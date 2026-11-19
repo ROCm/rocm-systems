@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Inherited FP32 binary exception policies, separate from strict-mode qualification.
+// MUL shares the hardware classifier with explicit reporting.
 // Uses the default host FP environment without changing its controls.
 
 #pragma once
@@ -9,6 +10,7 @@
 #include "common/alu.h"
 #include "common/validation.h"
 #include "fp/binary.h"
+#include "fp/mul_exceptions.h"
 #include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
@@ -26,22 +28,17 @@ inline uint32_t binary_input_causes_f32(uint32_t bits, uint64_t flags) {
              : 0;
 }
 
-// Retain rdna4/binary_fp_status.h's input, invalid-operation and pre-OMOD overflow causes.
+// Retain rdna4/binary_fp_status.h's input, invalid-operation and pre-OMOD overflow causes
+// for ADD/SUB/SUBREV and the selection operations.
 template <Binary Op>
 inline uint32_t gfx12_binary_causes(uint64_t flags, uint32_t modifiers, uint32_t a, uint32_t b) {
   uint32_t causes = binary_input_causes_f32(a, flags) | binary_input_causes_f32(b, flags);
-  if constexpr (Op != Binary::Add && Op != Binary::Sub && Op != Binary::Subrev &&
-                Op != Binary::Mul) {
+  if constexpr (Op != Binary::Add && Op != Binary::Sub && Op != Binary::Subrev) {
     return causes;
   }
   a = alu_input_bits(a, 0, flags);
   b = alu_input_bits(b, 0, flags);
   const uint32_t ma = a & 0x7fffffff, mb = b & 0x7fffffff;
-  if constexpr (Op == Binary::Mul) {
-    return causes |
-           ((!ma && mb == 0x7f800000) || (!mb && ma == 0x7f800000) ? RJ_ARITH_EXCEPTION_INVALID
-                                                                   : 0);
-  }
   a = alu_input_bits(a, modifiers);
   b = alu_input_bits(b, modifiers >> 1);
   if constexpr (Op == Binary::Sub) {
@@ -77,8 +74,10 @@ inline uint32_t gfx12_binary_causes(uint64_t flags, uint32_t modifiers, uint32_t
   return causes;
 }
 
-// Retain shared/alu_exceptions.h's native-nearest MUL classifier. It observes raw
-// operands, independently of the guest flush/rounding applied to the numeric result.
+// Retain shared/alu_exceptions.h's native-nearest MUL classifier for gfx1250, whose
+// inherited Compatibility policy reports range-only MUL causes; the shared hardware rule is
+// fitted to gfx1201 captures only. It observes raw operands, independently of the guest
+// flush/rounding applied to the numeric result.
 inline uint32_t compatibility_mul_causes(uint32_t a, uint32_t b, uint32_t omod, bool gfx12) {
   const uint32_t ma = a & 0x7fffffff, mb = b & 0x7fffffff;
   const float x = as_float(a), y = as_float(b);
@@ -103,6 +102,9 @@ inline uint32_t compatibility_mul_causes(uint32_t a, uint32_t b, uint32_t omod, 
 }
 
 // Inspect participating source lanes before any possibly aliased destination writes.
+// MUL uses the hardware classifier shared with explicit reporting (fp/mul_exceptions.h):
+// range causes follow participating EXEC lanes, while DPP row/bank controls that suppress
+// a destination also suppress that lane's INVALID, as in the inherited model.
 template <Binary Op, bool Rdna3, bool Gfx1250 = false>
 inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, uint32_t write_mask,
                                             uint32_t modifiers, const uint32_t *a,
@@ -112,15 +114,20 @@ inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, 
     if (!(exec_mask & (1U << lane))) {
       continue;
     }
-    if constexpr (!Rdna3 && !Gfx1250) {
+    if constexpr (Op == Binary::Mul && Gfx1250) {
+      const uint32_t x = alu_input_bits(a[lane], modifiers);
+      const uint32_t y = alu_input_bits(b[lane], modifiers >> 1);
+      causes |= compatibility_mul_causes(x, y, (modifiers >> 6) & 3, true);
+    } else if constexpr (Op == Binary::Mul) {
+      uint32_t lane_causes = mul_exceptions_f32(a[lane], b[lane], flags, modifiers);
+      if (!(write_mask & (1U << lane))) {
+        lane_causes &= ~RJ_ARITH_EXCEPTION_INVALID;
+      }
+      causes |= lane_causes;
+    } else if constexpr (!Rdna3 && !Gfx1250) {
       if (write_mask & (1U << lane)) {
         causes |= gfx12_binary_causes<Op>(flags, modifiers, a[lane], b[lane]);
       }
-    }
-    if constexpr (Op == Binary::Mul) {
-      const uint32_t x = alu_input_bits(a[lane], modifiers);
-      const uint32_t y = alu_input_bits(b[lane], modifiers >> 1);
-      causes |= compatibility_mul_causes(x, y, (modifiers >> 6) & 3, !Rdna3);
     }
   }
   return causes;
