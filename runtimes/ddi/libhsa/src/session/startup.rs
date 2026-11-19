@@ -361,6 +361,12 @@ impl HsaSession {
                 gpus,
             },
             config: HsaConfig {
+                core_dump: crate::core_dump::Config::from_environment(),
+                queue_fault_message_enabled: config::queue_fault_message_enabled(
+                    std::env::var("HSA_ENABLE_QUEUE_FAULT_MESSAGE")
+                        .ok()
+                        .as_deref(),
+                ),
                 yielding_poll_enabled: std::env::var_os("HSA_ENABLE_YIELDING_POLL")
                     .is_some_and(|value| value == "1"),
                 sdma_enabled: config::sdma_enabled(

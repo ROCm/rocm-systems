@@ -261,6 +261,32 @@ pub(crate) struct Queue {
     teardown_started: bool,
 }
 
+impl Queue {
+    /// Borrows fatal queue state and scratch while the registry excludes teardown.
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<
+        (
+            rocddi::device::gpu::diagnostic::CoreQueueSnapshot<'_>,
+            Vec<rocddi::device::gpu::diagnostic::DiagnosticMemory<'_>>,
+        ),
+        rocddi::Error,
+    > {
+        self.native.inactivate()?;
+        self.inactivated = true;
+        // SAFETY: Both parts remain borrowed from the retained owner. No backing
+        // is replaced or released; capture only stops execution and reads bytes.
+        let (native, backing) = unsafe { self.native.parts_mut() };
+        let scratch = backing
+            .scratch
+            .iter()
+            .chain(&backing.uncertain_scratch)
+            .map(Allocation::diagnostic_memory)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((native.core_snapshot()?, scratch))
+    }
+}
+
 /// External GPU addresses retained by the native queue through retirement.
 pub(crate) struct QueueBacking {
     /// Inactive signal owned by this queue backing.

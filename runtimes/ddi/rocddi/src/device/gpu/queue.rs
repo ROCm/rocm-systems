@@ -145,6 +145,12 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         self.inner.progress()
     }
 
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.inner.core_snapshot()
+    }
+
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         self.inner.inactivate()
     }
@@ -289,6 +295,14 @@ impl<D> RetainedQueue<D> {
         self.queue.map_device(device)
     }
 
+    /// Captures fatal compute state while retaining the dependency bundle.
+    ///
+    /// # Errors
+    /// Returns inactivation or native capture errors.
+    pub fn core_snapshot(&mut self) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.queue.core_snapshot()
+    }
+
     /// Stops native execution while keeping its dependency bundle live.
     ///
     /// # Errors
@@ -427,6 +441,14 @@ pub(crate) fn abandon_unpublished<T, D: 'static>(
 }
 
 impl Queue {
+    /// Permanently inactivates the queue and captures its saved GPU state.
+    ///
+    /// # Errors
+    /// Returns native inactivation, capture, or unsupported-provider errors.
+    pub fn core_snapshot(&mut self) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.inner.core_snapshot()
+    }
+
     /// Copies the ring, index, and doorbell facts captured at creation.
     /// It performs no health poll or progress read. The adapter permits address
     /// use only while a live public queue mapping borrows this native owner.

@@ -46,6 +46,7 @@ pub(super) const ALLOC_MEMORY: u64 = request(3, 0x16, 40);
 pub(super) const FREE_MEMORY: u64 = request(1, 0x17, 8);
 pub(super) const MAP_MEMORY: u64 = request(3, 0x18, 24);
 pub(super) const UNMAP_MEMORY: u64 = request(3, 0x19, 24);
+pub(super) const GET_QUEUE_WAVE_STATE: u64 = request(3, 0x1b, 24);
 pub(super) const SET_CU_MASK: u64 = request(1, 0x1a, 16);
 pub(super) const ALLOC_QUEUE_GWS: u64 = request(3, 0x1e, 16);
 pub(super) const GET_DMABUF_INFO: u64 = request(3, 0x1c, 32);
@@ -132,6 +133,17 @@ pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
 pub(super) struct Version {
     pub major: u32,
     pub minor: u32,
+}
+
+/// Wave-state query; the control address points at retained writable CWSR memory.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct QueueWaveState {
+    pub control_stack_address: u64,
+    pub control_stack_used_size: u32,
+    pub save_area_used_size: u32,
+    pub queue_id: u32,
+    pub pad: u32,
 }
 
 /// GPU, CPU, and system clock readings returned by KFD.
@@ -650,3 +662,14 @@ const _: () = {
     assert!(offset_of!(SetTrapHandler, tma_address) == 8);
     assert!(offset_of!(SetTrapHandler, gpu_id) == 16);
 };
+
+#[cfg(test)]
+mod core_layout_tests {
+    use super::*;
+    #[test]
+    fn wave_state_matches_vendored_kfd_uapi() {
+        assert_eq!(size_of::<QueueWaveState>(), 24);
+        assert_eq!(offset_of!(QueueWaveState, queue_id), 16);
+        assert_eq!(GET_QUEUE_WAVE_STATE, 0xc018_4b1b);
+    }
+}
