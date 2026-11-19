@@ -72,4 +72,14 @@ private:
     std::string path_;
 };
 
+// Skip the current test when *dir* does not exist. A ScopedDir under a missing *base* aborts the
+// whole binary, and RCCL_HOST_TEST_BUILD_DIR is missing wherever the tests run from an installed
+// package rather than the build tree.
+#define RCCL_SKIP_WITHOUT_DIRECTORY(dir)                                \
+    do {                                                                \
+        if (!std::filesystem::is_directory(dir)) {                      \
+            GTEST_SKIP() << (dir) << " does not exist: no build tree";  \
+        }                                                               \
+    } while (false)
+
 #endif  // RCCL_TEST_HOST_SCOPED_DIR_H_

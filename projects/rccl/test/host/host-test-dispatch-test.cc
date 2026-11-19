@@ -1115,6 +1115,7 @@ constexpr std::chrono::seconds kListingSlack{5};
 TEST(HostDispatchListTestsMicrotest, ABinaryThatAnswersIsListed)
 {
     const ScopedStopHandling handling;
+    RCCL_SKIP_WITHOUT_DIRECTORY(RCCL_HOST_TEST_BUILD_DIR);
     const ScopedDir dir("rccl-host-dispatch-listing", RCCL_HOST_TEST_BUILD_DIR);
     const std::string script = addScript(dir, "lister", "echo 'Suite.'\necho '  Case'\n");
     ASSERT_FALSE(script.empty()) << "cannot execute a file written under " << dir.path();
@@ -1131,6 +1132,7 @@ TEST(HostDispatchListTestsMicrotest, WhatABinarySaysOnStderrStaysOutOfItsListing
     // The listing is parsed, and a line of noise in the middle of it is indistinguishable from a
     // suite name. This used to be a 2>/dev/null in a shell command; the shell has gone, so the
     // redirection has to be done to the child itself.
+    RCCL_SKIP_WITHOUT_DIRECTORY(RCCL_HOST_TEST_BUILD_DIR);
     const ScopedDir dir("rccl-host-dispatch-listing", RCCL_HOST_TEST_BUILD_DIR);
     const std::string script =
         addScript(dir, "noisy", "echo 'Loading plugin' >&2\necho 'Suite.'\necho '  Case'\n");
@@ -1148,6 +1150,7 @@ TEST(HostDispatchListTestsMicrotest, ABinaryThatWillNotAnswerIsKilledAtItsTimeou
     // The failure this exists for. A listing was a popen(), which hands back no pid, so there
     // was nothing to time out and nothing to signal: one binary hanging in a static constructor
     // hung the entire run, and the child timeout the caller had set did not apply to it.
+    RCCL_SKIP_WITHOUT_DIRECTORY(RCCL_HOST_TEST_BUILD_DIR);
     const ScopedDir dir("rccl-host-dispatch-listing", RCCL_HOST_TEST_BUILD_DIR);
     const std::string script = addScript(dir, "hanger", "exec sleep 600\n");
     ASSERT_FALSE(script.empty()) << "cannot execute a file written under " << dir.path();
@@ -1165,6 +1168,7 @@ TEST(HostDispatchListTestsMicrotest, AStopEndsAListingThatHasNoTimeout)
     // An unbounded listing is still the default, and must not be the one phase of the run that
     // a stop cannot reach.
     const ScopedStopHandling handling;
+    RCCL_SKIP_WITHOUT_DIRECTORY(RCCL_HOST_TEST_BUILD_DIR);
     const ScopedDir dir("rccl-host-dispatch-listing", RCCL_HOST_TEST_BUILD_DIR);
     const std::string script = addScript(dir, "hanger", "exec sleep 600\n");
     ASSERT_FALSE(script.empty()) << "cannot execute a file written under " << dir.path();

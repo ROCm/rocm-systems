@@ -75,13 +75,13 @@ struct DispatchRun {
 // these tests copy in already live in the build tree.
 class FixtureTree {
 public:
-    FixtureTree() : dir_("rccl-host-dispatch-e2e", RCCL_HOST_TEST_BUILD_DIR)
-    {
-    }
-
-    // Copy the dispatcher in, and the fixture binary in once per name in *binaries*.
+    // Copy the dispatcher in, and the fixture binary in once per name in *binaries*. The
+    // directory is made here rather than on construction, so RCCL_REQUIRE_TREE can skip first.
     bool build(const std::vector<std::string> &binaries)
     {
+        if (!dir_) {
+            dir_.emplace("rccl-host-dispatch-e2e", RCCL_HOST_TEST_BUILD_DIR);
+        }
         std::error_code ec;
         fs::create_directories(micro(), ec);
         fs::copy_file(HOST_DISPATCH_FRONT_DOOR_PATH, frontDoor(),
@@ -103,11 +103,11 @@ public:
         return true;
     }
 
-    std::string path() const { return dir_.path(); }
-    std::string frontDoor() const { return (fs::path(dir_.path()) / "front-door").string(); }
-    std::string micro() const { return (fs::path(dir_.path()) / "micro").string(); }
-    std::string records() const { return (fs::path(dir_.path()) / "records").string(); }
-    std::string reportPath() const { return (fs::path(dir_.path()) / "report.xml").string(); }
+    std::string path() const { return dir_->path(); }
+    std::string frontDoor() const { return (fs::path(dir_->path()) / "front-door").string(); }
+    std::string micro() const { return (fs::path(dir_->path()) / "micro").string(); }
+    std::string records() const { return (fs::path(dir_->path()) / "records").string(); }
+    std::string reportPath() const { return (fs::path(dir_->path()) / "report.xml").string(); }
 
     // What the fixture binary copied in as *binary* recorded of the environment it was given.
     std::string recordedEnvironment(const std::string &binary) const
@@ -130,7 +130,7 @@ private:
         return text.str();
     }
 
-    ScopedDir dir_;
+    std::optional<ScopedDir> dir_;
 };
 
 // One name=value the dispatcher is to be run with. An empty value unsets the variable, so a test
@@ -235,6 +235,11 @@ std::vector<EnvVar> baseEnvironment(const FixtureTree &tree)
 // The whole tree, one fixture binary per name.
 #define RCCL_REQUIRE_TREE(tree, ...)                                                      \
     do {                                                                                  \
+        RCCL_SKIP_WITHOUT_DIRECTORY(RCCL_HOST_TEST_BUILD_DIR);                            \
+        if (!fs::exists(HOST_DISPATCH_FRONT_DOOR_PATH) ||                                 \
+            !fs::exists(HOST_DISPATCH_FIXTURE_PATH)) {                                    \
+            GTEST_SKIP() << "no build tree to copy the front door and fixture from";      \
+        }                                                                                 \
         ASSERT_TRUE((tree).build({__VA_ARGS__})) << "could not build the fixture tree";   \
     } while (false)
 
