@@ -18,7 +18,8 @@ namespace rocjitsu {
 namespace rdna3_5 {
 
 void ExpExp::execute_impl(amdgpu::Wavefront &wf) {
-  (void)wf; // Export: no-op in compute simulation.
+  if (!wf.export_shader_data(amdgpu::ShaderExportOperands::decode(inst_)))
+    wf.pc -= size_;
 }
 
 } // namespace rdna3_5

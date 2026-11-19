@@ -3,6 +3,7 @@
 
 set(trace_cache_tests_sources
     test_agent_info_json.cpp
+    test_archive.cpp
     test_args_serialization.cpp
     test_buffer_storage.cpp
     test_cache_integration.cpp
@@ -13,6 +14,7 @@ set(trace_cache_tests_sources
     test_kfd_args.cpp
     test_metadata_registry_json.cpp
     test_metadata_registry.cpp
+    test_record_format.cpp
     test_rocpd_pmc_name_contract.cpp
     test_rocpd_processor.cpp
     test_rocpd_xcp_output.cpp
@@ -20,6 +22,7 @@ set(trace_cache_tests_sources
     test_storage_parser.cpp
     test_type_registry.cpp
     test_unified_memory_processor.cpp
+    test_wall_clock_processor.cpp
 )
 
 add_library(trace-cache-tests OBJECT ${trace_cache_tests_sources})

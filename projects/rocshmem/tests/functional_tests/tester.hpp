@@ -26,11 +26,13 @@
 #define _TESTER_HPP_
 
 #include <algorithm>
+#include <functional>
 #include <rocshmem/rocshmem.hpp>
 #include <vector>
 #include <climits>
 
 #include "tester_arguments.hpp"
+#include "type_lists.hpp"
 #include "../src/util.hpp"
 #include "verify_results_kernels.hpp"
 
@@ -235,7 +237,22 @@
   X(TilePutWave3D,                  191)  \
   X(TileGetWave3D,                  192)  \
   X(TilePutWave4D,                  193)  \
-  X(TileGetWave4D,                  194)
+  X(TileGetWave4D,                  194)  \
+  X(SignalOpsOnStream,              195)  \
+  X(TilePut3DStrided,               196)  \
+  X(TileGet3DStrided,               197)  \
+  X(TilePutWG3DStrided,             198)  \
+  X(TileGetWG3DStrided,             199)  \
+  X(TilePutWave3DStrided,           200)  \
+  X(TileGetWave3DStrided,           201)  \
+  X(TilePut4DStrided,               202)  \
+  X(TileGet4DStrided,               203)  \
+  X(TilePutWG4DStrided,             204)  \
+  X(TileGetWG4DStrided,             205)  \
+  X(TilePutWave4DStrided,           206)  \
+  X(TileGetWave4DStrided,           207)  \
+  X(HostPutmemSignal,               208)  \
+  X(HostPutmemSignalAdd,            209)
 
 #define _ROCSHMEM_ENUM_ENTRY(name, val) name##TestType = val,
 enum TestType {
@@ -250,6 +267,20 @@ typedef int ShmemContextType;
 /******************************************************************************
  * TESTER INTERFACE
  *****************************************************************************/
+class Tester;
+
+/**
+ * Deferred construction of a single tester.
+ *
+ * Testers allocate their symmetric buffers in their constructors, so building
+ * them all up front would hold every tester's buffers in the symmetric heap at
+ * once.  With per-type coverage (-types full) one test type expands to a dozen or
+ * more testers, which overruns the heap.  The factory method hands back one
+ * thunk per tester instead; the driver constructs, runs, and destroys them one
+ * at a time so only a single tester's buffers are resident.
+ */
+using TesterFactory = std::function<Tester *()>;
+
 class Tester {
  public:
   explicit Tester(TesterArguments args);
@@ -257,7 +288,9 @@ class Tester {
 
   virtual void execute();
 
-  static std::vector<Tester *> create(TesterArguments args);
+  virtual std::string typeName() const { return ""; }
+
+  static std::vector<TesterFactory> create(TesterArguments args);
 
   void *alloc_test_buffer(size_t size, enum UserBufType user_buf_type = USER_BUF_TYPE_HEAP);
   void free_test_buffer(void *buffer, enum UserBufType user_buf_type = USER_BUF_TYPE_HEAP);

@@ -15,6 +15,7 @@
 #include "graph.h"
 #include "utils.h"
 #include "param.h"
+#include "ib_gid_utils.h"
 #include "profiler/net_ib.h"
 
 #include <pthread.h>
@@ -780,6 +781,9 @@ struct ncclIbNetCtx {
 // ncclNetIb listen: ncclIbListen plus the context's GDR flush flag decision.
 ncclResult_t ncclIbNetListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 
+// CX9 rail policy helper. Returns NCCL_NET_ID_UNDEF when nDevs is not a positive multiple of eight.
+int ncclIbCx9RailId(enum ncclIbRailPolicy policy, int devId, int nDevs);
+
 // Net IB plugin entry functions.
 ncclResult_t ncclIbInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction);
 ncclResult_t ncclIbInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config, ncclDebugLogger_t logFunction,
@@ -837,15 +841,12 @@ static inline void printIbWcStatusHint(int status) {
   }
 }
 
-// GID Format
-// global:  |              64b  - subnet-prefix                |                 64b - EUI                          |
-// raw   :  | 10b fixed | 22b 0 | 16b FLID | 16b subnet-prefix |                 64b - EUI                          |
 static uint16_t ncclIbExtractLocalSubnetPrefix(uint64_t subnet_prefix) {
-  return (be64toh(subnet_prefix) & 0xffff);
+  return ncclIbGidSubnetPrefix16(subnet_prefix);
 }
 
 static int ncclIbExtractFlid(union ibv_gid* gid) {
-  return ntohs(*((uint16_t*)((uintptr_t)(gid->raw) + 4)));
+  return ncclIbGidFlid(gid->raw);
 }
 
 #endif

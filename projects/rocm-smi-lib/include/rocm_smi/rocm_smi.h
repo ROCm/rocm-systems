@@ -46,9 +46,9 @@
 
 // NOTICE: ROCm-SMI is fully deprecated as of ROCm 10.1; only critical bug
 // fixes will be applied. Please switch to AMD-SMI
-// (https://github.com/ROCm/amdsmi) for continued support.
+// (https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi) for continued support.
 #pragma message( \
-    " ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).")
+    " ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html#rocm-smi-transitions-to-amd-smi). Please switch to AMD-SMI (https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi).")
 
 #ifdef __cplusplus
 extern "C" {

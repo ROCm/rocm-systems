@@ -2032,6 +2032,12 @@ extern "C" __global__ void ext_fill(int* out, int val, int n) {
 
   // API under test.  kernelParams holds the address of each argument value;
   // args[0] = &d is the address of the int* device pointer.
+  // The runtime marks start and stop inside the launch; the app never records
+  // them, so replay needs the markers capture stores around the launch record.
+  hipEvent_t start = nullptr, stop = nullptr;
+  HRR_HIP_CHECK(hipEventCreate(&start));
+  HRR_HIP_CHECK(hipEventCreate(&stop));
+
   int   val = 55;
   int   n   = LN;
   void* args[] = { &d, &val, &n };
@@ -2039,8 +2045,14 @@ extern "C" __global__ void ext_fill(int* out, int val, int n) {
       /*globalWorkSize*/ LN, 1, 1,
       /*localWorkSize */ 256, 1, 1,
       /*sharedMemBytes*/ 0, s, args, /*extra*/ nullptr,
-      /*startEvent*/ nullptr, /*stopEvent*/ nullptr, /*flags*/ 0));
+      start, stop, /*flags*/ 0));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
+
+  float ms = -1.f;
+  HRR_HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
+  REQUIRE(ms >= 0.f);
+  HRR_HIP_CHECK(hipEventDestroy(start));
+  HRR_HIP_CHECK(hipEventDestroy(stop));
 
   HRR_HIP_CHECK(hipModuleUnload(mod));
 
@@ -3228,6 +3240,10 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
   HRR_HIP_CHECK(hipMemsetAsync(d, 0, SZ, s));
   HRR_HIP_CHECK(hipStreamEndCapture(s, &capturedGraph));
 
+  // hipGraphGetId
+  { unsigned int graphId = 0;
+    (void)hipGraphGetId(capturedGraph, &graphId); }
+
   // hipGraphClone
   hipGraph_t clonedGraph = nullptr;
   (void)hipGraphClone(&clonedGraph, capturedGraph);
@@ -3247,6 +3263,10 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
   { unsigned long long execFlags = 0;
     (void)hipGraphExecGetFlags(exec, &execFlags); }
 
+  // hipGraphExecGetId
+  { unsigned int execId = 0;
+    (void)hipGraphExecGetId(exec, &execId); }
+
   // hipGraphGetNodes — query count then enumerate
   { size_t numNodes = 0;
     (void)hipGraphGetNodes(capturedGraph, nullptr, &numNodes);
@@ -3256,6 +3276,11 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
       // hipGraphNodeGetType
       hipGraphNodeType nodeType{};
       (void)hipGraphNodeGetType(nodes[0], &nodeType);
+      // hipGraphNodeGetLocalId / hipGraphNodeGetToolsId
+      unsigned int localId = 0;
+      unsigned long long toolsId = 0;
+      (void)hipGraphNodeGetLocalId(nodes[0], &localId);
+      (void)hipGraphNodeGetToolsId(nodes[0], &toolsId);
       // hipGraphNodeSetEnabled / hipGraphNodeGetEnabled
       unsigned int enabled = 1;
       (void)hipGraphNodeSetEnabled(exec, nodes[0], 1);

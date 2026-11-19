@@ -10,6 +10,7 @@
 #include "library/components/backtrace.hpp"
 #include "library/thread_data.hpp"
 
+#include <timemory/backends/papi.hpp>
 #include <timemory/components/base.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/types.hpp>
@@ -17,11 +18,15 @@
 #include <timemory/utility/type_list.hpp>
 #include <timemory/variadic/types.hpp>
 
+#include <fmt/format.h>
+
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace rocprofsys
@@ -61,7 +66,6 @@ struct backtrace_metrics : comp::empty_base
 
     static void configure(bool, std::int64_t _tid = threading::get_id());
     static void init_cache(std::int64_t _tid, valid_array_t);
-    static std::vector<std::string> get_hw_counter_labels(std::int64_t);
 
     template <typename Tp>
     static bool get_valid(Tp, valid_array_t);
@@ -139,6 +143,25 @@ bool
 backtrace_metrics::operator()(Tp) const
 {
     return (*this)(type_list<Tp>{});
+}
+
+// Perfetto title for one sampled hardware counter. get_event_info() returns the
+// PAPI short description when the component map is filled, and an empty string
+// when it is not. The empty case keeps the configured symbol.
+inline std::string
+hardware_counter_track_name(const std::string& label, std::int64_t tid)
+{
+    std::string descr = tim::papi::get_event_info(label).short_descr;
+    if(descr.empty())
+    {
+        if(label.empty())
+        {
+            throw std::runtime_error("Empty description for tid: " + std::to_string(tid));
+        }
+        descr = label;
+    }
+
+    return fmt::format("Thread {} [{}] (S)", descr, tid);
 }
 }  // namespace component
 }  // namespace rocprofsys

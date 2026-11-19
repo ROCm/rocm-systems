@@ -6,7 +6,7 @@
 //! A primary-process VM may survive session destruction in the kernel. The
 //! Linux process connection retains its exact render files through exit for
 //! later activation; secondary bindings are released with their session.
-use super::{drm, errno, error, native_error, os_file, os_memory, sys, sysfs, uapi};
+use super::{connection, drm, errno, error, native_error, os_file, os_memory, sysfs, uapi};
 use crate::device::event::{
     DeviceEvent, GpuHardwareException, GpuMemoryFault, GpuMemoryFaultCause, GpuResetCause,
     GpuResetScope,
@@ -145,10 +145,12 @@ impl VmBindings {
 
     pub(super) fn device(
         &self,
-        kfd: &Shared<sys::Kfd>,
+        kfd: &Shared<connection::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
     ) -> Result<Shared<DeviceVm>, Error> {
-        self.device_with_render(kfd, node, sysfs::open_render)
+        self.device_with_render(kfd, node, xnack_requested, debugger, sysfs::open_render)
     }
 
     // Supplying the opener lets tests exercise concurrent initialization and
@@ -159,8 +161,10 @@ impl VmBindings {
     )]
     fn device_with_render(
         &self,
-        kfd: &Shared<sys::Kfd>,
+        kfd: &Shared<connection::Kfd>,
         node: &sysfs::KfdNode,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
         open_render: impl FnOnce(u32) -> io::Result<File>,
     ) -> Result<Shared<DeviceVm>, Error> {
         kfd.check_process()
@@ -168,6 +172,12 @@ impl VmBindings {
         let mut runtime = kfd
             .runtime_guard()
             .map_err(|source| native_error("KFD runtime serialization", source))?;
+        kfd.configure_debugger_locked(&mut runtime, debugger)
+            .map_err(|source| native_error("KFD debugger registration", source))?;
+        if let Some(request) = xnack_requested {
+            kfd.configure_xnack_mode_locked(&mut runtime, request)
+                .map_err(|source| native_error("KFD XNACK configuration", source))?;
+        }
         let process = std::process::id();
         let owner = self
             .process
@@ -321,6 +331,10 @@ pub(crate) struct DeviceVm {
 }
 
 impl DeviceVm {
+    pub(crate) fn event_origin_id(&self) -> crate::device::event::DeviceEventOriginId {
+        crate::device::event::DeviceEventOriginId::from_driver_key(u64::from(self.gpu_id))
+    }
+
     pub(super) fn render(&self) -> Result<&File, Error> {
         self.render
             .as_ref()
@@ -356,11 +370,11 @@ impl DeviceVm {
         self.loss.has_latched_loss()
     }
 
-    pub(super) fn kfd(&self) -> &sys::Kfd {
+    pub(super) fn kfd(&self) -> &connection::Kfd {
         &self.loss.kfd
     }
 
-    pub(super) fn kfd_owner(&self) -> Shared<sys::Kfd> {
+    pub(super) fn kfd_owner(&self) -> Shared<connection::Kfd> {
         self.loss.kfd.clone()
     }
 
@@ -422,7 +436,7 @@ impl DeviceVm {
 /// serialized observer, so neither path can consume another path's details.
 struct LossEvent {
     /// Exact KFD connection that created the native event IDs.
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     /// Native hardware exception event identity.
     hardware_event_id: AtomicU32,
     /// Native memory exception event identity.
@@ -676,7 +690,7 @@ impl LossEvent {
         Ok(())
     }
 
-    fn create(kfd: Shared<sys::Kfd>) -> Result<Shared<Self>, Error> {
+    fn create(kfd: Shared<connection::Kfd>) -> Result<Shared<Self>, Error> {
         let observed = ObservedEvents::new()?;
         let event = Shared::new(Self {
             kfd,
@@ -810,6 +824,9 @@ impl LossEvent {
                 exception.gpu_id,
                 DeviceEvent::GpuHardwareException(GpuHardwareException {
                     endpoint_id: None,
+                    origin_id: Some(crate::device::event::DeviceEventOriginId::from_driver_key(
+                        u64::from(exception.gpu_id),
+                    )),
                     scope: if exception.reset_type == 0 {
                         GpuResetScope::WholeGpu
                     } else {
@@ -1355,7 +1372,14 @@ impl KfdAllocation {
                 "scratch address exceeds the host address width",
             ));
         };
-        let reservation = os_memory::Reservation::view_with_poison(address_usize, size, poison);
+        let reservation =
+            match os_memory::Reservation::view_with_poison(address_usize, size, poison) {
+                Ok(reservation) => reservation,
+                Err(source) => {
+                    vm.release_scratch(address, desc.size)?;
+                    return Err(native_error("scratch reservation process identity", source));
+                }
+            };
         let mut allocation = owner.write(Self {
             vm: vm.clone(),
             peers,
@@ -2584,7 +2608,7 @@ mod tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 pub(super) fn queue_fixture(
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     render: File,
     node: sysfs::KfdNode,
 ) -> Shared<DeviceVm> {
@@ -2594,7 +2618,7 @@ pub(super) fn queue_fixture(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 pub(super) fn queue_fixture_with_range(
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     render: File,
     node: sysfs::KfdNode,
     bounds: (u64, u64),

@@ -150,27 +150,6 @@ def test_vop3p_literal64_rejection_uses_complete_encoding_capability():
     assert not CodeGenerator._rejects_unencoded_vop3p_literal64(implied)
 
 
-def test_gfx1250_packed_f32_reader_has_no_unreachable_literal64_branch():
-    codegen = object.__new__(CodeGenerator)
-    codegen.isa_spec = SimpleNamespace(
-        inst_encodings=[
-            SimpleNamespace(
-                enc_name='ENC_VOP3P',
-                ucode_fields=[SimpleNamespace(bit_offset=14, name='opsel_hi_2')],
-            )
-        ]
-    )
-    source = codegen._emit_cdna5_matrix_fmt_helpers().execution[0]
-
-    reader_start = source.index('PkF32Words read_pk_f32_words')
-    reader_end = source.index('\n}', reader_start)
-    reader = source[reader_start:reader_end]
-    assert 'literal64_value' not in reader
-    assert 'read_lane_pair32(' in reader
-    assert 'operand, lane, amdgpu::ScalarPairMode::Replicate32' in reader
-    assert 'return {pair.lo, pair.hi};' in reader
-
-
 def test_literal_fixups_require_generated_machine_inst_struct():
     inst = Instruction('V_PK_ADD_I16', 'ENC_VOP3P', opcode=0, operands=[])
 
@@ -700,21 +679,19 @@ def test_scalar_fmamk_generated_execute_uses_literal_multiplier():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc0))' in body
-    assert (
-        'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(simm32))' in body
-    )
-    assert 'std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_scalar(ssrc1))' in body
-    assert body.index('amdgpu::RegisterAccess(wf).read_scalar(simm32)') < body.index(
-        'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)'
-    )
+    assert 'rj_arith_s_fmamk_f32(' in body
+    assert 'input0 = registers.read_scalar(ssrc0)' in body
+    assert 'input1 = registers.read_scalar(simm32)' in body
+    assert 'input2 = registers.read_scalar(ssrc1)' in body
+    assert '&result, input0, input1, input2,' in body
 
 
-def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
+@pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+def test_vector_fmaak_execute_uses_fieldless_simm32_operand(arch):
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(
-        arch_name='rdna4',
-        profile=Rdna4Profile(),
+        arch_name=arch,
+        profile=Rdna4Profile() if arch == 'rdna4' else Cdna5Profile(),
         inst_encodings=[],
         encoding_map={},
     )
@@ -733,7 +710,11 @@ def test_vector_fmaak_execute_uses_fieldless_simm32_operand():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_VOP2')
 
-    assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
+    if arch == 'rdna4':
+        assert 'amdgpu::arith::execute_float_fma32' in body
+        assert 'vdst, src0, vsrc1, simm32,' in body
+    else:
+        assert 'std::bit_cast<float>(simm32.encoding_value_)' in body
     assert 'simm32_' not in body
 
 
@@ -789,11 +770,12 @@ def test_scalar_mul_u64_generated_execute_reads_full_source_pairs():
 
     body = codegen._gen_execute_body(inst, sem, 'ENC_SOP2')
 
-    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc0)' in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar64(ssrc1)' in body
-    assert 'amdgpu::RegisterAccess(wf).write_scalar64(sdst, result);' in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc0)' not in body
-    assert 'amdgpu::RegisterAccess(wf).read_scalar(ssrc1)' not in body
+    assert 'registers.read_scalar64(ssrc0)' in body
+    assert 'registers.read_scalar64(ssrc1)' in body
+    assert 'registers.write_scalar64(sdst, result);' in body
+    assert 'rj_arith_s_mul_u64(' in body
+    assert 'registers.read_scalar(ssrc0)' not in body
+    assert 'registers.read_scalar(ssrc1)' not in body
 
 
 def test_scalar_addpc_generated_execute_uses_unsigned_pc_addition():
@@ -1078,4 +1060,5 @@ def test_inline_literal_fma_emits_body_with_literal_source():
     cg = _fma_codegen()
     sem = InstructionSemantics('V_FMAMK_F32', 'vector_fmamk', data_type='f32')
     body = cg._gen_execute_body(_fma_inst(with_simm32=True), sem, 'ENC_VOP2')
-    assert 'simm32.encoding_value_' in body
+    assert 'amdgpu::arith::execute_float_fma32' in body
+    assert 'vdst, src0, simm32, vsrc1,' in body

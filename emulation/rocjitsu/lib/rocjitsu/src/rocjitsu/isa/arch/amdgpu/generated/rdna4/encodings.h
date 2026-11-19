@@ -484,6 +484,17 @@ public:
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -546,6 +557,17 @@ public:
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
     if (has_encoded_dpp8())
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+  }
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
   }
   bool default_encoding();
   bool has_lit();
@@ -610,6 +632,17 @@ public:
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
   }
   void implicit_uses(RegisterSet &uses) const override;
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    const bool dpp = has_encoded_dpp() && index < 2;
+    const bool absolute = dpp && ((dpp_modifiers_.absolute >> index) & 1);
+    if (dpp && ((dpp_modifiers_.negate >> index) & 1))
+      out += "-";
+    if (absolute)
+      out += "|";
+    Instruction::append_src_operand(out, index);
+    if (absolute)
+      out += "|";
+  }
   bool default_encoding();
   bool has_lit();
   bool has_dpp8();
@@ -921,12 +954,12 @@ public:
   Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn);
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
-    return !mnemonic_.starts_with("image_atomic_") &&
+    return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&
            Instruction::should_print_dst_operand(operand_index);
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
-    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
+    if (operand_index == 0 && inst_.tfe && amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic) {
       // VDATA is the first source. Assembly includes the status slot;
       // the source dependency includes only the atomic payload.
       const auto first = operand->encoding_value();
@@ -982,6 +1015,7 @@ public:
 class Vsample : public IsaInstruction<Isa> {
 public:
   Vsample(std::string_view mnemonic, const VsampleMachineInst *inst, ExecuteFn exec_fn);
+  void append_src_operand(std::string &out, uint8_t index) const override;
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;

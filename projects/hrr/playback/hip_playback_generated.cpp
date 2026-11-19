@@ -779,16 +779,7 @@ extern hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx, const u
 
 extern hipError_t playback_hipEventDestroy(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(payload);
-  float _out_ms{};
-  hipError_t _r = (hipError_t)hipEventElapsedTime(&_out_ms, (hipEvent_t)ctx.translate_event(a->start), (hipEvent_t)ctx.translate_event(a->stop));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipEventElapsedTime", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* payload);
 
@@ -2267,31 +2258,9 @@ static hipError_t playback_hipGraphicsUnregisterResource(PlaybackContext& ctx, c
   return hipErrorNotSupported;
 }
 
-static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static std::atomic<bool> warned{false};
-  if (!warned.exchange(true)) {
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipHostAlloc — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(payload);
-  uint64_t _rec_ptr = a->ptr;
-  void*    _live_ptr = ctx.lookup_ptr(_rec_ptr);
-  if (_live_ptr == nullptr) return hipSuccess;
-  hipError_t _r = (hipError_t)hipHostFree(_live_ptr);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipHostFree", a->ret);
-    return hipSuccess;
-  }
-  if (_r == hipSuccess) {
-    ctx.remove_alloc(_rec_ptr);
-  }
-  return _r;
-}
+extern hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const uint8_t* payload);
 
@@ -2505,15 +2474,7 @@ static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* pay
   return _r;
 }
 
-static hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static std::atomic<bool> warned{false};
-  if (!warned.exchange(true)) {
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemAllocHost — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemAllocPitch(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -4079,25 +4040,7 @@ extern hipError_t playback_hipLaunchCooperativeKernel_spt(PlaybackContext& ctx, 
 
 extern hipError_t playback_hipLaunchKernel_spt(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphLaunch_spt*>(payload);
-  if (a->graphExec != 0 && ctx.translate_graph_exec(a->graphExec) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphLaunch_spt: graphExec 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->graphExec);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipGraphLaunch_spt((hipGraphExec_t)ctx.translate_graph_exec(a->graphExec), (hipStream_t)ctx.translate_stream(a->stream));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphLaunch_spt", a->ret);
-    return hipSuccess;
-  }
-  return _r;
-}
+extern hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamBeginCapture_spt(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginCapture_spt*>(payload);
@@ -5570,6 +5513,99 @@ static hipError_t playback_hipExtMemcpyBatchAsync(PlaybackContext& ctx, const ui
   return _r;
 }
 
+static hipError_t playback_hipMemcpyWithAttributesAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemcpyWithAttributesAsync*>(payload);
+  hipMemcpyAttributes _out_attr{};
+  hipError_t _r = (hipError_t)hipMemcpyWithAttributesAsync(ctx.translate_ptr(a->dst), ctx.translate_ptr(a->src), (size_t)a->size, &_out_attr, (hipStream_t)ctx.translate_stream(a->stream));
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipMemcpyWithAttributesAsync", a->ret);
+    return hipSuccess;
+  }
+  return _r;
+}
+
+static hipError_t playback_hipMemcpy3DWithAttributesAsync(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipMemcpy3DWithAttributesAsync*>(payload);
+  struct hipMemcpy3DBatchOp _out_op{};
+  hipError_t _r = (hipError_t)hipMemcpy3DWithAttributesAsync(&_out_op, (unsigned long long)a->flags, (hipStream_t)ctx.translate_stream(a->stream));
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipMemcpy3DWithAttributesAsync", a->ret);
+    return hipSuccess;
+  }
+  return _r;
+}
+
+static hipError_t playback_hipArrayGetSparseProperties(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipArrayGetSparseProperties — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipGraphNodeGetLocalId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetLocalId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipGraphNodeGetToolsId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetToolsId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipGraphGetId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphGetId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipGraphExecGetId(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecGetId — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDeviceGetExecAffinitySupport(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetExecAffinitySupport*>(payload);
+  int _out_pi{};
+  hipError_t _r = (hipError_t)hipDeviceGetExecAffinitySupport(&_out_pi, (hipExecAffinityType)a->type, (hipDevice_t)a->dev);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipDeviceGetExecAffinitySupport", a->ret);
+    return hipSuccess;
+  }
+  return _r;
+}
+
+static hipError_t playback_hipArrayGetPlane(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipArrayGetPlane — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   return hipSuccess;
@@ -6166,15 +6202,24 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelSetAttributeForDevice)),  // [547] HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE
     static_cast<uint32_t>(sizeof(hrr_args_hipKernelSetCacheConfig)),  // [548] HRR_API_HIPKERNELSETCACHECONFIG
     static_cast<uint32_t>(sizeof(hrr_args_hipExtMemcpyBatchAsync)),  // [549] HRR_API_HIPEXTMEMCPYBATCHASYNC
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [550] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [551] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [552] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [553] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [554] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [555] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [556] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [557] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [558] HRR_API_HIPUNREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpyWithAttributesAsync)),  // [550] HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipMemcpy3DWithAttributesAsync)),  // [551] HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC
+    static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetSparseProperties)),  // [552] HRR_API_HIPARRAYGETSPARSEPROPERTIES
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetLocalId)),  // [553] HRR_API_HIPGRAPHNODEGETLOCALID
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetToolsId)),  // [554] HRR_API_HIPGRAPHNODEGETTOOLSID
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetId)),  // [555] HRR_API_HIPGRAPHGETID
+    static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecGetId)),  // [556] HRR_API_HIPGRAPHEXECGETID
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetExecAffinitySupport)),  // [557] HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT
+    static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetPlane)),  // [558] HRR_API_HIPARRAYGETPLANE
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [559] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [560] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [561] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [562] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [563] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [564] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [565] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [566] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [567] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
@@ -6731,13 +6776,22 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipKernelSetAttributeForDevice,  // [547] HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE
     playback_hipKernelSetCacheConfig,  // [548] HRR_API_HIPKERNELSETCACHECONFIG
     playback_hipExtMemcpyBatchAsync,  // [549] HRR_API_HIPEXTMEMCPYBATCHASYNC
-    playback___hipPopCallConfiguration,  // [550] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [551] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [552] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [553] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [554] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [555] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [556] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [557] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [558] HRR_API_HIPUNREGISTERFATBINARY
+    playback_hipMemcpyWithAttributesAsync,  // [550] HRR_API_HIPMEMCPYWITHATTRIBUTESASYNC
+    playback_hipMemcpy3DWithAttributesAsync,  // [551] HRR_API_HIPMEMCPY3DWITHATTRIBUTESASYNC
+    playback_hipArrayGetSparseProperties,  // [552] HRR_API_HIPARRAYGETSPARSEPROPERTIES
+    playback_hipGraphNodeGetLocalId,  // [553] HRR_API_HIPGRAPHNODEGETLOCALID
+    playback_hipGraphNodeGetToolsId,  // [554] HRR_API_HIPGRAPHNODEGETTOOLSID
+    playback_hipGraphGetId,  // [555] HRR_API_HIPGRAPHGETID
+    playback_hipGraphExecGetId,  // [556] HRR_API_HIPGRAPHEXECGETID
+    playback_hipDeviceGetExecAffinitySupport,  // [557] HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT
+    playback_hipArrayGetPlane,  // [558] HRR_API_HIPARRAYGETPLANE
+    playback___hipPopCallConfiguration,  // [559] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [560] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [561] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [562] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [563] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [564] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [565] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [566] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [567] HRR_API_HIPUNREGISTERFATBINARY
 };

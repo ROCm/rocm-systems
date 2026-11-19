@@ -686,17 +686,24 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
   uint64_t* end_ts_addr = nullptr;
   uint32_t total_timestamp_command_size = 0;
 
+  // Profiling: complete out_signal after the end timestamp, not via inline SIGNAL.
+  uint32_t deferred_completion_size = 0;
+
   if (profiling_enabled) {
     out_signal.GetSdmaTsAddresses(start_ts_addr, end_ts_addr);
     total_timestamp_command_size = 2 * timestamp_command_size_;
+    deferred_completion_size =
+        platform_atomic_support_ ? atomic_command_size_ : fence_64b_command_size_;
   }
 
-  const uint32_t wait_dws = dep_signals.empty() ? 0 : 7;
-  const uint32_t per_pkt_dws = 1 + wait_dws + 6 + 5;
+  const bool inline_wait = !profiling_enabled && !dep_signals.empty();
+  const uint32_t wait_dws = inline_wait ? 7 : 0;
+  const uint32_t signal_dws = profiling_enabled ? 0 : 5;
+  const uint32_t per_pkt_dws = 1 + wait_dws + 6 + signal_dws;
   const uint32_t total_copy_dws = num_copy_command * per_pkt_dws;
 
-  const uint32_t extra_polls = (dep_signals.size() > 1)
-      ? static_cast<uint32_t>(dep_signals.size() - 1) : 0;
+  const uint32_t first_polled_signal = inline_wait ? 1 : 0;
+  const uint32_t extra_polls = static_cast<uint32_t>(dep_signals.size()) - first_polled_signal;
   const uint32_t extra_poll_bytes = extra_polls * poll_64b_command_size_;
 
   const uint32_t copy_bytes = total_copy_dws * sizeof(uint32_t);
@@ -714,7 +721,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
 
   const uint32_t total_command_size =
       prologue_bytes + extra_poll_bytes + total_timestamp_command_size +
-      copy_bytes + epilogue_bytes;
+      copy_bytes + deferred_completion_size + epilogue_bytes;
 
   const uint32_t pad_size = total_command_size < min_submission_size_
       ? min_submission_size_ - total_command_size
@@ -734,7 +741,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
   }
   uint32_t wrapped_index = WrapIntoRing(curr_index);
 
-  if (num_copy_command > 1)
+  if (!profiling_enabled && num_copy_command > 1)
     out_signal.AddRelaxed(num_copy_command - 1);
 
   if (emit_prologue) {
@@ -744,8 +751,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     wrapped_index += gcr_command_size();
   }
 
-  for (uint32_t i = 1; i < dep_signals.size(); ++i) {
-    BuildPoll64bCommand(command_addr, dep_signals[i]->ValueLocation(), 0);
+  for (uint32_t index = first_polled_signal; index < dep_signals.size(); ++index) {
+    BuildPoll64bCommand(command_addr, dep_signals[index]->ValueLocation(), 0);
     command_addr += poll_64b_command_size_;
     bytes_written_[wrapped_index] = prior_bytes;
     wrapped_index += poll_64b_command_size_;
@@ -758,10 +765,10 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     wrapped_index += timestamp_command_size_;
   }
 
-  const core::Signal* wait_sig = dep_signals.empty() ? nullptr : dep_signals[0];
+  const core::Signal* wait_sig = inline_wait ? dep_signals[0] : nullptr;
   BuildWaitSignalCopyCommand(command_addr, num_copy_command,
                              dst, src, size,
-                             wait_sig, &out_signal, false);
+                             wait_sig, profiling_enabled ? nullptr : &out_signal, false);
   bytes_written_.fill(wrapped_index, wrapped_index + copy_bytes, prior_bytes);
   bytes_written_[wrapped_index + copy_bytes - sizeof(uint32_t)] = post_bytes;
   command_addr += copy_bytes;
@@ -772,6 +779,16 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
     command_addr += timestamp_command_size_;
     bytes_written_[wrapped_index] = post_bytes;
     wrapped_index += timestamp_command_size_;
+
+    if (platform_atomic_support_) {
+      BuildAtomicDecrementCommand(command_addr, out_signal.ValueLocation());
+    } else {
+      BuildFence64bCommand(command_addr, out_signal.ValueLocation(),
+                           static_cast<uint64_t>(out_signal.LoadRelaxed() - 1));
+    }
+    command_addr += deferred_completion_size;
+    bytes_written_[wrapped_index] = post_bytes;
+    wrapped_index += deferred_completion_size;
   }
 
   if (emit_epilogue) {

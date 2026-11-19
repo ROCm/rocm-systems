@@ -13,6 +13,101 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+// Plugin Selection Tests
+//
+// Plain TESTs, not TEST_Fs: no ranks, no NIC, and they must run even when the
+// fixture skips. They exist because SetUp used strcmp, so NCCL_NET=ib-cast
+// matched nothing, fell back to plain IB, and every "(IB-CAST)" suite passed
+// without loading the cast plugin.
+
+TEST(NetPluginSelection, ResolvesNameCaseInsensitively) {
+    EXPECT_EQ(ResolveNetPlugin("IB"), &ncclNetIb);
+    EXPECT_EQ(ResolveNetPlugin("ib"), &ncclNetIb);
+    EXPECT_EQ(ResolveNetPlugin("Ib"), &ncclNetIb);
+    EXPECT_EQ(ResolveNetPlugin("IB-CAST"), &netIbCast);
+    EXPECT_EQ(ResolveNetPlugin("ib-cast"), &netIbCast);
+    EXPECT_EQ(ResolveNetPlugin("Ib-Cast"), &netIbCast);
+}
+
+TEST(NetPluginSelection, RocmIbSelectsTheIbCastPlugin) {
+    EXPECT_EQ(ResolveNetPlugin("ROCM-IB"), &netIbCast);
+    EXPECT_EQ(ResolveNetPlugin("rocm-ib"), &netIbCast);
+    EXPECT_STRCASEEQ(CanonicalNetName("ROCM-IB"), netIbCast.name);
+    EXPECT_EQ(ResolveNetPlugin("ROCM-IB"), ResolveNetPlugin("IB-CAST"))
+        << "ROCM-IB and IB-CAST must select the same plugin";
+}
+
+TEST(NetPluginSelection, LibraryMapperBacksThePluginChoice) {
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("ROCM-IB"), netIbCast.name);
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("rocm-ib"), netIbCast.name);
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("IB-CAST"), netIbCast.name);
+    EXPECT_STRCASEEQ(rcclCanonicalNetName("IB"), ncclNetIb.name);
+    EXPECT_EQ(rcclCanonicalNetName(nullptr), nullptr);
+    EXPECT_STREQ(rcclCanonicalNetName(""), "") << "empty must not be mapped to unset";
+}
+
+TEST(NetPluginSelection, UnsetFollowsAinicDefault) {
+    ncclNet_t* expected = rcclUseAinic() ? &netIbCast : &ncclNetIb;
+    EXPECT_EQ(ResolveNetPlugin(nullptr), expected);
+}
+
+TEST(NetPluginSelection, NonIbAndUnknownNamesAreDistinguishable) {
+    EXPECT_EQ(ResolveNetPlugin("Socket"), nullptr);
+    EXPECT_TRUE(IsSocketNetName("Socket"));
+
+    // NCCL_NET= is a name matching no plugin, not "unset" -- as in the library.
+    EXPECT_EQ(ResolveNetPlugin(""), nullptr);
+    EXPECT_FALSE(IsSocketNetName(""));
+
+    // "NO-SUCH-NET" is a deliberate sentinel, not a typo.
+    EXPECT_EQ(ResolveNetPlugin("NO-SUCH-NET"), nullptr);
+    EXPECT_FALSE(IsSocketNetName("NO-SUCH-NET"));
+
+    // Guards against a future prefix/substring compare: only whole names match.
+    for (const char* almost : {"IB-CAST-EXTRA", "IB-CAS", "ROCM", "ROCM-IB-2", "SOCK"}) {
+        EXPECT_EQ(ResolveNetPlugin(almost), nullptr) << almost << " must not resolve";
+        EXPECT_FALSE(IsSocketNetName(almost)) << almost << " must not resolve to Socket";
+    }
+}
+
+// Written out by hand, not derived from CanonicalNetName/ResolveNetPlugin:
+// the expectation must not come from the code SetUp already ran.
+static ncclNet_t* ExpectedPluginFor(const char* env) {
+    static const struct {
+        const char* env;
+        ncclNet_t* plugin;
+    } kExpected[] = {
+        {"IB", &ncclNetIb},
+        {"IB-CAST", &netIbCast},
+        {"ROCM-IB", &netIbCast},
+    };
+    for (const auto& e : kExpected) {
+        if (strcasecmp(env, e.env) == 0) return e.plugin;
+    }
+    return nullptr;
+}
+
+TEST_F(NetIbMPITest, PluginMatchesNcclNetEnv) {
+    const char* env = getenv("NCCL_NET");
+    // Unset, the only expectation is the one SetUp computed; DefaultPluginIsIbCastOnAinic pins it instead.
+    if (env == nullptr) GTEST_SKIP() << "NCCL_NET unset; see DefaultPluginIsIbCastOnAinic";
+    ASSERT_NE(net_, nullptr);
+    ncclNet_t* expected = ExpectedPluginFor(env);
+    ASSERT_NE(expected, nullptr) << "NCCL_NET=" << env << " is missing from this test's table";
+    EXPECT_EQ(net_, expected) << "NCCL_NET=" << env << " but the fixture selected " << net_->name
+                              << ", expected " << expected->name;
+    TEST_INFO("Rank %d: NCCL_NET=%s resolved to plugin %s", MPIEnvironment::world_rank, env, net_->name);
+}
+
+// AINIC configs only: asserts IB-CAST outright, without rcclUseAinic(), so it
+// also fails if AINIC detection misses the NIC.
+TEST_F(NetIbMPITest, DefaultPluginIsIbCastOnAinic) {
+    if (getenv("NCCL_NET") != nullptr) GTEST_SKIP() << "NCCL_NET is set; this pins the unset default";
+    ASSERT_NE(net_, nullptr);
+    EXPECT_EQ(net_, &netIbCast) << "NCCL_NET unset on AINIC but the fixture selected " << net_->name;
+    TEST_INFO("Rank %d: NCCL_NET unset resolved to plugin %s", MPIEnvironment::world_rank, net_->name);
+}
+
 // Initialization Tests
 
 TEST_F(NetIbMPITest, InitializePlugin) {
@@ -173,7 +268,7 @@ TEST_F(NetIbMPITest, ListenAndConnect) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     if (rank == 0) {
         EXPECT_NE(pair.recvComm, nullptr) << "Recv comm should be established";
@@ -211,7 +306,7 @@ TEST_F(NetIbMPITest, RegisterHostMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = malloc(bufferSize);
@@ -238,7 +333,7 @@ TEST_F(NetIbMPITest, RegisterGpuMemory) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     const size_t bufferSize = kSmallBufferSize;
     void* buffer = nullptr;
@@ -265,7 +360,7 @@ TEST_F(NetIbMPITest, RegisterMemoryNullPointer) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     void* mhandle = nullptr;
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
@@ -285,7 +380,7 @@ TEST_F(NetIbMPITest, DeregisterNullHandle) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
@@ -313,7 +408,7 @@ TEST_F(NetIbMPITest, SimpleSendRecv) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+        ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
         const size_t bufferSize = kSmallBufferSize;
         const int tag = 42;
@@ -468,7 +563,7 @@ TEST_F(NetIbMPITest, SendRecvMultipleSizes) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     for (size_t size : testSizes) {
         const int tag = 100;
@@ -525,7 +620,7 @@ TEST_F(NetIbMPITest, SendRecvZeroSize) {
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     const size_t bufferSize = kSmallBufferSize;
     const int tag = 50;
@@ -689,7 +784,7 @@ TEST_F(NetIbMPITest, MultipleSequentialTransfers) {
     if (nThreads == 1) {
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+        ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
         void* sendBuffer = nullptr;
         void* recvBuffer = nullptr;
@@ -875,7 +970,7 @@ TEST_F(NetIbMPITest, LargeTransfer) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 
     const size_t bufferSize = kLargeBufferSize; // 16 MB
     const int tag = 400;
@@ -927,7 +1022,7 @@ TEST_F(NetIbMPITest, CloseWithoutWaitingForCompletion) {
 
     ConnectionPair pair;
     NetConnectionGuard connGuard(net_);
-    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+    ASSERT_SETUP_CONNECTION(0, pair, connGuard);
 }
 
 TEST_F(NetIbMPITest, ListenCloseListen) {
@@ -1185,6 +1280,18 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
         void* mhandle = nullptr;
         ASSERT_EQ(RegisterMemory(comm, buf, kTransferSize, NCCL_PTR_HOST, &mhandle),
                   ncclSuccess);
+        void* request = nullptr;
+        auto mrGuard = RCCLTestGuards::makeScopeGuard([&]() {
+            if (request) {
+                // A failed wait does not cancel the request. Retain its MR and
+                // buffer until this isolated test process exits.
+                mhandle = nullptr;
+                bufGuard.release();
+            } else if (mhandle) {
+                (void)DeregisterMemory(comm, mhandle);
+                mhandle = nullptr;
+            }
+        });
 
         if (rank == 1) {
             fillHostBufferWithPattern<uint8_t>(buf, kTransferSize, makeBytePattern(seed));
@@ -1192,23 +1299,26 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
             memset(buf, 0xDE, kTransferSize);
         }
 
-        void* req = nullptr;
         if (rank == 0) {
             void* rb[1] = {buf}; size_t rs[1] = {kTransferSize};
             int rt[1] = {tag}; void* rh[1] = {mhandle};
-            ASSERT_EQ(PostRecv(recvComms[c], 1, rb, rs, rt, rh, &req), ncclSuccess);
-            ASSERT_NE(req, nullptr);
+            ASSERT_EQ(PostRecv(recvComms[c], 1, rb, rs, rt, rh, &request), ncclSuccess);
+            ASSERT_NE(request, nullptr);
         }
 
         if (rank == 1) {
-            void* sendReq = nullptr;
-            PostSendWithRetry(sendComms[c], buf, kTransferSize, tag, mhandle, &sendReq);
+            PostSendWithRetry(sendComms[c], buf, kTransferSize, tag, mhandle, &request);
+            int sendSize[1] = {0};
+            ASSERT_EQ(WaitForCompletion(request, sendSize, kLargeTransferTimeoutMs), ncclSuccess)
+                << listens[c].label << " send timed out";
+            request = nullptr;
         }
 
         if (rank == 0) {
             int csz[1] = {0};
-            ASSERT_EQ(WaitForCompletion(req, csz, kLargeTransferTimeoutMs), ncclSuccess)
+            ASSERT_EQ(WaitForCompletion(request, csz, kLargeTransferTimeoutMs), ncclSuccess)
                 << listens[c].label << " recv timed out";
+            request = nullptr;
             EXPECT_EQ(csz[0], (int)kTransferSize)
                 << listens[c].label << " size mismatch";
 
@@ -1220,7 +1330,16 @@ TEST_F(NetIbMPITest, MultipleSimultaneousListens) {
                             << ": expected " << (int)errExp << " got " << (int)errGot;
         }
 
-        ASSERT_EQ(DeregisterMemory(comm, mhandle), ncclSuccess);
+        void* mhandleToDeregister = mhandle;
+        mhandle = nullptr;
+        const ncclResult_t deregResult = DeregisterMemory(comm, mhandleToDeregister);
+        if (deregResult != ncclSuccess) {
+            // The scope guard must not retry a failed deregistration or free
+            // memory that the transport may still associate with this MR.
+            bufGuard.release();
+            ADD_FAILURE() << listens[c].label << " deregistration failed with status "
+                          << deregResult;
+        }
     }
 
     // === Phase 4: Close ALL ===
