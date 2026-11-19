@@ -18,7 +18,7 @@ VInterpP1F32Vop3::VInterpP1F32Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP1F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -46,13 +46,14 @@ VInterpP2F32Vop3::VInterpP2F32Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP2F32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       m0(32, OperandType::OPR_SDST_M0, 124) {
+  src_operands_[0] = &vdst;
   dst_operands_[0] = &vdst;
-  src_operands_[0] = &src1;
-  src_operands_[1] = &src0;
-  src_operands_[2] = &m0;
-  num_src_ = 3;
+  src_operands_[1] = &src1;
+  src_operands_[2] = &src0;
+  src_operands_[3] = &m0;
+  num_src_ = 4;
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= EMBEDDED_MEMORY_WAIT;
@@ -74,7 +75,7 @@ VInterpMovF32Vop3::VInterpMovF32Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpMovF32Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_PARAM, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(32, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
       m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
@@ -144,7 +145,7 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readfirstlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadfirstlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
   num_src_ = 1;
@@ -1609,6 +1610,81 @@ DecodeResult decodeVMovreldB32Vop3(const MachineInst *opcode,
   if (validation.failed()) [[unlikely]]
     return Result::failure();
   return std::make_unique<VMovreldB32Vop3>(opcode);
+}
+} // namespace detail
+
+VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
+    : Vop3("v_movrels_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMovrelsB32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeVMovrelsB32Vop3(const MachineInst *opcode,
+                                   const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrels_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsB32Vop3>(opcode);
+}
+} // namespace detail
+
+VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
+    : Vop3("v_movrelsd_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMovrelsdB32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeVMovrelsdB32Vop3(const MachineInst *opcode,
+                                    const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsdB32Vop3>(opcode);
+}
+} // namespace detail
+
+VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
+    : Vop3("v_movrelsd_2_b32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VMovrelsd2B32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      m0(32, OperandType::OPR_SDST_M0, 124) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  src_operands_[1] = &m0;
+  num_src_ = 2;
+  num_dst_ = 1;
+  m0.apply_fieldless_caps(false, false, false);
+}
+
+namespace detail {
+DecodeResult decodeVMovrelsd2B32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_movrelsd_2_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VMovrelsd2B32Vop3>(opcode);
 }
 } // namespace detail
 
@@ -3353,6 +3429,10 @@ VAddF16Vop3::VAddF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_register_byte_mask(0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
@@ -6306,12 +6386,15 @@ VInterpP1llF16Vop3::VInterpP1llF16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP1llF16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
   src_operands_[1] = &src0;
   num_src_ = 2;
   num_dst_ = 1;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  src_operands_[num_src_++] = &lds_m0;
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -6331,14 +6414,17 @@ VInterpP1lvF16Vop3::VInterpP1lvF16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP1lvF16Vop3)),
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src2(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
+      src2(16, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
   src_operands_[1] = &src0;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  src_operands_[num_src_++] = &lds_m0;
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
 
@@ -7029,15 +7115,18 @@ VInterpP2F16Vop3::VInterpP2F16Vop3(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::VInterpP2F16Vop3)),
       vdst(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       src1(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src1),
-      src0(16, OperandType::OPR_ATTR, reinterpret_cast<const OpEncoding *>(inst)->src0),
-      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2) {
+      src0(16, OperandType::OPR_ATTR, (reinterpret_cast<const OpEncoding *>(inst)->src0 & 0x3fu)),
+      src2(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src2),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src1;
   src_operands_[1] = &src0;
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  vdst.set_register_byte_mask(0x3);
+  lds_m0.apply_fieldless_caps(false, false, false);
+  src_operands_[num_src_++] = &lds_m0;
+  vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= EMBEDDED_MEMORY_WAIT;
 }
@@ -7182,7 +7271,7 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
     : Vop3("v_readlane_b32", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::VReadlaneB32Vop3)),
       vdst(32, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      src0(32, OperandType::OPR_SRC_VGPR, reinterpret_cast<const OpEncoding *>(inst)->src0),
+      src0(32, OperandType::OPR_VGPR_OR_LDS, reinterpret_cast<const OpEncoding *>(inst)->src0),
       src1(32, OperandType::OPR_SSRC_LANESEL, reinterpret_cast<const OpEncoding *>(inst)->src1) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &src0;
@@ -10623,6 +10712,10 @@ VCmpLtI16Vop3::VCmpLtI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -10660,6 +10753,10 @@ VCmpEqI16Vop3::VCmpEqI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -10697,6 +10794,10 @@ VCmpLeI16Vop3::VCmpLeI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -10734,6 +10835,10 @@ VCmpGtI16Vop3::VCmpGtI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -10771,6 +10876,10 @@ VCmpNeI16Vop3::VCmpNeI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -10808,6 +10917,10 @@ VCmpGeI16Vop3::VCmpGeI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11207,6 +11320,10 @@ VCmpxLtI16Vop3::VCmpxLtI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11247,6 +11364,10 @@ VCmpxEqI16Vop3::VCmpxEqI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11287,6 +11408,10 @@ VCmpxLeI16Vop3::VCmpxLeI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11327,6 +11452,10 @@ VCmpxGtI16Vop3::VCmpxGtI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11367,6 +11496,10 @@ VCmpxNeI16Vop3::VCmpxNeI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11407,6 +11540,10 @@ VCmpxGeI16Vop3::VCmpxGeI16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11834,6 +11971,10 @@ VCmpLtU16Vop3::VCmpLtU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11871,6 +12012,10 @@ VCmpEqU16Vop3::VCmpEqU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11908,6 +12053,10 @@ VCmpLeU16Vop3::VCmpLeU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11945,6 +12094,10 @@ VCmpGtU16Vop3::VCmpGtU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -11982,6 +12135,10 @@ VCmpNeU16Vop3::VCmpNeU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12019,6 +12176,10 @@ VCmpGeU16Vop3::VCmpGeU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12436,6 +12597,10 @@ VCmpxLtU16Vop3::VCmpxLtU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12476,6 +12641,10 @@ VCmpxEqU16Vop3::VCmpxEqU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12516,6 +12685,10 @@ VCmpxLeU16Vop3::VCmpxLeU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12556,6 +12729,10 @@ VCmpxGtU16Vop3::VCmpxGtU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12596,6 +12773,10 @@ VCmpxNeU16Vop3::VCmpxNeU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12636,6 +12817,10 @@ VCmpxGeU16Vop3::VCmpxGeU16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
@@ -12938,6 +13123,10 @@ VCmpFF16Vop3::VCmpFF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -12973,6 +13162,10 @@ VCmpLtF16Vop3::VCmpLtF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -13008,6 +13201,10 @@ VCmpEqF16Vop3::VCmpEqF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -13043,6 +13240,10 @@ VCmpLeF16Vop3::VCmpLeF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -13078,6 +13279,10 @@ VCmpGtF16Vop3::VCmpGtF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -13113,6 +13318,10 @@ VCmpLgF16Vop3::VCmpLgF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -13148,6 +13357,10 @@ VCmpGeF16Vop3::VCmpGeF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -13183,6 +13396,10 @@ VCmpOF16Vop3::VCmpOF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -13508,6 +13725,10 @@ VCmpxFF16Vop3::VCmpxFF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -13546,6 +13767,10 @@ VCmpxLtF16Vop3::VCmpxLtF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -13584,6 +13809,10 @@ VCmpxEqF16Vop3::VCmpxEqF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -13622,6 +13851,10 @@ VCmpxLeF16Vop3::VCmpxLeF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -13660,6 +13893,10 @@ VCmpxGtF16Vop3::VCmpxGtF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -13698,6 +13935,10 @@ VCmpxLgF16Vop3::VCmpxLgF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -13736,6 +13977,10 @@ VCmpxGeF16Vop3::VCmpxGeF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -13774,6 +14019,10 @@ VCmpxOF16Vop3::VCmpxOF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -14122,6 +14371,10 @@ VCmpUF16Vop3::VCmpUF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14157,6 +14410,10 @@ VCmpNgeF16Vop3::VCmpNgeF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14192,6 +14449,10 @@ VCmpNlgF16Vop3::VCmpNlgF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14227,6 +14488,10 @@ VCmpNgtF16Vop3::VCmpNgtF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14262,6 +14527,10 @@ VCmpNleF16Vop3::VCmpNleF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14297,6 +14566,10 @@ VCmpNeqF16Vop3::VCmpNeqF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14332,6 +14605,10 @@ VCmpNltF16Vop3::VCmpNltF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14367,6 +14644,10 @@ VCmpTruF16Vop3::VCmpTruF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   vdst.set_wave_mask();
   flags_ |= DIRECT_REGISTER_ACCESSES;
 }
@@ -14740,6 +15021,10 @@ VCmpxUF16Vop3::VCmpxUF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -14778,6 +15063,10 @@ VCmpxNgeF16Vop3::VCmpxNgeF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -14817,6 +15106,10 @@ VCmpxNlgF16Vop3::VCmpxNlgF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -14856,6 +15149,10 @@ VCmpxNgtF16Vop3::VCmpxNgtF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -14895,6 +15192,10 @@ VCmpxNleF16Vop3::VCmpxNleF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -14934,6 +15235,10 @@ VCmpxNeqF16Vop3::VCmpxNeqF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -14973,6 +15278,10 @@ VCmpxNltF16Vop3::VCmpxNltF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;
@@ -15012,6 +15321,10 @@ VCmpxTruF16Vop3::VCmpxTruF16Vop3(const MachineInst *inst)
         Operand(16, OperandType::OPR_SIMM32,
                 static_cast<int>((
                     reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32 & 0xFFFFu)));
+  if (src0.is_vgpr())
+    src0.set_register_byte_mask(0x3);
+  if (src1.is_vgpr())
+    src1.set_register_byte_mask(0x3);
   sdst_exec.apply_fieldless_caps(false, false, false);
   vdst.set_wave_mask();
   flags_ |= WRITES_EXEC;

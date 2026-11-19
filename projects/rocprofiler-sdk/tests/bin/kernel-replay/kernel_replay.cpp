@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string_view>
 #include <vector>
 
 #define HIP_CHECK(call)                                                                            \
@@ -333,13 +334,105 @@ run_inplace_saxpy(int n)
     }
     return EXIT_FAILURE;
 }
+
+// The in-place saxpy with y in host-pinned or fine-grained device memory outside the snapshot.
+// Each dispatch runs once without replay, adding `step` to y once per host-observed launch.
+int
+run_untracked_saxpy(int n, bool fine_grained)
+{
+    constexpr int kLaunches = 3;
+    const size_t  bytes     = static_cast<size_t>(n) * sizeof(float);
+    const float   alpha     = 2.0f;
+    const float   y0        = 100.0f;
+    const float   step      = alpha * 1.0f;
+    const char*   memory    = fine_grained ? "fine-grained device" : "host-pinned";
+
+    std::vector<float> h_x(n, 1.0f);
+    std::vector<float> h_y(n, y0);
+
+    float *d_x = nullptr, *d_y = nullptr;
+    HIP_CHECK(hipMalloc(&d_x, bytes));
+    if(fine_grained)
+        HIP_CHECK(hipExtMallocWithFlags(
+            reinterpret_cast<void**>(&d_y), bytes, hipDeviceMallocFinegrained));
+    else
+        HIP_CHECK(hipHostMalloc(&d_y, bytes));
+    HIP_CHECK(hipMemcpy(d_x, h_x.data(), bytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_y, h_y.data(), bytes, hipMemcpyHostToDevice));
+
+    bool ok = true;
+    for(int i = 0; i < kLaunches && ok; ++i)
+    {
+        saxpy<<<512, 512>>>(alpha, d_x, d_y, n);
+        HIP_CHECK(hipGetLastError());
+        HIP_CHECK(hipDeviceSynchronize());
+
+        const float expected_y = y0 + static_cast<float>(i + 1) * step;
+        HIP_CHECK(hipMemcpy(h_y.data(), d_y, bytes, hipMemcpyDeviceToHost));
+        for(int e = 0; e < n && ok; ++e)
+        {
+            if(!approx_equal(h_y[e], expected_y))
+            {
+                fprintf(stderr,
+                        "saxpy on %s memory: launch %d elem %d: %f != %f\n",
+                        memory,
+                        i + 1,
+                        e,
+                        h_y[e],
+                        expected_y);
+                ok = false;
+            }
+        }
+    }
+
+    HIP_CHECK(hipFree(d_x));
+    if(fine_grained)
+        HIP_CHECK(hipFree(d_y));
+    else
+        HIP_CHECK(hipHostFree(d_y));
+    if(!ok) return EXIT_FAILURE;
+    printf("saxpy on %s memory: %d launches OK\n", memory, kLaunches);
+    return EXIT_SUCCESS;
+}
 }  // namespace
 
+// Usage: kernel-replay [n_elems] [iters] [mode] [pass_counts_file]
+//   mode "untracked" runs the in-place saxpy over host-pinned memory and, when supported,
+//   fine-grained device memory. An optional file records the expected per-dispatch pass counts.
+//   Any other mode runs the kernels the other replay tests measure.
 int
 main(int argc, char** argv)
 {
     const int n     = (argc > 1) ? atoi(argv[1]) : (1 << 20);
     const int iters = (argc > 2) ? atoi(argv[2]) : 1;
+
+    if(argc > 3 && std::string_view{argv[3]} == "untracked")
+    {
+        if(run_untracked_saxpy(n, false) != EXIT_SUCCESS) return EXIT_FAILURE;
+        int device = 0, fine_grained = 0;
+        HIP_CHECK(hipGetDevice(&device));
+        HIP_CHECK(hipDeviceGetAttribute(&fine_grained, hipDeviceAttributeFineGrainSupport, device));
+        const bool fine_grained_supported = fine_grained != 0;
+        if(fine_grained_supported)
+        {
+            if(run_untracked_saxpy(n, true) != EXIT_SUCCESS) return EXIT_FAILURE;
+        }
+        else
+            printf("kernel-replay: fine-grained device memory is unsupported; host-pinned launches "
+                   "completed\n");
+
+        if(argc > 4)
+        {
+            auto* file = std::fopen(argv[4], "w");
+            if(file == nullptr) return EXIT_FAILURE;
+            const bool written =
+                std::fputs(fine_grained_supported ? "1,1,1,1,1,1\n" : "1,1,1\n", file) >= 0;
+            const bool closed = std::fclose(file) == 0;
+            if(!written || !closed) return EXIT_FAILURE;
+        }
+        printf("kernel-replay: untracked memory kernels completed\n");
+        return EXIT_SUCCESS;
+    }
 
     if(run_vecadd(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;
     if(run_saxpy(n, iters) != EXIT_SUCCESS) return EXIT_FAILURE;

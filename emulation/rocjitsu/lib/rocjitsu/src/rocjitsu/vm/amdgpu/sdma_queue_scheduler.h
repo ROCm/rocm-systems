@@ -154,6 +154,7 @@ public:
   const std::shared_ptr<DeviceCacheCoherence> &cache_coherence() const { return coherence_; }
 
 private:
+  friend class SdmaQueueSchedulerTestAccess;
   class QueueRecord;
 
   class Slot {

@@ -1,0 +1,42 @@
+utcl1.lookup_hit_rate:
+  name: UTCL1 Lookup Hit Rate
+  formula: 100 * SUM(UTCL1_HITS_sum) / SUM(UTCL1_REQS_sum)
+  unit: Percent
+  description: UTCL1 TLB hit rate.
+utcl1.miss_handler_fifo_full_rate:
+  name: UTCL1 Miss Handler FIFO Full Rate
+  formula: 100 * SUM(UTCL1_STALL_MH_FULL_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of UTCL1-busy cycles stalled because the miss handler FIFO is full.
+utcl1.total_req_from_utcl0:
+  name: UTCL1 Total Requests from UTCL0
+  formula: SUM(UTCL1_REQS_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total address translation requests received by UTCL1 from UTCL0.
+utcl1.total_returns_to_utcl0:
+  name: UTCL1 Total Returns to UTCL0
+  formula: SUM(UTCL1_RTNS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total translation results returned from UTCL1 to UTCL0.
+utcl1.utcl2_req:
+  name: UTCL1-UTCL2 Requests
+  formula: SUM(UTCL1_UTCL2_REQS_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of UTCL1 TLB misses forwarded to UTCL2.
+utcl1.utcl2_req_lat:
+  name: UTCL1-UTCL2 Request Latency
+  formula: SUM(UTCL1_UTCL2_REQS_OUTSTANDING_sum) / SUM(UTCL1_UTCL2_REQS_sum)
+  unit: Cycles
+  description: Average UTCL1-to-UTCL2 translation latency.
+utcl1.utcl2_req_stall_rate:
+  name: UTCL1-UTCL2 Request Stall Rate
+  formula: 100 * SUM(UTCL1_STALL_UTCL2_CREDITS_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
+  unit: Percent
+  description: Percentage of UTCL1-busy cycles stalled sending to UTCL2.
+utcl1.utcl2_returns:
+  name: UTCL1-UTCL2 Returns
+  formula: SUM(UTCL1_UTCL2_RET_CNT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of translation results returned from UTCL2 to UTCL1.

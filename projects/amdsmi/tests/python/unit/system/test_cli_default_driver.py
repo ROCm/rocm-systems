@@ -30,12 +30,12 @@ class _LibraryError(Exception):
         return "not supported"
 
 
-def _project_root() -> Path:
-    return Path(__file__).resolve().parents[4]
+def _cli_file(relative_path: str) -> Path:
+    return Path(_CLI_DIR or "") / relative_path
 
 
 def _load_module(relative_path: str, module_name: str) -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(module_name, _project_root() / relative_path)
+    spec = importlib.util.spec_from_file_location(module_name, _cli_file(relative_path))
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -79,7 +79,7 @@ def _load_default_module() -> types.ModuleType:
         {"amdsmi": amdsmi, "_version": version_metadata, "amdsmi_helpers": helpers_module}
     )
     try:
-        return _load_module("amdsmi_cli/subcommands/default.py", "default_driver_under_test")
+        return _load_module("subcommands/default.py", "default_driver_under_test")
     finally:
         restore()
 
@@ -129,10 +129,11 @@ def _run_default_without_amdgpu(gpus_without_driver: list) -> dict:
 class TestDefaultDriverHeader(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        root = _project_root()
-        for relative_path in ("amdsmi_cli/subcommands/default.py", "amdsmi_cli/amdsmi_logger.py"):
-            if not (root / relative_path).is_file():
-                raise unittest.SkipTest(f"amd-smi CLI source not found at {root / relative_path}")
+        if not _CLI_DIR:
+            raise unittest.SkipTest("amd-smi CLI directory not found")
+        for relative_path in ("subcommands/default.py", "amdsmi_logger.py"):
+            if not _cli_file(relative_path).is_file():
+                raise unittest.SkipTest(f"amd-smi CLI file not found: {_cli_file(relative_path)}")
 
     def test_default_payload_uses_driver_info(self) -> None:
         output = _run_default()

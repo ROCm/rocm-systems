@@ -476,15 +476,17 @@ There are two memory hooks, and they see different things.
 `onAmdgpuRouteMemoryInstruction` fires before routing decides anything: the
 instruction still carries the address space it decoded as and the addresses it
 computed. `onAmdgpuMemoryAccessRouted` fires once routing has settled and
-reports a `MemoryAccessObservation` describing the access the memory system is
-actually about to be asked for — the pipeline it was issued to, its routing-selected
-counter, and its effective addresses. The scalar `wait_counter` field does not
-describe the complete wait requirement: mixed FLAT retains its VMEM counter here,
-while `VectorMemState::routed_issue_info` carries both VMEM and LDS obligations.
-Consult that routed issue's `counter_obligations()` for the full set.
+reports the selected pipeline and effective addresses in a `MemoryAccessObservation`.
+The observation's scalar `wait_counter` field identifies the counter for that route. Mixed FLAT
+requests retain their VMEM counter in this field. For the full set of issued
+counters, use `onAmdgpuMemoryAccessRouted(access, inst, wf)`. For generic FLAT,
+`inst.data_as<VectorMemState>()->routed_issue_info->counter_obligations()` includes
+both VMEM and LDS on RDNA1–4 and CDNA5, even for uniform or empty requests.
+On CDNA1–4 each domain takes a position only when a lane requests it.
 
-When all requesting FLAT lanes use the shared aperture, routing selects the
-LDS pipeline and sets `normalized_to_local` to `true`. This flag describes the
+When at least one FLAT lane requests memory and all requests use the shared
+aperture, routing selects the LDS pipeline and sets
+`normalized_to_local` to `true`. This flag describes the
 uniform local route, not whether addresses were normalized.
 
 Mixed FLAT requests retain `MemoryRoute::GLOBAL`. The global pipeline separates the lanes by backing store, completing
@@ -500,18 +502,27 @@ and PC, then fault before any memory effects because DDS backing is unimplemente
 On other architectures the shared aperture remains LDS; out-of-backing accesses
 read zero and discard writes.
 
-For RDNA4 FLAT LDS requests, the offset wraps to 17 bits before adding the
-workgroup base. `flat_local_allocation_end` captures the exclusive modeled
-`lds_base + lds_size` limit and remains fixed across retries. This includes the
-current 256-byte scheduler rounding; PM4 sizes may already be 512-byte multiples
-before that rounding. Target allocation and encoding granules remain unmodeled.
-A lane whose first memory element does not fit is rejected in full and appears
-in `flat_local_oob_lane_mask`. Other lanes retain only complete elements below
-the allocation end (DWORDs for multiword transfers); atomics require their whole
-element. Rejected reads return zero and rejected writes are discarded. These
-bounds leave `valid_lane_mask`, `request_lane_mask` and nominal counter
-participation unchanged, so those masks describe requests rather than bytes
-actually accessed.
+For ordinary FLAT LDS requests, routing captures the exclusive workgroup limit
+`lds_base + lds_size` at issue and reuses it on retry. The observation reports
+this limit clamped to the backing size in `flat_local_allocation_end`.
+RDNA4 wraps the LDS offset to 17 bits before adding the workgroup base.
+RDNA1 through RDNA3.5 reject the entire lane transfer if any element crosses
+the workgroup limit. Other targets retain complete elements that fit, including
+individual DWORDs of a multiword transfer. An atomic requires its whole element.
+`flat_local_oob_lane_mask` identifies fully rejected requests. Rejected reads
+return zero and rejected writes are dropped. `request_lane_mask` includes
+requests that reach the bounds check, even when they transfer zero bytes.
+
+For CDNA2 DS and ordinary FLAT LDS, `lds_allocation` reports the workgroup
+range intersected with the backing. For FLAT, start with
+`flat_local_lane_mask & ~flat_local_oob_lane_mask`. For CDNA2 DS, start with
+`request_lane_mask`. Apply `lds_allocation->retained_bytes()` to each selected
+lane and address set to recover the transferred byte intervals. Equal-offset
+CDNA2 DS pairs report a single access.
+
+BUFFER_STORE_LDS_DWORD reports the issue-time LDS source addresses in
+`lds_source_addresses` and the global destinations in `addresses`. The same
+request mask and allocation checks select which source DWORDs were read.
 
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store
@@ -542,6 +553,20 @@ RocJITsu calls the most specific form; its defaults forward through the
 wavefront-aware form to the observation-only form. The borrowed instruction and
 wavefront already reflect the selected route and are valid only during the
 callback.
+
+A plugin can also implement `AmdgpuMemoryCancellationObserver` to roll back an
+individual routed issue. The group calls `onAmdgpuMemoryAccessCancelled(inst, wf)`
+only when the plugin enables `observes_memory_routing()` and subscribes to hot
+hooks for that wavefront. The instruction and wavefront are borrowed for the
+callback, which runs before the pipeline deletes the instruction. When an entire
+wave is cancelled, release its outstanding issues in `onAmdgpuWavefrontCancelled`
+instead of expecting individual issue callbacks.
+
+Mixed FLAT requests can reach the global pipeline and fault before touching
+LDS. Plugins that track actual LDS accesses can implement
+`AmdgpuMixedFlatLdsObserver`. With routing and wave hot hooks enabled,
+`onAmdgpuMixedFlatLdsAccess(inst, wf)` runs after the global lanes succeed
+and immediately before the shared lanes access LDS.
 
 The observation's spans borrow execution-owned storage and are valid only for
 the duration of the callback. A plugin that keeps one must copy them.
@@ -634,8 +659,12 @@ void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
   auto &last = *static_cast<LastInstruction *>(wf.plugin_state(slot_index()));
   const int bytes = inst.size();
   if (!inst.raw_encoding() || bytes <= 0 || bytes % sizeof(uint32_t) != 0 ||
-      static_cast<size_t>(bytes) > sizeof(last.words))
-    throw std::logic_error(std::format("instruction at PC {:#x} has no valid encoding", pc));
+      static_cast<size_t>(bytes) > sizeof(last.words)) {
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::PluginFailure, "instruction has no valid encoding");
+    return;
+  }
   last.pc = pc;
   last.word_count = bytes / sizeof(uint32_t);
   std::copy_n(inst.raw_encoding(), last.word_count, last.words.begin());
@@ -643,25 +672,50 @@ void onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Instruction &inst,
 
 // Later, when a report about this wave needs text:
 if (last.word_count != 0) {
-  std::string text = wf.disassemble_instruction(
+  util::FailureOr<std::string> text = wf.disassemble_instruction(
       std::span(last.words).first(last.word_count), last.pc);
-  // ...
+  if (text.failed()) {
+    if (!wf.instruction_execution_failed())
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::PluginFailure, "cannot disassemble instruction");
+    return;
+  }
+  // Use text.value().
 }
 ```
 
 `Wavefront::disassemble_instruction` decodes the copy with the wave's CU target
 decoder, so a standalone plugin module can use it without linking the
 simulator. Call it on the CU execution thread, for example from one of that
-wave's synchronous hooks. It throws `std::logic_error` if the encoding is empty,
-truncated, or cannot be decoded. Because the text comes from the copied bytes,
+wave's synchronous hooks. It returns `FailureOr<std::string>` and emits a diagnostic
+through the optional `DiagnosticEmitter` if the encoding is empty, truncated, or
+cannot be decoded. Because the text comes from the copied bytes,
 it describes the instruction that executed even if the code was later
 overwritten or unmapped. The race detector formats its instruction traces this
 way.
 
+Plugin callbacks, policy queries, constructors, destructors, and output sinks must
+not throw. This is a semantic contract; callback signatures do not require
+`noexcept`. From synchronous instruction hooks, report expected instruction or
+reporting failures through
+`Wavefront::report_instruction_execution_error()` and preserve any error already
+recorded on the wave. Every accepted asynchronous instruction must still receive
+its normal completion accounting before cancellation or shutdown.
+
+`onAmdgpuWavefrontHalted` is a terminal notification. The wave's instruction-error
+state is discarded when this hook returns. Use `sink().write()` to report problems
+from this hook.
+
 ## Adding a new plugin
 
-1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class
-   must be constructible from `const char *config_json`.
+1. Implement `ExecutionPlugin` in a new subdirectory. The plugin class can
+   provide a `const char *config_json` constructor, or a default constructor and
+   `util::Result initialize(const char *, util::DiagnosticEmitter)`.
+   The export macro uses the `const char *` constructor when available; it uses
+   the checked initializer only when that constructor is absent. A constructor
+   taking `const char * = nullptr` still takes precedence, so remove it when
+   migrating to the checked form. If initialization fails, the factory logs
+   `create failed: <diagnostic>`, destroys the candidate, and returns a null handle.
 2. Add a `plugin_export.cpp` that calls
    `ROCJITSU_DEFINE_PLUGIN(MyPlugin, "myname", schema)`.
 3. In `CMakeLists.txt`, add the object library and a
@@ -702,6 +756,13 @@ not register values: even a source can alias a destination being written.
 Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.
+
+Plugins that need to report instruction failures from register hooks must keep
+`supports_async_instructions()` false. Helper register hooks can run while the
+issuer clears the same wave's instruction error field for its next instruction;
+neither reading nor writing that field from a helper is safe. Issuer-thread issue
+callbacks may report failures. The CU checks the retained error after the full
+issue callback fanout and drains accepted jobs before cancelling the wave.
 
 Throughput, instruction mix, and kernel logging support this contract. The
 [simulator race detector](race-detector.md) keeps synchronous execution until
