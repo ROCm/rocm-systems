@@ -130,6 +130,13 @@ class Blit {
   /// not through SubmitSwapCopyCommand.
   virtual bool SupportsSwapCopyCommand() const { return false; }
 
+  /// @brief Whether this blit implements SubmitBroadcastCopyCommand below.
+  ///
+  /// @note As above, distinct from BlitSdmaBase::BroadcastSupported(), which
+  /// reports the SDMA broadcast packet reached via
+  /// SubmitLinearCopyBroadcastCommand.
+  virtual bool SupportsBroadcastCopyCommand() const { return false; }
+
   /// @brief Submit a batch of swap copy commands, exchanging the contents of
   /// each address pair. After execution entry i's buffer A holds the original
   /// contents of its buffer B and vice versa. All entries share @p out_signal,
@@ -165,6 +172,26 @@ class Blit {
     const size_t size_list[1] = {size};
     return SubmitSwapCopyCommand(1, addr_a_list, addr_b_list, size_list,
                                  dep_signals, out_signal);
+  }
+
+  /// @brief Submit a broadcast copy: one source buffer written to each of
+  /// @p num_destinations destination buffers. All destinations share
+  /// @p out_signal, which is released once every one has been written.
+  ///
+  /// @param src Source buffer address.
+  /// @param dst_list Array of @p num_destinations destination addresses.
+  /// @param num_destinations Number of destination buffers, >= 1. An
+  /// implementation that can only drive a bounded number of destinations per
+  /// dispatch splits the request internally rather than rejecting it, so the
+  /// accepted range does not depend on which engine services the copy.
+  /// @param size Bytes written to each destination.
+  /// @param dep_signals Arrays of dependent signals.
+  /// @param out_signal Output signal.
+  virtual hsa_status_t SubmitBroadcastCopyCommand(
+      const void* src, void* const* dst_list, uint32_t num_destinations,
+      size_t size, std::vector<core::Signal*>& dep_signals,
+      core::Signal& out_signal) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 };
 }  // namespace core

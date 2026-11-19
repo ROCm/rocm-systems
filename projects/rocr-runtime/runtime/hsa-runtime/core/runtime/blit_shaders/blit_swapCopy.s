@@ -129,7 +129,8 @@
 
 // GFX12.5 uses s_wait_storecnt instead of s_waitcnt expcnt(0)
 .macro S_WAITCNT_STORECNT
-  .if (.amdgcn.gfx_generation_number == 12 && .amdgcn.gfx_generation_minor >= 5)
+  // GFX12 and later count stores in storecnt; expcnt does not cover them there.
+  .if (.amdgcn.gfx_generation_number >= 12)
     s_wait_storecnt     0
   .else
     s_waitcnt           expcnt(0)
