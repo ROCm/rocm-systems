@@ -13,7 +13,9 @@ from the file name (0300_memory_chart.yaml is panel 300), table and row ids from
 position (301 is the first table, 3.1.0 its first row).
 
 views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
-analysis_configs/. Analyze reads its panel configs through arch_panel_configs().
+analysis_configs/. Analyze reads its panel configs through arch_panel_configs(). Profile
+still reads analysis_configs/, which test_metric_library_sync.py keeps equal in
+structure to the views' panel configs.
 Standard library and vendored YAML only, because profile imports this module.
 """
 
@@ -24,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import config
+from rocprof_compute_soc.metric_library import loader
 from utils.equation_format import (
     AGGREGATION_FUNCTIONS,
     ASTNode,
@@ -34,13 +37,17 @@ from utils.equation_format import (
     format_equation,
     parse_equation,
 )
+from utils.logger import console_error
 from utils.utils_common import (
+    INVALID_BLOCK_HINT,
+    METRIC_ID_RE,
     PLACEHOLDER_RANGE_KEY,
     canonical_config_arch,
+    convert_metric_id_to_panel_info,
     format_row_id,
-    load_panel_configs,
     load_yaml,
     mapping_field_errors,
+    resolve_block_token,
 )
 from utils.utils_counter_defs import (
     PER_DISPATCH_SUFFIX,
@@ -182,9 +189,16 @@ def per_dispatch_partners(collectables: Dict[str, str]) -> Dict[str, Optional[st
 
 
 def arch_panel_configs(arch: str) -> "OrderedDict[int, Dict[str, Any]]":
-    """Return the panel configs analyze shows for arch, from analysis_configs/."""
-    config_arch = canonical_config_arch(arch) or arch
-    return load_panel_configs([str(config.analysis_configs_dir / config_arch)])
+    """Return arch's panel configs, built from its views and metric library.
+
+    An arch without a metric library has no views, so it gets {} and shows no panels.
+    """
+    if not loader.has_metric_library(arch):
+        return OrderedDict()
+    library = loader.MetricLibrary.load(loader.default_metric_library_dir(), arch)
+    return views_to_panel_configs(
+        load_views(arch), library.metrics, library.collectable_formulas()
+    )
 
 
 def panel_aliases(views: Dict[int, Dict[str, Any]]) -> Dict[str, str]:
@@ -193,6 +207,41 @@ def panel_aliases(views: Dict[int, Dict[str, Any]]) -> Dict[str, str]:
         str(panel_id // 100): view.get("alias") or ""
         for panel_id, view in views.items()
     }
+
+
+def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
+    """Return panel_aliases() of arch's views; {} for an arch without views."""
+    if not loader.has_metric_library(arch):
+        return {}
+    return panel_aliases(load_views(arch))
+
+
+def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
+    """Return -b alias -> panel number, for the panels that have an alias."""
+    return {
+        alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
+    }
+
+
+def convert_filter_blocks_to_panel_ids(
+    filter_blocks: List[str], arch: Optional[str] = None
+) -> Set[int]:
+    """Return the panel ids (e.g. {200, 1100}) that -b tokens select.
+
+    Numeric ids ("2", "11.1") select their panel; other tokens are arch's panel aliases.
+    """
+    alias_map: Dict[str, str] = (
+        get_arch_alias_to_panel_id(arch)
+        if arch and any(not METRIC_ID_RE.match(str(bid)) for bid in filter_blocks)
+        else {}
+    )
+    resolved: Set[int] = set()
+    for bid in filter_blocks:
+        metric_id = resolve_block_token(str(bid), alias_map)
+        if metric_id is None:
+            console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
+        resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
+    return resolved
 
 
 def iter_view_rows(

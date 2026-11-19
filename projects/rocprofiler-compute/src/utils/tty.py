@@ -27,6 +27,7 @@ from memory_chart.loader import Layouts
 from memory_chart.render import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
 from utils import parser, schema
+from utils.analysis_views import convert_filter_blocks_to_panel_ids
 from utils.logger import console_log, console_warning
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
@@ -42,7 +43,6 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     MEMORY_CHART_PANEL_ID,
     ROOFLINE_PANEL_ID,
-    convert_filter_blocks_to_panel_ids,
     format_table_id,
     selects_roofline,
     strip_ansi,

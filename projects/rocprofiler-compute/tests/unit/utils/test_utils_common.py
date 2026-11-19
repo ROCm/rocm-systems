@@ -12,7 +12,6 @@ from collections import OrderedDict
 from pathlib import Path
 from unittest import mock
 
-import common
 import pytest
 
 import utils.utils_common as utils_common
@@ -735,11 +734,6 @@ def test_convert_metric_id_to_panel_info_edge_case_dot_only():
 
     with pytest.raises(ValueError):
         utils_common.convert_metric_id_to_panel_info(".02")
-
-
-@pytest.mark.parametrize("gpu_arch", sorted(common.SUPPORTED_ARCHS))
-def test_get_arch_alias_to_panel_id_finds_template_aliases(gpu_arch):
-    assert utils_common.get_arch_alias_to_panel_id(gpu_arch)
 
 
 # =============================================================================

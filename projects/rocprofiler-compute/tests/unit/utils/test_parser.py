@@ -15,6 +15,7 @@ import pytest
 
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils import schema
+from utils.analysis_views import convert_filter_blocks_to_panel_ids
 from utils.parser import (
     apply_filters,
     apply_kernel_filter,
@@ -23,10 +24,7 @@ from utils.parser import (
     load_pc_sampling_data,
 )
 from utils.specs import MachineSpecsCDNA
-from utils.utils_common import (
-    convert_filter_blocks_to_panel_ids,
-    expand_placeholder_ranges,
-)
+from utils.utils_common import expand_placeholder_ranges
 
 # =============================================================================
 # Helpers to build in-memory panel configs
@@ -107,7 +105,7 @@ class TestResolveFilterBlocksToPanelIds:
 
     def test_alias_tokens_resolve_via_arch_map(self, monkeypatch):
         monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
+            "utils.analysis_views.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "10", "roofline": "4"},
         )
         result = convert_filter_blocks_to_panel_ids(["lds", "roofline"], arch="gfx942")
@@ -115,7 +113,7 @@ class TestResolveFilterBlocksToPanelIds:
 
     def test_mixed_alias_and_numeric_tokens(self, monkeypatch):
         monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
+            "utils.analysis_views.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "10"},
         )
         result = convert_filter_blocks_to_panel_ids(["lds", "2", "11.1"], arch="gfx942")
@@ -123,7 +121,7 @@ class TestResolveFilterBlocksToPanelIds:
 
     def test_unknown_alias_raises(self, monkeypatch):
         monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
+            "utils.analysis_views.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "10"},
         )
         with pytest.raises(SystemExit):
@@ -245,7 +243,7 @@ class TestBuildDfs:
 
     def test_profile_side_alias_resolves_to_panel_id(self, monkeypatch):
         monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
+            "utils.analysis_views.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "11"},
         )
         ac = _two_block_config()
@@ -260,7 +258,7 @@ class TestBuildDfs:
 
     def test_analyze_side_alias_resolves_to_panel_id(self, monkeypatch):
         monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
+            "utils.analysis_views.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "11"},
         )
         ac = _two_block_config()
@@ -275,7 +273,7 @@ class TestBuildDfs:
 
     def test_analyze_mixed_numeric_and_alias_filter(self, monkeypatch):
         monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
+            "utils.analysis_views.get_arch_alias_to_panel_id",
             lambda arch: {"lds": "11"},
         )
         ac = _two_block_config()
@@ -370,7 +368,7 @@ class TestBuildDfs:
 
     def test_alias_filter_does_not_auto_include_block_30(self, monkeypatch):
         monkeypatch.setattr(
-            "utils.utils_common.get_arch_alias_to_panel_id",
+            "utils.analysis_views.get_arch_alias_to_panel_id",
             lambda arch: {"memchart": "3"},
         )
         ac = _make_arch_config([
