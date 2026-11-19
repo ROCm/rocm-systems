@@ -2361,10 +2361,10 @@ TEST_F(Gfx1250CounterCapacityRaceTest, TensorBelowCapacityOverwritingAPendingSou
   EXPECT_TRUE(tensor_load_oldest());
 }
 
-/// Counter capacity on gfx950 (CDNA4), whose combined VMCNT holds 63 tokens and
+/// Counter capacity on CDNA1 through CDNA4: combined VMCNT holds 63 tokens and
 /// LGKMCNT 15 (the generated ISA properties). These tests pin the pre-GFX12 side
 /// of behavior that differs on gfx1250.
-class Gfx950CounterCapacityRaceTest : public ::testing::Test {
+class CdnaCounterCapacityRaceTest : public ::testing::TestWithParam<const char *> {
 protected:
   static constexpr int kVmcntCapacity = 63;
   static constexpr int kLgkmcntCapacity = 15;
@@ -2375,7 +2375,7 @@ protected:
   std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
-    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1, "cdna4"));
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1, GetParam()));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2425,7 +2425,7 @@ protected:
 
 // Messages share LGKMCNT with DS operations before GFX12, so a message issued
 // at a full LGKMCNT completes the oldest DS read.
-TEST_F(Gfx950CounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
+TEST_P(CdnaCounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
   load(/*lds=*/true, /*vgpr=*/0);
   for (int index = 0; index < kLgkmcntCapacity - 1; ++index)
     load(/*lds=*/true, /*vgpr=*/1);
@@ -2437,9 +2437,9 @@ TEST_F(Gfx950CounterCapacityRaceTest, MessageAdvancesLgkmcnt) {
   EXPECT_FALSE(vgpr_read(0));
 }
 
-// Measured on MI355X (#15938): an EXEC-zero buffer or global instruction counts
-// on VMCNT, so it applies backpressure.
-TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
+// An EXEC-zero buffer or global instruction counts on VMCNT, so it applies
+// backpressure (CDNA1 through CDNA4 ISA sections 3.3 and 4.4).
+TEST_P(CdnaCounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
   load(/*lds=*/false, /*vgpr=*/0);
   for (int index = 0; index < kVmcntCapacity - 1; ++index)
     load(/*lds=*/false, /*vgpr=*/1);
@@ -2449,7 +2449,7 @@ TEST_F(Gfx950CounterCapacityRaceTest, ExecZeroLoadAppliesBackpressure) {
 
 // An EXEC-zero instruction holds a VMCNT slot: after a load and an EXEC-zero
 // load, store or load to LDS, s_waitcnt vmcnt(1) completes the first load.
-TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction) {
+TEST_P(CdnaCounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction) {
   auto exec_zero = [&](bool is_load, bool lds_dst) {
     wave->pc += 16;
     auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
@@ -2465,9 +2465,9 @@ TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction)
     fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *wave);
     wave->set_exec(1);
   };
-  const uint32_t wait_one = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15);
-  const uint32_t wait_all = legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/0, /*lgkmcnt=*/15);
-  // A gfx950 buffer load to LDS sets both is_load and lds_dst.
+  const uint32_t wait_one = legacy_wait_word(wave->cu().arch(), /*vmcnt=*/1, /*lgkmcnt=*/15);
+  const uint32_t wait_all = legacy_wait_word(wave->cu().arch(), /*vmcnt=*/0, /*lgkmcnt=*/15);
+  // A buffer load to LDS sets both is_load and lds_dst.
   for (const auto &[is_load, lds_dst] : {std::pair{true, false}, {false, false}, {true, true}}) {
     SCOPED_TRACE(testing::Message() << "is_load=" << is_load << " lds_dst=" << lds_dst);
     load(/*lds=*/false, /*vgpr=*/0);
@@ -2480,21 +2480,24 @@ TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitCountsExecZeroInstruction)
 
 // With no EXEC-zero instruction after the load, s_waitcnt vmcnt(1) leaves it
 // pending.
-TEST_F(Gfx950CounterCapacityRaceTest, PartialVmcntWaitLeavesOnlyLoadPending) {
+TEST_P(CdnaCounterCapacityRaceTest, PartialVmcntWaitLeavesOnlyLoadPending) {
   load(/*lds=*/false, /*vgpr=*/0);
   execute_wait(*fixture.plugin_group_, *wave,
-               legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, /*vmcnt=*/1, /*lgkmcnt=*/15));
+               legacy_wait_word(wave->cu().arch(), /*vmcnt=*/1, /*lgkmcnt=*/15));
   EXPECT_TRUE(vgpr_read(0));
 }
 
 // A load issued at a full VMCNT with active lanes completes the oldest load.
-TEST_F(Gfx950CounterCapacityRaceTest, LoadAdvancesVmcnt) {
+TEST_P(CdnaCounterCapacityRaceTest, LoadAdvancesVmcnt) {
   load(/*lds=*/false, /*vgpr=*/0);
   for (int index = 0; index < kVmcntCapacity - 1; ++index)
     load(/*lds=*/false, /*vgpr=*/1);
   load(/*lds=*/false, /*vgpr=*/2);
   EXPECT_FALSE(vgpr_read(0));
 }
+
+INSTANTIATE_TEST_SUITE_P(Cdna1ThroughCdna4, CdnaCounterCapacityRaceTest,
+                         ::testing::Values("cdna1", "cdna2", "cdna3", "cdna4"));
 
 // Wave 1 writes LDS and may end; wave 0 then passes a barrier and reads the
 // bytes. The fixture's DS helpers are not specific to tensor DMA.
