@@ -2724,9 +2724,10 @@ TEST(MemoryWaitExecutionTest, ExecZeroCounterProgressFollowsTargetPolicy) {
         const unsigned limit = lds && arch == ROCJITSU_CODE_ARCH_CDNA4 ? 15 : 63;
         wave->set_exec(1);
         ASSERT_NO_FATAL_FAILURE(issue(2));
-        if (capacity)
+        if (capacity) {
           for (unsigned i = 1; i < limit; ++i)
             ASSERT_NO_FATAL_FAILURE(issue(3));
+        }
         wave->set_exec(0);
         ASSERT_NO_FATAL_FAILURE(issue(4));
         auto &state = wave->ensure_memory_wait_scoreboard();
