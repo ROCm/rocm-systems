@@ -28,6 +28,16 @@ bool test_fp16() {
   return true;
 }
 
+bool test_half22float2() {
+  __half2 h2(__float2half(1.5f), __float2half(-2.0f));
+  float2 f2 = __half22float2(h2);
+  if (f2.x != 1.5f || f2.y != -2.0f) {
+    std::cout << "__half22float2 lanes: got " << f2.x << ", " << f2.y << std::endl;
+    return false;
+  }
+  return true;
+}
+
 bool test_bf16() {
   {
     __hip_bfloat16 h = 1.0f;

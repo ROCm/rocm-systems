@@ -9,6 +9,8 @@
 
 ruby-linux-slurm-scale-runner
 oci-linux-slurm-scale-runner
+tw-linux-slurm-scale-runner
+crusoe-linux-slurm-scale-runner
 tw-gfx950-ainic-ROCm-scale-runner
 
 .github/workflows/rccl-coco-pr.yml
@@ -16,7 +18,6 @@ tw-gfx950-ainic-ROCm-scale-runner
 .github/workflows/rccl-ci.yml
 .github/workflows/rccl-suite.yml
 .github/workflows/rccl-ainic-tw-gfx950-runner.yml
-.github/workflows/rccl_perf_regression.yml
 .github/workflows/therock-rccl-ci-linux.yml
 .github/workflows/therock-rccl-test-accl-profiler.yml
 .github/workflows/therock-rccl-test-madengine.yml

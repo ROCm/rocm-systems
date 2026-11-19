@@ -13,6 +13,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// MSVC proper, not clang-cl: it has none of the GCC builtins ABCE uses on host.
+#if defined(_MSC_VER) && !defined(__clang__)
+#define ABCE_COMPILER_MSVC 1
+#if !defined(_M_X64)
+#error "ABCE's MSVC host atomics assume x64 ordering"
+#endif
+#include <intrin.h>
+#else
+#define ABCE_COMPILER_MSVC 0
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
@@ -104,6 +115,93 @@ static inline int abce_popcount_u64(uint64_t value) {
   for (; value != 0; value >>= 1) count += (int)(value & 1u);
   return count;
 #endif  // __GNUC__ || __clang__
+}
+
+//===----------------------------------------------------------------------===//
+// Host atomics
+//
+// The host words ABCE shares between threads and with the engine: ring cursors
+// and queue words, the coordination and execution words a submit arms, and the
+// cached environment knobs. GCC and Clang take the __atomic builtins. MSVC gets
+// the x64 mapping: aligned loads and stores are single-copy atomic and the
+// hardware already gives them acquire/release order, so those cost a compiler
+// barrier, a sequentially consistent fence is MFENCE, and the CAS is an
+// interlocked exchange.
+//===----------------------------------------------------------------------===//
+
+static inline uint64_t abce_host_load_relaxed_u64(const uint64_t* ptr) {
+#if ABCE_COMPILER_MSVC
+  return *(const volatile uint64_t*)ptr;
+#else
+  return __atomic_load_n(ptr, __ATOMIC_RELAXED);
+#endif
+}
+
+static inline uint64_t abce_host_load_acquire_u64(const uint64_t* ptr) {
+#if ABCE_COMPILER_MSVC
+  const uint64_t value = *(const volatile uint64_t*)ptr;
+  _ReadWriteBarrier();
+  return value;
+#else
+  return __atomic_load_n(ptr, __ATOMIC_ACQUIRE);
+#endif
+}
+
+static inline void abce_host_store_relaxed_u64(uint64_t* ptr, uint64_t value) {
+#if ABCE_COMPILER_MSVC
+  *(volatile uint64_t*)ptr = value;
+#else
+  __atomic_store_n(ptr, value, __ATOMIC_RELAXED);
+#endif
+}
+
+static inline void abce_host_store_release_u64(uint64_t* ptr, uint64_t value) {
+#if ABCE_COMPILER_MSVC
+  _ReadWriteBarrier();
+  *(volatile uint64_t*)ptr = value;
+#else
+  __atomic_store_n(ptr, value, __ATOMIC_RELEASE);
+#endif
+}
+
+static inline void abce_host_store_release_u32(uint32_t* ptr, uint32_t value) {
+#if ABCE_COMPILER_MSVC
+  _ReadWriteBarrier();
+  *(volatile uint32_t*)ptr = value;
+#else
+  __atomic_store_n(ptr, value, __ATOMIC_RELEASE);
+#endif
+}
+
+// Strong compare-and-swap. On failure |*expected| receives the current value.
+static inline bool abce_host_cas_relaxed_u64(uint64_t* ptr, uint64_t* expected,
+                                             uint64_t desired) {
+#if ABCE_COMPILER_MSVC
+  const uint64_t observed = (uint64_t)_InterlockedCompareExchange64(
+      (volatile __int64*)ptr, (__int64)desired, (__int64)*expected);
+  if (observed == *expected) return true;
+  *expected = observed;
+  return false;
+#else
+  return __atomic_compare_exchange_n(ptr, expected, desired, /*weak=*/false, __ATOMIC_RELAXED,
+                                     __ATOMIC_RELAXED);
+#endif
+}
+
+static inline void abce_host_fence_release(void) {
+#if ABCE_COMPILER_MSVC
+  _ReadWriteBarrier();
+#else
+  __atomic_thread_fence(__ATOMIC_RELEASE);
+#endif
+}
+
+static inline void abce_host_fence_seq_cst(void) {
+#if ABCE_COMPILER_MSVC
+  _mm_mfence();
+#else
+  __atomic_thread_fence(__ATOMIC_SEQ_CST);
+#endif
 }
 
 //===----------------------------------------------------------------------===//

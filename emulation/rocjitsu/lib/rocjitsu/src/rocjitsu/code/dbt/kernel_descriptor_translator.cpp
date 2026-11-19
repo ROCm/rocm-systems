@@ -226,6 +226,8 @@ constexpr uint16_t kTtmpRdna4GridX = 9;
 }
 
 [[nodiscard]] int16_t workgroup_id_sgpr(const KD &desc, uint32_t dimension, rj_code_arch_t arch) {
+  if (isa_properties(arch).uses_ttmp_workgroup_ids)
+    return -1;
   const uint32_t rsrc2 = desc.compute_pgm_rsrc2;
   const bool enabled[3] = {
       RJ_AMDHSA_BITS_GET(rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) != 0,
@@ -287,12 +289,7 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
   if (!uses_gfx90a_accum_offset(guest_arch) || !arch_has_accvgpr(guest_arch))
     return 0;
 
-  const uint32_t encoded =
-      RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET);
-  // The descriptor encoding is one less than the actual first AccVGPR offset:
-  // field value 0 means acc0 starts at unified VGPR index 4, value 1 means 8,
-  // and so on in groups of four registers.
-  return static_cast<uint16_t>((encoded + 1) * 4);
+  return static_cast<uint16_t>(kd::gfx90a_accum_vgpr_base(desc.compute_pgm_rsrc3));
 }
 
 [[nodiscard]] uint16_t ttmp_scalar_operand(uint16_t ttmp) {
@@ -303,8 +300,11 @@ descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch, uint32_t wavefron
 // Kernel-entry prologue construction.
 // -----------------------------------------------------------------------------
 
-void append_rdna4_salu_write(std::vector<uint32_t> &words, uint32_t word) {
-  words.push_back(word);
+void append_rdna4_salu_write(std::vector<uint32_t> &words, util::FailureOr<uint32_t> word) {
+  // Only the RDNA4 prologue calls this helper. Its SGPRs follow the descriptor's
+  // six-bit user-SGPR count, and its TTMP/inline sources are fixed valid codes.
+  assert(word.succeeded());
+  words.push_back(word.value());
   // The prologue feeds the original kernel entry, whose first few instructions
   // may immediately consume these SGPRs. GFX12 needs an explicit ALU delay for
   // scalar producer/consumer dependencies; entry prologues bypass the normal
@@ -462,6 +462,15 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
   result.workgroup_id_sgpr_x = workgroup_id_sgpr(src, 0, guest_arch);
   result.workgroup_id_sgpr_y = workgroup_id_sgpr(src, 1, guest_arch);
   result.workgroup_id_sgpr_z = workgroup_id_sgpr(src, 2, guest_arch);
+  if (!isa_properties(guest_arch).uses_ttmp_workgroup_ids &&
+      isa_properties(host_arch).uses_ttmp_workgroup_ids &&
+      RJ_AMDHSA_BITS_GET(src.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_INFO))
+    append_descriptor_error(result, "guest WORKGROUP_INFO is unsupported on TTMP-ID targets");
+  if (RJ_AMDHSA_BITS_GET(src.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT) &&
+      arch_appends_private_segment_wave_offset_sgpr(guest_arch) &&
+      !arch_appends_private_segment_wave_offset_sgpr(host_arch))
+    append_descriptor_error(result, "guest requires a private-segment wave-offset SGPR "
+                                    "that the host launch does not provide");
   result.lds_overflow_workgroup_id_sgpr_x = result.workgroup_id_sgpr_x;
   result.lds_overflow_workgroup_id_sgpr_y = result.workgroup_id_sgpr_y;
   result.lds_overflow_workgroup_id_sgpr_z = result.workgroup_id_sgpr_z;
