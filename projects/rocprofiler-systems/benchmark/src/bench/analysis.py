@@ -93,13 +93,21 @@ def summarize(runs: Sequence[RunResult]) -> dict[str, dict[str, float]]:
     return out
 
 
+def exceeds_noise(diff: float, base_median: float, *samples: dict[str, float]) -> bool:
+    """|diff| exceeds max(2 * its standard error, 1% of base_median).
+
+    diff is a sum or difference of the medians of the independent samples (stats() dicts).
+    """
+    se_diff = MEDIAN_SE_FACTOR * math.hypot(
+        *(s["mad"] / math.sqrt(s["n"]) for s in samples)
+    )
+    threshold = max(NOISE_FACTOR * se_diff, MIN_REAL_FRACTION * abs(base_median))
+    return abs(diff) > threshold
+
+
 def is_real(base: dict[str, float], other: dict[str, float]) -> bool:
     """Difference of medians exceeds max(2 * its standard error, 1% of the base median)."""
-    se_diff = MEDIAN_SE_FACTOR * math.hypot(
-        base["mad"] / math.sqrt(base["n"]), other["mad"] / math.sqrt(other["n"])
-    )
-    threshold = max(NOISE_FACTOR * se_diff, MIN_REAL_FRACTION * abs(base["median"]))
-    return abs(other["median"] - base["median"]) > threshold
+    return exceeds_noise(other["median"] - base["median"], base["median"], base, other)
 
 
 def pct(diff: float, base: float, floor: float = 0.0) -> float:

@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bench.analysis import is_real, pct
+from bench.analysis import exceeds_noise, pct
 
 SNAPSHOT_FILE = "snapshot.json"
 RESULTS_DIR = "results"
@@ -102,24 +102,38 @@ def system_diff(a: Any, b: Any) -> list[tuple[str, Any, Any]]:
 
 
 def compare_command(
-    name: str, sum_a: dict[str, Any], sum_b: dict[str, Any]
+    cmd: str, ref: str, sum_a: dict[str, Any], sum_b: dict[str, Any]
 ) -> list[dict[str, Any]]:
-    """Rows for one command (same name in both snapshots) over COMPARED_METRICS."""
+    """Rows for one command of a scenario over COMPARED_METRICS.
+
+    sum_a and sum_b are the scenario summaries (command -> metric -> stats) of the two
+    snapshots. The reference command is shown with its own medians, for information only.
+    Every other command is shown and judged by its overhead over the reference
+    (command - reference), so a machine that got faster or slower between the snapshots
+    does not count as a change of the tool.
+    """
     rows = []
     for key, label, scale, unit in COMPARED_METRICS:
-        if key not in sum_a or key not in sum_b:
+        samples = [s.get(c, {}).get(key) for s in (sum_a, sum_b) for c in (ref, cmd)]
+        if None in samples:
             continue
-        a, b = sum_a[key], sum_b[key]
-        diff = b["median"] - a["median"]
+        ref_a, a, ref_b, b = samples
+        if cmd == ref:
+            value_a, value_b, samples = a["median"], b["median"], [a, b]
+        else:
+            value_a = a["median"] - ref_a["median"]
+            value_b = b["median"] - ref_b["median"]
+        diff = value_b - value_a
         rows.append(
             {
-                "command": name,
+                "command": cmd,
                 "metric": label,
                 "unit": unit,
-                "a": a["median"] * scale,
-                "b": b["median"] * scale,
+                "reference": cmd == ref,
+                "a": value_a * scale,
+                "b": value_b * scale,
                 "pct": pct(diff, a["median"]),
-                "real": is_real(a, b),
+                "real": exceeds_noise(diff, a["median"], *samples),
                 "worse": diff > 0,
             }
         )
@@ -127,17 +141,19 @@ def compare_command(
 
 
 def compare_snapshots(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Raises ValueError when a scenario has a different reference in the two snapshots."""
     by_a = {s["name"]: s for s in a["scenarios"]}
     by_b = {s["name"]: s for s in b["scenarios"]}
     rows: dict[str, list[dict[str, Any]]] = {}
     for name in sorted(set(by_a) & set(by_b)):
+        ref = by_a[name]["reference"]
+        if by_b[name]["reference"] != ref:
+            raise ValueError(
+                f"scenario '{name}': reference is '{ref}' in A but "
+                f"'{by_b[name]['reference']}' in B, so the overheads cannot be compared"
+            )
         sa, sb = by_a[name]["summary"], by_b[name]["summary"]
-        rows[name] = [
-            row
-            for cmd in sa
-            if cmd in sb
-            for row in compare_command(cmd, sa[cmd], sb[cmd])
-        ]
+        rows[name] = [row for cmd in sa for row in compare_command(cmd, ref, sa, sb)]
     return {
         "system": system_diff(a["system"], b["system"]),
         "tool_versions": [
@@ -187,9 +203,12 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
             f"  {'command':<16}{'metric':<10}{'A':>12}{'B':>12}{'Δ %':>9}  verdict"
         )
         for r in rows:
-            verdict = (
-                ("REGRESSION" if r["worse"] else "improved") if r["real"] else "noise"
-            )
+            if r["reference"]:
+                verdict = "reference moved" if r["real"] else "reference"
+            elif r["real"]:
+                verdict = "REGRESSION" if r["worse"] else "improved"
+            else:
+                verdict = "noise"
             pct_text = "n/a" if r["pct"] != r["pct"] else f"{r['pct']:+.1f}"
             lines.append(
                 f"  {r['command']:<16}{r['metric']:<10}{r['a']:>9.2f} {r['unit']:<2}"
@@ -197,15 +216,21 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
             )
         lines.append("")
     lines.append(
-        "verdict: REAL change only if |Δ median| > max(2 x standard error, 1% of A); "
-        "same rule as the single-session report"
+        "A, B: median of the reference command (information only); for every other command "
+        "its overhead over the reference (command - reference)"
+    )
+    lines.append(
+        "verdict: REGRESSION or improved only if |Δ overhead| > max(2 x standard error, "
+        "1% of the command's median in A); Δ % is the change in % of that median"
     )
     return "\n".join(lines)
 
 
 def has_regression(cmp: dict[str, Any]) -> bool:
     return bool(cmp["failed_in_b"]) or any(
-        r["real"] and r["worse"] for rows in cmp["scenarios"].values() for r in rows
+        r["real"] and r["worse"] and not r["reference"]
+        for rows in cmp["scenarios"].values()
+        for r in rows
     )
 
 

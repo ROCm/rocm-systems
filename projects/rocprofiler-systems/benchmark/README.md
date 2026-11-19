@@ -21,7 +21,7 @@ pytest                           # Python tests
 | `src/bench/` | The Python package: CLI, runner, analysis, reports, scenario and snapshot handling, JSON schema |
 | `workloads/` | C++ synthetic test programs (CMake, gtest in `workloads/tests/`); built into `build/` |
 | `tests/` | pytest suite for `src/bench`, including a check that every shipped JSON file is valid |
-| `docs/` | Design and feature description (`feature_description.md`), runnable `examples/` |
+| `docs/` | Runnable `examples/` |
 | `resource/scenarios/<group>/` | Scenario definitions (inputs) |
 | `resource/results/<group>/` | Result JSON per scenario (outputs), mirrors `scenarios/` |
 | `resource/snapshots/` | Suite files and `results/snapshot-<date-time>/` runs of a whole suite |
@@ -34,4 +34,4 @@ pytest                           # Python tests
 - `rocprofsys-*-output/` directories are profiler output written to the current
   directory; they are git-ignored. Run from a scratch directory to keep the tree clean.
 
-See `docs/feature_description.md` for the measurement model and `workloads/README.md` for the programs.
+The LEGEND section of every report explains the measured values; see `workloads/README.md` for the programs.

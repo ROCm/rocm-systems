@@ -3,6 +3,8 @@
 
 import dataclasses
 import json
+import os
+import signal
 
 import pytest
 from bench import cli, runner
@@ -100,6 +102,24 @@ def test_all_runs_of_a_command_failing_does_not_crash(capsys):
     assert "'B' has no successful runs" in captured.out
     assert "B: 3 run(s) failed" in captured.out
     assert "WALL-CLOCK TIME" in captured.out
+
+
+def test_sigterm_kills_the_running_command(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pids: list[int] = []
+
+    def sigterm_while_child_runs(pid: int, options: int) -> None:
+        pids.append(pid)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    monkeypatch.setattr(runner.os, "wait4", sigterm_while_child_runs)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["--runs", "1", "--warmup", "0", "--cmd", "A=sleep 30"])
+    assert exit_info.value.code == 128 + signal.SIGTERM
+    with pytest.raises(ProcessLookupError):  # killed and reaped, not orphaned
+        os.kill(pids[0], 0)
+    assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
 
 
 def test_progress_header_and_status_lines_on_stderr(capsys):

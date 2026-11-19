@@ -1,8 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from __future__ import annotations
+
 import copy
 import json
+from typing import Any
 
 import pytest
 from bench import cli, snapshot
@@ -106,6 +109,67 @@ def test_compare_flags_failed_scenario_and_vanished_command(tmp_path, capsys):
         assert cmp["failed_in_b"] == ["a"] and snapshot.has_regression(cmp)
         assert "failed runs" in snapshot.format_comparison(a, b, cmp)
     assert not snapshot.compare_snapshots(a, a)["failed_in_b"]
+
+
+def snap(reference: str, **wall_ms: float) -> dict[str, Any]:
+    """Snapshot with one scenario 's'; wall_ms: command name -> wall median in ms."""
+    summary = {
+        cmd: {"wall": {"median": ms * 1e6, "mad": 2e6, "n": 150}}
+        for cmd, ms in wall_ms.items()
+    }
+    entry = {
+        "name": "s",
+        "exit": 0,
+        "reference": reference,
+        "tool_versions": {},
+        "summary": summary,
+    }
+    return {"created": "x", "system": {}, "scenarios": [entry]}
+
+
+@pytest.mark.parametrize(
+    "b,regression",
+    [
+        pytest.param(
+            snap("baseline", baseline=1030, tool=1133),
+            False,
+            id="machine-3pct-slower-overhead-unchanged",
+        ),
+        pytest.param(
+            snap("baseline", baseline=950, tool=1100),
+            True,
+            id="machine-5pct-faster-overhead-100ms-to-150ms",
+        ),
+        pytest.param(
+            snap("baseline", baseline=1500, tool=1600),
+            False,
+            id="only-the-reference-got-slower",
+        ),
+    ],
+)
+def test_compare_judges_overhead_not_absolute_time(
+    b: dict[str, Any], regression: bool
+) -> None:
+    a = snap("baseline", baseline=1000, tool=1100)
+    assert snapshot.has_regression(snapshot.compare_snapshots(a, b)) is regression
+
+
+def test_comparison_shows_overhead_and_marks_the_reference() -> None:
+    a = snap("baseline", baseline=1000, tool=1100)
+    b = snap("baseline", baseline=950, tool=1100)
+    text = snapshot.format_comparison(a, b, snapshot.compare_snapshots(a, b))
+    ref_row, tool_row = [line for line in text.splitlines() if " wall " in line]
+    assert "1000.00 ms" in ref_row and "950.00 ms" in ref_row
+    assert ref_row.endswith("reference moved")
+    assert "100.00 ms" in tool_row and "150.00 ms" in tool_row
+    assert tool_row.endswith("REGRESSION")
+
+
+def test_compare_rejects_a_changed_reference() -> None:
+    a = snap("baseline", baseline=1000, tool=1100)
+    b = snap("tool", baseline=1000, tool=1100)
+    with pytest.raises(ValueError, match="reference"):
+        snapshot.compare_snapshots(a, b)
 
 
 def test_cli_compare_exit_codes(tmp_path, capsys):

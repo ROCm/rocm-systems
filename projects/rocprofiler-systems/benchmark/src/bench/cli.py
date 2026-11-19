@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import sys
 from datetime import datetime
 from pathlib import Path
+from types import FrameType
 from typing import Any, Sequence
 
 from bench import analysis, progress, report, scenario, snapshot, system, text_report
@@ -144,6 +146,12 @@ def _color_enabled() -> bool:
     return sys.stdout.isatty() and "NO_COLOR" not in os.environ
 
 
+def _exit_on_sigterm(signum: int, frame: FrameType | None) -> None:
+    # Python's default SIGTERM action ends the process without unwinding, so run_once
+    # would never kill the child, which lives in its own session.
+    sys.exit(128 + signum)
+
+
 def run_session(
     cmds: list[tuple[str, str]],
     cfg: RunConfig,
@@ -157,7 +165,11 @@ def run_session(
     Returns (exit code, JSON document).
     """
     envs = envs or {}
-    results = _run_all(cmds, cfg, envs)
+    previous = signal.signal(signal.SIGTERM, _exit_on_sigterm)
+    try:
+        results = _run_all(cmds, cfg, envs)
+    finally:
+        signal.signal(signal.SIGTERM, previous)
     doc = report.build_json(results, dict(cmds), analysis.analyze(results), meta, envs)
     print(text_report.format_text(doc, color=_color_enabled()))
     if output:
@@ -286,10 +298,10 @@ def _snapshot_compare(argv: Sequence[str]) -> int:
     args = p.parse_args(argv)
     try:
         a, b = snapshot.load_snapshot(args.a), snapshot.load_snapshot(args.b)
+        cmp = snapshot.compare_snapshots(a, b)
     except ValueError as exc:
         print(f"bench-snapshot: error: {exc}", file=sys.stderr)
         return 2
-    cmp = snapshot.compare_snapshots(a, b)
     print(snapshot.format_comparison(a, b, cmp))
     return 1 if snapshot.has_regression(cmp) else 0
 
