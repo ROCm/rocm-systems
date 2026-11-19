@@ -729,6 +729,11 @@ def build_metric_details(
     return dict(_iter_metric_list_rows(expanded_configs))
 
 
+def panel_id_of(table_id: int) -> int:
+    """Return the panel id of a table config id, e.g. 1802 -> 1800."""
+    return table_id // 100 * 100
+
+
 def format_table_id(config_id: int) -> str:
     """Return the "block.table" id of a table config id, e.g. 1802 -> "18.2"."""
     return f"{config_id // 100}.{config_id % 100}"
