@@ -51,7 +51,7 @@ struct InstructionLegalization;
 /// The classification is a pure query. Reporting belongs to the translation
 /// loop, which owns both the diagnostic list and the per-translation record of
 /// what it has already reported.
-[[nodiscard]] bool gfx1250_b0_to_a0_is_deferred_family(std::string_view mnemonic);
+[[nodiscard]] bool gfx1250_b0_to_a0_is_deferred_family(const Instruction &inst);
 
 /// @brief True when a low-precision B0 WMMA needs an A0 completion wait.
 ///

@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/intrusive_shared_ptr.h"
 
 #include <algorithm>
 #include <array>
@@ -888,8 +889,9 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
   // Indirect branches have no known target until this analysis recovers one.
   // Indirect calls still expose their ordinary fallthrough/return continuation
   // in the direct CFG, which is required for liveness and for callers that do
-  // not care about the callee body.
-  return is_program_path_terminator(inst) || is_indirect_branch(inst);
+  // not care about the callee body. Forks and joins also keep their fallthrough.
+  return is_program_path_terminator(inst) ||
+         (is_indirect_branch(inst) && !indirect_branch_falls_through(inst));
 }
 
 [[nodiscard]] std::optional<size_t>
@@ -950,8 +952,8 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   return leaders;
 }
 
-[[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word, std::string_view mnemonic,
-                                  uint16_t sreg);
+[[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word,
+                                  amdgpu::Operation operation, uint16_t sreg);
 
 [[nodiscard]] std::optional<TempDeltaPattern> match_temp_add_pattern(const AnalysisContext &ctx,
                                                                      size_t index,
@@ -971,7 +973,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     return std::nullopt;
 
   size_t low_index = index + 1;
-  if (ctx.insts[low_index]->mnemonic() == "s_delay_alu")
+  if (ctx.insts[low_index]->amdgpu_operation() == amdgpu::Operation::S_DELAY_ALU)
     ++low_index;
   const size_t high_index = low_index + 1;
   if (high_index > last_index)
@@ -1044,7 +1046,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
                                    text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
                                    *add_i32_opcode, temp_sdst, kInlineInt4, literal))
     return std::nullopt;
-  if (!sop1_same_sreg(abs_inst, ctx.facts[index + 1].word, "s_abs_i32", temp_sdst))
+  if (!sop1_same_sreg(abs_inst, ctx.facts[index + 1].word, amdgpu::Operation::S_ABS_I32, temp_sdst))
     return std::nullopt;
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[index + 2].word, *sub_u32_opcode, pair_lo,
                                 pair_lo, temp_sdst))
@@ -1061,11 +1063,11 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   };
 }
 
-[[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word, std::string_view mnemonic,
-                                  uint16_t sreg) {
+[[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word,
+                                  amdgpu::Operation operation, uint16_t sreg) {
   if (inst.size() != sizeof(uint32_t))
     return false;
-  if (inst.mnemonic() != mnemonic)
+  if (inst.amdgpu_operation() != operation)
     return false;
   if ((word >> 23) != kSop1EncodingPrefix)
     return false;
@@ -1156,8 +1158,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   //
   // Match only the self-update literal forms. Register addends would require a
   // separate constant-propagation proof and must continue to fail closed.
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 || inst.mnemonic() != "s_add_nc_u64" ||
-      inst.num_dst_operands() != 1 || inst.num_src_operands() != 2)
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+      inst.amdgpu_operation() != amdgpu::Operation::S_ADD_NC_U64 || inst.num_dst_operands() != 1 ||
+      inst.num_src_operands() != 2)
     return false;
 
   const Operand *dst = inst.dst_operand(0);
@@ -1210,6 +1213,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
       .source_call_sreg = pair_lo,
       .source_builder_sreg = value.source_sreg,
       .source_is_call = ctx.facts[inst_index].swappc_sdst.has_value(),
+      .source_recovery_contiguous = value.contiguous,
       .source_return_sreg = ctx.facts[inst_index].swappc_sdst.value_or(0),
   };
 }
@@ -1266,7 +1270,7 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
            existing.source_recovery_end_offset == fixup.source_recovery_end_offset;
   });
   if (duplicate != out.end()) {
-    // Both flags below are monotonic and must survive the merge, because only
+    // These requirements are monotonic and must survive the merge, because only
     // the first record of a duplicate group is kept. Incompleteness: if any
     // iteration observes this fixup as incomplete, the merged record must stay
     // incomplete, or a later fixed-point pass that rediscovers an
@@ -1276,6 +1280,7 @@ bool append_unique(std::vector<IndirectCallFixup> &out, IndirectCallFixup fixup)
     // it cannot be outvoted by one that does not. Any future requirement that
     // changes the bytes relocation emits belongs here too.
     duplicate->source_incomplete = duplicate->source_incomplete || fixup.source_incomplete;
+    duplicate->source_recovery_contiguous &= fixup.source_recovery_contiguous;
     duplicate->source_requires_xcnt_drain =
         duplicate->source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
@@ -1296,6 +1301,7 @@ bool append_unique_indexed(std::vector<IndirectCallFixup> &out, FixupIndex &inde
   if (!inserted) {
     IndirectCallFixup &duplicate = out[it->second];
     duplicate.source_incomplete = duplicate.source_incomplete || fixup.source_incomplete;
+    duplicate.source_recovery_contiguous &= fixup.source_recovery_contiguous;
     duplicate.source_requires_xcnt_drain =
         duplicate.source_requires_xcnt_drain || fixup.source_requires_xcnt_drain;
     return false;
@@ -1593,14 +1599,15 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     // while locating the arithmetic and set-PC consumer. The subtract half sits
     // inside the range and has to reproduce its drain -- see
     // match_signed_delta_sub_consumer.
-    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
+    if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_XCNT ||
+        inst.amdgpu_operation() == amdgpu::Operation::S_PREFETCH_INST_PC_REL)
       return true;
     // The compiler also emits a scalar immediate move to configure the
     // prefetch. It is safe to skip only when its destination is outside the
     // getpc pair being proven AND is not tmp_sreg — a move into tmp_sreg would
     // change the value the following s_add/s_abs consumes while recovery keeps
     // computing the target from the original literal.
-    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+    if (inst.amdgpu_operation() != amdgpu::Operation::S_MOV_B32 || inst.size() != sizeof(uint32_t))
       return false;
     const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
@@ -1670,11 +1677,12 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
       return false;
     const Instruction &inst = *ctx.insts[index];
-    if (inst.mnemonic() == "s_wait_xcnt" || inst.mnemonic() == "s_prefetch_inst_pc_rel")
+    if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_XCNT ||
+        inst.amdgpu_operation() == amdgpu::Operation::S_PREFETCH_INST_PC_REL)
       return true;
     // Skip a prefetch-config move only when it clobbers neither the getpc pair
     // nor tmp_sreg (whose value s_abs_i32/s_sub_u32 below consume).
-    if (inst.mnemonic() != "s_mov_b32" || inst.size() != sizeof(uint32_t))
+    if (inst.amdgpu_operation() != amdgpu::Operation::S_MOV_B32 || inst.size() != sizeof(uint32_t))
       return false;
     const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
@@ -1688,7 +1696,8 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   size_t abs_index = block.first_index;
   bool skipped_xcnt = false;
   while (abs_index <= block.last_index && is_gfx1250_padding(abs_index)) {
-    skipped_xcnt = skipped_xcnt || ctx.insts[abs_index]->mnemonic() == "s_wait_xcnt";
+    skipped_xcnt =
+        skipped_xcnt || ctx.insts[abs_index]->amdgpu_operation() == amdgpu::Operation::S_WAIT_XCNT;
     ++abs_index;
   }
   if (abs_index + 3 > block.last_index)
@@ -1702,7 +1711,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   if (setpc_index > block.last_index)
     return std::nullopt;
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
-  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, "s_abs_i32", tmp_sreg))
+  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, amdgpu::Operation::S_ABS_I32, tmp_sreg))
     return std::nullopt;
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[abs_index + 1].word, *sub_u32_opcode, pair_lo,
                                 pair_lo, tmp_sreg))
@@ -1730,6 +1739,19 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
+    // RDNA4 GETPC zero-extends the 48-bit PC. LLVM sign-extends its high
+    // half before adding the function displacement. This preserves the PC
+    // used by SETPC/SWAPPC. Keep the normalization outside the relocatable
+    // arithmetic range so it still executes if the displacement is rewritten.
+    if (ctx.arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+        updated.source_recovery_end_offset == updated.source_getpc_offset + sizeof(uint32_t) &&
+        sop1_same_sreg(inst, word, amdgpu::Operation::S_SEXT_I32_I16, pair_lo + 1)) {
+      updated.source_recovery_begin_offset = inst.src_loc() + inst.size();
+      updated.source_recovery_end_offset = updated.source_recovery_begin_offset;
+      invalidate_written_sgprs(ctx, index, state, pair_lo);
+      state.set_builder(pair_lo, updated);
+      return true;
+    }
     // A builder step must start exactly where the recorded range ends. If the
     // pair survived an instruction between the previous step and this one, that
     // instruction sits inside [begin, end) and would be NOP-erased by
@@ -1751,7 +1773,8 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
 
 void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint16_t pair_lo,
                             std::span<const PcValue> values,
-                            std::vector<IndirectCallFixup> &recovered, bool incomplete = false) {
+                            std::vector<IndirectCallFixup> &recovered, FixupIndex &recovered_index,
+                            bool incomplete = false) {
   // A complete lattice value can contain multiple concrete targets. That is not
   // an error by itself; it represents a bounded static dispatch where different
   // predecessor paths materialize different PC constants before joining at one
@@ -1761,14 +1784,15 @@ void emit_fixups_for_values(const AnalysisContext &ctx, size_t inst_index, uint1
   for (const PcValue &value : values) {
     if (auto fixup = fixup_for_value(ctx, inst_index, pair_lo, value)) {
       fixup->source_incomplete = incomplete;
-      append_unique(recovered, *fixup);
+      append_unique_indexed(recovered, recovered_index, *fixup);
     }
   }
 }
 
 void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBlock> &blocks,
                 std::vector<PendingConsumer> &pending_consumers,
-                std::vector<IndirectCallFixup> &recovered, PcAddressBuilderMap &pc_builders) {
+                std::vector<IndirectCallFixup> &recovered, FixupIndex &recovered_index,
+                PcAddressBuilderMap &pc_builders) {
   // Phase 2: run local transfer semantics for one straight-line block.
   //
   // This scan has no incoming lattice facts by design. A pair either becomes
@@ -1848,7 +1872,7 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // block. Emit now so BasicBlock can split at the consumer and target.
       if (PcValue *value = state.builder(*consumer_pair)) {
         emit_fixups_for_values(ctx, index, *consumer_pair, std::span<const PcValue>(value, 1),
-                               recovered);
+                               recovered, recovered_index);
         // A setpc/swappc source operand is a read, not a write. Preserve the
         // source pair unless the instruction also defines it. Real kernels can
         // build one callee address once and issue multiple swappc calls through
@@ -2133,7 +2157,7 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
 classify_pending_consumers(const AnalysisContext &ctx, const std::vector<AnalysisBlock> &blocks,
                            const std::vector<LatticeFacts> &entry_facts,
                            const std::vector<PendingConsumer> &pending_consumers,
-                           std::vector<IndirectCallFixup> &recovered) {
+                           std::vector<IndirectCallFixup> &recovered, FixupIndex &recovered_index) {
   // Phase 4: resolve consumers that were pristine in their own block. A complete
   // entry fact provides concrete getpc-built targets. Missing, empty, or killed
   // facts are unresolved. Incomplete facts are still allowed when the concrete
@@ -2160,7 +2184,7 @@ classify_pending_consumers(const AnalysisContext &ctx, const std::vector<Analysi
     }
 
     emit_fixups_for_values(ctx, consumer.inst_index, consumer.pair_lo, value->values, recovered,
-                           value->incomplete);
+                           recovered_index, value->incomplete);
   }
   return unresolved;
 }
@@ -2345,6 +2369,8 @@ class RestoredSgprFacts {
   };
 
   using Storage = std::vector<Entry>;
+  using CountedStorage = util::RefCountedNonAtomic<Storage>;
+  using StoragePtr = util::IntrusiveSharedPtr<CountedStorage>;
 
 public:
   [[nodiscard]] const StashedPcHalf *find(uint16_t sgpr) const {
@@ -2371,18 +2397,18 @@ public:
   void erase(uint16_t sgpr) {
     if (!values_)
       return;
-    const auto found = std::ranges::lower_bound(*values_, sgpr, {}, &Entry::sgpr);
-    if (found == values_->end() || found->sgpr != sgpr)
+    const auto found = std::ranges::lower_bound(values_->value, sgpr, {}, &Entry::sgpr);
+    if (found == values_->value.end() || found->sgpr != sgpr)
       return;
-    const size_t index = static_cast<size_t>(found - values_->begin());
+    const size_t index = static_cast<size_t>(found - values_->value.begin());
     Storage &updated = writable_values();
     updated.erase(updated.begin() + static_cast<Storage::difference_type>(index));
     reset_if_empty();
   }
 
   template <typename Predicate> void erase_if(Predicate &&predicate) {
-    if (!values_ ||
-        std::ranges::none_of(*values_, [&](const Entry &entry) { return predicate(entry.sgpr); }))
+    if (!values_ || std::ranges::none_of(values_->value,
+                                         [&](const Entry &entry) { return predicate(entry.sgpr); }))
       return;
     std::erase_if(writable_values(), [&](const Entry &entry) { return predicate(entry.sgpr); });
     reset_if_empty();
@@ -2395,14 +2421,14 @@ public:
       const StashedPcHalf *incoming = other.find(entry.sgpr);
       return incoming == nullptr || *incoming != entry.half;
     };
-    if (std::ranges::none_of(*values_, conflicts))
+    if (std::ranges::none_of(values_->value, conflicts))
       return;
     std::erase_if(writable_values(), conflicts);
     reset_if_empty();
   }
 
-  [[nodiscard]] bool empty() const { return !values_ || values_->empty(); }
-  [[nodiscard]] size_t size() const { return values_ ? values_->size() : 0; }
+  [[nodiscard]] bool empty() const { return !values_ || values_->value.empty(); }
+  [[nodiscard]] size_t size() const { return values_ ? values_->value.size() : 0; }
   void clear() { values_.reset(); }
 
   friend bool operator==(const RestoredSgprFacts &lhs, const RestoredSgprFacts &rhs) {
@@ -2412,23 +2438,25 @@ public:
 private:
   [[nodiscard]] const Storage &values() const {
     static const Storage empty;
-    return values_ ? *values_ : empty;
+    return values_ ? values_->value : empty;
   }
 
   [[nodiscard]] Storage &writable_values() {
     if (!values_)
-      values_ = std::make_shared<Storage>();
-    else if (!values_.unique())
-      values_ = std::make_shared<Storage>(*values_);
-    return *values_;
+      values_ = StoragePtr::make();
+    else if (values_->ref_count() != 1)
+      values_ = StoragePtr::make(values_->value);
+    return values_->value;
   }
 
   void reset_if_empty() {
-    if (values_->empty())
+    if (values_->value.empty())
       values_.reset();
   }
 
-  std::shared_ptr<Storage> values_;
+  // All owners are local flow states in one synchronous analysis invocation.
+  // Concurrent invocations allocate independent backing storage.
+  StoragePtr values_;
 };
 
 struct VectorLaneFlowState {
@@ -2460,21 +2488,6 @@ constexpr size_t kBlockScaffoldingBytes =
     sizeof(std::vector<size_t>) + 2 * sizeof(VectorLaneFlowState) + sizeof(CallEdgeInfo) +
     6 * sizeof(void *) + 3 * sizeof(size_t) + 2 * sizeof(uint8_t);
 
-[[nodiscard]] constexpr bool hwreg_slice_overlaps_vgpr_msb(uint16_t hwreg) {
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
-  if (slice.id != amdgpu::MODE_HWREG)
-    return false;
-  const uint16_t end = static_cast<uint16_t>(
-      std::min<uint32_t>(32, static_cast<uint32_t>(slice.begin) + slice.width));
-  return slice.begin < amdgpu::VGPR_MSB_MODE_SHIFT + 8 && end > amdgpu::VGPR_MSB_MODE_SHIFT;
-}
-
-[[nodiscard]] constexpr bool hwreg_slice_overlaps_mode_bit(uint16_t hwreg, uint16_t bit) {
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
-  return slice.id == amdgpu::MODE_HWREG && slice.begin <= bit &&
-         static_cast<uint32_t>(slice.begin) + slice.width > bit;
-}
-
 [[nodiscard]] std::optional<uint8_t> vgpr_bank_for_role(std::optional<uint8_t> mode,
                                                         amdgpu::VgprMsbRole role) {
   return amdgpu::vgpr_msb_bank_for_role(mode, role);
@@ -2488,8 +2501,8 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
                       bool setreg_vgpr_msb_fixup) {
   const std::optional<bool> incoming_hazard = adjacent_hazard;
   adjacent_hazard = false;
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic == "s_set_vgpr_msb") {
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (operation == amdgpu::Operation::S_SET_VGPR_MSB) {
     if (setreg_vgpr_msb_fixup && incoming_hazard == std::optional<bool>{true})
       return;
     if (setreg_vgpr_msb_fixup && !incoming_hazard) {
@@ -2502,7 +2515,8 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
       mode = std::nullopt;
     return;
   }
-  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+  if (operation != amdgpu::Operation::S_SETREG_B32 &&
+      operation != amdgpu::Operation::S_SETREG_IMM32_B32)
     return;
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr) {
@@ -2512,7 +2526,7 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
   const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
   if (setreg_vgpr_msb_fixup && writes_mode) {
-    if (mnemonic == "s_setreg_b32") {
+    if (operation == amdgpu::Operation::S_SETREG_B32) {
       mode = std::nullopt;
       return;
     }
@@ -2526,8 +2540,8 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
     adjacent_hazard = true;
     return;
   }
-  if (mnemonic == "s_setreg_b32") {
-    if (hwreg_slice_overlaps_vgpr_msb(hwreg))
+  if (operation == amdgpu::Operation::S_SETREG_B32) {
+    if (amdgpu::hwreg_slice_overlaps_vgpr_msb(hwreg))
       mode = std::nullopt;
     return;
   }
@@ -2541,16 +2555,17 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
   if (!isa_properties(arch).mode_has_gpr_idx_en)
     return;
   constexpr uint16_t kGprIdxEnableBit = 27;
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic == "s_set_gpr_idx_on") {
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (operation == amdgpu::Operation::S_SET_GPR_IDX_ON) {
     enabled = true;
     return;
   }
-  if (mnemonic == "s_set_gpr_idx_off") {
+  if (operation == amdgpu::Operation::S_SET_GPR_IDX_OFF) {
     enabled = false;
     return;
   }
-  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+  if (operation != amdgpu::Operation::S_SETREG_B32 &&
+      operation != amdgpu::Operation::S_SETREG_IMM32_B32)
     return;
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr) {
@@ -2558,9 +2573,9 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  if (!hwreg_slice_overlaps_mode_bit(hwreg, kGprIdxEnableBit))
+  if (!amdgpu::hwreg_slice_overlaps_mode_bit(hwreg, kGprIdxEnableBit))
     return;
-  if (mnemonic == "s_setreg_b32") {
+  if (operation == amdgpu::Operation::S_SETREG_B32) {
     enabled = std::nullopt;
     return;
   }
@@ -2579,12 +2594,6 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
       return true;
   }
   return false;
-}
-
-[[nodiscard]] bool has_runtime_relative_destination(std::string_view mnemonic) {
-  return mnemonic.starts_with("s_movreld") || mnemonic.starts_with("s_movrelsd") ||
-         mnemonic.starts_with("v_movreld") || mnemonic.starts_with("v_movrelsd") ||
-         mnemonic.starts_with("v_swaprel");
 }
 
 [[nodiscard]] std::optional<uint32_t> instruction_literal(const Instruction &inst,
@@ -2773,13 +2782,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         };
         for (size_t index = block.first_index; index <= block.last_index; ++index) {
           const Instruction &inst = *ctx.insts[index];
-          const std::string_view mnemonic = inst.mnemonic();
           // Relative-register operations can read or write a register selected
           // at runtime. Likewise, an ordinary VGPR destination is not a static
           // destination while GPR indexing may be enabled. An exact clobber
           // summary cannot represent either case, so use the ABI fallback.
-          if (mnemonic.starts_with("s_movrel") || mnemonic.starts_with("v_movrel") ||
-              mnemonic.starts_with("v_swaprel") ||
+          if ((inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION |
+                               RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) != 0 ||
               (gpr_idx_enabled != std::optional<bool>{false} &&
                has_explicit_vgpr_destination(inst))) {
             unsupported = true;
@@ -2892,7 +2900,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     for (size_t index = block.first_index; index <= block.last_index; ++index) {
       const Instruction &inst = *ctx.insts[index];
       const InstructionFacts &facts = ctx.facts[index];
-      const std::string_view mnemonic = inst.mnemonic();
+      const amdgpu::Operation operation = inst.amdgpu_operation();
       // The gfx1250 setreg hazard is consumed by the next instruction even
       // when this scanner handles that instruction through an early exit or
       // snapshots its state at a call edge. Preserve the incoming MODE value
@@ -2913,7 +2921,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       // before generic destination invalidation and publish the copy only when
       // both halves carry the same proven PC value.
       std::optional<std::pair<uint16_t, PcValue>> copied_pair;
-      if (mnemonic == "s_mov_b64" && inst.num_dst_operands() == 1 && inst.num_src_operands() == 1) {
+      if (operation == amdgpu::Operation::S_MOV_B64 && inst.num_dst_operands() == 1 &&
+          inst.num_src_operands() == 1) {
         const Operand *dst_operand = inst.dst_operand(0);
         const Operand *src_operand = inst.src_operand(0);
         const auto dst = dst_operand ? dst_operand->to_register_ref() : std::nullopt;
@@ -2989,7 +2998,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
             callee_summary ? callee_summary->return_gpr_idx_enabled : std::optional<bool>{};
       }
 
-      if (mnemonic == "v_writelane_b32") {
+      if (operation == amdgpu::Operation::V_WRITELANE_B32) {
         const auto dst = operand_register(inst.dst_operand(0), RegClass::VGPR);
         const auto src = operand_register(inst.src_operand(0), RegClass::SGPR);
         const auto lane = inline_lane(inst.src_operand(1));
@@ -3030,7 +3039,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         continue;
       }
 
-      if (mnemonic == "v_readlane_b32") {
+      if (operation == amdgpu::Operation::V_READLANE_B32) {
         const auto dst = operand_register(inst.dst_operand(0), RegClass::SGPR);
         const auto src = operand_register(inst.src_operand(0), RegClass::VGPR);
         const auto lane = inline_lane(inst.src_operand(1));
@@ -3142,7 +3151,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       // select a bank and therefore conservatively invalidate every bank with
       // the same low selector.
       if (!state.slots.empty()) {
-        if ((has_runtime_relative_destination(mnemonic) && mnemonic.starts_with("v_")) ||
+        if (((inst.flags() & RELATIVE_VGPR_DESTINATION) != 0) ||
             (state.gpr_idx_enabled != std::optional<bool>{false} &&
              has_explicit_vgpr_destination(inst))) {
           state.slots.clear();
@@ -3185,7 +3194,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       if (!builders.active_pairs().empty())
         invalidate_written_sgprs(ctx, index, builders);
 
-      if (has_runtime_relative_destination(mnemonic) && mnemonic.starts_with("s_")) {
+      if ((inst.flags() & RELATIVE_SGPR_DESTINATION) != 0) {
         state.restored_sgprs.clear();
         for (uint16_t pair_lo : builders.active_pairs())
           builders.invalidate_pair(pair_lo);
@@ -3436,7 +3445,8 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
 
 void recover_signed_delta_templates(const AnalysisContext &ctx,
                                     const std::vector<AnalysisBlock> &blocks,
-                                    std::vector<IndirectCallFixup> &recovered) {
+                                    std::vector<IndirectCallFixup> &recovered,
+                                    FixupIndex &recovered_index) {
   // Some compiler output uses one signed literal template for a PC-relative
   // setpc:
   //
@@ -3531,11 +3541,11 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
     // the duplicate to agree.
     if (auto fixup = fixup_for_value(ctx, sub_consumer->setpc_index, *pair_lo, value)) {
       fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
-      append_unique(recovered, *fixup);
+      append_unique_indexed(recovered, recovered_index, *fixup);
     }
     if (auto fixup = fixup_for_value(ctx, *add_consumer, *pair_lo, value)) {
       fixup->source_requires_xcnt_drain = sub_consumer->skipped_xcnt;
-      append_unique(recovered, *fixup);
+      append_unique_indexed(recovered, recovered_index, *fixup);
     }
   }
 }
@@ -3599,19 +3609,28 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     // by being promoted to external roots.
     recover_vector_lane_stashed_pcs(ctx, blocks, recovered, iteration_recovered,
                                     sorted_extra_leaders, entry_policy, analysis_roots);
+    // Lane-stash recovery leaves unique records but can roll back its output on
+    // budget exhaustion. Seed the per-round index only after it finishes; all
+    // subsequent producers must use append_unique_indexed to keep the vector
+    // and index in sync and avoid quadratic collection.
+    FixupIndex iteration_recovered_index;
+    iteration_recovered_index.reserve(iteration_recovered.size());
+    for (size_t i = 0; i < iteration_recovered.size(); ++i)
+      iteration_recovered_index.try_emplace(fixup_identity(iteration_recovered[i]), i);
     // Recovered leaders can split a block between rounds, which changes where a
     // builder's block-exit value is observed. Keep only the final round's view
     // so the published records are internally consistent with one CFG.
     round_builders.clear();
     for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
-      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered, round_builders);
-    recover_signed_delta_templates(ctx, blocks, iteration_recovered);
+      scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered,
+                 iteration_recovered_index, round_builders);
+    recover_signed_delta_templates(ctx, blocks, iteration_recovered, iteration_recovered_index);
 
     if (!pending_consumers.empty()) {
       const auto entry_facts = run_block_dataflow(blocks, pending_consumers, sorted_extra_leaders,
                                                   entry_policy, analysis_roots);
       (void)classify_pending_consumers(ctx, blocks, entry_facts, pending_consumers,
-                                       iteration_recovered);
+                                       iteration_recovered, iteration_recovered_index);
     }
 
     bool changed = false;

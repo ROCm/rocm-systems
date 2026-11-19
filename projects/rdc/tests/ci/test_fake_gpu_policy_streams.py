@@ -34,6 +34,23 @@ RDC_GROUP_EMPTY = 1
 CALLBACK = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p)
 
 
+class _Condition(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("value", ctypes.c_int64)]
+
+
+class _Notification(ctypes.Structure):
+    """rdc_policy_callback_response_t."""
+
+    _fields_ = [
+        ("version", ctypes.c_uint),
+        ("condition", _Condition),
+        ("group_id", ctypes.c_uint32),
+        ("value", ctypes.c_int64),
+        ("gpu_index", ctypes.c_uint32),
+        ("reset_triggered", ctypes.c_bool),
+    ]
+
+
 def _lib():
     lib = ctypes.CDLL(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
     lib.rdc_init.argtypes = [ctypes.c_uint64]
@@ -248,6 +265,44 @@ def test_every_stream_of_a_group_gets_every_notification(rdcd):
     finally:
         second.disconnect()
         first.disconnect()
+
+
+def test_a_stream_gets_the_notification_of_every_gpu(tools, tmp_path):
+    # A check notifies the GPUs of a group one right after the other. A stream that kept
+    # only the latest notification lost most of them.
+    gpus = 16
+    d = Rdcd(tools, tmp_path, gpus=gpus).start()
+    try:
+        gid = _created_id(d.ok("group", "-c", "all_gpus"))
+        d.ok("group", "-g", gid, "-a", ",".join(str(g) for g in range(gpus)))
+        d.ok("policy", "-g", gid, "-T", "1", "-A", "0")
+        got = []  # the GPU of each notification, in order
+
+        def callback(response):
+            got.append(ctypes.cast(response, ctypes.POINTER(_Notification)).contents.gpu_index)
+            return 0
+
+        def per_gpu():
+            return [got.count(g) for g in range(gpus)]
+
+        notify = CALLBACK(callback)
+        client = Client(_lib(), d)
+        try:
+            assert client.register(int(gid), notify) == RDC_ST_OK
+            # 10 checks or more, each notifying GPU 0 to 15 in that order. A group's first
+            # stream gets whole checks only: RDC reads its callbacks once per check, and rdcd
+            # registers the group with RDC and adds the stream under the lock its callback
+            # takes.
+            assert _wait_until(lambda: len(got) >= 10 * gpus, 15), f"per GPU: {per_gpu()}"
+            seen = list(got)
+            assert seen == [i % gpus for i in range(len(seen))], (
+                f"per GPU: {per_gpu()}, {seen[:40]}"
+            )
+        finally:
+            client.disconnect()
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
 
 
 def test_registering_a_missing_group_fails(rdcd):

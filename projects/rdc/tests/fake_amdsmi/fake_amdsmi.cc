@@ -514,8 +514,9 @@ amdsmi_status_t amdsmi_init(uint64_t init_flags) {
   }
   // Rules without @gpu apply; RDC_FAKE_UNFILLED changes nothing, as there are no outputs.
   if (auto st = done(apply_rules(__func__, -1))) return st;
-  // No simulated CPUs: amd-smi fails a CPU init on hosts without the HSMP driver.
-  if ((init_flags & AMDSMI_INIT_AMD_CPUS) != 0) return AMDSMI_STATUS_NOT_SUPPORTED;
+  // No simulated CPUs. amd-smi succeeds a CPU init without the HSMP driver (it logs and goes on
+  // with no CPUs), so the flag is accepted and finds nothing.
+  (void)init_flags;
   std::lock_guard<std::mutex> lock(g_mutex);
   ++g_init_refs;
   return AMDSMI_STATUS_SUCCESS;
@@ -729,8 +730,12 @@ amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(info, 0, sizeof(*info));
+  if (sentinel(__func__, p)) {
+    // amd-smi copies gpu_metrics' uint16_t marker into these uint32_t fields.
+    info->gfx_activity = info->umc_activity = info->mm_activity = UINT16_MAX;
+    return AMDSMI_STATUS_SUCCESS;
+  }
   info->gfx_activity = V(kGFX_ACTIVITY_PCT, p->gpu);
   info->umc_activity = V(kUMC_ACTIVITY_PCT, p->gpu);
   return AMDSMI_STATUS_SUCCESS;
@@ -741,7 +746,6 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, gpu_busy_percent)) return done(st);
   if (gpu_busy_percent == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(gpu_busy_percent);
   *gpu_busy_percent = V(kGFX_ACTIVITY_PCT, p->gpu);
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -751,7 +755,6 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(info, 0, sizeof(*info));
   if (clk_type == AMDSMI_CLK_TYPE_GFX) {
     info->clk = V(kGFX_CLK_MHZ, p->gpu);
@@ -766,6 +769,8 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
     info->min_clk = 100;
     info->max_clk = 1000;
   }
+  // amd-smi: the range is known, the current clock is not.
+  if (sentinel(__func__, p)) info->clk = UINT32_MAX;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -792,6 +797,8 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
   f->frequency[0] = (mem ? 900 : 500) * mhz;
   f->frequency[1] = V(mem ? kMEM_CLK_MHZ : kGFX_CLK_MHZ, p->gpu) * mhz;
   f->frequency[2] = (mem ? 1300 : 2100) * mhz;
+  // amd-smi: no level is current, as for a power-gated clock domain.
+  if (sentinel(__func__, p)) f->current = UINT32_MAX;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1095,6 +1102,22 @@ amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle process
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// The partition modes the fake lists, as an MI300X does: SPX, DPX, QPX and CPX (1, 2, 4 and 8
+// partitions), and the configured count as a mode of its own when it is none of those. The
+// active profile has the index of the configured count's mode.
+struct PartitionModes {
+  uint32_t parts[5];
+  uint32_t count;
+  uint32_t active;
+};
+
+PartitionModes partition_modes() {
+  PartitionModes m = {{1, 2, 4, 8}, 4, 0};
+  while (m.active < m.count && m.parts[m.active] != g_cfg.parts) ++m.active;
+  if (m.active == m.count) m.parts[m.count++] = g_cfg.parts;
+  return m;
+}
+
 amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
     amdsmi_processor_handle processor_handle, amdsmi_accelerator_partition_profile_t* profile,
     uint32_t* partition_id) {
@@ -1108,7 +1131,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
                           : g_cfg.parts == 4 ? AMDSMI_ACCELERATOR_PARTITION_QPX
                                              : AMDSMI_ACCELERATOR_PARTITION_CPX;
   profile->num_partitions = g_cfg.parts;
-  profile->profile_index = g_cfg.parts == 1 ? 0 : (g_cfg.parts == 2 ? 1 : 2);
+  profile->profile_index = partition_modes().active;
   profile->memory_caps.nps_flags.nps1_cap = 1;
   *partition_id = p->part;
   return AMDSMI_STATUS_SUCCESS;
@@ -1122,25 +1145,25 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
   if (profile_config == nullptr) return AMDSMI_STATUS_INVAL;
   if (!g_cfg.partitionable) return AMDSMI_STATUS_NOT_SUPPORTED;
   memset(profile_config, 0, sizeof(*profile_config));
-  const uint32_t kParts[] = {1, 2, 8};
-  profile_config->num_profiles = 3;
-  for (uint32_t i = 0; i < 3; ++i) {
-    profile_config->profiles[i].num_partitions = kParts[i];
+  const PartitionModes modes = partition_modes();
+  profile_config->num_profiles = modes.count;
+  for (uint32_t i = 0; i < modes.count; ++i) {
+    profile_config->profiles[i].num_partitions = modes.parts[i];
     profile_config->profiles[i].profile_index = i;
   }
   // One XCC and one decoder resource profile per partition mode (8 XCCs, 4 decoders).
   uint32_t n = 0;
-  for (uint32_t i = 0; i < 3; ++i) {
+  for (uint32_t i = 0; i < modes.count; ++i) {
     auto& xcc = profile_config->resource_profiles[n++];
     xcc.profile_index = i;
     xcc.resource_type = AMDSMI_ACCELERATOR_XCC;
-    xcc.partition_resource = 8 / kParts[i];
+    xcc.partition_resource = 8 / modes.parts[i];
     xcc.num_partitions_share_resource = 1;
     auto& dec = profile_config->resource_profiles[n++];
     dec.profile_index = i;
     dec.resource_type = AMDSMI_ACCELERATOR_DECODER;
-    dec.partition_resource = std::max(1u, 4 / kParts[i]);
-    dec.num_partitions_share_resource = kParts[i] > 4 ? 2 : 1;
+    dec.partition_resource = std::max(1u, 4 / modes.parts[i]);
+    dec.num_partitions_share_resource = modes.parts[i] > 4 ? 2 : 1;
   }
   profile_config->num_resource_profiles = n;
   return AMDSMI_STATUS_SUCCESS;
@@ -1175,18 +1198,17 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
 amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_indices,
                                                     uint32_t* num_devices) {
   if (auto st = enter_global(__func__, num_devices)) return done(st);
-  if (num_devices == nullptr) return AMDSMI_STATUS_INVAL;
+  // As with amd-smi, a NULL list or count is invalid: there is no count-only query.
+  if (dv_indices == nullptr || num_devices == nullptr) return AMDSMI_STATUS_INVAL;
   // The processes the last process-list call reported.
   const uint32_t calls = g_process_calls.load();
   if (pid < 1000 || pid - 1000 >= g_cfg.procs + (calls > 0 ? calls - 1 : 0)) {
     return AMDSMI_STATUS_NOT_FOUND;
   }
-  // Each process runs on one GPU. As with amd-smi, a NULL list asks for the count, and a list
-  // without room gets AMDSMI_STATUS_INSUFFICIENT_SIZE and keeps *num_devices.
-  if (dv_indices != nullptr) {
-    if (*num_devices < 1) return AMDSMI_STATUS_INSUFFICIENT_SIZE;
-    dv_indices[0] = (pid - 1000) % g_cfg.gpus;
-  }
+  // Each process runs on one GPU. As with amd-smi, a list without room gets
+  // AMDSMI_STATUS_INSUFFICIENT_SIZE and keeps *num_devices.
+  if (*num_devices < 1) return AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  dv_indices[0] = (pid - 1000) % g_cfg.gpus;
   *num_devices = 1;
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -1334,6 +1356,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  // amd-smi starts every counter at UINT64_MAX and fills in what the GPU provides.
+  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(static_cast<void*>(info), 0, sizeof(*info));
   info->reference_timestamp = now_ms() * 1000;
   info->acc_counter = counter_ms();
