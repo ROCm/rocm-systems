@@ -185,15 +185,15 @@ void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
       if constexpr (std::is_same<T1, char>::value ||
                     std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
-        source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id);
+        source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id + my_pe);
         dest_buf[idx] = static_cast<T1>('a' + wg_id);
       }
       else if constexpr (std::is_floating_point<T1>::value) {
-        source_buf[idx] = static_cast<T1>(3.14 + n_pes + wg_id);
+        source_buf[idx] = static_cast<T1>(3.14 + n_pes + wg_id + my_pe);
         dest_buf[idx] = static_cast<T1>(3.14 + wg_id);
       }
       else if constexpr (std::is_integral<T1>::value) {
-        source_buf[idx] = static_cast<T1>(n_pes + wg_id);
+        source_buf[idx] = static_cast<T1>(n_pes + wg_id + my_pe);
         dest_buf[idx] = static_cast<T1>(wg_id);
       }
     }
