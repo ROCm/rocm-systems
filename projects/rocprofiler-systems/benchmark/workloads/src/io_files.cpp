@@ -26,10 +26,14 @@ public:
             std::string(base && *base ? base : "/tmp") + "/bench_io_XXXXXX";
         if(mkdtemp(tmpl.data()) != nullptr) m_path = tmpl;
     }
-    ~temp_dir()
+    ~temp_dir() { remove(); }
+
+    // Deleting inside the measured region keeps the cost out of the tool's shutdown time.
+    void remove()
     {
         std::error_code ec;
         if(!m_path.empty()) fs::remove_all(m_path, ec);
+        m_path.clear();
     }
     temp_dir(const temp_dir&)                  = delete;
     temp_dir&       operator=(const temp_dir&) = delete;
@@ -69,10 +73,11 @@ main(int argc, char** argv)
         argc, argv, { 64, 6500, 1 }, "io_files",
         "size = file size in KB, iters = number of files "
         "(each written then read back in a temp dir, removed on exit).");
-    const temp_dir dir;
+    temp_dir dir;
     if(dir.path().empty()) return 1;
     bench_hook(BENCH_HOOK_WORK_BEGIN);
     const std::uint64_t sum = run(a, dir.path());
+    dir.remove();
     bench_hook(BENCH_HOOK_WORK_END);
     workload::print_checksum(sum);
     return 0;

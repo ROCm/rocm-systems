@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.25 FATAL_ERROR)
 project(bench_workloads LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
