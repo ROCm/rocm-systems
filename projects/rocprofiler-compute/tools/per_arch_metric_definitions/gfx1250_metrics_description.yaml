@@ -1,76 +1,76 @@
 System Speed-of-Light:
   VALU FLOPs (FP16):
-    plain: Achieved FP16 VALU throughput.
-    rst: Achieved FP16 VALU throughput.
+    plain: The total FP16 floating-point operations executed per second on the VALU.
+    rst: The total FP16 floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU FLOPs (FP32):
-    plain: Achieved FP32 VALU throughput.
-    rst: Achieved FP32 VALU throughput.
+    plain: The total FP32 floating-point operations executed per second on the VALU.
+    rst: The total FP32 floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU FLOPs (FP64):
-    plain: Achieved FP64 VALU throughput.
-    rst: Achieved FP64 VALU throughput.
+    plain: The total FP64 floating-point operations executed per second on the VALU.
+    rst: The total FP64 floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU IOPs:
-    plain: Achieved integer VALU throughput.
-    rst: Achieved integer VALU throughput.
+    plain: The total integer operations executed per second on the VALU.
+    rst: The total integer operations executed per second on the VALU.
     unit: GIOP/s
   VALU Trans FLOPs (FP16):
-    plain: 'Achieved FP16 transcendental (square root, reciprocal, trig) VALU throughput. TODO: Double check that transcendental ops are executed within ALU.'
-    rst: 'Achieved FP16 transcendental (square root, reciprocal, trig) VALU throughput. TODO: Double check that transcendental ops are executed within ALU.'
+    plain: The total FP16 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
+    rst: The total FP16 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU Trans FLOPs (FP32):
-    plain: Achieved FP32 transcendental (square root, reciprocal, trig) VALU throughput.
-    rst: Achieved FP32 transcendental (square root, reciprocal, trig) VALU throughput.
+    plain: The total FP32 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
+    rst: The total FP32 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU Trans FLOPs (FP64):
-    plain: Achieved FP64 transcendental (square root, reciprocal, trig) VALU throughput.
-    rst: Achieved FP64 transcendental (square root, reciprocal, trig) VALU throughput.
+    plain: The total FP64 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
+    rst: The total FP64 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   WMMA FLOPs (FP64):
-    plain: Achieved FP64 WMMA throughput.
-    rst: Achieved FP64 WMMA throughput.
+    plain: The total number of FP64 WMMA floating-point operations executed per second.
+    rst: The total number of FP64 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP32):
-    plain: Achieved FP32 WMMA throughput.
-    rst: Achieved FP32 WMMA throughput.
+    plain: The total number of FP32 WMMA floating-point operations executed per second.
+    rst: The total number of FP32 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP16):
-    plain: Achieved FP16 WMMA throughput.
-    rst: Achieved FP16 WMMA throughput.
+    plain: The total number of FP16 WMMA floating-point operations executed per second.
+    rst: The total number of FP16 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (BF16):
-    plain: Achieved BF16 WMMA throughput.
-    rst: Achieved BF16 WMMA throughput.
+    plain: The total number of BF16 WMMA floating-point operations executed per second.
+    rst: The total number of BF16 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP8):
-    plain: Achieved FP8 WMMA throughput.
-    rst: Achieved FP8 WMMA throughput.
+    plain: The total number of FP8 WMMA floating-point operations executed per second.
+    rst: The total number of FP8 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (MXFP8):
-    plain: Achieved MXFP8 WMMA throughput.
-    rst: Achieved MXFP8 WMMA throughput.
+    plain: The total number of MXFP8 WMMA floating-point operations executed per second.
+    rst: The total number of MXFP8 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP6):
-    plain: Achieved FP6 WMMA throughput.
-    rst: Achieved FP6 WMMA throughput.
+    plain: The total number of FP6 WMMA floating-point operations executed per second.
+    rst: The total number of FP6 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP4):
-    plain: Achieved FP4 WMMA throughput.
-    rst: Achieved FP4 WMMA throughput.
+    plain: The total number of FP4 WMMA floating-point operations executed per second.
+    rst: The total number of FP4 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA IOPs (Int8):
-    plain: Achieved Int8 WMMA throughput.
-    rst: Achieved Int8 WMMA throughput.
+    plain: The total number of Int8 WMMA integer operations executed per second.
+    rst: The total number of Int8 WMMA integer operations executed per second.
     unit: GIOP/s
   WMMA IOPs (Int4):
-    plain: Achieved Int4 WMMA throughput.
-    rst: Achieved Int4 WMMA throughput.
+    plain: The total number of Int4 WMMA integer operations executed per second.
+    rst: The total number of Int4 WMMA integer operations executed per second.
     unit: GIOP/s
   Active WGPs:
     plain: Average number of WGPs that had at least one active wavefront in a cycle.
     rst: Average number of WGPs that had at least one active wavefront in a cycle.
-    unit: WGPs per Cycle
+    unit: Count
   IPC:
     plain: Average number of instructions per active WGP cycle.
     rst: Average number of instructions per active WGP cycle.
@@ -79,45 +79,45 @@ System Speed-of-Light:
     plain: Average number of wavefronts in flight on GPU.
     rst: Average number of wavefronts in flight on GPU.
     unit: Wavefronts
-  LDS Read Bandwidth:
-    plain: Total LDS read bandwidth.
-    rst: Total LDS read bandwidth.
+  LDS Load Bandwidth:
+    plain: The number of bytes per second read from the LDS into WGP registers.
+    rst: The number of bytes per second read from the LDS into WGP registers.
     unit: GB/s
-  LDS Write Bandwidth:
-    plain: Total LDS write bandwidth.
-    rst: Total LDS write bandwidth.
+  LDS Store Bandwidth:
+    plain: The number of bytes per second written from WGP registers to the LDS.
+    rst: The number of bytes per second written from WGP registers to the LDS.
     unit: GB/s
-  LDS Bank Conflicts/Access:
+  LDS Bank Conflicts per Access:
     plain: Number of LDS bank conflicts per LDS access.
     rst: Number of LDS bank conflicts per LDS access.
     unit: Conflicts per Access
   GL0 Hit Rate:
-    plain: GL0 cache hit rate.
-    rst: GL0 cache hit rate.
+    plain: Percentage of GL0 cache requests that hit in the cache.
+    rst: Percentage of GL0 cache requests that hit in the cache.
     unit: Percent
-  GL0 Cache BW:
-    plain: Total GL0 cache data bandwidth combining load, store, and atomic traffic.
-    rst: Total GL0 cache data bandwidth combining load, store, and atomic traffic.
+  GL0 Cache Bandwidth:
+    plain: The number of bytes per second loaded from, stored to, or atomically updated in the GL0 cache.
+    rst: The number of bytes per second loaded from, stored to, or atomically updated in the GL0 cache.
     unit: GB/s
-  GL1A Busy Rate:
+  GL1A Utilization:
     plain: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
     rst: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
     unit: Percent
   GL2 Cache Hit Rate:
-    plain: GL2 cache hit rate.
-    rst: GL2 cache hit rate.
+    plain: Percentage of GL2 cache requests that hit in the cache.
+    rst: Percentage of GL2 cache requests that hit in the cache.
     unit: Percent
-  GL2 Cache BW:
-    plain: Total GL2 cache data bandwidth combining load, store, and atomic traffic.
-    rst: Total GL2 cache data bandwidth combining load, store, and atomic traffic.
+  L2 Cache Bandwidth:
+    plain: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
+    rst: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
     unit: GB/s
-  GL2 to DRAM Read BW:
-    plain: Total read bandwidth from HBM to GL2.
-    rst: Total read bandwidth from HBM to GL2.
+  DRAM Read Bandwidth:
+    plain: The number of bytes per second read from HBM (DRAM) through the EA.
+    rst: The number of bytes per second read from HBM (DRAM) through the EA.
     unit: GB/s
-  GL2 to DRAM Write BW:
-    plain: Total write bandwidth from GL2 to HBM.
-    rst: Total write bandwidth from GL2 to HBM.
+  DRAM Write Bandwidth:
+    plain: The number of bytes per second written to HBM (DRAM) through the EA.
+    rst: The number of bytes per second written to HBM (DRAM) through the EA.
     unit: GB/s
   GL2 to DRAM Read Latency:
     plain: Average latency to read data from HBM to GL2.
@@ -127,53 +127,28 @@ System Speed-of-Light:
     plain: Average latency to write data from GL2 to HBM.
     rst: Average latency to write data from GL2 to HBM.
     unit: Cycles
-  Scalar Data Cache Hit Rate:
-    plain: Scalar Data Cache hit rate.
-    rst: Scalar Data Cache hit rate.
+  sL1D Hit Rate (Excluding Duplicate Misses):
+    plain: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+    rst: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
     unit: Percent
-  Scalar Data Cache BW:
-    plain: Total Scalar Data Cache data bandwidth.
-    rst: Total Scalar Data Cache data bandwidth.
+  sL1D Cache Bandwidth:
+    plain: The number of bytes per second looked up in the sL1D cache.
+    rst: The number of bytes per second looked up in the sL1D cache.
     unit: GB/s
-  Instruction Cache Hit Rate:
-    plain: Instruction Cache hit rate.
-    rst: Instruction Cache hit rate.
+  L1I Hit Rate (Excluding Duplicate Misses):
+    plain: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
+    rst: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
     unit: Percent
-  Instruction Cache BW:
-    plain: Total Instruction Cache data bandwidth.
-    rst: Total Instruction Cache data bandwidth.
+  L1I Bandwidth:
+    plain: The number of bytes per second looked up in the L1I cache.
+    rst: The number of bytes per second looked up in the L1I cache.
     unit: GB/s
   Instruction Cache Fetch Latency:
     plain: Average latency to fetch instruction from GL1 to Instruction Cache.
     rst: Average latency to fetch instruction from GL1 to Instruction Cache.
     unit: Cycles
-Memory chart - Workgroup Processors (WGPs):
-  Wavefront Occupancy:
-    plain: Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
-    rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
-    unit: Percent
-  VGPR:
-    plain: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
-    rst: 'The number of architected vector general-purpose registers allocated for the kernel. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
-    unit: Registers
-  SGPR:
-    plain: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
-    rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
-    unit: Registers
-  LDS Allocation:
-    plain: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
-    rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
-    unit: Bytes per Workgroup
-  Scratch Allocation:
-    plain: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
-    unit: KB per Wave
-  Workgroups:
-    plain: The number of workgroups in the launch divided by the number of WGPs.
-    rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of WGPs.
-    unit: Workgroups per WGP
 Memory chart - Instruction Cache:
-  ICache Requests:
+  L1I Requests:
     plain: Total Instruction Cache fetch requests.
     rst: Total Instruction Cache fetch requests.
     unit: Requests per Normalization Unit
@@ -181,9 +156,9 @@ Memory chart - Instruction Cache:
     plain: Percentage of shader-busy cycles the Instruction Cache is serving requests.
     rst: Percentage of shader-busy cycles the Instruction Cache is serving requests.
     unit: Percent
-  ICache Hit Rate:
-    plain: Instruction Cache hit rate.
-    rst: Instruction Cache hit rate.
+  L1I Hit Rate:
+    plain: Percentage of Instruction Cache requests that hit in the cache.
+    rst: Percentage of Instruction Cache requests that hit in the cache.
     unit: Percent
   ICache Latency:
     plain: Average Instruction Cache request latency.
@@ -193,16 +168,16 @@ Memory chart - Instruction Cache:
     plain: Percentage of shader-busy cycles the instruction fetch unit is stalled.
     rst: Percentage of shader-busy cycles the instruction fetch unit is stalled.
     unit: Percent
-  ICache-GL1 Read Bandwidth:
-    plain: Instruction Cache miss fill bandwidth from GL1.
-    rst: Instruction Cache miss fill bandwidth from GL1.
-    unit: Bytes/s
+  L1I-GL1 Read Bandwidth:
+    plain: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    rst: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    unit: GB/s
   ICache-GL1 Request Latency:
     plain: Average latency of Instruction Cache requests sent to GL1.
     rst: Average latency of Instruction Cache requests sent to GL1.
     unit: Cycles
 Memory chart - Scalar Data Cache:
-  Dcache Requests:
+  sL1D Requests:
     plain: Total Scalar Data Cache requests.
     rst: Total Scalar Data Cache requests.
     unit: Requests per Normalization Unit
@@ -210,9 +185,9 @@ Memory chart - Scalar Data Cache:
     plain: Percentage of WGP cycles the Scalar Data Cache is serving requests.
     rst: Percentage of WGP cycles the Scalar Data Cache is serving requests.
     unit: Percent
-  Dcache Hit Rate:
-    plain: Scalar Data Cache hit rate.
-    rst: Scalar Data Cache hit rate.
+  sL1D Hit Rate:
+    plain: Percentage of Scalar Data Cache requests that hit in the cache.
+    rst: Percentage of Scalar Data Cache requests that hit in the cache.
     unit: Percent
   Dcache Latency:
     plain: Average Scalar Data Cache request latency.
@@ -222,19 +197,23 @@ Memory chart - Scalar Data Cache:
     plain: Percentage of WGP cycles the SQC scalar cache is stalled.
     rst: Percentage of WGP cycles the SQC scalar cache is stalled.
     unit: Percent
-  Dcache Request Bandwidth:
-    plain: Total Scalar Data Cache request bandwidth.
-    rst: Total Scalar Data Cache request bandwidth.
-    unit: Bytes/s
-  Dcache-GL1 Read Bandwidth:
-    plain: Scalar Data Cache miss fill bandwidth from GL1.
-    rst: Scalar Data Cache miss fill bandwidth from GL1.
-    unit: Bytes/s
+  sL1D Load Bandwidth:
+    plain: The number of bytes per second loaded by scalar memory instructions. The number of bytes is the number of dwords each instruction loads multiplied by four; bounds-check reductions are ignored.
+    rst: The number of bytes per second loaded by scalar memory instructions. The number of bytes is the number of dwords each instruction loads multiplied by four; bounds-check reductions are ignored.
+    unit: GB/s
+  sL1D-GL1 Read Bandwidth:
+    plain: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    rst: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    unit: GB/s
   Dcache-GL1 Request Latency:
     plain: Average latency of Scalar Data Cache requests sent to GL1.
     rst: Average latency of Scalar Data Cache requests sent to GL1.
     unit: Cycles
 Memory chart - GL0 Cache (Vector L0):
+  GL0 Utilization:
+    plain: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    rst: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    unit: Percent
   GL0 Read Requests:
     plain: Number of GL0 read requests.
     rst: Number of GL0 read requests.
@@ -247,13 +226,9 @@ Memory chart - GL0 Cache (Vector L0):
     plain: Number of GL0 atomic requests.
     rst: Number of GL0 atomic requests.
     unit: Requests per Normalization Unit
-  GL0 Utilization:
-    plain: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
-    rst: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
-    unit: Percent
   GL0 Hit Rate:
-    plain: GL0 cache hit rate.
-    rst: GL0 cache hit rate.
+    plain: Percentage of GL0 cache requests that hit in the cache.
+    rst: Percentage of GL0 cache requests that hit in the cache.
     unit: Percent
   GL0 Total Requests:
     plain: Total GL0 cache requests.
@@ -264,70 +239,70 @@ Memory chart - GL0 Cache (Vector L0):
     rst: Average GL0 cache request latency.
     unit: Cycles
 Memory chart - LDS (Local Data Share):
-  LDS Load Requests:
-    plain: Number of LDS load requests.
-    rst: Number of LDS load requests.
-    unit: Requests per Normalization Unit
-  LDS Store Requests:
-    plain: Number of LDS store requests.
-    rst: Number of LDS store requests.
-    unit: Requests per Normalization Unit
-  LDS Atomic Requests:
-    plain: Number of LDS atomic requests.
-    rst: Number of LDS atomic requests.
-    unit: Requests per Normalization Unit
-  Async Load Requests:
-    plain: Number of async load requests.
-    rst: Number of async load requests.
-    unit: Requests per Normalization Unit
-  Async Store Requests:
-    plain: Number of async store requests.
-    rst: Number of async store requests.
-    unit: Requests per Normalization Unit
+  LDS Load Instructions:
+    plain: Number of LDS load instructions processed by TXA.
+    rst: Number of LDS load instructions processed by TXA.
+    unit: Count per Normalization Unit
+  LDS Store Instructions:
+    plain: Number of LDS store instructions processed by TXA.
+    rst: Number of LDS store instructions processed by TXA.
+    unit: Count per Normalization Unit
+  LDS Atomics Instructions:
+    plain: Number of LDS atomic instructions processed by TXA.
+    rst: Number of LDS atomic instructions processed by TXA.
+    unit: Count per Normalization Unit
+  TXA Async Load Instruction:
+    plain: Number of async load instructions processed by TXA.
+    rst: Number of async load instructions processed by TXA.
+    unit: Count per Normalization Unit
+  TXA Async Store Instruction:
+    plain: Number of async store instructions processed by TXA.
+    rst: Number of async store instructions processed by TXA.
+    unit: Count per Normalization Unit
   LDS Utilization:
-    plain: Percentage of VMW-busy cycles the LDS is executing any operation.
-    rst: Percentage of VMW-busy cycles the LDS is executing any operation.
+    plain: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
+    rst: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
     unit: Percent
   LDS Bank Conflict Stall Rate:
     plain: Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
     rst: Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
     unit: Percent
   LDS Load Bandwidth:
-    plain: Total LDS load bandwidth.
-    rst: Total LDS load bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second read from the LDS into WGP registers.
+    rst: The number of bytes per second read from the LDS into WGP registers.
+    unit: GB/s
   LDS Store Bandwidth:
-    plain: Total LDS store bandwidth.
-    rst: Total LDS store bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second written from WGP registers to the LDS.
+    rst: The number of bytes per second written from WGP registers to the LDS.
+    unit: GB/s
   LDS Atomic Bandwidth:
-    plain: Total LDS atomic bandwidth.
-    rst: Total LDS atomic bandwidth.
-    unit: Bytes/s
-  Async Load Bandwidth:
-    plain: Total async load bandwidth.
-    rst: Total async load bandwidth.
-    unit: Bytes/s
-  Async Store Bandwidth:
-    plain: Total async store bandwidth.
-    rst: Total async store bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second moved between the LDS and WGP registers by LDS atomic (read-modify-write) operations.
+    rst: The number of bytes per second moved between the LDS and WGP registers by LDS atomic (read-modify-write) operations.
+    unit: GB/s
+  TXA Async Load Bandwidth:
+    plain: The number of bytes per second loaded by asynchronous load operations.
+    rst: The number of bytes per second loaded by asynchronous load operations.
+    unit: GB/s
+  TXA Async Store Bandwidth:
+    plain: The number of bytes per second stored by asynchronous store operations.
+    rst: The number of bytes per second stored by asynchronous store operations.
+    unit: GB/s
   TDM Load Bandwidth:
-    plain: Total TDM load bandwidth.
-    rst: Total TDM load bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second loaded by the TDM.
+    rst: The number of bytes per second loaded by the TDM.
+    unit: GB/s
   TDM Store Bandwidth:
-    plain: Total TDM store bandwidth.
-    rst: Total TDM store bandwidth.
-    unit: Bytes/s
-  TDM Load Requests:
-    plain: Total TDM load requests.
-    rst: Total TDM load requests.
-    unit: Requests per Normalization Unit
-  TDM Store Requests:
-    plain: Total TDM store requests.
-    rst: Total TDM store requests.
-    unit: Requests per Normalization Unit
+    plain: The number of bytes per second stored by the TDM.
+    rst: The number of bytes per second stored by the TDM.
+    unit: GB/s
+  TDM Async Load Requests:
+    plain: Number of TDM async load requests processed by TXA.
+    rst: Number of TDM async load requests processed by TXA.
+    unit: Count per Normalization Unit
+  TDM Async Store Requests:
+    plain: Number of TDM async store requests processed by TXA.
+    rst: Number of TDM async store requests processed by TXA.
+    unit: Count per Normalization Unit
   LDS Utilization - Load:
     plain: Percentage of VMW-busy cycles the LDS is executing a load.
     rst: Percentage of VMW-busy cycles the LDS is executing a load.
@@ -342,20 +317,20 @@ Memory chart - LDS (Local Data Share):
     unit: Percent
 Memory chart - GL0-GL1 Interface:
   GL0-GL1 Read Bandwidth:
-    plain: Total GL0-GL1 read bandwidth.
-    rst: Total GL0-GL1 read bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second of read requests from the GL0 cache to the GL1 cache.
+    rst: The number of bytes per second of read requests from the GL0 cache to the GL1 cache.
+    unit: GB/s
   GL0-GL1 Write Bandwidth:
-    plain: Total GL0-GL1 write bandwidth.
-    rst: Total GL0-GL1 write bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second of write requests from the GL0 cache to the GL1 cache.
+    rst: The number of bytes per second of write requests from the GL0 cache to the GL1 cache.
+    unit: GB/s
   GL0-GL1 Atomic Bandwidth:
-    plain: Total GL0-GL1 atomic bandwidth.
-    rst: Total GL0-GL1 atomic bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second of atomic requests from the GL0 cache to the GL1 cache. Each request counts as 128 bytes.
+    rst: The number of bytes per second of atomic requests from the GL0 cache to the GL1 cache. Each request counts as 128 bytes.
+    unit: GB/s
   GL1A Utilization:
-    plain: Percentage of cycles GL1 Arbiter is processing requests from GL0.
-    rst: Percentage of cycles GL1 Arbiter is processing requests from GL0.
+    plain: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
+    rst: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
     unit: Percent
   GL1C Utilization:
     plain: Percentage of cycles the GL1 is processing requests.
@@ -387,37 +362,37 @@ Memory chart - GL0-GL1 Interface:
     unit: Percent
 Memory chart - GLARB (GL1-GL2 Arbiter):
   GLARBA Utilization:
-    plain: Percentage of cycles the Graphic Level Arbiter is processing requests.
-    rst: Percentage of cycles the Graphic Level Arbiter is processing requests.
+    plain: Percentage of cycles the Graphics Level Arbiter is processing requests.
+    rst: Percentage of cycles the Graphics Level Arbiter is processing requests.
     unit: Percent
   GLARBC Utilization:
-    plain: Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
-    rst: Percentage of cycles the Graphic Level Arbiter staging buffer is forwarding requests.
+    plain: Percentage of cycles the Graphics Level Arbiter staging buffer is forwarding requests.
+    rst: Percentage of cycles the Graphics Level Arbiter staging buffer is forwarding requests.
     unit: Percent
   GLARBC Buffer Full Stall:
     plain: Percentage of Graphics Level Arbiter busy cycles when it's stalled due to a full buffer.
     rst: Percentage of Graphics Level Arbiter busy cycles when it's stalled due to a full buffer.
     unit: Percent
-  GL1-GLARB Read Bandwidth:
-    plain: Total GL1 to Graphic Level Arbiter read bandwidth.
-    rst: Total GL1 to Graphic Level Arbiter read bandwidth.
-    unit: Bytes/s
-  GL1-GLARB Write Bandwidth:
-    plain: Total GL1 to Graphic Level Arbiter write bandwidth.
-    rst: Total GL1 to Graphic Level Arbiter write bandwidth.
-    unit: Bytes/s
+  GL1C-GLARB Read Bandwidth:
+    plain: The number of bytes per second of read requests from the GL1 cache to the Graphics Level Arbiter.
+    rst: The number of bytes per second of read requests from the GL1 cache to the Graphics Level Arbiter.
+    unit: GB/s
+  GL1C-GLARB Write Bandwidth:
+    plain: The number of bytes per second of write requests from the GL1 cache to the Graphics Level Arbiter. The number of bytes is the number of 32-byte write data beats multiplied by 32.
+    rst: The number of bytes per second of write requests from the GL1 cache to the Graphics Level Arbiter. The number of bytes is the number of 32-byte write data beats multiplied by 32.
+    unit: GB/s
   GLARB-GL2 Read Bandwidth:
-    plain: Total Graphic Level Arbiter to GL2 read bandwidth.
-    rst: Total Graphic Level Arbiter to GL2 read bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second of read requests from the Graphics Level Arbiter to the GL2 cache.
+    rst: The number of bytes per second of read requests from the Graphics Level Arbiter to the GL2 cache.
+    unit: GB/s
   GLARB-GL2 Write Bandwidth:
-    plain: Total Graphic Level Arbiter to GL2 write bandwidth.
-    rst: Total Graphic Level Arbiter to GL2 write bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second of write requests from the Graphics Level Arbiter to the GL2 cache.
+    rst: The number of bytes per second of write requests from the Graphics Level Arbiter to the GL2 cache.
+    unit: GB/s
   GLARB-GL2 Atomic Bandwidth:
-    plain: Total Graphic Level Arbiter to GL2 atomic bandwidth.
-    rst: Total Graphic Level Arbiter to GL2 atomic bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second of atomic requests from the Graphics Level Arbiter to the GL2 cache. Each request counts as 64 bytes.
+    rst: The number of bytes per second of atomic requests from the Graphics Level Arbiter to the GL2 cache. Each request counts as 64 bytes.
+    unit: GB/s
   GLARBA Request Path Utilization:
     plain: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
     rst: Percentage of cycles the GL1 to Graphic Level Arbiter request path is busy.
@@ -436,150 +411,175 @@ Memory chart - GL2 Cache (L2):
     rst: Percentage of cycles the GL2 Arbiter is distributing requests across GL2 Cache partitions.
     unit: Percent
   GL2C Hit Rate:
-    plain: GL2 Cache hit rate.
-    rst: GL2 Cache hit rate.
+    plain: Percentage of GL2 cache requests that hit in the cache.
+    rst: Percentage of GL2 cache requests that hit in the cache.
     unit: Percent
-  GL2-EA Read Bandwidth:
-    plain: Total GL2 to Efficiency Arbiter read bandwidth.
-    rst: Total GL2 to Efficiency Arbiter read bandwidth.
-    unit: Bytes/s
-  GL2-EA Write Bandwidth:
-    plain: Total GL2 to Efficiency Arbiter write bandwidth.
-    rst: Total GL2 to Efficiency Arbiter write bandwidth.
-    unit: Bytes/s
-  GL2-EA Atomic Bandwidth:
-    plain: Total GL2 to Efficiency Arbiter atomic bandwidth.
-    rst: Total GL2 to Efficiency Arbiter atomic bandwidth.
-    unit: Bytes/s
+  GL2-EA HBM Bandwidth - Read:
+    plain: The number of bytes per second of read requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of read requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    unit: GB/s
+  GL2-EA HBM Bandwidth - Write:
+    plain: The number of bytes per second of write requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of write requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    unit: GB/s
+  GL2-EA HBM Bandwidth - Atomic:
+    plain: The number of bytes per second of atomic requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of atomic requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    unit: GB/s
 Memory chart - EA to HBM:
   EA Utilization:
     plain: Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO, or fabric.
     rst: Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO, or fabric.
     unit: Percent
   DRAM Read Bandwidth:
-    plain: Total HBM read bandwidth.
-    rst: Total HBM read bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second read from HBM (DRAM) through the EA.
+    rst: The number of bytes per second read from HBM (DRAM) through the EA.
+    unit: GB/s
   DRAM Write Bandwidth:
-    plain: Total HBM write bandwidth.
-    rst: Total HBM write bandwidth.
-    unit: Bytes/s
+    plain: The number of bytes per second written to HBM (DRAM) through the EA.
+    rst: The number of bytes per second written to HBM (DRAM) through the EA.
+    unit: GB/s
   IO Read Bandwidth:
-    plain: Total read bandwidth from host CPU memory (pinned or mapped) through the EA.
-    rst: Total read bandwidth from host CPU memory (pinned or mapped) through the EA.
-    unit: Bytes/s
+    plain: The number of bytes per second read from host CPU memory (pinned or mapped) through the EA.
+    rst: The number of bytes per second read from host CPU memory (pinned or mapped) through the EA.
+    unit: GB/s
   IO Write Bandwidth:
-    plain: Total write bandwidth to host CPU memory (pinned or mapped) through the EA.
-    rst: Total write bandwidth to host CPU memory (pinned or mapped) through the EA.
-    unit: Bytes/s
+    plain: The number of bytes per second written to host CPU memory (pinned or mapped) through the EA.
+    rst: The number of bytes per second written to host CPU memory (pinned or mapped) through the EA.
+    unit: GB/s
   HDM Read Bandwidth:
-    plain: Total read bandwidth from Host Data Memory (unified memory pages) through the EA.
-    rst: Total read bandwidth from Host Data Memory (unified memory pages) through the EA.
-    unit: Bytes/s
+    plain: The number of bytes per second read from Host Data Memory (unified memory pages) through the EA.
+    rst: The number of bytes per second read from Host Data Memory (unified memory pages) through the EA.
+    unit: GB/s
   HDM Write Bandwidth:
-    plain: Total write bandwidth to Host Data Memory (unified memory pages) through the EA.
-    rst: Total write bandwidth to Host Data Memory (unified memory pages) through the EA.
-    unit: Bytes/s
+    plain: The number of bytes per second written to Host Data Memory (unified memory pages) through the EA.
+    rst: The number of bytes per second written to Host Data Memory (unified memory pages) through the EA.
+    unit: GB/s
   GMI Read Bandwidth:
-    plain: Total read bandwidth from peer GPU HBM via Infinity Fabric.
-    rst: Total read bandwidth from peer GPU HBM via Infinity Fabric.
-    unit: Bytes/s
+    plain: The number of bytes per second read from peer GPU HBM over Infinity Fabric through the EA.
+    rst: The number of bytes per second read from peer GPU HBM over Infinity Fabric through the EA.
+    unit: GB/s
   GMI Write Bandwidth:
-    plain: Total write bandwidth to peer GPU HBM via Infinity Fabric.
-    rst: Total write bandwidth to peer GPU HBM via Infinity Fabric.
-    unit: Bytes/s
-  EA Stall Rate:
-    plain: Percentage of EA-busy cycles where the EA is stalled.
-    rst: Percentage of EA-busy cycles where the EA is stalled.
+    plain: The number of bytes per second written to peer GPU HBM over Infinity Fabric through the EA.
+    rst: The number of bytes per second written to peer GPU HBM over Infinity Fabric through the EA.
+    unit: GB/s
+  EA Stalled by SDP:
+    plain: Percentage of EA-busy cycles where the EA has a request ready but cannot send it to the Scalable Data Port (SDP), the EA's link to the data fabric.
+    rst: Percentage of EA-busy cycles where the EA has a request ready but cannot send it to the Scalable Data Port (SDP), the EA's link to the data fabric.
     unit: Percent
   Outstanding Requests:
     plain: Time-averaged total number of in-flight requests from EA to the SDP memory fabric. Higher outstanding counts hide memory latency by keeping HBM busy. Very high outstanding with EA stalls indicates request queues are backed up and the downstream memory controllers cannot accept requests fast enough.
     rst: Time-averaged total number of in-flight requests from EA to the SDP memory fabric. Higher outstanding counts hide memory latency by keeping HBM busy. Very high outstanding with EA stalls indicates request queues are backed up and the downstream memory controllers cannot accept requests fast enough.
     unit: Count
+Memory chart - Workgroup Processors (WGPs):
+  Wavefront Occupancy:
+    plain: Percentage of the maximum wavefronts per WGP that are resident, averaged over GPU-active cycles.
+    rst: Resident :ref:`wavefronts <desc-wavefront>` per WGP, averaged over GPU-active cycles, as a percent of the maximum wavefronts per WGP.
+    unit: Percent
+  VGPRs:
+    plain: 'The number of architected vector general-purpose registers allocated per wavefront. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+    rst: 'The number of architected vector general-purpose registers allocated per wavefront. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  SGPRs:
+    plain: The number of scalar general-purpose registers (SGPRs) allocated per wavefront. On this architecture the hardware always allocates 128, whatever the kernel uses, so SGPRs do not limit occupancy.
+    rst: The number of scalar general-purpose registers (SGPRs) allocated per wavefront. On this architecture the hardware always allocates 128, whatever the kernel uses, so SGPRs do not limit occupancy.
+    unit: Registers
+  LDS Allocation:
+    plain: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    unit: Bytes per Workgroup
+  Scratch Allocation per Wave:
+    plain: 'The amount of scratch memory requested per wavefront, in KB: the scratch bytes requested per work-item multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
+    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
+    unit: KB per Wavefront
+  Workgroups:
+    plain: The number of workgroups in the launch divided by the number of WGPs.
+    rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of WGPs.
+    unit: Workgroups per WGP
 Roofline Performance Rates:
   VALU FLOPs (FP16):
-    plain: Achieved FP16 VALU throughput.
-    rst: Achieved FP16 VALU throughput.
+    plain: The total FP16 floating-point operations executed per second on the VALU.
+    rst: The total FP16 floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU FLOPs (FP32):
-    plain: Achieved FP32 VALU throughput.
-    rst: Achieved FP32 VALU throughput.
+    plain: The total FP32 floating-point operations executed per second on the VALU.
+    rst: The total FP32 floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU FLOPs (FP64):
-    plain: Achieved FP64 VALU throughput.
-    rst: Achieved FP64 VALU throughput.
+    plain: The total FP64 floating-point operations executed per second on the VALU.
+    rst: The total FP64 floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU IOPs:
-    plain: Achieved integer VALU throughput.
-    rst: Achieved integer VALU throughput.
+    plain: The total integer operations executed per second on the VALU.
+    rst: The total integer operations executed per second on the VALU.
     unit: GIOP/s
   VALU Trans FLOPs (FP16):
-    plain: Achieved FP16 transcendental VALU throughput.
-    rst: Achieved FP16 transcendental VALU throughput.
+    plain: The total FP16 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
+    rst: The total FP16 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU Trans FLOPs (FP32):
-    plain: Achieved FP32 transcendental VALU throughput.
-    rst: Achieved FP32 transcendental VALU throughput.
+    plain: The total FP32 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
+    rst: The total FP32 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   VALU Trans FLOPs (FP64):
-    plain: Achieved FP64 transcendental VALU throughput.
-    rst: Achieved FP64 transcendental VALU throughput.
+    plain: The total FP64 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
+    rst: The total FP64 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
     unit: GFLOP/s
   WMMA FLOPs (FP64):
-    plain: Achieved FP64 WMMA throughput.
-    rst: Achieved FP64 WMMA throughput.
+    plain: The total number of FP64 WMMA floating-point operations executed per second.
+    rst: The total number of FP64 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP32):
-    plain: Achieved FP32 WMMA throughput.
-    rst: Achieved FP32 WMMA throughput.
+    plain: The total number of FP32 WMMA floating-point operations executed per second.
+    rst: The total number of FP32 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP16):
-    plain: Achieved FP16 WMMA throughput.
-    rst: Achieved FP16 WMMA throughput.
+    plain: The total number of FP16 WMMA floating-point operations executed per second.
+    rst: The total number of FP16 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (BF16):
-    plain: Achieved BF16 WMMA throughput.
-    rst: Achieved BF16 WMMA throughput.
+    plain: The total number of BF16 WMMA floating-point operations executed per second.
+    rst: The total number of BF16 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP8):
-    plain: Achieved FP8 WMMA throughput.
-    rst: Achieved FP8 WMMA throughput.
+    plain: The total number of FP8 WMMA floating-point operations executed per second.
+    rst: The total number of FP8 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (MXFP8):
-    plain: Achieved MXFP8 WMMA throughput.
-    rst: Achieved MXFP8 WMMA throughput.
+    plain: The total number of MXFP8 WMMA floating-point operations executed per second.
+    rst: The total number of MXFP8 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP6):
-    plain: Achieved FP6 WMMA throughput.
-    rst: Achieved FP6 WMMA throughput.
+    plain: The total number of FP6 WMMA floating-point operations executed per second.
+    rst: The total number of FP6 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (FP4):
-    plain: Achieved FP4 WMMA throughput.
-    rst: Achieved FP4 WMMA throughput.
+    plain: The total number of FP4 WMMA floating-point operations executed per second.
+    rst: The total number of FP4 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA FLOPs (F6F4):
-    plain: Achieved mixed FP6/FP4 WMMA throughput.
-    rst: Achieved mixed FP6/FP4 WMMA throughput.
+    plain: The total number of mixed FP6/FP4 WMMA floating-point operations executed per second.
+    rst: The total number of mixed FP6/FP4 WMMA floating-point operations executed per second.
     unit: GFLOP/s
   WMMA IOPs (Int8):
-    plain: Achieved Int8 WMMA throughput.
-    rst: Achieved Int8 WMMA throughput.
+    plain: The total number of Int8 WMMA integer operations executed per second.
+    rst: The total number of Int8 WMMA integer operations executed per second.
     unit: GIOP/s
   HBM Bandwidth:
-    plain: Total HBM bandwidth. The peak empirically measured bandwidth reflects peak single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
-    rst: Total HBM bandwidth. The peak empirically measured bandwidth reflects peak single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
+    plain: The number of bytes per second read from and written to High-Bandwidth Memory (HBM). Its peak is the single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
+    rst: The number of bytes per second read from and written to High-Bandwidth Memory (HBM). Its peak is the single-direction (read-only) bandwidth, so write-heavy or mixed kernels fall below it.
     unit: GB/s
   GL2 Cache Bandwidth:
-    plain: GL2 Cache bandwidth.
-    rst: GL2 Cache bandwidth.
+    plain: The number of bytes per second transferred between the GL0 and GL1 caches by read, write, and atomic requests. Each request counts as 128 bytes.
+    rst: The number of bytes per second transferred between the GL0 and GL1 caches by read, write, and atomic requests. Each request counts as 128 bytes.
     unit: GB/s
   GL0 Cache Bandwidth:
-    plain: GL0 data delivery bandwidth.
-    rst: GL0 data delivery bandwidth.
+    plain: The number of bytes per second loaded from, stored to, or atomically updated in the GL0 cache.
+    rst: The number of bytes per second loaded from, stored to, or atomically updated in the GL0 cache.
     unit: GB/s
-  LDS Bandwidth:
-    plain: Total LDS bandwidth.
-    rst: Total LDS bandwidth.
+  Theoretical LDS Bandwidth:
+    plain: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
+    rst: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
     unit: GB/s
   WMMA IOPs (Int4):
     plain: Achieved Int4 WMMA throughput.
@@ -590,17 +590,17 @@ Roofline Plot Points:
     plain: Arithmetic intensity relative to HBM bandwidth.
     rst: Arithmetic intensity relative to HBM bandwidth.
     unit: FLOPs/Byte
-  AI GL2:
+  AI L2:
     plain: Arithmetic intensity relative to GL1 bandwidth.
     rst: Arithmetic intensity relative to GL1 bandwidth.
     unit: FLOPs/Byte
-  AI GL0:
+  AI L0:
     plain: Arithmetic intensity relative to GL0 data bandwidth.
     rst: Arithmetic intensity relative to GL0 data bandwidth.
     unit: FLOPs/Byte
   Performance (GFLOPs):
-    plain: Total achieved compute throughput combining all VALU and WMMA FLOPs.
-    rst: Total achieved compute throughput combining all VALU and WMMA FLOPs.
+    plain: The total VALU and WMMA floating-point operations executed per second.
+    rst: The total VALU and WMMA floating-point operations executed per second.
     unit: GFLOP/s
 CPC Utilizations:
   CPC Utilization:
@@ -608,24 +608,24 @@ CPC Utilizations:
     rst: Percentage of GPU-active cycles the CPC is processing compute dispatch packets.
     unit: Percent
   CPC Micro-Engine Busy Dispatching Workgroups:
-    plain: Percent of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
-    rst: Percent of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
+    plain: Percentage of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
+    rst: Percentage of CPC-busy cycles the micro-engine is sending dispatch commands to SPI.
     unit: Percent
   CPC ADC Pipe0 Busy Dispatching Workgroups:
-    plain: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing workgroups to SPI.
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing workgroups to SPI.
+    plain: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing workgroups to SPI.
+    rst: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 0 is issuing workgroups to SPI.
     unit: Percent
   CPC ADC Pipe1 Busy Dispatching Workgroups:
-    plain: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing workgroups to SPI.
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing workgroups to SPI.
+    plain: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing workgroups to SPI.
+    rst: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 1 is issuing workgroups to SPI.
     unit: Percent
   CPC ADC Pipe2 Busy Dispatching Workgroups:
-    plain: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing workgroups to SPI.
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing workgroups to SPI.
+    plain: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing workgroups to SPI.
+    rst: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 2 is issuing workgroups to SPI.
     unit: Percent
   CPC ADC Pipe3 Busy Dispatching Workgroups:
-    plain: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing workgroups to SPI.
-    rst: Percent of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing workgroups to SPI.
+    plain: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing workgroups to SPI.
+    rst: Percentage of CPC-busy cycles Asynchronous Dispatch Controller pipe 3 is issuing workgroups to SPI.
     unit: Percent
 SPI Utilization:
   SPI Utilization:
@@ -636,11 +636,11 @@ SPI Wavefront Dispatch:
   Dispatched Workgroups:
     plain: Workgroups launched via successful SPI resource allocation (SPI_RA_REQ_ALLOC_sum). SPI_CSN_NUM_THREADGROUPS_sum is CS-pipe scoped and reads zero for gfx1250 compute dispatches.
     rst: Workgroups launched via successful SPI resource allocation (SPI_RA_REQ_ALLOC_sum). SPI_CSN_NUM_THREADGROUPS_sum is CS-pipe scoped and reads zero for gfx1250 compute dispatches.
-    unit: Count
+    unit: Workgroups
   Dispatched Wavefronts:
-    plain: Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe scoped and reads zero for gfx1250 compute dispatches).
-    rst: Total wavefronts dispatched (SPI_ALL_WAVE_sum; SPI_CSN_WAVE_sum is CS-pipe scoped and reads zero for gfx1250 compute dispatches).
-    unit: Count
+    plain: Total wavefronts dispatched.
+    rst: Total wavefronts dispatched.
+    unit: Wavefronts
   Dispatched Clusters:
     plain: Total cluster-level dispatches issued by SPI.
     rst: Total cluster-level dispatches issued by SPI.
@@ -686,31 +686,31 @@ SPI Resource Allocation:
     plain: Percentage of SPI-busy cycles SPI successfully allocated resources and dispatched a workgroup.
     rst: Percentage of SPI-busy cycles SPI successfully allocated resources and dispatched a workgroup.
     unit: Percent
-  Alloc Failure - LDS Full:
+  Allocation Failure - LDS Full:
     plain: Percentage of SPI-busy cycles workgroup allocation failed due to full LDS.
     rst: Percentage of SPI-busy cycles workgroup allocation failed due to full LDS.
     unit: Percent
-  Alloc Failure - Waveslots Full:
+  Allocation Failure - Waveslots Full:
     plain: Percentage of SPI-busy cycles workgroup allocation failed due to full wavefront slots.
     rst: Percentage of SPI-busy cycles workgroup allocation failed due to full wavefront slots.
     unit: Percent
-  Alloc Failure - VGPR Full:
+  Allocation Failure - VGPR Full:
     plain: Percentage of SPI-busy cycles workgroup allocation failed due to VGPR exhaustion.
     rst: Percentage of SPI-busy cycles workgroup allocation failed due to VGPR exhaustion.
     unit: Percent
-  Alloc Failure - Barrier Full:
+  Allocation Failure - Barrier Full:
     plain: Percentage of SPI-busy cycles workgroup allocation failed due to full barrier slots.
     rst: Percentage of SPI-busy cycles workgroup allocation failed due to full barrier slots.
     unit: Percent
-  Alloc Failure - Bulky Full:
+  Allocation Failure - Bulky Full:
     plain: Percentage of SPI-busy cycles workgroup allocation failed because a bulky workgroup could not be placed.
     rst: Percentage of SPI-busy cycles workgroup allocation failed because a bulky workgroup could not be placed.
     unit: Percent
-  Alloc Failure - Named Barriers Full:
+  Allocation Failure - Named Barriers Full:
     plain: Percentage of SPI-busy cycles workgroup allocation failed due to named barrier exhaustion.
     rst: Percentage of SPI-busy cycles workgroup allocation failed due to named barrier exhaustion.
     unit: Percent
-  Alloc Failure - Temp Space Full:
+  Allocation Failure - Temp Space Full:
     plain: Percentage of SPI-busy cycles workgroup allocation failed due to exhausted scratch space.
     rst: Percentage of SPI-busy cycles workgroup allocation failed due to exhausted scratch space.
     unit: Percent
@@ -731,7 +731,7 @@ SPI CPC-SPI Interface:
     plain: Average in-flight dispatch requests in CPC pipe 1, queue 1.
     rst: Average in-flight dispatch requests in CPC pipe 1, queue 1.
     unit: Requests
-  CPC Pre-Alloc Request Stall Rate:
+  CPC Pre-Allocation Request Stall Rate:
     plain: Percentage of SPI-busy cycles where SPI cannot accept new pre-allocation requests from CPC because its internal pre-allocation pipeline is full.
     rst: Percentage of SPI-busy cycles where SPI cannot accept new pre-allocation requests from CPC because its internal pre-allocation pipeline is full.
     unit: Percent
@@ -745,8 +745,8 @@ WGP Utilization:
     rst: Total elapsed kernel clock cycles.
     unit: Cycles
   Active WGPs:
-    plain: Average number of WGPs with at least one active wavefront in a cycle.
-    rst: Average number of WGPs with at least one active wavefront in a cycle.
+    plain: Average number of WGPs that had at least one active wavefront in a cycle.
+    rst: Average number of WGPs that had at least one active wavefront in a cycle.
     unit: Count
 WGP Wavefront Launch Stats:
   Grid Size:
@@ -758,24 +758,24 @@ WGP Wavefront Launch Stats:
     rst: Number of work-items per workgroup.
     unit: Work-items
   VGPRs:
-    plain: Number of architectural VGPRs allocated per wave.
-    rst: Number of architectural VGPRs allocated per wave.
+    plain: 'The number of architected vector general-purpose registers allocated per wavefront. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+    rst: 'The number of architected vector general-purpose registers allocated per wavefront. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
   AGPRs:
-    plain: Number of accumulation VGPRs allocated per wave.
-    rst: Number of accumulation VGPRs allocated per wave.
+    plain: Number of accumulation VGPRs allocated per wavefront.
+    rst: Number of accumulation VGPRs allocated per wavefront.
     unit: Registers
   SGPRs:
-    plain: Number of SGPRs allocated per wave.
-    rst: Number of SGPRs allocated per wave.
+    plain: The number of scalar general-purpose registers (SGPRs) allocated per wavefront. On this architecture the hardware always allocates 128, whatever the kernel uses, so SGPRs do not limit occupancy.
+    rst: The number of scalar general-purpose registers (SGPRs) allocated per wavefront. On this architecture the hardware always allocates 128, whatever the kernel uses, so SGPRs do not limit occupancy.
     unit: Registers
   LDS Allocation:
-    plain: Bytes of LDS allocated per workgroup.
-    rst: Bytes of LDS allocated per workgroup.
-    unit: Bytes
+    plain: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    rst: 'The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    unit: Bytes per Workgroup
   Scratch Allocation:
-    plain: Bytes of scratch (private) memory allocated per work-item.
-    rst: Bytes of scratch (private) memory allocated per work-item.
+    plain: The number of bytes of scratch memory per work-item. Scratch memory holds the stack and register spills.
+    rst: The number of bytes of scratch memory per work-item. Scratch memory holds the stack and register spills.
     unit: Bytes per Work-item
 WGP Wavefront Dispatch:
   Dispatched Wavefronts:
@@ -797,36 +797,36 @@ WGP Wavefront Instruction Mix:
     rst: Total instructions issued.
     unit: Count per Normalization Unit
   Instructions - Internal:
-    plain: Number of internal (non-user-visible) instructions issued.
-    rst: Number of internal (non-user-visible) instructions issued.
+    plain: 'Number of internal SQ instructions issued: bookkeeping or other work that is not visible to the user.'
+    rst: 'Number of internal SQ instructions issued: bookkeeping or other work that is not visible to the user.'
     unit: Count per Normalization Unit
   Instructions - VALU:
-    plain: Number of VALU instructions issued.
-    rst: Number of VALU instructions issued.
+    plain: Number of VALU instructions issued. The VALU runs arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
+    rst: Number of VALU instructions issued. The VALU runs arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
     unit: Count per Normalization Unit
   Instructions - SALU:
-    plain: Number of SALU instructions issued.
-    rst: Number of SALU instructions issued.
+    plain: Number of SALU instructions issued. The SALU runs operations on values that are uniform across the wavefront. Efficient kernels often have a balance of VALU and SALU operations.
+    rst: Number of SALU instructions issued. The SALU runs operations on values that are uniform across the wavefront. Efficient kernels often have a balance of VALU and SALU operations.
     unit: Count per Normalization Unit
   Instructions - SMEM:
-    plain: Number of scalar memory instructions issued.
-    rst: Number of scalar memory instructions issued.
+    plain: Number of scalar memory (SMEM) instructions issued. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
+    rst: Number of scalar memory (SMEM) instructions issued. SMEM loads constant and uniform data through the scalar cache. High counts may indicate heavy use of constant buffers or kernel arguments.
     unit: Count per Normalization Unit
   Instructions - Transcendental:
-    plain: Number of transcendental VALU instructions issued.
-    rst: Number of transcendental VALU instructions issued.
+    plain: Number of transcendental VALU instructions issued. These are hardware approximations such as sin, cos and log on the VALU.
+    rst: Number of transcendental VALU instructions issued. These are hardware approximations such as sin, cos and log on the VALU.
     unit: Count per Normalization Unit
   Instructions - Double Precision:
     plain: Number of double-precision VALU instructions issued.
     rst: Number of double-precision VALU instructions issued.
     unit: Count per Normalization Unit
   Instructions - VMEM:
-    plain: Number of VMEM instructions issued.
-    rst: Number of VMEM instructions issued.
+    plain: Number of vector memory (VMEM) instructions issued, including global, buffer and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
+    rst: Number of vector memory (VMEM) instructions issued, including global, buffer and texture operations. High VMEM counts relative to VALU may indicate memory-bound workloads.
     unit: Count per Normalization Unit
   Instructions - LDS:
-    plain: Number of LDS instructions issued.
-    rst: Number of LDS instructions issued.
+    plain: Number of LDS instructions issued, including FLAT instructions that resolve to LDS. It counts instructions, not data movement, so it does not distinguish reads from writes.
+    rst: Number of LDS instructions issued, including FLAT instructions that resolve to LDS. It counts instructions, not data movement, so it does not distinguish reads from writes.
     unit: Count per Normalization Unit
 WGP VMEM Instruction Mix:
   Instructions - VMEM Flat:
@@ -916,12 +916,12 @@ WGP LDS Instruction Mix:
     unit: Count per Normalization Unit
 WGP VALU Instruction Mix:
   Total VALU Instructions:
-    plain: Total VALU instructions issued.
-    rst: Total VALU instructions issued.
+    plain: Number of VALU instructions issued. The VALU runs arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
+    rst: Number of VALU instructions issued. The VALU runs arithmetic and logic operations across all work-items in a wavefront. High VALU counts indicate compute-intensive kernels.
     unit: Count per Normalization Unit
   VALU Instructions - Trans:
-    plain: Number of transcendental VALU instructions issued.
-    rst: Number of transcendental VALU instructions issued.
+    plain: Number of transcendental VALU instructions issued. These are hardware approximations such as sin, cos and log on the VALU.
+    rst: Number of transcendental VALU instructions issued. These are hardware approximations such as sin, cos and log on the VALU.
     unit: Count per Normalization Unit
   VALU Instructions - Double Precision:
     plain: Number of double-precision VALU instructions issued.
@@ -1041,23 +1041,23 @@ WGP Latencies:
     rst: Average LDS access latency in cycles.
     unit: Cycles
 WGP-TXA Interface:
-  WGP-GL0 Request Bus Util:
+  WGP-GL0 Request Bus Utilization:
     plain: Percentage of cycles the WGP-to-GL0 request bus is carrying a valid request.
     rst: Percentage of cycles the WGP-to-GL0 request bus is carrying a valid request.
     unit: Percent
-  WGP-GL0 LDS Request Bus Util:
+  WGP-GL0 LDS Request Bus Utilization:
     plain: Percentage of cycles the WGP-to-GL0 bus is carrying an LDS request.
     rst: Percentage of cycles the WGP-to-GL0 bus is carrying an LDS request.
     unit: Percent
-  WGP-GL0 VMEM Request Bus Util:
+  WGP-GL0 VMEM Request Bus Utilization:
     plain: Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM request.
     rst: Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM request.
     unit: Percent
-  WGP-GL0 VMEM Read Request Bus Util:
+  WGP-GL0 VMEM Read Request Bus Utilization:
     plain: Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM read request.
     rst: Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM read request.
     unit: Percent
-  WGP-GL0 VMEM Write Request Bus Util:
+  WGP-GL0 VMEM Write Request Bus Utilization:
     plain: Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM write request.
     rst: Percentage of cycles the WGP-to-GL0 bus is carrying a VMEM write request.
     unit: Percent
@@ -1083,18 +1083,18 @@ WGP-TXD Interface:
     rst: Percentage of cycles the TXD data return bus is carrying valid return data.
     unit: Percent
 WGP Instruction Cache:
-  Icache Hit Rate:
-    plain: Instruction Cache hit rate.
-    rst: Instruction Cache hit rate.
+  L1I Hit Rate (Excluding Duplicate Misses):
+    plain: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
+    rst: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
     unit: Percent
 WGP Scalar Data Cache:
-  Dcache Hit Rate:
-    plain: Scalar Data Cache hit rate.
-    rst: Scalar Data Cache hit rate.
+  sL1D Hit Rate:
+    plain: Percentage of Scalar Data Cache requests that hit in the cache.
+    rst: Percentage of Scalar Data Cache requests that hit in the cache.
     unit: Percent
-  Dcache Request Bandwidth:
-    plain: Total Scalar Data Cache bandwidth.
-    rst: Total Scalar Data Cache bandwidth.
+  sL1D Load Bytes:
+    plain: The number of bytes loaded through the Scalar Data Cache by scalar memory loads.
+    rst: The number of bytes loaded through the Scalar Data Cache by scalar memory loads.
     unit: Bytes per Normalization Unit
 WGP SQC-GL1 Interface:
   Interface Stall Rate:
@@ -1186,21 +1186,21 @@ Shader-TXA Requests - TDM:
     plain: Total TDM instructions processed by TXA.
     rst: Total TDM instructions processed by TXA.
     unit: Count per Normalization Unit
-  TDM Async Load Instructions:
-    plain: Number of TDM async load instructions processed by TXA.
-    rst: Number of TDM async load instructions processed by TXA.
+  TDM Async Load Requests:
+    plain: Number of TDM async load requests processed by TXA.
+    rst: Number of TDM async load requests processed by TXA.
     unit: Count per Normalization Unit
-  TDM Async Store Instructions:
-    plain: Number of TDM async store instructions processed by TXA.
-    rst: Number of TDM async store instructions processed by TXA.
+  TDM Async Store Requests:
+    plain: Number of TDM async store requests processed by TXA.
+    rst: Number of TDM async store requests processed by TXA.
     unit: Count per Normalization Unit
-  TDM Async Cluster Load Instructions:
-    plain: Number of TDM async cluster load instructions processed by TXA.
-    rst: Number of TDM async cluster load instructions processed by TXA.
+  TDM Async Cluster Load Requests:
+    plain: Number of TDM async cluster load requests processed by TXA.
+    rst: Number of TDM async cluster load requests processed by TXA.
     unit: Count per Normalization Unit
-  TDM Async Barrier Instruction:
-    plain: Number of TDM async barrier instructions processed by TXA.
-    rst: Number of TDM async barrier instructions processed by TXA.
+  TDM Async Barrier Requests:
+    plain: Number of TDM async barrier requests processed by TXA.
+    rst: Number of TDM async barrier requests processed by TXA.
     unit: Count per Normalization Unit
 Shader-TXA Requests - Block Load and Store:
   Block Load Instruction:
@@ -1250,50 +1250,50 @@ TXA-VMW Interface:
     rst: Percentage of cycles the TXA-to-GL0 bus is carrying flat-addressed VMEM requests.
     unit: Percent
 LDS and GL0 Data Bandwidth:
-  LDS Bandwidth - Load:
-    plain: Total load bandwidth from LDS to WGP registers.
-    rst: Total load bandwidth from LDS to WGP registers.
+  LDS Load Bandwidth:
+    plain: The number of bytes per second read from the LDS into WGP registers.
+    rst: The number of bytes per second read from the LDS into WGP registers.
     unit: GB/s
-  LDS Bandwidth - Store:
-    plain: Total store bandwidth from WGP registers to LDS.
-    rst: Total store bandwidth from WGP registers to LDS.
+  LDS Store Bandwidth:
+    plain: The number of bytes per second written from WGP registers to the LDS.
+    rst: The number of bytes per second written from WGP registers to the LDS.
     unit: GB/s
-  LDS Bandwidth - Atomics:
-    plain: Total read-modify-write bandwidth for atomics between LDS and WGP registers.
-    rst: Total read-modify-write bandwidth for atomics between LDS and WGP registers.
+  LDS Atomic Bandwidth:
+    plain: The number of bytes per second moved between the LDS and WGP registers by LDS atomic (read-modify-write) operations.
+    rst: The number of bytes per second moved between the LDS and WGP registers by LDS atomic (read-modify-write) operations.
     unit: GB/s
-  Async Load Bandwidth:
-    plain: Total async load bandwidth.
-    rst: Total async load bandwidth.
+  TXA Async Load Bandwidth:
+    plain: The number of bytes per second loaded by asynchronous load operations.
+    rst: The number of bytes per second loaded by asynchronous load operations.
     unit: GB/s
-  Async Store Bandwidth:
-    plain: Total async store bandwidth.
-    rst: Total async store bandwidth.
+  TXA Async Store Bandwidth:
+    plain: The number of bytes per second stored by asynchronous store operations.
+    rst: The number of bytes per second stored by asynchronous store operations.
     unit: GB/s
   TDM Load Bandwidth:
-    plain: Total TDM load bandwidth.
-    rst: Total TDM load bandwidth.
+    plain: The number of bytes per second loaded by the TDM.
+    rst: The number of bytes per second loaded by the TDM.
     unit: GB/s
   TDM Store Bandwidth:
-    plain: Total TDM store bandwidth.
-    rst: Total TDM store bandwidth.
+    plain: The number of bytes per second stored by the TDM.
+    rst: The number of bytes per second stored by the TDM.
     unit: GB/s
   GL0 Load Bandwidth:
-    plain: Total GL0 load bandwidth from WGP.
-    rst: Total GL0 load bandwidth from WGP.
+    plain: The number of bytes per second the WGP loads from the GL0 cache.
+    rst: The number of bytes per second the WGP loads from the GL0 cache.
     unit: GB/s
   GL0 Store Bandwidth:
-    plain: Total GL0 store bandwidth from WGP.
-    rst: Total GL0 store bandwidth from WGP.
+    plain: The number of bytes per second the WGP stores to the GL0 cache.
+    rst: The number of bytes per second the WGP stores to the GL0 cache.
     unit: GB/s
   GL0 Atomics Bandwidth:
-    plain: Total GL0 atomics bandwidth from WGP.
-    rst: Total GL0 atomics bandwidth from WGP.
+    plain: The number of bytes per second the WGP atomically updates in the GL0 cache.
+    rst: The number of bytes per second the WGP atomically updates in the GL0 cache.
     unit: GB/s
 WGP Cache Utilization (LDS + GL0):
   Utilization:
-    plain: Percentage of cycles GL1 has outstanding memory requests.
-    rst: Percentage of cycles GL1 has outstanding memory requests.
+    plain: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    rst: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
     unit: Percent
 Cache Requests:
   Total Requests:
@@ -1301,12 +1301,12 @@ Cache Requests:
     rst: Total GL0 cache requests.
     unit: Requests per Normalization Unit
   Total Requests - Read:
-    plain: Number of GL0 cache read requests.
-    rst: Number of GL0 cache read requests.
+    plain: Number of GL0 read requests.
+    rst: Number of GL0 read requests.
     unit: Requests per Normalization Unit
   Total Requests - Write:
-    plain: Number of GL0 cache write requests.
-    rst: Number of GL0 cache write requests.
+    plain: Number of GL0 write requests.
+    rst: Number of GL0 write requests.
     unit: Requests per Normalization Unit
   Request Stall Rate:
     plain: Percentage of VMW-busy cycles the GL0 cache cannot accept a new request.
@@ -1330,12 +1330,12 @@ Cache Requests:
     unit: Count per Normalization Unit
 Cache Lookup:
   Cache Lookup Hit Rate:
-    plain: GL0 cache lookup hit rate.
-    rst: GL0 cache lookup hit rate.
+    plain: Percentage of GL0 cache requests that hit in the cache.
+    rst: Percentage of GL0 cache requests that hit in the cache.
     unit: Percent
   Cache Sector Lookup Hit Rate:
-    plain: GL0 cache sector-level lookup hit rate.
-    rst: GL0 cache sector-level lookup hit rate.
+    plain: Percentage of GL0 cache sector lookups that hit in the cache.
+    rst: Percentage of GL0 cache sector lookups that hit in the cache.
     unit: Percent
   Cache Capacity Stall Rate:
     plain: Percentage of VMW-busy cycles stalled due to no free GL0 cache lines or MSHR entries.
@@ -1403,8 +1403,8 @@ LDS Accesses:
     rst: Percentage of VMW-busy cycles the LDS is executing an atomic.
     unit: Percent
   LDS Bank Conflict Stall Rate:
-    plain: Percentage of VMW-busy cycles stalled due to an LDS bank conflict.
-    rst: Percentage of VMW-busy cycles stalled due to an LDS bank conflict.
+    plain: Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
+    rst: Percentage of VMW-busy cycles LDS is stalled due to bank conflict.
     unit: Percent
   LDS Bank Conflict Stall Rate - Read:
     plain: Percentage of VMW-busy cycles stalled due to an LDS read bank conflict.
@@ -1422,7 +1422,7 @@ LDS Accesses:
     plain: Percentage of VMW-busy cycles stalled due to an LDS address conflict.
     rst: Percentage of VMW-busy cycles stalled due to an LDS address conflict.
     unit: Percent
-  Segment Conflict Stall Rate - LDS:
+  LDS Segment Conflict Stall Rate:
     plain: Percentage of VMW-busy cycles stalled due to a cross-port LDS segment conflict.
     rst: Percentage of VMW-busy cycles stalled due to a cross-port LDS segment conflict.
     unit: Percent
@@ -1457,16 +1457,16 @@ Set-Slot Dynamics:
     rst: Number of GL0-GL1 read requests.
     unit: Requests per Normalization Unit
   GL0-GL1 Read Bandwidth:
-    plain: Total GL0-GL1 read bandwidth.
-    rst: Total GL0-GL1 read bandwidth.
+    plain: The number of bytes per second of read requests from the GL0 cache to the GL1 cache.
+    rst: The number of bytes per second of read requests from the GL0 cache to the GL1 cache.
     unit: GB/s
   GL0-GL1 Write Requests:
     plain: Number of GL0-GL1 write requests.
     rst: Number of GL0-GL1 write requests.
     unit: Requests per Normalization Unit
   GL0-GL1 Write Bandwidth:
-    plain: Total GL0-GL1 write bandwidth.
-    rst: Total GL0-GL1 write bandwidth.
+    plain: The number of bytes per second of write requests from the GL0 cache to the GL1 cache.
+    rst: The number of bytes per second of write requests from the GL0 cache to the GL1 cache.
     unit: GB/s
   GL0-GL1 Atomic Requests - With Return:
     plain: Number of returning GL0-GL1 atomic requests.
@@ -1510,9 +1510,9 @@ Set-Slot Dynamics:
     plain: Percentage of VMW-busy cycles a GL0 SRAM read is stalled by an incoming GL1 fill.
     rst: Percentage of VMW-busy cycles a GL0 SRAM read is stalled by an incoming GL1 fill.
     unit: Percent
-  GL0 Cache RAM Write Stall by GL1 Return:
-    plain: Percentage of VMW-busy cycles a GL0 SRAM write is stalled by an incoming GL1 fill.
-    rst: Percentage of VMW-busy cycles a GL0 SRAM write is stalled by an incoming GL1 fill.
+  GL0 Cache Write Stall Rate - GL1 Read Return:
+    plain: Percentage of VMW-busy cycles a GL0 write is stalled by an incoming GL1 read-return.
+    rst: Percentage of VMW-busy cycles a GL0 write is stalled by an incoming GL1 read-return.
     unit: Percent
 GL0-UTCL0 Interface:
   UTCL0 Requests:
@@ -1566,8 +1566,8 @@ UTCL0-UTCL1 Interface:
     unit: Percent
 UTCL0 Lookup:
   UTCL0 Lookup Hit Rate:
-    plain: UTCL0 TLB hit rate.
-    rst: UTCL0 TLB hit rate.
+    plain: Percentage of UTCL0 TLB translation requests that hit.
+    rst: Percentage of UTCL0 TLB translation requests that hit.
     unit: Percent
   UTCL0 Lookup Hit-on-Miss Rate:
     plain: Percentage of UTCL0 translation requests served by a pending miss.
@@ -1610,11 +1610,11 @@ TXD Utilization:
     plain: Percentage of VMW-busy cycles the TXD is stalled because SPI is writing to the same shader VGPR bank.
     rst: Percentage of VMW-busy cycles the TXD is stalled because SPI is writing to the same shader VGPR bank.
     unit: Percent
-  TXD-Shader Bus Util - LDS Return:
+  TXD-Shader Bus Utilization - LDS Return:
     plain: Percentage of VMW-busy cycles the TXD-to-shader bus is carrying LDS results to VGPRs.
     rst: Percentage of VMW-busy cycles the TXD-to-shader bus is carrying LDS results to VGPRs.
     unit: Percent
-  TXD-Shader Bus Util - GL0 Return:
+  TXD-Shader Bus Utilization - GL0 Return:
     plain: Percentage of VMW-busy cycles the TXD-to-shader bus is carrying GL0 cache results to VGPRs.
     rst: Percentage of VMW-busy cycles the TXD-to-shader bus is carrying GL0 cache results to VGPRs.
     unit: Percent
@@ -1624,8 +1624,8 @@ TXD Utilization:
     unit: Percent
 GL1A Processing:
   GL1A Utilization:
-    plain: Percentage of cycles the GL1 Arbiter is processing requests from GL0.
-    rst: Percentage of cycles the GL1 Arbiter is processing requests from GL0.
+    plain: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
+    rst: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
     unit: Percent
   GL1A Request Bus Utilization:
     plain: Percentage of cycles the GL0-to-GL1 request bus is carrying valid requests.
@@ -1639,11 +1639,19 @@ GL1A Processing:
     plain: Total requests arbitrated by GL1 Arbiter.
     rst: Total requests arbitrated by GL1 Arbiter.
     unit: Requests per Normalization Unit
+  GL1A Request Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
 GL1C Utilization:
   GL1C Utilization:
     plain: Percentage of cycles the GL1 is processing requests.
     rst: Percentage of cycles the GL1 is processing requests.
     unit: Percent
+  GL1C Return Arbitration Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
   GL1C Buffer Full Stall:
     plain: Percentage of GL1-busy cycles GL1 is stalled due to no available buffer entries.
     rst: Percentage of GL1-busy cycles GL1 is stalled due to no available buffer entries.
@@ -1653,11 +1661,11 @@ GL1C Request:
     plain: Total requests processed by GL1.
     rst: Total requests processed by GL1.
     unit: Requests per Normalization Unit
-  GL1C Requests - Read:
+  GL1 Read Requests:
     plain: Number of GL1 read requests.
     rst: Number of GL1 read requests.
     unit: Requests per Normalization Unit
-  GL1C Requests - Write:
+  GL1 Write Requests:
     plain: Number of GL1 write requests.
     rst: Number of GL1 write requests.
     unit: Requests per Normalization Unit
@@ -1665,19 +1673,56 @@ GL1C Request:
     plain: Number of returning GL1 atomic requests.
     rst: Number of returning GL1 atomic requests.
     unit: Requests per Normalization Unit
-  GL1C Requests - Atomic without Return:
+  GL1C Requests - Atomic Without Return:
     plain: Number of non-returning GL1 atomic requests.
     rst: Number of non-returning GL1 atomic requests.
     unit: Requests per Normalization Unit
 GL1C Request Bandwidth:
   GL1C Request Bandwidth - Read:
-    plain: Total GL1 read bandwidth.
-    rst: Total GL1 read bandwidth.
+    plain: The number of bytes per second of read requests to the GL1 cache.
+    rst: The number of bytes per second of read requests to the GL1 cache.
     unit: GB/s
   GL1C Request Bandwidth - Write:
-    plain: Total GL1 write bandwidth.
-    rst: Total GL1 write bandwidth.
+    plain: The number of bytes per second of write requests to the GL1 cache.
+    rst: The number of bytes per second of write requests to the GL1 cache.
     unit: GB/s
+GL1C Multicast:
+  GL1C Multicast Tracker Depletion Stall:
+    plain: Percentage of GL1 Cache busy cycles the multicast tracker resource is depleted.
+    rst: Percentage of GL1 Cache busy cycles the multicast tracker resource is depleted.
+    unit: Percent
+  GL1C Multicast Request - 128B:
+    plain: Number of 128-byte multicast requests processed by GL1 Cache.
+    rst: Number of 128-byte multicast requests processed by GL1 Cache.
+    unit: Requests per Normalization Unit
+  GL1C Multicast Request - 256B:
+    plain: Number of 256-byte multicast requests processed by GL1 Cache.
+    rst: Number of 256-byte multicast requests processed by GL1 Cache.
+    unit: Requests per Normalization Unit
+  GL1C Request Bandwidth - Multicast:
+    plain: The number of bytes per second of multicast requests to the GL1 cache.
+    rst: The number of bytes per second of multicast requests to the GL1 cache.
+    unit: GB/s
+  GL1C Multicast Tracker 0 Timeout Rate:
+    plain: Percentage of GL1 Cache busy cycles multicast tracker 0 timed out.
+    rst: Percentage of GL1 Cache busy cycles multicast tracker 0 timed out.
+    unit: Percent
+  GL1C Multicast Tracker 1 Timeout Rate:
+    plain: Percentage of GL1 Cache busy cycles multicast tracker 1 timed out.
+    rst: Percentage of GL1 Cache busy cycles multicast tracker 1 timed out.
+    unit: Percent
+  GL1C Multicast Tracker 2 Timeout Rate:
+    plain: Percentage of GL1 Cache busy cycles multicast tracker 2 timed out.
+    rst: Percentage of GL1 Cache busy cycles multicast tracker 2 timed out.
+    unit: Percent
+  GL1C Multicast Tracker 3 Timeout Rate:
+    plain: Percentage of GL1 Cache busy cycles multicast tracker 3 timed out.
+    rst: Percentage of GL1 Cache busy cycles multicast tracker 3 timed out.
+    unit: Percent
+  GL1C Multicast-to-Unicast Downgrade Rate:
+    plain: Percentage of GL1 Cache busy cycles a multicast request was downgraded to unicast.
+    rst: Percentage of GL1 Cache busy cycles a multicast request was downgraded to unicast.
+    unit: Percent
 GL1C-GLARB Interface:
   GL1C-GLARB Read Requests:
     plain: Number of GL1 to Graphics Level Arbiter read requests.
@@ -1691,7 +1736,7 @@ GL1C-GLARB Interface:
     plain: Number of 64-byte GL1 to Graphics Level Arbiter read requests.
     rst: Number of 64-byte GL1 to Graphics Level Arbiter read requests.
     unit: Requests per Normalization Unit
-  GL1C-GLARB Read Requests - 128B:
+  GL1-GL2 Read Requests (128B):
     plain: Number of 128-byte GL1 to Graphics Level Arbiter read requests.
     rst: Number of 128-byte GL1 to Graphics Level Arbiter read requests.
     unit: Requests per Normalization Unit
@@ -1719,60 +1764,35 @@ GL1C-GLARB Interface:
     plain: Number of 256-byte GL1 to Graphics Level Arbiter write requests.
     rst: Number of 256-byte GL1 to Graphics Level Arbiter write requests.
     unit: Requests per Normalization Unit
+  GL1C-GLARB Read Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
+  GL1C-GLARB Write Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
   GL1C-GLARB Read Bandwidth:
-    plain: Total GL1 to Graphics Level Arbiter read bandwidth.
-    rst: Total GL1 to Graphics Level Arbiter read bandwidth.
+    plain: The number of bytes per second of read requests from the GL1 cache to the Graphics Level Arbiter.
+    rst: The number of bytes per second of read requests from the GL1 cache to the Graphics Level Arbiter.
     unit: GB/s
   GL1C-GLARB Write Bandwidth:
-    plain: Total GL1 to Graphics Level Arbiter write bandwidth.
-    rst: Total GL1 to Graphics Level Arbiter write bandwidth.
+    plain: The number of bytes per second of write requests from the GL1 cache to the Graphics Level Arbiter. The number of bytes is the number of 32-byte write data beats multiplied by 32.
+    rst: The number of bytes per second of write requests from the GL1 cache to the Graphics Level Arbiter. The number of bytes is the number of 32-byte write data beats multiplied by 32.
     unit: GB/s
   GL1C-GLARB Write ACKs:
     plain: Number of write acknowledgments received from Graphics Level Arbiter by GL1.
     rst: Number of write acknowledgments received from Graphics Level Arbiter by GL1.
     unit: Count per Normalization Unit
-GL1C Multicast:
-  GL1C Multicast Tracker Depletion Stall:
-    plain: Percentage of GL1 Cache busy cycles the multicast tracker resource is depleted.
-    rst: Percentage of GL1 Cache busy cycles the multicast tracker resource is depleted.
-    unit: Percent
-  GL1C Multicast Request - 128B:
-    plain: Number of 128-byte multicast requests processed by GL1 Cache.
-    rst: Number of 128-byte multicast requests processed by GL1 Cache.
-    unit: Requests per Normalization Unit
-  GL1C Multicast Request - 256B:
-    plain: Number of 256-byte multicast requests processed by GL1 Cache.
-    rst: Number of 256-byte multicast requests processed by GL1 Cache.
-    unit: Requests per Normalization Unit
-  GL1C Request Bandwidth - Multicast:
-    plain: Total GL1 Cache multicast bandwidth.
-    rst: Total GL1 Cache multicast bandwidth.
-    unit: GB/s
-  GL1C Multicast Tracker 0 Timeout Rate:
-    plain: Percentage of GL1 Cache busy cycles multicast tracker 0 timed out.
-    rst: Percentage of GL1 Cache busy cycles multicast tracker 0 timed out.
-    unit: Percent
-  GL1C Multicast Tracker 1 Timeout Rate:
-    plain: Percentage of GL1 Cache busy cycles multicast tracker 1 timed out.
-    rst: Percentage of GL1 Cache busy cycles multicast tracker 1 timed out.
-    unit: Percent
-  GL1C Multicast Tracker 2 Timeout Rate:
-    plain: Percentage of GL1 Cache busy cycles multicast tracker 2 timed out.
-    rst: Percentage of GL1 Cache busy cycles multicast tracker 2 timed out.
-    unit: Percent
-  GL1C Multicast Tracker 3 Timeout Rate:
-    plain: Percentage of GL1 Cache busy cycles multicast tracker 3 timed out.
-    rst: Percentage of GL1 Cache busy cycles multicast tracker 3 timed out.
-    unit: Percent
-  GL1C Multicast-to-Unicast Downgrade Rate:
-    plain: Percentage of GL1 Cache busy cycles a multicast request was downgraded to unicast.
-    rst: Percentage of GL1 Cache busy cycles a multicast request was downgraded to unicast.
-    unit: Percent
 GLARBC Utilization:
   Utilization:
-    plain: Percentage of GLARBA/GLARBC cycles the Graphics Level Arbiter is actively processing requests.
-    rst: Percentage of GLARBA/GLARBC cycles the Graphics Level Arbiter is actively processing requests.
+    plain: Percentage of cycles the Graphics Level Arbiter is processing requests.
+    rst: Percentage of cycles the Graphics Level Arbiter is processing requests.
     unit: Percent
+  GLARBC Return Arbitration Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
   GLARBC Buffer Full Stall:
     plain: Percentage of Graphics Level Arbiter busy cycles when it's stalled due to a full buffer.
     rst: Percentage of Graphics Level Arbiter busy cycles when it's stalled due to a full buffer.
@@ -1790,6 +1810,10 @@ GLARBA Processing:
     plain: Total requests arbitrated by Graphics Level Arbiter.
     rst: Total requests arbitrated by Graphics Level Arbiter.
     unit: Requests per Normalization Unit
+  GLARBA Request Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
 GLARBC Request:
   GLARBC Requests:
     plain: Total requests forwarded by Graphics Level Arbiter to GL2.
@@ -1807,18 +1831,18 @@ GLARBC Request:
     plain: Number of returning Graphics Level Arbiter atomic requests.
     rst: Number of returning Graphics Level Arbiter atomic requests.
     unit: Requests per Normalization Unit
-  GLARBC Requests - Atomic without Return:
+  GLARBC Requests - Atomic Without Return:
     plain: Number of non-returning Graphics Level Arbiter atomic requests.
     rst: Number of non-returning Graphics Level Arbiter atomic requests.
     unit: Requests per Normalization Unit
 GLARBC Request Bandwidth:
   GLARBC Request Bandwidth - Read:
-    plain: Total Graphics Level Arbiter read bandwidth.
-    rst: Total Graphics Level Arbiter read bandwidth.
+    plain: The number of bytes per second of read requests from the Graphics Level Arbiter to the GL2 cache.
+    rst: The number of bytes per second of read requests from the Graphics Level Arbiter to the GL2 cache.
     unit: GB/s
   GLARBC Request Bandwidth - Write:
-    plain: Total Graphics Level Arbiter write bandwidth.
-    rst: Total Graphics Level Arbiter write bandwidth.
+    plain: The number of bytes per second of write requests from the Graphics Level Arbiter to the GL2 cache.
+    rst: The number of bytes per second of write requests from the Graphics Level Arbiter to the GL2 cache.
     unit: GB/s
   GLARBC-Client Write ACKs:
     plain: Number of write acknowledgments returned from Graphics Level Arbiter to GL1 clients.
@@ -1829,14 +1853,18 @@ GLARBC-GL2 Interface:
     plain: Average Graphics Level Arbiter to GL2 read latency.
     rst: Average Graphics Level Arbiter to GL2 read latency.
     unit: Cycles
+  GLARBC-GL2 Write Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
   GLARBC-GL2 Write ACKs:
     plain: Number of write acknowledgments received from GL2 by Graphics Level Arbiter.
     rst: Number of write acknowledgments received from GL2 by Graphics Level Arbiter.
     unit: Count per Normalization Unit
 GL2A Processing:
   Utilization:
-    plain: Percentage of GL2 Arbiter cycles when it's distributing requests across GL2C partitions.
-    rst: Percentage of GL2 Arbiter cycles when it's distributing requests across GL2C partitions.
+    plain: Percentage of cycles the GL2 Arbiter is distributing requests across GL2 Cache partitions.
+    rst: Percentage of cycles the GL2 Arbiter is distributing requests across GL2 Cache partitions.
     unit: Percent
   GL2A-GL2C0 Request:
     plain: Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 0.
@@ -1888,13 +1916,13 @@ GL2A Processing:
     unit: Percent
 GL2C Utilization:
   GL2C Utilization:
-    plain: Percentage of GL2 Cache cycles when it's busy.
-    rst: Percentage of GL2 Cache cycles when it's busy.
+    plain: Percentage of cycles the GL2 cache is busy.
+    rst: Percentage of cycles the GL2 cache is busy.
     unit: Percent
 GL2C Cache Lookup:
   GL2 Cache Hit Rate:
-    plain: GL2 cache hit rate.
-    rst: GL2 cache hit rate.
+    plain: Percentage of GL2 cache requests that hit in the cache.
+    rst: Percentage of GL2 cache requests that hit in the cache.
     unit: Percent
   GL2 Pipeline Stall:
     plain: Percentage of GL2 Cache busy cycles the tag pipeline is stalled.
@@ -1957,145 +1985,158 @@ GL2C-EA Stalls:
     plain: Percentage of GL2 Cache busy cycles when it's stalled on GL2 Cache to EA data channel VC7.
     rst: Percentage of GL2 Cache busy cycles when it's stalled on GL2 Cache to EA data channel VC7.
     unit: Percent
+GL2C-EA Interface - Latencies:
+  GL2-EA Read Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
+  GL2-EA Write Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
+  GL2-EA Atomic Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
 GL2C-EA Interface - HBM Bandwidth:
   GL2-EA HBM Bandwidth - Read:
-    plain: Total HBM read bandwidth between GL2 and EA.
-    rst: Total HBM read bandwidth between GL2 and EA.
+    plain: The number of bytes per second of read requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of read requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA HBM Bandwidth - Write:
-    plain: Total HBM write bandwidth between GL2 and EA.
-    rst: Total HBM write bandwidth between GL2 and EA.
+    plain: The number of bytes per second of write requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of write requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA HBM Bandwidth - Atomic:
-    plain: Total HBM atomic bandwidth between GL2 and EA.
-    rst: Total HBM atomic bandwidth between GL2 and EA.
+    plain: The number of bytes per second of atomic requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of atomic requests from the GL2 cache to HBM through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
 GL2C-EA Interface - Host CPU Bandwidth:
   GL2-EA Host CPU Bandwidth - Read:
-    plain: Total host CPU read bandwidth between GL2 and EA.
-    rst: Total host CPU read bandwidth between GL2 and EA.
+    plain: The number of bytes per second of read requests from the GL2 cache to host CPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of read requests from the GL2 cache to host CPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA Host CPU Bandwidth - Write:
-    plain: Total host CPU write bandwidth between GL2 and EA.
-    rst: Total host CPU write bandwidth between GL2 and EA.
+    plain: The number of bytes per second of write requests from the GL2 cache to host CPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of write requests from the GL2 cache to host CPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA Host CPU Bandwidth - Atomic:
-    plain: Total host CPU atomic bandwidth between GL2 and EA.
-    rst: Total host CPU atomic bandwidth between GL2 and EA.
+    plain: The number of bytes per second of atomic requests from the GL2 cache to host CPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of atomic requests from the GL2 cache to host CPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
 GL2C-EA Interface - PCIe Bandwidth:
   GL2-EA PCIE Bandwidth - Read:
-    plain: Total PCIe read bandwidth between GL2 and EA.
-    rst: Total PCIe read bandwidth between GL2 and EA.
+    plain: The number of bytes per second of read requests from the GL2 cache to PCIe through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of read requests from the GL2 cache to PCIe through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA PCIE Bandwidth - Write:
-    plain: Total PCIe write bandwidth between GL2 and EA.
-    rst: Total PCIe write bandwidth between GL2 and EA.
+    plain: The number of bytes per second of write requests from the GL2 cache to PCIe through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of write requests from the GL2 cache to PCIe through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA PCIE Bandwidth - Atomic:
-    plain: Total PCIe atomic bandwidth between GL2 and EA.
-    rst: Total PCIe atomic bandwidth between GL2 and EA.
+    plain: The number of bytes per second of atomic requests from the GL2 cache to PCIe through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of atomic requests from the GL2 cache to PCIe through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
 GL2C-EA Interface - Remote Node Bandwidth:
   GL2-EA Remote Node Bandwidth - Read:
-    plain: Total remote node read bandwidth between GL2 and EA.
-    rst: Total remote node read bandwidth between GL2 and EA.
+    plain: The number of bytes per second of read requests from the GL2 cache to remote-node memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of read requests from the GL2 cache to remote-node memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA Remote Node Bandwidth - Write:
-    plain: Total remote node write bandwidth between GL2 and EA.
-    rst: Total remote node write bandwidth between GL2 and EA.
+    plain: The number of bytes per second of write requests from the GL2 cache to remote-node memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of write requests from the GL2 cache to remote-node memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA Remote Node Bandwidth - Atomic:
-    plain: Total remote node atomic bandwidth between GL2 and EA.
-    rst: Total remote node atomic bandwidth between GL2 and EA.
+    plain: The number of bytes per second of atomic requests from the GL2 cache to remote-node memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of atomic requests from the GL2 cache to remote-node memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
 GL2C-EA Interface - Remote Memory Bandwidth (Same Node):
   GL2-EA Remote Memory Bandwidth - Read:
-    plain: Total same-node peer GPU read bandwidth between GL2 and EA.
-    rst: Total same-node peer GPU read bandwidth between GL2 and EA.
+    plain: The number of bytes per second of read requests from the GL2 cache to same-node peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of read requests from the GL2 cache to same-node peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA Remote Memory Bandwidth - Write:
-    plain: Total same-node peer GPU write bandwidth between GL2 and EA.
-    rst: Total same-node peer GPU write bandwidth between GL2 and EA.
+    plain: The number of bytes per second of write requests from the GL2 cache to same-node peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of write requests from the GL2 cache to same-node peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
   GL2-EA Remote Memory Bandwidth - Atomic:
-    plain: Total same-node peer GPU atomic bandwidth between GL2 and EA.
-    rst: Total same-node peer GPU atomic bandwidth between GL2 and EA.
+    plain: The number of bytes per second of atomic requests from the GL2 cache to same-node peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
+    rst: The number of bytes per second of atomic requests from the GL2 cache to same-node peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
     unit: GB/s
 EA Utilization:
   Utilization:
-    plain: Percentage of cycles EA is busy processing memory requests.
-    rst: Percentage of cycles EA is busy processing memory requests.
+    plain: Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO, or fabric.
+    rst: Percentage of cycles the Efficiency Arbiter is routing requests toward HBM, IO, or fabric.
     unit: Percent
 EA Traffic Bandwidth:
-  DRAM Bandwidth - Read:
-    plain: Total HBM read bandwidth.
-    rst: Total HBM read bandwidth.
+  DRAM Read Bandwidth:
+    plain: The number of bytes per second read from HBM (DRAM) through the EA.
+    rst: The number of bytes per second read from HBM (DRAM) through the EA.
     unit: GB/s
-  DRAM Bandwidth - Write:
-    plain: Total HBM write bandwidth.
-    rst: Total HBM write bandwidth.
+  DRAM Write Bandwidth:
+    plain: The number of bytes per second written to HBM (DRAM) through the EA.
+    rst: The number of bytes per second written to HBM (DRAM) through the EA.
     unit: GB/s
-  IO Bandwidth - Read:
-    plain: PCI-E and other IO read bandwidth from host CPU memory (pinned or mapped) through the EA.
-    rst: PCI-E and other IO read bandwidth from host CPU memory (pinned or mapped) through the EA.
+  IO Read Bandwidth:
+    plain: The number of bytes per second read from host CPU memory (pinned or mapped) through the EA.
+    rst: The number of bytes per second read from host CPU memory (pinned or mapped) through the EA.
     unit: GB/s
-  IO Bandwidth - Write:
-    plain: PCI-E and other IO write bandwidth to host CPU memory through the EA.
-    rst: PCI-E and other IO write bandwidth to host CPU memory through the EA.
+  IO Write Bandwidth:
+    plain: The number of bytes per second written to host CPU memory (pinned or mapped) through the EA.
+    rst: The number of bytes per second written to host CPU memory (pinned or mapped) through the EA.
     unit: GB/s
-  HDM Bandwidth - Read:
-    plain: Host Data Memory (unified memory pages) read bandwidth through the EA.
-    rst: Host Data Memory (unified memory pages) read bandwidth through the EA.
+  HDM Read Bandwidth:
+    plain: The number of bytes per second read from Host Data Memory (unified memory pages) through the EA.
+    rst: The number of bytes per second read from Host Data Memory (unified memory pages) through the EA.
     unit: GB/s
-  HDM Bandwidth - Write:
-    plain: Host Data Memory (unified memory pages) write bandwidth through the EA.
-    rst: Host Data Memory (unified memory pages) write bandwidth through the EA.
+  HDM Write Bandwidth:
+    plain: The number of bytes per second written to Host Data Memory (unified memory pages) through the EA.
+    rst: The number of bytes per second written to Host Data Memory (unified memory pages) through the EA.
     unit: GB/s
-  GMI Bandwidth - Read:
-    plain: GMI read bandwidth from peer GPU HBM via Infinity Fabric.
-    rst: GMI read bandwidth from peer GPU HBM via Infinity Fabric.
+  GMI Read Bandwidth:
+    plain: The number of bytes per second read from peer GPU HBM over Infinity Fabric through the EA.
+    rst: The number of bytes per second read from peer GPU HBM over Infinity Fabric through the EA.
     unit: GB/s
-  GMI Bandwidth - Write:
-    plain: GMI write bandwidth to peer GPU HBM via Infinity Fabric.
-    rst: GMI write bandwidth to peer GPU HBM via Infinity Fabric.
+  GMI Write Bandwidth:
+    plain: The number of bytes per second written to peer GPU HBM over Infinity Fabric through the EA.
+    rst: The number of bytes per second written to peer GPU HBM over Infinity Fabric through the EA.
     unit: GB/s
 EA-SDP Interface - Outstanding Requests:
   Outstanding Requests:
-    plain: Average number of in-flight requests from EA to SDP.
-    rst: Average number of in-flight requests from EA to SDP.
+    plain: Average number of in-flight requests from EA to the Scalable Data Port (SDP).
+    rst: Average number of in-flight requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - IO Read:
-    plain: Average in-flight PCI-E and other IO read requests from EA to SDP.
-    rst: Average in-flight PCI-E and other IO read requests from EA to SDP.
+    plain: Average in-flight PCI-E and other IO read requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight PCI-E and other IO read requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - IO Write:
-    plain: Average in-flight PCI-E and other IO write requests from EA to SDP.
-    rst: Average in-flight PCI-E and other IO write requests from EA to SDP.
+    plain: Average in-flight PCI-E and other IO write requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight PCI-E and other IO write requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - DRAM Read:
-    plain: Average in-flight HBM read requests from EA to SDP.
-    rst: Average in-flight HBM read requests from EA to SDP.
+    plain: Average in-flight HBM read requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight HBM read requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - DRAM Write:
-    plain: Average in-flight HBM write requests from EA to SDP.
-    rst: Average in-flight HBM write requests from EA to SDP.
+    plain: Average in-flight HBM write requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight HBM write requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - GMI Read:
-    plain: Average in-flight GMI read requests from EA to SDP.
-    rst: Average in-flight GMI read requests from EA to SDP.
+    plain: Average in-flight GMI read requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight GMI read requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - GMI Write:
-    plain: Average in-flight GMI write requests from EA to SDP.
-    rst: Average in-flight GMI write requests from EA to SDP.
+    plain: Average in-flight GMI write requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight GMI write requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - HDM Read:
-    plain: Average in-flight HDM read requests from EA to SDP.
-    rst: Average in-flight HDM read requests from EA to SDP.
+    plain: Average in-flight HDM read requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight HDM read requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - HDM Write:
-    plain: Average in-flight HDM write requests from EA to SDP.
-    rst: Average in-flight HDM write requests from EA to SDP.
+    plain: Average in-flight HDM write requests from EA to the Scalable Data Port (SDP).
+    rst: Average in-flight HDM write requests from EA to the Scalable Data Port (SDP).
     unit: Requests
   Outstanding Requests - Probe Request:
     plain: Time-averaged number of in-flight cache coherence probe requests from EA.
@@ -2107,28 +2148,28 @@ EA-SDP Interface - Outstanding Requests:
     unit: Requests
 EA-SDP Interface - Stalls:
   EA Stalled by SDP:
-    plain: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline.
-    rst: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline.
+    plain: Percentage of EA-busy cycles where the EA has a request ready but cannot send it to the Scalable Data Port (SDP), the EA's link to the data fabric.
+    rst: Percentage of EA-busy cycles where the EA has a request ready but cannot send it to the Scalable Data Port (SDP), the EA's link to the data fabric.
     unit: Percent
   EA Stalled by SDP - IO Read:
-    plain: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on PCI-E and other IO read path.
-    rst: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on PCI-E and other IO read path.
+    plain: Percentage of EA-busy cycles where the EA cannot send IO read requests to the Scalable Data Port (SDP).
+    rst: Percentage of EA-busy cycles where the EA cannot send IO read requests to the Scalable Data Port (SDP).
     unit: Percent
   EA Stalled by SDP - IO Write:
-    plain: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on PCI-E and other IO write path.
-    rst: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on PCI-E and other IO write path.
+    plain: Percentage of EA-busy cycles where the EA cannot send IO write requests to the Scalable Data Port (SDP).
+    rst: Percentage of EA-busy cycles where the EA cannot send IO write requests to the Scalable Data Port (SDP).
     unit: Percent
   EA Stalled by SDP - DRAM:
-    plain: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on DRAM path.
-    rst: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on DRAM path.
+    plain: Percentage of EA-busy cycles where the EA cannot send DRAM requests to the Scalable Data Port (SDP).
+    rst: Percentage of EA-busy cycles where the EA cannot send DRAM requests to the Scalable Data Port (SDP).
     unit: Percent
   EA Stalled by SDP - GMI:
-    plain: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on GMI path.
-    rst: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on GMI path.
+    plain: Percentage of EA-busy cycles where the EA cannot send GMI requests to the Scalable Data Port (SDP).
+    rst: Percentage of EA-busy cycles where the EA cannot send GMI requests to the Scalable Data Port (SDP).
     unit: Percent
   EA Stalled by SDP - HDM:
-    plain: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on HDM path.
-    rst: Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on HDM path.
+    plain: Percentage of EA-busy cycles where the EA cannot send HDM requests to the Scalable Data Port (SDP).
+    rst: Percentage of EA-busy cycles where the EA cannot send HDM requests to the Scalable Data Port (SDP).
     unit: Percent
 CHC Utilization:
   Utilization:
@@ -2140,6 +2181,10 @@ CHC Utilization:
     rst: Percentage of Central Hub Buffer busy cycles when it's stalled due to being full.
     unit: Percent
 CHA Arbitration:
+  Request Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
   CHA-CHC0 Request Stall Rate:
     plain: Percentage of Central Hub Arbiter busy cycles when it's stalled forwarding to Central Hub Buffer partition 0.
     rst: Percentage of Central Hub Arbiter busy cycles when it's stalled forwarding to Central Hub Buffer partition 0.
@@ -2211,13 +2256,25 @@ CHC Requests:
     unit: Requests per Normalization Unit
 CHC Bandwidth and Latency:
   CHC Bandwidth - Read:
-    plain: Read bandwidth through Central Hub Buffer.
-    rst: Read bandwidth through Central Hub Buffer.
+    plain: The number of bytes per second read through the Central Hub Buffer.
+    rst: The number of bytes per second read through the Central Hub Buffer.
     unit: GB/s
   CHC Bandwidth - Write:
-    plain: Write bandwidth through Central Hub Buffer.
-    rst: Write bandwidth through Central Hub Buffer.
+    plain: The number of bytes per second written through the Central Hub Buffer. The number of bytes is the number of 32-byte write data beats multiplied by 32.
+    rst: The number of bytes per second written through the Central Hub Buffer. The number of bytes is the number of 32-byte write data beats multiplied by 32.
     unit: GB/s
+  CHC-GL2 Latency - Read:
+    plain: ''
+    rst: ''
+    unit: Cycles
+  CHC-GL2 Latency - Write:
+    plain: ''
+    rst: ''
+    unit: Cycles
+  CHC Return Arbitration Latency:
+    plain: ''
+    rst: ''
+    unit: Cycles
 UTCL1 Metrics:
   Total Requests from UTCL0:
     plain: Total address translation requests received by UTCL1 from UTCL0.
@@ -2228,8 +2285,8 @@ UTCL1 Metrics:
     rst: Total translation results returned from UTCL1 to UTCL0.
     unit: Count per Normalization Unit
   UTCL1 Lookup Hit Rate:
-    plain: UTCL1 TLB hit rate.
-    rst: UTCL1 TLB hit rate.
+    plain: Percentage of UTCL1 TLB requests that hit.
+    rst: Percentage of UTCL1 TLB requests that hit.
     unit: Percent
   UTCL1-UTCL2 Requests:
     plain: Number of UTCL1 TLB misses forwarded to UTCL2.
