@@ -184,8 +184,8 @@ The finalizer extension and external semaphore operations are not supported.
 `hsa_amd_svm_prefetch_async` requires confirmed migration completion. Linux KFD
 supports this only when the native endpoint advertises the explicitly negotiated
 checked-prefetch protocol. Ordinary drivers and inactive contexts report
-`HSA_STATUS_ERROR_NOT_SUPPORTED`. The local kernel correction is implemented;
-its hardware qualification status is recorded in
+`HSA_STATUS_ERROR_NOT_SUPPORTED`. The local kernel correction is qualified on gfx1201;
+its exact driver/kernel coverage is recorded in
 [the SVM investigation](../../docs/testing/rocr-gfx1201-svm-prefetch.md).
 
 Default fatal handling captures GPU core dumps before aborting on unhandled
