@@ -6,32 +6,14 @@ on:
     branches:
       - develop
     paths:
-      - 'projects/rocprofiler-systems/**'
-      - 'projects/rocprofiler-systems/source/python/gui/*.py'
-      - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
-      - '!docs/**'
-      - '!projects/*/docs/**'
+      - '.github/workflows/rocprofiler-systems-python.yml'
+      - 'projects/rocprofiler-systems/pyproject.toml'
+      - 'projects/rocprofiler-systems/**/*.py'
   pull_request:
     paths:
-      - 'projects/rocprofiler-systems/**'
-      - 'projects/rocprofiler-systems/source/python/gui/*.py'
-      - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
-      - '!**/*.md'
-      - '!**/*.rtf'
-      - '!**/*.rst'
-      - '!**/.markdownlint-ci2.yaml'
-      - '!**/.readthedocs.yaml'
-      - '!**/.spellcheck.local.yaml'
-      - '!**/.wordlist.txt'
-      - '!docs/**'
-      - '!projects/*/docs/**'
+      - '.github/workflows/rocprofiler-systems-python.yml'
+      - 'projects/rocprofiler-systems/pyproject.toml'
+      - 'projects/rocprofiler-systems/**/*.py'
 
 permissions:
   contents: read
@@ -43,28 +25,21 @@ concurrency:
 jobs:
   linting:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
 
     steps:
-    - uses: actions/checkout@v6
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       with:
         sparse-checkout: projects/rocprofiler-systems
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.10"
     - name: Install dependencies
-      working-directory: projects/rocprofiler-systems/source/python/gui
       run: |
         python -m pip install --upgrade pip
-        pip install flake8
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    - name: Lint with flake8
-      working-directory: projects/rocprofiler-systems/source/python/gui
+        pip install ruff==0.17.1
+    - name: Lint with ruff
+      working-directory: projects/rocprofiler-systems
       run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # flake8 options are defined in setup.cfg
-        flake8 . --count --statistics
+        # ruff options are defined in pyproject.toml
+        ruff check .

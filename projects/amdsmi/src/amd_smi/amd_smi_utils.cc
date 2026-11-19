@@ -34,8 +34,13 @@
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/scoped_fd.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_io_link.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 std::string leftTrim(const std::string& s) {
@@ -176,7 +181,7 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   DIR* dh;
   struct dirent* contents;
-  std::string device_path = "/sys/class/drm/" + device->get_gpu_path();
+  std::string device_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path();
   std::string directory_path = device_path + "/device/hwmon/";
 
   if (!isAMDGPU(device_path)) {
@@ -205,16 +210,16 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
 amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           amdsmi_board_info_t* info) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string model_number_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
-  std::string product_serial_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
-  std::string fru_id_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/fru_id");
-  std::string manufacturer_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
-  std::string product_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
+  std::string model_number_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_number");
+  std::string product_serial_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                    device->get_gpu_path() + std::string("/device/serial_number");
+  std::string fru_id_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                            std::string("/device/fru_id");
+  std::string manufacturer_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                       device->get_gpu_path() + std::string("/device/manufacturer");
+  std::string product_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_name");
 
   auto ret_mod =
       openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
@@ -412,7 +417,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+  std::string fullpath =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device";
 
   std::string smclk_min_max_fullpath = "";
 
@@ -481,7 +487,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
+  std::string fullpath =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device/ras/features";
   std::ifstream f(fullpath.c_str());
   std::string tmp_str;
 
@@ -497,14 +504,28 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;
-
-  *enabled_blocks = strtoul(tmp_str.c_str(), nullptr, 16);
   f.close();
 
-  if (*enabled_blocks == 0 || *enabled_blocks == ULONG_MAX) {
+  // strtoul() alone can't tell "parsed 0" from "parsed nothing" -- both leave
+  // the result at 0 -- so confirm real hex digits were consumed via endptr. A
+  // cleanly-parsed 0 is a legitimate "no blocks enabled" mask, not a failure.
+  // ULONG_MAX stays a failure sentinel regardless: no real ASIC defines all 64
+  // mask bits (see AMDSMI_GPU_BLOCK_LAST), so a full set of 1s means a garbled
+  // read, not a plausible value.
+  char* endptr = nullptr;
+  unsigned long parsed = strtoul(tmp_str.c_str(), &endptr, 16);
+  bool parse_failed = endptr == tmp_str.c_str() || *endptr != '\0';
+  if (parse_failed || parsed == ULONG_MAX) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | " << fullpath << " line: \"" << line << "\""
+       << "; parsed token: \"" << tmp_str << "\""
+       << "; reason: " << (parse_failed ? "unparsable token" : "implausible all-bits-set value")
+       << "; returning AMDSMI_STATUS_API_FAILED";
+    LOG_DEBUG(ss);
     return AMDSMI_STATUS_API_FAILED;
   }
 
+  *enabled_blocks = parsed;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -514,8 +535,8 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   std::string line;
   std::vector<std::string> badPagesVec;
 
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/gpu_vram_bad_pages");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/ras/gpu_vram_bad_pages");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -608,35 +629,6 @@ amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt) {
-  SMIGPUDEVICE_MUTEX(device->get_mutex())
-  char str[10];
-
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/umc_err_count");
-  std::ifstream f(fullpath.c_str());
-
-  if (f.fail()) {
-    // fall back to aca file
-    fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
-    f.open(fullpath.c_str());
-    if (f.fail()) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
-
-  std::string line;
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->uncorrectable_count));
-
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->correctable_count));
-
-  f.close();
-
-  return AMDSMI_STATUS_SUCCESS;
-}
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
@@ -696,6 +688,23 @@ amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uin
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device) {
+  uint64_t kfd_gpu_id = 0;
+  const rsmi_status_t status = rsmi_dev_guid_get(device->get_gpu_id(), &kfd_gpu_id);
+  const auto& kfd_nodes = amd::smi::RocmSMI::getInstance().kfd_node_map();
+  const auto node = status == RSMI_STATUS_SUCCESS ? kfd_nodes.find(kfd_gpu_id) : kfd_nodes.end();
+  if (node == kfd_nodes.end()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | GPU " << device->get_gpu_id() << ": rsmi_dev_guid_get "
+       << amd::smi::getRSMIStatusString(status, false);
+    if (status == RSMI_STATUS_SUCCESS) ss << ", gpu_id " << kfd_gpu_id << " has no KFD node";
+    ss << "; keeping the PCIe link values";
+    LOG_INFO(ss);
+    return false;
+  }
+  return node->second->numa_node_type() == amd::smi::IOLINK_TYPE_XGMI;
+}
+
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
@@ -709,7 +718,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   std::ostringstream ss;
   std::string render_name = device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
+  if (render_name.empty() || !device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -797,8 +806,8 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/pp_features");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/pp_features");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -826,7 +835,8 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         "/device/vcn_busy_percent";
 
   std::ifstream fs(fullpath.c_str());
   if (fs.fail()) {
@@ -906,21 +916,7 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name) {
-  std::string file_path = folder + "/" + file_name;
-  std::ifstream file(file_path.c_str(), std::ifstream::in);
-  if (!file.is_open()) {
-    return 0xFFFF;
-  } else {
-    std::string line;
-    getline(file, line);
-    return static_cast<uint32_t>(stoi(line));
-  }
-
-  return 0;
-}
-
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name) {
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name) {
   std::stringstream temp;
   std::string file_path = folder + "/" + file_name;
   std::ifstream file(file_path.c_str(), std::ifstream::in);
@@ -937,27 +933,6 @@ std::string smi_brcm_get_value_string(const std::string& folder, const std::stri
   }
 
   return temp.str();
-}
-
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data) {
-  std::string result;
-  char buffer[128];
-
-  // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
-    if (f) pclose(f);
-  });
-  if (!pipe) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-
-  // Read the output of the command into the buffer
-  while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-    result += buffer;
-  }
-  *data = result;
-
-  return AMDSMI_STATUS_SUCCESS;
 }
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
@@ -1391,8 +1366,8 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
   }
 
   uint32_t drm_render = device->get_drm_render_minor();
-  std::string sysfs_path =
-      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+  std::string sysfs_path = amd::smi::test_hooks::SysfsDrmRoot() + "/renderD" +
+                           std::to_string(drm_render) + "/device/" + pp_dpm_file;
 
   std::ifstream file(sysfs_path);
   if (!file.good()) {

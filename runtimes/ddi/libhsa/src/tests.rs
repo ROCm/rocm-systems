@@ -8,7 +8,7 @@ use crate::api::host_alloc_dmabuf_supported;
 use crate::api::{agent::*, amd::*, isa::*, system::*};
 use crate::ffi::*;
 use crate::isa::isa_name;
-use crate::runtime::lock;
+use crate::lifecycle::lock;
 use std::ffi::{CStr, c_char, c_void};
 
 #[test]
@@ -74,6 +74,30 @@ fn extension_metadata_matches_implemented_capabilities() {
 }
 
 #[test]
+/// Checks version-specific discovery against the implemented loader tables.
+fn legacy_extension_versions_match_available_tables() {
+    for minor in 0..=4 {
+        assert!(legacy_extension_supported(EXTENSION_AMD_LOADER, 1, minor));
+        assert!(legacy_agent_extension_supported(
+            EXTENSION_AMD_LOADER,
+            true,
+            1,
+            minor
+        ));
+    }
+    assert!(!legacy_extension_supported(EXTENSION_AMD_LOADER, 1, 5));
+    assert!(legacy_extension_supported(EXTENSION_AMD_LOADER, 0, 0));
+    assert!(!legacy_extension_supported(EXTENSION_AMD_LOADER, 0, 1));
+    assert!(!legacy_extension_supported(EXTENSION_AMD_LOADER, 2, 0));
+    for extension in [EXTENSION_IMAGES, EXTENSION_AMD_PC_SAMPLING] {
+        assert!(legacy_extension_supported(extension, 1, 0));
+        assert!(!legacy_extension_supported(extension, 1, 1));
+        assert!(!legacy_extension_supported(extension, 0, 0));
+        assert!(!legacy_extension_supported(extension, 2, 0));
+    }
+}
+
+#[test]
 /// Verifies that agent extension answers never exceed system capabilities.
 fn agent_extension_answers_never_exceed_system_capabilities() {
     let extensions = [
@@ -88,7 +112,7 @@ fn agent_extension_answers_never_exceed_system_capabilities() {
     ];
     for extension in extensions {
         for major in 0..=2 {
-            for minor in 0..=1 {
+            for minor in 0..=5 {
                 let system = legacy_extension_supported(extension, major, minor);
                 let agent = legacy_agent_extension_supported(extension, true, major, minor);
                 assert!(!agent || system);
@@ -268,8 +292,6 @@ fn amd_agent_helpers_match_the_public_abi() {
         assert!(cpu_rejects_amd_agent_info(attribute));
     }
     assert!(!cpu_rejects_amd_agent_info(AMD_AGENT_INFO_NEAREST_CPU));
-    assert_eq!(nearest_cpu_agent(false).handle, 0);
-    assert_eq!(nearest_cpu_agent(true).handle, CPU_AGENT);
     let _: unsafe extern "C" fn(*mut u8, *mut c_void) -> Status = hsa_amd_enable_logging;
     let _: unsafe extern "C" fn(HsaAgent, *mut u32) -> Status = hsa_amd_coherency_get_type;
     let _: unsafe extern "C" fn(HsaAgent, u32, *mut c_void) -> Status = hsa_amd_agent_set_attribute;

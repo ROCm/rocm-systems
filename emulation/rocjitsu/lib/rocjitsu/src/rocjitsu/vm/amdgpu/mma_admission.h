@@ -181,7 +181,7 @@ private:
   };
   std::unique_ptr<Instruction> decode(Decoder &decoder, const Words &words) {
     ++stats.decodes;
-    auto result = decoder.decode(words.data());
+    auto result = decoder.decode_window(words);
     return result.succeeded() ? std::move(result).value() : nullptr;
   }
   unsigned limit_;

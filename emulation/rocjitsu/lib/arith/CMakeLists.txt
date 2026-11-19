@@ -5,7 +5,7 @@ include(rj_configure_target)
 
 set(rj_arith_source_dir ${CMAKE_CURRENT_SOURCE_DIR})
 
-# Enable x86-64 CPU detection when targeting x86-64 with GCC/Clang.
+# Enable x86-64 CPU detection and SIMD backends with GCC/Clang.
 string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" rj_arith_target_processor)
 
 set(RJ_ARITH_ENABLE_X86_64 OFF)

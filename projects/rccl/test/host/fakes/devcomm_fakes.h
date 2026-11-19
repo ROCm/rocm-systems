@@ -29,8 +29,7 @@ ncclTeam_t DefaultNcclTeamLsa(ncclComm_t comm);
 // the definition in devcomm_fakes.cc.
 void DefaultNcclDevCommCopyLsaData(void* dst, void const* src);
 
-// devcomm_fakes.cc also defines ncclTeamRail as a one-rank team, so binaries that link it must not
-// define their own.
+// ncclTeamRail lives in nccl_device_core_fakes.cc, with the other ncclTeam* accessors.
 
 void ResetDevcommFakes();
 

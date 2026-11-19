@@ -20,18 +20,109 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <map>
+#include <mutex>
 #include <string>
 
+#include "hsa/hsa.h"
 #include "rdc_lib/RdcDiagnosticLibInterface.h"
+#include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rocr/ComputeQueueTest.h"
 #include "rdc_modules/rdc_rocr/MemoryAccess.h"
 #include "rdc_modules/rdc_rocr/MemoryTest.h"
 #include "rdc_modules/rdc_rocr/common.h"
 
+namespace {
+
+// Each test object calls hsa_init() when it is built and hsa_shut_down() when it is destroyed,
+// so without another reference every test unloads ROCr and the next test loads it again.
+// rocprofiler-sdk, which the ROCp module loads into the same process, keeps the agents and
+// queues of the ROCr load it saw first. After a reload, creating a queue or reading a profiler
+// counter fails or aborts the process ("Could not find agent", "HSA Queue is not initialized").
+// Keep ROCr loaded from the first test run until this module is destroyed, so that the tests'
+// hsa_init() and hsa_shut_down() calls only move the reference count.
+std::mutex hsa_hold_mutex;
+bool hsa_held = false;
+
+// The queue each GPU's checks dispatch on, created by the first check that needs it and
+// destroyed with the reference above. rocprofiler-sdk does not destroy a queue it intercepted
+// when the application destroys it, so with a queue per check every check left a queue in
+// rdcd, with about 35 MB of VRAM on MI455X, until queue creation failed (at 254 queues).
+std::map<uint64_t, hsa_queue_t*> held_queues;
+
+// Runs one check at a time, since the checks share the queues above.
+std::mutex run_mutex;
+
+hsa_status_t hold_hsa() {
+  std::lock_guard<std::mutex> lock(hsa_hold_mutex);
+  if (hsa_held) {
+    return HSA_STATUS_SUCCESS;
+  }
+  const hsa_status_t status = hsa_init();
+  if (status != HSA_STATUS_SUCCESS) {
+    // The run fails without building a test; the next run tries again.
+    RDC_LOG(RDC_ERROR, "hsa_init() failed with status " << status);
+    return status;
+  }
+  hsa_held = true;
+  return HSA_STATUS_SUCCESS;
+}
+
+void release_hsa() {
+  std::lock_guard<std::mutex> lock(hsa_hold_mutex);
+  if (!hsa_held) {
+    return;
+  }
+  for (const auto& agent_queue : held_queues) {
+    const hsa_status_t status = hsa_queue_destroy(agent_queue.second);
+    if (status != HSA_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "hsa_queue_destroy() failed with status " << status);
+    }
+  }
+  held_queues.clear();
+  const hsa_status_t status = hsa_shut_down();
+  if (status != HSA_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "hsa_shut_down() failed with status " << status);
+  }
+  hsa_held = false;
+}
+
+}  // namespace
+
+namespace amd {
+namespace rdc {
+
+hsa_status_t AcquireDiagQueue(hsa_agent_t agent, hsa_queue_t** queue) {
+  std::lock_guard<std::mutex> lock(hsa_hold_mutex);
+  if (!hsa_held) {
+    // Only the module's reference keeps ROCr, and so the queue, alive after the check.
+    return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  }
+  auto it = held_queues.find(agent.handle);
+  if (it == held_queues.end()) {
+    hsa_queue_t* created = nullptr;
+    const hsa_status_t status = hsa_queue_create(agent, 128, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr,
+                                                 UINT32_MAX, UINT32_MAX, &created);
+    if (status != HSA_STATUS_SUCCESS) {
+      return status;
+    }
+    it = held_queues.emplace(agent.handle, created).first;
+  }
+  *queue = it->second;
+  return HSA_STATUS_SUCCESS;
+}
+
+}  // namespace rdc
+}  // namespace amd
+
 rdc_status_t rdc_diag_init(uint64_t) { return RDC_ST_OK; }
 
-rdc_status_t rdc_diag_destroy() { return RDC_ST_OK; }
+rdc_status_t rdc_diag_destroy() {
+  std::lock_guard<std::mutex> run_lock(run_mutex);
+  release_hsa();
+  return RDC_ST_OK;
+}
 
 rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
                                        uint32_t* test_case_count) {
@@ -163,6 +254,23 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
   result->test_case = test_case;
   result->status = RDC_DIAG_RESULT_PASS;
   result->per_gpu_result_count = 0;
+
+  std::lock_guard<std::mutex> run_lock(run_mutex);
+  const hsa_status_t init_status = hold_hsa();
+  if (init_status != HSA_STATUS_SUCCESS) {
+    // Build no test without the module's reference: a test's own hsa_init() could succeed, and
+    // its hsa_shut_down() would then unload ROCr, which the next run would load again.
+    result->status = RDC_DIAG_RESULT_FAIL;
+    std::string info = "ROCr initialization failed. hsa error code: " + std::to_string(init_status);
+    const char* status_string = nullptr;
+    if (hsa_status_string(init_status, &status_string) == HSA_STATUS_SUCCESS &&
+        status_string != nullptr) {
+      info += " ";
+      info += status_string;
+    }
+    strncpy_with_null(result->info, info.c_str(), MAX_DIAG_MSG_LENGTH);
+    return RDC_ST_OK;
+  }
 
   // Run test for each GPU. It will continue even
   // if one GPU test is fail.

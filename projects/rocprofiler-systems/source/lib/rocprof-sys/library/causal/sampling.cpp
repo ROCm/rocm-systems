@@ -454,13 +454,6 @@ block_samples()
 }
 
 void
-unblock_samples()
-{
-    trait::runtime_enabled<causal::component::backtrace>::set(true);
-    trait::runtime_enabled<causal_sampler_t>::set(true);
-}
-
-void
 block_backtrace_samples()
 {
     pause(scope::thread_scope{});

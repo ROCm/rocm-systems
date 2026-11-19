@@ -4,7 +4,6 @@
 #include "core/trace_cache/post_processor.hpp"
 
 #include "core/agent_manager.hpp"
-#include "core/config.hpp"
 #include "core/output/output_summary.hpp"
 #include "core/perfetto/engine.hpp"
 #include "core/trace_cache/cacheable.hpp"
@@ -14,16 +13,21 @@
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
+#include "core/trace_cache/wall_clock_processor.hpp"
 #include "core/track_registry.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
+
+#include <fmt/format.h>
 
 #include <sys/stat.h>
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -102,6 +106,17 @@ configure_processors(
             _config->_agent_manager, _config->_pid);
         _coordinator->add_handler(storage.unified_memory_processor);
         LOG_DEBUG("Unified memory processor enabled for PID {}", _config->_pid);
+    }
+
+    if(_formats.is_wall_clock_enabled())
+    {
+        auto const options = make_wall_clock_options(*_config);
+        if(options.has_output())
+        {
+            _coordinator->add_handler(std::make_shared<wall_clock_processor_t>(
+                _config->_metadata_registry, _config->_agent_manager, _config->_pid,
+                options));
+        }
     }
 
     return storage;
