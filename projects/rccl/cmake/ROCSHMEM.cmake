@@ -161,10 +161,16 @@ function(add_rocshmem_targets)
         endif()
         # With the device linker, librccl.so's link is a new-driver link, which
         # takes device code only from new-driver objects. That is the default in
-        # newer compilers; ROCm 7.0 needs it named.
+        # newer compilers; ROCm 7.0 needs it named. It goes in through a project
+        # include that appends to CMAKE_CXX_FLAGS, so a -DCMAKE_CXX_FLAGS in
+        # ROCSHMEM_CMAKE_OPTIONS can't replace it (the gda script forwards its
+        # arguments unquoted, so the two can't be merged into one -D value).
         set(_rocshmem_driver_opt "")
         if(ENABLE_DEVICE_LINKER)
-            set(_rocshmem_driver_opt "-DCMAKE_CXX_FLAGS=--offload-new-driver")
+            set(_rocshmem_driver_include "${CMAKE_CURRENT_BINARY_DIR}/rocshmem_new_driver.cmake")
+            file(WRITE "${_rocshmem_driver_include}"
+                 "string(APPEND CMAKE_CXX_FLAGS \" --offload-new-driver\")\n")
+            set(_rocshmem_driver_opt "-DCMAKE_PROJECT_rocshmem_INCLUDE=${_rocshmem_driver_include}")
         endif()
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
