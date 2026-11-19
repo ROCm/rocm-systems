@@ -35,18 +35,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from config_management import utils_ruamel as cm_utils  # noqa: E402
-
-
-def is_gfx115x_ip_variant(arch_name: str) -> bool:
-    """True for gfx115x IP names (gfx1150 to gfx115f)."""
-    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
-
-
-def is_gfx1250_arch(arch_name: str) -> bool:
-    """Check if arch is gfx1250 to correctly use the gfx1250 analysis layout."""
-    return arch_name == "gfx1250"
-
+from config_management import utils_ruamel as cm_utils
 
 # gfx1250 metric_table ids -> documentation section names (disambiguated
 # where multiple panels reuse generic titles like "Utilization").
@@ -63,6 +52,7 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     306: "Memory chart - GLARB (GL1-GL2 Arbiter)",
     307: "Memory chart - GL2 Cache (L2)",
     308: "Memory chart - EA to HBM",
+    309: "Memory chart - Workgroup Processors (WGPs)",
     401: "Roofline Performance Rates",
     402: "Roofline Plot Points",
     501: "CPC Utilizations",
@@ -144,6 +134,150 @@ GFX1250_PANEL_ID_TO_SECTION: dict[int, str] = {
     2101: "PC Sampling",
 }
 
+GFX1201_PANEL_ID_TO_SECTION: dict[int, str] = {
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - GL0 Cache (Vector L0)",
+    304: "Memory chart - LDS (Local Data Share)",
+    308: "Memory chart - GL2 Cache (L2)",
+    309: "Memory chart - L2 to Memory",
+    310: "Memory chart - Workgroup Processors (WGPs)",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "WGP Wavefront Launch Stats",
+    703: "WGP Wavefront Dispatch",
+    704: "WGP Wavefront Life",
+    705: "WGP Wavefront Instruction Mix",
+    706: "WGP VMEM Instruction Mix",
+    707: "WGP LDS Instruction Mix",
+    708: "WGP VALU Instruction Mix",
+    710: "WGP WMMA Instruction FLOPs and IOPs Counting",
+    716: "WGP Instruction Cache",
+    717: "WGP Scalar Data Cache",
+    902: "GL0 Request Statistics",
+    903: "GL0 Cache Performance",
+    908: "GL0 Stalls",
+    1103: "GL1 Cache Request Statistics",
+    1310: "GL2 Cache Request Statistics",
+    1311: "GL2 Cache Performance",
+    1701: "GRBM Metrics",
+}
+
+# All CDNA architectures share the same panel ID mapping.
+CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
+    201: "System Speed-of-Light",
+    301: "Memory chart",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    501: "Command processor fetcher (CPF)",
+    502: "Command processor packet processor (CPC)",
+    601: "Workgroup manager utilizations",
+    602: "Workgroup Manager - Resource Allocation",
+    701: "Wavefront launch stats",
+    702: "Wavefront runtime stats",
+    1001: "Overall instruction mix",
+    1002: "VALU arithmetic instruction mix",
+    1004: "Matrix instruction mix",
+    1101: "Compute Speed-of-Light",
+    1102: "Pipeline statistics",
+    1103: "Arithmetic operations",
+    1201: "LDS Speed-of-Light",
+    1202: "LDS Statistics",
+    1301: "L1I Speed-of-Light",
+    1302: "L1I cache accesses",
+    1303: "L1I <-> L2 interface",
+    1401: "Scalar L1D Speed-of-Light",
+    1402: "Scalar L1D cache accesses",
+    1403: "Scalar L1D Cache - L2 Interface",
+    1501: "Busy / stall metrics",
+    1502: "Instruction counts",
+    1503: "Spill / stack metrics",
+    1504: "Vector L1 data-return path or Texture Data (TD)",
+    1601: "vL1D Speed-of-Light",
+    1602: "vL1D cache stall metrics",
+    1603: "vL1D cache access metrics",
+    1605: "L1 Unified Translation Cache (UTCL1)",
+    1701: "L2 Speed-of-Light",
+    1702: "L2-Fabric interface metrics",
+    1703: "L2 cache accesses",
+    1705: "L2 - Fabric Interface stalls",
+    1706: "L2 - Fabric interface detailed metrics",
+}
+
+# RDNA 3.5 (gfx115x) metric_table ids -> section names
+RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
+    1: "Top Kernels",
+    2: "Dispatch List",
+    101: "System Info",
+    201: "System Speed-of-Light",
+    301: "Memory chart - Instruction Cache",
+    302: "Memory chart - Scalar Data Cache",
+    303: "Memory chart - TCP Cache (GL0 Vector Cache)",
+    304: "Memory chart - LDS (Local Data Share)",
+    305: "Memory chart - TCP-GL1 Interface",
+    306: "Memory chart - GL1 Cache (L1)",
+    307: "Memory chart - GL1-GL2 Interface",
+    308: "Memory chart - GL2 Cache (L2)",
+    309: "Memory chart - GCEA to System Memory",
+    310: "Memory chart - Workgroup Processors (WGPs)",
+    401: "Roofline Performance Rates",
+    402: "Roofline Plot Points",
+    501: "CPC Utilization",
+    502: "CPC Interface Utilization",
+    503: "MEC Stall Cycles",
+    504: "CPC Memory Requests",
+    505: "MEC Instruction Cache",
+    601: "SPI Utilization",
+    602: "Wave Dispatch Statistics",
+    701: "WGP Utilization",
+    702: "Wavefront Launch Stats",
+    703: "Wave Dispatch",
+    704: "Wave Life",
+    705: "Wave Instruction Mix",
+    706: "VMEM Instruction Mix",
+    707: "LDS Instruction Mix",
+    709: "Wait State Analysis",
+    710: "WGP Instruction Cache",
+    711: "WGP Scalar Data Cache",
+    901: "GL0 Utilization",
+    902: "GL0 Request Statistics",
+    903: "GL0 Cache Performance",
+    904: "GL0-GL1 Interface",
+    905: "GL0 Stalls",
+    1101: "GL1 Cache Utilization",
+    1102: "GL1 Cache Request Statistics",
+    1103: "GL1 Cache Performance",
+    1104: "GL1-GL2 Interface",
+    1105: "GL1 Cache Stalls",
+    1301: "GL2 Cache Performance",
+    1302: "GL2 Cache Request Statistics",
+    1303: "GL2 Cache Bandwidth",
+    1401: "DRAM Read Interface",
+    1402: "DRAM Write Interface",
+    1404: "System Arbiter (SARB)",
+    1405: "Return Interface",
+    1701: "GPU Utilization",
+    1702: "Shader Engine Utilization",
+}
+
+
+def is_gfx115x_ip_variant(arch_name: str) -> bool:
+    """True for gfx115x IP names (gfx1150 to gfx115f)."""
+    return bool(re.fullmatch(r"gfx115([0-9a-f]|x)", arch_name, re.IGNORECASE))
+
+
+def is_gfx1201_arch(arch_name: str) -> bool:
+    """Check if arch is gfx1201 to use the Navi48 analysis layout."""
+    return arch_name == "gfx1201"
+
+
+def is_gfx1250_arch(arch_name: str) -> bool:
+    """Check if arch is gfx1250 to correctly use the gfx1250 analysis layout."""
+    return arch_name == "gfx1250"
+
 
 def normalize_unit_for_docs(unit: str) -> str:
     """
@@ -197,108 +331,14 @@ def normalize_docs_metric_name(arch_name: str, metric_name: str) -> str:
     return replacements.get(metric_name, metric_name)
 
 
-# All CDNA architectures share the same panel ID mapping.
-CDNA_PANEL_ID_TO_SECTION: dict[int, str] = {
-    201: "System Speed-of-Light",
-    401: "Roofline Performance Rates",
-    402: "Roofline Plot Points",
-    501: "Command processor fetcher (CPF)",
-    502: "Command processor packet processor (CPC)",
-    601: "Workgroup manager utilizations",
-    602: "Workgroup Manager - Resource Allocation",
-    701: "Wavefront launch stats",
-    702: "Wavefront runtime stats",
-    1001: "Overall instruction mix",
-    1002: "VALU arithmetic instruction mix",
-    1004: "Matrix instruction mix",
-    1101: "Compute Speed-of-Light",
-    1102: "Pipeline statistics",
-    1103: "Arithmetic operations",
-    1201: "LDS Speed-of-Light",
-    1202: "LDS Statistics",
-    1301: "L1I Speed-of-Light",
-    1302: "L1I cache accesses",
-    1303: "L1I <-> L2 interface",
-    1401: "Scalar L1D Speed-of-Light",
-    1402: "Scalar L1D cache accesses",
-    1403: "Scalar L1D Cache - L2 Interface",
-    1501: "Busy / stall metrics",
-    1502: "Instruction counts",
-    1503: "Spill / stack metrics",
-    1504: "Vector L1 data-return path or Texture Data (TD)",
-    1601: "vL1D Speed-of-Light",
-    1602: "vL1D cache stall metrics",
-    1603: "vL1D cache access metrics",
-    1605: "L1 Unified Translation Cache (UTCL1)",
-    1701: "L2 Speed-of-Light",
-    1702: "L2-Fabric interface metrics",
-    1703: "L2 cache accesses",
-    1705: "L2 - Fabric Interface stalls",
-    1706: "L2 - Fabric interface detailed metrics",
-}
-
-# RDNA 3.5 (gfx115x) metric_table ids -> section names
-RDNA35_PANEL_ID_TO_SECTION_BY_ARCH: dict[int, str] = {
-    1: "Top Kernels",
-    2: "Dispatch List",
-    101: "System Info",
-    201: "System Speed-of-Light",
-    301: "Memory chart - Instruction Cache",
-    302: "Memory chart - Scalar Data Cache",
-    303: "Memory chart - TCP Cache (GL0 Vector Cache)",
-    304: "Memory chart - LDS (Local Data Share)",
-    305: "Memory chart - TCP-GL1 Interface",
-    306: "Memory chart - GL1 Cache (L1)",
-    307: "Memory chart - GL1-GL2 Interface",
-    308: "Memory chart - GL2 Cache (L2)",
-    309: "Memory chart - GCEA to System Memory",
-    401: "Roofline Performance Rates",
-    402: "Roofline Plot Points",
-    501: "CPC Utilization",
-    502: "CPC Interface Utilization",
-    503: "MEC Stall Cycles",
-    504: "CPC Memory Requests",
-    505: "MEC Instruction Cache",
-    601: "SPI Utilization",
-    602: "Wave Dispatch Statistics",
-    701: "WGP Utilization",
-    702: "Wavefront Launch Stats",
-    703: "Wave Dispatch",
-    704: "Wave Life",
-    705: "Wave Instruction Mix",
-    706: "VMEM Instruction Mix",
-    707: "LDS Instruction Mix",
-    709: "Wait State Analysis",
-    710: "WGP Instruction Cache",
-    711: "WGP Scalar Data Cache",
-    901: "GL0 Utilization",
-    902: "GL0 Request Statistics",
-    903: "GL0 Cache Performance",
-    904: "GL0-GL1 Interface",
-    905: "GL0 Stalls",
-    1101: "GL1 Cache Utilization",
-    1102: "GL1 Cache Request Statistics",
-    1103: "GL1 Cache Performance",
-    1104: "GL1-GL2 Interface",
-    1105: "GL1 Cache Stalls",
-    1301: "GL2 Cache Performance",
-    1302: "GL2 Cache Request Statistics",
-    1303: "GL2 Cache Bandwidth",
-    1401: "DRAM Read Interface",
-    1402: "DRAM Write Interface",
-    1404: "System Arbiter (SARB)",
-    1405: "Return Interface",
-    1701: "GPU Utilization",
-    1702: "Shader Engine Utilization",
-}
-
-
 def panel_id_to_section(arch_name: str, table_id: int | None) -> str | None:
     """Resolve documentation section name for a metric_table id (arch-specific)."""
     if table_id is None:
         return None
     if is_gfx115x_ip_variant(arch_name):
         return RDNA35_PANEL_ID_TO_SECTION_BY_ARCH.get(table_id)
+    if is_gfx1201_arch(arch_name):
+        return GFX1201_PANEL_ID_TO_SECTION.get(table_id)
     if is_gfx1250_arch(arch_name):
         return GFX1250_PANEL_ID_TO_SECTION.get(table_id)
     return CDNA_PANEL_ID_TO_SECTION.get(table_id)
@@ -515,13 +555,10 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing_per_arch: dict) -
 
 
 def resolved_docs_target_archs(per_arch_dir: Union[str, Path]) -> list[str]:
-    """Doc emit list: every per-arch YAML on disk except known-excluded archs."""
-    excluded = {"gfx940", "gfx941"}
+    """Doc emit list: the arch of every per-arch YAML on disk."""
     suffix = "_metrics_description.yaml"
     return sorted(
-        arch
-        for path in Path(per_arch_dir).glob(f"*{suffix}")
-        if (arch := path.name.removesuffix(suffix)) not in excluded
+        path.name.removesuffix(suffix) for path in Path(per_arch_dir).glob(f"*{suffix}")
     )
 
 

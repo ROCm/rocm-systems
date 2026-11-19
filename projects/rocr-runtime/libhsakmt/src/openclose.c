@@ -171,6 +171,12 @@ static HSAKMT_STATUS init_vars_from_env(void)
 	if (envvar)
 		hsakmt_enable_drm = atoi(envvar);
 
+	/* Force the legacy per-agent mbind even when the process set an explicit
+	 * NUMA memory policy (e.g. numactl -m).
+	 */
+	envvar = getenv("HSA_FORCE_MBIND");
+	if (envvar)
+		hsakmt_force_mbind = hsakmt_safe_env_to_int(envvar, 0);
 	return HSAKMT_STATUS_SUCCESS;
 }
 

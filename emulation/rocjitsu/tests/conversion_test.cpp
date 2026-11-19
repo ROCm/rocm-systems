@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
+#include "util/host_target.h"
 #include "util/simd.h"
 
 #include <gtest/gtest.h>
@@ -13,7 +14,7 @@
 #include <limits>
 #include <random>
 
-#if defined(__F16C__)
+#if RJ_HOST_HAS_F16C
 #include <immintrin.h>
 #endif
 
@@ -306,7 +307,7 @@ TEST(FloatRoundingTest, NarrowF64ToF32MatchesIeeeInEveryMode) {
   }
 }
 
-#if defined(__F16C__)
+#if RJ_HOST_HAS_F16C
 uint32_t host_f32_to_f16(uint32_t bits, Rounding direction) {
   const __m128 value = _mm_castsi128_ps(_mm_cvtsi32_si128(static_cast<int>(bits)));
   switch (direction) {
@@ -457,7 +458,7 @@ TEST(FloatRoundingTest, NarrowQuietsNanAndKeepsLeadingPayload) {
 
 TEST(FloatRoundingTest, SimdLanesMatchScalarLanes) {
   using V32 = util::native<uint32_t>;
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   using V64 = util::stdx::fixed_size_simd<uint64_t, 1>;
 #else
   using V64 = util::native<uint64_t>;

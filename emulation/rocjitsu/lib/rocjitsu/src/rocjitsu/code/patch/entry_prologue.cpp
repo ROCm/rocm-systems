@@ -2,15 +2,18 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/entry_prologue.h"
+#include "rocjitsu/code/patch/error_report.h"
 
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <array>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -21,7 +24,7 @@ using KD = amdhsa::kernel_descriptor_t;
 } // namespace
 
 uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc, rj_code_arch_t arch) {
-  return std::max(explicit_ordinary_sgpr_bound(blocks),
+  return std::max(explicit_ordinary_sgpr_bound(blocks, kernel_wavefront_size(arch, desc)),
                   kernel_descriptor_initial_sgpr_count(arch, desc));
 }
 
@@ -94,8 +97,7 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
   //
   // Everything before the emission is a guard on a case that would otherwise
   // miscompile silently. The register-field ones are also enforced by the
-  // builders, which throw; repeating them keeps a fail-closed caller from having
-  // to catch.
+  // builders; repeating them here gives the caller register-specific diagnostics.
   const auto fail = [error_out](std::string message) {
     if (error_out != nullptr)
       *error_out = std::move(message);
@@ -156,31 +158,52 @@ std::optional<DbiEntryPrologue> build_dbi_entry_prologue(const KD &desc, rj_code
   prologue.payload_byte_offset = layout->payload_offsets.front();
   prologue.original_kernarg_pointer_offset = layout->original_kernarg_pointer_offset;
 
-  const uint32_t offset_max = max_smem_byte_offset(arch);
+  // TODO: Accept a DiagnosticEmitter in the prologue APIs and remove this error_out adapter.
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+  // Delegated failures use the adapter to populate error_out before returning failure.
+  const auto offset_max = max_smem_byte_offset(arch, &error);
+  if (offset_max.failed())
+    return std::nullopt;
   for (const uint32_t offset :
        {prologue.payload_byte_offset, prologue.original_kernarg_pointer_offset}) {
-    if (offset > offset_max) {
+    if (offset > offset_max.value()) {
       return fail("kernarg wrapper offset " + std::to_string(offset) +
-                  " exceeds the target's SMEM immediate range of " + std::to_string(offset_max));
+                  " exceeds the target's SMEM immediate range of " +
+                  std::to_string(offset_max.value()));
     }
   }
 
-  const auto emit_load = [&](uint16_t sdst, uint32_t byte_offset) {
-    const std::array<uint32_t, 2> load =
-        build_s_load_dwordx2(sdst, *kernarg_base, byte_offset, arch);
-    prologue.words.push_back(load[0]);
-    prologue.words.push_back(load[1]);
+  const auto emit_load = [&](uint16_t sdst, uint32_t byte_offset) -> util::Result {
+    const auto load = build_s_load_dwordx2(sdst, *kernarg_base, byte_offset, arch, &error);
+    if (load.failed())
+      return util::Result::failure();
+    prologue.words.push_back(load.value()[0]);
+    prologue.words.push_back(load.value()[1]);
+    return util::Result::success();
   };
 
-  emit_load(storage.persistent_base, prologue.payload_byte_offset);
-  emit_load(storage.entry_temp_base, prologue.original_kernarg_pointer_offset);
+  if (emit_load(storage.persistent_base, prologue.payload_byte_offset).failed())
+    return std::nullopt;
+  if (emit_load(storage.entry_temp_base, prologue.original_kernarg_pointer_offset).failed())
+    return std::nullopt;
 
-  prologue.words.push_back(build_wait_scalar_loads_complete(arch));
+  const auto wait = build_wait_scalar_loads_complete(arch, &error);
+  if (wait.failed())
+    return std::nullopt;
+  prologue.words.push_back(wait.value());
 
-  prologue.words.push_back(build_s_mov_b32(*kernarg_base, storage.entry_temp_base, arch));
-  prologue.words.push_back(build_s_mov_b32(static_cast<uint16_t>(*kernarg_base + 1),
-                                           static_cast<uint16_t>(storage.entry_temp_base + 1),
-                                           arch));
+  util::FailureOr<uint32_t> restore_lo =
+      build_s_mov_b32(*kernarg_base, storage.entry_temp_base, arch, &error);
+  if (restore_lo.failed())
+    return std::nullopt;
+  util::FailureOr<uint32_t> restore_hi =
+      build_s_mov_b32(static_cast<uint16_t>(*kernarg_base + 1),
+                      static_cast<uint16_t>(storage.entry_temp_base + 1), arch, &error);
+  if (restore_hi.failed())
+    return std::nullopt;
+  prologue.words.push_back(restore_lo.value());
+  prologue.words.push_back(restore_hi.value());
   return prologue;
 }
 

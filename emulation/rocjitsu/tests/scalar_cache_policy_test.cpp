@@ -1,8 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -13,6 +16,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <array>
@@ -26,21 +30,28 @@ using namespace rocjitsu;
 
 class ScalarCachePolicyTest : public ::testing::Test {
 protected:
-  void SetUp() override {
+  virtual rj_code_arch_t arch() const { return ROCJITSU_CODE_ARCH_CDNA4; }
+  void SetUp() override { initialize(1); }
+
+  void initialize(uint32_t num_wf_slots) {
     l2.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
-    cfg.num_wf_slots = 1;
+    cfg.arch = arch();
+    cfg.num_wf_slots = num_wf_slots;
     cfg.sgprs_per_wf = 102;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("scalar_cache", cfg, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_cache", cfg, &memory, &l2));
     wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);
     decoder = Decoder::create(cfg.arch);
   }
 
-  void TearDown() override { wave->halt(); }
+  void TearDown() override {
+    if (wave)
+      wave->halt();
+  }
 
   void issue(uint32_t op, bool glc, uint64_t address, uint32_t records = 0xffffffffu) {
     const auto base = wave->sgpr_alloc().base;
@@ -71,6 +82,69 @@ protected:
   amdgpu::Wavefront *wave = nullptr;
   std::unique_ptr<Decoder> decoder;
 };
+
+class Gfx11ScalarCachePolicyTest : public ScalarCachePolicyTest,
+                                   public testing::WithParamInterface<rj_code_arch_t> {
+protected:
+  rj_code_arch_t arch() const override { return GetParam(); }
+};
+
+INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11ScalarCachePolicyTest,
+                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+
+TEST_P(Gfx11ScalarCachePolicyTest, GlcBypassesAWarmScalarCacheLine) {
+  constexpr uint32_t address = 0x4000;
+  const auto sgpr_base = wave->sgpr_alloc().base;
+  cu->write_sgpr(sgpr_base, address);
+  cu->write_sgpr(sgpr_base + 1, 0);
+  cu->write_sgpr(sgpr_base + 2, 0);
+
+  const auto load = [&](bool glc, uint32_t expected) {
+    const auto words =
+        rdna3::build_smem(rdna3::kSLoadB32Smem, {.sdata = 32, .glc = glc, .soffset = 2});
+    auto decoded = decoder->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    auto inst = std::move(decoded).value();
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+    ASSERT_EQ(pipeline.issue(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(result(0), expected);
+  };
+
+  memory.write32(address, 11);
+  ASSERT_NO_FATAL_FAILURE(load(false, 11));
+  const uint32_t fresh = 22;
+  ASSERT_EQ(l2.write(address, reinterpret_cast<const uint8_t *>(&fresh), sizeof(fresh),
+                     amdgpu::Mtype::RW),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_NO_FATAL_FAILURE(load(false, 11));
+  ASSERT_NO_FATAL_FAILURE(load(true, fresh));
+}
+
+TEST(ScalarCachePolicyTestSetup, RejectedComputeUnitAllowsTearDown) {
+  class RejectedFixture : public ScalarCachePolicyTest {
+  public:
+    void TestBody() override {}
+    void SetUp() override { initialize(33); }
+    using ScalarCachePolicyTest::TearDown;
+
+    bool setup_stopped() const { return !cu && !wave; }
+  };
+
+  RejectedFixture fixture;
+  ::testing::TestPartResultArray failures;
+  {
+    ::testing::ScopedFakeTestPartResultReporter reporter(
+        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD, &failures);
+    fixture.SetUp();
+  }
+  EXPECT_TRUE(fixture.setup_stopped());
+  fixture.TearDown();
+  ASSERT_GE(failures.size(), 1);
+  EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+  EXPECT_NE(std::string(failures.GetTestPartResult(0).message())
+                .find("num_wf_slots exceeds the ISA maximum of 32"),
+            std::string::npos);
+}
 
 TEST_F(ScalarCachePolicyTest, GlcLoadsRefetchWarmScalarAndL2Lines) {
   // CDNA4 ISA 9.1.10.1: GLC loads miss both caches. Each external update
@@ -217,7 +291,9 @@ TEST(ScalarCacheMtypeTest, NarrowPipelineLoadsForwardDecodedPolicy) {
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("narrow_scalar", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "narrow_scalar", cfg, &memory, &l2));
     auto *wave = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);
     auto decoder = Decoder::create(cfg.arch);

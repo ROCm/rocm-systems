@@ -11,6 +11,7 @@ from each instruction's mnemonic name and its encoding format name.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 import re
@@ -415,6 +416,10 @@ _CBRANCH_COND = {
     'S_CBRANCH_VCCNZ': 'vccnz',
     'S_CBRANCH_EXECZ': 'execz',
     'S_CBRANCH_EXECNZ': 'execnz',
+    'S_CBRANCH_CDBGUSER': 'debug_user',
+    'S_CBRANCH_CDBGSYS': 'debug_sys',
+    'S_CBRANCH_CDBGSYS_OR_USER': 'debug_either',
+    'S_CBRANCH_CDBGSYS_AND_USER': 'debug_both',
 }
 
 _NAMED_WAITCNT_COUNTERS = {
@@ -447,6 +452,10 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'waitcnt')
     if name == 'S_SET_VGPR_MSB':
         return InstructionSemantics(name, 'set_vgpr_msb')
+    if name == 'S_ROUND_MODE':
+        return InstructionSemantics(name, 'round_mode')
+    if name == 'S_DENORM_MODE':
+        return InstructionSemantics(name, 'denorm_mode')
     # RDNA4 split-wait instructions (GFX12 — no S_WAITCNT; each waits on a
     # single counter whose threshold is the immediate operand directly).
     _SPLIT_WAIT = {
@@ -481,9 +490,7 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
     # code is only visible to the fetcher once this instruction retires.
     if name == 'S_ICACHE_INV':
         return InstructionSemantics(name, 'icache_inv')
-    # S_NOP, S_SLEEP, S_SETHALT, S_SETPRIO, S_SENDMSG, S_INCPERFLEVEL,
-    # S_DECPERFLEVEL — all are either no-ops or system/debug instructions that
-    # don't affect compute simulation correctness.
+    # Remaining scalar control instructions use target-specific execution hooks.
     return InstructionSemantics(name, 'true_nop')
 
 
@@ -510,6 +517,7 @@ _SOP1_SPECIAL = {
     'S_SWAPPC': ('scalar_swappc', None),
     'S_SWAP_PC': ('scalar_swappc', None),
     'S_ADD_PC': ('scalar_addpc', None),
+    'S_CBRANCH_JOIN': ('cbranch_join', None),
     'S_GET_SHADER_CYCLES': ('scalar_shader_cycles', None),
     'S_RFE': ('true_nop', None),
     'S_RFE_RESTORE': ('true_nop', None),
@@ -523,7 +531,6 @@ _SOP1_SPECIAL = {
     'S_SET_GPR_IDX_ON': ('gpr_idx', 'on'),
     'S_SET_GPR_IDX_IDX': ('gpr_idx', 'idx'),
     'S_BITREPLICATE': ('scalar_bitreplicate', None),
-    'S_CBRANCH_JOIN': ('true_nop', None),
     'S_BITREPL_B64_B32': ('scalar_bitreplicate', None),
     # Newer SOP1 spellings shared by RDNA3+ and gfx1250 profiles:
     'S_CTZ_I32': ('scalar_unary', 'ctz'),
@@ -541,7 +548,7 @@ _SOP1_SPECIAL = {
     'S_GET_BARRIER_STATE': ('scalar_barrier_state', None, 'b32'),
     'S_BARRIER_INIT': ('scalar_barrier_init', None),
     'S_BARRIER_JOIN': ('scalar_barrier_join', None),
-    'S_WAKEUP_BARRIER': ('true_nop', None),
+    'S_WAKEUP_BARRIER': ('scalar_barrier_wakeup', None),
     'S_ALLOC_VGPR': ('true_nop', None),
     'S_SLEEP_VAR': ('true_nop', None),
     'S_CEIL': ('scalar_unary', 'ceil'),
@@ -696,6 +703,13 @@ _SOP2_OP_MAP = {
 
 def _derive_sop2(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SOP2 (Scalar ALU Two-operand) instruction."""
+    if name == 'S_CBRANCH_G_FORK':
+        return InstructionSemantics(name, 'cbranch_fork', operation='indirect')
+    # The legacy trap return. The MR ISA gives it no pseudocode; the generator
+    # emits the S_RFE_B64 body for it (see _TRAP_RETURN_NAMES).
+    if name == 'S_RFE_RESTORE_B64':
+        return InstructionSemantics(name, 'true_nop')
+
     # CSELECT
     if name.startswith('S_CSELECT_'):
         _, dtype = _split_dtype(name)
@@ -758,7 +772,7 @@ def _derive_sop2(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'scalar_binop', operation=op, data_type=dtype, sets_scc=scc
         )
-    # Unrecognized SOP2 instructions (S_CBRANCH_G_FORK, S_RFE_RESTORE, …)
+    # Unrecognized SOP2 instructions
     return InstructionSemantics(name, 'nop')
 
 
@@ -803,6 +817,10 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'wait_counter', operation=_NAMED_WAITCNT_COUNTERS[name]
         )
+    if name in ('S_SUBVECTOR_LOOP_BEGIN', 'S_SUBVECTOR_LOOP_END'):
+        return InstructionSemantics(
+            name, 'subvector_loop', operation=name.rsplit('_', 1)[1].lower()
+        )
     if name == 'S_VERSION':
         return InstructionSemantics(name, 'true_nop')
     if name == 'S_MOVK_I32':
@@ -817,6 +835,8 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'scalar_mulk')
     if name in ('S_CALL_B64', 'S_CALL_I64'):
         return InstructionSemantics(name, 'scalar_call')
+    if name == 'S_CBRANCH_I_FORK':
+        return InstructionSemantics(name, 'cbranch_fork', operation='direct')
 
     # S_CMPK_<op>_<dtype>
     m = re.match(r'S_CMPK_(\w+?)_(I32|U32)$', name)
@@ -839,7 +859,7 @@ def _derive_sopk(name: str) -> InstructionSemantics | None:
     if name == 'S_SETREG_IMM32_B32':
         return InstructionSemantics(name, 'scalar_setreg_imm')
 
-    # Everything else (CBRANCH_I_FORK, …) → nop
+    # Everything else → nop
     return InstructionSemantics(name, 'nop')
 
 
@@ -1603,7 +1623,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     # 64-bit shift/add (VOP3-only)
     if name == 'V_LSHL_ADD_U64':
         return InstructionSemantics(
-            name, 'vector_ternary', operation='lshl_add', data_type='u64'
+            name, 'vector_ternary', operation='lshl_add_u64', data_type='u64'
         )
     if name == 'V_LSHLREV_B64':
         return InstructionSemantics(
@@ -1868,23 +1888,24 @@ _SMEM_NARROW_LOAD_MAP = {
     'U16': (2, False),
 }
 
-# S_ATOMIC_* operations the CDNA ISAs define and the scalar pipeline supports.
-# Other flat atomic operations stay 'nop' even when the flat tables know them.
+# S_ATOMIC_* and S_BUFFER_ATOMIC_* operations the CDNA ISAs define and the
+# scalar pipeline supports, spelled as in the mnemonic without _X2. Any other
+# scalar atomic derives nop, even when the flat tables know its operation.
 _SMEM_ATOMIC_OPS = frozenset(
     {
-        'swap',
-        'cmpswap',
-        'add',
-        'sub',
-        'smin',
-        'umin',
-        'smax',
-        'umax',
-        'and',
-        'or',
-        'xor',
-        'inc',
-        'dec',
+        'SWAP',
+        'CMPSWAP',
+        'ADD',
+        'SUB',
+        'SMIN',
+        'UMIN',
+        'SMAX',
+        'UMAX',
+        'AND',
+        'OR',
+        'XOR',
+        'INC',
+        'DEC',
     }
 )
 
@@ -1913,29 +1934,28 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'dcache_wb')
     if upper == 'S_GL1_INV':
         return InstructionSemantics(name, 'gl1_inv')
+    if upper == 'S_GET_WAVEID_IN_WORKGROUP':
+        return InstructionSemantics(name, 'smem_wave_in_group')
     if upper in ('S_MEMTIME', 'S_MEMREALTIME'):
         return InstructionSemantics(name, 'smem_time')
     # Remaining scalar cache / special instructions.
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    if '_ATOMIC_' in upper:
-        if upper.startswith('S_ATOMIC_'):
-            suffix = upper[len('S_ATOMIC_') :]
-            is_x2 = suffix.endswith('_X2')
-            if is_x2:
-                suffix = suffix[:-3]
-            info = _derive_flat_atomic_info(suffix, is_x2)
-            if info and info[0] in _SMEM_ATOMIC_OPS:
-                op, elem_size, data_dw_actual = info
-                return InstructionSemantics(
-                    name,
-                    'smem_atomic',
-                    operation=op,
-                    elem_size=elem_size,
-                    num_elems=data_dw_actual,
-                )
-        # Scalar buffer atomics are not currently simulated.
+    if upper.startswith(('S_ATOMIC_', 'S_BUFFER_ATOMIC_')):
+        suffix = upper.partition('_ATOMIC_')[2]
+        is_x2 = suffix.endswith('_X2')
+        if is_x2:
+            suffix = suffix[:-3]
+        if suffix in _SMEM_ATOMIC_OPS:
+            op, elem_size, data_dw_actual = _derive_flat_atomic_info(suffix, is_x2)
+            return InstructionSemantics(
+                name,
+                'smem_atomic',
+                operation=op,
+                elem_size=elem_size,
+                num_elems=data_dw_actual,
+            )
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper
@@ -2008,29 +2028,38 @@ _FLAT_DATA_MAP: dict[str, tuple[int, int, bool]] = {
 }
 
 
-_TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, int]] = {
-    # suffix -> (semantic suffix, elem_size, num_elems, transpose kind)
-    # elem_size/num_elems describe the raw VGPR result size in dwords.
-    # transpose kind is amdgpu::TransposeKind: TR_B4=1, TR_B6=2,
-    # B64_TR_B8=3 (CDNA4 MFMA default), TR16_B128=4, B64_TR_B16=5,
-    # WMMA_TR_B8=6 (RDNA4 16x16 matrix layout), and
-    # CDNA5_DS_TR_B8=7 (gfx1250 DS matrix layout). All textual aliases use the
-    # same default here; instruction-family and ISA-profile overrides below
-    # select the architecture's routing.
-    'B64_TR_B4': ('b4', 4, 2, 1),
-    'B96_TR_B6': ('b6', 4, 3, 2),
-    'B64_TR_B8': ('b8', 4, 2, 3),
-    'B64_TR_B16': ('b16', 4, 2, 5),
-    'TR4_B64': ('b4', 4, 2, 1),
-    'TR6_B96': ('b6', 4, 3, 2),
-    'TR8_B64': ('b8', 4, 2, 3),
-    'TR16_B128': ('b16', 4, 4, 4),
-    'TR_B64': ('b8', 4, 2, 3),
-    'TR_B128': ('b16', 4, 4, 4),
+class TransposeKind(IntEnum):
+    """Cross-lane layouts shared with amdgpu::TransposeKind in vm/amdgpu/mem_state.h."""
+
+    TR_B4 = 1
+    TR_B6 = 2
+    B64_TR_B8 = 3
+    TR16_B128 = 4
+    B64_TR_B16 = 5
+    WMMA_TR_B8 = 6
+    CDNA5_DS_TR_B8 = 7
+    CDNA4_TR_B4 = 8
+    CDNA4_TR_B6 = 9
+
+
+_TRANSPOSE_LOAD_MAP: dict[str, tuple[str, int, int, TransposeKind]] = {
+    # Suffix, dword result shape, and default layout before ISA-specific overrides.
+    'B64_TR_B4': ('b4', 4, 2, TransposeKind.TR_B4),
+    'B96_TR_B6': ('b6', 4, 3, TransposeKind.TR_B6),
+    'B64_TR_B8': ('b8', 4, 2, TransposeKind.B64_TR_B8),
+    'B64_TR_B16': ('b16', 4, 2, TransposeKind.B64_TR_B16),
+    'TR4_B64': ('b4', 4, 2, TransposeKind.TR_B4),
+    'TR6_B96': ('b6', 4, 3, TransposeKind.TR_B6),
+    'TR8_B64': ('b8', 4, 2, TransposeKind.B64_TR_B8),
+    'TR16_B128': ('b16', 4, 4, TransposeKind.TR16_B128),
+    'TR_B64': ('b8', 4, 2, TransposeKind.B64_TR_B8),
+    'TR_B128': ('b16', 4, 4, TransposeKind.TR16_B128),
 }
 
 
-def _derive_transpose_load_info(upper: str) -> tuple[str, int, int, int] | None:
+def _derive_transpose_load_info(
+    upper: str,
+) -> tuple[str, int, int, TransposeKind] | None:
     for suffix, info in _TRANSPOSE_LOAD_MAP.items():
         if upper.endswith(suffix):
             return info
@@ -2072,7 +2101,7 @@ _FLAT_ATOMIC_OPS: dict[str, tuple[str, int]] = {
     'MIN_NUM_F64': ('fmin', 2),
     'MAX_NUM_F64': ('fmax', 2),
     'COND_SUB': ('cond_sub', 1),
-    'ORDERED_ADD': ('add', 2),
+    'ORDERED_ADD': ('ordered_add', 2),
     # RDNA3+ typed MIN/MAX (suffix stripped from the full instruction name).
     'MIN_I32': ('smin', 1),
     'MIN_U32': ('umin', 1),
@@ -2142,6 +2171,25 @@ def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] |
 def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
+    if upper.startswith('GLOBAL_LOAD_LDS_'):
+        suffix = upper.removeprefix('GLOBAL_LOAD_LDS_')
+        if suffix in (
+            'UBYTE',
+            'SBYTE',
+            'USHORT',
+            'SSHORT',
+            'DWORD',
+            'DWORDX3',
+            'DWORDX4',
+        ):
+            size, count, signed = _FLAT_DATA_MAP[suffix]
+            return InstructionSemantics(
+                name,
+                'global_load_lds',
+                elem_size=size,
+                num_elems=count,
+                sign_extend=signed,
+            )
     if upper.startswith('SCRATCH_LOAD_LDS_'):
         suffix = upper.removeprefix('SCRATCH_LOAD_LDS_')
         info = _FLAT_DATA_MAP.get(suffix)
@@ -2249,7 +2297,7 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
                 if transpose_info:
                     kind, esz, ne, transpose_kind = transpose_info
                     if kind == 'b8':
-                        transpose_kind = 6
+                        transpose_kind = TransposeKind.WMMA_TR_B8
                     return InstructionSemantics(
                         name,
                         'flat_load',
@@ -2438,6 +2486,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'ds_stack', elem_size=4, num_elems=2 if 'POP2' in upper else 1
         )
+    if '_SRC2_' in upper:
+        # Same atomic operation as the VGPR-data form, with both inputs in LDS.
+        if upper.startswith('DS_WRITE_SRC2_'):
+            return InstructionSemantics(
+                name,
+                'ds_atomic',
+                operation='swap',
+                elem_size=8 if upper.endswith('64') else 4,
+                num_elems=1,
+            )
+        upper = upper.replace('_SRC2_', '_')
     is_write2 = '_WRITE2' in upper or 'DS_STORE_2ADDR' in upper
     is_read2 = '_READ2' in upper or 'DS_LOAD_2ADDR' in upper
     is_write = ('_WRITE_' in upper or 'DS_STORE_' in upper) and not is_write2
@@ -2748,15 +2807,29 @@ def _derive_mimg(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'image_store')
     if upper.startswith('IMAGE_LOAD'):
         return InstructionSemantics(name, 'image_load')
-    if upper.startswith('IMAGE_ATOMIC'):
-        return InstructionSemantics(name, 'image_atomic')
+    if upper.startswith('IMAGE_ATOMIC_'):
+        suffix = upper.removeprefix('IMAGE_ATOMIC_')
+        # GFX12 image opcodes spell types differently from buffer atomics.
+        for image_type, buffer_type in (
+            ('_UINT', '_U32'),
+            ('_INT', '_I32'),
+            ('_FLT', '_F32'),
+        ):
+            if suffix.endswith(image_type):
+                suffix = suffix.removesuffix(image_type) + buffer_type
+                break
+        info = _derive_flat_atomic_info(suffix, False)
+        return InstructionSemantics(
+            name, 'image_atomic', operation=info[0] if info else None, elem_size=4
+        )
+
     if upper.startswith('IMAGE_SAMPLE') or upper.startswith('IMAGE_GATHER'):
         return InstructionSemantics(name, 'image_sample')
     if upper.startswith('IMAGE_GET_RESINFO') or upper.startswith('IMAGE_GET_LOD'):
         return InstructionSemantics(name, 'image_query')
     if upper.startswith('IMAGE_MSAA_LOAD'):
         return InstructionSemantics(name, 'image_load')
-    if upper.startswith('IMAGE_BVH_INTERSECT'):
+    if upper in ('IMAGE_BVH_INTERSECT_RAY', 'IMAGE_BVH64_INTERSECT_RAY'):
         return InstructionSemantics(name, 'image_bvh')
     return InstructionSemantics(name, 'nop')
 

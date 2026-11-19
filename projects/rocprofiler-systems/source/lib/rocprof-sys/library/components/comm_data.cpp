@@ -7,9 +7,11 @@
 #include "core/config.hpp"
 #include "core/node_info.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
 #include <cstdint>
+#include <optional>
 
 using rocprofsys::common::units::bytes;
 using rocprofsys::common::units::data_size_cast;
@@ -41,8 +43,7 @@ void
 metadata_initialize_track()
 {
     auto _init_track = [&](const char* label) {
-        trace_cache::get_metadata_registry().add_track(
-            { .track_name = label, .thread_id = std::nullopt, .extdata = "{}" });
+        trace_cache::get_metadata_registry().ensure_track(label, std::nullopt);
     };
 
     static std::once_flag _once{};
@@ -77,7 +78,7 @@ metadata_initialize_comm_data_pmc()
           .long_description = k_long_description,
           .component        = k_component,
           .units            = k_msg,
-          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .value_type       = rocprofsys::trace_cache::k_absolute,
           .block            = k_block,
           .expression       = k_expression,
           .is_constant      = 0,
@@ -95,7 +96,7 @@ metadata_initialize_comm_data_pmc()
           .long_description = k_long_description,
           .component        = k_component,
           .units            = k_msg,
-          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .value_type       = rocprofsys::trace_cache::k_absolute,
           .block            = k_block,
           .expression       = k_expression,
           .is_constant      = 0,
@@ -114,7 +115,7 @@ metadata_initialize_comm_data_pmc()
           .long_description = k_long_description,
           .component        = k_component,
           .units            = k_msg,
-          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .value_type       = rocprofsys::trace_cache::k_absolute,
           .block            = k_block,
           .expression       = k_expression,
           .is_constant      = 0,
@@ -132,7 +133,7 @@ metadata_initialize_comm_data_pmc()
           .long_description = k_long_description,
           .component        = k_component,
           .units            = k_msg,
-          .value_type       = rocprofsys::trace_cache::ABSOLUTE,
+          .value_type       = rocprofsys::trace_cache::k_absolute,
           .block            = k_block,
           .expression       = k_expression,
           .is_constant      = 0,
@@ -744,128 +745,4 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, void*, size_t
         add(_t, count);
     }
 }
-
-#if defined(ROCPROFSYS_USE_RCCL)
-// Kept for reference, but now gathered throught the SDK callbacks.
-
-// ncclReduce
-void
-comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const void*,
-                 size_t count, ncclDataType_t datatype, ncclRedOp_t, int root, ncclComm_t,
-                 hipStream_t)
-{
-    int _size = rccl_type_size(datatype);
-    if(_size <= 0) return;
-
-    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
-
-    if(rocprofsys::get_use_timemory())
-    {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
-        add(_t, count * _size);
-        add(fmt::format("{}/root={}", _name, root), count * _size);
-    }
-}
-
-// ncclSend
-// ncclGather
-// ncclBcast
-// ncclRecv
-void
-comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t count,
-                 ncclDataType_t datatype, int peer, ncclComm_t, hipStream_t)
-{
-    int _size = rccl_type_size(datatype);
-    if(_size <= 0) return;
-
-    static auto _send_types = std::unordered_set<std::string>{ "ncclSend", "ncclBcast" };
-    static auto _recv_types = std::unordered_set<std::string>{ "ncclGather", "ncclRecv" };
-
-    if(_send_types.count(_data.tool_id) > 0)
-    {
-        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
-    }
-    else if(_recv_types.count(_data.tool_id) > 0)
-    {
-        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
-    }
-    else
-    {
-        ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
-    }
-
-    if(rocprofsys::get_use_timemory())
-    {
-        auto        _name  = std::string_view{ _data.tool_id };
-        std::string _label = "root";
-        if(_name.find("Send") != std::string::npos) _label = "peer";
-
-        tracker_t _t{ _name };
-        add(_t, count * _size);
-        add(fmt::format("{}/{}={}", _name, _label, peer), count * _size);
-    }
-}
-
-// ncclBroadcast
-void
-comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const void*,
-                 size_t count, ncclDataType_t datatype, int root, ncclComm_t, hipStream_t)
-{
-    int _size = rccl_type_size(datatype);
-    if(_size <= 0) return;
-
-    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
-
-    if(rocprofsys::get_use_timemory())
-    {
-        auto      _name = std::string_view{ _data.tool_id };
-        tracker_t _t{ _name };
-        add(_t, count * _size);
-        add(fmt::format("{}/root={}", _data.tool_id, root), count * _size);
-    }
-}
-
-// ncclAllReduce
-// ncclReduceScatter
-void
-comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const void*,
-                 size_t count, ncclDataType_t datatype, ncclRedOp_t, ncclComm_t,
-                 hipStream_t)
-{
-    int _size = rccl_type_size(datatype);
-    if(_size <= 0) return;
-
-    static auto _recv_types = std::unordered_set<std::string>{ "ncclAllReduce" };
-    static auto _send_types = std::unordered_set<std::string>{ "ncclReduceScatter" };
-
-    if(_send_types.count(_data.tool_id) > 0)
-    {
-        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
-    }
-    else if(_recv_types.count(_data.tool_id) > 0)
-    {
-        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
-    }
-    else
-    {
-        ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
-    }
-
-    if(rocprofsys::get_use_timemory()) add(_data, count * _size);
-}
-
-// ncclAllGather
-// ncclAllToAll
-void
-comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const void*,
-                 size_t count, ncclDataType_t datatype, ncclComm_t, hipStream_t)
-{
-    int _size = rccl_type_size(datatype);
-    if(_size <= 0) return;
-
-    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
-    if(rocprofsys::get_use_timemory()) add(_data, count * _size);
-}
-#endif
 }  // namespace rocprofsys::component

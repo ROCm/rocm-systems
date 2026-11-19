@@ -14,8 +14,8 @@
 #include <fmt/format.h>
 
 #include <cstdint>
-#include <optional>
 #include <stdexcept>
+#include <tuple>
 
 namespace rocprofsys::domains::buffered
 {
@@ -54,10 +54,10 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         return;
     }
 
-    const typename Externals::agent_t* src_agent = nullptr;
     try
     {
-        src_agent = &Externals::get_agent_manager().get_agent_by_handle(
+        // Only validates the source agent: records from an unknown agent are dropped
+        std::ignore = Externals::get_agent_manager().get_agent_by_handle(
             record->src_agent_id.handle);
     } catch(const std::out_of_range& e)
     {
@@ -66,28 +66,24 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         return;
     }
 
-    const auto beg_timestamp_ns = record->start_timestamp;
-    const auto end_timestamp_ns = record->end_timestamp;
-
     const std::uint64_t stream_id =
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info({
-        .parent_process_id = Externals::get_ppid(),
-        .process_id        = Externals::get_pid(),
-        .thread_id         = record->thread_id,
-        .start             = k_zero_start_timestamp,
-        .end               = k_zero_end_timestamp,
-        .extdata           = k_empty_json,
+    metadata_registry.ensure_thread(record->thread_id, [&] {
+        return typename Externals::thread_info_t{
+            .parent_process_id = Externals::get_ppid(),
+            .process_id        = Externals::get_pid(),
+            .thread_id         = record->thread_id,
+            .start             = k_zero_start_timestamp,
+            .end               = k_zero_end_timestamp,
+            .extdata           = k_empty_json,
+        };
     });
 
-    metadata_registry.add_track({
-        .track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
-                                  dst_agent->logical_node_id, record->thread_id),
-        .thread_id  = record->thread_id,
-        .extdata    = k_empty_json,
-    });
+    auto const track_name = fmt::format("GPU Memory Copy to Agent [{}] Thread {}",
+                                        dst_agent->logical_node_id, record->thread_id);
+    metadata_registry.ensure_track(track_name, record->thread_id);
 
     metadata_registry.add_stream(stream_id);
 
@@ -101,20 +97,6 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         SdkBackend::get_parent_stack_id(record->correlation_id),
         SdkBackend::get_memory_copy_dst_address(*record),
         SdkBackend::get_memory_copy_src_address(*record), stream_id });
-
-    if(Externals::get_use_timemory())
-    {
-        if(const auto sequent_tid =
-               Externals::get_thread_info_sequent_tid(record->thread_id))
-        {
-            const auto bundle_name =
-                fmt::format("memory_copy: {} -> {}", src_agent->logical_node_id,
-                            dst_agent->logical_node_id);
-
-            Externals::write_timemory_bundle(bundle_name, *sequent_tid,
-                                             end_timestamp_ns - beg_timestamp_ns);
-        }
-    }
 }
 
 template <policies::domain_service::backend   SdkBackend,

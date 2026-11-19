@@ -5,10 +5,14 @@
 
 use std::ffi::c_void;
 
+use rocddi::device::gpu::profiling::SpmDestinationReport;
+
+use crate::admission::InFlightToken;
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{InFlightToken, boundary, initialized_mut, lock, map_error};
-use crate::{memory, runtime};
+use crate::lifecycle::{initialized_mut, lock};
+use crate::memory;
+use crate::status::{boundary, map_error};
 
 /// Flag that skips GPU linear-copy preload for an agent.
 const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
@@ -21,13 +25,13 @@ const AMD_AGENT_PRELOAD_SKIP_BLITS: u64 = 1 << 1;
 /// `hsa_shut_down` does not release the stream. Calls made recursively from a
 /// custom stream callback are rejected. Null selects stderr.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_enable_logging")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_void) -> Status {
     boundary(|| {
-        if runtime::LogWriteScope::active() {
+        if crate::logging::LogWriteScope::active() {
             return INVALID_RUNTIME_STATE;
         }
         if flags.is_null() {
@@ -44,7 +48,7 @@ pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_voi
             Some(runtime) => runtime,
             None => return NOT_INITIALIZED,
         };
-        let Some(_call) = runtime.inflight.enter() else {
+        let Some(_call) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         let logging = runtime.logging.clone();
@@ -57,10 +61,10 @@ pub unsafe extern "C" fn hsa_amd_enable_logging(flags: *mut u8, file: *mut c_voi
 /// The callback must remain callable until runtime shutdown. `data` must stay
 /// live and synchronized with event-worker access for that interval.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_register_system_event_handler")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_register_system_event_handler(
     callback: SystemEventCallback,
     data: *mut c_void,
@@ -79,17 +83,22 @@ pub unsafe extern "C" fn hsa_amd_register_system_event_handler(
         };
         // SAFETY: The C registration contract keeps callback data live and
         // synchronized until the runtime stops delivering events.
-        runtime.register_system_event_handler(callback, unsafe { CallbackArg::new(data) })
+        runtime.events.register(
+            runtime.agents.gpus.first().map(|gpu| &gpu.device),
+            &runtime.control.stop_workers,
+            callback,
+            unsafe { CallbackArg::new(data) },
+        )
     })
 }
 
 /// # Safety
 /// Any non-null `kind` must address writable `u32` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_coherency_get_type")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_coherency_get_type(agent: HsaAgent, kind: *mut u32) -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -99,23 +108,23 @@ pub unsafe extern "C" fn hsa_amd_coherency_get_type(agent: HsaAgent, kind: *mut 
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
         if kind.is_null() {
             return INVALID_ARGUMENT;
         }
         // SAFETY: The caller supplied writable output storage.
-        unsafe { kind.write(runtime.gpus[index].coherency_type) };
+        unsafe { kind.write(runtime.agents.gpus[index].coherency_type) };
         SUCCESS
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_coherency_set_type")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Sets the coherency policy exposed by a GPU agent.
 pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Status {
     boundary(|| {
@@ -127,25 +136,25 @@ pub extern "C" fn hsa_amd_coherency_set_type(agent: HsaAgent, kind: u32) -> Stat
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         if !(AMD_COHERENCY_TYPE_COHERENT..=AMD_COHERENCY_TYPE_NONCOHERENT).contains(&kind) {
             return INVALID_ARGUMENT;
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
-        runtime.gpus[index].coherency_type = kind;
+        runtime.agents.gpus[index].coherency_type = kind;
         SUCCESS
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_preload")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Requests that the selected agent preload its runtime state.
 pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
     boundary(|| {
@@ -157,16 +166,16 @@ pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             if flags & AMD_AGENT_PRELOAD_SKIP_BLITS != 0 {
                 return SUCCESS;
             }
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (token, runtime.gpus[index].device.clone())
+            (token, runtime.agents.gpus[index].device.clone())
         };
         match device
             .gpu()
@@ -179,14 +188,14 @@ pub extern "C" fn hsa_amd_agent_preload(agent: HsaAgent, flags: u64) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_agent_set_async_scratch_limit")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Rejects asynchronous scratch reclaim, which this backend does not expose.
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
+/// Updates the asynchronous scratch threshold observed by queue workers.
 pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
     agent: HsaAgent,
-    _threshold: usize,
+    threshold: usize,
 ) -> Status {
     boundary(|| {
         let guard = match lock() {
@@ -196,19 +205,27 @@ pub extern "C" fn hsa_amd_agent_set_async_scratch_limit(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if runtime.gpu_index(agent).is_none() {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
+        };
+        let gpu = &runtime.agents.gpus[index];
+        if !gpu.scratch.asynchronous
+            || threshold as u64 > gpu.info().maximum_scratch_aperture_bytes()
+        {
+            return INVALID_ARGUMENT;
         }
-        // GFX1201 does not advertise asynchronous scratch reclaim.
-        INVALID_ARGUMENT
+        gpu.scratch
+            .async_limit
+            .store(threshold as u64, std::sync::atomic::Ordering::Release);
+        SUCCESS
     })
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_async_copy_enable")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Enables or disables timestamps for asynchronous copies.
 pub extern "C" fn hsa_amd_profiling_async_copy_enable(enable: bool) -> Status {
     boundary(|| {
@@ -231,10 +248,10 @@ pub extern "C" fn hsa_amd_profiling_async_copy_enable(enable: bool) -> Status {
 /// # Safety
 /// Any non-null `system_tick` must address writable `u64` storage.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_profiling_convert_tick_to_system_domain")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
     agent: HsaAgent,
     agent_tick: u64,
@@ -252,19 +269,19 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
             if system_tick.is_null() {
                 return INVALID_ARGUMENT;
             }
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (token, runtime.gpus[index].device.clone())
+            (token, runtime.agents.gpus[index].device.clone())
         };
-        let counters = match runtime::clock_counters(&device) {
+        let counters = match crate::clock::clock_counters(&device) {
             Ok(counters) => counters,
             Err(error) => return map_error(error),
         };
-        let translated = match runtime::translate_gpu_tick(counters, agent_tick) {
+        let translated = match crate::clock::translate_gpu_tick(counters, agent_tick) {
             Ok(translated) => translated,
             Err(status) => return status,
         };
@@ -275,10 +292,10 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_acquire")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Acquires the agent’s streaming performance monitor.
 pub extern "C" fn hsa_amd_spm_acquire(agent: HsaAgent) -> Status {
     boundary(|| {
@@ -294,10 +311,10 @@ pub extern "C" fn hsa_amd_spm_acquire(agent: HsaAgent) -> Status {
 }
 
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_release")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Releases the SPM resource.
 pub extern "C" fn hsa_amd_spm_release(agent: HsaAgent) -> Status {
     boundary(|| {
@@ -320,9 +337,9 @@ pub(crate) fn retained_gpu_device(
 ) -> Result<(InFlightToken, rocddi::device::Device), Status> {
     let guard = lock()?;
     let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-    let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-    let token = runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
-    Ok((token, runtime.gpus[index].device.clone()))
+    let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
+    let token = runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+    Ok((token, runtime.agents.gpus[index].device.clone()))
 }
 
 /// # Safety
@@ -332,10 +349,10 @@ pub(crate) fn retained_gpu_device(
 /// replacement or unset, or conclusive teardown; a failed call may leave
 /// either reachable.
 #[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
+    all(hsa_tool_dispatch, not(test)),
     unsafe(export_name = "__hsa_impl_hsa_amd_spm_set_dest_buffer")
 )]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+#[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_spm_set_dest_buffer(
     agent: HsaAgent,
     size: usize,
@@ -357,29 +374,37 @@ pub unsafe extern "C" fn hsa_amd_spm_set_dest_buffer(
             Err(_) => return INVALID_ARGUMENT,
         };
         // SAFETY: The caller supplied readable/writable scalar storage.
-        let mut timeout_value = unsafe { timeout.read() };
-        let mut copied_value = 0;
-        let mut loss_value = false;
-        let result = device.gpu().and_then(|gpu| {
-            // SAFETY: The HSA C caller owns destination storage and must keep
-            // both old and new buffers writable while KFD may retain them.
-            // The raw core API exposes this retained-write obligation.
-            unsafe {
-                gpu.spm_set_destination(
-                    size,
-                    &mut timeout_value,
-                    &mut copied_value,
-                    (!destination.is_null()).then_some(destination as usize),
-                    &mut loss_value,
-                )
+        let timeout_value = unsafe { timeout.read() };
+        let (report, result) = match device.gpu() {
+            Err(error) => (
+                SpmDestinationReport {
+                    remaining_timeout_milliseconds: timeout_value,
+                    ..Default::default()
+                },
+                Err(error),
+            ),
+            Ok(gpu) => {
+                // SAFETY: The HSA C caller owns destination storage and must
+                // keep both old and new buffers writable while KFD may retain
+                // them. The raw core API exposes this retained-write duty.
+                match unsafe {
+                    gpu.spm_set_destination(
+                        size,
+                        timeout_value,
+                        (!destination.is_null()).then_some(destination as usize),
+                    )
+                } {
+                    Ok(report) => (report, Ok(())),
+                    Err(failure) => (failure.report, Err(failure.error)),
+                }
             }
-        });
+        };
         // KFD returns these fields together with the ioctl result, including
         // partial progress when the native call fails.
         unsafe {
-            timeout.write(timeout_value);
-            bytes_copied.write(copied_value);
-            data_loss.write(loss_value);
+            timeout.write(report.remaining_timeout_milliseconds);
+            bytes_copied.write(report.previous_destination_bytes_copied);
+            data_loss.write(report.data_loss);
         }
         result.map_or_else(map_error, |()| SUCCESS)
     })

@@ -10,6 +10,13 @@
 //! Layout-sensitive records are checked by compile-time assertions and ABI
 //! tests where the public contract requires an exact size or field offset.
 
+/// Native code-object input handle, matching `hsa_file_t` in `hsa.h`.
+#[cfg(unix)]
+pub type HsaFile = std::ffi::c_int;
+/// Native code-object input handle, matching `hsa_file_t` in `hsa.h`.
+#[cfg(windows)]
+pub type HsaFile = *mut std::ffi::c_void;
+
 use std::ffi::{c_char, c_void};
 
 /// Numeric `hsa_status_t` result returned by HSA C entry points.
@@ -134,11 +141,16 @@ pub(crate) const ISA_COUNT_PER_GPU: u64 = 2;
 pub(crate) const WAVEFRONT_BASE: u64 = 0x4853_4100_0028_0000;
 /// Synthetic handle for the fine-grained host memory pool.
 pub(crate) const CPU_POOL_FINE: u64 = 0x4853_4100_0030_0001;
+/// Base value of CPU memory-pool handles, with sixteen slots per CPU agent.
+pub(crate) const CPU_POOL_BASE: u64 = CPU_POOL_FINE - 1;
 /// Synthetic handle for the extended fine-grained host pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_EXTENDED: u64 = 0x4853_4100_0030_0002;
 /// Synthetic handle for the host kernel-argument pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_KERNARG: u64 = 0x4853_4100_0030_0003;
 /// Synthetic handle for the coarse-grained host pool.
+#[cfg(test)]
 pub(crate) const CPU_POOL_COARSE: u64 = 0x4853_4100_0030_0004;
 /// Base value of the synthetic GPU pool handle range.
 pub(crate) const GPU_POOL_BASE: u64 = 0x4853_4100_0040_0000;
@@ -410,8 +422,6 @@ pub(crate) const AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: u32 = 0xa126;
 pub(crate) const AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH: u32 = 0xa127;
 /// AMD agent information selector for host atomics supported.
 pub(crate) const AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED: u32 = 0xa128;
-/// AMD agent information selector for signal hints supported.
-pub(crate) const AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED: u32 = 0xa129;
 /// AMD agent attribute requesting persistent L2 cache size.
 pub(crate) const AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE: u32 = 0;
 
@@ -554,6 +564,8 @@ pub(crate) const POINTER_TYPE_IPC: u32 = 4;
 pub(crate) const POINTER_TYPE_RESERVED_ADDR: u32 = 5;
 /// AMD pointer-information category for HSA vmem.
 pub(crate) const POINTER_TYPE_HSA_VMEM: u32 = 6;
+/// A reserved range registered with the managed SVM subsystem.
+pub(crate) const POINTER_TYPE_SVM: u32 = 7;
 /// Allocation property bit permitting executable memory.
 pub(crate) const POINTER_ALLOC_EXECUTABLE: u32 = 1 << 0;
 /// Allocation property bit requesting contiguous memory.
@@ -620,8 +632,12 @@ pub(crate) const ACCESS_PERMISSION_RW: u32 = 3;
 /// Virtual memory access permission for ex.
 pub(crate) const ACCESS_PERMISSION_EX: u32 = 4;
 
-/// C ABI integer handle type used by legacy finalizer calls.
-pub(crate) type HsaHandle = i32;
+/// Native graphics interop handle, matching `hsa_handle_t` in `hsa.h`.
+#[cfg(unix)]
+pub(crate) type HsaHandle = std::ffi::c_int;
+/// Native graphics interop handle, matching `hsa_handle_t` in `hsa.h`.
+#[cfg(windows)]
+pub(crate) type HsaHandle = *mut c_void;
 
 /// Symbol information selector for type.
 pub(crate) const SYMBOL_INFO_TYPE: u32 = 0;
@@ -936,6 +952,15 @@ pub(crate) struct HsaAmdVmemHandleInfo {
     pub(crate) agent: HsaAgent,
 }
 
+/// First complete version of the caller-sized VMEM handle information record.
+#[repr(C)]
+pub(crate) struct HsaAmdVmemHandleInfoPrefix {
+    /// Byte size of the caller-provided record.
+    pub(crate) size: usize,
+    /// Size in bytes of the underlying allocation.
+    pub(crate) alloc_size: usize,
+}
+
 const _: () = {
     assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, alloc_size) == std::mem::size_of::<usize>());
     assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, agent) == 2 * std::mem::size_of::<usize>());
@@ -1091,6 +1116,22 @@ pub(crate) struct HsaExtSamplerDescriptorV2 {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
+/// Sampler descriptor with per-axis addressing, mip filters and anisotropy.
+pub(crate) struct HsaExtSamplerDescriptorV3 {
+    /// Whether sampler coordinates are normalized.
+    pub(crate) coordinate_mode: u32,
+    /// Filtering rule used to sample image elements.
+    pub(crate) filter_mode: u32,
+    /// Filtering rule used between mip levels.
+    pub(crate) mipmap_filter_mode: u32,
+    /// Addressing rules for X, Y, and Z coordinates.
+    pub(crate) address_modes: [u32; 3],
+    /// Maximum requested anisotropy ratio, normalized by the sampler owner.
+    pub(crate) max_anisotropy: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
 /// Agent and permissions for virtual-memory access.
 pub struct HsaAmdMemoryAccessDesc {
     /// Access bits granted to the named agent.
@@ -1207,6 +1248,44 @@ pub struct HsaQueue {
     pub(crate) reserved: u32,
     /// Unique public queue identifier for this runtime generation.
     pub(crate) id: u64,
+}
+
+/// Public AQL kernel dispatch packet. The C header's anonymous header union is
+/// represented by its two 16-bit fields; no caller in this frontend reads the
+/// alternate 32-bit union member. Packet storage is aligned by its ring, not
+/// by this C record's own alignment.
+#[repr(C)]
+pub(crate) struct HsaKernelDispatchPacket {
+    /// Packet type, barriers, and fence scopes; published last.
+    pub(crate) header: u16,
+    /// Grid dimensionality and dispatch setup.
+    pub(crate) setup: u16,
+    /// Work-group extent in the X dimension.
+    pub(crate) workgroup_size_x: u16,
+    /// Work-group extent in the Y dimension.
+    pub(crate) workgroup_size_y: u16,
+    /// Work-group extent in the Z dimension.
+    pub(crate) workgroup_size_z: u16,
+    /// Reserved packet storage.
+    pub(crate) reserved0: u16,
+    /// Grid extent in the X dimension.
+    pub(crate) grid_size_x: u32,
+    /// Grid extent in the Y dimension.
+    pub(crate) grid_size_y: u32,
+    /// Grid extent in the Z dimension.
+    pub(crate) grid_size_z: u32,
+    /// Private segment bytes requested per work-item.
+    pub(crate) private_segment_size: u32,
+    /// Group segment bytes requested per work-group.
+    pub(crate) group_segment_size: u32,
+    /// Executable kernel handle.
+    pub(crate) kernel_object: u64,
+    /// Pointer to the kernel arguments.
+    pub(crate) kernarg_address: *mut c_void,
+    /// Reserved packet storage.
+    pub(crate) reserved2: u64,
+    /// Signal updated when dispatch completes.
+    pub(crate) completion_signal: HsaSignal,
 }
 
 #[repr(C)]
@@ -1354,6 +1433,16 @@ pub struct HsaPitchedPtr {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+/// Pitched storage and the origin of one rectangular batch-copy operand.
+pub struct HsaAmdMemoryCopyRectPtr {
+    /// Base address and byte strides of the storage.
+    pub(crate) pitched_ptr: HsaPitchedPtr,
+    /// Origin, measured in bytes along X and rows/slices along Y/Z.
+    pub(crate) offset: HsaDim3,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
 /// Predicate and address evaluated before a batch copy.
 pub struct HsaAmdMemoryCopyWait {
     /// Wait predicate selected for the memory-copy control.
@@ -1404,6 +1493,8 @@ pub union HsaAmdMemoryCopySize {
     pub(crate) bytes: usize,
     /// Caller-owned byte-count list for a multi-copy operation.
     pub(crate) list: *const usize,
+    /// Caller-owned list of rectangular byte/row/slice extents.
+    pub(crate) ranges: *const HsaDim3,
 }
 
 #[repr(C)]

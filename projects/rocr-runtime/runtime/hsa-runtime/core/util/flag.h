@@ -257,11 +257,12 @@ class Flag {
     var = os::GetEnvVar("HSA_DISABLE_PC_SAMPLING");
     disable_pc_sampling_ = (var == "1") ? true : false;
 
-    // Controls reporting of the "strict" ISA variant on A0 silicon. Disabled by
-    // default, so the agent keeps the base target. Set the variable to 0 to opt
-    // in and have the agent re-point to the strict variant.
+    // Controls reporting of the "strict" ISA variant on A0 silicon. Enabled by
+    // default, so an A0 agent re-points to the strict variant and accepts native
+    // strict code objects. Set the variable to 1 as an emergency kill switch to
+    // fall back to the base target.
     var = os::GetEnvVar("HSA_DISABLE_GFX12_STRICT");
-    disable_gfx12_strict_ = (var == "0") ? false : true;
+    disable_gfx12_strict_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_LOADER_ENABLE_MMAP_URI");
     loader_enable_mmap_uri_ = (var == "1") ? true : false;
@@ -303,6 +304,9 @@ class Flag {
 
     var = os::GetEnvVar("HSA_ENABLE_MWAITX");
     enable_mwaitx_ = (var == "0") ? false : true;
+
+    var = os::GetEnvVar("HSA_ENABLE_YIELDING_POLL");
+    enable_yielding_poll_ = (var == "1") ? true : false;
 
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
@@ -507,6 +511,8 @@ class Flag {
 
   bool image_print_srd() const { return image_print_srd_; }
 
+  bool enable_yielding_poll() const { return enable_yielding_poll_; }
+
   bool check_mwaitx(bool mwaitx_supported) {
     if (enable_mwaitx_ && !mwaitx_supported) enable_mwaitx_ = false;
 
@@ -631,7 +637,7 @@ class Flag {
   bool no_scratch_thread_limit_;
   bool disable_image_;
   bool disable_pc_sampling_;
-  bool disable_gfx12_strict_ = true;
+  bool disable_gfx12_strict_ = false;
   bool loader_enable_mmap_uri_;
   bool check_sramecc_validity_;
   bool debug_;
@@ -641,6 +647,7 @@ class Flag {
   bool override_cpu_affinity_;
   bool image_print_srd_;
   bool enable_mwaitx_;
+  bool enable_yielding_poll_;
   bool enable_ipc_mode_legacy_;
   bool wait_any_;
   bool dev_mem_queue_buf_;

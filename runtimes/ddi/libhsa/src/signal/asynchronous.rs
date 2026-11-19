@@ -7,7 +7,7 @@ use super::*;
 
 /// Work accepted by the single asynchronous callback dispatcher.
 #[derive(Clone, Copy)]
-pub(super) enum AsyncRequest {
+pub(crate) enum AsyncRequest {
     /// Run an application callback without a signal condition.
     Function {
         /// One-shot application function scheduled on the dispatcher.
@@ -68,14 +68,29 @@ impl SignalState {
     }
 
     /// Joins the callback worker after the shared stop request is published.
+    #[cfg(test)]
     pub(crate) fn join_worker(&mut self) {
-        if let Some(dispatcher) = self.async_dispatcher.take() {
-            let _ = dispatcher.worker.join();
+        if let Some(worker) = self.take_worker() {
+            let _ = worker.join();
         }
     }
 
+    /// Detaches the callback worker for joining outside the lifecycle lock.
+    pub(crate) fn take_worker(&mut self) -> Option<thread::JoinHandle<()>> {
+        self.async_dispatcher
+            .take()
+            .map(|dispatcher| dispatcher.worker)
+    }
+
     /// Starts the dispatcher if needed and enqueues a callback request.
-    fn enqueue_async(&mut self, request: AsyncRequest, stop_workers: &Arc<AtomicBool>) -> Status {
+    pub(crate) fn enqueue_async(
+        &mut self,
+        request: AsyncRequest,
+        stop_workers: &Arc<AtomicBool>,
+    ) -> Status {
+        if stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
         if self.async_dispatcher.is_none() {
             let (sender, receiver) = std::sync::mpsc::channel();
             let stop = stop_workers.clone();
@@ -94,46 +109,13 @@ impl SignalState {
     }
 }
 
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_async_function")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Queues a function to run on the asynchronous callback worker.
-pub unsafe extern "C" fn hsa_amd_async_function(
-    callback: AsyncFunction,
-    arg: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(callback) = callback else {
-            return INVALID_ARGUMENT;
-        };
-        runtime.signal_state.enqueue_async(
-            AsyncRequest::Function {
-                callback,
-                arg: unsafe { CallbackArg::new(arg) },
-            },
-            &runtime.stop_workers,
-        )
-    })
-}
-
 /// Adds or removes a signal handler from the dispatcher state.
 fn accept_async_request(request: AsyncRequest, handlers: &mut Vec<AsyncSignalHandler>) {
     match request {
         AsyncRequest::Function { callback, arg } => {
-            let _scope = CallbackScope::enter();
             // SAFETY: The public contract requires callback and arg to remain
             // valid until the callback executes.
-            unsafe { callback(arg.as_ptr()) };
+            CallbackScope::run(|| unsafe { callback(arg.as_ptr()) });
         }
         AsyncRequest::Signal {
             signal,
@@ -181,142 +163,89 @@ pub(super) fn run_async_dispatcher(
 ) {
     let mut handlers = Vec::new();
     while !stop.load(Ordering::Acquire) {
-        if handlers.is_empty() {
-            match receiver.recv_timeout(Duration::from_millis(1)) {
-                Ok(request) => {
-                    if stop.load(Ordering::Acquire) {
-                        return;
+        let Some(token) = crate::admission::enter_runtime_service() else {
+            thread::sleep(Duration::from_millis(1));
+            continue;
+        };
+        if crate::admission::ApiLeaseScope::run(token, || {
+            if handlers.is_empty() {
+                match receiver.recv_timeout(Duration::from_millis(1)) {
+                    Ok(request) => {
+                        if stop.load(Ordering::Acquire) {
+                            return std::ops::ControlFlow::Break(());
+                        }
+                        accept_async_request(request, &mut handlers);
                     }
-                    accept_async_request(request, &mut handlers);
+                    Err(RecvTimeoutError::Timeout) => return std::ops::ControlFlow::Continue(()),
+                    Err(RecvTimeoutError::Disconnected) => return std::ops::ControlFlow::Break(()),
                 }
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => return,
             }
-        }
-        if !drain_async_requests(receiver, &mut handlers, stop) {
-            return;
-        }
+            if !drain_async_requests(receiver, &mut handlers, stop) {
+                return std::ops::ControlFlow::Break(());
+            }
 
-        let mut invoked = false;
-        let mut index = 0;
-        while index < handlers.len() {
+            let mut invoked = false;
+            let mut index = 0;
+            while index < handlers.len() {
+                if stop.load(Ordering::Acquire) {
+                    return std::ops::ControlFlow::Break(());
+                }
+                let registration = &handlers[index];
+                // SAFETY: The runtime retains each registered signal until this
+                // worker releases its last handler reference.
+                let observed = unsafe {
+                    with_public_signal(registration.signal, |slot| {
+                        slot.value.load(Ordering::Acquire)
+                    })
+                }
+                .unwrap_or(0);
+                if stop.load(Ordering::Acquire) {
+                    return std::ops::ControlFlow::Break(());
+                }
+                if !condition_met(registration.condition, observed, registration.compare_value) {
+                    index += 1;
+                    continue;
+                }
+                invoked = true;
+                // SAFETY: HSA requires the callback and argument to remain valid
+                // while the registration is active.
+                let keep = CallbackScope::run(|| unsafe {
+                    (registration.handler)(observed, registration.arg.as_ptr())
+                });
+                if keep {
+                    index += 1;
+                } else {
+                    let removed = handlers.remove(index);
+                    if let Ok(mut guard) = lock() {
+                        if let Some(runtime) = guard.as_mut() {
+                            runtime.signal_state.release_async_signal(removed.signal);
+                        }
+                    }
+                }
+            }
+
             if stop.load(Ordering::Acquire) {
-                return;
+                return std::ops::ControlFlow::Break(());
             }
-            let registration = &handlers[index];
-            // SAFETY: The runtime retains each registered signal until this
-            // worker releases its last handler reference.
-            let observed = unsafe { hsa_signal_load_scacquire(registration.signal) };
-            if stop.load(Ordering::Acquire) {
-                return;
-            }
-            if !condition_met(registration.condition, observed, registration.compare_value) {
-                index += 1;
-                continue;
-            }
-            invoked = true;
-            let _scope = CallbackScope::enter();
-            // SAFETY: HSA requires the callback and argument to remain valid
-            // while the registration is active.
-            let keep = unsafe { (registration.handler)(observed, registration.arg.as_ptr()) };
-            if keep {
-                index += 1;
+            if invoked {
+                thread::yield_now();
             } else {
-                let removed = handlers.remove(index);
-                if let Ok(mut guard) = lock() {
-                    if let Some(runtime) = guard.as_mut() {
-                        runtime.signal_state.release_async_signal(removed.signal);
+                match receiver.recv_timeout(Duration::from_micros(20)) {
+                    Ok(request) => {
+                        if stop.load(Ordering::Acquire) {
+                            return std::ops::ControlFlow::Break(());
+                        }
+                        accept_async_request(request, &mut handlers);
                     }
+                    Err(RecvTimeoutError::Timeout) => (),
+                    Err(RecvTimeoutError::Disconnected) => return std::ops::ControlFlow::Break(()),
                 }
             }
-        }
-
-        if stop.load(Ordering::Acquire) {
+            std::ops::ControlFlow::Continue(())
+        })
+        .is_break()
+        {
             return;
-        }
-        if invoked {
-            thread::yield_now();
-        } else {
-            match receiver.recv_timeout(Duration::from_micros(20)) {
-                Ok(request) => {
-                    if stop.load(Ordering::Acquire) {
-                        return;
-                    }
-                    accept_async_request(request, &mut handlers);
-                }
-                Err(RecvTimeoutError::Timeout) => (),
-                Err(RecvTimeoutError::Disconnected) => return,
-            }
         }
     }
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_amd_signal_async_handler")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-/// Registers a callback for a signal condition.
-pub unsafe extern "C" fn hsa_amd_signal_async_handler(
-    signal: HsaSignal,
-    condition: u32,
-    compare_value: SignalValue,
-    handler: SignalHandler,
-    arg: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        let Some(handler) = handler else {
-            return INVALID_ARGUMENT;
-        };
-        if !matches!(
-            condition,
-            SIGNAL_CONDITION_EQ | SIGNAL_CONDITION_NE | SIGNAL_CONDITION_LT | SIGNAL_CONDITION_GTE
-        ) {
-            return INVALID_ARGUMENT;
-        }
-        if !runtime.signal_state.owns_signal(signal) {
-            return INVALID_SIGNAL;
-        }
-        let address = signal.handle as usize;
-        if !runtime
-            .signal_state
-            .interrupt_signals
-            .contains_key(&address)
-            && !runtime
-                .signal_state
-                .owned_ipc_signals
-                .contains_key(&address)
-            && !runtime
-                .signal_state
-                .imported_ipc_signals
-                .contains_key(&address)
-        {
-            return INVALID_SIGNAL;
-        }
-        if let Err(status) = runtime.signal_state.retain_async_signal(signal) {
-            return status;
-        }
-        let status = runtime.signal_state.enqueue_async(
-            AsyncRequest::Signal {
-                signal,
-                condition,
-                compare_value,
-                handler,
-                arg: unsafe { CallbackArg::new(arg) },
-            },
-            &runtime.stop_workers,
-        );
-        if status != SUCCESS {
-            runtime.signal_state.release_async_signal(signal);
-        }
-        status
-    })
 }

@@ -223,12 +223,6 @@ experiment::description()
     return "Records an experiment for causal profiling";
 }
 
-const std::atomic<experiment*>&
-experiment::get_current_experiment()
-{
-    return current_experiment;
-}
-
 bool
 experiment::start()
 {
@@ -438,16 +432,6 @@ experiment::get_delay()
     return current_experiment_value.sample_delay;
 }
 
-double
-experiment::get_delay_scaling()
-{
-    if(!current_experiment.load())
-    {
-        return 0;
-    }
-    return current_experiment_value.delay_scaling;
-}
-
 std::uint32_t
 experiment::get_index()
 {
@@ -638,7 +622,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
         else
         {
             throw std::runtime_error(
-                fmt::format("Error opening causal experiments output file: %s", _fname));
+                fmt::format("Error opening causal experiments output file: {}", _fname));
         }
     }
 
@@ -796,7 +780,7 @@ experiment::load_experiments(std::string _fname, const filename_config_t& _cfg,
         if(_throw_on_error)
         {
             throw std::runtime_error(
-                fmt::format("Error opening causal experiments input file: %s", _fname));
+                fmt::format("Error opening causal experiments input file: {}", _fname));
         }
     }
 
