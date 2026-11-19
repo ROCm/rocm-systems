@@ -7080,6 +7080,7 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneWorkItemForTheNextRound) 
   }
 }
 
+// ===========================================================================
 // ncclGroupSimulateEnd estimatedTime: a tuner-forced 0 reports the cost-model
 // time of the chosen algorithm, and a direct AllGather is still costed.
 // ===========================================================================
