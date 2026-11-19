@@ -103,19 +103,18 @@ class Flag {
   void Refresh() {
     // Integer environment variables accept any complete base-10 integer in
     // range. The boolean flags below only recognize 0 and 1. Unset, empty, and
-    // non-integer values leave *parsed unchanged and return false.
+    // non-integer values return default_value.
     auto parse_env_integer = [](const char* name, long long min_value, long long max_value,
-                                long long* parsed) -> bool {
-      if (!os::IsEnvVarSet(name)) return false;
+                                long long default_value) -> long long {
+      if (!os::IsEnvVarSet(name)) return default_value;
       const std::string value = os::GetEnvVar(name);
-      if (value.empty()) return false;
+      if (value.empty()) return default_value;
       errno = 0;
       char* end = nullptr;
       const long long number = std::strtoll(value.c_str(), &end, 10);
-      if (end == value.c_str() || *end != '\0' || errno == ERANGE) return false;
-      if (number < min_value || number > max_value) return false;
-      *parsed = number;
-      return true;
+      if (end == value.c_str() || *end != '\0' || errno == ERANGE) return default_value;
+      if (number < min_value || number > max_value) return default_value;
+      return number;
     };
 
     std::string var = os::GetEnvVar("HSA_CHECK_FLAT_SCRATCH");
@@ -186,35 +185,27 @@ class Flag {
     var = os::GetEnvVar("HSA_SDMA_WAIT_IDLE");
     sdma_wait_idle_ = (var == "1") ? true : false;
 
-    long long parsed = 0;
-    parse_env_integer("HSA_MAX_QUEUES", 0, UINT32_MAX, &parsed);
-    max_queues_ = static_cast<uint32_t>(parsed);
+    max_queues_ = static_cast<uint32_t>(parse_env_integer("HSA_MAX_QUEUES", 0, UINT32_MAX, 0));
 
     // Maximum amount of scratch mem that can be used per process per gpu
-    parsed = 0;
-    parse_env_integer("HSA_SCRATCH_MEM", 0, LLONG_MAX, &parsed);
-    scratch_mem_size_ = static_cast<size_t>(parsed);
+    scratch_mem_size_ =
+        static_cast<size_t>(parse_env_integer("HSA_SCRATCH_MEM", 0, LLONG_MAX, 0));
 
     // Scratch memory sizes > HSA_SCRATCH_SINGLE_LIMIT will trigger a use-once scheme
     // We also reserve HSA_SCRATCH_SINGLE_LIMIT per process per gpu to guarrantee we
     // have sufficient memory to for scratch in case user tried to allocate all device
     // memory
-    parsed = 0;
-    if (parse_env_integer("HSA_SCRATCH_SINGLE_LIMIT", 0, LLONG_MAX, &parsed))
-      scratch_single_limit_ = static_cast<size_t>(parsed);
-    else
-      scratch_single_limit_ = DEFAULT_SCRATCH_SINGLE_LIMIT;
+    scratch_single_limit_ = static_cast<size_t>(
+        parse_env_integer("HSA_SCRATCH_SINGLE_LIMIT", 0, LLONG_MAX, DEFAULT_SCRATCH_SINGLE_LIMIT));
 
     // On GPUs that support asynchronous scratch reclaim
     // Scratch memory sizes > HSA_SCRATCH_SINGLE_LIMIT_ASYNC will trigger a use-once scheme
     // Note: This only sets the initial value for the threshold. If
     // hsa_amd_agent_set_async_scratch_limit is called after initialization, the threshold
     // will be updated.
-    parsed = 0;
-    if (parse_env_integer("HSA_SCRATCH_SINGLE_LIMIT_ASYNC", 0, LLONG_MAX, &parsed))
-      scratch_single_limit_async_ = static_cast<size_t>(parsed);
-    else
-      scratch_single_limit_async_ = 0;  // DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC;
+    // Unset stays 0. DEFAULT_SCRATCH_SINGLE_LIMIT_ASYNC_PER_XCC is applied later per XCC.
+    scratch_single_limit_async_ = static_cast<size_t>(
+        parse_env_integer("HSA_SCRATCH_SINGLE_LIMIT_ASYNC", 0, LLONG_MAX, 0));
 
     // On GPUs that support asynchronous scratch reclaim this can be used to disable this feature.
     // Disabling asynchronous scratch reclaim also disables use of alternate scratch
@@ -282,9 +273,8 @@ class Flag {
     var = os::GetEnvVar("HSA_LOADER_ENABLE_MMAP_URI");
     loader_enable_mmap_uri_ = (var == "1") ? true : false;
 
-    parsed = 1024 * 1024;
-    parse_env_integer("HSA_FORCE_SDMA_SIZE", 0, LLONG_MAX, &parsed);
-    force_sdma_size_ = static_cast<size_t>(parsed);
+    force_sdma_size_ = static_cast<size_t>(
+        parse_env_integer("HSA_FORCE_SDMA_SIZE", 0, LLONG_MAX, 1024 * 1024));
 
     var = os::GetEnvVar("HSA_IGNORE_SRAMECC_MISREPORT");
     check_sramecc_validity_ = (var == "1") ? false : true;
@@ -314,10 +304,8 @@ class Flag {
     // log2(page count), valid 0-63. -1 means unset or not a value in that range.
     // Applied once, on the first hsa_amd_svm_attributes_set for a virtual address
     // that does not itself set HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY.
-    svm_granularity_ = -1;
-    parsed = 0;
-    if (parse_env_integer("HSA_SVM_GRANULARITY", 0, 63, &parsed))
-      svm_granularity_ = static_cast<int>(parsed);
+    svm_granularity_ =
+        static_cast<int>(parse_env_integer("HSA_SVM_GRANULARITY", 0, 63, -1));
 
     var = os::GetEnvVar("HSA_ENABLE_SRAMECC");
     sramecc_enable_ =
@@ -335,11 +323,8 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_IPC_MODE_LEGACY");
     enable_ipc_mode_legacy_ = (var == "1") ? true : false;
 
-    parsed = 0;
-    if (parse_env_integer("HSA_PCS_MAX_DEVICE_BUFFER_SIZE", 0, LLONG_MAX, &parsed))
-      pc_sampling_max_device_buffer_size_ = static_cast<size_t>(parsed);
-    else
-      pc_sampling_max_device_buffer_size_ = DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE;
+    pc_sampling_max_device_buffer_size_ = static_cast<size_t>(parse_env_integer(
+        "HSA_PCS_MAX_DEVICE_BUFFER_SIZE", 0, LLONG_MAX, DEFAULT_PCS_MAX_DEVICE_BUFFER_SIZE));
 
     // Temporary environment variable to disable CPU affinity override
     // Will either rename to HSA_OVERRIDE_CPU_AFFINITY later or remove completely.
@@ -353,9 +338,8 @@ class Flag {
     wait_any_ = (var == "1") ? true : false;
 
     /* hsa_signal_wait_relaxed abort timeout  */
-    parsed = 0;
-    parse_env_integer("HSA_SIGNAL_WAIT_ABORT_TIMEOUT", 0, UINT32_MAX, &parsed);
-    signal_abort_timeout_ = static_cast<uint32_t>(parsed);
+    signal_abort_timeout_ = static_cast<uint32_t>(
+        parse_env_integer("HSA_SIGNAL_WAIT_ABORT_TIMEOUT", 0, UINT32_MAX, 0));
 
     /* Valid inputs are 0-99, HIGH, MAX */
     var = os::GetEnvVar("HSA_ASYNCEVENTS_THREAD_PRIORITY");
@@ -364,10 +348,13 @@ class Flag {
       async_events_thread_priority_ = os::OS_THREAD_PRIORITY_MAX;
     } else if (var == "HIGH") {
       async_events_thread_priority_ = os::OS_THREAD_PRIORITY_HIGH;
-    } else if (parse_env_integer("HSA_ASYNCEVENTS_THREAD_PRIORITY", 0, 99, &parsed)) {
-      async_events_thread_priority_ = static_cast<int>(parsed);
-    } else if (var != "") {
-      fprintf(stderr, "Failed to parse HSA_ASYNCEVENTS_THREAD_PRIORITY");
+    } else {
+      const long long priority =
+          parse_env_integer("HSA_ASYNCEVENTS_THREAD_PRIORITY", 0, 99, -1);
+      if (priority >= 0)
+        async_events_thread_priority_ = static_cast<int>(priority);
+      else if (var != "")
+        fprintf(stderr, "Failed to parse HSA_ASYNCEVENTS_THREAD_PRIORITY");
     }
 
     var = os::GetEnvVar("HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG");
@@ -394,9 +381,8 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_DXG_DETECTION");
     enable_dxg_detection_ = (var == "0") ? false : true;
 
-    parsed = 1024 * 1024;
-    parse_env_integer("HSA_CO_DMACOPY_SIZE", 0, LLONG_MAX, &parsed);
-    co_dmacopy_size_ = static_cast<size_t>(parsed);
+    co_dmacopy_size_ = static_cast<size_t>(
+        parse_env_integer("HSA_CO_DMACOPY_SIZE", 0, LLONG_MAX, 1024 * 1024));
 
     var = os::GetEnvVar("HSA_COREDUMP_SHOW_PROGRESS");
     enable_core_dump_progress_ = (var == "1");
@@ -412,15 +398,13 @@ class Flag {
 
     // This limits the maximum number of hardware queues that can be created per
     // priority level for counted queues on every GPU agent. By default, the limit is set to 4.
-    parsed = DEFAULT_GPU_HW_QUEUES_MAX;
-    parse_env_integer("GPU_MAX_HW_QUEUES", 0, UINT32_MAX, &parsed);
-    cp_queues_limit_ = static_cast<uint32_t>(parsed);
+    cp_queues_limit_ = static_cast<uint32_t>(
+        parse_env_integer("GPU_MAX_HW_QUEUES", 0, UINT32_MAX, DEFAULT_GPU_HW_QUEUES_MAX));
 
     // This allows configuring the size of counted queues created through
     // hsa_amd_counted_queue_acquire API. If not set, default queue size is set to 16384.
-    parsed = DEFAULT_COUNTED_QUEUE_SIZE;
-    parse_env_integer("HSA_COUNTED_QUEUE_SIZE", 0, LLONG_MAX, &parsed);
-    counted_queue_size_ = static_cast<size_t>(parsed);
+    counted_queue_size_ = static_cast<size_t>(
+        parse_env_integer("HSA_COUNTED_QUEUE_SIZE", 0, LLONG_MAX, DEFAULT_COUNTED_QUEUE_SIZE));
 
     // HSA_SDMA_LINEAR_B2B: 1=force B2B, 0=force broadcast, unset=auto (size threshold)
     var = os::GetEnvVar("HSA_SDMA_LINEAR_B2B");
