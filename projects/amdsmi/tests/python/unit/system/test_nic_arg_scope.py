@@ -109,7 +109,7 @@ class TestNicArgScope(unittest.TestCase):
 
     def test_every_device_subcommand_is_classified(self):
         # Each _add_device_arguments call site is one subcommand; the four consumers pass nic=True.
-        tree = ast.parse(Path(_PARSER_PATH).read_text())
+        tree = ast.parse(Path(_PARSER_PATH).read_text(encoding="utf-8"))
         call_sites = [
             node
             for node in ast.walk(tree)
@@ -121,9 +121,8 @@ class TestNicArgScope(unittest.TestCase):
             call
             for call in call_sites
             if any(
-                (keyword.arg == "nic")
-                and isinstance(keyword.value, ast.Constant)
-                and (keyword.value.value is True)
+                # Not isinstance(ast.Constant): a literal True is ast.NameConstant before Python 3.8.
+                (keyword.arg == "nic") and (getattr(keyword.value, "value", None) is True)
                 for keyword in call.keywords
             )
         ]

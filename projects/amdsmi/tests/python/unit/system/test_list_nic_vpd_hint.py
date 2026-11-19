@@ -12,8 +12,6 @@ Loaded in isolation with a stubbed ``amdsmi`` so the branch is exercised
 without a built libamd_smi.so or NIC hardware.
 """
 
-from __future__ import annotations
-
 import contextlib
 import importlib.util
 import io

@@ -75,13 +75,13 @@ def _build_fake_amdsmi():
     ``_FakeLibraryException``, standing in for a sensor the APU does not expose.
     """
 
-    class _Interface(types.ModuleType):
+    class _FakeInterface(types.ModuleType):
         # A class-level hook, unlike a module __getattr__, also works on Python 3.6.
         def __getattr__(self, name):
             return _unsupported(name)
 
     amdsmi_pkg = types.ModuleType("amdsmi")
-    interface = _Interface("amdsmi.amdsmi_interface")
+    interface = _FakeInterface("amdsmi.amdsmi_interface")
     exception = types.ModuleType("amdsmi.amdsmi_exception")
 
     interface.AMDSMI_MAX_NUM_GFX_CLKS = 8

@@ -12,8 +12,6 @@ Loaded in isolation with a stubbed ``amdsmi`` so the branch is exercised
 without a built libamd_smi.so or NIC hardware.
 """
 
-from __future__ import annotations
-
 import ast
 import importlib.util
 import os
@@ -64,7 +62,8 @@ def _load_decode_nic_capabilities():
                 }
             )
             namespace = {"amdsmi_wrapper": wrapper, "List": List}
-            exec(compile(ast.Module([node], []), _INTERFACE_PATH, "exec"), namespace)
+            module = ast.Module(body=[node], type_ignores=[])
+            exec(compile(module, _INTERFACE_PATH, "exec"), namespace)
             return namespace["_decode_nic_capabilities"]
     raise AssertionError("_decode_nic_capabilities not found in amdsmi_interface.py")
 

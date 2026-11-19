@@ -94,7 +94,7 @@ def _real_handle_ainics():
         amdsmi_wrapper=types.SimpleNamespace(AMDSMI_PROCESSOR_TYPE_AMD_NIC=_NIC_PROCESSOR_TYPE),
     )
     namespace = {"amdsmi_interface": interface, "logging": logging}
-    exec(compile(ast.Module([method], []), _HELPERS_PATH, "exec"), namespace)
+    exec(compile(ast.Module(body=[method], type_ignores=[]), _HELPERS_PATH, "exec"), namespace)
 
     helpers = types.SimpleNamespace(
         run_device_subcommand=lambda subcommand, args, **device_kwarg: subcommand(
@@ -130,7 +130,7 @@ class TestFirmwareNicPrefetch(unittest.TestCase):
         command.firmware_nic(args)
 
         self.assertEqual(get_fw_info.call_count, len(handles))
-        stored = [c.args[2] for c in command.logger.store_ainic_output.call_args_list]
+        stored = [c[0][2] for c in command.logger.store_ainic_output.call_args_list]
         self.assertEqual(stored, [{"FW": "v0"}, {"FW": "v1"}, {"FW": "v2"}])
 
     def test_prefetch_queries_the_nics_concurrently(self):
@@ -150,7 +150,7 @@ class TestFirmwareNicPrefetch(unittest.TestCase):
         args = types.SimpleNamespace(nic=None, fw_list=None)
         command.firmware_nic(args)
 
-        stored = [c.args[2] for c in command.logger.store_ainic_output.call_args_list]
+        stored = [c[0][2] for c in command.logger.store_ainic_output.call_args_list]
         self.assertEqual(stored, [{"FW": "v0"}, {"FW": "v1"}])
 
     def test_single_nic_has_no_prefetch(self):
@@ -182,7 +182,7 @@ class TestFirmwareNicPrefetch(unittest.TestCase):
         args = types.SimpleNamespace(nic=None, fw_list=None)
         command.firmware_nic(args)
 
-        stored = [c.args[2] for c in command.logger.store_ainic_output.call_args_list]
+        stored = [c[0][2] for c in command.logger.store_ainic_output.call_args_list]
         self.assertEqual(stored, [{}, {"FW": "v1"}])
 
     def test_prefetch_pool_is_capped(self):
