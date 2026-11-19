@@ -2487,8 +2487,9 @@ TEST(Rcclwrap, AdjustChannels_Enabled_DividesByMultiplier)
 // -> divided then doubled (the "reduced CU usage" special case).
 TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
 {
-    // Relies on default RCCL_MAX_NCHANNELS (-2, i.e. < 0). Isolate so the cached
-    // ncclParamMaxNchannels() value is deterministic regardless of test ordering.
+    // Relies on NCCL_MAX_NCHANNELS, NCCL_MAX_NRINGS and NCCL_WORK_ARGS_BYTES at their
+    // defaults, so ncclMaxNchannels() == MAXCHANNELS. Isolate so the cached params are
+    // deterministic regardless of test ordering.
     RUN_ISOLATED_TEST_WITH_ENV(
         "AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles",
         []()
