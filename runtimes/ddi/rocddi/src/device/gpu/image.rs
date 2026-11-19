@@ -3,12 +3,18 @@
 
 //! GFX9 through GFX12 image formats, layouts, and resource descriptors.
 //!
-//! The encodings below follow `ROCr`'s gfx12 image resource definition;
-//! the linear row alignment follows `AddrLib3`'s GFX12 surface calculation.
+//! Hardware register encoding is independent of frontend handles and statuses.
+//! Layout inputs retain the device-qualified surface calculation.
 
 use crate::topology::GpuInfo;
 
-mod legacy;
+mod resource;
+mod sampler;
+
+pub use sampler::{
+    SamplerAddressMode, SamplerAnisotropy, SamplerCoordinates, SamplerDescription, SamplerFilter,
+    SamplerMipFilter, sampler_descriptor,
+};
 
 /// Resource-descriptor generation; GFX10.3 adds explicit linear row pitches.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -40,7 +46,7 @@ impl Generation {
     }
 }
 
-pub use legacy::{
+pub use resource::{
     base_mip_level, descriptor_for, imported_descriptor_for, imported_mip_chain_for,
     mip_level_view_for, native_mip_descriptor_for,
 };

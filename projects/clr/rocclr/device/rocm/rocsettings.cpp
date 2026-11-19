@@ -92,7 +92,7 @@ Settings::Settings() {
 
 // ================================================================================================
 bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
-                      bool pcieStoresNeedFlush, bool isAPU, int aqlExtDispatch) {
+                      bool pcieStoresNeedFlush, bool isAPU) {
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
@@ -156,11 +156,11 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     enableCoopMultiDeviceGroups_ = GPU_ENABLE_COOP_GROUPS & coop_groups;
   }
 
-  // gfx12+ includes Navi4x (gfx120x) as well as gfx125x
+  // gfx120x CP firmware rejects barrier-value packets as malformed
   if ((gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10) ||
       ((gfxipMajor == 9 && gfxipMinor >= 4 &&
         (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2))) ||
-      (gfxipMajor >= 12)) {
+      (gfxipMajor == 12 && gfxipMinor >= 5)) {
     barrier_value_packet_ = true;
     queue_pipe_dist_ = dynamic_queues_ >= 1;
   }
@@ -207,11 +207,12 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, b
     enableExtension(ClKhrMipMapImageWrites);
   }
 
-  // The ext kernel dispatch packet carries one dependency in its dep_signal. ROCr reports it for
-  // gfx12.5, which supports it natively, and for a device whose CP firmware does; the ISA decides
-  // only when ROCr can't be asked. The carveout stays gfx12.5's.
+  // The ext kernel dispatch packet carries one dependency in its dep_signal. gfx12.5 supports it
+  // natively; for other devices it depends on the CP firmware, which ROCr reports once the device
+  // has a queue, so Device::ResolveCpFirmwareCaps() replaces this ISA default before the device's
+  // first VirtualGPU. The carveout stays gfx12.5's.
   const bool gfx125 = (gfxipMajor == 12 && gfxipMinor >= 5);
-  ext_dispatch_packet_ = (aqlExtDispatch >= 0) ? (aqlExtDispatch != 0) : gfx125;
+  ext_dispatch_packet_ = gfx125;
   if (gfx125) {
     groupMemCarveout_ = true;
   }

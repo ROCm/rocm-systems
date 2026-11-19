@@ -692,23 +692,13 @@ bool Device::create() {
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
 
-  // The AQL extensions ROCr reports for the agent; unknown to a runtime without the query
-  int aql_ext_dispatch = -1;
-  uint8_t aql_extensions[8] = {};
-  if (Hsa::agent_get_info(bkendDevice_,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
-                          aql_extensions) == HSA_STATUS_SUCCESS) {
-    aql_ext_dispatch =
-        hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH) ? 1 : 0;
-  }
-
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           pcie_stores_need_flush_, isAPU_, aql_ext_dispatch)) {
+                                           pcie_stores_need_flush_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -765,8 +755,6 @@ bool Device::create() {
                    pciDeviceId_);
     return false;
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d",
-          hsaSettings->ext_dispatch_packet_);
   hsaSettings->limit_blit_wg_ = info().maxComputeUnits_;
   if (!flagIsDefault(DEBUG_CLR_LIMIT_BLIT_WG)) {
     hsaSettings->limit_blit_wg_ = std::max(DEBUG_CLR_LIMIT_BLIT_WG, 0x1U);
@@ -1305,21 +1293,11 @@ bool Device::populateOCLDeviceConstants() {
       amd::IS_HIP && info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
   graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
   queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
-  // CP firmware without hint support takes a hinted handle as the signal address. Left false by
-  // a runtime that does not report the AQL extension. A profiler tool hands packet completion
-  // signals to ROCr, which rejects a hinted handle.
-  if (!tool_attached) {
-    uint8_t aql_extensions[8] = {};
-    Hsa::agent_get_info(bkendDevice_,
-                        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
-                        aql_extensions);
-    signal_hints_ = hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
-  }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
           "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
-          "AQL rings %d. Signal hints %d (profiler tool: %d)",
+          "AQL rings %d (profiler tool: %d)",
           signal_pool_name, graph_device_signals_, queue_device_signals_, AqlRingsInDeviceMemory(),
-          signal_hints_, tool_attached);
+          tool_attached);
 
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
@@ -1959,8 +1937,37 @@ bool Device::populateOCLDeviceConstants() {
 }
 
 // ================================================================================================
+void Device::ResolveCpFirmwareCaps() {
+  std::call_once(cpCapsOnce_, [this]() {
+    // ROCr learns what the CP firmware supports by running a packet on the agent's utility queue,
+    // so this query creates a queue. Asked at device init, every process would hold a queue and
+    // doorbells on every GPU it never uses, which runs out of doorbells with many processes on
+    // a partitioned system.
+    uint8_t aql_extensions[8] = {};
+    if (Hsa::agent_get_info(bkendDevice_,
+                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                            aql_extensions) == HSA_STATUS_SUCCESS) {
+      // The only write to settings after init. Its readers are VirtualGPUs, which call_once orders
+      // after it.
+      static_cast<Settings*>(settings_)->ext_dispatch_packet_ =
+          hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+      // CP firmware without hint support takes a hinted handle as the signal address. Left false
+      // by a runtime that does not report the AQL extension. A profiler tool hands packet
+      // completion signals to ROCr, which rejects a hinted handle.
+      signal_hints_.store(
+          hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS) &&
+              !amd::activity_prof::tool_attached.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
+    }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d, signal hints: %d",
+            settings().ext_dispatch_packet_, SignalHints());
+  });
+}
+
+// ================================================================================================
 device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool cooperative) {
   std::scoped_lock lock(vgpusAccess());
+  ResolveCpFirmwareCaps();
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
   bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&

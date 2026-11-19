@@ -75,8 +75,8 @@ jobs:
         #
         # The ROCm LLVM toolchain is built with CLANG_TIDY_ENABLE_STATIC_ANALYZER=OFF
         # (ROCm/TheRock compiler/CMakeLists.txt), so its clang-tidy has zero
-        # clang-analyzer-* checks compiled in and errors out with
-        # "no checks enabled". An upstream build is used for linting instead; the
+        # clang-analyzer-* checks compiled in and silently skips them. An
+        # upstream build is used for linting instead; the
         # compiler under test is still ROCm's amdclang++.
         #
         # AIS_CLANG_TIDY_VERSION must track the LLVM major version of the ROCm
