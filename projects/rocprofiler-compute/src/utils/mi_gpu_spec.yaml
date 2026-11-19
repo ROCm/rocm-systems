@@ -500,17 +500,16 @@ mi_gpu_spec:
           valu: [FP16, FP32, FP64, I32]
           wmma: [FP8, FP16, BF16]
         models:
-          - gpu_model: rx9070
+          - gpu_model: navi48_1
             design:
               memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
             chip_ids:
-              # 0x7550. The RX 9070 and the RX 9070 XT both report this chip id.
-              physical: 30032
-          - gpu_model: r9700
+              physical: 30032  # 0x7550
+          - gpu_model: navi48_2
             design:
               memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
             chip_ids:
-              physical: 30033  # 0x7551, Radeon AI PRO R9700
+              physical: 30033  # 0x7551
 
   #########################################################
   # gfx1250 family

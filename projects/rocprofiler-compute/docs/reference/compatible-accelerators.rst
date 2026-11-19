@@ -62,5 +62,5 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
       * - Platform
         - Status
 
-      * - AMD Radeon RX 9070, RX 9070 XT and AI PRO R9700 (gfx1201)
+      * - AMD Radeon Navi48
         - Supported ✅ (experimental)
