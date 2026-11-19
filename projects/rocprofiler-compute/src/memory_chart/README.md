@@ -5,8 +5,11 @@
 the chart, where each block goes, which metric each block and arrow shows, and how to
 draw them. The analysis supplies the values.
 
-Other tools that draw the chart, such as ROCm Optiq, read the same format from the
-analysis database.
+A layout file names each metric by its metric library id, such as `l2.hit_rate`.
+`analyze` shows the metric's value from the row of the architecture's memory chart view
+(`0300_memory_chart.yaml`) that shows the metric, so each metric is in one row of the
+view. Other tools that draw the chart, such as ROCm Optiq, read the same format from the
+analysis database, where each `metric_id` is that row's numeric id, such as `3.1.24`.
 
 ## Example
 
@@ -22,11 +25,11 @@ has no comments; the comments here only explain the fields.
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0,
      "style": "list", "content": [
-      {"metric_id": "3.1.0", "title": "vGPRs", "category": "util", "bar": false}
+      {"metric_id": "dispatch.vgprs", "title": "vGPRs", "category": "util", "bar": false}
     ]},
     {"id": "l2", "title": "L2", "column": 1, "row": 0, "order": 0,
      "style": "panel", "content": [
-      {"metric_id": "3.1.1", "title": "Hit", "category": "hit", "bar": true}
+      {"metric_id": "l2.hit_rate", "title": "Hit", "category": "hit", "bar": true}
     ]},
     {"id": "fabric", "title": "Fabric", "column": 2, "row": 0, "order": 0,
      "style": "panel"},
@@ -34,13 +37,15 @@ has no comments; the comments here only explain the fields.
     {"id": "pcie", "title": "PCIe", "column": 2, "row": 1, "style": "panel"}
   ],
   "arrows": [
-    {"from": "cu", "to": "l2", "direction": "backward", "metric_id": "3.1.2",
+    {"from": "cu", "to": "l2", "direction": "backward", "metric_id": "l2.rd_req",
      "title": "Read", "category": "read", "style": "inline"},
-    {"from": "l2", "to": "fabric", "direction": "backward", "metric_id": "3.1.3",
+    {"from": "l2", "to": "fabric", "direction": "backward", "metric_id": "fabric.rd_bw",
      "title": "Read BW", "category": "read", "style": "stacked"},
-    {"from": "fabric", "to": "xgmi", "direction": "backward", "metric_id": "3.1.4",
+    {"from": "fabric", "to": "xgmi", "direction": "backward",
+     "metric_id": "fabric.xgmi_rd_bw",
      "title": "Read BW", "category": "read", "style": "inline"},
-    {"from": "fabric", "to": "pcie", "direction": "backward", "metric_id": "3.1.5",
+    {"from": "fabric", "to": "pcie", "direction": "backward",
+     "metric_id": "fabric.pcie_rd_bw",
      "title": "Read BW", "category": "read", "style": "inline"}
   ]
 }
@@ -104,7 +109,7 @@ All fields are required.
 
 | Field | Meaning |
 |---|---|
-| `metric_id` | Id of the row in the memory chart view (panel 3), such as `3.1.24`. |
+| `metric_id` | Metric library id of the metric, such as `l2.hit_rate`. |
 | `title` | Label shown before the value. |
 | `category` | Kind of metric. It sets the color; see [Categories](#categories). |
 | `bar` | `true` draws a bar under the value. Use it only for percentages, and never in a `list` block. |
@@ -116,7 +121,7 @@ All fields are required.
 | `from` | yes | Id of the block where the arrow starts. |
 | `to` | yes | Id of the block where the arrow ends. |
 | `direction` | yes | `forward` points at `to`, `backward` points at `from`, and `both` points at both. |
-| `metric_id` | yes | Id of the row in the memory chart view (panel 3). |
+| `metric_id` | yes | Metric library id of the metric. |
 | `title` | yes | Label shown with the value. |
 | `category` | yes | `read`, `write`, `atomic`, or `neutral`. It sets the color. |
 | `style` | yes | `inline` draws one line, such as `Read : 100`. `stacked` draws the title, the value, and the arrow on separate lines. |
@@ -142,6 +147,8 @@ All fields are required.
 - An arrow in row 0 goes to the next column. An arrow to row -1 starts at the top block
   of that column, and an arrow to row 1 starts at the bottom block. Both are `inline`.
 - No arrow starts or ends at a block that holds other blocks.
+- The memory chart view of each architecture in `archs` shows every `metric_id`;
+  `analyze` skips the layout for an architecture whose view does not.
 
 ## Versioning
 
@@ -157,12 +164,14 @@ Bump it in the same change that changes the format:
 
 1. Copy the layout of the closest architecture, such as `gfx950.json`, and set `archs`.
 2. Edit its blocks and arrows until it shows every metric of the architecture's
-   `0300_memory_chart.yaml`, and no other. Set each `metric_id` by hand.
+   `0300_memory_chart.yaml`, and no other. Set each `metric_id` to the metric library
+   id of a row of that view.
 3. Run `./tools/memory_chart_layout_format.py` to write the file in the standard style.
    The pre-commit hook checks the style.
 4. Preview the chart without a GPU: `./tools/memory_chart_preview.py <arch>`.
 5. Run `python -m pytest tests/unit/memory_chart`. The tests check the ids against the
-   panel config, and check that each arrow `style` and `bar` fit the metric's unit.
+   memory chart view, and check that each arrow `style` and `bar` fit the metric's unit.
 
-No Python changes are needed. When a change to a `0300_memory_chart.yaml` adds,
-removes, or moves a metric, update the `metric_id` values of its layout.
+No Python changes are needed. When a change to a `0300_memory_chart.yaml` adds or
+removes a metric, update its layout. Moving a metric in the view needs no layout
+change.

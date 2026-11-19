@@ -20,7 +20,7 @@ from memory_chart.loader import (
     load_layout,
 )
 from memory_chart.units import display_unit, panel_units
-from utils.utils_common import metric_ids_by_name
+from utils.utils_common import MEMORY_CHART_PANEL_ID, metric_ids_by_name
 
 MEMORY_CHART_ARCHS = common.memory_chart_archs()
 
@@ -34,7 +34,7 @@ READ_ARROW = {
     "from": "cu",
     "to": "vl1d",
     "direction": "backward",
-    "metric_id": "3.1.6",
+    "metric_id": "ta.global_rd_insts",
     "title": "Read",
     "category": "read",
     "style": "inline",
@@ -112,7 +112,7 @@ def test_every_config_arch_has_one_layout(arch):
 
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_layout_shows_every_panel_metric_and_no_other(path, arch):
-    shown = load_layout(path).metrics()
+    shown = load_layout(path, arch).metrics()
     panel = panel_metric_ids(arch)
     assert not shown - panel, (
         f"not in the {arch} memory chart panel: {sorted(shown - panel)}"
@@ -123,7 +123,7 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
 @pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
 def test_every_shown_unit_has_a_display_rule(path, arch):
     units = panel_units(PanelConfigs.for_arch(arch))
-    shown = load_layout(path).metrics()
+    shown = load_layout(path, arch).metrics()
     unknown = {m: units.get(m) for m in shown if display_unit(units.get(m)) is None}
     assert not unknown
 
@@ -132,7 +132,7 @@ def test_every_shown_unit_has_a_display_rule(path, arch):
 def test_arrow_style_fits_the_metric_unit(path, arch):
     # A count reads best as one "title : value" line; a rate as title, value, arrow
     units = panel_units(PanelConfigs.for_arch(arch))
-    layout = load_layout(path)
+    layout = load_layout(path, arch)
     grid = {b.id for b in layout.blocks() if b.row == 0}
     wrong = [
         arrow.metric_id
@@ -149,7 +149,7 @@ def test_bars_are_only_on_percent_metrics(path, arch):
     units = panel_units(PanelConfigs.for_arch(arch))
     wrong = [
         item.metric_id
-        for block in load_layout(path).blocks()
+        for block in load_layout(path, arch).blocks()
         for item in block.items
         if item.bar and display_unit(units[item.metric_id]).kind != "percent"
     ]
@@ -185,6 +185,27 @@ def test_a_broken_layout_is_skipped_and_others_still_load(tmp_path, monkeypatch)
     assert "broken.json" in warning["warning"].call_args.args[1]
 
 
+def test_a_metric_the_arch_view_does_not_show_skips_the_arch(tmp_path, monkeypatch):
+    warning = common.patch_console(monkeypatch, "memory_chart.loader", "warning")
+    data = with_metric_change("l2.hit_rate", metric_id="l2.not_a_metric")
+    path = write_layout(tmp_path, data)
+    assert load_layout(path).archs == ("gfx950",)
+    assert "gfx950" not in loader._index_by_arch([path])
+    assert (
+        "'l2.not_a_metric' is not in the gfx950 memory chart view"
+        in (warning["warning"].call_args.args[1])
+    )
+
+
+def test_a_view_showing_a_metric_twice_is_rejected(monkeypatch):
+    views = loader.load_views("gfx950")
+    rows = views[MEMORY_CHART_PANEL_ID]["tables"][0]["metrics"]
+    rows.append(dict(rows[0]))
+    monkeypatch.setattr(loader, "load_views", lambda arch: views)
+    with pytest.raises(LayoutError, match="shows .* in rows 3.1.0 and 3.1."):
+        loader.memory_chart_row_ids("gfx950")
+
+
 # ---------------------------------------------------------------------------
 # Format rules
 # ---------------------------------------------------------------------------
@@ -193,7 +214,7 @@ def test_a_broken_layout_is_skipped_and_others_still_load(tmp_path, monkeypatch)
 def test_block_list_order_does_not_matter(tmp_path):
     data = gfx950_data()
     random.Random(0).shuffle(data["blocks"])
-    assert load_layout(write_layout(tmp_path, data)).columns == (
+    assert load_layout(write_layout(tmp_path, data), "gfx950").columns == (
         Layouts.for_arch("gfx950").columns
     )
 
@@ -224,13 +245,13 @@ def test_block_list_order_does_not_matter(tmp_path):
         (with_blocks({**NESTED, "column": 2}), "the column of 'mall'"),
         (with_blocks({**NESTED, "parent": "inner"}), "nest inside each other"),
         (with_blocks({**NESTED, "parent": "vl1d", "column": 1}), "nested blocks"),
-        (with_metric_change("3.1.1", bar=True), "compact list"),
-        (with_metric_change("3.1.28", category="x"), "category"),
-        (with_metric_change("3.1.28", bar=1), "bar of '3.1.28'"),
-        (with_metric_change("3.1.28", metric_id=None), "metric_id of None"),
+        (with_metric_change("dispatch.vgprs", bar=True), "compact list"),
+        (with_metric_change("l2.hit_rate", category="x"), "category"),
+        (with_metric_change("l2.hit_rate", bar=1), "bar of 'l2.hit_rate'"),
+        (with_metric_change("l2.hit_rate", metric_id=None), "metric_id of None"),
         (changed(arrows=[{**READ_ARROW, "metric_id": ""}]), "metric_id of arrow ''"),
-        (with_metric_change("3.1.6", category="hit"), "category"),
-        (with_metric_change("3.1.6", direction="up"), "direction"),
+        (with_metric_change("ta.global_rd_insts", category="hit"), "category"),
+        (with_metric_change("ta.global_rd_insts", direction="up"), "direction"),
         (changed(arrows=[{**READ_ARROW, "to": "nowhere"}]), "unknown block"),
         (changed(arrows=[{**READ_ARROW, "to": "l2"}]), "next column"),
         (
@@ -242,7 +263,7 @@ def test_block_list_order_does_not_matter(tmp_path):
             "must start at 'data_fabric'",
         ),
         (with_blocks(NESTED), "nested in 'mall'"),
-        (with_metric_change("3.1.35", style="stacked"), "must be inline"),
+        (with_metric_change("fabric.xgmi_rd_bw", style="stacked"), "must be inline"),
     ],
     ids=[
         "unknown-top-level-key",
