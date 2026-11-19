@@ -9,6 +9,8 @@
 
 #include "util/result.h"
 #include <algorithm>
+#include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <type_traits>
 
@@ -128,6 +130,25 @@ util::FailureOr<T> apply_int_atomic(AtomicOp op, T old_val, T src_val, T cmp_val
   default:
     return util::Result::failure();
   }
+}
+
+/// @brief Replace the T at @p target with compute(old) as one hardware read-modify-write.
+/// @details A compare-exchange loop, so the update is atomic against host threads that use
+/// their own atomics on the same word, not only against holders of a simulator lock.
+/// @p compute runs once per attempt and must have no side effects. The target must be
+/// naturally aligned; the GPU VM, L2Cache and PM4 paths refuse misaligned atomics first.
+/// @returns The value the successful exchange replaced.
+template <typename T, typename Compute> T atomic_update(void *target, Compute &&compute) {
+  static_assert(std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t>,
+                "backing atomics are 4 or 8 bytes");
+  assert(reinterpret_cast<uintptr_t>(target) % std::atomic_ref<T>::required_alignment == 0 &&
+         "backing atomics must be naturally aligned");
+  std::atomic_ref<T> word(*static_cast<T *>(target));
+  T old = word.load(std::memory_order_relaxed);
+  while (!word.compare_exchange_weak(old, compute(old), std::memory_order_acq_rel,
+                                     std::memory_order_acquire)) {
+  }
+  return old;
 }
 
 } // namespace amdgpu

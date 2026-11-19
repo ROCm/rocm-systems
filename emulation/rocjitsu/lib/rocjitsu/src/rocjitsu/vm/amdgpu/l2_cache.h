@@ -254,8 +254,10 @@ public:
   ///
   /// @param addr The memory address of the atomic target.
   /// @param size Access size in bytes (4 or 8).
-  /// @param fn Callback: fn(line_data_ptr, line_offset). Must read the
-  ///           old value, compute the new value, and write it in place.
+  /// @param fn Callback: fn(line_data_ptr, line_offset). Must apply its
+  ///           update in place as one hardware atomic (atomic_update()): the
+  ///           target may be a host page that host threads update with their
+  ///           own atomics, outside every simulator lock.
   template <typename F>
   [[nodiscard]] VmAccessOutcome atomic_rmw(uint64_t addr, uint32_t size, F &&fn,
                                            uint32_t vmid = 0) {
