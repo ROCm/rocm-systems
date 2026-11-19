@@ -231,7 +231,12 @@ The CI sweep uses five iterations and two initial warmups per size, with a
 1K–256M factor-two sweep, to bound profiler pool pressure. It still rejects any
 dropped/leaked records, incomplete summaries, missing ranks or requested sizes,
 and report failures. AllGather/ReduceScatter descriptor bytes are per-rank
-contributions, not rccl-tests' aggregate buffer bytes. A successful process exit
+contributions, not rccl-tests' aggregate buffer bytes. AllGather sizes at or
+below the Direct AllGather threshold (`nNodes * 2 MiB` of total buffer on gfx950,
+so 256 KiB per rank on 2 nodes) must be recorded with `coll_algo` `"P2P"` and
+larger ones must not, and no other collective may report `"P2P"`. That checks,
+end to end, that RCCL wraps Direct AllGather's Send/Recv tasks in the call's
+CollApi event. A successful process exit
 alone is not a passing output-validation run. Missing coverage remains a visible
 failure to hand off to profiler work, not a reason to duplicate fixes in the CI
 driver. Keep `manifest.json`, the reports, preflight log, and raw JSONL artifacts

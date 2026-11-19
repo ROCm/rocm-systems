@@ -204,6 +204,26 @@ def message_sizes(config: RunConfig, collective: str) -> set[int]:
     return sizes
 
 
+def direct_allgather_max_bytes(config: RunConfig) -> int | None:
+    """Largest per-rank AllGather descriptor size RCCL runs as Direct AllGather.
+
+    Mirrors rcclUseAllGatherDirect (src/rccl_wrap.cc) on gfx950 with no
+    RCCL_DIRECT_ALLGATHER_* override and no AINIC: Direct needs a rank count
+    that is a multiple of 8, and takes every call whose total buffer is at most
+    8 MiB on one node or nodes * 2 MiB below 64 nodes. Returns None when Direct
+    is never taken. The plugin records those calls with coll_algo "P2P".
+    """
+    if config.ranks % 8:
+        return None
+    if config.nodes == 1:
+        total = 8 * 1024**2
+    elif config.nodes < 64:
+        total = config.nodes * 2 * 1024**2
+    else:
+        total = 75497472  # RCCL_DIRECT_ALLGATHER_THRESHOLD default
+    return total // config.ranks
+
+
 def _find_artifact(root: Path, relative_path: str, name: str) -> Path:
     preferred = root / relative_path
     if preferred.is_file():
@@ -698,13 +718,21 @@ def validate_collective_output(
     expected_ranks: int,
     warmup_iterations: int,
     expected_sizes: set[int] | None = None,
+    p2p_max_bytes: int | None = None,
 ) -> dict:
+    """Validate one collective's profiler output.
+
+    p2p_max_bytes is the largest size RCCL should run as per-peer Send/Recv
+    tasks, which the plugin records as coll_algo "P2P": smaller-or-equal sizes
+    must be P2P and larger ones must not. None means no record may be P2P.
+    """
     files = sorted(output_dir.glob("*.jsonl")) if output_dir.is_dir() else []
     if not files:
         raise ValueError(f"No profiler JSONL files in {output_dir}")
 
     rank_sizes: dict[int, set[int]] = {}
     sample_counts: dict[tuple[int, int], int] = {}
+    wrong_path: set[tuple[int, str]] = set()
     record_count = 0
 
     for path in files:
@@ -776,6 +804,11 @@ def validate_collective_output(
             if not isinstance(kernel_events, list) or not kernel_events:
                 raise ValueError(f"Missing kernel events in {path}")
 
+            algo = coll_perf.get("coll_algo")
+            expect_p2p = p2p_max_bytes is not None and size <= p2p_max_bytes
+            if (algo == "P2P") != expect_p2p:
+                wrong_path.add((size, str(algo)))
+
             rank_sizes.setdefault(rank, set()).add(size)
             key = (rank, size)
             sample_counts[key] = sample_counts.get(key, 0) + 1
@@ -783,6 +816,14 @@ def validate_collective_output(
             record_count += 1
         if file_records == 0:
             raise ValueError(f"No collective records in {path}")
+
+    if wrong_path:
+        limit = "no size" if p2p_max_bytes is None else f"sizes <= {p2p_max_bytes}"
+        raise ValueError(
+            f"P2P path mismatch in {output_dir}: {limit} should be recorded as "
+            f"coll_algo P2P; got "
+            + ", ".join(f"size={size} algo={algo}" for size, algo in sorted(wrong_path))
+        )
 
     expected_rank_set = set(range(expected_ranks))
     observed_rank_set = set(rank_sizes)
@@ -1070,6 +1111,9 @@ def main() -> int:
                 config.ranks,
                 config.warmup_iterations,
                 expected_sizes[expected_name],
+                direct_allgather_max_bytes(config)
+                if expected_name == "AllGather"
+                else None,
             )
         except (OSError, ValueError) as exc:
             errors.append(f"{binary}: {exc}")
