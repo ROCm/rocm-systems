@@ -93,8 +93,8 @@ __device__ __forceinline__ SDMA_PKT_FENCE CreateFencePacket(uint64_t* address, u
 
 #if SDMA_IS_OSS7
 
-// Build a fused copy + optional wait + optional signal packet (MI350X / CDNA4).
-// Replaces the two-packet COPY_LINEAR + ATOMIC chain from MI300X.
+// Build a fused copy + optional wait + optional signal packet (OSS7.0, MI400-series).
+// Replaces the two-packet COPY_LINEAR + ATOMIC chain used on MI300X / MI350X.
 // Pass nullptr for signalAddr to omit the signal; set enableWait=false to omit the wait.
 __device__ __forceinline__ SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4
 CreateCopyWaitSignalPacketMI4(void* srcBuf, void* dstBuf, long long int packetSize,
