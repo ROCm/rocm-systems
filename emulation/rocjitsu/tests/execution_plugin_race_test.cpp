@@ -3353,9 +3353,9 @@ TEST(RaceDetectorPluginTest, TerminalWavesReleaseOnlyTheirWorkgroupDetector) {
   const auto observe = [&](Wavefront *wave) -> std::weak_ptr<WaveRaceState> {
     return static_cast<RaceWavefrontState *>(wave->plugin_state(race->slot_index()))->race_state;
   };
-  const auto first_detector = observe(first);
-  const auto second_detector = observe(second);
-  const auto next_dispatch_detector = observe(next_dispatch);
+  const std::weak_ptr<WaveRaceState> first_detector = observe(first);
+  const std::weak_ptr<WaveRaceState> second_detector = observe(second);
+  const std::weak_ptr<WaveRaceState> next_dispatch_detector = observe(next_dispatch);
 
   // Workgroup 0 of dispatch 2 keeps its detector.
   first->halt();
@@ -3994,7 +3994,7 @@ TEST(RaceDetectorPluginTest, OnlySuccessfulRdna2EndpgmCompletesTheLegacyWaitCoun
     auto &wave = *waves[i];
     auto *state = static_cast<RaceWavefrontState *>(wave.plugin_state(race->slot_index()));
     // Inspect the counter history after the terminal hook releases the wave state.
-    auto logical = state->race_state;
+    std::shared_ptr<WaveRaceState> logical = state->race_state;
     const std::array<uint32_t, 1> nop{0xbf800000};
     for (auto counter : counters)
       logical->registerEvent(InstructionSnapshot{wave.pc, nop}, MemoryEventType::GLOBAL_TO_VGPR,
