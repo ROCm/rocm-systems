@@ -1820,6 +1820,9 @@ TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
   check_reuse(kRegionBase, 8, 8, kRowStride);
   check_reuse(kRegionBase, 32, 1, kRowStride);
   check_reuse(kRegionBase, 8, 1, 4 * 1024 * 1024);
+
+  // A 128-row tile revisits input pages separated by an 8 KiB row pitch.
+  check_reuse(kRegionBase, 128, 1, 8 * 1024);
 }
 
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {

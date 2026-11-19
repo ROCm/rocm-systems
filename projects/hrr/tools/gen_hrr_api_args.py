@@ -1591,6 +1591,7 @@ _ENUM_TYPES = {
     "hipGraphMemAttributeType", "hipJitInputType",
     "hipMemAllocationHandleType", "hipMemRangeHandleType",
     "hipPointer_attribute", "hipStreamAttrID", "hipGLDeviceList",
+    "hipExecAffinityType",
 }
 
 # Scalar type map: normalised type string -> C field type
@@ -2111,8 +2112,11 @@ _HEADER_PREAMBLE = """\
  * as the wrong API.
  * v15: four graph ID queries were appended to HipDispatchTable, shifting the
  * compiler API IDs up by four. A v14 reader would decode those events as the
- * wrong API. */
-#define HRR_VERSION ((uint16_t)15u)
+ * wrong API.
+ * v16: hipDeviceGetExecAffinitySupport was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v15 reader would decode
+ * those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)16u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
