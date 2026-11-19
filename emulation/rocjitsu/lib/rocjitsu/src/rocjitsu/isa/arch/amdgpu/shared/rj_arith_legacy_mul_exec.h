@@ -30,8 +30,10 @@ inline void execute_legacy_multiply32(Inst &inst, Wavefront &wave, FloatBinary32
       }
       flags = float32_flags(wave, flags, true);
       modifiers |= RJ_ARITH_ALU_SDWA;
-      modifiers |= uint64_t(sdwa::output_modifier<sdwa::ResultFormat::F32>(inst, wave))
-                   << RJ_ARITH_ALU_OMOD_SHIFT;
+      // The arithmetic entry point applies the guest-mode OMOD eligibility rule.
+      if constexpr (requires { inst.sdwa_omod_; }) {
+        modifiers |= uint64_t(inst.sdwa_omod_) * RJ_ARITH_ALU_OMOD_2;
+      }
       modifiers |= inst.sdwa_clamp_ ? RJ_ARITH_ALU_CLAMP : 0;
       uint32_t result[64]{}, *d = result, state = 0;
       const int error =
@@ -44,7 +46,7 @@ inline void execute_legacy_multiply32(Inst &inst, Wavefront &wave, FloatBinary32
       }
       for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
         if ((exec_mask >> lane) & 1) {
-          sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+          sdwa::write_lane(inst, wave, destination, lane, result[lane]);
         }
       }
       return;

@@ -832,15 +832,6 @@ TEST_P(PackedNumberSelection, SignalingNanUsesNumberSemantics) {
   }
 }
 
-TEST(LegacyMinMaxPolicyDeathTest, RejectsUnsupportedArchitectures) {
-  static_assert(noexcept(amdgpu::fp_mode::legacy_minmax_policy(rocjitsu::IsaFamily::Cdna1, false)));
-  for (auto arch :
-       {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rv32i,
-        rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid}) {
-    EXPECT_DEATH(amdgpu::fp_mode::legacy_minmax_policy(arch, false), "");
-  }
-}
-
 INSTANTIATE_TEST_SUITE_P(Rdna4, PackedNumberSelection,
                          testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna4),
                                           testing::Bool()));

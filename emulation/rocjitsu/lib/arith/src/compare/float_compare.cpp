@@ -4,8 +4,8 @@
 // Ordered/unordered floating-point predicates and optional FP exception reporting.
 // Owns public entry points and their validation/dispatch policy.
 
-// Raw ordering, signed-zero normalization and predicate inversion follow
-// rocjitsu's shared/comparison.h, with guest input flushing before ordering.
+// Normalize signed zeros and flush guest inputs before raw ordering; then
+// apply the selected ordered/unordered predicate and optional inversion.
 
 #include "common/validation.h"
 #include "compare/float_compare_impl.h"

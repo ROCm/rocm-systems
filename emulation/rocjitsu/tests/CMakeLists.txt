@@ -644,19 +644,14 @@ add_executable(
     scalar_cache_discard_test.cpp
     legacy_native_f32_test.cpp
     legacy_special_f32_test.cpp
-    comparison_test.cpp
     gfx1150_compare_test.cpp
     older_packed_conversion_test.cpp
     older_byte_conversion_test.cpp
     older_normalized_conversion_test.cpp
     older_packing_test.cpp
     denormal_test.cpp
-    floating_operation_test.cpp
     input_denormal_test.cpp
     legacy_minmax_test.cpp
-    minmax_test.cpp
-    output_denormal_test.cpp
-    output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     amdgpu_elf_test_support_test.cpp

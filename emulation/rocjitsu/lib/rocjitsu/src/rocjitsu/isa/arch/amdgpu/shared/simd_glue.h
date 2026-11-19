@@ -1,8 +1,8 @@
 // Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 //
-// Raw operand selection, lane-mask writes and scalar overflow checks shared by
-// instruction adapters, plus CLAMP for the remaining gfx10 interpolation path.
+// Raw operand selection, lane-mask writes and packed-U64 shifts for instruction
+// adapters. CLAMP helpers remain for gfx10 interpolation.
 
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_SIMD_GLUE_H_
@@ -83,30 +83,6 @@ inline bool dot2_src_needs_half_replication(uint32_t selector) {
 
 // Packed-U64 fallback shifts use only the low six count bits.
 inline uint64_t lshl_masked(uint64_t value, uint64_t count) { return value << (count & 63u); }
-
-// Form a 32-bit field mask with the scalar instruction's masked width/offset.
-inline uint32_t bfm_b32(uint32_t width, uint32_t offset) {
-  const uint32_t w = width & 31u;
-  const uint32_t off = offset & 31u;
-  return w == 0 ? uint32_t{0} : ((uint32_t{1} << w) - uint32_t{1}) << off;
-}
-
-template <typename U> inline bool signed_add_overflows(U a, U b) {
-  static_assert(std::is_unsigned_v<U>, "operands must be unsigned");
-  const U sum = static_cast<U>(a + b);
-  constexpr U sign_bit = U{1} << (sizeof(U) * 8 - 1);
-  // Overflow iff the operands share a sign that differs from the result's.
-  return ((a ^ sum) & (b ^ sum) & sign_bit) != 0;
-}
-
-template <typename U> inline bool signed_sub_overflows(U a, U b) {
-  static_assert(std::is_unsigned_v<U>, "operands must be unsigned");
-  const U diff = static_cast<U>(a - b);
-  constexpr U sign_bit = U{1} << (sizeof(U) * 8 - 1);
-  // Overflow iff the operands differ in sign and a's sign differs from the
-  // result's.
-  return ((a ^ b) & (a ^ diff) & sign_bit) != 0;
-}
 
 /// Write an explicit SGPR lane-mask destination. Wave32 targets use the low
 /// dword only; writing a pair would clobber the next SGPR, which codegen may
