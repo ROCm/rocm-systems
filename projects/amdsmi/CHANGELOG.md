@@ -226,9 +226,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Upcoming Changes
 
-- **CUIDs (Component Unified IDs) will replace UUIDs in an upcoming release**.  
-  - Preview support is available: new `amdsmi_get_gpu_cuid_info()` and `amdsmi_get_cuid_components()`, `amd-smi static --cuid` and `amd-smi node --cuid`, and `cuid` and `identifier_kind` in `amd-smi list`. `amdsmi_get_gpu_device_cuid()` now returns the derived CUID. All CUIDs are currently temporary IDs.
-  - In a future release, `uuid`/`gpu_uuid` in `amd-smi list` will report only the legacy UUID. Use `cuid` and `identifier_kind` instead. GPU selection accepts both identifiers, and the legacy UUID API is unchanged.
+- **`uuid`/`gpu_uuid` in `amd-smi list` will report only the legacy UUID**.  
+  - In a future release they will no longer report the CUID (Component Unified ID). Use `cuid` and `identifier_kind` instead. GPU selection accepts both identifiers, and the legacy UUID API is unchanged.
+  - CUID preview support is available: new `amdsmi_get_gpu_cuid_info()` and `amdsmi_get_cuid_components()`, `amd-smi static --cuid` and `amd-smi node --cuid` (add `--cuid-primary`, as root, for the primary CUID), and `cuid` and `identifier_kind` in `amd-smi list`. `amdsmi_get_gpu_device_cuid()` now returns the derived CUID. All CUIDs are currently temporary IDs.
+  - The `BUILD_CUID` CMake option now takes `AUTO` (default), `ON` or `OFF`. It was off by default.
 
 ## amd_smi_lib for ROCm 10.2.0
 
@@ -534,7 +535,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **UUIDs will be replaced by CUIDs (Component Unified IDs) in an upcoming release**.  
   - CUIDs identify a device consistently across AMD tools.
   - `amdsmi_get_gpu_device_cuid()` is available but stays disabled until the amdgpu driver supports it.
-  - `amd-smi list` and GPU selection already show the CUID instead of the UUID when one is available.
+  - When a CUID is available, `amd-smi list` reports it in place of the UUID, and `--gpu` accepts it.
 
 ## amd_smi_lib for ROCm 10.0.0
 
