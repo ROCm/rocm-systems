@@ -205,7 +205,7 @@ ensure_finalization(bool _static_init = false)
         auto const _idx = threading::add_callback(&ensure_initialization);
         if(_idx < 0)
         {
-            throw exception<std::runtime_error>("failure adding threading callback");
+            throw std::runtime_error("failure adding threading callback");
         }
     }
 
@@ -438,12 +438,6 @@ rocprofsys_preinit_cache()
           .extdata     = _extdata_stream.str(),
           .start       = 0,
           .end         = 0 });
-}
-
-void
-rocprofsys_preinit_cpu_agents()
-{
-    cpu::query_cpu_agents();
 }
 
 void

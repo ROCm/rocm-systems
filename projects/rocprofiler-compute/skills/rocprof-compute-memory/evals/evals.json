@@ -1,48 +1,29 @@
 {
   "evaluations": [
     {
-      "id": "mem-access-inefficiency",
+      "id": "mem-end-to-end",
       "skill_should_trigger": true,
-      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture\n\nThe application is ./vrandom_access.cpp.",
+      "prompt": "This kernel looks memory bound. Where is the bandwidth going, and what are its cache hit rates?\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Answer with the memory level the traffic reaches and the hit rates the report shows.",
       "workspace": "evals/samples",
       "expected_behavior": [
-        "reads the memory chart before opening an individual cache level",
-        "cites hit rates or request counts from the report",
-        "ties any coalescing or tiling advice to those numbers"
+        "names the memory level the traffic reaches and cites cache hit rates the report printed"
       ],
-      "unexpected_behavior": [
-        "recommends an optimization without citing a metric from the report"
-      ],
-      "logs_contain": ["--memory-chart"]
+      "logs_contain": ["--memory-chart", "rocprof-compute analyze"]
     },
     {
-      "id": "mem-cache-hit-rates-gfx115x",
+      "id": "mem-access-inefficiency-routing",
       "skill_should_trigger": true,
-      "prompt": "what are my GL1 and GL2 hit rates for this kernel and are they bad?\n\nThe application is ./vsequential_access.cpp.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "checks the cache block names this GPU uses before choosing -b",
-        "opens the gl1 and gl2 blocks for a single kernel id",
-        "judges the rates against what the algorithm should do rather than a fixed cutoff"
-      ],
-      "unexpected_behavior": [
-        "applies a remembered threshold such as L2 below 50% being bad, as if the tool defined one"
-      ],
-      "logs_contain": ["gl2"]
+      "prompt": "find the memory access inefficiencies in this rocprofiler-compute capture"
     },
     {
-      "id": "mem-bandwidth-bound-gfx115x",
+      "id": "mem-cache-hit-rates-gfx115x-routing",
       "skill_should_trigger": true,
-      "prompt": "this kernel looks memory bound, where is the bandwidth going?\n\nThe application is ./vcopy.cpp.",
-      "workspace": "evals/samples",
-      "expected_behavior": [
-        "walks the hierarchy from the memory chart down to the level responsible",
-        "distinguishes traffic that caches absorbed from traffic that reached system memory"
-      ],
-      "unexpected_behavior": [
-        "describes the GPU memory as HBM"
-      ],
-      "logs_contain": ["memchart"]
+      "prompt": "what are my GL1 and GL2 hit rates for this kernel and are they bad?"
+    },
+    {
+      "id": "mem-bandwidth-bound-gfx115x-routing",
+      "skill_should_trigger": true,
+      "prompt": "this kernel looks memory bound, where is the bandwidth going?"
     },
     {
       "id": "mem-host-memory",

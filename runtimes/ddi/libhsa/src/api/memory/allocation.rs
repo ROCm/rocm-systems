@@ -7,10 +7,11 @@ use rocddi::topology::MemoryLinkInfo;
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::allocation::*;
 use crate::memory::pool::*;
 use crate::memory::*;
-use crate::runtime::{boundary, initialized_mut, lock, map_error};
+use crate::status::{boundary, map_error};
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -128,7 +129,7 @@ pub extern "C" fn hsa_memory_assign_agent(
         {
             return INVALID_ARGUMENT;
         }
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         SUCCESS
@@ -159,19 +160,20 @@ pub unsafe extern "C" fn hsa_amd_agent_memory_pool_get_info(
         if value.is_null() {
             return INVALID_ARGUMENT;
         }
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         let Some(owner) = pool_owner(runtime, pool) else {
             return INVALID_MEMORY_POOL;
         };
-        let storage = runtime
-            .decode_gpu_pool(pool)
-            .map_or(PoolStorage::System, |(_, kind)| match kind {
+        let storage = runtime.agents.decode_gpu_pool(pool).map_or(
+            PoolStorage::System,
+            |(_, kind)| match kind {
                 GpuPoolKind::Group => PoolStorage::Group,
                 GpuPoolKind::Fine => PoolStorage::LocalFine,
                 _ => PoolStorage::LocalCoarse,
-            });
+            },
+        );
         let (access, link) = agent_pool_relationship(runtime, agent, owner, storage);
         let same = owner == agent;
         let hops = if same || access == POOL_ACCESS_NEVER {
@@ -405,7 +407,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                     memory: runtime.memory_state.locked_allocations.remove(index),
                 }
             };
-            let tracker = runtime.inflight.clone();
+            let tracker = runtime.control.inflight.clone();
             let Some(token) = tracker.enter() else {
                 match removed {
                     Removed::Allocation { key, memory } => {
@@ -420,7 +422,7 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 }
                 return OUT_OF_RESOURCES;
             };
-            (removed, token, runtime.health.clone())
+            (removed, token, runtime.control.health.clone())
         };
         let result = match &mut removed {
             Removed::Allocation { memory, .. } => memory.free(),

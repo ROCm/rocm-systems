@@ -6,10 +6,11 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::ffi::*;
-use crate::runtime::{boundary, lock};
+use crate::lifecycle::lock;
 use crate::signal::{
     AmdSignal, batch_needs_flush, flush_device_store, signal_value_pointer, with_public_signal,
 };
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),

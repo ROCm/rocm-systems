@@ -4,7 +4,7 @@
 //! Regression coverage for host transition recipes, independent of GPU access.
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
 use super::*;
-use crate::instance;
+use crate::session;
 use rocddi::memory::storage::TryPush;
 use std::mem::size_of;
 
@@ -140,7 +140,7 @@ fn duplicate_device_handles_are_invalid() {
     unsafe {
         let (instance, memory) = host_resource();
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
-        let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
+        let scope = (&raw mut (*instance.cast::<AmdfSession>()).scope).cast();
         let request = amdf_memory_device_access_t {
             device: std::ptr::null_mut(),
             requirements: amdf_memory_access_requirements_t::default(),
@@ -187,7 +187,7 @@ fn duplicate_device_handles_are_invalid() {
             INVALID
         );
         assert_eq!(output, sentinel);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -195,7 +195,7 @@ fn duplicate_device_handles_are_invalid() {
 fn unsupported_import_preserves_the_external_value_and_output() {
     unsafe {
         let (instance, memory) = host_resource();
-        let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
+        let scope = (&raw mut (*instance.cast::<AmdfSession>()).scope).cast();
         let import_info = amdf_memory_import_info_t {
             r#type: AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO,
             structure_size: size_of::<amdf_memory_import_info_t>() as u32,
@@ -226,7 +226,7 @@ fn unsupported_import_preserves_the_external_value_and_output() {
         assert_eq!(external.payload.file_descriptor, 41);
         assert_eq!(external.byte_length, 4096);
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -254,7 +254,7 @@ fn export_range_errors_are_invalid_and_preserve_output() {
         assert_eq!(output.r#type, AMDF_EXTERNAL_MEMORY_TYPE_OPAQUE_FD);
         assert_eq!(output.byte_length, 77);
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -266,10 +266,7 @@ unsafe fn test_instance() -> *mut amdf_instance_t {
     };
     let mut instance = std::ptr::null_mut();
     unsafe {
-        assert_eq!(
-            instance::create(&raw const parameters, &raw mut instance),
-            0
-        );
+        assert_eq!(session::create(&raw const parameters, &raw mut instance), 0);
     };
     instance
 }
@@ -325,7 +322,7 @@ fn mapping_overrun_is_invalid_and_preserves_output() {
         );
         assert_eq!(mapping, sentinel);
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -365,7 +362,7 @@ fn mapping_info_preserves_extended_output_header_and_tail() {
         assert_eq!(extended.tail, [0xa5; 16]);
         assert_eq!(unmap(mapping), 0);
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -437,7 +434,7 @@ fn write_combined_views_require_fences_even_for_host_pairs() {
         assert_eq!(destroy(memory, std::ptr::null_mut()), BUSY);
         assert_eq!(unmap(mapping), 0);
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -446,8 +443,8 @@ fn unavailable_host_recipe_does_not_publish_a_host_visible_profile() {
     unsafe {
         let (instance, memory) = host_resource();
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
-        (*instance.cast::<Instance>()).host_write_back_cache = None;
-        let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
+        (*instance.cast::<AmdfSession>()).host_write_back_cache = None;
+        let scope = (&raw mut (*instance.cast::<AmdfSession>()).scope).cast();
         let mut profile = amdf_memory_profile_t {
             r#type: AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
             structure_size: size_of::<amdf_memory_profile_t>() as u32,
@@ -466,7 +463,7 @@ fn unavailable_host_recipe_does_not_publish_a_host_visible_profile() {
             UNSUPPORTED
         );
         assert_eq!(profile.roles, u64::MAX);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -475,7 +472,7 @@ fn registration_requires_the_declared_host_cacheability() {
     unsafe {
         let (instance, owned) = host_resource();
         assert_eq!(destroy(owned, std::ptr::null_mut()), 0);
-        let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
+        let scope = (&raw mut (*instance.cast::<AmdfSession>()).scope).cast();
         let mut profile = amdf_memory_profile_t {
             r#type: AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
             structure_size: size_of::<amdf_memory_profile_t>() as u32,
@@ -567,7 +564,7 @@ fn registration_requires_the_declared_host_cacheability() {
         assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         bytes[3] = 0xa5;
         assert_eq!(bytes[3], 0xa5);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -575,7 +572,7 @@ fn registration_requires_the_declared_host_cacheability() {
 fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
     unsafe {
         let instance = test_instance();
-        let scope = &raw mut (*instance.cast::<Instance>()).scope;
+        let scope = &raw mut (*instance.cast::<AmdfSession>()).scope;
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let other_device = device.wrapping_add(1);
         let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 1).unwrap();
@@ -635,7 +632,7 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), BUSY);
         drop(borrow);
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -643,7 +640,7 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
 fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
     unsafe {
         let instance = test_instance();
-        let scope = &raw mut (*instance.cast::<Instance>()).scope;
+        let scope = &raw mut (*instance.cast::<AmdfSession>()).scope;
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 1).unwrap();
         accesses
@@ -708,7 +705,7 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
             Err(UNSUPPORTED)
         );
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 
@@ -716,7 +713,7 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
 fn multi_device_access_queries_and_scratch_preserve_request_order() {
     unsafe {
         let instance = test_instance();
-        let scope = &raw mut (*instance.cast::<Instance>()).scope;
+        let scope = &raw mut (*instance.cast::<AmdfSession>()).scope;
         let first = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let second = first.wrapping_add(1);
         let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 2).unwrap();
@@ -805,7 +802,7 @@ fn multi_device_access_queries_and_scratch_preserve_request_order() {
             Err(INVALID)
         );
         assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
-        assert_eq!(instance::destroy(instance), 0);
+        assert_eq!(session::destroy(instance), 0);
     }
 }
 

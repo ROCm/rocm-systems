@@ -51,8 +51,10 @@ use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{HsaState, InFlightGeneration, boundary, initialized_mut, lock, map_error};
+use crate::lifecycle::{InFlightSession, initialized_mut, lock};
+use crate::session::HsaSession;
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile, SignalState};
+use crate::status::{boundary, map_error};
 
 /// Handle slots reserved for each agent's memory pools.
 pub(crate) const POOL_HANDLE_STRIDE: u64 = 0x10;
@@ -156,7 +158,7 @@ pub(crate) struct MemoryState {
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
-    pub(crate) health: Arc<crate::runtime::GenerationHealth>,
+    pub(crate) health: Arc<crate::session::SessionHealth>,
     /// Process setting captured by new asynchronous copies.
     pub(crate) async_copy_profiling: AsyncCopyProfiling,
     /// Virtual address reservations ordered by base address.
@@ -171,7 +173,7 @@ pub(crate) struct MemoryState {
 
 impl MemoryState {
     /// Initializes the allocation, registration, and virtual memory registries.
-    pub(crate) fn new(health: Arc<crate::runtime::GenerationHealth>) -> Self {
+    pub(crate) fn new(health: Arc<crate::session::SessionHealth>) -> Self {
         Self {
             allocations: HashMap::new(),
             ipc_allocations: HashMap::new(),
@@ -209,6 +211,7 @@ impl MemoryState {
     }
 
     /// Joins memory workers after the shared stop request is published.
+    #[cfg(test)]
     pub(crate) fn join_workers(&mut self) {
         for worker in self.take_workers() {
             let _ = worker.join();
@@ -315,7 +318,7 @@ impl PointerDescription {
     }
 }
 
-/// HsaState-owned allocation plus callbacks registered for its destruction.
+/// HsaSession-owned allocation plus callbacks registered for its destruction.
 pub(crate) struct Memory {
     /// Native backing and its mapping lifetime.
     pub(crate) allocation: Allocation,
