@@ -5468,25 +5468,72 @@ amdsmi_status_t amdsmi_get_gpu_pci_throughput(amdsmi_processor_handle processor_
   return rsmi_wrapper(rsmi_dev_pci_throughput_get, processor_handle, 0, sent, received, max_pkt_sz);
 }
 
+// rocm_smi's ranges have no reserved words, so its overdrive structs are smaller than the
+// public ones and are copied a field at a time.
+static_assert(AMDSMI_NUM_VOLTAGE_CURVE_POINTS == RSMI_NUM_VOLTAGE_CURVE_POINTS,
+              "the voltage curves must have the same number of points");
+
+static amdsmi_range_t to_amdsmi_range(const rsmi_range_t& range) {
+  amdsmi_range_t out{};
+  out.lower_bound = range.lower_bound;
+  out.upper_bound = range.upper_bound;
+  return out;
+}
+
 amdsmi_status_t amdsmi_get_gpu_od_volt_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_od_volt_freq_data_t* odv) {
-  // rocm_smi writes its own, smaller layout into the caller's buffer, and the Python
-  // library decodes it that way (_RsmiOdVoltFreqData). Change both together.
-  static_assert(sizeof(rsmi_od_volt_freq_data_t) == 152,
-                "the Python library decodes the 152-byte rocm_smi layout");
-  return rsmi_wrapper(rsmi_dev_od_volt_info_get, processor_handle, 0,
-                      reinterpret_cast<rsmi_od_volt_freq_data_t*>(odv));
+  if (odv == nullptr) {
+    // rocm_smi answers a null pointer with NOT_SUPPORTED or INVAL, depending on the GPU.
+    return rsmi_wrapper(rsmi_dev_od_volt_info_get, processor_handle, 0,
+                        static_cast<rsmi_od_volt_freq_data_t*>(nullptr));
+  }
+  rsmi_od_volt_freq_data_t rsmi_odv{};
+  amdsmi_status_t status = rsmi_wrapper(rsmi_dev_od_volt_info_get, processor_handle, 0, &rsmi_odv);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  odv->curr_sclk_range = to_amdsmi_range(rsmi_odv.curr_sclk_range);
+  odv->curr_mclk_range = to_amdsmi_range(rsmi_odv.curr_mclk_range);
+  odv->curr_fclk_range = to_amdsmi_range(rsmi_odv.curr_fclk_range);
+  odv->sclk_freq_limits = to_amdsmi_range(rsmi_odv.sclk_freq_limits);
+  odv->mclk_freq_limits = to_amdsmi_range(rsmi_odv.mclk_freq_limits);
+  odv->fclk_freq_limits = to_amdsmi_range(rsmi_odv.fclk_freq_limits);
+  for (uint32_t i = 0; i < AMDSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
+    odv->curve.vc_points[i].frequency = rsmi_odv.curve.vc_points[i].frequency;
+    odv->curve.vc_points[i].voltage = rsmi_odv.curve.vc_points[i].voltage;
+  }
+  odv->num_regions = rsmi_odv.num_regions;
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_gpu_od_volt_curve_regions(amdsmi_processor_handle processor_handle,
                                                      uint32_t* num_regions,
                                                      amdsmi_freq_volt_region_t* buffer) {
-  // rocm_smi writes its own 32-byte records into the caller's buffer, and the Python
-  // library decodes them that way (_RsmiFreqVoltRegion). Change both together.
-  static_assert(sizeof(rsmi_freq_volt_region_t) == 32,
-                "the Python library decodes 32-byte rocm_smi records");
-  return rsmi_wrapper(rsmi_dev_od_volt_curve_regions_get, processor_handle, 0, num_regions,
-                      reinterpret_cast<rsmi_freq_volt_region_t*>(buffer));
+  // A region is the range of one voltage curve point, so there are never more than the points.
+  rsmi_freq_volt_region_t regions[RSMI_NUM_VOLTAGE_CURVE_POINTS]{};
+  uint32_t capacity = 0;
+  if (num_regions != nullptr) {
+    capacity = std::min<uint32_t>(*num_regions, RSMI_NUM_VOLTAGE_CURVE_POINTS);
+  }
+  uint32_t count = capacity;
+  // Null pointers still reach rocm_smi, which answers them with NOT_SUPPORTED or INVAL.
+  amdsmi_status_t status = rsmi_wrapper(rsmi_dev_od_volt_curve_regions_get, processor_handle, 0,
+                                        num_regions != nullptr ? &count : nullptr,
+                                        buffer != nullptr ? regions : nullptr);
+  if (num_regions == nullptr) {
+    return status;
+  }
+  // Pass rocm_smi's count back only if it changed, and never more records than the buffer holds.
+  if (status == AMDSMI_STATUS_SUCCESS || count != capacity) {
+    *num_regions = std::min(count, capacity);
+  }
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    for (uint32_t i = 0; i < *num_regions; ++i) {
+      buffer[i].freq_range = to_amdsmi_range(regions[i].freq_range);
+      buffer[i].volt_range = to_amdsmi_range(regions[i].volt_range);
+    }
+  }
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_gpu_volt_metric(amdsmi_processor_handle processor_handle,
