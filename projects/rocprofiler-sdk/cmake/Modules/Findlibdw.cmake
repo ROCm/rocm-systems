@@ -72,7 +72,8 @@ if(PkgConfig_FOUND
 endif()
 
 if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
-    # HINTS are searched before system paths
+    # Prefer ROCm's bundled libdw (the copy rocprofiler-sdk is built against) over one in
+    # the default system paths.
     find_path(
         libdw_ROOT_DIR
         NAMES include/elfutils/libdw.h
