@@ -50,6 +50,7 @@ struct ImageFields {
   bool mip = false;    ///< The address tuple includes a view-relative mip level.
   bool gather = false; ///< Return four selected texel components.
   bool gradient16 = false;
+  bool coarse_derivatives = false;
   bool offset = false;
   bool lod_bias = false;
   bool lod_clamp = false;
@@ -61,6 +62,25 @@ struct ImageFields {
   bool raw = false;
   bool sign_extend = false;
 };
+
+/// RDNA1 through RDNA3.5 document the clamped and raw GET_LOD channels.
+/// W7900 and R9700 captures also return zero for the selected Z and W channels.
+inline bool image_lod_mask_supported(rj_code_arch_t arch, uint32_t mask) {
+  return !(mask & 0xcu) || arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+/// GET_LOD packs selected channels into consecutive registers. A dropped query returns zero.
+inline void write_image_lod(RegisterAccess &regs, uint32_t dst, uint32_t lane, uint32_t mask,
+                            float clamped, float raw) {
+  if (!mask) {
+    regs.write_vgpr(dst, lane, 0);
+    return;
+  }
+  const std::array<float, 4> result{clamped, raw, 0, 0};
+  for (uint32_t component = 0; component < result.size(); ++component)
+    if (mask & (1u << component))
+      regs.write_vgpr(dst++, lane, std::bit_cast<uint32_t>(result[component]));
+}
 
 /// Resolve the consumed coordinate words, including the individual VGPR0 substitutions on GFX11.5.
 inline bool resolve_image_coordinates(const Wavefront &wf, ImageAddressRegisters &addresses,
@@ -139,6 +159,13 @@ inline uint32_t image_load_selectors(uint32_t selectors, const BufferFormat &for
       selectors = (selectors & ~(7u << shift)) | ((4 + (select - 4) % count) << shift);
   }
   return selectors;
+}
+
+/// R128 omits the tail of the descriptor. Multisample surfaces support texel
+/// transfers, but do not supply a mip chain for sampling or LOD queries.
+inline bool image_supports_resource_type(uint32_t type, bool r128, bool sampled) {
+  return (!r128 || type == kImage1d || type == kImage2d || type == kImage2dMsaa) &&
+         (!sampled || type < kImage2dMsaa);
 }
 
 /// @brief Decode and qualify the descriptor and return its formatted-transfer state.
@@ -220,13 +247,11 @@ prepare_image_resource(Wavefront &wf, VectorMemState &state, uint32_t resource_r
   if (resource.type < kImage1d || resource.data_format == 0)
     return ImageResource{};
 
-  if (fields.r128 && resource.type != kImage1d && resource.type != kImage2d &&
-      resource.type != kImage2dMsaa)
-    return fail(InstructionExecutionError::UnsupportedOperandValue);
   if (!gfx10 && (msaa || (!gfx9 && fields.dim >= kImageDim2dMsaa)))
     return fail(InstructionExecutionError::UnimplementedInstruction);
-  if ((msaa && (sampled || fields.mip || fields.pixels || resource.base_level ||
-                resource.last_level > 3 || fields.dim + kImage1d != resource.type)) ||
+  if (!image_supports_resource_type(resource.type, fields.r128, sampled) ||
+      (msaa && (fields.mip || fields.pixels || resource.base_level || resource.last_level > 3 ||
+                fields.dim + kImage1d != resource.type)) ||
       (!msaa && (fields.msaa_load || fields.dim >= kImageDim2dMsaa) && gfx10))
     return fail(InstructionExecutionError::UnsupportedOperandValue);
 
