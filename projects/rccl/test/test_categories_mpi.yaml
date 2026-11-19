@@ -317,6 +317,16 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_CUMEM_ENABLE=1"
       - "RCCL_DDA_ENABLE=0"
+  quick_env_profiler_direct_allgather:
+    description: "Direct AllGather reports its per-peer Send/Recv tasks inside one AllGather CollApi event, checked with the recorder plugin. Runs in a process of its own for the same reason as quick_env_profiler_kernelch. DDA and hierarchical AllGather are off because both preempt Direct AllGather; the test skips when RCCL still picks another backend (Direct needs gfx942/gfx950 and a rank count that is a multiple of 8)."
+    test_patterns:
+      - "DirectAllGatherProfilerMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_ENABLE=0"
+      - "RCCL_HIERARCHICAL_ALLGATHER=0"
   # The QP-sharing functional gate. The same five tests run at three values of
   # RCCL_IB_COMM_NGROUPS: expectations are derived from ngroups by the reference
   # model (test/transport/NetIbMPI/QpShareRefModel.hpp), so no test is pinned to
