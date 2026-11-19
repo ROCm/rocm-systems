@@ -225,8 +225,16 @@ private:
     * @brief Waits for the submitted surfaces and copies/converts the decoded output.
     *
     * This is the only finalize path; the single-image decoders call it with a batch size of one.
+    * Every surface is released when it returns, whether it succeeds or fails.
     */
    RocJpegStatus FinalizeDecodeBatched(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size);
+
+   /**
+    * @brief Does the work of FinalizeDecodeBatched one sub-batch at a time, releasing each sub-batch's surfaces once
+    *        its output is complete. On failure it returns at once; num_released is the number of leading surfaces
+    *        already released.
+    */
+   RocJpegStatus FinalizeSubBatches(const VASurfaceID *surface_ids, const JpegStreamParameters *jpeg_stream_params, const RocJpegDecodeParams *decode_params, RocJpegImage *destinations, int batch_size, int &num_released);
 
    /**
     * @brief Retrieves the height of the chroma channel.

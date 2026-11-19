@@ -3671,6 +3671,94 @@ typedef union rocprofiler_hip_api_args_t
         int              device;
     } hipKernelSetAttributeForDevice;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
+    struct
+    {
+        hipKernel_t    kernel;
+        hipFuncCache_t config;
+        hipDevice_t    device;
+    } hipKernelSetCacheConfig;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 39
+    struct
+    {
+        void**                  dsts;
+        void**                  srcs;
+        size_t*                 sizes;
+        size_t*                 sizesDst;
+        hipExtMemcpyWait*       waits;
+        hipExtMemcpySignal*     signals;
+        size_t                  count;
+        hipExtMemcpyAttributes* attrs;
+        size_t*                 attrsIdxs;
+        size_t                  numAttrs;
+        hipStream_t             stream;
+    } hipExtMemcpyBatchAsync;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 40
+    struct
+    {
+        void*                dst;
+        const void*          src;
+        size_t               size;
+        hipMemcpyAttributes* attr;
+        hipStream_t          stream;
+    } hipMemcpyWithAttributesAsync;
+    struct
+    {
+        struct hipMemcpy3DBatchOp* op;
+        unsigned long long         flags;
+        hipStream_t                stream;
+    } hipMemcpy3DWithAttributesAsync;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
+    struct
+    {
+        hipArraySparseProperties* sparseProperties;
+        hipArray_t                array;
+    } hipArrayGetSparseProperties;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 42
+    struct
+    {
+        hipGraphNode_t node;
+        unsigned int*  nodeId;
+    } hipGraphNodeGetLocalId;
+
+    struct
+    {
+        hipGraphNode_t      node;
+        unsigned long long* toolsId;
+    } hipGraphNodeGetToolsId;
+
+    struct
+    {
+        hipGraph_t    graph;
+        unsigned int* graphId;
+    } hipGraphGetId;
+
+    struct
+    {
+        hipGraphExec_t graphExec;
+        unsigned int*  graphId;
+    } hipGraphExecGetId;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 43
+    struct
+    {
+        int*                pi;
+        hipExecAffinityType type;
+        hipDevice_t         dev;
+    } hipDeviceGetExecAffinitySupport;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 44
+    struct
+    {
+        hipArray_t*  pPlaneArray;
+        hipArray_t   hArray;
+        unsigned int planeIdx;
+    } hipArrayGetPlane;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

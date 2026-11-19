@@ -151,6 +151,14 @@ public:
     operator Span<const Item>() const { return Span<const Item>(Data(), Capacity()); }
     ///@}
 
+    ///@{
+    /// Implicitly gets the current contents of the buffer as a ByteSpan.
+    ///
+    /// @returns The contents of the buffer as a ByteSpan; same as ByteSpan::FromArray(Data(), size()).
+    operator ByteSpan() { return ByteSpan::FromArray(Data(), size()); }
+    operator ConstByteSpan() const { return ConstByteSpan::FromArray(Data(), size()); }
+    ///@}
+
     /// Returns pointer to the underlying buffer serving as data storage.
     /// The returned pointer defines always valid range [Data(), Data() + Capacity()).
     ///

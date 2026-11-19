@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -204,7 +205,9 @@ TEST_P(CubeInstructionTest, FaceCoordinatesAndModeMatchPhysicalWitnesses) {
     amdgpu::GpuMemory memory("cube_memory");
     amdgpu::L2Cache l2("cube_l2");
     const auto cfg = config();
-    auto cu = amdgpu::ComputeUnitCore::create("cube_cu", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cube_cu", cfg, &memory, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
@@ -506,7 +509,9 @@ TEST_P(CubeInstructionTest, SourceAndOutputModifiersMatchPhysicalWitnesses) {
     amdgpu::GpuMemory memory("cube_modifier_memory");
     amdgpu::L2Cache l2("cube_modifier_l2");
     const auto cfg = config();
-    auto cu = amdgpu::ComputeUnitCore::create("cube_modifier_cu", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cube_modifier_cu", cfg, &memory, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);

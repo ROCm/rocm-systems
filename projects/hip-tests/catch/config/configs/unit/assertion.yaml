@@ -9,7 +9,8 @@ assertion:
   Unit_StaticAssert_Negative_Basic_RTC:
     <<: *level_default
     tags: [deviceLib]
-  Unit_Assert_Positive_Basic_KernelPass: *level_default
+  Unit_Assert_Positive_Basic_KernelPass:
+    level: [*level_0, *level_default]
   Unit_Assert_Positive_Basic_KernelFail:
     <<: *level_default
     disabled:

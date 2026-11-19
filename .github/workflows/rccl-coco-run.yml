@@ -27,7 +27,7 @@ on:
         description: 'ROCm/tRCCL git ref (commit, tag, or branch) to check out the harness at.'
         type: string
         required: false
-        default: '1.3.x'
+        default: '1.4.x'
       trigger_kind:
         description: 'coco --trigger-kind, recorded against the run. Required, so a caller that does not wire it through fails rather than mislabelling its run.'
         type: string
@@ -70,6 +70,20 @@ on:
         type: number
         required: false
         default: 600
+      rocm_version:
+        description: >-
+          Dev wheel version that the job config reads as $ROCM_VERSION.
+          Empty leaves the variable unset.
+        type: string
+        required: false
+        default: ''
+      rocm_system_ref:
+        description: >-
+          Full 40-hex rocm-systems commit that the job config reads as
+          $ROCM_SYSTEM_REF. Empty leaves the variable unset.
+        type: string
+        required: false
+        default: ''
     secrets:
       APP_ID:
         description: 'GitHub App ID, used to mint a read token for the coco harness repository.'
@@ -91,9 +105,10 @@ jobs:
   coco:
     # Branch protection matches "<caller job> / <this job>" literally, so this must not vary per PR.
     name: ${{ inputs.job }}
-    # Any repository can invoke a workflow_call by full reference and reach
-    # these self-hosted runners; github.repository is the caller's.
-    if: github.repository == 'ROCm/rocm-systems'
+    # Allowlist of callers trusted on these self-hosted runners: any repository can
+    # invoke a workflow_call by full reference, and github.repository is the caller's.
+    # Keep every entry a literal slug -- never a prefix, pattern, or caller-supplied input.
+    if: github.repository == 'ROCm/rocm-systems' || github.repository == 'ROCm/TheRock'
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: ${{ inputs.timeout_minutes }}
     # Queue rather than cancel; superseding is the caller's workflow-level concern.
@@ -110,8 +125,14 @@ jobs:
       ARTIFACT_NAME: coco-${{ inputs.mode }}-${{ inputs.job }}${{ inputs.mode == 'pr' && format('-pr{0}', inputs.pr_number) || '' }}-${{ github.run_id }}-${{ github.run_attempt }}
       # ~/.cache/pip is on a small NFS home quota, here and on the compute nodes.
       PIP_NO_CACHE_DIR: '1'
+      UV_NO_CACHE: '1'
+      UV_VERSION: 0.9.26
+      # coco runs this venv on a compute node, which cannot see a TW workspace.
+      # Empty on other clusters, which keep RUNNER_TEMP.
+      COCO_SHARED_SCRATCH: ${{ startsWith(inputs.runs_on, 'tw-') && '/share_nfs/coco/ci-scratch' || '' }}
     steps:
       # In RUNNER_TEMP, so no step deletes NFS files coco may still hold open.
+      # COCO_SHARED_SCRATCH replaces it where compute nodes must run the venv.
       - name: Set up coco scratch
         env:
           MODE: ${{ inputs.mode }}
@@ -119,18 +140,39 @@ jobs:
           BUILD_JOB: ${{ inputs.build_job }}
         run: |
           set -euo pipefail
-          scratch=$(mktemp -d "${RUNNER_TEMP}/coco.XXXXXX")
+          base="${RUNNER_TEMP}"
+          if [[ -n "${COCO_SHARED_SCRATCH}" ]]; then
+            mkdir -p "${COCO_SHARED_SCRATCH}"
+            # The venv under here runs with the DB URL and HF token, so the root
+            # must be ours and closed to every other account.
+            if [[ -L "${COCO_SHARED_SCRATCH}" || ! -O "${COCO_SHARED_SCRATCH}" ]]; then
+              echo "::error::${COCO_SHARED_SCRATCH} must be a real directory owned by the runner user."
+              exit 1
+            fi
+            chmod 700 "${COCO_SHARED_SCRATCH}"
+            # Concurrent jobs share this root. A run lasts under 2 days, so a 5-day
+            # cutoff never deletes a live one.
+            find "${COCO_SHARED_SCRATCH}" -maxdepth 1 -name 'coco.*' -mtime +5 -exec rm -rf {} + || true
+            base="${COCO_SHARED_SCRATCH}"
+          fi
+          scratch=$(mktemp -d "${base}/coco.XXXXXX")
+          # A nightly run reuses a persistent stage_dir, so this marks the
+          # point before which an old *_summary.md must not reappear.
+          touch "${scratch}/launch.stamp"
           {
             echo "CI_SCRATCH=${scratch}"
             echo "COCO_VENV=${scratch}/venv"
             echo "LOG_FILE=${scratch}/coco-${MODE}-${JOB}-${GITHUB_RUN_ID}.log"
             echo "BUILD_LOG=${scratch}/coco-pr-${BUILD_JOB}-${GITHUB_RUN_ID}.log"
+            echo "LAUNCH_STAMP=${scratch}/launch.stamp"
+            echo "REPORTS_FILE=${scratch}/reports.md"
           } >> "${GITHUB_ENV}"
 
       # Not at the workspace root: checkout's clean there would delete COCO_DIR.
       - name: Checkout rocm-systems
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
+          repository: ROCm/rocm-systems
           path: coco-rocm-systems
           sparse-checkout: .github/actions/rccl-checkout-coco-harness
 
@@ -147,8 +189,22 @@ jobs:
         run: |
           set -euo pipefail
           # Never activated; invoked by absolute path.
-          python3 -m venv "${COCO_VENV}"
-          "${COCO_VENV}/bin/python3" -m pip install -e .
+          if [[ -n "${COCO_SHARED_SCRATCH}" ]]; then
+            # Runner is 3.12, compute nodes 3.10: uv-managed 3.10, non-editable install.
+            python3 -m venv "${CI_SCRATCH}/uv-boot"
+            "${CI_SCRATCH}/uv-boot/bin/python3" -m pip install --quiet "uv==${UV_VERSION}"
+            UV_PYTHON_INSTALL_DIR="${CI_SCRATCH}/python" \
+              "${CI_SCRATCH}/uv-boot/bin/uv" venv --python-preference only-managed \
+              --python 3.10 "${COCO_VENV}"
+            # setuptools only packages files inside the package directory;
+            # stage a fresh copy so the non-editable wheel carries configs/.
+            rm -rf coco/configs
+            cp -r configs coco/configs
+            "${CI_SCRATCH}/uv-boot/bin/uv" pip install --python "${COCO_VENV}/bin/python3" .
+          else
+            python3 -m venv "${COCO_VENV}"
+            "${COCO_VENV}/bin/python3" -m pip install -e .
+          fi
           # Surfaces a packaging problem here rather than after the queue.
           "${COCO_VENV}/bin/coco" --help > /dev/null
           echo "==> coco installed from $(git rev-parse HEAD)"
@@ -193,6 +249,8 @@ jobs:
           PR_REPO: ${{ inputs.pr_repo }}
           PR_SHA: ${{ inputs.pr_sha }}
           SOFTWARE: ${{ inputs.software }}
+          IN_ROCM_VERSION: ${{ inputs.rocm_version }}
+          IN_ROCM_SYSTEM_REF: ${{ inputs.rocm_system_ref }}
           COCO_DATABASE_URL: ${{ secrets.RCCL_COCO_DB_URL }}
           # sbatch --export=ALL carries the launcher environment to the compute
           # jobs, so both the build-only pass and the test pass see this.
@@ -201,6 +259,20 @@ jobs:
           set -euo pipefail
           if [[ -z "${COCO_DATABASE_URL:-}" ]]; then
             echo "::warning::RCCL_COCO_DB_URL is empty; this run will not publish results to the coco database."
+          fi
+
+          # Job configs read these as $ROCM_VERSION and $ROCM_SYSTEM_REF. Export
+          # them only when set: coco leaves an unset variable literal, and an
+          # empty one would change what a job without these pins resolves.
+          if [[ -n "${IN_ROCM_VERSION}" ]]; then
+            export ROCM_VERSION="${IN_ROCM_VERSION}"
+          fi
+          if [[ -n "${IN_ROCM_SYSTEM_REF}" ]]; then
+            if [[ ! "${IN_ROCM_SYSTEM_REF}" =~ ^[0-9a-fA-F]{40}$ ]]; then
+              echo "::error::rocm_system_ref must be a full 40-hex commit, got: ${IN_ROCM_SYSTEM_REF}"
+              exit 1
+            fi
+            export ROCM_SYSTEM_REF="${IN_ROCM_SYSTEM_REF}"
           fi
 
           # coco exits 0 after a build failure: unbuilt stacks' tests are marked
@@ -276,6 +348,7 @@ jobs:
               --job "${JOB}" \
               --trigger-kind "${TRIGGER_KIND}" \
               ${COCO_ARGS} > "${LOG_FILE}" 2>&1
+            assert_built "${LOG_FILE}"
           else
             echo "::error::mode must be run or pr, got: ${MODE}"
             exit 1
@@ -302,6 +375,7 @@ jobs:
             ${{ steps.artifact_dir.outputs.dir }}/logs
             ${{ steps.artifact_dir.outputs.dir }}/scripts
             ${{ steps.artifact_dir.outputs.dir }}/harness_*.log
+            ${{ steps.artifact_dir.outputs.dir }}/reports
           if-no-files-found: warn
           retention-days: 14
 
@@ -318,6 +392,7 @@ jobs:
           PR_SHA: ${{ inputs.pr_sha }}
           ARTIFACT_DIR: ${{ steps.artifact_dir.outputs.dir }}
           LAUNCH_OUTCOME: ${{ steps.launch.outcome }}
+          LAUNCH_STAMP: ${{ env.LAUNCH_STAMP }}
         run: |
           set -uo pipefail
           title="${JOB}"
@@ -341,6 +416,29 @@ jobs:
             echo "| extra flags | \`${COCO_ARGS:-(none)}\` |"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+          # Each stack's markdown summary, written this run only (a persistent
+          # stage_dir keeps an older report from a prior night alongside it).
+          # Also kept at REPORTS_FILE so the PR-comment step need not re-glob it.
+          if [[ -n "${ARTIFACT_DIR}" && -d "${ARTIFACT_DIR}/reports" ]]; then
+            : > "${REPORTS_FILE}"
+            find "${ARTIFACT_DIR}/reports" -name '*_summary.md' \
+              -newer "${LAUNCH_STAMP}" -print0 | sort -z |
+              while IFS= read -r -d '' md; do
+                # The PR build-only pass's own report (every *-pr-build.yaml job's
+                # fixed `tag: pr-smoke-build`) is a superset build and reports
+                # little beyond what the smoke pass's own report already shows.
+                # Worth reading only when the build itself is why this run failed.
+                if [[ "${LAUNCH_OUTCOME}" == "success" &&
+                      "$(basename "${md}")" == "pr-smoke-build_summary.md" ]]; then
+                  continue
+                fi
+                { echo; cat "${md}"; } | tee -a "${GITHUB_STEP_SUMMARY}" "${REPORTS_FILE}" > /dev/null
+              done
+            # Every report this run wrote can be the skipped build-only one;
+            # leave no empty file for the upload step to turn into a blank PR comment.
+            [[ -s "${REPORTS_FILE}" ]] || rm -f "${REPORTS_FILE}"
+          fi
+
           if [[ "${LAUNCH_OUTCOME}" != "success" ]]; then
             for log in "${BUILD_LOG:-}" "${LOG_FILE:-}"; do
               [[ -s "${log}" ]] || continue
@@ -349,3 +447,15 @@ jobs:
               echo "::endgroup::"
             done
           fi
+
+      # Posting to the PR needs issues: write, which this job does not hold --
+      # it checks out and builds PR-controlled code, and must not also carry a
+      # write token. A separate job with no PR checkout posts this artifact.
+      - name: Upload the PR summary
+        if: always() && inputs.mode == 'pr' && steps.artifact_dir.outputs.dir != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-summary
+          path: ${{ env.REPORTS_FILE }}
+          if-no-files-found: ignore
+          retention-days: 14

@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -20,7 +21,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -490,28 +490,6 @@ rsmi_status_t rsmi_shut_down(void) {
     return RSMI_STATUS_INIT_ERROR;
   }
 
-  // Release any device mutexes that are being held
-#if DEBUG
-  int ret = 0;
-#endif
-  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
-#if DEBUG
-    ret = pthread_mutex_unlock(smi.devices()[i]->mutex());
-    if (ret != EPERM) {  // We expect to get EPERM if the lock has already
-                         // been released
-      if (ret == 0) {
-        std::cout << "WARNING: Unlocked monitor_devices lock; "
-                  << "it should have already been unlocked." << std::endl;
-      } else {
-        std::cout << "WARNING: pthread_mutex_unlock() returned " << ret << " for device " << i
-                  << " in rsmi_shut_down()" << std::endl;
-      }
-    }
-#else
-    (void)pthread_mutex_unlock(smi.devices()[i]->mutex());
-#endif
-  }
-
   (void)smi.ref_count_dec();
 
   if (smi.ref_count() == 0) {
@@ -553,32 +531,6 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t* num_devices) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   *num_devices = static_cast<uint32_t>(smi.devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.nic_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.switch_devices().size());
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -830,40 +782,6 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
   CATCH
 }
 
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_NIC_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_SWITCH_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
 rsmi_status_t rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t* numa_node) {
   TRY rsmi_status_t ret;
 
@@ -899,8 +817,11 @@ static rsmi_status_t get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_
     return ret;
   }
 
+  // amdgpu prints xgmi_physical_id in decimal ("%u\n"); every other id read here is hex.
+  const int base = (typ == amd::smi::kDevXGMIPhysicalID) ? 10 : 16;
+
   errno = 0;
-  val_u64 = strtoul(val_str.c_str(), nullptr, 16);
+  val_u64 = strtoul(val_str.c_str(), nullptr, base);
   assert(errno == 0);
   if (errno != 0) {
     return amd::smi::ErrnoToRsmiStatus(errno);
@@ -6817,7 +6738,6 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   std::string newMemoryPartition = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
   std::string currentMemoryPartition;
 
-  // do nothing if memory_partition is the current mode
   rsmi_status_t ret_get = get_memory_partition(dv_ind, currentMemoryPartition);
   // we can try to set, even if we get unexpected data
   if (ret_get != RSMI_STATUS_SUCCESS && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
@@ -6831,19 +6751,8 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
     LOG_ERROR(ss);
     return ret_get;
   }
-  rsmi_memory_partition_type_t currRSMIMemoryPartition =
-      mapStringToMemoryPartitionTypes.at(currentMemoryPartition);
-  if (currRSMIMemoryPartition == memory_partition) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success - no change, current memory partition was already requested"
-       << " setting"
-       << " | Device #: " << dv_ind
-       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Data: " << newMemoryPartition
-       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
-    LOG_TRACE(ss);
-    return RSMI_STATUS_SUCCESS;
-  }
+  const bool is_current_mode =
+      mapStringToMemoryPartitionTypes.at(currentMemoryPartition) == memory_partition;
 
   // is this an available mode to set to?
   std::string memory_capabilities_str = "unknown";
@@ -6882,12 +6791,30 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   }
 
   GET_DEV_FROM_INDX
+  // Write the current mode too: it cancels a different mode requested earlier,
+  // which would otherwise apply at the next driver reload.
   int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newMemoryPartition);
   rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
+  // Single-mode GPUs expose the file without write bits, so nothing can be pending
+  // there; a read-only mount (EROFS) keeps the write bits and is reported.
+  struct stat attr = {};
+  if (is_current_mode && status == RSMI_STATUS_PERMISSION &&
+      stat(dev->get_sys_file_path_by_type(amd::smi::kDevMemoryPartition).c_str(), &attr) == 0 &&
+      (attr.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) == 0) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Success - requested mode is already current; write returned "
+       << getRSMIStatusString(status, false) << " | Device #: " << dv_ind
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Data: " << newMemoryPartition
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
+    LOG_INFO(ss);
+    return RSMI_STATUS_SUCCESS;
+  }
   if (status != RSMI_STATUS_SUCCESS) {
     if (status == RSMI_STATUS_PERMISSION) {
-      status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
+      // Root was checked above, so the driver or a read-only /sys refused the write.
+      status = RSMI_STATUS_NOT_SUPPORTED;
     }
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
