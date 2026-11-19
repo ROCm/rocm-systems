@@ -121,11 +121,18 @@ class ProcessCommands:
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
         # Populate initial processes
+        list_error = None
         try:
             process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
-            raise e
+            if not multiple_devices:
+                raise e
+            # One GPU's error must not hide the other GPUs' processes: show it for
+            # this GPU and record it for the exit code. NO_PERM still aborts.
+            self.helpers.record_or_raise(e)
+            list_error = f"[{e.get_error_info(detailed=False)}] Unable to get the process list"
+            process_list = []
 
         filtered_process_values = []
         for process_info in process_list:
@@ -237,7 +244,9 @@ class ProcessCommands:
 
         for index, process in enumerate(filtered_process_values):
             if process["process_info"] == "N/A":
-                filtered_process_values[index]["process_info"] = "No running processes detected"
+                filtered_process_values[index]["process_info"] = (
+                    list_error or "No running processes detected"
+                )
 
         if self.logger.is_json_format():
             if watching_output:
