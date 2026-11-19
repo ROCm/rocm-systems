@@ -7,6 +7,16 @@ Two commit-vs-commit comparison tools for AMDGPU compiler-codegen regressions, p
 
 Both scripts build each commit under test in its own isolated `git worktree` (under `/tmp`), so your working tree — including uncommitted changes — is never touched, and drive the same pipeline: build → extract remarks → CSV → diff → a self-contained interactive HTML dashboard (plus PNG charts for quick viewing). The Python helpers (`resource_usage_to_csv.py`/`_diff.py`/`_dashboard.py`, `lto_inline_remarks_to_csv.py`/`_diff.py`/`_dashboard.py`/`_report.py`) are plain CSV/YAML parsers and chart/dashboard generators with no project-specific logic — they only need whatever CSV/YAML the shell drivers hand them.
 
+Two more scripts answer a different question — not "did codegen change" but "where does build time actually go":
+
+- **`ninja_build_timing.py`** — parses `.ninja_log` (Ninja timestamps every edge it runs, so this is free) into a per-component time budget (`src/gda`, `tests/functional`, link steps, ...) and a list of the slowest individual compile/link edges. `scripts/build_configs/all_backends` runs this automatically after every build and appends it to `build/build_timing.log`, alongside separate configure/build/install stage timings (`time_stage` in `_common.sh`). Works with any build, no special flags needed.
+- **`ftime_trace_summary.py`** — for a finer-grained look, configure with `-DROCSHMEM_TIME_TRACE=ON` (adds `-ftime-trace` to every compile job) and rebuild, then run this to aggregate the resulting per-TU JSON profiles across the whole build: total time per compiler phase (parsing, template instantiation, codegen, ...) and the specific symbols whose instantiation costs the most time summed across every TU that instantiates them. Useful for confirming whether a combinatorial API-x-type template surface is the actual bottleneck.
+
+```bash
+python3 scripts/analysis/ninja_build_timing.py --ninja-log build/.ninja_log
+python3 scripts/analysis/ftime_trace_summary.py --build-dir build
+```
+
 ## Prerequisites
 
 - The target project must be a **git repository** (both scripts isolate builds via `git worktree add`/`remove` and resolve commits via `git rev-parse`/`merge-base`).

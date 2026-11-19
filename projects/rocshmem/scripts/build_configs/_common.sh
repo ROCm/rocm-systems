@@ -38,3 +38,27 @@ build_jobs=$(nproc)
 if (( build_jobs > 32 )); then
     build_jobs=32
 fi
+
+###############################################################################
+# STAGE TIMING
+###############################################################################
+# Wraps a build stage ("configure", "build", "install", ...) with wall-clock
+# timing so the three cmake steps (which the caller's own `time ...` lumps
+# together) can be told apart. Appends to build_timing.log in the cwd (the
+# build directory). Disable with ROCSHMEM_BUILD_TIMING=0.
+rocshmem_timing_log=${ROCSHMEM_BUILD_TIMING_LOG:-build_timing.log}
+
+time_stage() {
+    local stage_name="$1"
+    shift
+    if [[ "${ROCSHMEM_BUILD_TIMING:-1}" == 0 ]]; then
+        "$@"
+        return
+    fi
+    local start end elapsed
+    start=$(date +%s.%N)
+    "$@"
+    end=$(date +%s.%N)
+    elapsed=$(awk -v s="${start}" -v e="${end}" 'BEGIN{printf "%.2f", e-s}')
+    printf '[timing] %-10s %ss\n' "${stage_name}" "${elapsed}" | tee -a "${rocshmem_timing_log}"
+}

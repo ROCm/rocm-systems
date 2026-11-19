@@ -29,7 +29,9 @@ script_dir=$(dirname "$(realpath $0)")
 src_path=${script_dir}/../../
 source "${script_dir}/_common.sh"
 
-cmake \
+: > "${rocshmem_timing_log}"
+
+time_stage configure cmake \
     "${generator_args[@]}" \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} \
@@ -52,7 +54,14 @@ cmake \
     -DUSE_HDP_FLUSH=OFF \
     -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
     -DASAN=${ASAN:-OFF} \
+    -DROCSHMEM_TIME_TRACE=${ROCSHMEM_TIME_TRACE:-OFF} \
     $* $src_path
-cmake --build . --parallel ${BUILD_JOBS:-$build_jobs}
-cmake --install .
+time_stage build cmake --build . --parallel ${BUILD_JOBS:-$build_jobs}
+time_stage install cmake --install .
+
+if [[ -f .ninja_log ]] && command -v python3 >/dev/null 2>&1; then
+    echo "[timing] ninja edge breakdown (build/${rocshmem_timing_log}):"
+    python3 "${script_dir}/../analysis/ninja_build_timing.py" --ninja-log .ninja_log \
+        | tee -a "${rocshmem_timing_log}"
+fi
 
