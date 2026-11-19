@@ -46,6 +46,7 @@ VMovB32Vop3::VMovB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MOV_B32);
 }
 
 namespace detail {
@@ -75,6 +76,7 @@ VReadfirstlaneB32Vop3::VReadfirstlaneB32Vop3(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_READFIRSTLANE_B32);
 }
 
 namespace detail {
@@ -135,6 +137,7 @@ VMovB16Vop3::VMovB16Vop3(const MachineInst *inst)
       src0.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 0) : 0xf);
   vdst.set_register_byte_mask(
       vdst.is_vgpr() ? amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), 3) : 0xf);
+  set_amdgpu_operation(amdgpu::Operation::V_MOV_B16);
 }
 
 namespace detail {
@@ -193,6 +196,7 @@ VMovB64Vop3::VMovB64Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MOV_B64);
 }
 
 namespace detail {
@@ -253,6 +257,8 @@ VMovreldB32Vop3::VMovreldB32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_MOVRELD_B32);
+  flags_ |= RELATIVE_VGPR_DESTINATION;
 }
 
 namespace detail {
@@ -304,6 +310,8 @@ VMovrelsB32Vop3::VMovrelsB32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_MOVRELS_B32);
+  flags_ |= RELATIVE_VGPR_SOURCE;
 }
 
 namespace detail {
@@ -355,6 +363,8 @@ VMovrelsdB32Vop3::VMovrelsdB32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_MOVRELSD_B32);
+  flags_ |= RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION;
 }
 
 namespace detail {
@@ -406,6 +416,8 @@ VMovrelsd2B32Vop3::VMovrelsd2B32Vop3(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_MOVRELSD_2_B32);
+  flags_ |= RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION;
 }
 
 namespace detail {
@@ -439,6 +451,7 @@ VPermlane16SwapB32Vop3::VPermlane16SwapB32Vop3(const MachineInst *inst)
   num_dst_ = 2;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE16_SWAP_B32);
 }
 
 namespace detail {
@@ -496,6 +509,7 @@ VCndmaskB32Vop3::VCndmaskB32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CNDMASK_B32);
 }
 
 namespace detail {
@@ -563,6 +577,7 @@ VCubeidF32Vop3::VCubeidF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CUBEID_F32);
 }
 
 namespace detail {
@@ -629,6 +644,7 @@ VCubescF32Vop3::VCubescF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CUBESC_F32);
 }
 
 namespace detail {
@@ -695,6 +711,7 @@ VCubetcF32Vop3::VCubetcF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CUBETC_F32);
 }
 
 namespace detail {
@@ -761,6 +778,7 @@ VCubemaF32Vop3::VCubemaF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CUBEMA_F32);
 }
 
 namespace detail {
@@ -810,6 +828,7 @@ VPermPk16B4U4Vop3::VPermPk16B4U4Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_PERM_PK16_B4_U4);
 }
 
 namespace detail {
@@ -859,6 +878,7 @@ VPermPk16B6U4Vop3::VPermPk16B6U4Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_PERM_PK16_B6_U4);
 }
 
 namespace detail {
@@ -909,6 +929,7 @@ VPermPk16B8U4Vop3::VPermPk16B8U4Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_PERM_PK16_B8_U4);
 }
 
 namespace detail {
@@ -974,6 +995,7 @@ VPermB32Vop3::VPermB32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_PERM_B32);
 }
 
 namespace detail {
@@ -1016,6 +1038,7 @@ VPermlane16B32Vop3::VPermlane16B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE16_B32);
 }
 
 namespace detail {
@@ -1057,6 +1080,7 @@ VPermlanex16B32Vop3::VPermlanex16B32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANEX16_B32);
 }
 
 namespace detail {
@@ -1128,6 +1152,7 @@ VCndmaskB16Vop3::VCndmaskB16Vop3(const MachineInst *inst)
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_CNDMASK_B16);
 }
 
 namespace detail {
@@ -1184,6 +1209,7 @@ VPermlaneBcastB32Vop3::VPermlaneBcastB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE_BCAST_B32);
 }
 
 namespace detail {
@@ -1225,6 +1251,7 @@ VPermlaneUpB32Vop3::VPermlaneUpB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE_UP_B32);
 }
 
 namespace detail {
@@ -1266,6 +1293,7 @@ VPermlaneDownB32Vop3::VPermlaneDownB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE_DOWN_B32);
 }
 
 namespace detail {
@@ -1307,6 +1335,7 @@ VPermlaneXorB32Vop3::VPermlaneXorB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE_XOR_B32);
 }
 
 namespace detail {
@@ -1339,6 +1368,7 @@ VPermlane16VarB32Vop3::VPermlane16VarB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE16_VAR_B32);
 }
 
 namespace detail {
@@ -1371,6 +1401,7 @@ VPermlanex16VarB32Vop3::VPermlanex16VarB32Vop3(const MachineInst *inst)
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANEX16_VAR_B32);
 }
 
 namespace detail {
@@ -1406,6 +1437,7 @@ VPermlaneIdxGenB32Vop3::VPermlaneIdxGenB32Vop3(const MachineInst *inst)
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_PERMLANE_IDX_GEN_B32);
 }
 
 namespace detail {
@@ -1436,6 +1468,7 @@ VReadlaneB32Vop3::VReadlaneB32Vop3(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  set_amdgpu_operation(amdgpu::Operation::V_READLANE_B32);
 }
 
 namespace detail {
@@ -1471,6 +1504,7 @@ VWritelaneB32Vop3::VWritelaneB32Vop3(const MachineInst *inst)
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  set_amdgpu_operation(amdgpu::Operation::V_WRITELANE_B32);
 }
 
 namespace detail {

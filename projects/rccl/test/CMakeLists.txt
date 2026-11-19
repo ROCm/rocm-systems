@@ -438,6 +438,7 @@ if(BUILD_TESTS)
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/DdaLL128ArchGeometryTests.cpp
+      device/DdaReduceScatterFabricLL128PeerParTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestTdmReduceCopy.cpp
@@ -1513,9 +1514,9 @@ if(BUILD_TESTS)
     RENAME "CTestTestfile.cmake"
   )
 
-  # Host-only micro-test binaries (rccl-UnitTestsMicro). The host/ CMakeLists
+  # Host-only micro-test binaries (rccl-UnitTestsMicro*). The host/ CMakeLists
   # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
-  # target and returns; invoked standalone it builds rccl-HostUnitTests too.
+  # targets and returns; invoked standalone it builds rccl-HostUnitTests too.
   add_subdirectory(host)
 
   # Those headers are installed by the rocSHMEM sub-build, and targets that do

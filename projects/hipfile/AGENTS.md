@@ -128,12 +128,12 @@ Notes:
 - CI's build workflow
   ([hipfile-build.yml](../../.github/workflows/hipfile-build.yml), started
   by [hipfile-ci-toplevel.yml](../../.github/workflows/hipfile-ci-toplevel.yml))
-  builds with `amdclang++`, `clang++`, and `g++` across several Linux
-  distributions and ROCm versions (the matrix is in
-  `hipfile-ci-toplevel.yml`). Each job builds `Debug` and
-  `Release`, both with `-DCMAKE_CXX_FLAGS=-Werror`, runs the unit tests in
-  each, then packages the Debug build with `cpack`, installs the package,
-  and builds the installed examples against it
+  builds with `amdclang++` across several Linux distributions and ROCm
+  versions, and with `clang++` and `g++` on one distribution and ROCm
+  version (the matrix is in `hipfile-ci-toplevel.yml`). Each job builds
+  `Debug` and `Release`, both with `-DCMAKE_CXX_FLAGS=-Werror`, runs the unit
+  tests in each, then packages the Debug build with `cpack`, installs the
+  package, and builds the installed examples against it
   ([`util/ci-build-installed-examples.sh`](util/ci-build-installed-examples.sh)).
   The CI images are built from
   [`util/docker`](util/docker).
