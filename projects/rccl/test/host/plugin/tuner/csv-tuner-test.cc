@@ -367,6 +367,34 @@ TEST_F(CsvTunerMicrotest, FileConfigPreservesUnavailableProtocolFallbacks) {
   EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
 }
 
+TEST_F(CsvTunerMicrotest, EmbeddedGfx950LeavesRemoteFlushAllReduceRangeUntuned) {
+  const char* source = rcclCsvTunerFindConfig("gfx950");
+  ASSERT_NE(nullptr, source);
+  ASSERT_STREQ(RCCL_CSV_TUNER_EMBEDDED_PREFIX "rccl_tuner_gfx950.csv", source);
+  void* context = nullptr;
+  ASSERT_EQ(ncclSuccess, csvTunerInit(&context, 0, 16, 2, nullptr, nullptr, nullptr));
+  ASSERT_NE(nullptr, context);
+
+  constexpr size_t gapBegin = size_t{24} << 20;
+  constexpr size_t gapEnd = size_t{32} << 20;
+  for (int pipeOps : {1, 4}) {
+    for (int regBuff : {0, 1, 2}) {
+      for (size_t bytes : {gapBegin, gapBegin + 1, size_t{28} << 20, gapEnd - 1}) {
+        ExpectTuning(context, ncclFuncAllReduce, bytes, pipeOps, regBuff, -1, -1, 0);
+      }
+      for (size_t bytes : {gapBegin - 1, gapEnd, gapEnd + 1}) {
+        ExpectTuning(context, ncclFuncAllReduce, bytes, pipeOps, regBuff,
+                     NCCL_ALGO_TREE, NCCL_PROTO_LL128, 64);
+      }
+      ExpectTuning(context, ncclFuncAllReduce, gapBegin - 1, pipeOps, regBuff, -1, -1, 0,
+                   NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+      ExpectTuning(context, ncclFuncAllReduce, gapEnd, pipeOps, regBuff,
+                   NCCL_ALGO_RING, NCCL_PROTO_LL128, 64, NCCL_ALGO_TREE, NCCL_PROTO_LL128);
+    }
+  }
+  EXPECT_EQ(ncclSuccess, csvTunerFinalize(context));
+}
+
 TEST_F(CsvTunerMicrotest, ResolvesArchSpecificEmbeddedConfig) {
   const std::string arch = FirstEmbeddedArch();
   if (arch.empty()) GTEST_SKIP() << "no arch-specific config embedded";
