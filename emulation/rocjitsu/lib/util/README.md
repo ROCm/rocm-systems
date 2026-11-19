@@ -47,6 +47,35 @@ INTERFACE library that contributes an include path and nothing to link.
 | `diagnostic.h` | Non-owning diagnostic sinks and stream-style error construction for result-returning APIs. |
 | `except.h` | Exception hierarchy: `Exception` (base), `InvalidInst`, `UnimplementedInst`, `ConfigError`. All derive from `std::exception`. |
 
+### Statistics
+
+`statistics.h` supplies owner-local accumulators in the standalone `stats`
+namespace. The namespace describes the package; its headers belong to the
+`util` target. The accumulators have no simulator, clock, or output
+dependencies. Callers must synchronize shared updates and snapshots.
+
+| Type | Description |
+|------|-------------|
+| `stats::Counter` | Monotonic `uint64_t` counter. Addition and merging saturate on overflow and retain an explicit overflow flag. |
+| `stats::Gauge` | Current `int64_t` value. An unset gauge is distinct from an observed zero. It has no implicit merge policy. |
+| `stats::Summary` | Mergeable count, sum, minimum, maximum, mean, and population variance. Nonfinite input and arithmetic overflow set an explicit invalid flag. |
+| `stats::Histogram` | Fixed, finite, strictly increasing upper bounds with inclusive endpoints and an unbounded final bucket. Each bucket accumulates samples in its own interval over the recorder's lifetime; merging requires identical bounds. |
+
+Construct histogram layouts with `stats::Histogram::create()` before recording.
+Updates and successful merges allocate no storage. Snapshot values own their
+data, including histogram bounds and counts, and can outlive the accumulator.
+An empty summary has count zero and placeholder numeric fields. An invalid
+summary retains a saturated count of finite samples, but its numeric aggregates
+must be treated as unavailable. Neither snapshots nor accumulator merges
+establish a concurrency barrier.
+
+For histogram bounds `{0, 4, 8}`, snapshot counts `{2, 2, 2, 1}` describe seven
+samples: two in each bounded interval and one above `8` in the unbounded bucket.
+The counts are not prefix sums across buckets. `HistogramSnapshot::overflowed`
+means at least one bucket counter exceeded `UINT64_MAX` and saturated; a sample
+in the unbounded bucket does not indicate overflow. The summary separately
+reports count overflow through `SummarySnapshot::count_overflowed`.
+
 ### Miscellaneous
 
 | File | Description |
