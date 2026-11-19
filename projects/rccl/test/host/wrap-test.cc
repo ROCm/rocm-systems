@@ -3774,9 +3774,7 @@ TEST(WrapMicrotest, CommSetP2pShiftSize_BelowLog2UsesExactValue) {
   DeleteCommWithArch(comm);
 }
 
-// A shift below log2 still has to leave p2pnChannels >> shift distinct channels
-// for the p2pnChannelsPerPeer parts of a peer: the device recovers the part from
-// the channel id alone (ncclP2pChannelToPart masks with (p2pnChannels >> shift) - 1).
+// Counts the distinct channels a peer's parts map to from base; each part needs its own.
 static size_t DistinctP2pChannels(const ncclComm* comm, int base) {
   std::set<int> channels;
   for (int part = 0; part < comm->p2pnChannelsPerPeer; part++) {
