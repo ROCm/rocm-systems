@@ -18,6 +18,7 @@ import jsonschema
 SCHEMA_PATH = Path(__file__).with_name("config.schema.json")
 BASELINE = "baseline"
 REFERENCE_WORKLOAD = "workload"
+CONFIG_FILE_KEY = "ROCPROFSYS_CONFIG_FILE"
 VERSION_TIMEOUT_S = 10.0
 
 
@@ -78,6 +79,19 @@ def env_of(entries: list[dict[str, str]]) -> dict[str, str]:
     return {e["key"]: e["value"] for e in entries}
 
 
+def resolve_config_files(env: dict[str, str], base_dir: str) -> dict[str, str]:
+    """Make the ':'-separated files of CONFIG_FILE_KEY relative to base_dir, not to the
+    directory bench is started from, so a scenario can name a shared config file."""
+    if CONFIG_FILE_KEY not in env:
+        return env
+    files = [
+        os.path.normpath(os.path.join(base_dir, f))
+        for f in env[CONFIG_FILE_KEY].split(":")
+        if f
+    ]
+    return {**env, CONFIG_FILE_KEY: ":".join(files)}
+
+
 def version_argv(tool: dict[str, Any], base_dir: str) -> list[str]:
     """Argv printing the tool's version: tool_version_cmd if given, else '<tool> --version'."""
     argv = (
@@ -134,7 +148,9 @@ def build_commands(
                     *workload,
                 ]
             ),
-            {**workload_env, **env_of(t.get("tool_env", []))},
+            resolve_config_files(
+                {**workload_env, **env_of(t.get("tool_env", []))}, base_dir
+            ),
         )
         for t in scenario["tools"]
     ]

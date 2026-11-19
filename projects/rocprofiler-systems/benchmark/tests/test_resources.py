@@ -46,6 +46,17 @@ def test_workload_points_into_build_dir(path):
     assert workload.parent == ROOT / "build", workload
 
 
+@pytest.mark.parametrize(
+    "path", SCENARIOS + EXAMPLES, ids=lambda p: str(p.relative_to(ROOT))
+)
+def test_config_files_exist(path):
+    doc = scenario.load(str(path))
+    for _name, _command, env in scenario.build_commands(doc, str(path.parent)):
+        for config in env.get(scenario.CONFIG_FILE_KEY, "").split(":"):
+            if config:
+                assert Path(config).is_file(), config
+
+
 @pytest.mark.parametrize("path", SUITES, ids=lambda p: p.name)
 def test_suite_lists_existing_scenarios(path):
     for entry in snapshot.load_suite(str(path)):

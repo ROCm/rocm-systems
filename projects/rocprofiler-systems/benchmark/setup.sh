@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="${ROOT}/.venv"
 BUILD="${ROOT}/build"
 MIN_PY="3.9"
-MIN_CMAKE="3.16"
+MIN_CMAKE="3.25"
 
 build_type="Release"
 gpu="ON"

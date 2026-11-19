@@ -106,6 +106,15 @@ def test_workload_reference_puts_baseline_first_with_workload_env_only():
     assert cmds[2][2] == {"W": "1", "SHARED": "w"}
 
 
+def test_config_file_env_is_resolved_against_scenario_dir():
+    doc = valid()
+    doc["tools"][0]["tool_env"] = [
+        {"key": "ROCPROFSYS_CONFIG_FILE", "value": "../cfg/a.cfg:b.cfg:/abs/c.cfg"}
+    ]
+    env = scenario.build_commands(doc, "/s/dir")[1][2]
+    assert env["ROCPROFSYS_CONFIG_FILE"] == "/s/cfg/a.cfg:/s/dir/b.cfg:/abs/c.cfg"
+
+
 def test_tool_reference_runs_reference_first_and_no_baseline():
     cmds = scenario.build_commands(valid(reference="v2"), "/s")
     assert [c[0] for c in cmds] == ["v2", "v1"]
