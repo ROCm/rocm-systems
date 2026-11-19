@@ -228,11 +228,16 @@ class TestMIGPUSpecs:
                 assert set(bandwidth) <= set(levels), (gpu_arch, gpu_model)
 
     def test_roofline_data_types_are_known(self):
-        """An unknown data type would be measured but silently left out of the plot."""
+        """An unknown data type would be measured but silently left out of the plot,
+        and a mixed-precision ceiling would never be used for a data type the arch
+        does not plot against a matrix ceiling."""
         for gpu_arch in MIGPUSpecs.get_roofline_archs():
             valu = MIGPUSpecs._roofline_list(gpu_arch, "valu")
             matrix = MIGPUSpecs._roofline_list(gpu_arch, "matrix")
             assert {*valu, *matrix} <= set(ROOFLINE_DATA_TYPES), gpu_arch
+            mixed = MIGPUSpecs._roofline_entry(gpu_arch, "mixed") or {}
+            for covered in mixed.values():
+                assert set(covered) <= set(matrix), gpu_arch
 
     # -- extract_gpu_info (gfx1250 partition defaults) -----------------------
 

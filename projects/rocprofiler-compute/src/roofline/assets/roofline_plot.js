@@ -326,7 +326,7 @@
       var source = computeTraces.find(function (trace) {
         return trace.traceIndex === overlay.sourceTraceIndex;
       });
-      if (isolating && refBw && source && state.precisions.has(source.dtype)) {
+      if (isolating && refBw && source && isShown(source)) {
         var left = overlay.peakPerf / refBw;
         xs.push([left, ROOF_EXTREME_MAX_AI]);
         ys.push([overlay.peakPerf, overlay.peakPerf]);
@@ -364,10 +364,17 @@
     updateCeilings();
   }
 
+  // A compute ceiling is shown when one of the datatypes it serves is selected.
+  function isShown(trace) {
+    return trace.dtypes.some(function (dtype) {
+      return state.precisions.has(dtype);
+    });
+  }
+
   function topVisibleComputePeak() {
     var max = 0;
     computeTraces.forEach(function (trace) {
-      if (state.precisions.has(trace.dtype) && trace.peakPerf > max) {
+      if (isShown(trace) && trace.peakPerf > max) {
         max = trace.peakPerf;
       }
     });
@@ -447,7 +454,7 @@
       gd,
       {
         visible: computeTraces.map(function (trace) {
-          return state.precisions.has(trace.dtype);
+          return isShown(trace);
         }),
       },
       computeCeilingIndices
