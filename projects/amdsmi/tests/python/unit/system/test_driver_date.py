@@ -8,6 +8,7 @@ import importlib
 import sys
 import types
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
 
@@ -43,7 +44,9 @@ class TestDriverDate(unittest.TestCase):
             return amdsmi.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS
 
         with mock.patch.object(amdsmi.amdsmi_wrapper, "amdsmi_get_gpu_driver_info", _stub):
-            info = amdsmi.amdsmi_interface.amdsmi_get_gpu_driver_info(handle)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", DeprecationWarning)
+                info = amdsmi.amdsmi_interface.amdsmi_get_gpu_driver_info(handle)
 
         self.assertEqual(info["driver_date"], "N/A")
         self.assertEqual(info["driver_version"], "6.8.0")

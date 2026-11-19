@@ -7,18 +7,25 @@
 #include <fcntl.h>
 #include <libdrm/amdgpu.h>
 #include <libdrm/drm.h>
+#include <poll.h>
+#include <spawn.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <cerrno>
+#include <chrono>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -29,6 +36,10 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #include "amd_smi/impl/amd_smi_clk_testing.h"
 #include "amd_smi/impl/amd_smi_common.h"
@@ -1474,4 +1485,505 @@ auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
            std::string{drm_date.substr(6, 2)} + " 00:00";
   }
   return std::string{drm_date};
+}
+
+namespace {
+
+namespace fs = std::filesystem;
+
+// DKMS registers amdgpu under /var/lib/dkms/amdgpu/<version>/; package
+// metadata lives in source/dkms.conf behind the source symlink
+constexpr std::string_view kAmdgpuDkmsPackageName = "amdgpu";
+constexpr std::string_view kDkmsSourceSymlinkName = "source";
+constexpr std::string_view kDkmsKernelPrefix = "kernel-";
+constexpr std::string_view kDkmsConfName = "dkms.conf";
+constexpr std::string_view kDkmsConfPackageName = "PACKAGE_NAME";
+constexpr std::string_view kDkmsConfPackageVersion = "PACKAGE_VERSION";
+constexpr std::string_view kAmdgpuKmodPackagePrefix = "amdgpu-kmod-";
+// The file an rpm database keeps its packages in: Berkeley DB, ndb, sqlite.
+constexpr std::array<std::string_view, 3> kRpmDatabaseFiles = {"Packages", "Packages.db",
+                                                               "rpmdb.sqlite"};
+constexpr size_t kRpmQueryMaxOutput = 4096;
+// Pause between checks for rpm's exit. It starts short: rpm exits right after its output ends.
+constexpr auto kRpmExitPollFirst = std::chrono::microseconds{100};
+constexpr auto kRpmExitPollMax = std::chrono::microseconds{10000};
+
+struct AmdgpuPackageVersion {
+  std::string kernel_version;  // A.B.C
+  std::string version;         // A.B.C[.D]-<build>
+  std::string build;
+};
+
+struct AmdgpuModuleVersion {
+  std::string kernel_version;  // A.B.C
+  std::string amdgpu_version;  // D, empty for A.B.C
+};
+
+using DkmsConf = std::pair<std::string, std::string>;
+
+auto log_driver_package_debug(std::string_view caller, std::string_view message) -> void {
+  auto outstream = std::ostringstream{};
+  outstream << caller << " | " << message;
+  LOG_DEBUG(outstream);
+}
+
+// A DKMS PACKAGE_VERSION such as 6.19.14-2370381.24.04 (Ubuntu appends the OS release, other
+// distros may stop at the build), or an rpm VERSION-RELEASE such as 6.16.13.000000-2412345.el9.
+auto parse_package_version(std::string_view package_version)
+    -> std::optional<AmdgpuPackageVersion> {
+  static const auto regex = std::regex{R"(^(\d+\.\d+\.\d+)((?:\.\d+)*)-(\d+)(?:\..*)?$)"};
+
+  // Longer text cannot be a version, and std::regex recurses once per character.
+  if (package_version.size() >= AMDSMI_MAX_STRING_LENGTH) {
+    return std::nullopt;
+  }
+  const auto text = std::string{package_version};
+  auto match = std::smatch{};
+  if (!std::regex_match(text, match, regex)) {
+    return std::nullopt;
+  }
+  return AmdgpuPackageVersion{
+      match[1].str(), match[1].str() + match[2].str() + "-" + match[3].str(), match[3].str()};
+}
+
+// amdgpu-kmod modules report A.B.C; DKMS modules report A.B.C.D.
+auto parse_module_version(std::string_view module_version) -> std::optional<AmdgpuModuleVersion> {
+  static const auto regex = std::regex{R"(^(\d+\.\d+\.\d+)(?:\.(\d+))?$)"};
+
+  if (module_version.size() >= AMDSMI_MAX_STRING_LENGTH) {
+    return std::nullopt;
+  }
+  const auto text = std::string{module_version};
+  auto match = std::smatch{};
+  if (!std::regex_match(text, match, regex)) {
+    return std::nullopt;
+  }
+  return AmdgpuModuleVersion{match[1].str(), match[2].str()};
+}
+
+// A package is taken for the loaded module's when both have the same kernel version. Nothing
+// checks that the module was installed from it.
+auto package_matches_module(const std::optional<AmdgpuPackageVersion>& package,
+                            const std::optional<AmdgpuModuleVersion>& module) -> bool {
+  return package.has_value() && module.has_value() &&
+         (package->kernel_version == module->kernel_version);
+}
+
+// The one version in `versions` that has the kernel version of `module`. Empty when there is
+// none, and when there are several: which of them is loaded is then not known.
+auto only_version_of_module(const std::vector<std::string>& versions,
+                            const std::optional<AmdgpuModuleVersion>& module) -> std::string {
+  auto found = std::string{};
+  for (const auto& version : versions) {
+    if ((!package_matches_module(parse_package_version(version), module)) || (version == found)) {
+      continue;
+    }
+    if (!found.empty()) {
+      return {};
+    }
+    found = version;
+  }
+  return found;
+}
+
+auto try_parse_dkms_conf_assignment(std::string_view line, std::string_view key)
+    -> std::optional<std::string_view> {
+  const auto trimmed_line = trim(line);
+  if ((trimmed_line.size() <= (key.size() + 1)) ||
+      (trimmed_line.compare(0, key.size(), key) != 0)) {
+    return std::nullopt;
+  }
+
+  if (trimmed_line[key.size()] != '=') {
+    return std::nullopt;
+  }
+
+  const auto value_part = trim(trimmed_line.substr((key.size() + 1)));
+  if ((value_part.size() < 2) || (value_part.front() != '"') || (value_part.back() != '"')) {
+    return std::nullopt;
+  }
+
+  return value_part.substr(1, (value_part.size() - 2));
+}
+
+auto read_dkms_conf(std::string_view caller, const fs::path& conf_path) -> std::optional<DkmsConf> {
+  auto instream = std::ifstream{conf_path};
+  if (!instream.is_open()) {
+    log_driver_package_debug(caller, "Cannot open " + conf_path.string());
+    return std::nullopt;
+  }
+
+  auto package_name = std::string{};
+  auto package_version = std::string{};
+  auto line_str = std::string{};
+  while (std::getline(instream, line_str)) {
+    if ((!line_str.empty()) && (line_str.back() == '\r')) {
+      line_str.pop_back();
+    }
+
+    if (const auto parsed_name = try_parse_dkms_conf_assignment(line_str, kDkmsConfPackageName)) {
+      package_name = std::string{*parsed_name};
+    } else if (const auto parsed_version =
+                   try_parse_dkms_conf_assignment(line_str, kDkmsConfPackageVersion)) {
+      package_version = std::string{*parsed_version};
+    }
+  }
+
+  if ((package_name.empty()) || (package_version.empty())) {
+    log_driver_package_debug(caller,
+                             conf_path.string() + " has no PACKAGE_NAME or PACKAGE_VERSION");
+    return std::nullopt;
+  }
+  return std::make_pair(package_name, package_version);
+}
+
+auto package_version_from_kernel_symlink(std::string_view caller, const fs::path& dkms_root,
+                                         const fs::path& kernel_link)
+    -> std::optional<std::string> {
+  auto err_code = std::error_code{};
+  const auto target = fs::read_symlink(kernel_link, err_code);
+  if ((err_code) || (target.empty())) {
+    log_driver_package_debug(caller, "No kernel symlink at: " + kernel_link.string());
+    return std::nullopt;
+  }
+
+  // DKMS writes <version>/<release>/<machine>, relative to the root.
+  const auto relative = target.is_relative() ? target : fs::relative(target, dkms_root, err_code);
+  if ((err_code) || (relative.empty())) {
+    log_driver_package_debug(caller, "Cannot resolve kernel symlink at: " + kernel_link.string());
+    return std::nullopt;
+  }
+
+  // Also rejects a target outside the DKMS root, whose first component is "..".
+  auto version = relative.begin()->string();
+  if (!parse_package_version(version).has_value()) {
+    log_driver_package_debug(caller, "Kernel symlink at: " + kernel_link.string() +
+                                         " does not name a package version: " + target.string());
+    return std::nullopt;
+  }
+  return version;
+}
+
+auto is_valid_dkms_package(std::string_view caller, const fs::path& version_dir,
+                           std::string_view dir_name) -> bool {
+  // DKMS source_tree is configurable, so follow the source symlink instead of assuming /usr/src.
+  const auto dkms_conf_path = (version_dir / kDkmsSourceSymlinkName / kDkmsConfName);
+  const auto package_info = read_dkms_conf(caller, dkms_conf_path);
+  if (!package_info.has_value()) {
+    return false;
+  }
+
+  const auto& [package_name, package_version] = *package_info;
+  if ((package_name != kAmdgpuDkmsPackageName) || (package_version != dir_name)) {
+    log_driver_package_debug(caller, dkms_conf_path.string() + " is for " + package_name + " " +
+                                         package_version + "; expected " +
+                                         std::string{kAmdgpuDkmsPackageName} + " " +
+                                         std::string{dir_name});
+    return false;
+  }
+  return true;
+}
+
+// Waits for rpm to exit, but not past `until`. Returns what waitpid() said last: the pid once
+// rpm was reaped, 0 when it was still running, -1 when there was nothing to reap, as for a
+// caller that ignores SIGCHLD.
+auto wait_for_rpm(pid_t pid, std::chrono::steady_clock::time_point until, int* status) -> pid_t {
+  auto pause = kRpmExitPollFirst;
+  for (;;) {
+    const auto waited = waitpid(pid, status, WNOHANG);
+    if ((waited != 0) || (std::chrono::steady_clock::now() >= until)) {
+      return waited;
+    }
+    std::this_thread::sleep_for(pause);
+    pause = std::min(pause * 2, kRpmExitPollMax);
+  }
+}
+
+// Keeps the caller's open descriptors out of rpm, which can outlive the call. They are listed
+// here because glibc older than 2.34 cannot close them in the child; one that another thread
+// opens after the listing is still inherited. Returns 0 or an errno value.
+auto add_close_of_open_descriptors(posix_spawn_file_actions_t* actions) -> int {
+  auto err_code = std::error_code{};
+  auto entry = fs::directory_iterator{"/proc/self/fd", err_code};
+  for (; (!err_code) && (entry != fs::directory_iterator{}); entry.increment(err_code)) {
+    const auto name = entry->path().filename().string();
+    auto fd = 0;
+    const auto parsed = std::from_chars(name.data(), name.data() + name.size(), fd);
+    if ((parsed.ec != std::errc{}) || (fd <= STDERR_FILENO)) {
+      continue;
+    }
+    if (const auto add_err = posix_spawn_file_actions_addclose(actions, fd); add_err != 0) {
+      return add_err;
+    }
+  }
+  return err_code.value();
+}
+
+// Runs `<rpm_path> <args>` and returns what it printed, or nothing when rpm failed, printed more
+// than is kept, or had not finished by the deadline.
+auto run_rpm(std::string_view caller, const std::string& rpm_path, std::vector<std::string> args,
+             std::chrono::steady_clock::time_point deadline) -> std::optional<std::string> {
+  int pipe_fds[2] = {-1, -1};
+  if (pipe2(pipe_fds, O_CLOEXEC) != 0) {
+    log_driver_package_debug(caller, std::string{"pipe2 failed: "} + std::strerror(errno));
+    return std::nullopt;
+  }
+
+  auto arg0 = rpm_path;
+  auto argv = std::vector<char*>{arg0.data()};
+  for (auto& arg : args) {
+    argv.push_back(arg.data());
+  }
+  argv.push_back(nullptr);
+  // rpm gets none of the caller's environment, which can redirect its macros and database. HOME
+  // is set because without it rpm reads ~/.rpmmacros relative to the caller's directory.
+  auto env0 = std::string{"LC_ALL=C"};
+  auto env1 = std::string{"HOME=/"};
+  char* const envp[] = {env0.data(), env1.data(), nullptr};
+
+  auto pid = pid_t{-1};
+  auto actions = posix_spawn_file_actions_t{};
+  auto spawn_err = posix_spawn_file_actions_init(&actions);
+  if (spawn_err == 0) {
+    spawn_err = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
+    if (spawn_err == 0) {
+      spawn_err = posix_spawn_file_actions_adddup2(&actions, pipe_fds[1], STDOUT_FILENO);
+    }
+    if (spawn_err == 0) {
+      spawn_err =
+          posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+    }
+    // After the three above: the pipe is among the descriptors it closes.
+    if (spawn_err == 0) {
+      spawn_err = add_close_of_open_descriptors(&actions);
+    }
+    if (spawn_err == 0) {
+      spawn_err = posix_spawn(&pid, rpm_path.c_str(), &actions, nullptr, argv.data(), envp);
+    }
+    posix_spawn_file_actions_destroy(&actions);
+  }
+  close(pipe_fds[1]);
+  if (spawn_err != 0) {
+    close(pipe_fds[0]);
+    log_driver_package_debug(caller, "Cannot run " + rpm_path + ": " + std::strerror(spawn_err));
+    return std::nullopt;
+  }
+
+  // Read to the end of the output so rpm never blocks on a full pipe, but keep only the start.
+  auto output = std::string{};
+  auto truncated = false;
+  auto finished = false;
+  while (!finished) {
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+        deadline - std::chrono::steady_clock::now());
+    if (remaining.count() <= 0) {
+      break;
+    }
+    auto poll_fd = pollfd{pipe_fds[0], POLLIN, 0};
+    const auto wait_ms = std::min<std::chrono::milliseconds::rep>(remaining.count(), INT_MAX);
+    const auto ready = poll(&poll_fd, 1, static_cast<int>(wait_ms));
+    if ((ready < 0) && (errno == EINTR)) {
+      continue;
+    }
+    if (ready <= 0) {
+      break;
+    }
+    char buffer[512];
+    const auto bytes = read(pipe_fds[0], buffer, sizeof(buffer));
+    if ((bytes < 0) && (errno == EINTR)) {
+      continue;
+    }
+    if (bytes <= 0) {
+      finished = (bytes == 0);
+      break;
+    }
+    const auto kept = std::min(static_cast<size_t>(bytes), kRpmQueryMaxOutput - output.size());
+    output.append(buffer, kept);
+    truncated = truncated || (kept < static_cast<size_t>(bytes));
+  }
+  close(pipe_fds[0]);
+  // The deadline also covers an rpm whose output ended but that does not exit. A late rpm is left
+  // to end by itself. It is not killed, which can leave a Berkeley DB rpm database unusable, and
+  // not signalled or waited for later, when its process id can belong to another process.
+  auto wait_status = 0;
+  const auto waited = wait_for_rpm(pid, deadline, &wait_status);
+  if ((!finished) || (waited == 0)) {
+    log_driver_package_debug(caller, "rpm did not answer in time for: " + args.back());
+    return std::nullopt;
+  }
+
+  // A caller that ignores SIGCHLD reaps rpm itself; the output is still checked by its format.
+  if ((waited == pid) && ((!WIFEXITED(wait_status)) || (WEXITSTATUS(wait_status) != 0))) {
+    log_driver_package_debug(caller, "rpm failed for: " + args.back());
+    return std::nullopt;
+  }
+  if (truncated) {
+    log_driver_package_debug(caller, "rpm printed more than is kept for: " + args.back());
+    return std::nullopt;
+  }
+  return output;
+}
+
+// A query makes rpm create a database where it finds none, so rpm is first asked where its
+// database is, and the package is asked for only where that directory holds the packages file.
+auto rpm_has_database(std::string_view caller, const std::string& rpm_path,
+                      std::chrono::steady_clock::time_point deadline) -> bool {
+  const auto output = run_rpm(caller, rpm_path, {"--eval", "%{_dbpath}"}, deadline);
+  if (!output.has_value()) {
+    return false;
+  }
+
+  const auto dbpath = fs::path{trim(*output)};
+  const auto has_database =
+      dbpath.is_absolute() &&
+      std::any_of(kRpmDatabaseFiles.begin(), kRpmDatabaseFiles.end(), [&dbpath](auto file) {
+        auto err_code = std::error_code{};
+        return fs::is_regular_file(dbpath / file, err_code);
+      });
+  if (!has_database) {
+    log_driver_package_debug(caller, "No rpm database at: " + dbpath.string());
+  }
+  return has_database;
+}
+
+}  // namespace
+
+auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
+                                        std::string_view machine, std::string* active_version)
+    -> amdsmi_status_t {
+  if (active_version == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  active_version->clear();
+
+  if ((release.empty()) || (machine.empty())) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  const auto root = fs::path{std::string{dkms_root}};
+  auto link_name = std::string{kDkmsKernelPrefix};
+  link_name.append(release).append("-").append(machine);
+  const auto selected = package_version_from_kernel_symlink(__func__, root, root / link_name);
+  if ((!selected.has_value()) || (!is_valid_dkms_package(__func__, root / *selected, *selected))) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  *active_version = *selected;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+auto smi_amdgpu_get_kmod_versions(std::string_view rpm_path, std::string_view release,
+                                  std::vector<std::string>* kmod_versions,
+                                  std::chrono::milliseconds timeout) -> amdsmi_status_t {
+  if (kmod_versions == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  kmod_versions->clear();
+
+  if (release.empty()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  auto package = std::string{kAmdgpuKmodPackagePrefix};
+  package.append(release);
+  const auto rpm = std::string{rpm_path};
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  if (!rpm_has_database(__func__, rpm, deadline)) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  const auto output =
+      run_rpm(__func__, rpm, {"-q", "--qf", "%{VERSION}-%{RELEASE}\\n", package}, deadline);
+  if (!output.has_value()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  // rpm prints one line for each installed version. One that is not understood could be the
+  // package of the loaded module, so then none is reported.
+  auto versions = std::vector<std::string>{};
+  auto lines = std::istringstream{*output};
+  for (auto line = std::string{}; std::getline(lines, line);) {
+    const auto parsed = parse_package_version(line);
+    if (!parsed.has_value()) {
+      log_driver_package_debug(__func__, package + " has an unexpected version");
+      return AMDSMI_STATUS_NOT_SUPPORTED;
+    }
+    versions.push_back(parsed->version);
+  }
+
+  *kmod_versions = std::move(versions);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
+                                      std::string_view dkms_version, std::string_view kmod_version,
+                                      amdsmi_driver_info_v2_t* info) -> amdsmi_status_t {
+  if (info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  const auto module = parse_module_version(module_version);
+  const auto dkms = parse_package_version(dkms_version);
+  const auto kmod = parse_package_version(kmod_version);
+
+  // DKMS before kmod. A package built from another kernel version is not the loaded module's,
+  // so neither it nor its build is reported.
+  const AmdgpuPackageVersion* package = nullptr;
+  auto package_type = AMDSMI_DRIVER_PACKAGE_NONE;
+  if (package_matches_module(dkms, module)) {
+    package = &*dkms;
+    package_type = AMDSMI_DRIVER_PACKAGE_DKMS;
+  } else if (package_matches_module(kmod, module)) {
+    package = &*kmod;
+    package_type = AMDSMI_DRIVER_PACKAGE_KMOD;
+  } else if (dkms.has_value() || kmod.has_value()) {
+    log_driver_package_debug(__func__, "No installed package has the kernel version of module " +
+                                           std::string{module_version});
+  }
+
+  // A build that does not fit behind the module version in its field is not reported at all.
+  if ((package != nullptr) &&
+      ((module_version.size() + 1 + package->build.size()) >= AMDSMI_MAX_STRING_LENGTH)) {
+    package = nullptr;
+    package_type = AMDSMI_DRIVER_PACKAGE_NONE;
+  }
+
+  auto full_version = std::string{};
+  if ((!module_version.empty()) && (module_version != "N/A")) {
+    full_version = module_version;
+  }
+  if (package != nullptr) {
+    full_version.append("-").append(package->build);
+  }
+
+  smi_clear_char_and_reinitialize(info->driver_kernel_version, AMDSMI_MAX_STRING_LENGTH,
+                                  module.has_value() ? module->kernel_version : std::string{});
+  smi_clear_char_and_reinitialize(info->amdgpu_driver_version, AMDSMI_MAX_STRING_LENGTH,
+                                  module.has_value() ? module->amdgpu_version : std::string{});
+  smi_clear_char_and_reinitialize(info->driver_build_version, AMDSMI_MAX_STRING_LENGTH,
+                                  (package != nullptr) ? package->build : std::string{});
+  smi_clear_char_and_reinitialize(info->driver_full_version, AMDSMI_MAX_STRING_LENGTH,
+                                  full_version);
+  smi_clear_char_and_reinitialize(info->driver_package_version, AMDSMI_MAX_STRING_LENGTH,
+                                  (package != nullptr) ? package->version : std::string{});
+  info->driver_package = package_type;
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+auto smi_amdgpu_get_driver_versions(
+    std::string_view module_version, std::string_view dkms_root, const utsname& uts,
+    const std::function<std::vector<std::string>(std::string_view)>& kmod_lookup,
+    amdsmi_driver_info_v2_t* info) -> amdsmi_status_t {
+  auto dkms_version = std::string{};
+  auto kmod_version = std::string{};
+  // A module without an amdgpu package version cannot match a package. rpm is slow to start, so
+  // kmod is looked up only when DKMS is not the module's package.
+  const auto module = parse_module_version(module_version);
+  if (module.has_value()) {
+    smi_amdgpu_get_active_dkms_version(dkms_root, uts.release, uts.machine, &dkms_version);
+    if (!package_matches_module(parse_package_version(dkms_version), module)) {
+      kmod_version = only_version_of_module(kmod_lookup(uts.release), module);
+    }
+  }
+  return smi_amdgpu_parse_driver_versions(module_version, dkms_version, kmod_version, info);
 }
