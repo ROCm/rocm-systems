@@ -10,7 +10,7 @@ use crate::image::{
     IMAGE_LAYOUT_LINEAR, IMAGE_LAYOUT_OPAQUE, ImageRequest, create_image, create_imported_image,
     create_native_mip_image, destroy_image, image_mipmap_array_get_level,
 };
-use crate::runtime::boundary;
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),

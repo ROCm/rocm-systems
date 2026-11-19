@@ -7,7 +7,7 @@ use std::ffi::c_void;
 
 use crate::ffi::*;
 use crate::image::{clear_image, copy_images, transfer_image};
-use crate::runtime::boundary;
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),

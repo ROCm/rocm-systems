@@ -54,19 +54,19 @@ mod tests {
 
     #[test]
     fn internal_stores_inherit_admission_but_cannot_start_after_shutdown_closes_it() {
-        let gate = Arc::new(crate::runtime::InFlightTracker::new_process());
+        let gate = Arc::new(crate::admission::InFlightTracker::new_process());
         gate.open(73);
-        let _test_gate = crate::runtime::install_test_public_raw_gate(gate.clone());
+        let _test_gate = crate::admission::install_test_public_raw_gate(gate.clone());
         let slot = AmdSignal::user(7);
         let handle = HsaSignal {
             handle: std::ptr::from_ref(&slot) as u64,
         };
-        let admitted = crate::runtime::ApiLeaseScope::enter(gate.enter().unwrap());
-        gate.close();
-        // SAFETY: The stack slot remains live for both stores. The inherited
-        // generation lease permits descendants to finish after final closure.
-        assert_eq!(unsafe { store(handle, 9, Ordering::Release) }, Some(()));
-        drop(admitted);
+        crate::admission::ApiLeaseScope::run(gate.enter().unwrap(), || {
+            gate.close();
+            // SAFETY: The stack slot remains live for both stores. The inherited
+            // generation lease permits descendants to finish after final closure.
+            assert_eq!(unsafe { store(handle, 9, Ordering::Release) }, Some(()));
+        });
         assert_eq!(unsafe { store(handle, 11, Ordering::Relaxed) }, None);
         assert_eq!(slot.value.load(Ordering::Acquire), 9);
         assert!(gate.wait_idle_for(Duration::from_secs(1)));

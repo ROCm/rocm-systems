@@ -109,9 +109,12 @@ log "Running amdisa generator"
 "$python" -m amdisa \
   "${isa_entries[@]}" \
   --isa-additions "cdna1:$isa_xml/amdgpu_isa_cdna1_legacy_math.xml" \
+  --isa-additions "cdna1:$isa_xml/amdgpu_isa_cdna1_ds_src2.xml" \
   --isa-additions "cdna2:$isa_xml/amdgpu_isa_cdna2_legacy_math.xml" \
   --isa-additions "cdna3:$isa_xml/amdgpu_isa_cdna3_legacy_math.xml" \
   --isa-additions "cdna4:$isa_xml/amdgpu_isa_cdna4_legacy_math.xml" \
+  --isa-additions "rdna2:$isa_xml/amdgpu_isa_rdna2_atc_probe.xml" \
+  --isa-additions "rdna4:$isa_xml/amdgpu_isa_rdna4_barrier_state.xml" \
   --isa-additions "cdna5:$cdna5_delta" \
   --isa-variants "cdna5:$cdna5_variants" \
   --isa-output "$isa_out" \

@@ -92,10 +92,6 @@ def generate_signal_api():
 def fetch_api_dec(suffix):
     return f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}(const uint64_t *sig_addr);\n"
 
-def generate_fetch_api():
-    suffixes = ["", "_wg", "_wave"]
-    return "".join([fetch_api_dec(suffix) for suffix in suffixes])
-
 def signal_op_dec(operation):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_{operation}(\n"

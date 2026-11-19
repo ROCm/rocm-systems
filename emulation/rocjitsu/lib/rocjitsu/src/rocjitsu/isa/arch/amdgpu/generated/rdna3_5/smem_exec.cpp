@@ -219,9 +219,31 @@ void SGl1InvSmem::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_s_gl1_in
 
 void SDcacheInvSmem::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  set_data(std::move(d));
+}
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
+  set_data(std::move(d));
+}
 
 } // namespace rdna3_5
 } // namespace rocjitsu

@@ -10,12 +10,16 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocloader::{LoadedImage, Symbol, SymbolKind};
 
+use crate::admission::InFlightToken;
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
+use crate::lifecycle::lock;
 use crate::queue::index::{QueueIndex, with_queue_index};
 use crate::queue::{AqlQueueKind, AqlQueueRequest};
-use crate::runtime::{GenerationHealth, InFlightToken, RetainOnDrop, lock, map_error};
+use crate::session::SessionHealth;
 use crate::signal;
+use crate::status::map_error;
+use rocddi::memory::storage::RetainOnDrop;
 
 /// Result after the private queue has attempted explicit retirement.
 pub(crate) struct DispatchResult {
@@ -50,7 +54,7 @@ pub(crate) struct Dispatch<D> {
     /// Cancellation requested by runtime shutdown.
     stop: Arc<AtomicBool>,
     /// Prevents generation teardown after uncertain cleanup.
-    health: Arc<GenerationHealth>,
+    health: Arc<SessionHealth>,
     /// Always released, even if assets are retained, so shutdown can progress.
     _inflight: InFlightToken,
     /// Explicit cleanup has run and must not be retried.
@@ -62,7 +66,7 @@ struct PendingCode {
     /// The image is transferred only after complete publication.
     image: Option<LoadedImage>,
     /// Uncertain code publication blocks this HSA generation's teardown.
-    health: Arc<GenerationHealth>,
+    health: Arc<SessionHealth>,
 }
 
 impl PendingCode {
@@ -89,12 +93,12 @@ impl Drop for PendingCode {
 
 /// Applies the publication owner's release proof to its retained backing.
 /// Keeping this disposition explicit also covers unwinding during publication.
-fn release_after_publication<T>(owner: T, can_release: bool, health: &GenerationHealth) {
+fn release_after_publication<T>(owner: T, can_release: bool, health: &SessionHealth) {
+    let owner = RetainOnDrop::new(owner);
     if can_release {
-        drop(owner);
+        drop(owner.into_inner());
     } else {
         health.quarantine();
-        std::mem::forget(owner);
     }
 }
 
@@ -112,16 +116,16 @@ impl<D> Dispatch<D> {
         let (device, page, stop, health, inflight) = {
             let guard = lock()?;
             let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-            let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-            if runtime.operation_stop().load(Ordering::Acquire) {
+            let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
+            if runtime.control.operation_stop().load(Ordering::Acquire) {
                 return Err(INVALID_RUNTIME_STATE);
             }
             (
-                runtime.gpus[index].device.clone(),
-                runtime.host_page_size as u64,
-                runtime.operation_stop(),
-                runtime.health.clone(),
-                runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?,
+                runtime.agents.gpus[index].device.clone(),
+                runtime.agents.host_page_size as u64,
+                runtime.control.operation_stop(),
+                runtime.control.health.clone(),
+                runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?,
             )
         };
         let (image, mut symbols) =
@@ -178,7 +182,7 @@ impl<D> Dispatch<D> {
         // the generation alive while its signal and queue owners are published.
         dispatch.completion = {
             let mut guard = lock()?;
-            let runtime = crate::runtime::initialized_mut(&mut guard)?;
+            let runtime = crate::lifecycle::initialized_mut(&mut guard)?;
             runtime.create_signal(1, true)?
         };
         let Some(assets) = dispatch.assets.as_ref() else {
@@ -392,7 +396,7 @@ mod tests {
     fn failed_publication_retains_backing_until_native_retirement_is_proved() {
         for can_release in [false, true] {
             let released = Arc::new(AtomicBool::new(false));
-            let health = GenerationHealth::new();
+            let health = SessionHealth::new();
             release_after_publication(Backing(released.clone()), can_release, &health);
             assert_eq!(released.load(Ordering::Acquire), can_release);
             assert_eq!(health.is_quarantined(), !can_release);

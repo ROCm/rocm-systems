@@ -51,93 +51,94 @@ pub(crate) unsafe fn signal_wait(
     // Keep the generation alive for the complete wait. The blocking path
     // observes stop_workers and releases its retained slot before this drops.
     // Publish the lease so nested slot reads still enter after final closure.
-    let Some(call) = crate::runtime::enter_public_raw_handle() else {
+    let Some(call) = crate::admission::enter_public_raw_handle() else {
         return 0;
     };
-    let _lease_scope = crate::runtime::ApiLeaseScope::enter(call);
-    #[cfg(test)]
-    AFTER_WAIT_ADMISSION.with(|slot| {
-        let hook = slot.borrow_mut().take();
-        if let Some((entered, release)) = hook {
-            let _ = entered.send(());
-            let _ = release.recv();
-        }
-    });
-    let (generation, observed) = {
-        let handles = WAIT_SIGNAL_HANDLES
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let Some(&generation) = handles.get(&(signal.handle as usize)) else {
-            drop(handles);
-            // Unit tests exercise raw signal entry points with stack-owned
-            // slots and no published runtime generation.
-            #[cfg(test)]
-            if lock().is_ok_and(|guard| guard.as_ref().is_none()) {
-                return unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }
-                    .unwrap_or(0);
+    crate::admission::ApiLeaseScope::run(call, || {
+        #[cfg(test)]
+        AFTER_WAIT_ADMISSION.with(|slot| {
+            let hook = slot.borrow_mut().take();
+            if let Some((entered, release)) = hook {
+                let _ = entered.send(());
+                let _ = release.recv();
             }
-            return 0;
+        });
+        let (generation, observed) = {
+            let handles = WAIT_SIGNAL_HANDLES
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let Some(&generation) = handles.get(&(signal.handle as usize)) else {
+                drop(handles);
+                // Unit tests exercise raw signal entry points with stack-owned
+                // slots and no published runtime generation.
+                #[cfg(test)]
+                if lock().is_ok_and(|guard| guard.as_ref().is_none()) {
+                    return unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }
+                        .unwrap_or(0);
+                }
+                return 0;
+            };
+            // SAFETY: The registry read lock excludes destruction and storage
+            // release through the entire atomic load. The raw gate excludes
+            // generation teardown while the slot is read.
+            (
+                generation,
+                unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }.unwrap_or(0),
+            )
         };
-        // SAFETY: The registry read lock excludes destruction and storage
-        // release through the entire atomic load. The raw gate excludes
-        // generation teardown while the slot is read.
-        (
-            generation,
-            unsafe { with_public_signal(signal, |slot| slot.value.load(order)) }.unwrap_or(0),
+        if condition_met(condition, observed, compare_value) {
+            return observed;
+        }
+        if timeout_hint == 0 {
+            return observed;
+        }
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(_) => return observed,
+        };
+        let Some(runtime) = guard.as_mut() else {
+            return observed;
+        };
+        if !runtime.signal_state.owns_signal(signal) {
+            return observed;
+        }
+        // A destroyed slab slot may already have been recycled at the same raw
+        // address. Do not turn this wait into one for the new signal lifetime.
+        if WAIT_SIGNAL_HANDLES
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&(signal.handle as usize))
+            .copied()
+            != Some(generation)
+        {
+            return observed;
+        }
+        // SAFETY: The runtime lock now prevents destruction until the per-slot
+        // reference and in-flight token have been acquired for the blocking path.
+        let Some(registration) = (unsafe { prepare_multi_wait(runtime, &[signal]) }) else {
+            return observed;
+        };
+        drop(guard);
+        let Some(entry) = registration.entries.first() else {
+            return observed;
+        };
+        let Some(pointer) = entry.signal else {
+            return observed;
+        };
+        // SAFETY: The registration retains this slot through signal_wait_open.
+        signal_wait_open(
+            unsafe { pointer.as_ref() },
+            entry.retired.as_deref(),
+            &registration.stop,
+            SignalWaitConfig {
+                condition,
+                compare_value,
+                timeout_hint,
+                wait_state_hint,
+                order,
+            },
         )
-    };
-    if condition_met(condition, observed, compare_value) {
-        return observed;
-    }
-    if timeout_hint == 0 {
-        return observed;
-    }
-    let mut guard = match lock() {
-        Ok(guard) => guard,
-        Err(_) => return observed,
-    };
-    let Some(runtime) = guard.as_mut() else {
-        return observed;
-    };
-    if !runtime.signal_state.owns_signal(signal) {
-        return observed;
-    }
-    // A destroyed slab slot may already have been recycled at the same raw
-    // address. Do not turn this wait into one for the new signal lifetime.
-    if WAIT_SIGNAL_HANDLES
-        .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .get(&(signal.handle as usize))
-        .copied()
-        != Some(generation)
-    {
-        return observed;
-    }
-    // SAFETY: The runtime lock now prevents destruction until the per-slot
-    // reference and in-flight token have been acquired for the blocking path.
-    let Some(registration) = (unsafe { prepare_multi_wait(runtime, &[signal]) }) else {
-        return observed;
-    };
-    drop(guard);
-    let Some(entry) = registration.entries.first() else {
-        return observed;
-    };
-    let Some(pointer) = entry.signal else {
-        return observed;
-    };
-    // SAFETY: The registration retains this slot through signal_wait_open.
-    signal_wait_open(
-        unsafe { pointer.as_ref() },
-        entry.retired.as_deref(),
-        &registration.stop,
-        SignalWaitConfig {
-            condition,
-            compare_value,
-            timeout_hint,
-            wait_state_hint,
-            order,
-        },
-    )
+    })
 }
 
 /// Inputs that stay fixed while one signal wait polls a retained slot.
@@ -264,7 +265,7 @@ impl WaitInputs {
     ///
     /// # Safety
     /// The caller holds the process HSA registry lock until preparation returns.
-    pub(crate) unsafe fn prepare(self, runtime: &mut HsaState) -> Option<PreparedWait> {
+    pub(crate) unsafe fn prepare(self, runtime: &mut HsaSession) -> Option<PreparedWait> {
         if self.signals.len() != self.conditions.len() || self.signals.len() != self.values.len() {
             return None;
         }
@@ -402,7 +403,7 @@ impl Drop for WaitRegistration {
 }
 
 /// Releases the retained wait entries reference.
-fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
+fn release_wait_entries(runtime: &mut HsaSession, entries: &mut [WaitEntry]) {
     for entry in entries {
         if entry.retained {
             entry.signal = None;
@@ -417,10 +418,10 @@ fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
 /// The caller must hold the runtime registry lock until every accepted signal
 /// is retained, and must keep the returned registration alive through the wait.
 pub(crate) unsafe fn prepare_multi_wait(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     handles: &[HsaSignal],
 ) -> Option<WaitRegistration> {
-    let token = runtime.inflight.enter()?;
+    let token = runtime.control.inflight.enter()?;
     // SAFETY: The runtime lock protects every accepted handle while its
     // storage reference is acquired, and the references are retained below.
     let mut entries =
@@ -448,7 +449,7 @@ pub(crate) unsafe fn prepare_multi_wait(
     Some(WaitRegistration {
         entries,
         _token: token,
-        stop: runtime.operation_stop(),
+        stop: runtime.control.operation_stop(),
     })
 }
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/isa/arch/amdgpu/cdna1/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna2/register_destinations.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
@@ -15,6 +16,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/amdgpu/ordered_count.h"
 
 #include <algorithm>
 #include <bit>
@@ -149,6 +151,8 @@ bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront 
   if (inst.mnemonic() == "lds_direct_load" || inst.mnemonic() == "ds_direct_load")
     return valid_lds_direct_operand(wf.m0());
   if (inst.mnemonic() == "s_barrier_signal_isfirst") {
+    if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+      return wf.cu().in_multiwave_workgroup();
     const auto &source = *inst.src_operand(0);
     const auto constant = source.const_value();
     const auto value =
@@ -184,7 +188,9 @@ MemoryWaitScoreboard::MemoryLanes MemoryWaitScoreboard::memory_lanes(const Instr
   if (inst.is_memory_op() && wf.memory_destination_out_of_range(inst))
     return {};
   const auto *issue = inst.amdgpu_memory_issue_info();
-  uint64_t lanes = issue && !issue->exec_masked
+  if (const auto ordered = decoded_ordered_count_lanes(inst, wf))
+    return {ordered->result, ordered->result};
+  uint64_t lanes = issue && !issue->exec_masked && !(inst.flags() & FIRST_ACTIVE_MEMORY_LANE)
                        ? (wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff})
                        : wf.memory_exec(inst);
   if (!(inst.flags() & CONDITIONAL_MEMORY_LANES))
@@ -272,8 +278,7 @@ MemoryWaitScoreboard::FlatLanes MemoryWaitScoreboard::flat_lanes(const Instructi
   return result;
 }
 
-bool MemoryWaitScoreboard::needs_buffer_payload_lanes(const Instruction &inst,
-                                                      rj_code_arch_t arch) {
+static bool needs_buffer_payload_lanes(const Instruction &inst, rj_code_arch_t arch) {
   const auto name = inst.mnemonic();
   if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return name.starts_with("buffer_store_") || name.starts_with("buffer_atomic_");
@@ -281,6 +286,32 @@ bool MemoryWaitScoreboard::needs_buffer_payload_lanes(const Instruction &inst,
           arch == ROCJITSU_CODE_ARCH_RDNA4) &&
          (name.starts_with("buffer_store_") || name.starts_with("tbuffer_store_")) &&
          name.find("_format_") != std::string_view::npos;
+}
+
+bool MemoryWaitScoreboard::needs_prepared_payload_lanes(const Instruction &inst,
+                                                        rj_code_arch_t arch) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4 && inst.mnemonic().starts_with("image_atomic_")) {
+    RegisterModifiers modifiers;
+    inst.amdgpu_register_modifiers(modifiers);
+    return modifiers.image_atomic_data != nullptr;
+  }
+  return needs_buffer_payload_lanes(inst, arch);
+}
+
+void MemoryWaitScoreboard::check_image_atomic_payload(const Instruction &inst,
+                                                      const Operand &payload, const Wavefront &wf,
+                                                      uint64_t lanes) {
+  // Bound GFX11 image atomics read VDATA for all EXEC lanes. GFX12 fetches the
+  // payload only for in-bounds lanes selected during address preparation.
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (!inst.data())
+      return;
+    lanes = inst.data_as<VectorMemState>()->lane_mask;
+  }
+  for (unsigned word = 0; word < static_cast<unsigned>(payload.size_bits()) / 32; ++word) {
+    const auto reg = gfx115_source_vgpr(payload.encoding_value() + word, wf.num_vgprs());
+    access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
+  }
 }
 
 void MemoryWaitScoreboard::check_image_store_payload(const Instruction &inst, const Wavefront &wf) {
@@ -368,9 +399,7 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
           read_image_sampler_controls(arch, sample.sampler, read)))
     return result;
   const bool volume = (word3 >> 28) == kImage3d;
-  if (gfx11 && volume &&
-      (sample.query || sample.compare || sample.offset || sample.clamp || sample.gather ||
-       sample.mode == ImageSampleMode::Bias || sample.mode == ImageSampleMode::Derivatives16))
+  if (gfx11 && volume && sample.gather)
     return result;
   const bool native_texture =
       !sample.query && uses_native_2d_sampler(arch, resource, sample.sampler, sample.dim,
@@ -379,9 +408,12 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const uint32_t filter = read(sample.sampler + 2);
   const uint32_t word1 = read(resource + 1);
   const bool compute_feedback =
-      (sample.linear_candidate || sample.filtered_feedback_candidate) && !sample.clamp &&
+      sample.filtered_feedback_candidate &&
+      (sample.texel_fault || sample.lod_warning ||
+       rdna_image_lod_warning_threshold(arch, read(resource + 5))) &&
       use_linear_image_path(arch, resource, sample.sampler, sample.dim, true, read, backed, true) &&
-      compute_filtered_image_feedback(arch, sample.dim, word3, word1, filter);
+      compute_filtered_image_feedback(arch, sample.dim, word3, word1, filter, sample.mode,
+                                      sample.offset, sample.compare);
   const bool linear =
       !native_filter &&
       (compute_feedback || (volume && !sample.query) ||
@@ -393,8 +425,7 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const auto mip = rdna_image_mip_range(arch, word1, word3);
   const bool needs_gradients =
       linear
-          ? gradients || linear_image_needs_implicit_lod((filter >> 26) & 3, mip.first, mip.last) ||
-                ((filter >> 20) & 3) != ((filter >> 22) & 3)
+          ? gradients || linear_image_needs_implicit_lod(filter, mip.first, mip.last, sample.gather)
           : graphics_image_needs_gradients(sample.query,
                                            graphics_sample_has_fixed_lod(sample.query,
                                                                          sample.lod_warning, filter,
@@ -409,9 +440,14 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
   const bool bias = sample.mode == ImageSampleMode::Bias;
   const unsigned gradient_start =
       unsigned(sample.offset) + unsigned(bias) + unsigned(sample.compare);
+  const uint32_t gradient_components = sample.mode == ImageSampleMode::Derivatives16
+                                           ? image_derivative_component_count(sample.dim)
+                                           : 0;
+  const uint16_t low16_words =
+      image_prefix_low16_words(gradient_start, gradient_components, a16, bias, sample.offset);
   const unsigned prefix = modifiers.image_prefix_words;
   for (unsigned word = 0; word < prefix; ++word) {
-    uint8_t bytes = image_prefix_word_bytes(word, modifiers.image_prefix_low16_words);
+    uint8_t bytes = image_prefix_word_bytes(word, low16_words);
     if (!linear && sample.offset && word == 0 && sample.dim == kImageDimCube)
       bytes = 0;
     if (bias && word == unsigned(sample.offset))
@@ -425,9 +461,11 @@ std::array<ImageSourceBytes, 12> image_sample_source_bytes(const RegisterModifie
     }
     result[word].active = bytes;
   }
-  // Cube unfolding also reads the face selector from each derivative source lane.
-  const unsigned spatial =
-      !linear && sample.dim == kImageDimCube ? 3u : image_derivative_component_count(sample.dim);
+  // Cube unfolding and GFX10's same-face check read the derivative lanes' face selectors.
+  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const unsigned spatial = sample.dim == kImageDimCube && (!linear || gfx10)
+                               ? 3u
+                               : image_derivative_component_count(sample.dim);
   const bool array = sample.dim == kImageDim1dArray || sample.dim == kImageDim2dArray;
   const unsigned count = sample.query && array ? spatial : modifiers.image_coordinate_count;
   for (unsigned component = 0; component < count; ++component) {
@@ -467,8 +505,9 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   // VOPD only executes its two operations in a wave32.
   if (wf.wf_size() != 32 && name.starts_with("v_dual_"))
     return;
-  const bool gfx10_valu = (inst.flags() & VALU) && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
-                                                    wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2);
+  const bool gfx10 =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10_valu = gfx10 && (inst.flags() & VALU);
   const bool vector = name.starts_with("v_") || name.starts_with("ds_") ||
                       name.starts_with("lds_") || (inst.is_memory_op() && !name.starts_with("s_"));
   const bool scalar_lane_read = name.starts_with("v_readlane_b32");
@@ -480,28 +519,61 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   const bool ignores_exec = (inst.flags() & IGNORES_EXEC) || matrix || scalar_lane_read ||
                             scalar_lane_write || (memory_issue && !memory_issue->exec_masked);
   const uint64_t all_lanes = wf.wf_size() == 64 ? ~uint64_t{0} : uint64_t{0xffffffff};
-  uint64_t lanes = ignores_exec ? all_lanes : wf.memory_exec(inst);
+  const auto ordered = decoded_ordered_count_lanes(inst, wf);
+  uint64_t lanes = ordered ? ordered->contribution
+                   : ignores_exec && !(inst.flags() & FIRST_ACTIVE_MEMORY_LANE)
+                       ? all_lanes
+                       : wf.memory_exec(inst);
   if ((wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2) &&
       name.starts_with("ds_gws_"))
     lanes = RegisterAccess(wf).gds_source_lanes(inst);
-  else if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 && inst.is_memory_op())
+  else if (!ordered && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 && inst.is_memory_op())
     lanes = result_lanes(inst, wf);
-  if (vector && !ignores_exec)
+  if (const auto &output = modifiers.gfx10_export) {
+    if ((wf.status_raw() & (1u << 18)) || !output->valid() || !wf.cu().shader_export_ready())
+      return;
+    access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
+    output->for_each_source(wf.num_vgprs(), [&](unsigned, uint16_t reg) {
+      access({RegClass::VGPR, reg, 1}, wf.exec(), 0xf, false);
+    });
+    return;
+  }
+  if (vector && (!ignores_exec || (ordered && ordered->result)))
     access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
   const RegisterAccess registers(wf);
+  if (const auto &output = modifiers.shader_export) {
+    if (wf.shader_export_issue(*output) != ShaderExportIssue::Accept)
+      return;
+    access({RegClass::EXEC, 0, static_cast<uint8_t>(wf.wf_size() / 32)}, ~uint64_t{0}, 0xf, false);
+    if (output->row_from_m0)
+      access({RegClass::M0, 0, 1}, ~uint64_t{0}, 0xf, false);
+    const uint64_t exported = output->source_lanes(wf.exec());
+    output->for_each_source(wf.num_vgprs(), [&](unsigned, uint16_t reg) {
+      access({RegClass::VGPR, reg, 1}, exported, 0xf, false);
+    });
+    return;
+  }
   const bool gfx11 =
       wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool gfx12_image_atomic =
+      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 && modifiers.image_atomic_data;
   const bool gfx11_or_gfx12_sample = (gfx11 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4) &&
                                      modifiers.image_sample_sources &&
                                      !modifiers.image_sample_sources->query;
-  const bool check_image_result =
-      (gfx11 && modifiers.image_address) || gfx11_or_gfx12_sample || modifiers.image_resource_info;
+  const bool check_image_result = modifiers.gfx10_lod_query_quad ||
+                                  (gfx11 && modifiers.image_address) || gfx12_image_atomic ||
+                                  gfx11_or_gfx12_sample || modifiers.image_resource_info;
   if (check_image_result) {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
       const auto &dst = *inst.dst_operand(i);
-      if (dst.decoded_vgpr() &&
-          !registers.destination_register(dst, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR)))
-        return;
+      if (dst.decoded_vgpr() && !registers.destination_register(
+                                    dst, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR))) {
+        if (!gfx12_image_atomic && !modifiers.bvh_resource)
+          return;
+        // GFX11 BVH and GFX12 atomics read the scalar descriptor before suppressing vector work.
+        lanes = 0;
+        break;
+      }
     }
   }
   // Dropped and unbound texture operations do not acquire coordinate or payload VGPRs.
@@ -545,6 +617,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       }
     }
   }
+  if (modifiers.image_atomic_data && read_image_inputs)
+    check_image_atomic_payload(inst, *modifiers.image_atomic_data, wf, lanes);
   if (modifiers.image_sample_sources && read_image_inputs) {
     const auto inputs = image_sample_source_bytes(modifiers, wf, [&](uint32_t selector) {
       return registers.scalar_control_value(selector).value_or(0);
@@ -608,10 +682,38 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       check_coordinate(reg, image_prefix_word_bytes(word, modifiers.image_prefix_low16_words),
                        lanes);
     }
+    const uint64_t coordinate_lanes =
+        modifiers.gfx10_lod_query_quad ? ImageDerivativeQuad::source_lanes(lanes) : lanes;
+    uint64_t ray_lanes = coordinate_lanes;
+    if (const auto resource = modifiers.bvh_resource) {
+      const auto word2 = registers.scalar_control_value(*resource + 2);
+      const auto word3 = registers.scalar_control_value(*resource + 3);
+      const auto last_node = word2 && word3 ? gfx11_bvh_last_node(*word2, *word3) : std::nullopt;
+      if (!last_node)
+        ray_lanes = 0;
+      else {
+        const bool pointer_flags = gfx11_bvh_pointer_flags_enabled(*word3);
+        for (uint64_t pending = coordinate_lanes; pending; pending &= pending - 1) {
+          const uint32_t lane = std::countr_zero(pending);
+          const auto pointer_word = [&](unsigned i) {
+            const auto index = gfx115_source_vgpr(modifiers.image_coordinates[i], wf.num_vgprs());
+            return wf.debug_read_vgpr(index, lane);
+          };
+          uint64_t pointer = pointer_word(0);
+          if (modifiers.bvh_pointer_words == 2)
+            pointer |= uint64_t{pointer_word(1)} << 32;
+          if (!bvh_node_can_load(pointer, *last_node, pointer_flags))
+            ray_lanes &= ~(uint64_t{1} << lane);
+        }
+      }
+    }
     for (uint32_t component = 0; component < components; ++component) {
       const uint32_t word = prefix + (modifiers.image_a16 ? component / 2 : component);
-      const uint16_t reg = modifiers.image_coordinates[word];
-      check_coordinate(reg, modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf, lanes);
+      uint16_t reg = modifiers.image_coordinates[word];
+      if (modifiers.gfx10_lod_query_quad && reg >= wf.num_vgprs())
+        reg = 0;
+      check_coordinate(reg, modifiers.image_a16 ? (component % 2 ? 0xc : 0x3) : 0xf,
+                       component < modifiers.bvh_pointer_words ? coordinate_lanes : ray_lanes);
     }
   }
   if (modifiers.exec_all_if_nonzero)
@@ -670,10 +772,12 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
   }
   // FLAT's result ordering depends on its planned memory domains. The issuer
   // checks those results after checking address sources, still before execution.
-  if (inst.is_memory_wait_producer() && !name.starts_with("flat_"))
-    check_memory_result(inst, wf,
-                        (inst.flags() & CONDITIONAL_MEMORY_LANES) ? result_lanes(inst, wf) : lanes,
-                        modifiers);
+  if (inst.is_memory_wait_producer() && !name.starts_with("flat_")) {
+    const uint64_t results = ordered                                     ? ordered->result
+                             : (inst.flags() & CONDITIONAL_MEMORY_LANES) ? result_lanes(inst, wf)
+                                                                         : lanes;
+    check_memory_result(inst, wf, results, modifiers);
+  }
   // SUBREV permutes VSRC1, unlike other integer DPP instructions.
   const bool reverse_dpp =
       name.starts_with("v_subrev_") &&
@@ -732,6 +836,16 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     access(*data, source_lanes, 0xf, false);
     return;
   }
+  // SRC2 has one register input beyond EXEC (checked above). Its other
+  // operand comes from the data share. Both pending-state paths use the
+  // address register selected by execution, including its VGPR0 fallback.
+  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1 && name.starts_with("ds_") &&
+      name.find("_src2_") != std::string_view::npos) {
+    const auto reg = cdna1::ds_src2_address_register(inst.src_operand(0)->encoding_value(),
+                                                     wf.vgpr_alloc().count);
+    access({RegClass::VGPR, reg, 1}, lanes, 0xf, false);
+    return;
+  }
   const bool ds = inst.is_memory_op() && name.starts_with("ds_");
   const bool ds_vgpr0 = ds && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2 &&
                         RegisterAccess::ds_sources_use_vgpr0(inst);
@@ -780,6 +894,23 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     return range ? range->register_ref() : std::nullopt;
   };
   auto resolve = [&](const Operand &op, bool write) -> std::optional<RegisterRef> {
+    if (write && (inst.flags() & COND_BRANCH) && &op == inst.dst_operand(0) &&
+        name.starts_with("s_subvector_loop_") &&
+        (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
+         wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2)) {
+      // BEGIN skips its scratch write on empty raw EXEC. END reads scratch on
+      // every path and overwrites it only to start the high pass.
+      const auto selector = op.encoding_value();
+      const bool writes_scratch =
+          name == "s_subvector_loop_begin"
+              ? wf.exec_raw() != 0
+              : (wf.exec_raw() >> 32) == 0 &&
+                    registers.scalar_control_value(selector).value_or(0) != 0;
+      if (!writes_scratch)
+        return std::nullopt;
+      const auto range = resolve_scalar_destination_range(wf, selector, 1);
+      return range ? range->register_ref() : std::nullopt;
+    }
     // MMA execution applies GPR_IDX only to ordinary VGPRs, never its
     // separate accumulator bank. Keep that bank's decoded identity intact.
     if (matrix && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
@@ -1039,8 +1170,8 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         (!write && op == buffer_payload && !reads_buffer_payload) ||
         (!write && op == modifiers.buffer_offset && !read_buffer_offset) ||
         (!write && gfx11_or_gfx12_sample && !modifiers.image_reads_address && !op->is_vgpr()) ||
-        op == modifiers.image_address || op == modifiers.image_store_data ||
-        (!pending_scalar_ && !op->is_vgpr()))
+        op == modifiers.image_address || op == modifiers.image_atomic_data ||
+        op == modifiers.image_store_data || (!pending_scalar_ && !op->is_vgpr()))
       return;
     if (!write && ds_vgpr0 && op->decoded_vgpr()) {
       check_ds_source(*op);
@@ -1093,6 +1224,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     // Interpolation coefficients are quad broadcasts, including inactive lanes.
     if (!write && reg->cls == RegClass::VGPR && name.starts_with("v_interp_") &&
         (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+         wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
          wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)) {
       const uint64_t quads =
           (lanes | (lanes >> 1) | (lanes >> 2) | (lanes >> 3)) & 0x1111111111111111ULL;
@@ -1664,8 +1796,12 @@ void MemoryWaitScoreboard::add(Event event, bool ordered_native_result) {
       // drains their entire X group, so its newest covering source is enough.
       const bool scalar_replay =
           xcnt_scalar_ && old.counter == WaitCounterKind::X && event.counter == WaitCounterKind::X;
+      // Multiple enabled export channels may select the same physical source.
+      const bool same_export =
+          event.export_source && old.export_source && old.sequence == event.sequence;
       const bool superseded =
-          (ordered || scalar_replay || (event.gds_source_lock && old.gds_source_lock)) &&
+          (ordered || scalar_replay || same_export ||
+           (event.gds_source_lock && old.gds_source_lock)) &&
           old.holds_source() == event.holds_source() && old.reg.cls == event.reg.cls &&
           event.reg.index <= old.reg.index &&
           event.reg.index + event.reg.width >= old.reg.index + old.reg.width &&
