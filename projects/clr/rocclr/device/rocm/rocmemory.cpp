@@ -852,14 +852,8 @@ void Buffer::destroy() {
 
     if (needUnlockHostMem && hostLockOwner_) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-        // Safe only because Memory::~Memory() destroys deviceMemories_ synchronously, in
-        // insertion order, and the lock owner is always inserted first: it's the first
-        // device to reach Buffer::create() for this owner, which is a precondition for
-        // any sibling being able to find and reuse its mapping (see the sibling scan in
-        // Buffer::create()). So by the time any sibling's destroy() runs, this unlock has
-        // already happened -- a sibling only ever reads deviceMemory_, never unlocks it
-        // itself. If deviceMemories_ teardown order ever stops matching insertion order,
-        // this would unlock while a sibling still holds the shared pointer.
+        // Safe because Memory::~Memory() destroys in insertion order and the owner is
+        // always inserted first, so no sibling's destroy() can still be pending.
         if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
     }
@@ -1209,10 +1203,8 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
       // so gate on amd::IS_HIP to leave OpenCL unchanged.
       //
       // lockMemoryOps() serializes sibling device::Memory creation (see
-      // Memory::addDeviceMemory() in platform/memory.cpp, which already holds this same
-      // mutex on every call into here); re-taking it must use recursive_mutex, since the
-      // calling thread already owns it. Taking it again explicitly just documents that
-      // reading sibling state below relies on that lock being held.
+      // Memory::addDeviceMemory()); must be recursive_mutex since the caller already
+      // holds it.
       const auto& contextDevices = owner()->getContext().devices();
 
       void* shared = nullptr;
@@ -1225,8 +1217,7 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
           device::Memory* existing = owner()->getDeviceMemory(*other, false);
           if (existing == nullptr) continue;
           roc::Memory* existingMem = static_cast<roc::Memory*>(existing);
-          // A sibling that already tried and failed the group lock tells us not to
-          // bother retrying it ourselves (see hostLockGroupAttemptFailed_ below).
+          // A sibling's failed group-lock attempt means ours would fail too.
           if (existingMem->HostLockGroupAttemptFailed()) {
             priorGroupLockFailed = true;
           }
@@ -1254,20 +1245,15 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
           hostLockOwner_ = true;
           hostLockCoversAllDevices_ = true;
         } else {
-          // The group lock failed (e.g. one peer agent is unavailable). Fall back to
-          // locking just this device so the remaining devices can still succeed
-          // independently, instead of failing the whole hipHostRegister call. Record
-          // the failure so later siblings skip straight to this fallback too, instead
-          // of each repeating the same doomed group-lock attempt.
+          // Group lock failed (e.g. peer agent unavailable); fall back to locking just
+          // this device, and flag it so later siblings skip straight to the fallback too.
           deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                          getHostMemorySegment(memFlags));
           hostLockOwner_ = deviceMemory_ != nullptr;
           hostLockGroupAttemptFailed_ = true;
         }
       } else {
-        // Single-device context, non-HIP caller, or a sibling already established that
-        // the group lock isn't viable for this context (priorGroupLockFailed) -- lock
-        // just this device.
+        // Single-device context, non-HIP caller, or group lock already known to fail.
         deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
                                        getHostMemorySegment(memFlags));
         hostLockOwner_ = deviceMemory_ != nullptr;

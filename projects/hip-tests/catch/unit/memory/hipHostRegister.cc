@@ -977,10 +977,8 @@ HIP_TEST_CASE(Unit_hipHostRegister_with_fine_grain) {
  * re-registering the same range works cleanly with no leaked or double-released lock.
  * Run in a child process because HIP_VISIBLE_DEVICES is only read once, at HIP's first
  * initialization in the process.
- * Known limitation: because the excluded GPU is outside HIP_VISIBLE_DEVICES, the child
- * process has no HIP-level visibility into it at all, so this test cannot directly
- * confirm the excluded device received no mapping -- only that the subset it can see
- * all share one correctly working mapping.
+ * Known limitation: the excluded GPU is outside HIP_VISIBLE_DEVICES, so this test can't
+ * directly confirm it received no mapping -- only that the visible subset shares one.
  * Test source
  * ------------------------
  *    - catch\unit\memory\hipHostRegister.cc
@@ -999,8 +997,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_SharedLockDeviceSubset) {
     return;
   }
 
-  // Save any pre-existing HIP_VISIBLE_DEVICES so it can be restored afterwards instead
-  // of unconditionally clobbering whatever the test environment had set.
+  // Save any pre-existing HIP_VISIBLE_DEVICES so it can be restored afterwards.
   const char* prevVisibleDevices = getenv("HIP_VISIBLE_DEVICES");
   const bool hadPrevVisibleDevices = (prevVisibleDevices != nullptr);
   const std::string prevVisibleDevicesValue = hadPrevVisibleDevices ? prevVisibleDevices : "";
@@ -1013,8 +1010,7 @@ HIP_TEST_CASE(Unit_hipHostRegister_SharedLockDeviceSubset) {
   int exitCode = proc.run();
   INFO(proc.getOutput());
 
-  // Restore the environment before REQUIRE, so a failing assertion still leaves
-  // HIP_VISIBLE_DEVICES the way this test found it rather than stuck at "0,1".
+  // Restore before REQUIRE so a failing assertion can't leak the override.
   if (hadPrevVisibleDevices) {
     setenv("HIP_VISIBLE_DEVICES", prevVisibleDevicesValue.c_str(), 1);
   } else {

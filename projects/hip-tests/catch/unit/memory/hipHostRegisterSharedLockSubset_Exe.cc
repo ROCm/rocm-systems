@@ -24,9 +24,7 @@
 #include <cstdlib>
 #include <vector>
 
-// Each device gets its own kElemsPerDevice-int region of the shared buffer to mark and
-// verify. 4096 ints (16 KiB) per device is large enough to exercise a real mapped range
-// rather than a single cache line, while keeping the total registration small.
+// Each device marks/verifies its own 16 KiB region of the shared buffer.
 constexpr int kElemsPerDevice = 4096;
 
 __global__ void MarkRange(int* ptr, int count, int value) {
@@ -74,11 +72,8 @@ bool RegisterAccessUnregisterOnce(int* buf, int numDevices) {
     buf[i] = -1;
   }
 
-  // Exercise the mapping from every device, not just device 0, so a mapping that is
-  // only valid for the owning device (but reused by siblings) would show up as a
-  // kernel fault or stale/incorrect values instead of silently passing. Each device
-  // writes its own kElemsPerDevice-sized region so a bad/aliased per-device mapping
-  // would also corrupt a neighboring device's region rather than going unnoticed.
+  // Each device writes its own region, so a bad/aliased mapping shows up as a kernel
+  // fault or wrong/corrupted values instead of silently passing.
   for (int dev = 0; dev < numDevices; ++dev) {
     if (!Check(hipSetDevice(dev), "hipSetDevice")) return false;
     int* devRegion = reinterpret_cast<int*>(devPtrs[dev]) + (dev * kElemsPerDevice);
@@ -113,13 +108,8 @@ int main() {
     return 0;
   }
 
-  // Note: this process only has HIP_VISIBLE_DEVICES-restricted visibility (see the
-  // parent test, Unit_hipHostRegister_SharedLockDeviceSubset), so any GPU excluded from
-  // that subset is invisible here -- there is no HIP API this process can call to
-  // directly confirm the excluded device received no mapping. What this test does
-  // confirm is that the subset it *can* see all got one correctly working shared
-  // mapping, i.e. the lock call was scoped to (and only to) this context's own devices
-  // rather than, say, every device in the process by default.
+  // The excluded GPU is outside HIP_VISIBLE_DEVICES and thus invisible here; this only
+  // confirms the visible subset shares one correctly working mapping.
   std::vector<int> buf(static_cast<size_t>(numDevices) * kElemsPerDevice, 0);
 
   // Round 1: exercise the shared-lock path end to end.
