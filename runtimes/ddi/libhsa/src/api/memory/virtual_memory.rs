@@ -765,7 +765,13 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(mapping) = runtime.memory_state.vmem_mappings.get(&(address as usize)) else {
+        let Some((_, mapping)) = runtime
+            .memory_state
+            .vmem_mappings
+            .range(..=address as usize)
+            .next_back()
+            .filter(|(_, mapping)| mapping.contains(address as usize))
+        else {
             return INVALID_ALLOCATION;
         };
         let handle_id = mapping.handle;
