@@ -114,7 +114,8 @@ rocprofiler_add_integration_validate_test(
     BUNDLE_TESTS
     ARGS validate.py::test_rank_env_var_rejects_malicious_name
     TIMEOUT 60
-    LABELS "integration-tests;rocpd")
+    LABELS "integration-tests;rocpd"
+    PYTHON_PATH "${rocpd-site-packages}")
 
 #########################################################################################
 #

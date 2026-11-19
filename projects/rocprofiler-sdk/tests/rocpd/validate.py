@@ -161,7 +161,14 @@ def load_summary_module():
     test_dir = Path(__file__).resolve().parent
     source_path = test_dir.parents[1] / "source/lib/python/rocpd/summary.py"
     if not source_path.is_file():
-        source_path = SOURCE_TEST_DIR.parent.parent / "source/lib/python/rocpd/summary.py"
+        # Installed test tree: no source checkout, so use the installed package.
+        package_spec = importlib.util.find_spec("rocpd")
+        if package_spec is not None and package_spec.origin:
+            source_path = Path(package_spec.origin).with_name("summary.py")
+        else:
+            source_path = (
+                SOURCE_TEST_DIR.parent.parent / "source/lib/python/rocpd/summary.py"
+            )
     assert source_path.is_file(), f"cannot locate {source_path}"
 
     spec = importlib.util.spec_from_file_location(f"{package_name}.summary", source_path)
