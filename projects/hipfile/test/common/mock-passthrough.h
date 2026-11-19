@@ -14,19 +14,19 @@
 #include <utility>
 
 // Set the default action of a mocked method to call the real base class
-// implementation. Prefer using NiceMock when using passthrough. Otherwise,
-// every called function must have an EXPECT_CALL set or an "uninteresting call"
-// failure will occur. EXPECT_CALL without an action uses passthrough. If setting
-// up an expectation to alter behaviour, add `.RetiresOnSaturation()` to re-enable
-// passthrough after the function has been called.
+// implementation. Prefer NiceMock, so calls without an EXPECT_CALL pass through
+// silently. An EXPECT_CALL without an action also passes through.
 //
-// StrictMock example:
+// To alter only some calls and pass the rest through, chain the altered calls
+// and DoDefault() into one expectation. Once a method has an EXPECT_CALL, every
+// call to it must match an expectation, even on a NiceMock, so a plain
+// `.WillOnce(...)` makes the next call fail:
 // ```
-// StrictMock<MHip> mhip;
+// NiceMock<MHip> mhip;
 // mhip.enable_passthrough();
-// EXPECT_CALL(mhip, <passthrough_func>).Times(AnyNumber());
-// EXPECT_CALL(mhip, <modified_func>).WillOnce(...).RetiresOnSaturation();
+// EXPECT_CALL(mhip, <func>).WillOnce(...).WillRepeatedly(DoDefault());
 // ```
+// See "Understanding Uninteresting vs Unexpected Calls" in the gMock cookbook.
 #define MOCK_PASSTHROUGH(base_class, func)                                                                   \
     ON_CALL(*this, func).WillByDefault([this](auto &&...args) {                                              \
         return this->base_class::func(std::forward<decltype(args)>(args)...);                                \
