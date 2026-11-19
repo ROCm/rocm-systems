@@ -31,6 +31,7 @@ static int maxBlocksLsa(struct ncclComm* comm, enum ncclSymkKernelId kernelId) {
   case ncclSymkKernelId_AllGather_HierLsaTmaST:
     return ncclSymkAgHierTmaMaxBlocks;
   case ncclSymkKernelId_ReduceScatter_HierLsaLDST:
+  case ncclSymkKernelId_AllReduce_HierLsaLDST:
     return ncclSymkRsHierMaxBlocks;
   default:
     return ncclSymkMaxBlocks;
@@ -135,6 +136,10 @@ ncclResult_t ncclSymkLsaModel(struct ncclTuningInput_t* input, enum ncclSymkKern
   // within the bounds the user or the communicator set.
   if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST && nUserCTAs <= 0) {
     *nBlocks = std::min(std::max(ncclSymkRsHierLaunchBlocks(comm->nRanks, nBytes), nMinBlocks), nMaxBlocks);
+  }
+  if (kernelId == ncclSymkKernelId_AllReduce_HierLsaLDST && nUserCTAs <= 0) {
+    *nBlocks = std::min(std::max(ncclSymkRsHierLaunchBlocks(comm->nRanks, nBytes / comm->nRanks), nMinBlocks),
+                        nMaxBlocks);
   }
   return ncclSuccess;
 }

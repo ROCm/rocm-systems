@@ -43,6 +43,7 @@ const struct ncclSymkLsaA2AParameters
       {}, // ReduceScatter_RailA2A_LsaLD
       {}, // ReduceScatter_RailA2A_LsaLDMC
       {}, // ReduceScatter_HierLsaLDST
+      {}, // AllReduce_HierLsaLDST
     },
     // SM103
     {
@@ -69,6 +70,7 @@ const struct ncclSymkLsaA2AParameters
       {}, // ReduceScatter_RailA2A_LsaLD
       {}, // ReduceScatter_RailA2A_LsaLDMC
       {}, // ReduceScatter_HierLsaLDST
+      {}, // AllReduce_HierLsaLDST
     },
 };
 

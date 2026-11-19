@@ -22,7 +22,7 @@
 // Each row's mask bit IS its cost-model tuning id, so the mask lines up 1:1 with
 // src/tuning/cost_model.cc modelMap[] (collMask mirrors modelMap[].enabled[func]):
 //   general    -> bit (algo*NCCL_NUM_PROTOCOLS + proto), the [0,21) space
-//   symmetric  -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), the [21,42) space
+//   symmetric  -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), the [21,44) space
 // Commented rows are algo/proto combinations that do not exist today; they mark where a
 // future kernel would slot into the tuning-id space.
 // IMPORTANT: this table need must be consistent with the modelMap in src/tuning/cost_model.cc
@@ -56,6 +56,7 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   {"SYMK_RSxTmaLD_AGxTmaST", ALGBIT(23), F_AR, -1, -1, ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST},
   {"SYMK_RSxLD_AGxST",       ALGBIT(24), F_AR, -1, -1, ncclSymkKernelId_AllReduce_RSxLD_AGxST},
   {"SYMK_RSxLDMC_AGxSTMC",   ALGBIT(25), F_AR, -1, -1, ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC},
+  {"SYMK_HierLsaLDST",       ALGBIT(43), F_AR, -1, -1, ncclSymkKernelId_AllReduce_HierLsaLDST},
   // Symmetric AllGather kernels
   {"SYMK_LL",                ALGBIT(26), F_AG, -1, -1, ncclSymkKernelId_AllGather_LL},
   {"SYMK_LLMC",              ALGBIT(27), F_AG, -1, -1, ncclSymkKernelId_AllGather_LLMC},

@@ -10,10 +10,12 @@
 #include "symmetric/kernel.h"
 #include "symmetric/primitives.h"
 #include "symmetric/data_ops.h"
+#include "symmetric/hier.h"
 #else
 #include "kernel.cuh"
 #include "primitives.cuh"
 #include "data_ops.cuh"
+#include "hier.cuh"
 #endif
 
 template <int BytePerPack, int UnrollPacks, int UnrollPeers, typename T, bool EnableTma, typename Red>
@@ -404,106 +406,6 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_TmaLD(ncclSymkDevWorkA
   ncclSymkRun_ReduceScatter_LD_impl<EnableProfiler, Red, T, /*EnableTma=*/true>(args);
 }
 
-// LSA rank of the package rank i places up from ours, so copy 0 is our own.
-static __device__ __forceinline__ int rsHierCopyLsa(ncclDevComm const& comm, ncclTeam scaleIn, int i) {
-  int r = scaleIn.rank + i;
-  if (r >= scaleIn.nRanks) r -= scaleIn.nRanks;
-  return ncclTeamRankToLsa(comm, scaleIn, r);
-}
-
-// Rank of scaleUp s + 1 places up from ours: where our s-th send goes, and whose credits we wait on.
-static __device__ __forceinline__ int rsHierPeerUp(ncclTeam scaleUp, int s) {
-  int r = scaleUp.rank + 1 + s;
-  return r >= scaleUp.nRanks ? r - scaleUp.nRanks : r;
-}
-
-// Rank of scaleUp s + 1 places down from ours: whose send lands in our s-th slot.
-static __device__ __forceinline__ int rsHierPeerDown(ncclTeam scaleUp, int s) {
-  int r = scaleUp.rank - 1 - s;
-  return r < 0 ? r + scaleUp.nRanks : r;
-}
-
-// This block's slots for a round on the given rank of scaleUp, one per other package. Rounds alternate
-// between two sets so senders can store a round while the owners' finishers still read the one before.
-static __device__ char* rsHierSlots(ncclDevComm const& comm, ncclTeam scaleUp, ncclDevResourceHandle slotsBuf, int peer,
-                                    uint64_t round, size_t chunkBytes) {
-  size_t roundBytes = size_t(scaleUp.nRanks - 1) * chunkBytes;
-  return (char*)ncclGetResourceBufferLsaPointer(comm, slotsBuf, ncclTeamRankToLsa(comm, scaleUp, peer)) +
-         (2 * blockIdx.x + (round & 1)) * roundBytes;
-}
-
-// How the hierarchical ReduceScatter runs reduceBatch: plain loads through the global aperture, the
-// packages' slots written side by side, and each group of sources in flight together.
-struct rsHierBatchMode : ReduceBatchMode {
-  using SrcSpace = GMemApertureTag;
-  static constexpr bool Interleave = true;
-  static constexpr bool Overlap = true;
-};
-
-// A sender's part of a round: for each other package, sums our package's copies of the block its
-// counterpart of us owns and stores that into our slot there.
-template <typename T, typename Red>
-static __device__ void rsHierSend(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
-                                  ncclCoopWarpSpan role, ncclSymPtr<T> input, size_t nAllElts,
-                                  ncclDevResourceHandle slotsBuf, uint64_t round, int nElts, size_t chunkBytes,
-                                  bool aligned) {
-  // A pointer getter so the window is read before the loops: ncclSymPtr re-reads it after every store.
-  ncclLsaPointerGetter<T> inputLsa(input);
-  reduceBatch</*PostOp=*/false, rsHierBatchMode>(
-    role, /*inPlace=*/false, /*nBatch=*/scaleUp.nRanks - 1, nElts, GMemApertureTag(), /*dstAlignMin=*/16,
-    /*getDst=*/
-    [&] __device__(int s) -> T* {
-      return (T*)(rsHierSlots(comm, scaleUp, slotsBuf, rsHierPeerUp(scaleUp, s), round, chunkBytes) + s * chunkBytes);
-    },
-    red, /*nSrcs=*/scaleIn.nRanks,
-    /*getSrc=*/
-    [&] __device__(int s, int i) -> T* {
-      return inputLsa(rsHierCopyLsa(comm, scaleIn, i)) +
-             ncclTeamRankToWorld(comm, scaleUp, rsHierPeerUp(scaleUp, s)) * nAllElts;
-    },
-    /*srcPtrCommonMask=*/aligned ? 15u : 0u, /*getSrcPtrMasked=*/[&] __device__(int) -> unsigned { return 0u; });
-}
-
-// A finisher's part of a round: sums our package's copies of our own block with the sums the other
-// packages stored into our slots, and writes that to output with the post-op applied.
-template <typename T, typename Red>
-static __device__ void rsHierFinish(ncclDevComm const& comm, ncclTeam scaleIn, ncclTeam scaleUp, Red red,
-                                    ncclCoopWarpSpan role, ncclSymPtr<T> input, size_t nAllElts, char const* slots,
-                                    T* output, int nElts, size_t chunkBytes, bool aligned) {
-  ncclLsaPointerGetter<T> blockLsa(input + comm.rank * nAllElts);
-  size_t const slotElts = chunkBytes / sizeof(T);
-  reduceBatch</*PostOp=*/true, rsHierBatchMode>(
-    role, /*inPlace=*/false, /*nBatch=*/1, nElts, GMemApertureTag(), /*dstAlignMin=*/16,
-    /*getDst=*/[&] __device__(int) -> T* { return output; }, red, /*nSrcs=*/scaleIn.nRanks + scaleUp.nRanks - 1,
-    /*getSrc=*/
-    [&] __device__(int, int i) -> T* {
-      return i < scaleIn.nRanks ? blockLsa(rsHierCopyLsa(comm, scaleIn, i)) :
-                                  (T*)slots + size_t(i - scaleIn.nRanks) * slotElts;
-    },
-    /*srcPtrCommonMask=*/aligned ? 15u : 0u, /*getSrcPtrMasked=*/[&] __device__(int) -> unsigned { return 0u; });
-}
-
-// This block's row of rsHierFlags on the given rank of scaleUp.
-static __device__ uint64_t* rsHierFlagRow(ncclDevComm const& comm, ncclTeam scaleUp, ncclDevResourceHandle flagsBuf,
-                                          int peer) {
-  return (uint64_t*)ncclGetResourceBufferLsaPointer(comm, flagsBuf, ncclTeamRankToLsa(comm, scaleUp, peer)) +
-         blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
-}
-
-// Spins until each of the n flags starting at flags reaches target, then orders the caller's later
-// accesses after what their raisers did before raising them.
-static __device__ void rsHierWaitFlags(ncclDevComm const& comm, uint64_t* flags, int n, uint64_t target) {
-  uint32_t steps = 0;
-  NVCC_PRAGMA_UNROLL_DISABLED
-  for (int s = 0; s < n; s++) {
-    cuda::atomic_ref<uint64_t> flag(flags[s]);
-    while (flag.load(cuda::memory_order_relaxed) < target) {
-      if (nccl::utility::testAbort(comm.abortFlag, steps)) return;
-    }
-  }
-  cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
-}
-
 // Two-level ReduceScatter: LD within a package, ST one partial sum per other package, so a block crosses packages once.
 // Sender and finisher warps run concurrently, handing off through double-buffered slots with ready and credit flags.
 template <bool EnableProfiler, template <typename> typename Red, typename T>
@@ -564,35 +466,21 @@ __device__ __forceinline__ void ncclSymkRun_ReduceScatter_HierLsaLDST(ncclSymkDe
         // The opening barrier frees the slots for this launch's first two rounds. After that, a round's
         // slots last held the round two back, which each owner credits once it has read it.
         if (round >= 2) {
-          if (role.thread_rank() == 0) rsHierWaitFlags(comm, credit, nPeers, seq + round - 1);
+          if (role.thread_rank() == 0) hierWaitFlags(comm, credit, nPeers, seq + round - 1);
           role.sync();
         }
-        rsHierSend<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slotsBuf, round, n, chunkBytes, aligned);
+        hierReduceSend<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slotsBuf, round, n, chunkBytes,
+                          aligned);
         role.sync();
-        if (role.thread_rank() == 0) {
-          cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
-          NVCC_PRAGMA_UNROLL_DISABLED
-          for (int s = 0; s < nPeers; s++) {
-            cuda::atomic_ref<uint64_t>(rsHierFlagRow(comm, scaleUp, flagsBuf, rsHierPeerUp(scaleUp, s))[s])
-              .store(seq + round + 1, cuda::memory_order_relaxed);
-          }
-        }
+        if (role.thread_rank() == 0) hierRaiseUp(comm, scaleUp, flagsBuf, /*base=*/0, seq + round + 1);
       } else {
-        char const* slots = rsHierSlots(comm, scaleUp, slotsBuf, scaleUp.rank, round, chunkBytes);
-        if (role.thread_rank() == 0) rsHierWaitFlags(comm, ready, nPeers, seq + round + 1);
+        char const* slots = hierSlots(comm, scaleUp, slotsBuf, scaleUp.rank, round, chunkBytes);
+        if (role.thread_rank() == 0) hierWaitFlags(comm, ready, nPeers, seq + round + 1);
         role.sync();
-        rsHierFinish<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slots, output + lo, n, chunkBytes,
-                        aligned);
+        hierReduceFinish<T>(comm, scaleIn, scaleUp, red, role, input + lo, dw.nElts, slots, output + lo, n, chunkBytes,
+                            aligned);
         role.sync();
-        if (role.thread_rank() == 0) {
-          cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
-          NVCC_PRAGMA_UNROLL_DISABLED
-          for (int s = 0; s < nPeers; s++) {
-            uint64_t* row = rsHierFlagRow(comm, scaleUp, flagsBuf, rsHierPeerDown(scaleUp, s));
-            cuda::atomic_ref<uint64_t>(row[scaleUp.nRanks + s])
-              .store(seq + round + 1, cuda::memory_order_relaxed);
-          }
-        }
+        if (role.thread_rank() == 0) hierRaiseDown(comm, scaleUp, flagsBuf, /*base=*/scaleUp.nRanks, seq + round + 1);
       }
     }
   }

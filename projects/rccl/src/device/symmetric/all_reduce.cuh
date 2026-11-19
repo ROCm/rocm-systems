@@ -10,9 +10,13 @@
 #if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/kernel.h"
 #include "symmetric/primitives.h"
+#include "symmetric/data_ops.h"
+#include "symmetric/hier.h"
 #else
 #include "kernel.cuh"
 #include "primitives.cuh"
+#include "data_ops.cuh"
+#include "hier.cuh"
 #endif
 #include <stdio.h>
 
@@ -432,6 +436,170 @@ __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxLD_AGxST(ncclSymkDevWor
 template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_AllReduce_RSxTmaLD_AGxTmaST(ncclSymkDevWorkArgs const* args) {
   ncclSymkRun_AllReduce_RSxLD_AGxST_impl<EnableProfiler, Red, T, /*EnableTma=*/true>(args);
+}
+
+// Batched copy: a one-source reduceBatch, exact through Red's accumulator.
+template <typename T, typename Red, typename GetDst, typename GetSrc>
+static __device__ void arHierCopyBatch(ncclCoopWarpSpan role, Red red, int nBatch, int nElts, bool aligned,
+                                       GetDst getDst, GetSrc getSrc) {
+  reduceBatch</*PostOp=*/false, hierBatchMode>(
+    role, /*inPlace=*/false, nBatch, nElts, GMemApertureTag(), /*dstAlignMin=*/16, getDst, red, /*nSrcs=*/1,
+    /*getSrc=*/[&] __device__(int b, int) -> T* { return getSrc(b); },
+    /*srcPtrCommonMask=*/aligned ? 15u : 0u, /*getSrcPtrMasked=*/[&] __device__(int) -> unsigned { return 0u; });
+}
+
+// Two-level AllReduce: the hierarchical ReduceScatter's send and finish over one piece per rank, then
+// ST each reduced piece to the other packages and forward it within the package. When pipelined, sender,
+// finisher and forwarder warps run concurrently, each on its own round.
+template <bool EnableProfiler, template <typename> typename Red, typename T>
+__device__ __forceinline__ void ncclSymkRun_AllReduce_HierLsaLDST(ncclSymkDevWorkArgs const* args) {
+  size_t const chunkBytes = args->kcomm.rsHierChunkSize;
+  size_t const RoundElts = chunkBytes / sizeof(T);
+  constexpr size_t PackElts = ncclSymkBytePerPack / sizeof(T);
+  ncclSymkArgsHandler handler{args};
+  ncclDevComm const& comm = handler.comm;
+  ncclLsaBarrierSession<ncclCoopCta> bar{ncclCoopCta(), comm, ncclTeamTagLsa(), blockIdx.x};
+  Red<typename ncclSymkAccumType<Red, T, /*nvls=*/false>::Type> red(handler.devWork->redOpArg);
+
+  int const& rank = comm.rank;
+  int const& nRanks = comm.nRanks;
+  ncclTeam lsa = ncclTeamLsa(comm);
+  ncclTeam scaleIn = ncclTeamInnerFactor(lsa, args->kcomm.hierScaleInSize);
+  ncclTeam scaleUp = ncclTeamOuterFactor(lsa, args->kcomm.hierScaleInSize);
+  int nPeers = scaleUp.nRanks - 1;
+  ncclDevResourceHandle slotsBuf = args->kcomm.rsHierSlots;
+  ncclDevResourceHandle flagsBuf = args->kcomm.rsHierFlags;
+  uint64_t* flags = (uint64_t*)ncclGetResourceBufferLocalPointer(comm, flagsBuf) +
+                    blockIdx.x * ncclSymkRsHierFlagsPerBlock(scaleUp.nRanks);
+  uint64_t* ready = flags;
+  uint64_t* credit = flags + scaleUp.nRanks;
+  uint64_t* agReady = flags + 2 * scaleUp.nRanks;
+  // Shared with the hierarchical ReduceScatter.
+  uint64_t seq = flags[nPeers];
+
+  int t = threadIdx.x;
+  int tn = blockDim.x;
+  int nFwd = scaleIn.nRanks - 1;
+
+  // Without the pipeline every warp takes the three roles in turn.
+  bool pipeline = args->kcomm.arHierPipeline;
+  int nWarps = blockDim.x / WARP_SIZE;
+  int roleId = 0;
+  ncclCoopWarpSpan role(0, nWarps, 0);
+  if (pipeline) {
+    // Split the warps by the loads and stores each role does per element of a piece, at least one each.
+    int sendW = (scaleIn.nRanks + 1) * nPeers;
+    int finishW = 2 * (scaleIn.nRanks + scaleUp.nRanks) - 1;
+    int fwdW = scaleIn.nRanks * nPeers;
+    int allW = sendW + finishW + fwdW;
+    int nSendWarps = min(max((2 * nWarps * sendW + allW) / (2 * allW), 1), nWarps - 2);
+    int nFwdWarps = min(max((2 * nWarps * fwdW + allW) / (2 * allW), 1), nWarps - nSendWarps - 1);
+    int nFinishWarps = nWarps - nSendWarps - nFwdWarps;
+    int warp = threadIdx.x / WARP_SIZE;
+    roleId = warp < nSendWarps ? 0 : warp < nSendWarps + nFinishWarps ? 1 : 2;
+    role = ncclCoopWarpSpan(roleId == 0 ? 0 : roleId == 1 ? nSendWarps : nSendWarps + nFinishWarps,
+                            roleId == 0 ? nSendWarps : roleId == 1 ? nFinishWarps : nFwdWarps, roleId);
+  }
+  bool leader = role.thread_rank() == 0;
+
+  ncclCoopNamedBarrierInit();
+  bar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_AFTER_OPEN);
+
+  uint16_t workLo, workHi;
+  size_t indexLo, indexHi;
+  handler.getWorkRange<T>(blockIdx.x, workLo, indexLo, workHi, indexHi);
+  uint64_t round = 0;
+  NVCC_PRAGMA_UNROLL_DISABLED
+  for (int w = workLo; w <= workHi; w++) {
+    ncclSymkDevWork const& dw = handler.devWork[w];
+    ncclSymPtr<T> input(dw.inputWin, dw.inputOff);
+    ncclSymPtr<T> output(dw.outputWin, dw.outputOff);
+    T* outLocal = output.localPtr();
+    ncclLsaPointerGetter<T> outLsa(output);
+    size_t const nElts = dw.nElts;
+    size_t const pieceElts = nElts / nRanks / PackElts * PackElts;
+    // The block's share of the message maps to the same share of every piece.
+    size_t lo = w > workLo ? 0 : indexLo;
+    size_t hi = w < workHi ? nElts : indexHi;
+    bool ownsEnd = hi == nElts;
+    lo = min(lo / nRanks / PackElts * PackElts, pieceElts);
+    hi = min(hi / nRanks / PackElts * PackElts, pieceElts);
+    bool aligned = (dw.inputOff | dw.outputOff) % ncclSymkBytePerPack == 0;
+
+    NVCC_PRAGMA_UNROLL_DISABLED
+    for (; lo < hi; lo += RoundElts, round++) {
+      int n = int(min(RoundElts, hi - lo));
+      uint64_t const done = seq + round + 1;
+      size_t const myOff = rank * pieceElts + lo;
+      auto runRole = [&] __device__(int id) {
+        if (id == 0) {
+          // Scale-in reduce-scatter into the owners' slots. A slot set is reused every other round.
+          if (round >= 2) {
+            if (leader) hierWaitFlags(comm, credit, nPeers, seq + round - 1);
+            role.sync();
+          }
+          hierReduceSend<T>(comm, scaleIn, scaleUp, red, role, input + lo, pieceElts, slotsBuf, round, n, chunkBytes,
+                            aligned);
+          role.sync();
+          if (leader) hierRaiseUp(comm, scaleUp, flagsBuf, /*base=*/0, done);
+        } else if (id == 1) {
+          // Scale-up reduce-scatter into our output, then ST our piece to our counterparts and package peers.
+          char const* slots = hierSlots(comm, scaleUp, slotsBuf, scaleUp.rank, round, chunkBytes);
+          if (leader) hierWaitFlags(comm, ready, nPeers, done);
+          role.sync();
+          hierReduceFinish<T>(comm, scaleIn, scaleUp, red, role, input + lo, pieceElts, slots, outLocal + myOff, n,
+                              chunkBytes, aligned);
+          role.sync();
+          if (leader) hierRaiseDown(comm, scaleUp, flagsBuf, /*base=*/scaleUp.nRanks, done);
+          arHierCopyBatch<T>(
+            role, red, /*nBatch=*/nPeers, n, aligned,
+            /*getDst=*/
+            [&] __device__(int s) -> T* {
+              return outLsa(ncclTeamRankToLsa(comm, scaleUp, hierPeerUp(scaleUp, s))) + myOff;
+            },
+            /*getSrc=*/[&] __device__(int) -> T* { return outLocal + myOff; });
+          role.sync();
+          if (leader) hierRaiseUp(comm, scaleUp, flagsBuf, /*base=*/2 * scaleUp.nRanks, done);
+          arHierCopyBatch<T>(
+            role, red, /*nBatch=*/nFwd, n, aligned,
+            /*getDst=*/
+            [&] __device__(int b) -> T* { return outLsa(hierCopyLsa(comm, scaleIn, 1 + b)) + myOff; },
+            /*getSrc=*/[&] __device__(int) -> T* { return outLocal + myOff; });
+        } else {
+          // Scale-in allgather of our counterparts' pieces once they land.
+          if (leader) hierWaitFlags(comm, agReady, nPeers, done);
+          role.sync();
+          auto pieceOff = [&] __device__(int b) -> size_t {
+            return ncclTeamRankToWorld(comm, scaleUp, hierPeerDown(scaleUp, b / nFwd)) * pieceElts + lo;
+          };
+          arHierCopyBatch<T>(
+            role, red, /*nBatch=*/nPeers * nFwd, n, aligned,
+            /*getDst=*/
+            [&] __device__(int b) -> T* {
+              return outLsa(hierCopyLsa(comm, scaleIn, 1 + b % nFwd)) + pieceOff(b);
+            },
+            /*getSrc=*/[&] __device__(int b) -> T* { return outLocal + pieceOff(b); });
+        }
+      };
+      if (pipeline) {
+        runRole(roleId);
+      } else {
+        NVCC_PRAGMA_UNROLL_DISABLED
+        for (int id = 0; id < 3; id++) runRole(id);
+      }
+    }
+
+    // Each tail element is read and written by one rank only, so this is safe in place.
+    if (ownsEnd) {
+      allreduceEnds</*UnrollPeers=*/8>(handler, nRanks * tn, rank * tn + t, red, input, output, nElts,
+                                       /*nPreElts=*/0, /*nSufElts=*/nElts - nRanks * pieceElts);
+    }
+  }
+  if (threadIdx.x == 0) flags[nPeers] = seq + round;
+
+  if NCCL_IF_CONSTEXPR (EnableProfiler) ncclSymkProfilerPhase(args, NCCL_KERNEL_PHASE_BEFORE_CLOSE);
+  bar.sync(ncclCoopCta(), cuda::memory_order_release);
 }
 
 template <typename Red, typename T>

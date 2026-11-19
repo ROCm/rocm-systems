@@ -44,7 +44,8 @@ constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncc
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
                                    1 << ncclSymkKernelId_AllReduce_RSxLD_AGxST |
-                                   1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST;
+                                   1 << ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST |
+                                   1 << ncclSymkKernelId_AllReduce_HierLsaLDST;
 
 constexpr uint32_t kernelMask_RS = 1 << ncclSymkKernelId_ReduceScatter_LD | 1 << ncclSymkKernelId_ReduceScatter_LDMC |
                                    1 << ncclSymkKernelId_ReduceScatter_TmaLD | 1 << ncclSymkKernelId_ReduceScatter_LL |
@@ -76,7 +77,7 @@ constexpr uint32_t kernelMask_DynamicSmem = (kernelMask_Gin & kernelMask_RS) | k
 // Needs the LSA team to factor into equal-size packages
 constexpr uint32_t kernelMask_Hier =
   1 << ncclSymkKernelId_AllGather_HierLsaST | 1 << ncclSymkKernelId_AllGather_HierLsaTmaST |
-  1 << ncclSymkKernelId_ReduceScatter_HierLsaLDST;
+  1 << ncclSymkKernelId_ReduceScatter_HierLsaLDST | 1 << ncclSymkKernelId_AllReduce_HierLsaLDST;
 
 int ncclSymkLLKernelMask() {
   return kernelMask_LL;
@@ -156,6 +157,7 @@ static uint32_t kernelMask_coll(ncclFunc_t coll) {
 
 NCCL_PARAM(SymGinKernelsEnable, "SYM_GIN_KERNELS_ENABLE", 1)
 NCCL_PARAM(SymRsGinChunkSize, "SYM_RS_GIN_CHUNK_SIZE", -1)
+NCCL_PARAM(SymArHierPipeline, "SYM_AR_HIER_PIPELINE", 1)
 
 // [RCCL] Anvil SDMA reaches a GIN peer only through its slot in this rank's LSA window, and every
 // rail peer of the GIN kernels is outside the LSA team.
@@ -314,6 +316,7 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
     symk->initialized = true;
     symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
     symk->kcomm.rsHierChunkSize = ncclSymkRsHierMinChunkBytes;
+    symk->kcomm.arHierPipeline = ncclParamSymArHierPipeline() != 0;
     int hierGroups = ncclSymkHierGroups(comm);
     if (ncclSymkHierAvailable(comm) && symk->kcomm.hierScaleInSize == 0) {
       INFO(NCCL_INIT,

@@ -84,6 +84,7 @@ set(SRC_FILES
   device/symmetric/gin_scratch.h
   device/symmetric/gin_scratch__funcs.h
   device/symmetric/gin_scratch__types.h
+  device/symmetric/hier.cuh
   device/symmetric/kernel.cuh
   device/symmetric/primitives.cuh
   device/symmetric/reduce_scatter.cuh

@@ -28,7 +28,7 @@ int ncclSymkModelCtasEnvOverride(enum ncclSymkKernelId kernelId) {
   if (kernelId == ncclSymkKernelId_AllGather_HierLsaTmaST) {
     maxBlocks = ncclSymkAgHierTmaMaxBlocks;
   }
-  if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST) {
+  if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST || kernelId == ncclSymkKernelId_AllReduce_HierLsaLDST) {
     maxBlocks = ncclSymkRsHierMaxBlocks;
   }
   int64_t nUserCTAs = ncclParamSymCTAs();

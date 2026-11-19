@@ -64,10 +64,10 @@ constexpr size_t ncclSymkRsHierSlotsAlign = 4 << 10;
 // times two rounds in flight times one slot per other package. Within it the chunk is
 // ncclSymkRsHierMaxChunkBytes, which holds up to 11 packages; beyond that the chunk shrinks to fit.
 constexpr size_t ncclSymkRsHierSlotsMaxBytes = 256 << 20;
-// Flags a block of it keeps: a ready count from each other package, the block's round count, then a
-// credit count from each other package.
+// Flags a block of it keeps: a ready count from each other package, the block's round count, a credit
+// count from each other package, then an allgather ready count (AllReduce only) from each other package.
 constexpr __host__ __device__ int ncclSymkRsHierFlagsPerBlock(int nGroups) {
-  return 2 * nGroups;
+  return 3 * nGroups;
 }
 
 // [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
@@ -110,6 +110,9 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC,
   ncclSymkKernelId_ReduceScatter_HierLsaLDST,
 
+  // Last so that no other kernel's tuning id moves.
+  ncclSymkKernelId_AllReduce_HierLsaLDST,
+
   ncclSymkKernelId_Count
 };
 
@@ -136,7 +139,8 @@ constexpr char const* ncclSymKernelStr[] = {
   "ReduceScatter_LDMC",
   "ReduceScatter_RailA2A_LsaLD",
   "ReduceScatter_RailA2A_LsaLDMC",
-  "ReduceScatter_HierLsaLDST"
+  "ReduceScatter_HierLsaLDST",
+  "AllReduce_HierLsaLDST"
 };
 
 struct ncclSymkDevComm {
@@ -153,14 +157,17 @@ struct ncclSymkDevComm {
   // Per block of the hierarchical AllGather, a row of flags, one per package group, that the pushing
   // block on another rank raises after each chunk.
   ncclDevResourceHandle hierPushFlags;
-  // Per block of the hierarchical ReduceScatter, two rounds of landing slots, one for each other
-  // package, that the same block on that package's counterpart rank stores partial sums into.
+  // Per block of the hierarchical ReduceScatter and AllReduce, two rounds of landing slots, one for each
+  // other package, that the same block on that package's counterpart rank stores partial sums into.
   ncclDevResourceHandle rsHierSlots;
-  // Per block of the hierarchical ReduceScatter, the flags that pace those slots: counterparts raise a
-  // ready count when a round's sums land, and owners raise a credit count once they have read them.
+  // Per block of the hierarchical ReduceScatter and AllReduce, the flags that pace those slots: counterparts
+  // raise a ready count when a round's sums land, and owners raise a credit count once they have read them.
   ncclDevResourceHandle rsHierFlags;
   // Chunk size: bytes of partial sums a block sends each other package per round.
   uint32_t rsHierChunkSize;
+  // Whether the hierarchical AllReduce splits its warps into concurrent roles, or runs every role on all
+  // warps in turn.
+  bool arHierPipeline;
   // Profiler counters (host-pinned), indexed by channel id and per-channel slot.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
