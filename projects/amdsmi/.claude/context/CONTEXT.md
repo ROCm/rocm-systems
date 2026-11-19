@@ -104,6 +104,11 @@ Disambiguation: activity = utilization = usage; pin the axis (average vs instant
 The **active, settable** power limit: `amdsmi_set_power_cap()` / `amdsmi_power_cap_info_t` (amdsmi.h:1042-1049). **Not** `amdsmi_power_info_t.power_limit` (amdsmi.h:1352), which is a **read-only** info field — there is no `set_gpu_power_limit()`. Enforcement points: **PPT0** (lower limit, filtered input) and **PPT1** (higher limit, raw input) (amdsmi.h:1051-1052). PPT = Package Power Tracking.
 Disambiguation: power cap (settable) ≠ power_limit (read-only field); PPT0/PPT1 are the two firmware enforcement points.
 
+### APU (amd-smi) vs AMD_IS_APU
+
+amd-smi treats a GPU as an APU when `amdsmi_get_gpu_metrics_info()["is_apu"]` is true. The Python interface derives it as `gpu_metrics_output["is_apu"] = bool(gpu_metrics.apu_metrics)` (`py-interface/amdsmi_interface.py`, `amdsmi_get_gpu_metrics_info`), and the CLI keys its APU output on it (`metric.py` `show_apu`). `apu_metrics` is non-null only when the device reports an APU metrics table, versions 2.1-2.4 or 3.0 (`amdsmi_gpu_metrics_t.apu_metrics`, amdsmi.h:2565-2569). The amdgpu driver uses its own `AMD_IS_APU` flag instead, which also covers MI300A; whether amd-smi reports a driver APU such as MI300A as an APU depends only on which metrics table it exposes. On a driver APU, hwmon hides all fan attributes and, except VanGogh and MI300A, `power1_cap*` (`amdgpu_pm.c`), so fan and power-cap writes return NOT_SUPPORTED.
+Disambiguation: amd-smi `is_apu` (gpu_metrics) ≠ driver `AMD_IS_APU`; pin which one a design means.
+
 ### socket power
 
 Current GPU socket power draw. **Platform-split fields** in `amdsmi_power_info_t` (amdsmi.h:1340-1341): `current_socket_power` = instantaneous, **MI300+ only**; `average_socket_power` = windowed average, **Navi / MI200 and earlier**. `socket_power` is W on Linux-baremetal, µW on host.
