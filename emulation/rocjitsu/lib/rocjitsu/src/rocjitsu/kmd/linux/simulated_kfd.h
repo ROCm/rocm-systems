@@ -199,7 +199,28 @@ private:
 /// overloads so each client thread identifies itself by connection, not by
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
+  class LocalIngressCache;
+  // Borrowed host-command owner; trivial TLS does not retain the library.
+  inline static thread_local std::unique_ptr<LocalIngressCache> *scoped_ingress_cache_ = nullptr;
+  static LocalIngressCache &thread_ingress_cache();
+
 public:
+  /// @brief Bound host-thread ingress caches to the current command.
+  /// @details Simulation workers retain their caches outside this scope.
+  class ScopedIngressCache {
+  public:
+    ScopedIngressCache();
+    ~ScopedIngressCache();
+    ScopedIngressCache(const ScopedIngressCache &) = delete;
+    ScopedIngressCache &operator=(const ScopedIngressCache &) = delete;
+
+  private:
+    // Allocated only when this command enters the local memory fast path.
+    std::unique_ptr<LocalIngressCache> cache_;
+    // Borrowed enclosing scope, restored before releasing the current cache.
+    std::unique_ptr<LocalIngressCache> *previous_;
+  };
+
   /// Minimum backing descriptor requested when the process limit permits it.
   /// Shared with the interposer so its early table growth covers this range.
   static constexpr int kBackingFdMin = 4096;

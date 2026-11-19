@@ -4711,6 +4711,28 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
   HIP_RETURN(ihipArray3DGetDescriptor(pArrayDescriptor, array));
 }
 
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  HIP_INIT_API(hipArrayGetPlane, pPlaneArray, hArray, planeIdx);
+  CHECK_STREAM_CAPTURE_SUPPORTED();
+
+  if (pPlaneArray == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  {
+    amd::ScopedLock lock(hipArraySetLock);
+    if (hip::hipArraySet.find(hArray) == hip::hipArraySet.end()) {
+      HIP_RETURN(hipErrorInvalidHandle);
+    }
+  }
+
+  *pPlaneArray = nullptr;
+
+  ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
+          "HIP does not implement multiplanar arrays, so no array has planes to return");
+  HIP_RETURN(hipErrorNotSupported);
+}
+
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyParam2DAsync, pCopy);
   STREAM_CAPTURE(hipMemcpyParam2DAsync, stream, pCopy);
