@@ -34,45 +34,34 @@ find_program(
     PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
     PATH_SUFFIXES bin llvm/bin REQUIRED)
 
-# GPU_TARGETS is left to HIP's detection unless it is given, and detection finds nothing
-# on a build machine without GPUs, so the blit kernels are also built for this list.
-set(ROCPROFILER_KERNEL_REPLAY_BLIT_DEFAULT_TARGETS
-    "gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250"
-    CACHE STRING "GPUs the kernel replay blit kernels are built for besides GPU_TARGETS")
-mark_as_advanced(ROCPROFILER_KERNEL_REPLAY_BLIT_DEFAULT_TARGETS)
-
-# A code object built without xnack or sramecc settings loads whichever setting the GPU
-# uses, so a target such as gfx90a:xnack- gets the gfx90a one.
-set(kernel_replay_blit_candidates ${GPU_TARGETS}
-                                  ${ROCPROFILER_KERNEL_REPLAY_BLIT_DEFAULT_TARGETS})
-list(TRANSFORM kernel_replay_blit_candidates REPLACE ":.*" "")
-list(REMOVE_DUPLICATES kernel_replay_blit_candidates)
-
-# Older compilers do not know the newest GPUs, which are left out rather than failing the
-# build. Checking a GPU compiles a kernel, so like CMake's own checks, a GPU that passes
-# is remembered in the cache.
+# The GPUs this compiler can build the blit kernels for. Generic targets need code object
+# version 6, and gfx6 and gfx7 lack the cross-lane permutes the kernels use.
 set(kernel_replay_blit_flags -mcode-object-version=5 -O3)
-set(kernel_replay_blit_check_source ${CMAKE_CURRENT_BINARY_DIR}/blit-target-check.hip)
-file(WRITE ${kernel_replay_blit_check_source} "__global__ void check() {}\n")
+execute_process(
+    COMMAND ${kernel_replay_hipcc} --target=amdgcn-amd-amdhsa --print-supported-cpus
+    OUTPUT_VARIABLE kernel_replay_blit_cpus
+    ERROR_VARIABLE kernel_replay_blit_cpus)
+string(REGEX MATCHALL "\n[ \t]+gfx[0-9a-z-]+" kernel_replay_blit_supported
+             "${kernel_replay_blit_cpus}")
+list(TRANSFORM kernel_replay_blit_supported STRIP)
+list(FILTER kernel_replay_blit_supported EXCLUDE REGEX "-generic$|^gfx[67][0-9][0-9]$")
+
+# GPU_TARGETS, given or detected by HIP's package, picks the GPUs. It is empty on a build
+# machine without GPUs when not given, and then the blit kernels are built for every GPU
+# the compiler supports. A code object built without xnack or sramecc settings loads
+# whichever setting the GPU uses, so a target such as gfx90a:xnack- gets the gfx90a one.
+if(GPU_TARGETS)
+    set(kernel_replay_blit_candidates ${GPU_TARGETS})
+    list(TRANSFORM kernel_replay_blit_candidates REPLACE ":.*" "")
+    list(REMOVE_DUPLICATES kernel_replay_blit_candidates)
+else()
+    set(kernel_replay_blit_candidates ${kernel_replay_blit_supported})
+endif()
+
 set(kernel_replay_blit_targets)
 set(kernel_replay_blit_skipped)
 foreach(gpu_name IN LISTS kernel_replay_blit_candidates)
-    string(MAKE_C_IDENTIFIER "ROCPROFILER_KERNEL_REPLAY_BLIT_CHECKED_${gpu_name}" checked)
-    if(NOT ${checked})
-        execute_process(
-            COMMAND
-                ${kernel_replay_hipcc} --genco --offload-arch=${gpu_name}
-                ${kernel_replay_blit_flags} -o /dev/null
-                ${kernel_replay_blit_check_source}
-            RESULT_VARIABLE check_result
-            OUTPUT_QUIET ERROR_QUIET)
-        if(check_result EQUAL 0)
-            set(${checked}
-                ON
-                CACHE INTERNAL "")
-        endif()
-    endif()
-    if(${checked})
+    if(gpu_name IN_LIST kernel_replay_blit_supported)
         list(APPEND kernel_replay_blit_targets ${gpu_name})
     else()
         list(APPEND kernel_replay_blit_skipped ${gpu_name})
@@ -84,14 +73,12 @@ message(STATUS "Kernel replay blit kernels: ${kernel_replay_blit_message}")
 if(kernel_replay_blit_skipped)
     list(JOIN kernel_replay_blit_skipped ", " kernel_replay_blit_message)
     message(
-        STATUS
-            "Kernel replay blit kernels: ${kernel_replay_hipcc} does not support ${kernel_replay_blit_message}"
-        )
+        STATUS "Kernel replay blit kernels: not built for ${kernel_replay_blit_message}")
 endif()
 if(NOT kernel_replay_blit_targets)
     message(
         WARNING
-            "Kernel replay blit kernels: ${kernel_replay_hipcc} supports none of their GPUs, so device-only snapshots are unavailable and restores are slower"
+            "Kernel replay blit kernels: built for no GPU, so device-only snapshots are unavailable and restores are slower"
         )
 endif()
 
