@@ -690,6 +690,7 @@ add_executable(
     util_result_test.cpp
     statistics_test.cpp
     statistics_vm_test.cpp
+    cache_statistics_test.cpp
     util_bit_test.cpp
     util_unique_handle_test.cpp
     util_intrusive_shared_ptr_test.cpp

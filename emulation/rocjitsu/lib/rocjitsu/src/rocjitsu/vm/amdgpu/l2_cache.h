@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "rocjitsu/stats/cache_statistics.h"
+
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
@@ -125,6 +127,9 @@ public:
   /// @details This is separate from the maintenance VM so direct functional
   /// accesses and out-of-band maintenance remain independently configurable.
   void set_gpu_vm(GpuVm *gpu_vm) { gpu_vm_ = gpu_vm; }
+
+  /// Bind optional statistics before execution or while all users are quiescent.
+  void set_statistics(const std::shared_ptr<stats::Scope> &scope) { statistics_.bind(scope); }
 
   /// @brief Rebind this cache to a device-local coherence domain before use.
   /// @details A null domain fails without changing registration.
@@ -590,7 +595,7 @@ private:
                                       uint32_t vmid, uint64_t admission_generation);
   // Store allocation leaves untouched bytes absent instead of reading backing.
   VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
-                              bool fetch_on_miss = true);
+                              bool fetch_on_miss = true, bool observe_read = false);
   VmAccessOutcome discard_stale_line_locked(uint64_t addr, uint32_t vmid,
                                             uint64_t admission_generation);
   [[nodiscard]] uint64_t current_cache_identity(uint32_t vmid) const;
@@ -673,6 +678,7 @@ private:
 
   // Accounting has no cache/coherence role and never shares a dirty-state line.
   std::array<DiagnosticCounters, kDiagnosticShards> diagnostics_{};
+  CacheStatistics statistics_;
 };
 
 } // namespace amdgpu

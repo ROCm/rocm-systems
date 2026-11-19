@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "rocjitsu/stats/cache_statistics.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "simdojo/components/cache.h"
 
@@ -57,6 +59,9 @@ public:
 
   /// @brief Set the VM service used for process-scoped MTYPE lookups.
   void set_gpu_vm(GpuVm *gpu_vm);
+
+  /// Bind optional statistics before execution or while all users are quiescent.
+  void set_statistics(const std::shared_ptr<stats::Scope> &scope) { statistics_.bind(scope); }
 
   /// @brief Scalar load: read num_dwords contiguous dwords from addr.
   ///
@@ -141,6 +146,7 @@ private:
   GpuVm *gpu_vm_ = nullptr;
   VmMtypeCache mtype_cache_;
   uint64_t coherence_epoch_ = 0;
+  CacheStatistics statistics_;
 };
 
 } // namespace amdgpu

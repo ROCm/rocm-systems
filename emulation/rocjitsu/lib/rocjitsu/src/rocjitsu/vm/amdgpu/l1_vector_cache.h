@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "rocjitsu/stats/cache_statistics.h"
+
 #include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
 #include "simdojo/components/cache.h"
@@ -56,6 +58,9 @@ public:
   /// steps, so this must finish before ordinary accesses or maintenance.
   void set_l2(L2Cache *l2);
   void set_gpu_vm(GpuVm *gpu_vm);
+
+  /// Bind optional statistics before execution or while all users are quiescent.
+  void set_statistics(const std::shared_ptr<stats::Scope> &scope) { statistics_.bind(scope); }
 
   /// @param addr_base_offset Low bits of a uniform address contribution applied after
   /// swizzling. This does not change the first-byte addresses in @p addrs; it only keeps the
@@ -180,6 +185,7 @@ private:
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;
   uint64_t store_l2_writes_ = 0;
+  CacheStatistics statistics_;
 };
 
 } // namespace amdgpu

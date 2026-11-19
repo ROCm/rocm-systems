@@ -88,6 +88,8 @@ public:
   const simdojo::CompositeComponent &component_root() const { return *component_root_; }
 
   uint32_t gpu_id() const { return gpu_id_; }
+  /// @brief Bind or clear statistics while producers and plugin callbacks are stopped.
+  /// @details Existing wave-local plugin state must no longer be in use.
   void set_statistics(std::shared_ptr<StatisticsSession> session, uint32_t gpu_index);
   const std::shared_ptr<StatisticsSession> &statistics() const { return statistics_; }
   uint32_t statistics_gpu_index() const { return statistics_gpu_index_; }
