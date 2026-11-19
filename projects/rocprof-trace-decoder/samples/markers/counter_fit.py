@@ -176,23 +176,31 @@ def load_spm_samples(path: str, names: list[str]) -> dict[str, dict[int, float]]
     values are deltas since the previous sample, so instances are summed to
     get the GPU-wide delta for that sample.
     """
+    return {name: summed for name, (summed, _) in load_spm_streams(path, names).items()}
+
+
+def load_spm_streams(path: str, names: list[str]):
+    """Like load_spm_samples, plus each instance's own series:
+    counter name -> ({timestamp: summed value}, {instance: [(timestamp, value)]})."""
     with open(path) as f:
         tool = json.load(f)["rocprofiler-sdk-tool"][0]
     ids = {c["id"]["handle"]: c["name"] for c in tool["counters"]}
     wanted = set(names)
     samples: dict[str, dict[int, float]] = {name: defaultdict(float) for name in names}
+    streams: dict[str, dict[int, list]] = {name: defaultdict(list) for name in names}
     for batch in tool["callback_records"].get("spm_counter_collection", []):
         for record in batch["records"]:
             name = ids.get(record["counter_id"]["handle"])
             if name in wanted:
                 samples[name][record["timestamp"]] += record["value"]
+                streams[name][record["instance_id"]].append((record["timestamp"], record["value"]))
     missing = [name for name in names if not samples[name]]
     if missing:
         raise SystemExit(
             f"No SPM samples for {', '.join(missing)} in {path}. Collect them with "
             "rocprofv3 --spm ... --output-format json in the same run as --att."
         )
-    return samples
+    return {name: (samples[name], streams[name]) for name in names}
 
 
 def print_table(sites, executions_per_site, x, model, unit):
@@ -390,15 +398,42 @@ def main() -> int:
     # dict.fromkeys de-duplicates while keeping order, so a counter that is both
     # attributed and used for normalising is only read (and summed) once.
     names = list(dict.fromkeys(counters + [args.normalize_counter or counters[0]]))
-    spm = load_spm_samples(args.spm_json, names)
+    spm_streams = load_spm_streams(args.spm_json, names)
+    spm = {name: summed for name, (summed, _) in spm_streams.items()}
+    # On multi-die GPUs (MI300: one SPM stream per XCC) the instances sample on
+    # different timelines, so a sample's delta covers the time since *its own
+    # instance's* previous sample, not since the previous timestamp of any
+    # instance. Then windows are a regular grid and each delta is spread over
+    # the windows its own interval overlaps.
+    stamp_sets = {
+        frozenset(t for t, _ in series)
+        for name in names
+        for series in spm_streams[name][1].values()
+    }
+    own_timelines = len(stamp_sets) > 1
 
     # Window boundaries are SPM sample timestamps. A sample's value counts the
     # events since the previous sample, so window k covers the realtime interval
     # (edges[k], edges[k + 1]] and owns every sample stamped inside it.
     stamps = sorted(set().union(*(spm[name].keys() for name in names)))
-    edges = stamps[:: args.samples_per_window]
-    if edges[-1] != stamps[-1]:
-        edges.append(stamps[-1])
+    if own_timelines:
+        gaps = []
+        for name in names:
+            for series in spm_streams[name][1].values():
+                ts = sorted({t for t, _ in series})
+                gaps += [b - a for a, b in zip(ts, ts[1:])]
+        gaps.sort()
+        period = gaps[len(gaps) // 2]  # median sampling period of one instance
+        width = period * args.samples_per_window
+        edges = list(range(stamps[0], stamps[-1] + width, width))
+        print(
+            f"SPM instances sample on {len(stamp_sets)} separate timelines (e.g. one per XCC): "
+            f"windows of {width} ticks, each sample spread over its own interval"
+        )
+    else:
+        edges = stamps[:: args.samples_per_window]
+        if edges[-1] != stamps[-1]:
+            edges.append(stamps[-1])
     windows = len(edges) - 1
     if windows < len(sites):
         raise SystemExit(
@@ -414,10 +449,24 @@ def main() -> int:
     # Y per counter: sum the SPM deltas that fall into each window.
     Y: dict[str, list[float]] = {name: [0.0] * windows for name in names}
     for name in names:
-        for stamp, value in spm[name].items():
-            k = window_of(stamp)
-            if k is not None:
-                Y[name][k] += value
+        if not own_timelines:
+            for stamp, value in spm[name].items():
+                k = window_of(stamp)
+                if k is not None:
+                    Y[name][k] += value
+            continue
+        for series in spm_streams[name][1].values():
+            series = sorted(series)
+            # The first sample's interval start is unknown, so it is left out.
+            for (prev, _), (stamp, value) in zip(series, series[1:]):
+                if stamp <= prev:
+                    continue
+                k = max(0, bisect.bisect_right(edges, prev) - 1)
+                while k < windows and edges[k] < stamp:
+                    overlap = min(stamp, edges[k + 1]) - max(prev, edges[k])
+                    if overlap > 0:
+                        Y[name][k] += value * overlap / (stamp - prev)
+                    k += 1
 
     # A: traced executions per site per window, after mapping marker shader-clock
     # times onto the realtime axis of the SPM samples.
