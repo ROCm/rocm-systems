@@ -9,6 +9,8 @@ This script handles:
   4. Running both phases back to back inside one SLURM allocation
   5. Scoring the candidate against the baseline measured on the same nodes
   6. Appending both absolute values and their ratio to a JSONL datastore
+  7. Leaving the leg's record for CoCo in <work dir>/madengine_result.json,
+     which publish_madengine_result.py sends
 
 The reference build is the previous scheduled CI build of the workload's
 schedule, nightly or weekly (``--resolve-baseline``), or the one a dispatch
@@ -3008,6 +3010,177 @@ def leg_artifacts_dir(results_dir: Path, run_id: str, workload: str, phase: str)
     return results_dir / "runs" / run_id / leg / phase
 
 
+# The leg's record for CoCo's madengine A/B page, which the workflow's publish
+# step sends. Its schema is MadengineAbPayload in tRCCL's
+# coco/core/models/madengine_ab.py; bump this with its payload version.
+COCO_SCHEMA_VERSION = 1
+COCO_RECORD_NAME = "madengine_result.json"
+COCO_REPORT_CHARS = 65_536
+COCO_PHASE_ROWS = 2048
+
+
+def _finite(value: object) -> float | None:
+    """*value* as a float strict JSON can carry, or None."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _json_safe(value: object) -> object:
+    """*value* with every NaN or infinity inside it replaced by None."""
+    if isinstance(value, float):
+        return _finite(value)
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
+
+
+def coco_record_path(args: argparse.Namespace) -> Path | None:
+    """Where the record goes: the work dir, or the job's WORK_DIR; None for neither."""
+    work_dir = args.work_dir or os.environ.get("WORK_DIR", "")
+    return Path(work_dir) / COCO_RECORD_NAME if work_dir else None
+
+
+def coco_build(phase: str, *, sha: str = "", event: str = "",
+               fingerprint: dict | None = None, image: str = "") -> dict:
+    """One side's build for the record: the run it came from, or the published spec."""
+    fingerprint = fingerprint or {}
+    if phase == CANDIDATE:
+        run_id, source = os.environ.get("ARTIFACT_RUN_ID", ""), ""
+    else:
+        run_id = os.environ.get("BASELINE_ARTIFACT_RUN_ID", "")
+        source = os.environ.get("BASELINE_RCCL_SOURCE", "")
+    return {
+        "artifact_run_id": run_id or None,
+        "sha": sha or None,
+        "event": event or None,
+        "rccl_version": fingerprint.get("version") or None,
+        "rccl_md5": fingerprint.get("md5") or None,
+        "image": image or None,
+        "source": source or None,
+    }
+
+
+def coco_comparisons(comparisons: list[dict], metric_key: str, workload_type: str) -> list[dict]:
+    """The gate's comparisons, one per point, as the record carries them."""
+    threshold = (REGRESSION_THRESHOLD_TRAINING if workload_type == "training"
+                 else REGRESSION_THRESHOLD_INFERENCE)
+    records = []
+    for c in comparisons:
+        base, cand = c[BASELINE] or {}, c[CANDIDATE] or {}
+        ratio = _finite(c["ratio"])
+        records.append({
+            "point_key": c["precision"][:128],
+            "metric": metric_key[:128],
+            "threshold": threshold,
+            "baseline_value": _finite(base.get("metric_value")),
+            "candidate_value": _finite(cand.get("metric_value")),
+            "ratio": ratio,
+            "baseline_tflops": _finite(base.get("tflops_avg")),
+            "candidate_tflops": _finite(cand.get("tflops_avg")),
+            "baseline_status": base.get("status"),
+            "candidate_status": cand.get("status"),
+            # check_ab_regression's own test, on the ratio it would compute.
+            "regression": None if ratio is None else ratio < 1 - threshold,
+        })
+    return records
+
+
+def coco_phase(run_dir: Path, exit_code: int | None, rccl_verified: bool | None) -> dict:
+    """One phase for the record: how it exited, and its perf_entry_super.json rows.
+
+    A row is keyed by its point and metric; ``model`` alone does not tell two
+    precisions apart.
+    """
+    rows: dict[tuple[str, str], dict] = {}
+    try:
+        entries = json.loads((run_dir / "perf_entry_super.json").read_text())
+    except (OSError, json.JSONDecodeError):
+        entries = []
+    for row in entries if isinstance(entries, list) else []:
+        if not isinstance(row, dict) or not row.get("metric"):
+            continue
+        point = _row_precision(row)[:128]
+        metric = str(row["metric"])[:128]
+        multi = row.get("multi_results")
+        rows[(point, metric)] = {
+            "point_key": point,
+            "model": str(row.get("model", ""))[:255],
+            "metric": metric,
+            "performance": _finite(row.get("performance")),
+            "status": str(row["status"])[:32] if row.get("status") else None,
+            "multi_results": _json_safe(multi) if isinstance(multi, dict) else None,
+        }
+    return {
+        "exit_code": exit_code,
+        "rccl_verified": rccl_verified,
+        "rows": list(rows.values())[:COCO_PHASE_ROWS],
+    }
+
+
+def coco_record(
+    args: argparse.Namespace,
+    *,
+    verdict: str,
+    started_at: datetime | None,
+    builds: dict,
+    report: str,
+    comparisons: list[dict] | None = None,
+    phases: dict | None = None,
+    slurm_job_id: str = "",
+    nodelist: str = "",
+    base_image: str = "",
+) -> dict:
+    """This leg's record: the run context from the job's environment, plus what it found."""
+    workload_config = WORKLOAD_CONFIGS[args.workload]
+    # owner/repo/.github/workflows/<file>@<ref>: the caller's file, which is
+    # what GitHub's run list names the run by.
+    workflow = os.environ.get("GITHUB_WORKFLOW_REF", "").split("@", 1)[0].split("/", 2)[-1]
+    return {
+        "schema_version": COCO_SCHEMA_VERSION,
+        "repo": os.environ.get("GITHUB_REPOSITORY", ""),
+        "workflow": workflow,
+        "run_id": int(os.environ.get("GITHUB_RUN_ID") or 0),
+        "run_attempt": int(os.environ.get("GITHUB_RUN_ATTEMPT") or 1),
+        "event": os.environ.get("GITHUB_EVENT_NAME", ""),
+        "head_sha": os.environ.get("GITHUB_SHA") or None,
+        "run_label": os.environ.get("RUN_LABEL", ""),
+        "report_only": bool(args.report_only),
+        "workload": args.workload,
+        "workload_type": workload_config["type"],
+        "nodes": args.nodes,
+        "gpus_per_node": workload_config.get("gpus_per_node"),
+        "amdgpu_family": os.environ.get("AMDGPU_FAMILIES", ""),
+        "cluster": args.cluster,
+        "slurm_job_id": str(slurm_job_id) if slurm_job_id else None,
+        "nodelist": (nodelist or "")[:1024] or None,
+        "base_image": (base_image or "")[:1024] or None,
+        "verdict": verdict,
+        "started_at": started_at.isoformat() if started_at else None,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "builds": builds,
+        "comparisons": comparisons or [],
+        "phases": phases or {BASELINE: None, CANDIDATE: None},
+        "report": report[:COCO_REPORT_CHARS] or None,
+    }
+
+
+def write_coco_record(args: argparse.Namespace, record: dict) -> None:
+    """Leave *record* for the publish step. A failure here must not cost the gate its result."""
+    path = coco_record_path(args)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, allow_nan=False, indent=1))
+    except (OSError, ValueError) as exc:
+        log.warning("Could not write the CoCo record %s: %s", path, exc)
+
+
 def send_report(args: argparse.Namespace, report: str, exit_code: int) -> None:
     """Send *report* to the email and Teams channel the run was given."""
     status = "PASSED" if exit_code == 0 else "FAILED"
@@ -3035,6 +3208,10 @@ def fail_before_run(args: argparse.Namespace, scale: str, reason: str) -> NoRetu
     log.info("\n%s", report)
     write_github_summary(report)
     set_github_output("madengine_status", "fail")
+    write_coco_record(args, coco_record(
+        args, verdict="error", started_at=None, report=report,
+        builds={phase: coco_build(phase) for phase in (BASELINE, CANDIDATE)},
+    ))
     send_report(args, report, 1)
     sys.exit(1)
 
@@ -3132,6 +3309,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    started_at = datetime.now(timezone.utc)
     # madengine runs inside our allocation only for multi-node workloads; a
     # single-node phase gets its own sbatch, possibly on other nodes.
     if args.nodes < 2:
@@ -3319,10 +3497,12 @@ def main() -> None:
     # Step 5b: Verify RCCL replacement in both phases: each must have run its
     # own build's library, not the image's bundled copy.
     rccl_verification_failed = False
+    rccl_verified: dict[str, bool] = {}
     for phase, run_dir in phases:
         rccl_ok, rccl_msg = verify_rccl_replacement(
             run_dir, fingerprints[phase], args.nodes,
         )
+        rccl_verified[phase] = rccl_ok
         if rccl_ok:
             log.info("%s RCCL verification: %s", phase, rccl_msg)
         else:
@@ -3484,6 +3664,26 @@ def main() -> None:
 
     summary_path = work_dir / "madengine_summary.txt"
     summary_path.write_text(report)
+    write_coco_record(args, coco_record(
+        args,
+        verdict=status,
+        started_at=started_at,
+        report=report,
+        builds={
+            phase: coco_build(phase, sha=sources[phase]["sha"], event=sources[phase]["event"],
+                              fingerprint=fingerprints[phase], image=images[phase])
+            for phase in (BASELINE, CANDIDATE)
+        },
+        comparisons=coco_comparisons(comparisons, metric_key, workload_config["type"]),
+        phases={
+            phase: coco_phase(run_dir, allocation["exit_codes"].get(phase),
+                              rccl_verified.get(phase))
+            for phase, run_dir in phases
+        },
+        slurm_job_id=allocation["job_id"],
+        nodelist=allocation["nodelist"],
+        base_image=base_ref or workload_config["base_image"],
+    ))
 
     send_report(args, report, exit_code)
 
