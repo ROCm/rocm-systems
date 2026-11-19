@@ -112,16 +112,11 @@ public:
  /// @brief Number of core tiles in each column.
  uint32_t num_core_rows() const { return node_props_.NumCUPerArray; }
 
- /// @brief Number of code objects destroyed on this agent that had placed PdiInsts PDIs.
- ///
- /// A queue's PDI cache names PDIs by BO handle, and the driver reuses the handles of freed BOs, so
- /// once such a code object is destroyed a cached handle may name a freed BO or a new, unrelated
- /// one. Each queue records the value its cache was filled under and empties the cache when it has
- /// moved.
+ /// @brief Epoch incremented when a code object with PdiInsts PDIs is destroyed.
+ /// Queues clear their PDI caches when this changes, because freed BO handles may be reused.
  uint64_t PdiReleaseEpoch() const { return pdi_release_epoch_.load(std::memory_order_seq_cst); }
 
- /// @brief Records that a code object's PdiInsts PDIs are about to be freed. Called before the
- /// BOs are freed, so that no queue can see their handles reused under the old epoch.
+ /// @brief Advance the PDI release epoch before freeing the code object's BOs.
  void ReleasePdis() { pdi_release_epoch_.fetch_add(1, std::memory_order_seq_cst); }
 
 private:
@@ -139,8 +134,10 @@ private:
   std::function<void(void*)> system_deallocator_;
 
   const hsa_profile_t profile_ = HSA_PROFILE_BASE;
-  const uint32_t min_aql_size_ = 0x40;
-  const uint32_t max_aql_size_ = 0x40;
+  /// @brief Queue-size limits: 0x40 for aie2/aie2p KMQ chain limits, kUmqMaxCmds for the aie4 UMQ
+  /// ring-slot cap enforced by CERT (see amd_xdna_driver.h).
+  uint32_t min_aql_size_ = 0x40;
+  uint32_t max_aql_size_ = 0x40;
   const uint32_t max_queues_ = 1;
 
   const HsaNodeProperties node_props_;

@@ -21,6 +21,7 @@ set(TEST_SRC
     hipSetGetDevice.cc
     hipDeviceGetUuid.cc
     hipDeviceGetLuid.cc
+    hipDeviceGetExecAffinitySupport.cc
     hipDeviceAPUCheck.cc
     hipDeviceFlushGPUDirectRDMAWrites.cc
     hipDeviceGetDefaultMemPool.cc
@@ -28,6 +29,7 @@ set(TEST_SRC
     hipDeviceEnableDisablePeerAccess.cc
     hipExtGetLinkTypeAndHopCount.cc
     hipDeviceSetGetLimit.cc
+    hipDevicePersistingL2Cache.cc
     hipDeviceSetGetSharedMemConfig.cc
     hipDeviceReset.cc
     hipDeviceSetGetMemPool.cc
@@ -45,7 +47,7 @@ if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
       hipGetProcAddressDevMgmt.cc
       hipGetDriverEntryPoint.cc)
   if(UNIX)
-    set(AMD_SRC ${AMD_SRC} hipGetProcAddressIpcApis.cc)
+    set(AMD_SRC ${AMD_SRC} hipGetProcAddressIpcApis.cc hipAmdFileIo.cc)
   endif()
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()

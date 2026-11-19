@@ -64,14 +64,6 @@ function(
                 COMPONENT ${COMPONENT_NAME_T}
             )
         endif()
-    else()
-        # License file
-        install(
-            FILES ${LICENSE_FILE}
-            DESTINATION ${CMAKE_INSTALL_DOCDIR}
-            RENAME LICENSE.txt
-            COMPONENT ${COMPONENT_NAME_T}
-        )
     endif()
 endfunction()
 

@@ -10,11 +10,14 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
+#include <exception>
 #include <format>
 #include <limits>
-#include <stdexcept>
+#include <system_error>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -45,6 +48,7 @@ public:
               SdmaPacketDialect dialect, SdmaPacketCallbacks callbacks,
               SdmaQueueProgressObserver progress_observer)
       : address_space_lease_(std::move(retained_address_space)),
+        producer_ingress_(callbacks.admit_memory_ingress),
         ring_consumer_(gpu_vm, std::move(config.ring), dialect, std::move(callbacks)),
         process_id_(config.context.process_id), queue_id_(config.context.queue_id),
         engine_id_(config.context.engine_id),
@@ -59,6 +63,7 @@ private:
   friend class SdmaQueueScheduler;
 
   GpuVmBindingLease address_space_lease_;
+  SdmaMemoryIngressHandler producer_ingress_;
   SdmaRingConsumer ring_consumer_;
   uint32_t process_id_ = 0;
   uint32_t queue_id_ = 0;
@@ -91,8 +96,7 @@ SdmaQueueScheduler::SdmaQueueScheduler(GpuVm &gpu_vm,
                                        std::shared_ptr<DeviceCacheCoherence> coherence,
                                        SdmaPacketDialect dialect)
     : gpu_vm_(gpu_vm), coherence_(std::move(coherence)), dialect_(dialect) {
-  if (!coherence_)
-    throw std::invalid_argument("SDMA queue scheduler requires a cache-coherence domain");
+  assert(coherence_ && "SDMA queue scheduler requires a cache-coherence domain");
 }
 
 SdmaQueueScheduler::~SdmaQueueScheduler() { shutdown(); }
@@ -133,6 +137,8 @@ SdmaQueueScheduler::Handle SdmaQueueScheduler::allocate_locked(std::shared_ptr<Q
 void SdmaQueueScheduler::ensure_worker_locked() {
   if (worker_.joinable())
     return;
+  if (std::exchange(fail_next_worker_start_for_testing_, false))
+    throw std::system_error(std::make_error_code(std::errc::resource_unavailable_try_again));
   worker_ = std::jthread([this](std::stop_token stop_token) { worker_loop(stop_token); });
 }
 
@@ -275,6 +281,11 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
       return status;
     }
 
+    // The worker can retain a QueueRecord after publishing service_active_=false.
+    // Cancel its deferred owner effect before detach reports force-close done.
+    if (force)
+      queue->ring_consumer_.cancel_in_flight();
+
     Slot &slot = slots_[handle.slot_];
     slot.queue.reset();
     ++slot.generation;
@@ -299,7 +310,9 @@ void SdmaQueueScheduler::set_process_doorbell_base(uint32_t process_id, void *ba
   condition_.notify_all();
 }
 
-bool SdmaQueueScheduler::synchronize_host_queue_for_test(uint32_t process_id, uint32_t queue_id) {
+bool SdmaQueueScheduler::synchronize_host_queue_for_test(uint32_t process_id, uint32_t queue_id,
+                                                         std::chrono::milliseconds timeout) {
+  const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
   std::unique_lock lock(mutex_);
   scan_host_doorbells_locked();
 
@@ -311,16 +324,19 @@ bool SdmaQueueScheduler::synchronize_host_queue_for_test(uint32_t process_id, ui
   if (!queue->service_active_ && queue->ring_consumer_.cursor() < producer_cursor)
     queue->ready_ = true;
   condition_.notify_all();
-  condition_.wait(lock, [&queue, producer_cursor]() {
-    return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
-           (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor);
-  });
+  if (!condition_.wait_until(lock, deadline, [&queue, producer_cursor]() {
+        return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
+               (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor);
+      }))
+    return false;
   return !queue->closing_ && !queue->terminal_ && queue->enabled_ && !queue->service_active_ &&
          queue->ring_consumer_.cursor() >= producer_cursor;
 }
 
 bool SdmaQueueScheduler::synchronize_queue_for_test(
-    uint32_t process_id, uint32_t queue_id, const std::function<void()> &service_dependencies) {
+    uint32_t process_id, uint32_t queue_id, const std::function<void()> &service_dependencies,
+    std::chrono::milliseconds timeout) {
+  const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
   uint64_t producer_cursor = 0;
   {
     const std::lock_guard lock(mutex_);
@@ -340,15 +356,18 @@ bool SdmaQueueScheduler::synchronize_queue_for_test(
       return false;
     if (!queue->service_active_ && queue->ring_consumer_.cursor() >= producer_cursor)
       return true;
+    if (std::chrono::steady_clock::now() >= deadline)
+      return false;
 
     const uint64_t completed_service_turns = queue->completed_service_turns_;
     queue->ready_ = true;
     queue->retry_pending_ = false;
     condition_.notify_all();
-    condition_.wait(lock, [&queue, completed_service_turns]() {
-      return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
-             queue->completed_service_turns_ != completed_service_turns;
-    });
+    if (!condition_.wait_until(lock, deadline, [&queue, completed_service_turns]() {
+          return queue->closing_ || queue->terminal_ || !queue->enabled_ ||
+                 queue->completed_service_turns_ != completed_service_turns;
+        }))
+      return false;
   }
 }
 
@@ -512,35 +531,51 @@ void SdmaQueueScheduler::worker_loop(std::stop_token stop_token) {
 
     SdmaRingStatus outcome = SdmaRingStatus::Faulted;
     bool publication_ready = true;
-    if (synchronize_publication) {
-      // The doorbell remains the execution bound. This acquire load exists only
-      // to pair with the producer's release-store of its canonical write pointer.
-      const AtomicLoadResult write_pointer = gpu_vm_.atomic_load(
-          queue->address_space_lease_.handle(), queue->producer_pointer_address_, sizeof(uint64_t));
-      if (write_pointer.outcome == VmAccessOutcome::Complete) {
-        const std::lock_guard lock(mutex_);
-        queue->synchronized_cursor_ = std::max(queue->synchronized_cursor_, producer);
-      } else {
-        publication_ready = false;
-        outcome = write_pointer.outcome == VmAccessOutcome::Unavailable ? SdmaRingStatus::Blocked
-                                                                        : SdmaRingStatus::Faulted;
+    try {
+      if (synchronize_publication) {
+        // The doorbell remains the execution bound. This acquire load exists only
+        // to pair with the producer's release-store of its canonical write pointer.
+        AtomicLoadResult write_pointer;
+        if (queue->producer_ingress_) {
+          const std::optional<GpuVmAccess> access =
+              gpu_vm_.snapshot(queue->address_space_lease_.handle());
+          if (!access) {
+            write_pointer.outcome = VmAccessOutcome::Revoked;
+          } else {
+            const std::array spans{MemoryIngressSpan{queue->producer_pointer_address_,
+                                                     sizeof(uint64_t), VmAccessKind::Read}};
+            MemoryIngressAdmission admitted = queue->producer_ingress_(*access, spans);
+            write_pointer =
+                admitted.outcome == VmAccessOutcome::Complete
+                    ? access->atomic_load(queue->producer_pointer_address_, sizeof(uint64_t))
+                    : AtomicLoadResult{.outcome = admitted.outcome};
+          }
+        } else {
+          write_pointer = gpu_vm_.atomic_load(queue->address_space_lease_.handle(),
+                                              queue->producer_pointer_address_, sizeof(uint64_t));
+        }
+        if (write_pointer.outcome == VmAccessOutcome::Complete) {
+          const std::lock_guard lock(mutex_);
+          queue->synchronized_cursor_ = std::max(queue->synchronized_cursor_, producer);
+        } else {
+          publication_ready = false;
+          outcome = write_pointer.outcome == VmAccessOutcome::Unavailable ? SdmaRingStatus::Blocked
+                                                                          : SdmaRingStatus::Faulted;
+        }
       }
-    }
-    if (publication_ready) {
-      try {
+      if (publication_ready)
         outcome = queue->ring_consumer_.service(producer, kPacketsPerTurn);
-      } catch (const std::exception &error) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after exception: {}",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_,
-                                       error.what()));
-        queue->ring_consumer_.latch_callback_failure();
-        outcome = SdmaRingStatus::Faulted;
-      } catch (...) {
-        util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after unknown exception",
-                                       queue->engine_id_, queue->process_id_, queue->queue_id_));
-        queue->ring_consumer_.latch_callback_failure();
-        outcome = SdmaRingStatus::Faulted;
-      }
+    } catch (const std::exception &error) {
+      util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after exception: {}",
+                                     queue->engine_id_, queue->process_id_, queue->queue_id_,
+                                     error.what()));
+      queue->ring_consumer_.latch_callback_failure();
+      outcome = SdmaRingStatus::Faulted;
+    } catch (...) {
+      util::Logger::warn(std::format("SDMA{} queue {}:{} stopped after unknown exception",
+                                     queue->engine_id_, queue->process_id_, queue->queue_id_));
+      queue->ring_consumer_.latch_callback_failure();
+      outcome = SdmaRingStatus::Faulted;
     }
 
     const bool terminal_outcome =

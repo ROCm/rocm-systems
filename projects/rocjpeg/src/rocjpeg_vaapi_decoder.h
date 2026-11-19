@@ -107,7 +107,7 @@ typedef enum {
  *
  * This structure holds information about a memory pool entry used by the RocJpegVaapiDecoder.
  * It contains the image width and height, the entry status, an array of VA surface IDs,
- * and an array of HipInteropDeviceMem objects.
+ * an array of HipInteropDeviceMem objects, and the status of each VA surface.
  */
 struct RocJpegVaapiMemPoolEntry {
     uint32_t image_width;
@@ -115,6 +115,9 @@ struct RocJpegVaapiMemPoolEntry {
     MemPoolEntryStatus entry_status;
     std::vector<VASurfaceID> va_surface_ids;
     std::vector<HipInteropDeviceMem> hip_interops;
+    // Status of each surface in va_surface_ids. Surfaces are released one at a time, so the entry only
+    // becomes idle once all of them are idle; otherwise it could be reused while some are still in flight.
+    std::vector<MemPoolEntryStatus> surface_status;
 };
 
 /**
@@ -185,7 +188,8 @@ class RocJpegVaapiMemoryPool {
         /**
          * @brief Sets a VASurfaceID as idle.
          *
-         * This function sets the specified VASurfaceID as idle, indicating that it is available for reuse.
+         * This function sets the specified VASurfaceID as idle. Its pool entry becomes available for reuse
+         * once every surface of the entry is idle.
          *
          * @param surface_id The VASurfaceID to set as idle.
          * @return true if the VASurfaceID was successfully set as idle, false otherwise.

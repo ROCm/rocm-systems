@@ -496,6 +496,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
     err = ReadSysfsStr(cu_occupancy_path, &tmp);
     sysfs_data_errcode = CheckValidProcessInfoData(tmp, err);
 
+    // Missing occupancy on one GPU must not discard samples from other GPUs.
     if (!(sysfs_data_errcode == 0 || sysfs_data_errcode == ENOENT)) {
       return sysfs_data_errcode;
     } else if (sysfs_data_errcode == 0) {
@@ -503,17 +504,15 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
       proc->cu_occupancy += std::stoi(tmp);
       // Collect count of compute units
       cu_count += kfd_node_map[gpu_id]->cu_count();
-    } else {
-      // Some GFX revisions do not provide cu_occupancy debugfs method
-      // which may cause ENOENT
-      proc->cu_occupancy = CU_OCCUPANCY_INVALID;
-      cu_count = 0;
     }
   }
 
   // Adjust CU occupancy to percent.
   if (cu_count > 0) {
     proc->cu_occupancy = ((proc->cu_occupancy * 100) / cu_count);
+  } else {
+    // Some GFX revisions do not provide the cu_occupancy debugfs method.
+    proc->cu_occupancy = CU_OCCUPANCY_INVALID;
   }
 
   return 0;

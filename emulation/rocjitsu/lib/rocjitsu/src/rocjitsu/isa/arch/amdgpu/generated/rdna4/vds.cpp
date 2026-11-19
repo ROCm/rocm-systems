@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vds.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include <memory>
@@ -30,6 +31,8 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -60,6 +63,8 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -90,6 +95,8 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -120,6 +127,8 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -150,6 +159,8 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -180,6 +191,8 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -210,6 +223,8 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -240,6 +255,8 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -270,6 +287,8 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -300,6 +319,8 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -330,6 +351,8 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -360,6 +383,8 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -392,6 +417,8 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -420,6 +447,8 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -450,6 +479,8 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -481,6 +512,8 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -514,6 +547,8 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -545,6 +580,8 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -575,6 +612,8 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -593,6 +632,8 @@ DsNopVds::DsNopVds(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_NOP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -623,6 +664,8 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -652,6 +695,8 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -681,6 +726,8 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -713,6 +760,8 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -745,6 +794,8 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -777,6 +828,8 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -810,6 +863,8 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -842,6 +897,8 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -874,6 +931,8 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -906,6 +965,8 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -938,6 +999,8 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -970,6 +1033,8 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1002,6 +1067,8 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1034,6 +1101,8 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1066,6 +1135,8 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1100,6 +1171,8 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1133,6 +1206,8 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1168,6 +1243,8 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1203,6 +1280,8 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1239,6 +1318,8 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1272,6 +1353,8 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_RTN_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1305,6 +1388,8 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_RTN_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1329,6 +1414,8 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SWIZZLE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -1359,6 +1446,8 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1387,6 +1476,8 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1416,6 +1507,8 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1446,6 +1539,8 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1475,6 +1570,8 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1504,6 +1601,8 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1533,6 +1632,8 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1561,6 +1662,8 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CONSUME);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1589,6 +1692,8 @@ DsAppendVds::DsAppendVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_APPEND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1619,6 +1724,8 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1649,6 +1756,8 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1679,6 +1788,8 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1709,6 +1820,8 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1739,6 +1852,8 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1769,6 +1884,8 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1799,6 +1916,8 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1829,6 +1948,8 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1859,6 +1980,8 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1889,6 +2012,8 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1919,6 +2044,8 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1949,6 +2076,8 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1981,6 +2110,8 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2009,6 +2140,8 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2039,6 +2172,8 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2070,6 +2205,8 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2103,6 +2240,8 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2134,6 +2273,8 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2164,6 +2305,8 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2196,6 +2339,8 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2228,6 +2373,8 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2260,6 +2407,8 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2293,6 +2442,8 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2325,6 +2476,8 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2357,6 +2510,8 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2389,6 +2544,8 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2421,6 +2578,8 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2453,6 +2612,8 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2485,6 +2646,8 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2517,6 +2680,8 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2549,6 +2714,8 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2583,6 +2750,8 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2616,6 +2785,8 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2651,6 +2822,8 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2686,6 +2859,8 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2722,6 +2897,8 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2755,6 +2932,8 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_RTN_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2788,6 +2967,8 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_RTN_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2818,6 +2999,8 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2846,6 +3029,8 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2875,6 +3060,8 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2908,6 +3095,8 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2940,6 +3129,8 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CONDXCHG32_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2971,6 +3162,8 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_COND_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3002,6 +3195,8 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_CLAMP_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3033,6 +3228,8 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3063,6 +3260,8 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3092,6 +3291,9 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B8_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3122,6 +3324,9 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B16_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3151,6 +3356,9 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U8_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3185,6 +3393,9 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U8_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3220,6 +3431,9 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I8_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3254,6 +3468,9 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I8_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3289,6 +3506,9 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U16_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3324,6 +3544,9 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U16_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3363,6 +3586,8 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_COND_SUB_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3396,6 +3621,8 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_CLAMP_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3429,6 +3656,8 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_RTN_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3462,6 +3691,8 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_RTN_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3491,6 +3722,8 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_ADDTID_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -3520,6 +3753,8 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_ADDTID_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3546,6 +3781,8 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PERMUTE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -3572,6 +3809,8 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BPERMUTE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -3598,6 +3837,8 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
   num_dst_ = 1;
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BPERMUTE_FI_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -3627,6 +3868,8 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -3655,6 +3898,8 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -3685,6 +3930,8 @@ DsBvhStackPush4Pop1RtnB32Vds::DsBvhStackPush4Pop1RtnB32Vds(const MachineInst *in
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BVH_STACK_PUSH4_POP1_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -3717,6 +3964,8 @@ DsBvhStackPush8Pop1RtnB32Vds::DsBvhStackPush8Pop1RtnB32Vds(const MachineInst *in
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BVH_STACK_PUSH8_POP1_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -3749,6 +3998,8 @@ DsBvhStackPush8Pop2RtnB64Vds::DsBvhStackPush8Pop2RtnB64Vds(const MachineInst *in
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BVH_STACK_PUSH8_POP2_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -3780,6 +4031,8 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3809,6 +4062,8 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
