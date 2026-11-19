@@ -99,11 +99,14 @@ tolerance. Prints a summary box, writes a per-stream comparison CSV to
 memory type; override the base with `ROCDECODE_PERF_RESULTS_DIR`), and exits `0` if there
 are no regressions, `1` otherwise.
 
+A stream that `videoDecodePerf` fails to decode (non-zero exit or no FPS reported, in any of
+its runs) is reported as `FAILED`, not skipped, and fails the run (exit 1) in every mode.
+
 If no baseline is available — either the baseline file is missing or it has no column for
 the detected GPU — the script runs in **measure-only mode**: all streams are measured, FPS
 is saved to CSV (which can serve as a future baseline), and the summary reports
-`— NO BASELINE` per codec with `— MEASURED` overall (exit 0). The specific reason is
-printed as a WARNING.
+`— NO BASELINE` per codec with `— MEASURED` overall (exit 0, unless a stream failed). The
+specific reason is printed as a WARNING.
 
 ```shell
 test/perf_regression.py [--perf-dir DIR] [--baseline FILE] [--tolerance PCT] [--runs N] [--device ID] [--gpu NAME] [--quick] [--check-rocm] [--mem-type {0,1,2,3}] [--save-baseline [--force]]
@@ -190,7 +193,9 @@ test/perf_regression.py --mem-type 1 --save-baseline
 combined with `--quick`: later runs compare only the streams that are in the baseline. It
 refuses to overwrite an existing file unless `--force` is given. Besides `File` and `FPS`,
 the CSV records the codec, memory type, GPU, time and `ROCM_PATH`, so you can tell later
-where a baseline came from. Local baselines describe one machine and software stack; they
+where a baseline came from. A baseline whose recorded memory type or GPU differs from the run
+is rejected (a CSV with only `File` and `FPS` is accepted), so a copied-mode baseline cannot
+be compared against a decode-only run by mistake. Local baselines describe one machine and software stack; they
 are not a substitute for the shared SharePoint baseline.
 
 Baseline selection:

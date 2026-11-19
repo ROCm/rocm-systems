@@ -287,11 +287,26 @@ def local_baseline_path(perf_dir, label, mem_type):
     return perf_dir / LOCAL_BASELINE_DIR / f"{label}_m{mem_type}.csv"
 
 
-def load_local_baseline(csv_path):
-    """Return {basename: baseline_fps} from a baseline CSV written by --save-baseline."""
+def load_local_baseline(csv_path, mem_type=None, label=None):
+    """Return {basename: baseline_fps} from a baseline CSV written by --save-baseline.
+
+    When the CSV has the Mem Type or GPU columns that --save-baseline writes, they
+    must match the run's memory type and GPU: comparing, say, a decode-only run
+    against a copied-mode baseline would hide regressions. A CSV with only File and
+    FPS is accepted as is."""
     df = pd.read_csv(csv_path)
     if "File" not in df.columns or "FPS" not in df.columns:
         raise ValueError(f"baseline CSV {csv_path} needs 'File' and 'FPS' columns")
+    if mem_type is not None and "Mem Type" in df.columns:
+        recorded = set(pd.to_numeric(df["Mem Type"], errors="coerce").dropna().astype(int))
+        if recorded and recorded != {mem_type}:
+            raise ValueError(f"baseline CSV {csv_path} was recorded with memory type "
+                             f"{sorted(recorded)}, but this run uses {mem_type}")
+    if label is not None and "GPU" in df.columns:
+        recorded = set(df["GPU"].dropna().astype(str).str.strip())
+        if recorded and recorded != {label}:
+            raise ValueError(f"baseline CSV {csv_path} was recorded on GPU "
+                             f"{sorted(recorded)}, but this run is on {label}")
     baseline = {}
     for _, row in df.iterrows():
         fname = str(row["File"]).strip()
@@ -314,7 +329,10 @@ def load_local_baseline(csv_path):
 
 
 def measure_stream(stream_path, runs, device, mem_type=None):
-    """Run videodecodeperf directly N times on one stream; return averaged FPS or None."""
+    """Run videodecodeperf directly N times on one stream; return the averaged FPS,
+    or None if any run fails. A failed run is not averaged away: a stream that
+    decodes only some of the time is a failure, and an average of fewer runs than
+    requested would misrepresent a saved baseline."""
     cmd = [str(PERF_EXE), "-i", str(stream_path), "-t", "1", "-d", str(device)]
     if mem_type is not None:
         cmd += ["-m", str(mem_type)]
@@ -322,9 +340,10 @@ def measure_stream(stream_path, runs, device, mem_type=None):
     for _ in range(runs):
         out = _run(cmd)
         m = re.search(r"avg decode FPS:\s*([\d.]+)", out.stdout + out.stderr)
-        if m:
-            vals.append(float(m.group(1)))
-    return sum(vals) / len(vals) if vals else None
+        if out.returncode != 0 or not m:
+            return None
+        vals.append(float(m.group(1)))
+    return sum(vals) / len(vals)
 
 
 STREAM_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".img", ".ivf", ".av1", ".265", ".h265", ".hevc"}
@@ -362,7 +381,8 @@ def summary_box(rows, overall_ok, measure_only=False):
     line = lambda l, f, r: l + f * inner + r
     status = {"PASSED": (GREEN, "✓ PASSED"), "REGRESSED": (RED, "✗ REGRESSED"),
               "WARNING": (YELLOW, "⚠ WARNING"), "SKIPPED": (YELLOW, "- SKIPPED"),
-              "NO BASELINE": (YELLOW, "— NO BASELINE"), "MEASURED": (GREEN, "✓ MEASURED")}
+              "NO BASELINE": (YELLOW, "— NO BASELINE"), "MEASURED": (GREEN, "✓ MEASURED"),
+              "FAILED": (RED, "✗ FAILED")}
     print()
     print(line("╔", "═", "╗"))
     print("║  " + title.ljust(inner - 2) + "║")
@@ -372,7 +392,10 @@ def summary_box(rows, overall_ok, measure_only=False):
         pad = inner - len(lbl) - 3
         print(f"║  {name.ljust(pad)} {color}{lbl}{NC}  ║")
     print(line("╠", "═", "╣"))
-    if measure_only:
+    failed = any(st == "FAILED" for _, st in rows)
+    if failed:
+        color, lbl = RED, "✗ FAILED"
+    elif measure_only:
         color, lbl = YELLOW, "— MEASURED"
     elif overall_ok:
         color, lbl = GREEN, "✓ PASSED"
@@ -505,7 +528,7 @@ def main():
                 continue
             if kind == "csv":
                 try:
-                    baseline = load_local_baseline(path)
+                    baseline = load_local_baseline(path, mem, label)
                 except (ValueError, pd.errors.ParserError, pd.errors.EmptyDataError) as e:
                     print(f"ERROR: {e}", file=sys.stderr)
                     return 1
@@ -608,18 +631,34 @@ def main():
         # avoids writing any results into the repo tree.
         runs = args.runs if args.save_baseline else 1
         measured = {}
+        failed = []  # streams of this codec that could not be measured
         for name, path in candidates:
             fps = measure_stream(path, runs, args.device, mem)
             if fps is not None:
                 measured[name] = fps
-            elif args.save_baseline:
-                print(f"    {RED}FAILED   {NC} {name}  (no FPS measured)")
-                save_failures.append(name)
-        if not measured:
+            else:
+                failed.append(name)
+        if not candidates:
             print(f"    no results produced for {disp}")
             summary_rows.append((disp, "WARNING"))
-            if args.save_baseline and not candidates:
+            if args.save_baseline:
                 save_failures.append(f"{disp} has no streams in {codec_dir}")
+            continue
+        # A stream that fails to decode is a failure in every mode: dropping it
+        # would let a build that crashes on it pass, and saving without it would
+        # remove it from later comparisons.
+        for name in failed:
+            print(f"    {RED}FAILED   {NC} {name}  (videodecodeperf failed or reported no FPS)")
+            detail_rows.append({
+                "Codec": disp, "File": name, "Mem Type": mem,
+                "Baseline FPS": round(baseline[name], 2) if name in baseline else "",
+                "Measured FPS": "", "Delta %": "", "Verdict": "FAILED", "Note": "",
+            })
+        save_failures.extend(failed)
+        if failed:
+            overall_ok = False
+        if not measured:
+            summary_rows.append((f"{disp} ({len(failed)}/{len(candidates)} failed)", "FAILED"))
             continue
 
         if measure_only:
@@ -631,8 +670,11 @@ def main():
                     "Verdict": "MEASURED", "Note": f"avg of {runs} runs" if runs > 1 else "",
                 })
                 print(f"    {GREEN}MEASURED {NC} {name}  {m_fps:8.1f} fps")
-            summary_rows.append((f"{disp} ({len(measured)} streams)",
-                                 "MEASURED" if args.save_baseline else "NO BASELINE"))
+            if failed:
+                summary_rows.append((f"{disp} ({len(failed)}/{len(candidates)} failed)", "FAILED"))
+            else:
+                summary_rows.append((f"{disp} ({len(measured)} streams)",
+                                     "MEASURED" if args.save_baseline else "NO BASELINE"))
         else:
             regressions = 0
             compared = 0
@@ -645,14 +687,21 @@ def main():
                 if delta < -tol:
                     # candidate regression -- confirm with an averaged re-run
                     confirmed = m_fps
+                    rerun_failed = False
                     if name in index:
                         avg = measure_stream(index[name], args.runs, args.device, mem)
                         if avg is not None:
                             confirmed = avg
                             delta = (avg - b_fps) / b_fps * 100.0
                             note = f"re-ran {args.runs}x"
+                        else:
+                            rerun_failed = True
+                            note = "re-run failed"
                     m_fps = confirmed
-                    if delta < -tol:
+                    if rerun_failed:
+                        verdict = "FAILED"
+                        failed.append(name)
+                    elif delta < -tol:
                         verdict = "REGRESSED"
                         regressions += 1
                     else:
@@ -662,11 +711,14 @@ def main():
                     "Measured FPS": round(m_fps, 2), "Delta %": round(delta, 2),
                     "Verdict": verdict, "Note": note,
                 })
-                tag = {"OK": GREEN, "OK*": YELLOW, "REGRESSED": RED}[verdict]
+                tag = {"OK": GREEN, "OK*": YELLOW, "REGRESSED": RED, "FAILED": RED}[verdict]
                 print(f"    {tag}{verdict:9}{NC} {name}  "
                       f"{m_fps:8.1f} vs {b_fps:8.1f} fps  ({delta:+.1f}%){(' '+note) if note else ''}")
 
-            if compared == 0:
+            if failed:
+                overall_ok = False
+                summary_rows.append((f"{disp} ({len(failed)}/{len(candidates)} failed)", "FAILED"))
+            elif compared == 0:
                 summary_rows.append((f"{disp} (0 matched)", "WARNING"))
             elif regressions:
                 summary_rows.append((f"{disp} ({regressions}/{compared} regressed)", "REGRESSED"))
