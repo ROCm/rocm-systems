@@ -17,7 +17,9 @@ import pytest
 from test_fake_gpu import FACTOR, PREFIX, Rdcd, _created_id, tools  # noqa: F401 (fixture)
 
 NOTIFICATION = "A Temperature Limit exceeds the threshold 1 with the value"
-RDC_ST_CONFLICT = 7  # rdc_status_t in include/rdc/rdc.h
+# rdc_status_t in include/rdc/rdc.h
+RDC_ST_CONFLICT = 7
+RDC_ST_CLIENT_ERROR = 8
 
 
 @pytest.fixture
@@ -214,6 +216,37 @@ def test_registering_waits_for_an_unregister_to_return(rdcd):
     finally:
         release.set()
         disconnected = lib.rdc_disconnect(handle)
+    assert disconnected == 0
+
+
+def test_unregister_frees_the_group_when_rdcd_is_gone(rdcd):
+    """Through the C API: once rdcd is gone, rdc_policy_unregister() fails but
+    returns, and the group is free again: registering it returns RDC_ST_OK
+    instead of RDC_ST_CONFLICT."""
+    group = _policy_group(rdcd)
+    lib, handle = _connect(rdcd)
+    wait = 10 * FACTOR
+    called = threading.Event()
+    callbacks = [CALLBACK(lambda _: called.set() or 0), CALLBACK(lambda _: 0)]
+    results = {}
+    unregistering = threading.Thread(
+        target=lambda: results.update(unregister=lib.rdc_policy_unregister(handle, group)),
+        daemon=True,
+    )
+    disconnected = None
+    try:
+        assert lib.rdc_policy_register(handle, group, callbacks[0]) == 0
+        assert called.wait(wait), "no callback"
+        rdcd.kill()
+        unregistering.start()
+        unregistering.join(wait)
+        assert not unregistering.is_alive(), "rdc_policy_unregister() did not return"
+        assert results == {"unregister": RDC_ST_CLIENT_ERROR}, results
+        assert lib.rdc_policy_register(handle, group, callbacks[1]) == 0
+    finally:
+        # Not while the unregister still runs: that would free the handle under it.
+        if not unregistering.is_alive():
+            disconnected = lib.rdc_disconnect(handle)
     assert disconnected == 0
 
 

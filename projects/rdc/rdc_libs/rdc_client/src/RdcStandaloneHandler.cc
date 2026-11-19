@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <future>
+#include <utility>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc.pb.h"
@@ -57,6 +58,19 @@ RdcStandaloneHandler::RdcStandaloneHandler(const char* ip_and_port, const char* 
 namespace {
 // True on the threads that read policy streams, where the callbacks run.
 thread_local bool t_in_policy_reader = false;
+
+// Runs a function when the scope ends, also by an exception.
+template <typename F>
+class ScopeExit {
+ public:
+  explicit ScopeExit(F fn) : fn_(std::move(fn)) {}
+  ~ScopeExit() { fn_(); }
+  ScopeExit(const ScopeExit&) = delete;
+  ScopeExit& operator=(const ScopeExit&) = delete;
+
+ private:
+  F fn_;
+};
 }  // namespace
 
 RdcStandaloneHandler::~RdcStandaloneHandler() {
@@ -1022,37 +1036,44 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
   // for rdc_policy_register() or the destructor to join.
   const bool from_callback = t_in_policy_reader;
   std::shared_ptr<policy_stream> stream;
+  bool counted = false;
+  // However this call returns, also by an exception: the stream is stopped,
+  // its reader is joined unless this is a callback, and the group can be
+  // registered again.
+  ScopeExit finish([&] {
+    if (stream) {
+      stop_policy_stream(stream.get());
+      if (!from_callback && stream->reader.joinable()) {
+        stream->reader.join();
+      }
+    }
+    if (counted) {
+      std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+      auto it = unregistering_.find(group_id);
+      if (--it->second == 0) {
+        unregistering_.erase(it);
+      }
+    }
+  });
   {
     std::lock_guard<std::mutex> guard(policy_streams_mutex_);
     ++unregistering_[group_id];
+    counted = true;
     auto it = policy_streams_.find(group_id);
     if (it != policy_streams_.end()) {
+      // Pushed before the erase: if the push throws, the stream stays registered.
+      if (from_callback) {
+        draining_.push_back(it->second);
+      }
       stream = it->second;
       policy_streams_.erase(it);
-      if (from_callback) {
-        draining_.push_back(stream);
-      }
     }
   }
 
-  // rdcd ends the stream, then the reader is stopped and joined, also when
-  // rdcd cannot be reached.
+  // rdcd ends the stream; then the guard stops it and joins the reader, also
+  // when rdcd cannot be reached.
   request.set_group_id(group_id);
   ::grpc::Status status = stub_->UnRegisterPolicy(&context, request, &reply);
-  if (stream) {
-    stop_policy_stream(stream.get());
-    if (!from_callback && stream->reader.joinable()) {
-      stream->reader.join();
-    }
-  }
-  {
-    std::lock_guard<std::mutex> guard(policy_streams_mutex_);
-    auto it = unregistering_.find(group_id);
-    if (--it->second == 0) {
-      unregistering_.erase(it);
-    }
-  }
-
   return error_handle(status, reply.status());
 }
 
