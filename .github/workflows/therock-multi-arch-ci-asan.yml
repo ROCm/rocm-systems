@@ -69,6 +69,12 @@ jobs:
     uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@034bf04f3e9c2443e3a5b6c3bc98a07c772c1dfd # 2026-11-18
     with:
       build_variant: "host-asan"
+      # From TheRock#10034, same as rocm-systems#15589. 034bf04 does not
+      # declare these inputs, so this workflow fails to parse until develop's
+      # TheRock pin includes #10034.
+      run_rocm_tests: true
+      pull_request_opt_out_label: "ci:no-host-asan"
+      pull_request_opt_in_label: "ci:host-asan"
       build_stages: "compiler-runtime,runtime-tests"
       # Python/PyTorch/JAX builds are not supported with ASAN yet
       build_python_packages: false
