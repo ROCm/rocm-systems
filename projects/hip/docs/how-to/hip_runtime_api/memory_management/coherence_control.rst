@@ -1,6 +1,6 @@
 .. meta::
-  :description: HIP coherence control
-                ecosystem ROCm software.
+  :description: Choose between fine-grained and coarse-grained coherence for
+                host and device memory allocations in HIP.
   :keywords: AMD, ROCm, HIP, host memory
 
 .. _coherence_control:

@@ -606,7 +606,7 @@ The parameters are described here: :ref:`cg_operations`
 
 **Performance**
 
-On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration :ref:`hip_cpp_language_extensions:Warp reduction functions` The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
+On AMD, although all types ``T`` fulfilling the description above can be used with the functors in the ``cooperative_groups`` namespace, only some of them will receive hardware acceleration in the form of DPP instructions. Essentially only the types supported by ``__reduce_*_sync`` operations would potentially receive acceleration (see :ref:`warp_reduction_functions`). The macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES`` might be needed to enable the hardware acceleration on some types.
 
 For arithmetic reduces (``plus``, ``less`` and ``greater``):
 
@@ -662,13 +662,18 @@ The parameters are described here: :ref:`cg_operations`
  The value returned for the first active lane is platform-dependent and may change in future releases. As a reference: 
 
 * AMD - the "identity" value is returned, according to the operation:
+
   * ``plus``: always 0
   * ``less``:
+
     * for integer types: the maximum value for the type, i.e. ``std::numeric_limits<T>::max()``
     * for floating point types: ``inf``
+
   * ``greater``:
+
     * for integer types: the minimum value for the type, i.e. ``std::numeric_limits<T>::lowest()``
     * for floating point types: ``-inf``
+
   * ``bit_and``: a value with all the bits set to 1
   * ``bit_or``: always 0
   * ``bit_xor``: always 0

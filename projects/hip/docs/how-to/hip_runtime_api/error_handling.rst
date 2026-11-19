@@ -1,5 +1,6 @@
 .. meta::
-   :description: Error Handling
+   :description: Detect, report, and handle errors from HIP runtime functions
+                 and kernel launches.
    :keywords: AMD, ROCm, HIP, error handling, error
 
 .. _error_handling:
