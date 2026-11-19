@@ -171,6 +171,12 @@ class Memory : public device::Memory {
   // Sibling devices reuse that mapping and must not unlock it.
   bool hostLockOwner_ = false;
 
+  // True only when hostLockOwner_'s lock call included every device in the owning
+  // context (i.e. it used the multi-agent hostLock path and that call succeeded).
+  // Sibling devices may only reuse hostLockOwner_'s mapping when this is true;
+  // otherwise each device must lock its own agent individually (see Buffer::create).
+  bool hostLockCoversAllDevices_ = false;
+
   // Pointer to the device associated with this memory object.
   const roc::Device& dev_;
 
