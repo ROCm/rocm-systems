@@ -1121,7 +1121,7 @@ TEST(HostDispatchListTestsMicrotest, ABinaryThatAnswersIsListed)
     const std::string script = addScript(dir, "lister", "echo 'Suite.'\necho '  Case'\n");
     ASSERT_FALSE(script.empty()) << "cannot execute a file written under " << dir.path();
 
-    const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
+    const std::optional<std::string> output = listTestsOutput(script, std::nullopt);
 
     ASSERT_TRUE(output.has_value());
     EXPECT_EQ(*output, "Suite.\n  Case\n");
@@ -1138,7 +1138,7 @@ TEST(HostDispatchListTestsMicrotest, WhatABinarySaysOnStderrStaysOutOfItsListing
         addScript(dir, "noisy", "echo 'Loading plugin' >&2\necho 'Suite.'\necho '  Case'\n");
     ASSERT_FALSE(script.empty()) << "cannot execute a file written under " << dir.path();
 
-    const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
+    const std::optional<std::string> output = listTestsOutput(script, std::nullopt);
 
     ASSERT_TRUE(output.has_value());
     EXPECT_EQ(*output, "Suite.\n  Case\n");
@@ -1177,7 +1177,7 @@ TEST(HostDispatchListTestsMicrotest, AStopEndsAListingThatHasNoTimeout)
     });
 
     const std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
-    const std::optional<std::string> output = listTestsOutput(script, std::chrono::seconds{0});
+    const std::optional<std::string> output = listTestsOutput(script, std::nullopt);
     const std::chrono::milliseconds elapsed = since(start);
     stopper.join();
 
@@ -1412,8 +1412,8 @@ TEST(HostDispatchChildTimeoutMicrotest, AnUnconfiguredRunHasNoChildTimeout)
 {
     // The dispatcher has always waited for its children indefinitely. A caller that has not
     // asked for a limit must keep that, or a slow machine would start killing passing binaries.
-    EXPECT_EQ(resolveChildTimeout(nullptr), std::chrono::seconds{0});
-    EXPECT_EQ(resolveChildTimeout(""), std::chrono::seconds{0});
+    EXPECT_EQ(resolveChildTimeout(nullptr), std::nullopt);
+    EXPECT_EQ(resolveChildTimeout(""), std::nullopt);
 }
 
 TEST(HostDispatchChildTimeoutMicrotest, TheEnvironmentSetsHowLongAChildMayRun)
@@ -1424,7 +1424,7 @@ TEST(HostDispatchChildTimeoutMicrotest, TheEnvironmentSetsHowLongAChildMayRun)
 
 TEST(HostDispatchChildTimeoutMicrotest, ZeroIsAnExplicitOptOut)
 {
-    EXPECT_EQ(resolveChildTimeout("0"), std::chrono::seconds{0});
+    EXPECT_EQ(resolveChildTimeout("0"), std::nullopt);
 }
 
 TEST(HostDispatchChildTimeoutMicrotest, ARequestThatIsNotSecondsLeavesTheRunUnbounded)
@@ -1432,8 +1432,8 @@ TEST(HostDispatchChildTimeoutMicrotest, ARequestThatIsNotSecondsLeavesTheRunUnbo
     // Unbounded is the only safe reading of a value that cannot be honoured -- a guessed limit
     // would kill binaries the caller never meant to limit. main() says so on stderr, because
     // silently unbounded is the outcome the caller set the variable to avoid.
-    EXPECT_EQ(resolveChildTimeout("soon"), std::chrono::seconds{0});
-    EXPECT_EQ(resolveChildTimeout("-30"), std::chrono::seconds{0});
+    EXPECT_EQ(resolveChildTimeout("soon"), std::nullopt);
+    EXPECT_EQ(resolveChildTimeout("-30"), std::nullopt);
 }
 
 // ── coverageDirectory ───────────────────────────────────────────────

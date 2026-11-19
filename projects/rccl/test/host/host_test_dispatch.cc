@@ -963,19 +963,22 @@ size_t resolveParallelism(const char *request, size_t fallbackJobs)
     return requested >= 1 ? static_cast<size_t>(requested) : fallback;
 }
 
-// Zero means no limit.
-std::chrono::seconds resolveChildTimeout(const char *request)
+// nullopt means no limit; "0" asks for that explicitly.
+std::optional<std::chrono::seconds> resolveChildTimeout(const char *request)
 {
     if (request == nullptr || *request == '\0') {
-        return std::chrono::seconds{0};
+        return std::nullopt;
     }
     const long seconds = toLong(std::string_view(request), -1);
+    if (seconds == 0) {
+        return std::nullopt;
+    }
     if (seconds < 0) {
         fmt::print(stderr,
                    "host-test-dispatch: {}=\"{}\" is not a number of seconds -- no child timeout"
                    " will be applied\n",
                    kChildTimeoutEnv, request);
-        return std::chrono::seconds{0};
+        return std::nullopt;
     }
     return std::chrono::seconds{seconds};
 }
@@ -1153,13 +1156,35 @@ void signalChildGroup(pid_t pid, int signal)
     ::kill(pid, signal);
 }
 
+using Deadline = std::optional<std::chrono::steady_clock::time_point>;
+
+// *now* + *limit*, or no deadline when there is no limit.
+Deadline deadlineAfter(std::chrono::steady_clock::time_point now,
+                       std::optional<std::chrono::seconds> limit)
+{
+    return limit ? Deadline(now + *limit) : std::nullopt;
+}
+
+// How long until *deadline*, never negative; nullopt when there is none.
+std::optional<std::chrono::milliseconds> timeUntil(Deadline deadline,
+                                                   std::chrono::steady_clock::time_point now)
+{
+    if (!deadline) {
+        return std::nullopt;
+    }
+    return std::max(std::chrono::milliseconds{0},
+                    std::chrono::duration_cast<std::chrono::milliseconds>(*deadline - now));
+}
+
 // The TERM, grace, KILL sequence for one child: each advance() sends the next signal and sets
-// *due* to when the one after it is owed.
+// *due* to when the one after it should be sent. With no due, nothing is signalled until
+// advance() is called (e.g. on a stop).
 class Escalation {
 public:
-    explicit Escalation(std::chrono::steady_clock::time_point due) : due_(due) {}
+    Escalation() = default;
+    explicit Escalation(Deadline due) : due_(due) {}
 
-    std::chrono::steady_clock::time_point due() const { return due_; }
+    Deadline due() const { return due_; }
     bool termed() const { return signalsSent_ > 0; }
     bool killed() const { return signalsSent_ > 1; }
 
@@ -1172,7 +1197,7 @@ public:
     }
 
 private:
-    std::chrono::steady_clock::time_point due_;
+    Deadline due_;
     int signalsSent_ = 0;
 };
 
@@ -1282,7 +1307,8 @@ private:
 
 // *path*'s --gtest_list_tests output, or nullopt when the binary failed, timed out or was
 // stopped.
-std::optional<std::string> listTestsOutput(const std::string &path, std::chrono::seconds timeout)
+std::optional<std::string> listTestsOutput(const std::string &path,
+                                           std::optional<std::chrono::seconds> timeout)
 {
     const ScopedTempFile listing(
         (fs::temp_directory_path() / "rccl-host-dispatch-listing-XXXXXX").string());
@@ -1295,17 +1321,11 @@ std::optional<std::string> listTestsOutput(const std::string &path, std::chrono:
         return std::nullopt;
     }
 
-    const bool timed = timeout.count() > 0;
-    Escalation escalation(std::chrono::steady_clock::now() + timeout);
+    Escalation escalation(deadlineAfter(std::chrono::steady_clock::now(), timeout));
     for (;;) {
-        std::optional<std::chrono::milliseconds> within;
-        if (timed || escalation.termed()) {
-            within = std::max(std::chrono::milliseconds{0},
-                              std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  escalation.due() - std::chrono::steady_clock::now()));
-        }
         ChildExit exit;
-        const pid_t finished = reapAnyChild(exit, within);
+        const pid_t finished =
+            reapAnyChild(exit, timeUntil(escalation.due(), std::chrono::steady_clock::now()));
         if (finished == pid) {
             return (exit.status == 0 && !escalation.termed())
                        ? std::optional<std::string>(readFile(listing.path()))
@@ -1345,8 +1365,7 @@ using CommandFn = std::function<int(const std::string &)>;
 // stopped.
 int waitForShellChild(pid_t pid)
 {
-    // Not due anything until the run is stopped.
-    Escalation escalation(std::chrono::steady_clock::time_point::max());
+    Escalation escalation;
     for (;;) {
         int status = 0;
         const pid_t done = waitpid(pid, &status, WNOHANG);
@@ -1358,12 +1377,11 @@ int waitForShellChild(pid_t pid)
         }
         const auto now = std::chrono::steady_clock::now();
         if ((g_stopRequested != 0 && !escalation.termed()) ||
-            (escalation.termed() && !escalation.killed() && now >= escalation.due())) {
+            (!escalation.killed() && escalation.due() && now >= *escalation.due())) {
             escalation.advance(pid, now, signalChildGroup);
         }
-        waitForWake(escalation.termed() && !escalation.killed()
-                        ? std::optional<std::chrono::steady_clock::time_point>(escalation.due())
-                        : std::nullopt);
+        // After the KILL there is nothing left to send, so wait for the exit alone.
+        waitForWake(escalation.killed() ? std::nullopt : escalation.due());
     }
 }
 
@@ -1587,7 +1605,7 @@ struct ScheduleOptions {
     ReportFormat outputFormat = ReportFormat::Xml;
     std::vector<std::string> passthrough;
     std::string logDirectory;              // empty: children inherit our stdio
-    std::chrono::seconds childTimeout{0};  // 0: no limit
+    std::optional<std::chrono::seconds> childTimeout;  // nullopt: no limit
 };
 
 struct ChildOutcome {
@@ -1599,7 +1617,7 @@ struct ChildOutcome {
 struct ChildContext {
     std::string qualifier;
     std::string logPath;  // empty when the child inherited our stdio
-    std::chrono::seconds timeout{0};
+    std::optional<std::chrono::seconds> timeout;
     size_t remainingParts = 0;  // parts of this binary not yet run
 };
 
@@ -1633,7 +1651,7 @@ ChildVerdict classifyChild(const ChildOutcome &outcome, const ChildContext &cont
     if (outcome.timedOut && outcome.exit.signalled) {
         verdict.fragments.push_back(crashFragment(
             context.qualifier,
-            fmt::format("binary timed out after {} s and was killed{}{}", context.timeout.count(),
+            fmt::format("binary timed out after {} s and was killed{}{}", context.timeout->count(),
                         where, skipped)));
         verdict.failed = true;
         verdict.skipRemainingParts = true;
@@ -1680,14 +1698,13 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
 {
     std::vector<size_t> nextPart(selections.size(), 0);
     std::vector<std::vector<SuiteFragment>> perSelection(selections.size());
-    const bool timed = schedule.childTimeout > std::chrono::seconds{0};
 
     struct RunningChild {
         pid_t pid;
         size_t selection;
         std::string reportPath;
         std::string logPath;
-        Escalation escalation;  // first due at the child's timeout
+        Escalation escalation;  // first due at the child's timeout, if it has one
         bool timedOut = false;
         bool abandoned = false;
     };
@@ -1761,31 +1778,25 @@ std::vector<SuiteFragment> runSelections(const std::vector<Selection> &selection
                 continue;
             }
             running.push_back({pid, index, reportPath, logPath,
-                               Escalation{ops.now() + schedule.childTimeout}});
+                               Escalation{deadlineAfter(ops.now(), schedule.childTimeout)}});
         }
 
         // Bounded by the nearest deadline, if any.
-        std::optional<std::chrono::milliseconds> within;
-        if ((timed || stopping) && !running.empty()) {
-            const auto nearest = std::min_element(running.begin(), running.end(),
-                                                  [](const RunningChild &a, const RunningChild &b) {
-                                                      return a.escalation.due() < b.escalation.due();
-                                                  });
-            within = std::max(std::chrono::milliseconds{0},
-                              std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  nearest->escalation.due() - ops.now()));
+        Deadline nearest;
+        for (const RunningChild &child : running) {
+            const Deadline due = child.escalation.due();
+            if (due && (!nearest || *due < *nearest)) {
+                nearest = due;
+            }
         }
 
         ChildExit exit;
-        const pid_t finished = ops.reap(exit, within);
+        const pid_t finished = ops.reap(exit, timeUntil(nearest, ops.now()));
         if (finished == 0) {
-            if (!timed && !stopping) {
-                continue;
-            }
             // Signal every child past its deadline and give it another grace period.
             const std::chrono::steady_clock::time_point now = ops.now();
             for (RunningChild &child : running) {
-                if (now < child.escalation.due()) {
+                if (!child.escalation.due() || now < *child.escalation.due()) {
                     continue;
                 }
                 child.timedOut = !child.abandoned;
@@ -1941,7 +1952,7 @@ int main(int argc, char **argv)
 
     // Before the enumeration, so a stop can end a hung listing.
     installStopHandler();
-    const std::chrono::seconds childTimeout =
+    const std::optional<std::chrono::seconds> childTimeout =
         resolveChildTimeout(std::getenv(std::string(kChildTimeoutEnv).c_str()));
     const TerminatedFn terminated = [] { return g_stopRequested != 0; };
 
