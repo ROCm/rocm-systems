@@ -167,11 +167,11 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     }
   }
 
-  hsa_status_t err = driver().GetClockCounters(node_id(), &t0_);
-  t1_ = t0_;
-  historical_clock_ratio_ = 0.0;
-  gpu_clock_offset_ = 0;
+  HsaClockCounters clocks = {};
+  hsa_status_t err = driver().GetClockCounters(node_id(), &clocks);
   assert(err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
+  clock_map_.Reset(core::ClockSample{clocks.GPUClockCounter, clocks.SystemClockCounter});
+  gpu_clock_offset_ = 0;
 
   num_h2d_d2h_engines_ = properties_.NumSdmaEngines > 2 ? 2 : properties_.NumSdmaEngines;
   num_p2p_engines_ =  properties_.NumSdmaXgmiEngines ? properties_.NumSdmaXgmiEngines
@@ -3419,9 +3419,10 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  const uint64_t t0 = clock_map_.origin().tick;
+  if ((start == 0) || (end == 0) || (start < t0) || (end < t0)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
-                &signal->signal_, start, end, t0_.GPUClockCounter);
+                &signal->signal_, start, end, t0);
     time.start = 0;
     time.end = 0;
     return;
@@ -3437,9 +3438,10 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  const uint64_t t0 = clock_map_.origin().tick;
+  if ((start == 0) || (end == 0) || (start < t0) || (end < t0)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
-                &signal->signal_, start, end, t0_.GPUClockCounter);
+                &signal->signal_, start, end, t0);
     time.start = 0;
     time.end = 0;
     return;
@@ -3452,83 +3454,49 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
 }
 
 /*
-Times during program execution are interpolated to adjust for relative clock drift.
-Interval timing may appear as ticks well before process start, leading to large errors due to
-frequency adjustment (ie the profiling with NTP problem).  This is fixed by using a fixed frequency
-for early times.
-Intervals larger than t0_ will be frequency adjusted.  This admits a numerical error of not more
-than twice the frequency stability (~10^-5).
+GPU timestamps are mapped onto the system clock through core::ClockMap, a monotone piecewise-linear
+function through the correlated clock samples taken by SyncClocks. Times during program execution
+are interpolated between samples, which adjusts for relative clock drift, and a translated value is
+never revised by a later sample, so two timestamps that are ordered in the GPU domain stay ordered
+in the system domain regardless of when each of them is translated. Ticks that predate agent
+creation are extrapolated with a fixed clock ratio (the profiling with NTP problem); this admits a
+numerical error of not more than twice the frequency stability (~10^-5).
 */
-uint64_t GpuAgent::TranslateTime(uint64_t tick) {
-  // Only allow short (error bounded) extrapolation for times during program execution.
-  // Limit errors due to relative frequency drift to ~0.5us.  Sync clocks at 16Hz.
-  const int64_t max_extrapolation = core::Runtime::runtime_singleton_->sys_clock_freq() >> 4;
+// Extrapolation past the newest clock sample is limited to this much system time (1/16 s), which
+// bounds the error from relative frequency drift to ~0.5us and clock synchronization to 16Hz. A new
+// sample is blended into the map over the same horizon.
+static uint64_t ClockHorizon() { return core::Runtime::runtime_singleton_->sys_clock_freq() >> 4; }
 
-  std::lock_guard<std::mutex> lock(t1_lock_);
+uint64_t GpuAgent::TranslateTime(uint64_t tick) {
+  const uint64_t max_extrapolation = ClockHorizon();
+
+  std::lock_guard<std::mutex> lock(clock_lock_);
 
 #ifdef _WIN32
   // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
-  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
-  // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
+  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different base). Detect it
+  // from the first translation that lands in the future, which proves the offset, and subtract it
+  // from every tick. If TranslateTime is called long after dispatch the probe is <= now, so no
+  // false offset is computed; detection retries on subsequent calls. The probe does not commit to
+  // the clock map, so an uncorrected tick cannot freeze a bogus extrapolation.
+  if (gpu_clock_offset_ == 0) {
+    if (clock_map_.NeedsSample(tick, max_extrapolation)) SyncClocks();
+    const int64_t now = int64_t(os::TimeNanos());
+    const int64_t probe = int64_t(clock_map_.Translate(tick, false));
+    if (probe > now && clock_map_.ratio() > 0.0)
+      gpu_clock_offset_ = int64_t(double(probe - now) / clock_map_.ratio());
+  }
   tick -= gpu_clock_offset_;
 #endif
-  // Limit errors due to correlated pair certainty to ~0.5us.
-  // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
-  // clock read certainty is <4us.
-  if (((t1_.GPUClockCounter - t0_.GPUClockCounter) >> 2) + t1_.GPUClockCounter < tick) SyncClocks();
 
-  // Good for ~300 yrs
-  // uint64_t sysdelta = t1_.SystemClockCounter - t0_.SystemClockCounter;
-  // uint64_t gpudelta = t1_.GPUClockCounter - t0_.GPUClockCounter;
-  // int64_t offtick = int64_t(tick - t1_.GPUClockCounter);
-  //__int128 num = __int128(sysdelta)*__int128(offtick) +
-  //__int128(gpudelta)*__int128(t1_.SystemClockCounter);
-  //__int128 sysLarge = num / __int128(gpudelta);
-  // return sysLarge;
-
-  // Good for ~3.5 months.
-  uint64_t system_tick = 0;
-  int64_t elapsed = 0;
-  double ratio;
-
-  // Valid ticks only need at most one SyncClocks.
-  for (int i = 0; i < 2; i++) {
-    ratio = double(t1_.SystemClockCounter - t0_.SystemClockCounter) /
-        double(t1_.GPUClockCounter - t0_.GPUClockCounter);
-    elapsed = int64_t(ratio * double(int64_t(tick - t1_.GPUClockCounter)));
-
-    // Skip clock sync if under the extrapolation limit.
-    if (elapsed < max_extrapolation) break;
-    SyncClocks();
-  }
-
-  system_tick = uint64_t(elapsed) + t1_.SystemClockCounter;
-
-  // tick predates HSA startup - extrapolate with fixed clock ratio
-  if (tick < t0_.GPUClockCounter) {
-    if (historical_clock_ratio_ == 0.0) historical_clock_ratio_ = ratio;
-    system_tick = uint64_t(historical_clock_ratio_ * double(int64_t(tick - t0_.GPUClockCounter))) +
-        t0_.SystemClockCounter;
-  }
-
-#ifdef _WIN32
-  // Detect epoch mismatch: only trigger when translated time is in the future,
-  // which proves AQL timestamps have an epoch offset from D3DKMT's GPU clock.
-  // If TranslateTime is called long after dispatch, system_tick <= now, so no
-  // false offset is computed.  Retries on subsequent calls until detected.
-  if (gpu_clock_offset_ == 0) {
-    int64_t now = int64_t(os::TimeNanos());
-    if (int64_t(system_tick) > now) {
-      gpu_clock_offset_ = int64_t(double(int64_t(system_tick) - now) / ratio);
-      // Re-translate this first event with the corrected offset.
-      elapsed = int64_t(ratio * double((int64_t(tick) - gpu_clock_offset_) - int64_t(t1_.GPUClockCounter)));
-      system_tick = uint64_t(elapsed) + t1_.SystemClockCounter;
-    }
-  }
-#endif
-
-  return system_tick;
+  // Limit errors due to correlated pair certainty to ~0.5us: a fresh sample is also taken when the
+  // extrapolation exceeds a quarter of the baseline since agent creation (clock read certainty is
+  // <4us). A valid tick needs at most one sample. A tick that is still beyond the limit afterwards
+  // lies in the future or is corrupt: it is translated, but must not freeze the map for the real
+  // timestamps that follow it.
+  if (clock_map_.NeedsSample(tick, max_extrapolation)) SyncClocks();
+  const bool plausible = !clock_map_.NeedsSample(tick, max_extrapolation);
+  return clock_map_.Translate(tick, plausible);
 }
 
 /* This function is deprecated */
@@ -3546,8 +3514,12 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 }
 
 void GpuAgent::SyncClocks() {
-  [[maybe_unused]] hsa_status_t sync_err = driver().GetClockCounters(node_id(), &t1_);
+  HsaClockCounters clocks = {};
+  [[maybe_unused]] hsa_status_t sync_err = driver().GetClockCounters(node_id(), &clocks);
   assert(sync_err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
+  if (sync_err == HSA_STATUS_SUCCESS)
+    clock_map_.AddSample(core::ClockSample{clocks.GPUClockCounter, clocks.SystemClockCounter},
+                         ClockHorizon());
 }
 
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,

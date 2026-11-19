@@ -9,6 +9,7 @@
 #include <vector>
 #include <memory>
 #include <sys/sysinfo.h>
+#include <unistd.h>
 
 #include "suites/functional/time_stamp.h"
 #include "common/base_rocr_utils.h"
@@ -17,6 +18,7 @@
 #include "common/hsatimer.h"
 #include "gtest/gtest.h"
 #include "hsa/hsa.h"
+#include "hsa/hsa_ext_amd.h"
 
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
@@ -249,4 +251,92 @@ void TimeStamp::BarrierPacketTimestampValidationTest(void) {
   }
 }
 
+// The runtime maps GPU timestamps onto the system clock from correlated clock samples that it
+// refreshes about 16 times per second while translation is going on. A refresh must not change
+// the translation of any tick that was already translated: otherwise the end of one packet and
+// the start of the next, which are the same instant on the GPU, can be reported out of order
+// when they are translated on opposite sides of a refresh. Barrier packets are submitted in
+// batches spread over more than a second so that many refreshes happen in between, each batch
+// is translated right after it completes (as a profiler does), and at the end every raw tick is
+// translated again and compared with the value handed out the first time.
+void TimeStamp::TimestampTranslationStabilityTest(void) {
+  PrinTimeStampSubtestHeader(
+      "TimestampTranslationStabilityTest: translation stays stable across clock refreshes");
+  hsa_status_t err;
+  std::vector<hsa_agent_t> gpus;
+  err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  ASSERT_GT(gpus.size(), (uint32_t)0);
+  uint32_t queue_size = 0;
+  ASSERT_SUCCESS(hsa_agent_get_info(gpus[0], HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size));
+  err = hsa_queue_create(gpus[0], queue_size, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0, &queue);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  ASSERT_SUCCESS(hsa_amd_profiling_set_profiler_enabled(queue, 1));
+  for (uint32_t i = 0; i < NUM_BARRIERS; ++i) {
+    ASSERT_SUCCESS(hsa_signal_create(1, 0, NULL, &completion_signals[i]));
+  }
+
+  struct Record {
+    uint64_t raw_start, raw_end;  // GPU ticks written by the command processor
+    uint64_t start, end;          // their first translation to system time
+  };
+  const uint32_t kBatches = 40;  // 40 x 40 ms covers tens of calibration refreshes
+  std::vector<Record> records;
+  records.reserve(kBatches * NUM_BARRIERS);
+  for (uint32_t b = 0; b < kBatches; ++b) {
+    for (uint32_t i = 0; i < NUM_BARRIERS; ++i) {
+      hsa_signal_store_relaxed(completion_signals[i], 1);
+      hsa_barrier_and_packet_t barrier_pkt;
+      memset(&barrier_pkt, 0, sizeof(barrier_pkt));
+      barrier_pkt.header = HSA_PACKET_TYPE_BARRIER_AND | (1 << HSA_PACKET_HEADER_BARRIER) |
+                           (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                           (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+      barrier_pkt.completion_signal = completion_signals[i];
+      uint64_t index = hsa_queue_load_write_index_relaxed(queue);
+      hsa_queue_store_write_index_relaxed(queue, index + 1);
+      reinterpret_cast<hsa_barrier_and_packet_t*>(queue->base_address)[index % queue->size] =
+          barrier_pkt;
+      hsa_signal_store_relaxed(queue->doorbell_signal, index);
+    }
+    for (uint32_t i = 0; i < NUM_BARRIERS; ++i) {
+      while (hsa_signal_wait_scacquire(completion_signals[i], HSA_SIGNAL_CONDITION_LT, 1,
+                                       (uint64_t)-1, HSA_WAIT_STATE_ACTIVE) >= 1) {
+      }
+      const amd_signal_t* raw = reinterpret_cast<const amd_signal_t*>(completion_signals[i].handle);
+      hsa_amd_profiling_dispatch_time_t time;
+      ASSERT_SUCCESS(hsa_amd_profiling_get_dispatch_time(gpus[0], completion_signals[i], &time));
+      records.push_back(Record{raw->start_ts, raw->end_ts, time.start, time.end});
+    }
+    usleep(40000);
+  }
+
+  // Consecutive barrier packets execute in order, so wherever the GPU timestamps are ordered
+  // the translated timestamps must be ordered too.
+  uint32_t raw_disorder = 0;
+  for (size_t i = 1; i < records.size(); ++i) {
+    if (records[i - 1].raw_end > records[i].raw_start) {
+      ++raw_disorder;
+      continue;
+    }
+    ASSERT_LE(records[i - 1].end, records[i].start)
+        << "translated end of packet " << i - 1 << " lands after the start of packet " << i;
+  }
+  EXPECT_EQ(raw_disorder, 0u) << "GPU timestamps of consecutive barrier packets out of order";
+
+  // Translating the same ticks again after all those refreshes must reproduce the values that
+  // were handed out the first time.
+  for (size_t i = 0; i < records.size(); ++i) {
+    uint64_t start = 0, end = 0;
+    ASSERT_SUCCESS(
+        hsa_amd_profiling_convert_tick_to_system_domain(gpus[0], records[i].raw_start, &start));
+    ASSERT_SUCCESS(
+        hsa_amd_profiling_convert_tick_to_system_domain(gpus[0], records[i].raw_end, &end));
+    ASSERT_EQ(start, records[i].start) << "start of packet " << i << " was translated differently";
+    ASSERT_EQ(end, records[i].end) << "end of packet " << i << " was translated differently";
+  }
+  if (verbosity() > 0) {
+    std::cout << "Translated " << records.size() << " barrier packets over " << kBatches
+              << " batches; all re-translations identical" << std::endl;
+  }
+}
 #undef RET_IF_HSA_ERR
