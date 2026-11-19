@@ -29,12 +29,28 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - RDC no longer reports another GPU's XGMI link states, or garbage values that could crash `rdcd`, for a GPU whose link status AMD SMI cannot read. That GPU now reports no links.
   - `rdci link` now prints an error and exits with a nonzero status when it cannot get the link status, instead of printing nothing and exiting with 0.
 
+- `rdcd` no longer crashes reading `RDC_FI_GPU_CLOCK` or `RDC_FI_MEM_CLOCK` when AMD SMI reports no current clock level, as it does for a power-gated clock domain on some APUs. The field is N/A then.
+
+- Fields that AMD SMI cannot read are N/A instead of AMD SMI's "not available" value, such as 4294967295 for `RDC_FI_GPU_GFX_BUSY_INST` or 65535 for `RDC_FI_GPU_VCN_BUSY_INST` on Radeon GPUs. This covers the utilization and clock fields, the `RDC_FI_GPU_*_BUSY_INST` fields, and the `RDC_HEALTH_*` throttle and residency counters.
+
+- `RDC_FI_ECC_CORRECT_TOTAL`, `RDC_FI_ECC_UNCORRECT_TOTAL`, and `RDC_FI_ECC_DEFERRED_TOTAL` are N/A on GPUs without ECC, like the per-block ECC fields, instead of 0. The memory health check still checks such a GPU's retired pages.
+
+- `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` is N/A instead of 0 when the GPU reports no memory activity.
+
 - `rdci group -l` lists 64 groups, the most RDC holds; it reported `The max limit reached`.
 
 - `rdc_job_get_stats()` and `rdc_policy_get()` with `rdcd` no longer report more GPUs, processes, or policies than the `rdcd` reply carries, or read past the entries it carries.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.
   - `rdci topo` now exits with an error code when the GPU index is out of range or the topology query fails, instead of exiting 0, and `rdc_device_topology_get()` reports link types RDC does not define as `RDC_IOLINK_TYPE_UNDEFINED`.
+
+- RDC checks GPU policy conditions every 500 ms, as intended. It checked them every 0.5 ms, which read every GPU in a policy group thousands of times per second and kept `rdcd` busy on a CPU core.
+
+- Deleting a GPU group stops its policies. RDC kept checking the policies of a deleted group on whatever GPUs an uninitialized group record held, and with the GPU reset action could reset those GPUs.
+
+- Setting or deleting policies while RDC checks them, and registering for policy notifications with `rdcd`, are now thread-safe.
+
+- `rdc_policy_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist, instead of accepting the policy, and `rdci policy` exits with the status of a failed set.
 
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
@@ -54,6 +70,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - A GPU that cannot be partitioned now reports 1.
 
 - Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
+
+- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port. It printed "Server listening" and then crashed.
+
+- `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
+
+- `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
+
+- When `rdcd` takes more than 5 seconds to stop, another SIGTERM or SIGINT ends it at once, with status 1.
 
 - `rdcd` no longer crashes when the watches due in one update read more than 8,192 GPU-field pairs from AMD SMI, for example two `rdci dmon` sessions of 128 fields on 64 GPUs each.
 

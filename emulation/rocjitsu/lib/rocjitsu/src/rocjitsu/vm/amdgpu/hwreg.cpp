@@ -41,6 +41,7 @@ enum class HwregState : uint8_t {
   XnackStatePrivGfx1250,
   XnackMaskGfx1250,
   Trapsts,
+  TrapstsGfx10,
   SimdIdCdna2,
   LocationCdna3_4,
   XccIdCdna3_4,
@@ -113,6 +114,20 @@ uint32_t blocks_minus_one(uint32_t count, uint32_t block_size) {
     return 0;
   return ((count + block_size - 1u) / block_size) - 1u;
 }
+
+// SH_MEM_BASES holds aperture address bits [63:48], or [31:16] for RDNA1's
+// 32-bit flat pointers.
+uint32_t sh_mem_bases_raw(const Wavefront &wf) {
+  const unsigned shift = wf.flat_pointer32() ? 16 : 48;
+  return field_value(wf.private_aperture_base() >> shift, 0, 16) |
+         field_value(wf.shared_aperture_base() >> shift, 16, 16);
+}
+
+// RDNA1/2 TRAPSTS.DP_RATE[31:29] is a read-only property of the SIMD design.
+// Every RDNA1/2 part runs FP64 at 1/16 rate; gfx1010 and gfx1030 read 2, the
+// encoding RDNA3 documents for 1/16 rate in HW_ID1.DP_RATE.
+constexpr uint32_t kGfx10TrapstsDpRateMask = 7u << 29;
+constexpr uint32_t kGfx10TrapstsDpRate = 2u << 29;
 
 uint32_t cdna2_4_simd_id_raw(const Wavefront &wf) {
   // CDNA2/3/4 define SIMD_ID at HW_ID[5:4]. Assign permanent CU wave slots
@@ -258,7 +273,7 @@ constexpr HwregDescriptor RDNA1_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::StatusGfx10, HwregWritePolicy::Privileged},
-    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::TrapstsGfx10, HwregWritePolicy::UserWritable},
     {4, "HW_ID_LEGACY", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::LdsAllocGfx10, HwregWritePolicy::ReadOnly},
@@ -291,7 +306,7 @@ constexpr HwregDescriptor RDNA2_HWREGS[] = {
     // are named for diagnostics but stay unsupported without modeled VM state.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::StatusGfx10, HwregWritePolicy::Privileged},
-    {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
+    {3, "TRAPSTS", HwregState::TrapstsGfx10, HwregWritePolicy::UserWritable},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::LdsAllocGfx10, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::IbStsGfx10, HwregWritePolicy::ReadOnly},
@@ -546,8 +561,7 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     raw_value = static_cast<uint32_t>(wf.pc >> 32);
     return HwregAccessResult::Success;
   case HwregState::ApertureBases:
-    raw_value = field_value(wf.private_aperture_base() >> 32, 0, 16) |
-                field_value(wf.shared_aperture_base() >> 32, 16, 16);
+    raw_value = sh_mem_bases_raw(wf);
     return HwregAccessResult::Success;
   case HwregState::ShaderCycles:
     // Full-width HWREG 29 reads on W7900 wrap at bit 20.
@@ -596,12 +610,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
                 field_value(counters.lgkmcnt >> 5, 24, 1) | field_value(counters.vscnt, 26, 6);
     return HwregAccessResult::Success;
   }
-  case HwregState::ShMemBasesGfx10: {
-    const unsigned shift = wf.flat_pointer32() ? 16 : 48;
-    raw_value = field_value(wf.private_aperture_base() >> shift, 0, 16) |
-                field_value(wf.shared_aperture_base() >> shift, 16, 16);
+  case HwregState::ShMemBasesGfx10:
+    raw_value = sh_mem_bases_raw(wf);
     return HwregAccessResult::Success;
-  }
   case HwregState::ShaderTbaLoGfx10:
   case HwregState::ShaderTbaHiGfx10:
   case HwregState::ShaderTmaLoGfx10:
@@ -644,6 +655,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::Trapsts:
     raw_value = wf.trapsts();
+    return HwregAccessResult::Success;
+  case HwregState::TrapstsGfx10:
+    raw_value = (wf.trapsts() & ~kGfx10TrapstsDpRateMask) | kGfx10TrapstsDpRate;
     return HwregAccessResult::Success;
   case HwregState::SimdIdCdna2:
     raw_value = cdna2_4_simd_id_raw(wf);
@@ -728,6 +742,10 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
     // The trap handler clears the excp bit it just serviced before s_rfe, so
     // this has to write through to wave state rather than report Unsupported.
     wf.set_trapsts(raw_value);
+    return HwregAccessResult::Success;
+  case HwregState::TrapstsGfx10:
+    // gfx1010 and gfx1030 ignore S_SETREG to DP_RATE.
+    wf.set_trapsts(raw_value & ~kGfx10TrapstsDpRateMask);
     return HwregAccessResult::Success;
   case HwregState::FlushIb:
     if (raw_value & 1u)

@@ -107,10 +107,17 @@ thread_function(int id, BatchContextMap &bcm)
                     //       on the data
                 } break;
                 default: {
-                    lock_guard<mutex> guard{io_mutex};
-                    cout << "ERROR: Tried to pick a non-existent case" << endl;
+                    {
+                        lock_guard<mutex> guard{io_mutex};
+                        cerr << "ERROR: Tried to pick a non-existent case" << endl;
+                    }
+                    // Don't call exit() from a worker thread: it destroys
+                    // static objects while the other threads are still
+                    // using them. abort() stops the process where it is,
+                    // and when the test runs under gdb, gdb prints every
+                    // thread's backtrace.
+                    abort();
                 }
-                    exit(EXIT_FAILURE);
             }
         }
     }

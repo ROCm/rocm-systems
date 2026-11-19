@@ -191,6 +191,8 @@ struct IdentityHostPage {
 constexpr uint32_t SOPP_S_NOP = 0xBF800000;
 constexpr uint32_t SOPP_S_ENDPGM = 0xBF810000;
 constexpr uint32_t SOPP_S_TRAP_1 = 0xBF920001;
+// RDNA1/2 TRAPSTS reads carry the read-only DP_RATE[31:29] = 2 (1/16 rate).
+constexpr uint32_t kGfx10TrapstsDpRate = 2u << 29;
 
 using namespace rocjitsu;
 
@@ -1435,10 +1437,10 @@ TEST(RdnaDispatchTest, Gfx1030MemoryViolationEntersHandlerOrInterruptsAndHalts) 
         ASSERT_TRUE(interrupts.empty());
         ASSERT_EQ(halts->snapshots().size(), 1u);
         const auto &wave = halts->snapshots().front();
-        EXPECT_EQ(wave.sgpr(4), mem_viol);
+        EXPECT_EQ(wave.sgpr(4), kGfx10TrapstsDpRate | mem_viol);
         EXPECT_EQ(wave.sgpr(6), 1u);
         EXPECT_EQ(wave.sgpr(12), width == 32 ? 0x12345678u : 0u);
-        EXPECT_EQ(wave.sgpr(9), handler == Handler::Returns ? mem_viol : 0u);
+        EXPECT_EQ(wave.sgpr(9), handler == Handler::Returns ? kGfx10TrapstsDpRate | mem_viol : 0u);
         EXPECT_EQ(wave.sgpr(10), handler == Handler::Returns ? 1u : 0u);
         if (handler == Handler::Returns) {
           EXPECT_EQ(wave.ttmp(0), next_pc);
@@ -1516,7 +1518,7 @@ TEST(RdnaDispatchTest, Gfx1030DeferredMemoryViolationUsesTheRetiredPc) {
     ASSERT_NO_THROW(f.engine->run());
     ASSERT_EQ(halts->snapshots().size(), 1u);
     const auto &snap = halts->snapshots().front();
-    EXPECT_EQ(snap.sgpr(9), 1u << 8);
+    EXPECT_EQ(snap.sgpr(9), kGfx10TrapstsDpRate | 1u << 8);
     EXPECT_EQ(snap.ttmp(0), next_pc);
     EXPECT_EQ(snap.ttmp(1), 0u);
     EXPECT_EQ(snap.vgpr(8, 0), 0x89abcdefu);
@@ -13343,7 +13345,7 @@ TEST(Pm4DispatchTest, Gfx1030Rsrc2EnablesMemoryViolationsAtLaunch) {
       } else {
         ASSERT_EQ(halts->snapshots().size(), 1u);
         EXPECT_EQ(halts->snapshots()[0].wf_size, width);
-        EXPECT_EQ(halts->snapshots()[0].sgpr(5), 1u << 8);
+        EXPECT_EQ(halts->snapshots()[0].sgpr(5), kGfx10TrapstsDpRate | 1u << 8);
       }
     }
   }
