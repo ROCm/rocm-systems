@@ -9822,7 +9822,7 @@ TEST(ArithBridgeTest, DppConditionalAppliesIndependentSignsAfterRouting) {
 }
 
 TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinations) {
-  const uint16_t opcodes[5][2][12] = {
+  const uint16_t opcodes[6][2][12] = {
       {{rdna4::kSAndSaveExecB32Sop1, rdna4::kSOrSaveExecB32Sop1, rdna4::kSXorSaveExecB32Sop1,
         rdna4::kSNandSaveExecB32Sop1, rdna4::kSNorSaveExecB32Sop1, rdna4::kSXnorSaveExecB32Sop1,
         rdna4::kSAndNot0SaveExecB32Sop1, rdna4::kSOrNot0SaveExecB32Sop1,
@@ -9862,11 +9862,24 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
         cdna5::kSNandSaveExecB64Sop1, cdna5::kSNorSaveExecB64Sop1, cdna5::kSXnorSaveExecB64Sop1,
         cdna5::kSAndNot0SaveExecB64Sop1, cdna5::kSOrNot0SaveExecB64Sop1,
         cdna5::kSAndNot1SaveExecB64Sop1, cdna5::kSOrNot1SaveExecB64Sop1,
-        cdna5::kSAndNot0WrExecB64Sop1, cdna5::kSAndNot1WrExecB64Sop1}}};
+        cdna5::kSAndNot0WrExecB64Sop1, cdna5::kSAndNot1WrExecB64Sop1}},
+      {{rdna3_5::kSAndSaveExecB32Sop1, rdna3_5::kSOrSaveExecB32Sop1, rdna3_5::kSXorSaveExecB32Sop1,
+        rdna3_5::kSNandSaveExecB32Sop1, rdna3_5::kSNorSaveExecB32Sop1,
+        rdna3_5::kSXnorSaveExecB32Sop1, rdna3_5::kSAndNot0SaveExecB32Sop1,
+        rdna3_5::kSOrNot0SaveExecB32Sop1, rdna3_5::kSAndNot1SaveExecB32Sop1,
+        rdna3_5::kSOrNot1SaveExecB32Sop1, rdna3_5::kSAndNot0WrExecB32Sop1,
+        rdna3_5::kSAndNot1WrExecB32Sop1},
+       {rdna3_5::kSAndSaveExecB64Sop1, rdna3_5::kSOrSaveExecB64Sop1, rdna3_5::kSXorSaveExecB64Sop1,
+        rdna3_5::kSNandSaveExecB64Sop1, rdna3_5::kSNorSaveExecB64Sop1,
+        rdna3_5::kSXnorSaveExecB64Sop1, rdna3_5::kSAndNot0SaveExecB64Sop1,
+        rdna3_5::kSOrNot0SaveExecB64Sop1, rdna3_5::kSAndNot1SaveExecB64Sop1,
+        rdna3_5::kSOrNot1SaveExecB64Sop1, rdna3_5::kSAndNot0WrExecB64Sop1,
+        rdna3_5::kSAndNot1WrExecB64Sop1}},
+  };
   const rocjitsu::IsaFamily architectures[] = {
       rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Cdna3,
-      rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5};
-  for (int architecture = 0; architecture < 5; ++architecture) {
+      rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna3_5};
+  for (int architecture = 0; architecture < 6; ++architecture) {
     for (uint32_t lanes : {32U, 64U}) {
       for (bool wide : {false, true}) {
         for (bool loose : {false, true}) {
@@ -9902,15 +9915,17 @@ TEST(ArithBridgeTest, ExecBooleanUpdatesPreserveWidthsOrderingAndAliasedDestinat
               fixture.cu->write_sgpr(base, uint32_t(input));
               fixture.cu->write_sgpr(base + 1, uint32_t(input >> 32));
               const auto opcode = opcodes[architecture][wide][op];
-              const auto words = arch == rocjitsu::IsaFamily::Cdna3
-                                     ? cdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
-                                 : arch == rocjitsu::IsaFamily::Cdna4
-                                     ? cdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
-                                 : arch == rocjitsu::IsaFamily::Cdna5
-                                     ? cdna5::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
-                                 : rdna3
-                                     ? rdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
-                                     : rdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination});
+              const auto words =
+                  arch == rocjitsu::IsaFamily::Cdna3
+                      ? cdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                  : arch == rocjitsu::IsaFamily::Cdna4
+                      ? cdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                  : arch == rocjitsu::IsaFamily::Cdna5
+                      ? cdna5::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                  : arch == rocjitsu::IsaFamily::Rdna3_5
+                      ? rdna3_5::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                  : rdna3 ? rdna3::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination})
+                          : rdna4::build_sop1(opcode, {.ssrc0 = 0, .sdst = destination});
               auto instruction = fixture.decoder->decode_window(words);
               // The SREG destination class excludes EXEC; preserve that decoder
               // rejection instead of manufacturing an unsupported register
