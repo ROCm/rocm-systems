@@ -107,7 +107,7 @@ All fields are required.
 | `metric_id` | Id of the metric in panel 3 of the analysis config, such as `3.1.24`. |
 | `title` | Label shown before the value. |
 | `category` | Kind of metric. It sets the color; see [Categories](#categories). |
-| `bar` | `true` draws a bar under the value. Use it only for percentages, and never in a `list` block. |
+| `bar` | `true` draws a bar under the value. Use it only for percentages. |
 
 ### Arrows
 
