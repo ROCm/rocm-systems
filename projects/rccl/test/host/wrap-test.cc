@@ -3181,10 +3181,7 @@ TEST(WrapMicrotestIsolated, UseReduceScatterDirect_ThresholdAboveHardLimitIsClam
       });
 }
 
-// enqueue.cc turns a negative RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD into a device
-// limit of 0, so the kernel never takes the direct path. Host selection must
-// agree: picking Direct RS here builds a ring without proxy ops, which the
-// device then runs -- a hang on multi-node.
+// A negative threshold gives the device a direct limit of 0, so host selection must reject Direct RS too.
 TEST(WrapMicrotestIsolated, UseReduceScatterDirect_NegativeOneThresholdMatchesDeviceLimit) {
   RUN_ISOLATED_TEST(
       "Wrap_UseReduceScatterDirect_NegativeOneThresholdMatchesDeviceLimit",
