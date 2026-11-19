@@ -676,9 +676,10 @@ TEST(Cdna4MatrixControlTest, DenseF32AndBf16ClampFiniteOverflowOnly) {
       }
     }
 
-    // CBSZ=1 broadcasts one half of A to both halves of the result.
+    // CBSZ=1 selects one four-lane A block from each adjacent pair.
+    // Unselected infinities must not prevent finite overflow from clamping.
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      fx.cu->write_vgpr(fx.vbase + A_OFF, lane, lane < 32 ? 0x7f7fffffu : 0x7f800000u);
+      fx.cu->write_vgpr(fx.vbase + A_OFF, lane, lane % 8 < 4 ? 0x7f7fffffu : 0x7f800000u);
       fx.cu->write_vgpr(fx.vbase + B_OFF, lane, 0x40000000u);
       fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0);
     }
@@ -696,8 +697,8 @@ TEST(Cdna4MatrixControlTest, DenseF32AndBf16ClampFiniteOverflowOnly) {
       ASSERT_NE(instruction, nullptr);
       ASSERT_TRUE(fx.cu->execute_instruction(instruction.get(), *fx.wf).succeeded());
       const uint32_t expected = abid ? 0x7f800000u : 0x7f7fffffu;
-      for (uint32_t lane : {0u, 32u})
-        EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, lane), expected);
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+        EXPECT_EQ(fx.cu->read_vgpr(fx.vbase + DST_OFF, lane), expected) << "lane=" << lane;
     }
   }
 }
