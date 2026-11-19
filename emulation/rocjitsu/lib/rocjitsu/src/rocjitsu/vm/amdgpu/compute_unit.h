@@ -1216,7 +1216,7 @@ public:
 
 private:
   static bool nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf);
-  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                              uint64_t deferred_gds_sources = 0);
 
   // RegisterAccess is the instruction-facing register boundary. These
@@ -1710,10 +1710,11 @@ protected:
   void tick_pipelines();
 
   /// @brief Route a memory instruction into the appropriate pipeline.
-  /// @param inst Ownership transfers when the pipeline accepts the instruction.
-  /// Rejected instructions stay with the issuer until it reports the failure.
+  /// @param inst Synchronous completion preserves ownership; retry and deferred
+  /// completion transfer it to the pipeline. Pre-routing rejection leaves the
+  /// instruction with the issuer until it reports the failure.
   /// @param wf The issuing wavefront.
-  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                     uint64_t deferred_gds_sources = 0);
   void track_memory_wait(Instruction &inst, Wavefront &wf, uint64_t *deferred_gds_sources);
   void lock_gds_sources(const Instruction &inst, Wavefront &wf, uint64_t sequence);

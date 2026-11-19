@@ -49,7 +49,7 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  auto d = std::make_unique<VectorMemState>(LOCAL_MEM);
+  std::unique_ptr<VectorMemState> d = inst.acquire_data<VectorMemState>(LOCAL_MEM);
   d->wf_size = wf.wf_size();
   d->dst_reg_base = wf.vgpr_alloc().base + dst;
   d->elem_size = type == 2 ? 4 : (type & 1 ? 2 : 1);
