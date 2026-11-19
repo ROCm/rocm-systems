@@ -375,6 +375,10 @@ rocpd_v2_reader::read_table_events(const resolved_event_query& query,
             out.name_id         = published_string(
                 is_region ? row.name_id : op_name_id(row.name_id, row.category_id));
             out.category_id = published_string(row.category_id);
+            if(event_type == PH_EVENT_TYPE_KERNEL_DISPATCH)
+            {
+                out.kernel_id = out.name_id;
+            }
             out.nid         = rocpd_v2::k_node_id;
             out.process_id  = or_zero(row.pid);
             out.pid         = or_zero(row.pid);

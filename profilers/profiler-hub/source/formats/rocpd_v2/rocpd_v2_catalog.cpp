@@ -182,12 +182,46 @@ rocpd_v2_reader::build_catalog_category(catalog_category_t category,
             if(catalog.derived_aggregates_ready) return;
             build_pmc_infos(catalog);
             break;
-        // The schema records no streams, code objects, or kernel symbols.
+        case catalog_category_t::kernel_symbols: build_kernel_symbols(catalog); break;
+        // The schema records no streams or code objects.
         case catalog_category_t::stream_hardware_links:
         case catalog_category_t::code_objects:
-        case catalog_category_t::kernel_symbols:
         case catalog_category_t::streams: break;
     }
+}
+
+void
+rocpd_v2_reader::build_kernel_symbols(reader_catalog_t& catalog)
+{
+    struct kernel_name_row_t
+    {
+        std::optional<size_t> description_id;
+        std::optional<size_t> op_type_id;
+    };
+
+    const std::string sql = fmt::format(
+        "SELECT O.description_id, O.opType_id FROM rocpd_op O WHERE {} "
+        "GROUP BY O.description_id, O.opType_id",
+        rocpd_v2::op_kind_where("O", false));
+    m_backend
+        ->create_read_statement_executor<kernel_name_row_t>(
+            sql,
+            &kernel_name_row_t::description_id,
+            &kernel_name_row_t::op_type_id)()
+        .for_each([&](const kernel_name_row_t& row) {
+            const std::optional<size_t> name_id =
+                op_name_id(row.description_id, row.op_type_id);
+            if(!name_id.has_value()) return;
+            const size_t      symbol_id = canonical_string_id(name_id.value());
+            const std::string text{ text_of(symbol_id) };
+            if(text.empty() || catalog.kernel_symbols_by_id.count(symbol_id) > 0) return;
+            auto symbol          = std::make_shared<reader_types::kernel_symbol_info_t>();
+            symbol->id           = symbol_id;
+            symbol->name         = text;
+            symbol->display_name = text;
+            catalog.kernel_symbols.push_back(symbol);
+            catalog.kernel_symbols_by_id.emplace(symbol_id, symbol);
+        });
 }
 
 void

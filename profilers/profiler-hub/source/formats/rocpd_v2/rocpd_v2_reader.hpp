@@ -174,6 +174,8 @@ private:
     void build_tracks(reader_catalog_t& catalog);
     void build_queues(reader_catalog_t& catalog);
     void build_pmc_infos(reader_catalog_t& catalog);
+    // One symbol per distinct kernel description. The schema has no symbol table.
+    void build_kernel_symbols(reader_catalog_t& catalog);
 
     [[nodiscard]] reader_types::timeline_event_t region_event(
         const rocpd_v2::api_row_t& row) const;
