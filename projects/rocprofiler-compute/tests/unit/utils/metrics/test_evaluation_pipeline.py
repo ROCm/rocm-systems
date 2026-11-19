@@ -103,7 +103,7 @@ class TestEvaluationPipeline:
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         with patch(
-            "utils.utils_counter_defs.Collectables.of_arch",
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
             return_value={},
         ), patch(
             "utils.metrics.evaluation_pipeline.debug_row_tracker"
@@ -150,7 +150,7 @@ class TestEvaluationPipeline:
             for counters in pass_counters
         ]
         with patch(
-            "utils.utils_counter_defs.Collectables.of_arch",
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
             return_value={},
         ):
             eval_metric(
@@ -187,7 +187,7 @@ class TestEvaluationPipeline:
             "b_per_dispatch": "GRBM_GUI_ACTIVE",
         }
         with patch(
-            "utils.utils_counter_defs.Collectables.of_arch",
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
             return_value=collectables,
         ):
             eval_metric(
@@ -212,7 +212,10 @@ class TestEvaluationPipeline:
             }
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
-        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
+        with patch(
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
+            return_value={},
+        ):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -240,7 +243,10 @@ class TestEvaluationPipeline:
             "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
         })
-        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
+        with patch(
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
+            return_value={},
+        ):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -258,7 +264,10 @@ class TestEvaluationPipeline:
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         assert metric_df.loc["1.1.0", "Average"] is None
 
-        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
+        with patch(
+            "rocprof_compute_soc.metric_library.loader.Collectables.of_arch",
+            return_value={},
+        ):
             eval_metric(
                 dfs,
                 dfs_type,

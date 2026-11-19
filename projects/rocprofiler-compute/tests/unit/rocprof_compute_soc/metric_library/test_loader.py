@@ -4,11 +4,19 @@
 """Unit tests for rocprof_compute_soc/metric_library/loader.py."""
 
 import copy
+import importlib
+import sys
 
 import pytest
+from conftest import ProfileModeImportGuard
 
+from rocprof_compute_soc import metric_library
 from rocprof_compute_soc.metric_library import loader
-from rocprof_compute_soc.metric_library.loader import MetricLibrary, MetricLibraryError
+from rocprof_compute_soc.metric_library.loader import (
+    Collectables,
+    MetricLibrary,
+    MetricLibraryError,
+)
 
 # A base and a four-deep chain of children. Each child changes one thing.
 FAMILY_PARENT_ARCH = {
@@ -81,6 +89,14 @@ def family(tmp_path, monkeypatch):
     for arch, text in FAMILY_COMPUTE_FILES.items():
         write_file(tmp_path / arch / "compute.yaml", text)
     return tmp_path
+
+
+@pytest.fixture
+def family_collectables(family, monkeypatch):
+    """The synthetic family as the shipped library, with no collectables read yet."""
+    monkeypatch.setattr(loader, "default_metric_library_dir", lambda: family)
+    monkeypatch.setattr(Collectables, "_formulas_by_arch", {})
+    return family
 
 
 def test_arch_chain_of_real_archs():
@@ -293,3 +309,52 @@ def test_shipped_library_loads():
     for arch in loader.METRIC_LIBRARY_PARENT_ARCH:
         library = MetricLibrary.load(loader.default_metric_library_dir(), arch)
         assert library.metrics and library.collectables
+
+
+def test_gfx1250_reads_gui_active_from_its_sum():
+    assert (
+        Collectables.of_arch("gfx1250")["GRBM_GUI_ACTIVE_PER_XCD"]
+        == "GRBM_GUI_ACTIVE_sum / $num_xcd"
+    )
+
+
+@pytest.mark.parametrize("gpu_arch", ["gfx942", "gfx1151"])
+def test_other_archs_read_gui_active(gpu_arch):
+    assert (
+        Collectables.of_arch(gpu_arch)["GRBM_GUI_ACTIVE_PER_XCD"]
+        == "GRBM_GUI_ACTIVE / $num_xcd"
+    )
+
+
+def test_each_collectable_comes_after_those_it_uses(family_collectables):
+    write_file(
+        family_collectables / "gfx_base" / "collectables.yaml",
+        "rate:\n  formula: SUM($count) / 2\ncount:\n  formula: TA_BUSY\n",
+    )
+    assert list(Collectables.of_arch("gfx_c4")) == ["count", "rate"]
+
+
+def test_collectables_that_use_each_other_fail(family_collectables):
+    write_file(
+        family_collectables / "gfx_base" / "collectables.yaml",
+        "first:\n  formula: $second\nsecond:\n  formula: $first\n",
+    )
+    with pytest.raises(SystemExit):
+        Collectables.of_arch("gfx_c4")
+
+
+def test_an_arch_without_a_metric_library_fails():
+    with pytest.raises(SystemExit):
+        Collectables.of_arch("gfx900")
+
+
+def test_imports_under_profile_mode_guard(monkeypatch):
+    """The metric library uses only stdlib, project and vendored code. The re-import
+    rebinds the package's loader attribute, so it is restored too: later tests patch
+    the loader by name."""
+    monkeypatch.setattr(metric_library, "loader", loader)
+    monkeypatch.delitem(
+        sys.modules, "rocprof_compute_soc.metric_library.loader", raising=False
+    )
+    with ProfileModeImportGuard():
+        importlib.import_module("rocprof_compute_soc.metric_library.loader")

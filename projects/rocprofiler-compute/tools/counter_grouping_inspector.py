@@ -43,6 +43,7 @@ if str(_SRC_DIR) not in sys.path:
 
 # Import from existing modules to maintain single source of truth
 import config
+from rocprof_compute_soc.metric_library.loader import Collectables
 from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
     is_tcc_channel_counter,
@@ -56,7 +57,7 @@ from utils.counters.counter_file import (
 from utils.logger import console_error
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import canonical_config_arch
-from utils.utils_counter_defs import BLOCK_REMAP, Collectables
+from utils.utils_counter_defs import BLOCK_REMAP
 
 
 def _counter_display_ip_prefix(counter: str) -> str:

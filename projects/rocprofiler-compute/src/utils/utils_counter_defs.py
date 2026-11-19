@@ -10,11 +10,6 @@ Imported by both the main runtime code and lightweight tooling such as
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import config
-from utils.logger import console_error
-from utils.utils_common import canonical_config_arch
-from vendored import yaml
-
 # ---------------------------------------------------------------------------
 # Regex patterns for HW counter and variable extraction
 # ---------------------------------------------------------------------------
@@ -38,9 +33,6 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 # ---------------------------------------------------------------------------
 # Collectables and denominator definitions
 # ---------------------------------------------------------------------------
-
-# Per-arch files of named formulas, written $name in metric formulas
-COLLECTABLES_DIR = config.analysis_configs_dir / "collectables"
 
 # A collectable whose formula matches is one value for all dispatches. A min or
 # max reads its partner named <name> + PER_DISPATCH_SUFFIX, which has a value per
@@ -189,41 +181,3 @@ def counter_to_block(counter: str) -> str:
     if block == "TX":
         return "TCP"
     return BLOCK_REMAP.get(block, block)
-
-
-def _dependency_order(formulas: Dict[str, str]) -> Dict[str, str]:
-    """Return formulas ordered so each collectable comes after those it uses."""
-    ordered: Dict[str, str] = {}
-    pending = dict(formulas)
-    while pending:
-        ready = {
-            name: formula
-            for name, formula in pending.items()
-            if not parse_counters_text(formula)[1] & pending.keys()
-        }
-        if not ready:
-            console_error(f"Collectables use each other in a loop: {sorted(pending)}")
-        ordered.update(ready)
-        pending = {name: pending[name] for name in pending.keys() - ready.keys()}
-    return ordered
-
-
-class Collectables:
-    """The collectables of each arch: named formulas that metric formulas use
-    as $name. Each arch's file is read once, and its collectables are kept so
-    that each one comes after the collectables it uses."""
-
-    _formulas_by_arch: Dict[str, Dict[str, str]] = {}
-
-    @classmethod
-    def of_arch(cls, gpu_arch: str) -> Dict[str, str]:
-        """Return the formula of each collectable of gpu_arch, by name."""
-        config_arch = canonical_config_arch(gpu_arch)
-        if config_arch not in cls._formulas_by_arch:
-            path = COLLECTABLES_DIR / f"{config_arch}_collectables.yaml"
-            if not path.is_file():
-                console_error(f"No collectables file for {gpu_arch}: {path}")
-            cls._formulas_by_arch[config_arch] = _dependency_order(
-                yaml.safe_load(path.read_text(encoding="utf-8"))
-            )
-        return cls._formulas_by_arch[config_arch]

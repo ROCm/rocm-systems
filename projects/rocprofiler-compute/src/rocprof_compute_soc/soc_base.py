@@ -21,6 +21,7 @@ from typing import (
 
 import config
 from rocprof_compute_soc.metric_library import loader
+from rocprof_compute_soc.metric_library.loader import Collectables
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED, run_roofline_benchmark
 from utils import amdsmi_interface, rocprofv3_avail_interface
 from utils.counters.allocator import (
@@ -59,7 +60,6 @@ from utils.utils_common import (
     view_table_render,
 )
 from utils.utils_counter_defs import (
-    Collectables,
     metric_expressions,
 )
 from vendored import yaml
