@@ -123,6 +123,21 @@ inline void AtomicSetPacketHeader(uint16_t header, uint16_t setup,
                                     header | (setup <<16), __ATOMIC_RELEASE);
 }
 
+/// Writes a barrier-AND packet with the barrier bit set to the next slot of
+/// a queue. The caller rings the doorbell.
+/// \param[in] queue Queue to write to
+/// \param[in] dependency Signal the packet waits for, or a 0 handle for none
+/// \param[in] completion_signal Completion signal, which may carry handle hints
+/// \returns Index of the packet
+uint64_t WriteBarrierAndToQueue(hsa_queue_t* queue, hsa_signal_t dependency,
+                                hsa_signal_t completion_signal);
+
+/// Returns the agent's memory pool that hsa_amd_signal_batch_create accepts
+/// (HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE), or a pool with handle 0 if it has
+/// none. Which pool that is depends on the GPU: extended-scope fine-grained on
+/// gfx94x/gfx95x, coarse-grained on gfx12+.
+hsa_amd_memory_pool_t FindSignalCapablePool(hsa_agent_t agent);
+
 /// @brief This function returns the Host Address for a code object given its device address
 /// @param[in] device device address
 /// @param[in] host host address

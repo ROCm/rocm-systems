@@ -4,17 +4,25 @@ on:
   pull_request:
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
+      - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
       - ".github/workflows/rocjitsu-benchmarks.yml"
+      - ".github/scripts/rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_summary.mjs"
   push:
     branches:
       - develop
     paths:
       - "emulation/rocjitsu/website/dashboard/**"
+      - "emulation/rocjitsu/scripts/prepare-benchmarks.py"
       - ".github/workflows/rocjitsu-website-test.yml"
       - ".github/workflows/rocjitsu-publish-website.yml"
       - ".github/workflows/rocjitsu-benchmarks.yml"
+      - ".github/scripts/rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_report.js"
+      - ".github/scripts/tests/test_rocjitsu_benchmark_summary.mjs"
   workflow_dispatch:
 
 permissions:
@@ -26,7 +34,7 @@ concurrency:
 
 jobs:
   dashboard-data:
-    name: Verify dashboard data tools
+    name: Verify benchmark preparation and publication
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -34,7 +42,9 @@ jobs:
         working-directory: emulation/rocjitsu/website/dashboard
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -48,15 +58,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bash git jq
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22.13.0"
-
       - name: Install Python test dependencies
         run: python -m pip install -r scripts/dashboard-data/requirements-test.txt
 
-      - name: Test dashboard data tools
+      - name: Test benchmark preparation and publication
         run: python -m pytest scripts/dashboard-data/tests
 
   verify:
@@ -68,14 +73,25 @@ jobs:
         working-directory: emulation/rocjitsu/website/dashboard
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22.13.0"
           cache: npm
           cache-dependency-path: emulation/rocjitsu/website/dashboard/package-lock.json
+
+      - name: Test benchmark PR reporting
+        working-directory: .
+        run: node --test .github/scripts/tests/test_rocjitsu_benchmark_report.js .github/scripts/tests/test_rocjitsu_benchmark_summary.mjs
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
 
       - name: Install dependencies
         run: npm ci
@@ -86,9 +102,14 @@ jobs:
       - name: Verify website
         run: npm run verify
 
+      - name: Smoke test published dashboard data
+        env:
+          PLAYWRIGHT_PUBLISHED_DATA: "1"
+        run: npm run test:e2e:production -- tests/production/published-data.e2e.js
+
       - name: Upload Playwright diagnostics
         if: ${{ !cancelled() && failure() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rocjitsu-website-playwright-results
           path: |

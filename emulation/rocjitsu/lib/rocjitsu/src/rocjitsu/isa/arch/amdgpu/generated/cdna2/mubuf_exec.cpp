@@ -723,6 +723,13 @@ void BufferStoreDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 4);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 1)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+      return;
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -745,6 +752,13 @@ void BufferStoreDwordx2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 8);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 2)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+      return;
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -769,6 +783,13 @@ void BufferStoreDwordx3Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 12);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 3)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+      return;
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -795,6 +816,13 @@ void BufferStoreDwordx4Mubuf::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
   d->store_data.resize(wf.wf_size() * 16);
+  if (!cu.observes_register_access() && wf.vgpr_alloc().contains(data_base, 4)) {
+    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
+    if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+      return;
+    set_data(std::move(d));
+    return;
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1050,13 +1078,25 @@ void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferInvl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  (void)wf; // BUFFER_INVL2 selects remote MTYPE NC lines.
 }
 
 void BufferStoreLdsDwordMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 1;
+  d->is_load = false;
+  d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+  d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+  mubuf_calculate_addresses(inst_, wf, *d);
+  amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                  (wf.m0() & 0xffffu) + inst_.offset, 4, 4);
+  d->store_data.resize(wf.wf_size() * sizeof(uint32_t));
+  for (uint64_t lanes = d->lane_mask; lanes; lanes &= lanes - 1) {
+    const unsigned lane = std::countr_zero(lanes);
+    std::as_const(wf.lds()).read(d->per_lane_lds_addr[lane], d->store_data.data() + lane * 4, 4);
+  }
+  set_data(std::move(d));
 }
 
 void BufferWbinvl1Mubuf::execute_impl(amdgpu::Wavefront &wf) {

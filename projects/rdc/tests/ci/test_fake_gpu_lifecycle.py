@@ -94,9 +94,10 @@ def test_rdcd_exits_with_an_error_when_its_port_is_in_use(tools, tmp_path):
     # checks a lock file it does not take (the root one).
     a_lock_file_is_missing = os.geteuid() != 0 and not os.path.exists(ROOT_LOCK)
     # gRPC binds with SO_REUSEPORT, which works only if every socket on the port
-    # sets it; this one does not, so rdcd cannot bind.
+    # sets it; this one does not, so rdcd cannot bind. rdcd's 0.0.0.0 includes
+    # the loopback address that this socket holds.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as busy:
-        busy.bind(("0.0.0.0", 0))
+        busy.bind(("127.0.0.1", 0))
         busy.listen()
         port = busy.getsockname()[1]
         code, out = _run([d.rdcd_path, "-u", "-p", str(port)], d.env, "port in use")
@@ -131,6 +132,75 @@ def test_rdcd_stops_with_a_config_set(tools, tmp_path):
         code = d.stop()
     assert code == 0, f"rdcd exited with {code} after SIGTERM\n{d.output()}"
     assert "RDC server successfully shut down." in d.output(), d.output()
+
+
+def _wait_for_output(d, text):
+    deadline = time.monotonic() + 10 * FACTOR
+    while text not in d.out_log.read_text(errors="replace"):
+        if d.proc.poll() is not None or time.monotonic() > deadline:
+            d.kill()
+            pytest.fail(f"rdcd did not print {text!r}\n{d.output()}")
+        time.sleep(0.001)  # fine-grained: rdcd can finish a stop within 100 ms of a signal
+
+
+def _catches(pid, sig):
+    """Whether process `pid` has a handler for `sig` (SigCgt in /proc/<pid>/status)."""
+    with open(f"/proc/{pid}/status") as status:
+        for line in status:
+            if line.startswith("SigCgt:"):
+                return (int(line.split()[1], 16) >> (sig - 1)) & 1 == 1
+    return False
+
+
+def test_rdcd_stops_normally_on_two_sigterms_in_a_row(tools, tmp_path):
+    # A unit with ExecStop=/bin/kill -15 $MAINPID, as an earlier rdc.service and copies of it in
+    # /etc/systemd/system have: systemctl stop sends that SIGTERM, then its own right after.
+    d = Rdcd(tools, tmp_path).start()
+    d.proc.send_signal(signal.SIGTERM)
+    # Once rdcd has handled the first, the second cannot merge with it.
+    _wait_for_output(d, "Caught signal 15")
+    d.proc.send_signal(signal.SIGTERM)
+    try:
+        code = d.proc.wait(timeout=15 * FACTOR)
+    except subprocess.TimeoutExpired:
+        d.kill()
+        pytest.fail(f"rdcd did not exit after two SIGTERMs\n{d.output()}")
+    log = d.out_log.read_text(errors="replace")
+    assert log.count("Caught signal 15") == 2, f"rdcd stopped before the second SIGTERM\n{log}"
+    assert code == 0, f"rdcd exited with {code} after two SIGTERMs\n{d.output()}"
+    assert "RDC server successfully shut down." in log, d.output()
+
+
+def test_rdcd_ends_a_stalled_stop_on_a_signal_after_5_seconds(tools, tmp_path):
+    # amdsmi_init takes 60 s, so a stop that rdcd gets while it starts cannot finish. This
+    # passes without the 5 s rule too: it checks that the rule keeps the exit for a stuck stop.
+    d = Rdcd(tools, tmp_path, RDC_FAKE_DELAY_MS="amdsmi_init=60000")
+    d.arm()  # amdsmi_init runs at start
+    with open(d.out_log, "w") as out:
+        d.proc = subprocess.Popen(
+            [d.rdcd_path, "-u", "-p", str(_free_port())],
+            env=d.env,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+        )
+    try:
+        deadline = time.monotonic() + 10 * FACTOR
+        while not _catches(d.proc.pid, signal.SIGTERM):
+            if d.proc.poll() is not None or time.monotonic() > deadline:
+                pytest.fail(f"rdcd did not handle SIGTERM\n{d.output()}")
+            time.sleep(0.05)
+        d.proc.send_signal(signal.SIGTERM)
+        _wait_for_output(d, "Caught signal 15")
+        time.sleep(6)  # more than the 5 s that rdcd gives a stop, from that signal on
+        assert d.proc.poll() is None, f"rdcd exited with {d.proc.returncode}\n{d.output()}"
+        d.proc.send_signal(signal.SIGTERM)
+        try:
+            code = d.proc.wait(timeout=10 * FACTOR)
+        except subprocess.TimeoutExpired:
+            pytest.fail(f"rdcd did not exit on a SIGTERM 6 s into its stop\n{d.output()}")
+    finally:
+        d.kill()
+    assert code == 1, f"rdcd exited with {code}\n{d.output()}"
 
 
 @pytest.mark.parametrize("mode", [0o644, 0o600], ids=["readable", "unreadable"])

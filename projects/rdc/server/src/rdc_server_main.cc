@@ -31,12 +31,14 @@ THE SOFTWARE.
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -60,6 +62,9 @@ THE SOFTWARE.
 //  * port on which to listen
 
 static std::atomic<bool> sShutDownServer{false};
+// MonotonicNs() of the first stop request; 0 until then. The signal handler reads it.
+static std::atomic<int64_t> sStopStartNs{0};
+static_assert(std::atomic<int64_t>::is_always_lock_free, "a signal handler uses it");
 static const char* kDaemonName = "rdcd";
 static const char* kRDCDHomeDir = "/";
 static const char* kDaemonLockFileRoot = "/var/run/rdcd.lock";
@@ -78,7 +83,8 @@ static const char* kDefaultRDCClientCACertPemPkiPath = "/etc/rdc/client/certs/rd
 static const char* kDefaultListenAddress = "0.0.0.0";
 static const char* kDefaultListenPort = "50051";
 static const uint32_t kRSMIUMask = 027;
-// How long a stop waits for RPCs in progress before it cancels them.
+// How long a stop waits for RPCs in progress before it cancels them. Stop requests in this time
+// after the first one belong to the same stop (HandleSignal()).
 static constexpr auto kShutdownGracePeriod = std::chrono::seconds(5);
 
 RDCServer::RDCServer()
@@ -247,6 +253,20 @@ bool RDCServer::Run() {
   return true;
 }
 
+// CLOCK_MONOTONIC now, in ns. clock_gettime() is async-signal-safe.
+static int64_t MonotonicNs() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return static_cast<int64_t>(ts.tv_sec) * 1000000000 + ts.tv_nsec;
+}
+
+// Requests a stop and notes when the first request came. The signal handler calls it.
+static void RequestStop() {
+  int64_t not_started = 0;
+  sStopStartNs.compare_exchange_strong(not_started, MonotonicNs());
+  sShutDownServer = true;
+}
+
 // Writes "<text><sig>\n" with write(2): a signal handler cannot use iostreams.
 static void WriteFromSignalHandler(int fd, const char* text, size_t text_len, int sig) {
   char buf[64];
@@ -279,11 +299,14 @@ static void HandleSignal(int sig) {
   switch (sig) {
     case SIGINT:
     case SIGTERM:
-      if (sShutDownServer) {
-        // A second request, or a stop that is stuck: exit now.
+      if (sShutDownServer &&
+          std::chrono::nanoseconds(MonotonicNs() - sStopStartNs.load()) > kShutdownGracePeriod) {
+        // The stop has run longer than the grace period it gives RPCs: it is stuck. Exit now.
         _exit(1);
       }
-      sShutDownServer = true;
+      // A request in the first kShutdownGracePeriod of a stop is part of it. systemd sends two
+      // SIGTERMs for a unit with ExecStop=/bin/kill, as copies of an earlier rdc.service have.
+      RequestStop();
       break;
 
       // SIGHUP (restart) is not handled: gRPC does not restart a server well.
@@ -742,7 +765,7 @@ int main(int argc, char** argv) {
 
   // The signal thread stops the server, also after a failed start; wait for it.
   // rdc_server's destructor then frees the server and its services.
-  sShutDownServer = true;
+  RequestStop();
   pthread_join(sig_listen_thread, nullptr);
 
   if (!started) {

@@ -1,28 +1,25 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 
-#include "leaf_context.h"
-#include "marker_stack.h"
-#include "process_state.h"
-#include "record_function_installation.h"
-#include "stack_entry.h"
-#include "user_scope.h"
+#include "torch_trace_collector.h"
+
+#include "argument_capture.h"
 #include "wire_format.h"
 
 #include <ATen/record_function.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
-#include <algorithm>
+#include <array>
 #include <atomic>
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <exception>
+#include <iterator>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 extern "C"
 {
@@ -31,372 +28,242 @@ extern "C"
 
 namespace
 {
-using namespace torch_trace_collector::detail;
 
-constexpr std::string_view kRoctxUserScopeKindName = "rocprofiler-compute.user_scope";
-const c10::DebugInfoKind   kRoctxUserScopeKind{&kRoctxUserScopeKindName};
-constexpr const char*      kRecordFnBackend = "torch";
+constexpr const char* kRecordFnBackend         = "torch";
+constexpr std::size_t kMarkerMetadataAllowance = 512;
+constexpr std::size_t kInlineMarkerSize = torch_trace_collector::detail::kMaxEncodedArgumentsSize +
+                                          kMarkerMetadataAllowance;
+using torch_trace_collector::detail::kUnavailable;
 
-class RoctxUserScopeChain : public c10::DebugInfoBase
+std::atomic_flag g_callback_failure_warning = ATOMIC_FLAG_INIT;
+
+constexpr std::string_view kLauncherTidKindName{"ROCPROF_COMPUTE_LAUNCHER_TID"};
+const c10::DebugInfoKind   kLauncherTidKind{&kLauncherTidKindName};
+
+struct LauncherTidInfo final : c10::DebugInfoBase
 {
-public:
-    explicit RoctxUserScopeChain(std::vector<StackEntry> chain)
-        : chain(std::move(chain))
-    {
-    }
-
-    std::vector<StackEntry> chain;
+    std::uint64_t launcher_tid = 0;
 };
 
-struct RoctxObserverContext : public at::ObserverContext
-{
-    bool        pushed_roctx_range  = false;
-    bool        pushed_leaf         = false;
-    std::size_t pushed_extra_frames = 0;
-};
+thread_local std::size_t g_launcher_tid_depth = 0;
 
-void encode_marker_segment(const std::string& name, std::string& out)
+void warn_callback_failure_once() noexcept
 {
-    for (char c : name)
+    if (!g_callback_failure_warning.test_and_set(std::memory_order_relaxed))
     {
-        if (c == '%')
-            out += kEncodedPercent;
-        else if (c == '/')
-            out += kEncodedSlash;
-        else
-            out += c;
+        std::fputs("rocprof-compute: PyTorch RecordFunction callback failed; "
+                   "some operator markers may be missing.\n",
+                   stderr);
     }
 }
 
-std::unique_ptr<c10::DebugInfoGuard> publish_user_scope_chain(const std::vector<StackEntry>& stack)
+struct RoctxObserverContext final : at::ObserverContext
+{
+};
+
+std::optional<std::uint64_t> launcher_tid_for_marker()
+{
+    const auto* info = static_cast<const LauncherTidInfo*>(
+        c10::ThreadLocalDebugInfo::get(kLauncherTidKind));
+    if (info == nullptr)
+    {
+        return std::nullopt;
+    }
+    return info->launcher_tid;
+}
+
+std::string_view capture_args(
+    const at::RecordFunction&                                                  record_function,
+    std::array<char, torch_trace_collector::detail::kMaxEncodedArgumentsSize>& buffer) noexcept
+{
+    const std::size_t required = torch_trace_collector::detail::capture_args(record_function,
+                                                                             buffer.data(),
+                                                                             buffer.size());
+    if (required > buffer.size())
+    {
+        return kUnavailable;
+    }
+    return {buffer.data(), required - 1};
+}
+
+std::string_view scope_name(at::RecordScope scope)
+{
+    static constexpr std::string_view names[] = {
+        "FUNCTION",
+        "BACKWARD_FUNCTION",
+        "TORCHSCRIPT_FUNCTION",
+        "KERNEL_FUNCTION_DTYPE",
+        "CUSTOM_CLASS",
+        "BUILD_FEATURE",
+        "LITE_INTERPRETER",
+        "USER_SCOPE",
+        "STATIC_RUNTIME_OP",
+        "STATIC_RUNTIME_MODEL",
+    };
+    static_assert(std::size(names) == torch_abi::kScopeCount);
+
+    const std::size_t index = static_cast<std::size_t>(scope);
+    if (index < std::size(names))
+    {
+        return names[index];
+    }
+    return kUnavailable;
+}
+
+bool push_range(const at::RecordFunction& record_function, std::string_view name, std::string_view arguments)
+{
+    std::array<char, kInlineMarkerSize> marker_buffer;
+    const auto                          launcher_tid = launcher_tid_for_marker();
+    const auto                          format =
+        [&record_function, name, arguments, launcher_tid](char* destination, std::size_t capacity)
+    {
+        torch_trace_collector::detail::RangeNameFields fields{};
+        fields.name               = name;
+        fields.context            = kUnavailable;
+        fields.sequence_number    = record_function.seqNr();
+        fields.thread_id          = at::RecordFunction::currentThreadId();
+        fields.forward_thread_id  = record_function.forwardThreadId();
+        fields.launcher_thread_id = launcher_tid;
+        fields.scope              = scope_name(record_function.scope());
+        fields.arguments          = arguments;
+        fields.backend            = kRecordFnBackend;
+        return torch_trace_collector::detail::format_range_name(destination, capacity, fields);
+    };
+
+    const std::size_t required = format(marker_buffer.data(), marker_buffer.size());
+    if (required <= marker_buffer.size())
+    {
+        return roctxRangePushA(marker_buffer.data()) >= 0;
+    }
+
+    std::string marker(required, '\0');
+    format(marker.data(), marker.size());
+    marker.resize(required - 1);
+    return roctxRangePushA(marker.c_str()) >= 0;
+}
+
+std::unique_ptr<at::ObserverContext> start_callback(const at::RecordFunction& record_function)
 {
     try
     {
-        auto info = std::make_shared<RoctxUserScopeChain>(stack);
-        return std::make_unique<c10::DebugInfoGuard>(kRoctxUserScopeKind, std::move(info));
-    }
-    catch (...)
-    {
-        return nullptr;
-    }
-}
-
-void unwind_observer_context(const RoctxObserverContext& observer_ctx, bool count_pop)
-{
-    std::vector<StackEntry>& stack = thread_state().stack;
-    if (observer_ctx.pushed_roctx_range)
-    {
-        roctxRangePop();
-        if (count_pop)
-        {
-            process_state().stats.pops.fetch_add(1, std::memory_order_relaxed);
-        }
-    }
-    if (observer_ctx.pushed_leaf && !stack.empty())
-    {
-        stack.pop_back();
-    }
-    for (std::size_t i = 0; i < observer_ctx.pushed_extra_frames && !stack.empty(); ++i)
-    {
-        stack.pop_back();
-    }
-}
-
-void handle_start_error(std::unique_ptr<RoctxObserverContext>& observer_ctx, const char* message)
-{
-    if (observer_ctx)
-    {
-        try
-        {
-            unwind_observer_context(*observer_ctx, /*count_pop=*/false);
-        }
-        catch (...)
-        {
-        }
-    }
-    std::fprintf(stderr, "torch_trace_collector: %s\n", message);
-    process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-}
-
-std::size_t push_with_prefix_dedup(const std::vector<StackEntry>& chain)
-{
-    std::vector<StackEntry>& stack  = thread_state().stack;
-    const std::size_t        limit  = std::min(chain.size(), stack.size());
-    std::size_t              common = 0;
-    for (; common < limit; ++common)
-    {
-        if (chain[common].marker != stack[common].marker || chain[common].context != stack[common].context)
-        {
-            break;
-        }
-    }
-    std::size_t pushed = 0;
-    for (std::size_t i = common; i < chain.size(); ++i)
-    {
-        stack.push_back(chain[i]);
-        ++pushed;
-    }
-    return pushed;
-}
-
-std::size_t apply_user_scope_overlay()
-{
-    auto* chain_info = dynamic_cast<const RoctxUserScopeChain*>(
-        c10::ThreadLocalDebugInfo::get(kRoctxUserScopeKind));
-    if (chain_info == nullptr || chain_info->chain.empty())
-    {
-        return 0;
-    }
-    const std::vector<StackEntry> chain_copy = chain_info->chain;
-    const std::size_t             pushed     = push_with_prefix_dedup(chain_copy);
-    if (pushed > 0)
-    {
-        process_state().stats.user_scope_inherits.fetch_add(1, std::memory_order_relaxed);
-    }
-    return pushed;
-}
-
-std::unique_ptr<at::ObserverContext> start_cb(const at::RecordFunction& record_fn)
-{
-    std::unique_ptr<RoctxObserverContext> observer_ctx;
-    try
-    {
-        observer_ctx = std::make_unique<RoctxObserverContext>();
-
-        ProcessState&            state = process_state();
-        std::vector<StackEntry>& stack = thread_state().stack;
-
-        const at::RecordScope scope  = record_fn.scope();
-        const std::int64_t    seq_nr = record_fn.seqNr();
-        const char*           name   = record_fn.name();
+        auto        context = std::make_unique<RoctxObserverContext>();
+        const char* name    = record_function.name();
         if (name == nullptr || name[0] == '\0')
         {
             name = "<anonymous>";
         }
-
-        const bool stack_was_empty          = stack.empty();
-        bool       stack_was_empty_for_leaf = stack_was_empty;
-
-        if (stack_was_empty)
+        std::array<char, torch_trace_collector::detail::kMaxEncodedArgumentsSize> argument_buffer;
+        if (!push_range(record_function, name, capture_args(record_function, argument_buffer)))
         {
-            const std::size_t overlay_frames = apply_user_scope_overlay();
-            observer_ctx->pushed_extra_frames += overlay_frames;
-            if (overlay_frames > 0)
-            {
-                stack_was_empty_for_leaf = false;
-            }
+            return nullptr;
         }
-
-        if (scope == at::RecordScope::BACKWARD_FUNCTION && seq_nr >= 0)
-        {
-            const std::uint64_t     forward_thread_id = record_fn.forwardThreadId();
-            std::vector<StackEntry> snapshot;
-            if (forward_thread_id != 0 && state.snapshots.consume(seq_nr, forward_thread_id, &snapshot))
-            {
-                observer_ctx->pushed_extra_frames += push_with_prefix_dedup(snapshot);
-            }
-        }
-
-        StackEntry leaf;
-        leaf.marker                  = name;
-        const bool is_backward_scope = (scope == at::RecordScope::BACKWARD_FUNCTION);
-        leaf.context = torch_trace_collector::default_leaf_context(is_backward_scope,
-                                                                   seq_nr,
-                                                                   stack_was_empty_for_leaf);
-        stack.push_back(std::move(leaf));
-        observer_ctx->pushed_leaf = true;
-
-        if (scope == at::RecordScope::FUNCTION && seq_nr >= 0)
-        {
-            state.snapshots.save(seq_nr, at::RecordFunction::currentThreadId(), stack);
-        }
-
-        std::string wire_string = build_marker_string(stack);
-        wire_string += '|';
-        wire_string += kRecordFnBackend;
-        roctxRangePushA(wire_string.c_str());
-        observer_ctx->pushed_roctx_range = true;
-        state.stats.pushes.fetch_add(1, std::memory_order_relaxed);
-
-        return observer_ctx;
-    }
-    catch (const std::exception& exc)
-    {
-        handle_start_error(observer_ctx, exc.what());
-        return nullptr;
+        return context;
     }
     catch (...)
     {
-        handle_start_error(observer_ctx, "unknown exception");
+        warn_callback_failure_once();
         return nullptr;
     }
 }
 
-void end_cb(const at::RecordFunction& /*record_fn*/, at::ObserverContext* obs_ctx)
+// PyTorch's callback ABI requires a mutable ObserverContext pointer.
+// cppcheck-suppress constParameterCallback
+void end_callback(const at::RecordFunction&, at::ObserverContext* context)
 {
-    if (obs_ctx == nullptr)
+    if (context != nullptr)
     {
-        return;
+        roctxRangePop();
     }
-    auto* observer_ctx = static_cast<RoctxObserverContext*>(obs_ctx);
-    try
+}
+
+std::mutex         g_install_mutex;
+at::CallbackHandle g_handle = at::INVALID_CALLBACK_HANDLE;
+std::atomic<bool>  g_installed{false};
+
+bool install()
+{
+    const std::lock_guard<std::mutex> lock{g_install_mutex};
+    if (g_handle != at::INVALID_CALLBACK_HANDLE)
     {
-        unwind_observer_context(*observer_ctx, /*count_pop=*/true);
+        return true;
     }
-    catch (...)
+    if (!torch_trace_collector::detail::initialize_argument_capture())
     {
-        process_state().stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
+        return false;
     }
+    g_handle = at::addGlobalCallback(
+        at::RecordFunctionCallback(start_callback, end_callback).needsInputs(true));
+    if (g_handle == at::INVALID_CALLBACK_HANDLE)
+    {
+        return false;
+    }
+    g_installed.store(true, std::memory_order_release);
+    return true;
+}
+
+bool push_launcher_tid(std::uint64_t launcher_tid)
+{
+    if (!g_installed.load(std::memory_order_acquire))
+    {
+        return false;
+    }
+    auto info          = std::make_shared<LauncherTidInfo>();
+    info->launcher_tid = launcher_tid;
+    c10::ThreadLocalDebugInfo::_push(kLauncherTidKind, std::move(info));
+    ++g_launcher_tid_depth;
+    return true;
+}
+
+bool pop_launcher_tid()
+{
+    if (!g_installed.load(std::memory_order_acquire) || g_launcher_tid_depth == 0)
+    {
+        return false;
+    }
+    c10::ThreadLocalDebugInfo::_pop(kLauncherTidKind);
+    --g_launcher_tid_depth;
+    return true;
 }
 
 }  // namespace
 
-namespace torch_trace_collector::detail
+extern "C" std::uint32_t torch_trace_collector_abi_revision(void)
 {
-
-ProcessState& process_state()
-{
-    static ProcessState state;
-    return state;
+    return TORCH_TRACE_COLLECTOR_ABI_REVISION;
 }
 
-ThreadState& thread_state()
+extern "C" int torch_trace_collector_install(void)
 {
-    static thread_local ThreadState state;
-    return state;
-}
-
-std::string build_marker_string(const std::vector<StackEntry>& stack)
-{
-    std::size_t marker_len = 0;
-    std::size_t ctx_len    = 0;
-    for (const auto& entry : stack)
-    {
-        marker_len += entry.marker.size() + 1;
-        for (char c : entry.marker)
-            if (c == '%' || c == '/')
-                marker_len += 2;
-        ctx_len += entry.context.size() + 1;
-    }
-    std::string out;
-    out.reserve(marker_len + ctx_len + 1);
-
-    for (std::size_t i = 0; i < stack.size(); ++i)
-    {
-        if (i != 0)
-            out += '/';
-        encode_marker_segment(stack[i].marker, out);
-    }
-    out += ':';
-    for (std::size_t i = 0; i < stack.size(); ++i)
-    {
-        if (i != 0)
-            out += '/';
-        out += stack[i].context;
-    }
-    return out;
-}
-
-void push_user_scope(const std::string& marker, const std::string& context, const std::string& backend)
-{
-    ProcessState& state        = process_state();
-    ThreadState&  thread       = thread_state();
-    bool          pushed_frame = false;
-    bool          pushed_guard = false;
     try
     {
-        StackEntry entry;
-        entry.marker  = marker;
-        entry.context = context;
-        thread.stack.push_back(std::move(entry));
-        pushed_frame = true;
-
-        thread.guards.push_back(publish_user_scope_chain(thread.stack));
-        pushed_guard = true;
-
-        std::string wire_string = build_marker_string(thread.stack);
-        if (!backend.empty())
-        {
-            wire_string += '|';
-            wire_string += backend;
-        }
-        roctxRangePushA(wire_string.c_str());
-        state.stats.user_scope_pushes.fetch_add(1, std::memory_order_relaxed);
-        state.stats.pushes.fetch_add(1, std::memory_order_relaxed);
+        return install() ? 0 : 1;
     }
     catch (...)
     {
-        if (pushed_guard && !thread.guards.empty())
-        {
-            thread.guards.pop_back();
-        }
-        if (pushed_frame && !thread.stack.empty())
-        {
-            thread.stack.pop_back();
-        }
-        state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-        throw;
+        return 1;
     }
 }
 
-bool pop_user_scope()
+extern "C" int torch_trace_collector_push_launcher_tid(std::uint64_t launcher_tid)
 {
-    ProcessState& state  = process_state();
-    ThreadState&  thread = thread_state();
     try
     {
-        if (thread.stack.empty() || thread.guards.empty())
-        {
-            state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-            return false;
-        }
-        roctxRangePop();
-        state.stats.user_scope_pops.fetch_add(1, std::memory_order_relaxed);
-        state.stats.pops.fetch_add(1, std::memory_order_relaxed);
-        thread.stack.pop_back();
-        thread.guards.pop_back();
-        return true;
+        return push_launcher_tid(launcher_tid) ? 0 : 1;
     }
     catch (...)
     {
-        state.stats.callback_errors.fetch_add(1, std::memory_order_relaxed);
-        return false;
+        return 1;
     }
 }
 
-std::int64_t install()
+extern "C" int torch_trace_collector_pop_launcher_tid(void)
 {
-    return process_state().install.wlock(
-        [](InstallState& state)
-        {
-            if (state.handle == at::INVALID_CALLBACK_HANDLE)
-            {
-                state.handle = at::addGlobalCallback(
-                    at::RecordFunctionCallback(start_cb, end_cb)
-                        .scopes({at::RecordScope::FUNCTION, at::RecordScope::BACKWARD_FUNCTION}));
-            }
-            return static_cast<std::int64_t>(state.handle);
-        });
+    try
+    {
+        return pop_launcher_tid() ? 0 : 1;
+    }
+    catch (...)
+    {
+        return 1;
+    }
 }
-
-void uninstall()
-{
-    process_state().install.wlock(
-        [](InstallState& state)
-        {
-            const auto handle = std::exchange(state.handle, at::INVALID_CALLBACK_HANDLE);
-            if (handle != at::INVALID_CALLBACK_HANDLE)
-            {
-                at::removeCallback(handle);
-            }
-            process_state().snapshots.clear();
-        });
-}
-
-bool is_installed()
-{
-    return process_state().install.rlock([](const InstallState& state)
-                                         { return state.handle != at::INVALID_CALLBACK_HANDLE; });
-}
-
-}  // namespace torch_trace_collector::detail

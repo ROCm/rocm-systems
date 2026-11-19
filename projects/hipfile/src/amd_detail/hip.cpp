@@ -63,9 +63,39 @@ Hip::hipMemcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind)
 }
 
 void
+Hip::hipMemcpyWithStream(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind,
+                         hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipMemcpyWithStream(dst, src, sizeBytes, kind, stream));
+}
+
+void
 Hip::hipStreamSynchronize(hipStream_t stream) const
 {
     (void)throwOnHipError<Hip::RuntimeError>(::hipStreamSynchronize(stream));
+}
+
+hipStream_t
+Hip::hipStreamCreateWithPriority(unsigned int flags, int priority) const
+{
+    hipStream_t stream;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamCreateWithPriority(&stream, flags, priority));
+    return stream;
+}
+
+HipStreamPriorityRange
+Hip::hipDeviceGetStreamPriorityRange() const
+{
+    HipStreamPriorityRange range{};
+    (void)throwOnHipError<Hip::RuntimeError>(
+        ::hipDeviceGetStreamPriorityRange(&range.least, &range.greatest));
+    return range;
+}
+
+void
+Hip::hipStreamDestroy(hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamDestroy(stream));
 }
 
 void *

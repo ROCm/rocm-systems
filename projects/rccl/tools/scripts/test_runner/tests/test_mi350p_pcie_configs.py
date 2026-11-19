@@ -187,7 +187,7 @@ class Mi350pPcieConfigTest(unittest.TestCase):
         topo = self.func["test_configurations"]["mi350p_topo_unit"]
         self.assertEqual(topo["tests"][0]["test_filter"], gtest_name)
 
-        model = re.search(r"topo_expl/models/([\w.]+\.xml)", source)
+        model = re.search(r'topoFixturePath\("([\w.]+\.xml)"\)', source)
         self.assertIsNotNone(model)
         model_path = _RCCL / "tools" / "topo_expl" / "models" / model.group(1)
         self.assertTrue(model_path.is_file(), model_path)

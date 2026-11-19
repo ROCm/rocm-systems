@@ -19,7 +19,14 @@
 #pragma once
 
 #include "hsa_dispatch_util.h"
+#include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/basic_block.h"
+#include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -27,6 +34,7 @@
 #include <cstdint>
 #include <random>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -47,6 +55,31 @@ struct DbiTargetParams {
   /// agent the rocjitsu CLI supplies.
   const char *isa_substring;
 };
+
+// Select anchors only from the kernel that the HSA fixture dispatches. HIP may
+// link unrelated device functions and alignment bytes ahead of vector_add.
+inline void find_vector_add_anchors(const AmdGpuCodeObject &object, rj_code_arch_t arch,
+                                    std::vector<uint64_t> &offsets) {
+  std::string error;
+  const auto kernel = resolve_probe_symbol(object, "vector_add", &error);
+  ASSERT_TRUE(kernel) << error;
+  ASSERT_EQ(object.text_sections().size(), 1u);
+  const auto *text = object.text_sections().front();
+  const std::span bytes(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+  const uint64_t entry = kernel->body_file_offset - text->sectionOffset();
+  const BasicBlock::CodeRange range{entry, kernel->body_size};
+  auto decoder = Decoder::create(arch);
+  ASSERT_NE(decoder, nullptr);
+  util::StringDiagnostic diagnostic;
+  auto blocks = BasicBlock::build_reachable(object, *decoder, arch, {&entry, 1},
+                                            diagnostic.emitter(), {&range, 1});
+  ASSERT_TRUE(blocks.succeeded()) << diagnostic.message();
+  for (const auto &block : blocks.value())
+    for (const Instruction &inst : block->instructions())
+      if (is_relocatable_anchor(inst, inst.src_loc(), bytes, arch))
+        offsets.push_back(inst.src_loc());
+  ASSERT_FALSE(offsets.empty()) << "No relocatable anchor in vector_add";
+}
 
 /// @brief The vector_add inputs both smoke tests dispatch, with the CPU-side
 ///        expected result. The seed is fixed so the golden is reproducible and

@@ -4,12 +4,14 @@
 #pragma once
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/rj_code.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -93,6 +95,12 @@ public:
   /// the executable LOAD segment that contains .text, preserves LOAD alignment,
   /// updates moved symbols and relocation places, and keeps descriptor-relative
   /// entries coherent with explicit descriptor patches applied by DBT.
+  /// Rejects growth that would extend a divergent LOAD mapping and supported
+  /// dynamic relocation writes that overlap final .text after place remapping.
+  /// Appended text must also have equivalent file backing in every overlapping
+  /// final LOAD mapping, including segments that remain at their original address.
+  /// Loaded section backing must remain coherent after movement, and final LOAD
+  /// memory extents, including padding, must fit ROCr's combined allocation.
   [[nodiscard]] bool replace_text(
       std::span<const uint8_t> new_text,
       std::span<const TextOffsetRelocation> text_relocations = {},
@@ -101,17 +109,18 @@ public:
       bool require_every_text_symbol_mapped = false,
       const std::unordered_map<uint64_t, uint64_t> *canonical_code_pointer_placement = nullptr);
 
-  /// @brief True if any non-inert relocation's place (r_offset) falls inside .text.
+  /// @brief Whether a relocation place or supported dynamic write affects .text.
   ///
   /// @details DBT compacts/expands/moves instructions within .text but does not
   /// remap relocation places that land in .text — replace_text() only shifts
   /// relocation offsets for whole sections moved *after* .text. An in-.text
   /// relocation would therefore be applied to the wrong translated bytes.
+  /// Supported ROCr dynamic writes also reject when their complete write
+  /// interval enters .text from before it, or its end address overflows.
+  /// Other forms retain the existing place-based check.
   /// R_AMDGPU_NONE performs no write at its relocation place. Runtime acceptance
   /// of that record is checked separately by has_rocr_rejected_none_relocation().
-  /// BinaryTranslator uses this to fail closed instead of miscompiling. Real
-  /// AMDHSA kernel code objects carry no such relocations, so this rejects only
-  /// genuinely unsupported inputs.
+  /// BinaryTranslator and shared BI admission fail closed on these inputs.
   [[nodiscard]] bool has_relocations_within_text() const;
 
   /// @brief True if ROCr cannot resolve an ET_DYN SHT_RELA section target.
@@ -141,23 +150,27 @@ public:
   /// tables that the text offset map can update safely.
   [[nodiscard]] bool has_unsupported_relocation_to_text() const;
 
+  /// @brief Raw .text offsets referenced by symbol-less RELATIVE64 addends.
+  /// @details Collects references across ELF types when the shared relocation-place policy
+  /// classifies their storage as allocated. Unlike function-entry discovery, retains interior
+  /// and unaligned destinations for byte-edit preflight.
+  /// This query does not replace the existing malformed/unsupported relocation checks.
+  [[nodiscard]] std::vector<uint64_t> relative_text_addend_offsets() const;
+
   void update_elf_flags(uint32_t new_flags);
 
   [[nodiscard]] bool patch_kernel_descriptor(uint64_t file_offset,
                                              std::span<const uint8_t> descriptor);
 
-  /// @brief Overwrite one kernel descriptor's `private_segment_fixed_size`.
-  ///
-  /// @details Used by the DBI spill path to grow a kernel's per-lane scratch to
-  /// cover the appended spill zone. Reads the descriptor at @p
-  /// descriptor_file_offset, sets the scratch-size field to @p bytes, and writes
-  /// it back. Returns false if the descriptor does not fit in the image.
-  ///
-  /// Deliberately narrower than DBT's apply_kernel_descriptor_translation: a
-  /// same-arch instrument-only pass must re-encode no other descriptor field
-  /// (VGPR/SGPR granules, mode bits, USER_SGPR_COUNT, kernarg size).
-  [[nodiscard]] bool set_private_segment_fixed_size(uint64_t descriptor_file_offset,
-                                                    uint32_t bytes);
+  /// @brief Patch a planned descriptor and its matching numeric metadata together.
+  /// @details The caller encodes architecture-specific allocation fields in the
+  /// descriptor. Missing metadata or insufficient integer widths reject before
+  /// either representation changes. Absent register counts retain their fields.
+  [[nodiscard]] bool patch_kernel_resources(const KernelDescriptorInfo &kernel,
+                                            const amdhsa::kernel_descriptor_t &descriptor,
+                                            std::optional<uint32_t> sgprs,
+                                            std::optional<uint32_t> vgprs,
+                                            std::string *error = nullptr);
 
   /// @brief Apply a descriptor translation plan to the in-memory ELF image.
   ///
