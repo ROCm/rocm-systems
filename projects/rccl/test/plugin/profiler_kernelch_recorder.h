@@ -20,19 +20,21 @@ extern "C" {
 #endif
 
 // One recorded event, copied out of the plugin. Only the event types the tests
-// reason about are recorded: Coll, P2p, KernelCh and KernelPhase.
+// reason about are recorded: Coll, P2p, KernelCh and KernelPhase, plus CollApi and
+// P2pApi when RCCL_TEST_KCH_EVENT_MASK asks for them.
 typedef struct {
   uint64_t type;        // ncclProfileColl, ncclProfileP2p, ncclProfileKernelCh, ...
   uint64_t commId;      // commHash the owning communicator passed to init()
   int rank;
   int64_t parentIndex;  // snapshot index of the parent record, or -1
   uint64_t order;       // global start order across every recorded event
+  uint64_t stopOrder;   // the same counter at stopEvent, 0 before it
   long startTid;        // thread that delivered startEvent
   long stopTid;         // thread that delivered stopEvent, 0 before it
   long stateTid;        // thread that delivered the KernelCh/KernelPhase stop state, 0 before it
   int stopEvents;       // stopEvent calls received for this handle
   int stopStates;       // KernelCh/KernelPhase stop states received
-  // Coll / P2p
+  // Coll / P2p / CollApi / P2pApi
   char func[32];
   uint64_t seqNumber;
   size_t count;         // element count of the collective or send/recv
