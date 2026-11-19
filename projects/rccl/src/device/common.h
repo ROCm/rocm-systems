@@ -57,7 +57,9 @@ struct ncclShmemGroup {
   void* srcs[NCCL_MAX_ARITY + 1];
   void* dsts[NCCL_MAX_ARITY + 1];
   void* acc;
+#if !RCCL_HAVE_NAMED_BARRIERS
   uint64_t barrier;
+#endif
   union {
     unpackGroupShmem unpack;
   } devicePlugin;
@@ -96,7 +98,9 @@ struct ncclShmemData {
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
 #endif
+#if !RCCL_HAVE_NAMED_BARRIERS
   uint64_t barrier_pat;
+#endif
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
   // A separate __shared__ should work better as it does not instantiate this for LL and LL128
   alignas(RCCL_TDM_ALIGN) char tdmStage[RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE)];
@@ -116,37 +120,7 @@ extern __shared__ ulong2
 #endif
 #endif
 
-// gfx1250 named barriers back the sub-block barriers in the primitives: one per
-// group, plus NCCL_PAT_NAMED_BARRIER shared by all PAT workers. This must stay the
-// only named-barrier variable: the compiler numbers hardware barrier IDs per
-// module, and device-linker shards only agree on those IDs if each slot maps to
-// the same ID in every shard.
-#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
-  __has_builtin(__builtin_amdgcn_s_barrier_init) && __has_builtin(__builtin_amdgcn_s_barrier_join) && \
-  __has_builtin(__builtin_amdgcn_s_barrier_signal_var)
-#define RCCL_HAVE_NAMED_BARRIERS 1
-#else
-#define RCCL_HAVE_NAMED_BARRIERS 0
-#endif
-
-#if RCCL_HAVE_NAMED_BARRIERS
-#define NCCL_PAT_NAMED_BARRIER NCCL_MAX_GROUPS
-#define NCCL_NUM_NAMED_BARRIERS (NCCL_MAX_GROUPS + 1)
-static_assert(NCCL_NUM_NAMED_BARRIERS <= 16, "gfx1250 has 16 named barriers per workgroup");
-#ifdef RCCL_DEVICE_LINKER
-__shared__ __amdgpu_named_workgroup_barrier_t ncclNamedBarriers[NCCL_NUM_NAMED_BARRIERS];
-#else
-extern __shared__ __amdgpu_named_workgroup_barrier_t ncclNamedBarriers[NCCL_NUM_NAMED_BARRIERS];
-#endif
-
-// Toolchains disagree on where a named barrier's address keeps its hardware ID:
-// bits [9:4], where array indexing steps the ID, or bits [5:0], where only a byte
-// step does. Always index ncclNamedBarriers through this.
-__device__ __forceinline__ __amdgpu_named_workgroup_barrier_t* ncclNamedBarrier(int i) {
-  if (((uintptr_t)&ncclNamedBarriers[0] >> 4) & 0x3f) return &ncclNamedBarriers[i];
-  return (__amdgpu_named_workgroup_barrier_t*)((char*)ncclNamedBarriers + i);
-}
-#endif
+#include "sub_barrier.h"
 
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
 __device__ inline void* ncclTdmStageForWarp(int warp) {
@@ -599,14 +573,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     }
     break;
   case 1:
-    if (tid < WARP_SIZE + NCCL_MAX_GROUPS) {
-      if (tid == WARP_SIZE) ncclShmem.barrier_pat = 0;
-      ncclShmem.groups[tid - WARP_SIZE].barrier = 0;
-    }
-#if RCCL_HAVE_NAMED_BARRIERS
-    // Any non-zero count works; every arrive passes the real wave count.
-    for (int b = 0; b < NCCL_NUM_NAMED_BARRIERS; b++) __builtin_amdgcn_s_barrier_init(ncclNamedBarrier(b), 1);
-#endif
+    rcclInitSubBarriers(tid);
     break;
   case 2:
 #ifdef ENABLE_FAULT_INJECTION
@@ -734,10 +701,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     __syncthreads();
     switch (tid / WARP_SIZE) {
     case 1:
-      if (tid < WARP_SIZE + NCCL_MAX_GROUPS) {
-        if (tid == WARP_SIZE) ncclShmem.barrier_pat = 0;
-        ncclShmem.groups[tid - WARP_SIZE].barrier = 0;
-      }
+      rcclResetSubBarriers(tid);
       break;
     default:
       break;

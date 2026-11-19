@@ -15,67 +15,6 @@
 #include "common_kernel.h"
 #include "common.h"
 
-#define NCCL_SPINS_BEFORE_CHECK_ABORT 10000
-// NAMED_BARRIER indexes ncclNamedBarriers where the hardware has them; otherwise
-// sub-block barriers spin on the BARRIERS_PTR counter.
-#if RCCL_HAVE_NAMED_BARRIERS
-// The signal also sets the expected wave count, so groups of different widths
-// can reuse a barrier. s_barrier_wait 1 waits on the last barrier this wave joined.
-#define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, NAMED_BARRIER) \
-  do { \
-    __THREAD_FENCE; \
-    if (nthreads == threadsPerBlock) { \
-      __builtin_amdgcn_s_barrier(); \
-    } else { \
-      __builtin_amdgcn_s_barrier_join(ncclNamedBarrier(NAMED_BARRIER)); \
-      __builtin_amdgcn_s_barrier_signal_var(ncclNamedBarrier(NAMED_BARRIER), (NWORKERS) / WARP_SIZE); \
-      __builtin_amdgcn_s_barrier_wait(1); \
-      __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup"); \
-    } \
-  } while (0)
-#else
-#define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, NAMED_BARRIER) \
-  barrier_generic_ordered(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)
-#endif
-
-// ARRIVE_ORDER/WAIT_ORDER order the software arrive/spin on BARRIERS_PTR. A workgroup-scope release
-// there drains every outstanding store (s_wait_storecnt on gfx1250), so callers that order memory
-// with their own fences pass __ATOMIC_RELAXED.
-#define barrier_generic_ordered(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, ARRIVE_ORDER, WAIT_ORDER) \
-  do { \
-    if (nthreads == threadsPerBlock) { \
-      __THREAD_FENCE; \
-      __builtin_amdgcn_s_barrier(); \
-    } else { \
-      /**const int w = threadIdx.x/WARP_SIZE //unused variable - compiler warning**/; \
-      const int wid = threadIdx.x % WARP_SIZE; \
-      if (wid == 0) { \
-        (BARRIER_NEXT) += (NWORKERS) / WARP_SIZE; \
-        __THREAD_FENCE; \
-        __scoped_atomic_fetch_add((BARRIERS_PTR), 1, (ARRIVE_ORDER), __MEMORY_SCOPE_WRKGRP); \
-        int spins = 0; \
-        int rate_limit = 50; \
-        while (__scoped_atomic_load_n((BARRIERS_PTR), (WAIT_ORDER), __MEMORY_SCOPE_WRKGRP) < (BARRIER_NEXT)) { \
-          spins++; \
-          if (spins == NCCL_SPINS_BEFORE_CHECK_ABORT) { \
-            if (__atomic_load_n(ncclShmem.comm.abortFlag, __ATOMIC_SEQ_CST)) { \
-              ncclShmem.aborted = 1; \
-              break; \
-            } \
-            spins = 0; \
-          } \
-          if (spins == 0 && rate_limit > 0) { \
-            rate_limit--; \
-            traceData(__LINE__, threadIdx.x, \
-                      __scoped_atomic_load_n((BARRIERS_PTR), (WAIT_ORDER), __MEMORY_SCOPE_WRKGRP), (BARRIER_NEXT)); \
-          } \
-          __builtin_amdgcn_s_sleep(1); \
-        } \
-        __asm__ __volatile__("s_wakeup"); \
-      } \
-    } \
-  } while (0)
-
 // LL and LL128 step barriers order LDS only instead of waiting for the step's stores to the peer
 // (see storeFreeStepBarrier()). Configure with -DENABLE_STORE_FREE_STEP_BARRIER=OFF to keep the full-fence barriers.
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_STORE_FREE_STEP_BARRIER)
@@ -90,19 +29,20 @@
 // per-step flag. The fences do not wait for outstanding loads (no s_wait_loadcnt), so every wave must use each value
 // it loaded from the step's slots before it arrives: the head store after the end-of-step barrier hands the slot
 // back to the upstream GPU, which can then overwrite a load still in flight.
-inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int threadsPerBlock, uint64_t& barrier_next,
-                                            uint64_t* barriers) {
+inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int threadsPerBlock,
+                                            rcclSubBarrier& barriers) {
 #if RCCL_STORE_FREE_STEP_BARRIER
   if (fifoSend) return false;
   if (nthreads != WARP_SIZE) {
+    // LDS-scope fences only, and stepSync() adds no acquire of its own: a workgroup-scope one
+    // would wait for the step's stores.
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-    barrier_generic_ordered(__atomic_signal_fence(__ATOMIC_SEQ_CST), nthreads, barrier_next, barriers, __ATOMIC_RELAXED,
-                            __ATOMIC_RELAXED);
+    barriers.stepSync([] { __atomic_signal_fence(__ATOMIC_SEQ_CST); }, nthreads, nthreads, threadsPerBlock);
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
   }
   return true;
 #else
-  (void)fifoSend, (void)nthreads, (void)threadsPerBlock, (void)barrier_next, (void)barriers;
+  (void)fifoSend, (void)nthreads, (void)threadsPerBlock, (void)barriers;
   return false;
 #endif
 }

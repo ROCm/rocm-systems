@@ -99,17 +99,16 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 #endif
 #endif
 
-  uint64_t* barriers;
-  uint64_t barrier_next = 0;
+  rcclSubBarrier barriers;
   bool fifoSend = false;
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     if (nthreads != WARP_SIZE)
 #if defined(__gfx942__) || (defined(__gfx950__) && defined(HIP_HOST_UNCACHED_MEMORY)) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
-      barrier_generic(__threadfence_block(), nthreads, barrier_next, barriers, group);
+      barrier_generic(__threadfence_block(), nthreads, barriers);
 #else
-      barrier_generic(__threadfence(), nthreads, barrier_next, barriers, group);
+      barrier_generic(__threadfence(), nthreads, barriers);
 #endif
 #else
     if (nthreads == WARP_SIZE) {
@@ -122,7 +121,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
 
   // LL lines carry per-step flags, so skip waiting on peer stores; connFifo sends keep the fence for the proxy.
   inline __device__ void stepBarrier() {
-    if (!storeFreeStepBarrier(fifoSend, nthreads, threadsPerBlock, barrier_next, barriers)) barrier();
+    if (!storeFreeStepBarrier(fifoSend, nthreads, threadsPerBlock, barriers)) barrier();
   }
 
   int abort = 0;
@@ -587,7 +586,7 @@ public:
 #else
     auto* channel = &ncclShmem.channel;
 #endif
-    barriers = &ncclShmem.groups[group].barrier;
+    barriers.bindGroup(group);
     // If we are going to support oneshot collNet + LL, then we would need to add connector index here
     int nrecv = 0, nsend = 0;
     // Yes, for some template arguments this code will be unreachable.  That's fine.

@@ -55,10 +55,8 @@ class Primitives<T, RedOp, Fan, Direct,
   void* netDeviceHandle;
   uint64_t accSize;
   uint32_t* next_hdp_reg;
-  uint64_t* barriers;
-  uint64_t barrier_next = 0;
-  uint64_t* barriers_pat;
-  uint64_t barrier_next_pat = 0;
+  rcclSubBarrier barriers;
+  rcclSubBarrier barriers_pat;
   int repeat;
   bool skip_fence = false;
 
@@ -70,9 +68,9 @@ class Primitives<T, RedOp, Fan, Direct,
       // device-wide and doesn't add system-scope ordering here.
       // To be revisited for correctness on gfx1250
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
-      barrier_generic(__threadfence_block(), nworkers, barrier_next, barriers, group);
+      barrier_generic(__threadfence_block(), nworkers, barriers);
 #else
-      barrier_generic(__threadfence(), nworkers, barrier_next, barriers, group);
+      barrier_generic(__threadfence(), nworkers, barriers);
 #endif
   }
   inline __device__ void subBarrier() {
@@ -86,9 +84,9 @@ class Primitives<T, RedOp, Fan, Direct,
     constexpr int nPatWorkers = isHierarchical ? NCCL_PAT_MULTI_RPN_NWORKERS : NCCL_PAT_NWORKERS;
     // To be revisited for correctness on gfx1250
 #if defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))
-    barrier_generic(__threadfence_block(), nPatWorkers, barrier_next_pat, barriers_pat, NCCL_PAT_NAMED_BARRIER);
+    barrier_generic(__threadfence_block(), nPatWorkers, barriers_pat);
 #else
-    barrier_generic(__threadfence(), nPatWorkers, barrier_next_pat, barriers_pat, NCCL_PAT_NAMED_BARRIER);
+    barrier_generic(__threadfence(), nPatWorkers, barriers_pat);
 #endif
   }
 
@@ -236,10 +234,9 @@ class Primitives<T, RedOp, Fan, Direct,
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
       // To be revisited for correctness and performance on gfx1250
-      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"), nworkers, barrier_next, barriers,
-                      group);
+      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"), nworkers, barriers);
 #else
-      barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barrier_next, barriers, group);
+      barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barriers);
 #endif
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
     } else if ((flags & RolePostSend) && dataStored) {
@@ -733,9 +730,8 @@ public:
       stepSize(stepSize_ == 0 ? ncclShmem.comm.buffSizes[NCCL_PROTO_SIMPLE] / NCCL_STEPS / sizeof(T) : stepSize_),
       group(group), threadsPerBlock(blockDim.x) {
 #endif
-                                                                    barriers = &ncclShmem.groups[group].barrier;
-  // PAT uses the same barrier for each group
-  barriers_pat = &ncclShmem.barrier_pat;
+  barriers.bindGroup(group);
+  barriers_pat.bindPat();
   this->nworkers = nthreads;
 #ifdef ENABLE_WARP_SPEED
   auto* channel = ncclShmem.warpComm ? &ncclShmem.warpChannel[tidInBlock / WARP_SIZE] : &ncclShmem.channel;
