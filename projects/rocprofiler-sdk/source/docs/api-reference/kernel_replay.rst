@@ -159,3 +159,4 @@ See also
 * :ref:`kernel-replay-callback-api` — API contract
 * :ref:`kernel-replay-concurrency` — isolation model
 * :ref:`kernel-replay-memory-snapshot` — what ``snap()`` / ``restore()`` actually do
+* :ref:`range-replay-sdk-api` — the same idea applied to a sequence of dispatches

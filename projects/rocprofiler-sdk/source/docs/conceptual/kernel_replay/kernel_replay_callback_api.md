@@ -290,7 +290,7 @@ separate kernel replay Doxygen group. A walkthrough for tool authors is
 rocprofv3 --pmc <counters...> --replay-mode kernel --kernel-replay-beta-enabled -- <app>
 ```
 
-- `--replay-mode kernel` requires `--pmc` and `--kernel-replay-beta-enabled`, and the CLI fails with a diagnostic if either is missing.
+- `--replay-mode kernel` requires `--pmc` and `--kernel-replay-beta-enabled`, and the CLI fails with a diagnostic if either is missing. `--kernel-replay-beta-enabled` on its own fails the same way, because it acknowledges the beta rather than selecting replay.
 - The tool library creates the kernel replay context when the flag is given, and not otherwise.
 - There is no pass-count knob. The tool derives the pass count from the number of counter groups
   collectable on the dispatch's agent and returns it from `replay_pass_count`.

@@ -114,7 +114,24 @@ rocprofiler_add_unit_test(
 # but nothing else in the tree compiles them as C, so a C++-only construct reaching one of
 # them would otherwise go unnoticed until a downstream tool failed to build. Compiling
 # this file is that check, and it also lets the test compare C's view of the record layout
-# against C++'s.
+# against C++'s. Snapshot staging pool: host memory management only, so it runs without a
+# GPU.
+add_executable(kernel-replay-staging-test)
+target_sources(kernel-replay-staging-test PRIVATE staging.cpp)
+target_link_libraries(
+    kernel-replay-staging-test
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kernel-replay-staging-test
+    SOURCES staging.cpp
+    TIMEOUT 60
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${ROCM_PATH}/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 set(KERNEL_REPLAY_ABI_SOURCES replay_abi.cpp replay_abi_c.c)
 
 add_executable(kernel-replay-abi-test)

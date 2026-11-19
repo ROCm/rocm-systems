@@ -224,8 +224,9 @@ Limitations
 * **Async copies are not fenced.** ``hsa_amd_memory_async_copy`` (or HIP async memcpy) on another
   thread can mutate device memory during the replay window.
 * **Stuck drains abort the process** rather than hanging (roughly 60 s bounds inside the window).
-* **Host RAM duplication** of the tracked device footprint for the duration of the replay. Under
-  host memory pressure the snapshot is declined and the dispatch runs once rather than aborting.
+* **Host RAM duplication** of the tracked device footprint. The host copies are kept between
+  replayed dispatches for reuse, bounded by the most recent snapshot's footprint. Under host memory
+  pressure the snapshot is declined and the dispatch runs once rather than aborting.
 
 See also
 ========
