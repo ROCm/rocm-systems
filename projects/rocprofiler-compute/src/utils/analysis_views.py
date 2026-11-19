@@ -13,7 +13,8 @@ from the file name (0300_memory_chart.yaml is panel 300), table and row ids from
 position (301 is the first table, 3.1.0 its first row).
 
 views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
-analysis_configs/. Until the cutover, only tools and tests read the views.
+analysis_configs/. Until the cutover, analyze reads only the built-in top stats view
+(--list-stats); tools read the rest.
 Standard library and vendored YAML only, because profile imports this module.
 """
 

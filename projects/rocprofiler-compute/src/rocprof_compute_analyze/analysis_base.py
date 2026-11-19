@@ -15,6 +15,11 @@ import pandas as pd
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils import file_io, parser, schema
+from utils.analysis_views import (
+    BUILT_IN_VIEWS,
+    TOP_STATS_PANEL_ID,
+    views_to_panel_configs,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -33,30 +38,6 @@ from utils.utils_common import (
     load_panel_configs,
     validate_roofline_csv,
 )
-
-# the build-in config to list kernel names purpose only
-TOP_STATS_BUILD_IN_CONFIG: OrderedDict[int, dict[str, Any]] = OrderedDict([
-    (
-        0,
-        {
-            "id": 0,
-            "title": "Top Kernels",
-            "data source": [
-                {"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}
-            ],
-        },
-    ),
-    (
-        1,
-        {
-            "id": 1,
-            "title": "Dispatch List",
-            "data source": [
-                {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
-            ],
-        },
-    ),
-])
 
 
 class OmniAnalyze_Base:
@@ -162,7 +143,8 @@ class OmniAnalyze_Base:
     ) -> dict[str, schema.ArchConfig]:
         ac = schema.ArchConfig()
         if list_stats:
-            ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
+            top_stats = {TOP_STATS_PANEL_ID: BUILT_IN_VIEWS[TOP_STATS_PANEL_ID]}
+            ac.panel_configs = views_to_panel_configs(top_stats, {}, {})
         else:
             config_arch = canonical_config_arch(arch) or arch
             ac.panel_configs = load_panel_configs([
