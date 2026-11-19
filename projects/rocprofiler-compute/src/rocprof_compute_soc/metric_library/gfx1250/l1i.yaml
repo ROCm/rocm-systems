@@ -20,7 +20,6 @@ l1i.hit_rate_excl_dup:
     Percentage of L1I requests that hit on a previously loaded line in the cache.
     Calculated as the number of L1I hits over the number of hits and misses, excluding
     duplicate misses.
-  peak: 100
 l1i.hits_per_req:
   name: L1I Hit Rate
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)

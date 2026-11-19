@@ -87,7 +87,6 @@ gl0.hit_rate:
     Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache
     is the first-level cache for vector memory operations. High hit rates reduce traffic
     to the GL1 cache and improve memory access latency.
-  peak: 100
 gl0.miss_req:
   name: GL0 Miss Requests
   formula: SUM(TCP_REQ_MISS_sum) / SUM($denom)

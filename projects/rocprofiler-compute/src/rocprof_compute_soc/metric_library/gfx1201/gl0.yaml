@@ -24,7 +24,6 @@ gl0.hit_rate:
     Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher
     hit rates indicate better data locality and lower memory access latency. Low hit
     rates may indicate working sets exceeding GL0 capacity or poor access patterns.
-  peak: 100
 gl0.miss_req:
   name: GL0 Miss Requests
   formula: SUM(TCP_REQ_MISS_sum) / SUM($denom)
