@@ -79,9 +79,9 @@ summarise() {
   # all. Testing only for emptiness would report a run that never happened as
   # a clean one.
   # pre-commit skips the hook, without running it, when the change touches no
-  # C/C++ source file; that is not a failure.
+  # C/C++ file under src/; that is not a failure.
   if [[ ! -f "$FINDINGS" ]] && grep -q 'no files to check' "$LOG" 2>/dev/null; then
-    echo "No C/C++ source files changed, so there was nothing to analyse."
+    echo "No C/C++ files under src/ changed, so there was nothing to analyse."
   elif [[ ! -f "$FINDINGS" ]]; then
     echo ":warning: clang-tidy did not complete, so nothing was analysed."
     echo "See the \`Run clang-tidy\` step log for the error."
