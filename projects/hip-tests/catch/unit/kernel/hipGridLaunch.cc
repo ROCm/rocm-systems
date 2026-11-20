@@ -11,6 +11,14 @@
 #include <hip_test_common.hh>
 #include <utils.hh>
 
+#include <array>
+#include <cstdint>
+#include <limits>
+
+#if HT_AMD
+#include <hip/hip_ext.h>
+#endif
+
 
 static unsigned threadsPerBlock = 256;
 static unsigned blocksPerCU = 6;
@@ -182,34 +190,122 @@ HIP_TEST_CASE(Unit_hipGridLaunch_MaxGridDim_GetDeviceAttribute) {
 }
 
 HIP_TEST_CASE(Unit_hipGridLaunch_ExceedMaxGridDim_Negative) {
-  const unsigned int maxGridX = GetDeviceAttribute(hipDeviceAttributeMaxGridDimX, 0);
-  const unsigned int maxGridY = GetDeviceAttribute(hipDeviceAttributeMaxGridDimY, 0);
-  const unsigned int maxGridZ = GetDeviceAttribute(hipDeviceAttributeMaxGridDimZ, 0);
+  const int axis = GENERATE(0, 1, 2);
+  constexpr hipDeviceAttribute_t attributes[] = {
+      hipDeviceAttributeMaxGridDimX, hipDeviceAttributeMaxGridDimY, hipDeviceAttributeMaxGridDimZ};
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  const unsigned int maxGrid = GetDeviceAttribute(attributes[axis], device);
+  REQUIRE(maxGrid > 0);
+  REQUIRE(maxGrid < std::numeric_limits<unsigned int>::max());
+  INFO("Axis: " << axis << ", maximum blocks: " << maxGrid);
 
-  SECTION("Launch kernel with gridDim.x > maxGridDimX returns error") {
-    // Only test if we can exceed the max (avoid overflow)
-    if (maxGridX < UINT_MAX) {
-      hipLaunchKernelGGL(emptyKernel, dim3(maxGridX + 1, 1, 1), dim3(1, 1, 1), 0, 0);
-      hipError_t err = hipGetLastError();
-      REQUIRE(err == hipErrorInvalidConfiguration);
+  std::array<unsigned int, 3> grid = {1, 1, 1};
+  grid[axis] = maxGrid + 1;
+  SECTION("GGL rejects an oversized block grid") {
+    hipLaunchKernelGGL(emptyKernel, dim3(grid[0], grid[1], grid[2]), dim3(1), 0, 0);
+    HIP_CHECK_ERROR(hipGetLastError(), hipErrorInvalidConfiguration);
+  }
+
+#if HT_AMD
+  hipFunction_t function = nullptr;
+  HIP_CHECK(hipGetFuncBySymbol(&function, reinterpret_cast<const void*>(emptyKernel)));
+
+  // Keep new immediate launches bounded if a regression accepts invalid dimensions.
+  // The existing GGL coverage above already exercises the immediate X limit.
+  if (axis != 0 && maxGrid <= 65535) {
+    SECTION("Module launch rejects an oversized block grid") {
+      HIP_CHECK_ERROR(hipModuleLaunchKernel(function, grid[0], grid[1], grid[2], 1, 1, 1, 0,
+                                            nullptr, nullptr, nullptr),
+                      hipErrorInvalidValue);
+    }
+    SECTION("Extended module launch rejects too many work items with local size one") {
+      HIP_CHECK_ERROR(hipExtModuleLaunchKernel(function, grid[0], grid[1], grid[2], 1, 1, 1, 0,
+                                               nullptr, nullptr, nullptr),
+                      hipErrorInvalidConfiguration);
     }
   }
 
-  SECTION("Launch kernel with gridDim.y > maxGridDimY returns error") {
-    if (maxGridY < UINT_MAX) {
-      hipLaunchKernelGGL(emptyKernel, dim3(1, maxGridY + 1, 1), dim3(1, 1, 1), 0, 0);
-      hipError_t err = hipGetLastError();
-      REQUIRE(err == hipErrorInvalidConfiguration);
+  SECTION("Captured module launches enforce block limits without overflow or truncation") {
+    hipDeviceProp_t properties{};
+    HIP_CHECK(hipGetDeviceProperties(&properties, device));
+    const uint64_t maxWorkItems = static_cast<uint64_t>(maxGrid) * 2;
+    if (properties.maxThreadsDim[axis] < 2 || properties.maxThreadsPerBlock < 2 ||
+        maxWorkItems + 1 > std::numeric_limits<unsigned int>::max()) {
+      return;
     }
-  }
+    const bool moduleLaunch = GENERATE(false, true);
+    const bool exceed = GENERATE(false, true);
+    grid[axis] = maxGrid + (exceed ? 1 : 0);
+    std::array<unsigned int, 3> global = {1, 1, 1};
+    std::array<unsigned int, 3> local = {1, 1, 1};
+    global[axis] = static_cast<unsigned int>(maxWorkItems) + (exceed ? 1 : 0);
+    local[axis] = 2;
+    INFO((moduleLaunch ? "Module grid blocks: " : "Extended module work items: ")
+         << (moduleLaunch ? grid[axis] : global[axis]) << ", local size: " << local[axis]);
 
-  SECTION("Launch kernel with gridDim.z > maxGridDimZ returns error") {
-    if (maxGridZ < UINT_MAX) {
-      hipLaunchKernelGGL(emptyKernel, dim3(1, 1, maxGridZ + 1), dim3(1, 1, 1), 0, 0);
-      hipError_t err = hipGetLastError();
-      REQUIRE(err == hipErrorInvalidConfiguration);
+    struct CaptureResources {
+      hipStream_t stream = nullptr;
+      hipGraph_t graph = nullptr;
+      hipGraphExec_t executable = nullptr;
+      bool capturing = false;
+
+      ~CaptureResources() {
+        if (capturing) {
+          static_cast<void>(hipStreamEndCapture(stream, &graph));
+        }
+        if (executable != nullptr) {
+          static_cast<void>(hipGraphExecDestroy(executable));
+        }
+        if (graph != nullptr) {
+          static_cast<void>(hipGraphDestroy(graph));
+        }
+        if (stream != nullptr) {
+          static_cast<void>(hipStreamDestroy(stream));
+        }
+      }
+    } resources;
+    HIP_CHECK(hipStreamCreateWithFlags(&resources.stream, hipStreamNonBlocking));
+    HIP_CHECK(hipStreamBeginCapture(resources.stream, hipStreamCaptureModeThreadLocal));
+    resources.capturing = true;
+    const hipError_t launchStatus =
+        moduleLaunch
+            ? hipModuleLaunchKernel(function, grid[0], grid[1], grid[2], local[0], local[1],
+                                    local[2], 0, resources.stream, nullptr, nullptr)
+            : hipExtModuleLaunchKernel(function, global[0], global[1], global[2], local[0],
+                                       local[1], local[2], 0, resources.stream, nullptr, nullptr);
+    const hipError_t endStatus = hipStreamEndCapture(resources.stream, &resources.graph);
+    resources.capturing = false;
+    const hipError_t expectedFailureStatus =
+        moduleLaunch ? hipErrorInvalidValue : hipErrorInvalidConfiguration;
+    const hipError_t expectedLaunchStatus = exceed ? expectedFailureStatus : hipSuccess;
+    HIP_CHECK_ERROR(launchStatus, expectedLaunchStatus);
+    if (exceed) {
+      HIP_CHECK_ERRORS(endStatus, hipSuccess, hipErrorStreamCaptureInvalidated);
+    } else {
+      HIP_CHECK(endStatus);
+    }
+    if (endStatus == hipSuccess) {
+      size_t nodeCount = 0;
+      HIP_CHECK(hipGraphGetNodes(resources.graph, nullptr, &nodeCount));
+      REQUIRE(nodeCount == (exceed ? 0 : 1));
+      if (!exceed) {
+        hipGraphNode_t node = nullptr;
+        HIP_CHECK(hipGraphGetNodes(resources.graph, &node, &nodeCount));
+        hipKernelNodeParams parameters{};
+        HIP_CHECK(hipGraphKernelNodeGetParams(node, &parameters));
+        REQUIRE(parameters.gridDim.x == grid[0]);
+        REQUIRE(parameters.gridDim.y == grid[1]);
+        REQUIRE(parameters.gridDim.z == grid[2]);
+        REQUIRE(parameters.blockDim.x == local[0]);
+        REQUIRE(parameters.blockDim.y == local[1]);
+        REQUIRE(parameters.blockDim.z == local[2]);
+        // Validate the graph without dispatching billions of workgroups.
+        HIP_CHECK(hipGraphInstantiate(&resources.executable, resources.graph, nullptr, nullptr, 0));
+      }
     }
   }
+#endif
 }
 
 /**
