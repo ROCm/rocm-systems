@@ -3,6 +3,8 @@
 
 // Public FP16/BF16 conversion entry points, validation, Wave64 splitting and dispatch.
 #include "conversion/float16_conversion.h"
+#include "common/alu.h"
+#include "common/sdwa_output.h"
 #include "common/validation.h"
 #include "conversion/float16_conversion_impl.h"
 #include "register/dpp.h"
@@ -19,6 +21,9 @@ using rocjitsu::arith::Float16Format;
 template <Float16Format Format, Float16Conversion Op>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  if ((mode >> 32) && (mode & RJ_ARITH_CVT_SDWA)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
@@ -29,12 +34,19 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_A |
       RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C | RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_MASK;
   constexpr uint32_t known =
-      arithmetic_modifiers | (Op == Float16Conversion::Widen        ? RJ_ARITH_ALU_HIGH_A
-                              : Op == Float16Conversion::Stochastic ? RJ_ARITH_ALU_HIGH_D
-                                                                    : 0);
+      arithmetic_modifiers |
+      (Op == Float16Conversion::Widen        ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_CVT_SDWA
+       : Op == Float16Conversion::Stochastic ? RJ_ARITH_ALU_HIGH_D
+                                             : 0);
   constexpr bool packed_f16 = Format == Float16Format::F16 && Op == Float16Conversion::Pack;
-  if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(known),
-                                            packed_f16 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0)) {
+  uint64_t fp_flags = packed_f16 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0;
+  if constexpr (Op == Float16Conversion::Widen) {
+    if (mode & RJ_ARITH_CVT_SDWA) {
+      fp_flags |= RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_IEEE_MODE |
+                  RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_DX10_CLAMP_OFF;
+    }
+  }
+  if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(known), fp_flags)) {
     return error;
   }
   if (!exec_mask) {
@@ -67,9 +79,14 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     return raw;
   };
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
+  const auto output = rocjitsu::arith::sdwa_output_policy(
+      flags, uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, mode)));
   for (int lane = 0; lane < 32; ++lane) {
     if constexpr (Op == Float16Conversion::Widen) {
       result[lane] = (a[0][lane] >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) << 16;
+      if (mode & RJ_ARITH_CVT_SDWA) {
+        result[lane] = rocjitsu::arith::sdwa_output_f32(result[lane], output);
+      }
     } else if constexpr (Op == Float16Conversion::Stochastic) {
       uint32_t value = rocjitsu::arith::narrow_float16<Format>(source(a[0][lane], 0), b[0][lane],
                                                                true, saturate);
@@ -105,14 +122,16 @@ int execute(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
             const uint32_t *const *a, const uint32_t *const *b = nullptr,
             const uint32_t *const *c = nullptr) {
   // The inherited gfx1250 packed FP16 model is not hardware-qualified for
-  // output-denormal and stochastic boundary behavior. Do not advertise exactness.
-  constexpr bool qualified =
-      Format != Float16Format::F16 ||
-      (Op != Float16Conversion::Pack && Op != Float16Conversion::StochasticPack);
+  // output-denormal and stochastic boundary behavior. Legacy SDWA output is also
+  // inherited without new hardware qualification; ordinary BF16 widening is unchanged.
+  const bool qualified =
+      (Format != Float16Format::F16 ||
+       (Op != Float16Conversion::Pack && Op != Float16Conversion::StochasticPack)) &&
+      (Op != Float16Conversion::Widen || !(mode & RJ_ARITH_CVT_SDWA));
   flags = rocjitsu::arith::resolve_compatibility(
       flags,
       qualified ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS : RJ_ARITH_SEMANTICS_LOOSE);
-  if constexpr (!qualified) {
+  if (!qualified) {
     if (rocjitsu::arith::is_exact(flags) &&
         (flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
       return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;

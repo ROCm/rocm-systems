@@ -12,7 +12,6 @@
 
 #include <bit>
 #include <cstdint>
-#include <type_traits>
 
 namespace rocjitsu::amdgpu::arith {
 
@@ -87,11 +86,13 @@ using FloatCompare64Function = int (*)(uint64_t, uint64_t, uint64_t, uint64_t *,
 
 // Report fresh causes separately from sticky state so repeated exceptions still
 // reach trap delivery. A rejected call commits neither its mask nor its causes.
-template <unsigned Bits, bool Gfx10Signaling = false, typename Commit>
+// Gfx12 may observe full EXEC; gfx1150 retains its routed participation mask.
+template <unsigned Bits, typename Commit>
 inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32,
                                   FloatCompare64Function wave64, uint64_t flags, uint64_t modifiers,
                                   const Operand &source_a, const Operand &source_b, bool constant,
-                                  Commit commit, uint64_t exec_mask = ~0ULL) {
+                                  Commit commit, uint64_t exec_mask = ~0ULL,
+                                  bool observe_full_exec = true) {
   const uint32_t denorm = Bits == 32 ? wave.fp_denorm_mode_f32() : wave.fp_denorm_mode_f16_f64();
   if (!(denorm & 1))
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
@@ -101,29 +102,6 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
   uint64_t result = 0;
   uint32_t causes = 0;
   auto invoke = [&](const uint32_t *const *a, const uint32_t *const *b) {
-    // GFX10 uses CLAMP to request a signaling compare, including quiet NaNs.
-    if constexpr (Gfx10Signaling) {
-      if (modifiers & RJ_ARITH_ALU_CLAMP) {
-        using F =
-            std::conditional_t<Bits == 16, fp_format::F16,
-                               std::conditional_t<Bits == 32, fp_format::F32, fp_format::F64>>;
-        auto is_nan = [&](const uint32_t *const *source, uint64_t high, unsigned lane) {
-          uint64_t bits = source[0][lane];
-          if constexpr (Bits == 64)
-            bits |= uint64_t{source[1][lane]} << 32;
-          if constexpr (Bits == 16)
-            bits >>= (modifiers & high) ? 16 : 0;
-          return (bits & F::kMagnitude) > F::kInfinity;
-        };
-        for (uint64_t lanes = exec_mask; lanes; lanes &= lanes - 1) {
-          const unsigned lane = std::countr_zero(lanes);
-          if (is_nan(a, RJ_ARITH_ALU_HIGH_A, lane) || is_nan(b, RJ_ARITH_ALU_HIGH_B, lane)) {
-            causes |= RJ_ARITH_EXCEPTION_INVALID;
-            break;
-          }
-        }
-      }
-    }
     uint32_t *state = &causes;
     // Arithmetic/status policy stays in the selected library entry point.
     if (wave.wf_size() == 64)
@@ -133,9 +111,9 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
     result = result32;
     return status;
   };
-  const bool skip_inputs = constant && !(Gfx10Signaling && (modifiers & RJ_ARITH_ALU_CLAMP));
-  const int status = with_compare_inputs<Bits>(wave, Gfx10Signaling ? exec_mask : wave.exec(),
-                                               source_a, source_b, skip_inputs, modifiers, invoke);
+  const uint64_t input_exec_mask = observe_full_exec ? wave.exec() : exec_mask;
+  const int status = with_compare_inputs<Bits>(wave, input_exec_mask, source_a, source_b, constant,
+                                               modifiers, invoke);
   if (wave.instruction_execution_failed())
     return;
   if (status != RJ_ARITH_SUCCESS) {
@@ -145,6 +123,21 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
   commit(result);
   wave.set_trapsts(wave.trapsts() | causes);
   wave.raise_alu_causes(causes);
+}
+
+// Execute a Wave64-only predicate. Unsupported test-CU wave sizes fail before
+// source observation or mask/status commits; ordinary Wave32 bridges are unaffected.
+template <unsigned Bits, typename Commit>
+inline void execute_float_compare_wave64(Wavefront &wave, FloatCompare64Function function,
+                                         uint64_t flags, uint64_t modifiers,
+                                         const Operand &source_a, const Operand &source_b,
+                                         bool constant, Commit commit, uint64_t exec_mask) {
+  if (wave.wf_size() != 64) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  execute_float_compare<Bits>(wave, nullptr, function, flags, modifiers, source_a, source_b,
+                              constant, commit, exec_mask);
 }
 
 } // namespace rocjitsu::amdgpu::arith

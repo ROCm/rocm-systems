@@ -3,6 +3,9 @@
 
 // Tests for packed FP16 fused multiply-accumulate.
 
+#include "common/cpu.h"
+#include "common/registers.h"
+#include "common/semantics.h"
 #include "fp/fma_reference.h"
 #include "fp/half_fma_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -106,3 +109,46 @@ template <int Lanes, typename Call> void check_cdna_fmac(Call entry) {
 TEST(FpPkFmacF16W32Gfx942, Arithmetic) { check_cdna_fmac<32>(rj_arith_v_pk_fmac_f16_w32_gfx942); }
 
 TEST(FpPkFmacF16W64Gfx942, Arithmetic) { check_cdna_fmac<64>(rj_arith_v_pk_fmac_f16_w64_gfx942); }
+
+// Finalize negative zeros after packed arithmetic; ordinary FMAC keeps its existing model.
+TEST(FpPkFmacF16W64Gfx942, SdwaOutput) {
+  using namespace rocjitsu::arith::test;
+  const uint32_t a[] = {0xf37529a7U, 0x3c003c00U, 0x7e017c00U, 0x80000000U};
+  const uint32_t b[] = {0x0a999662U, 0x40004000U, 0x3c003c00U, 0x3c003c00U};
+  const uint32_t c[] = {0x934d0042U, 0, 0, 0x80000000U};
+  const uint32_t golden[] = {0xbe270000U, 0x3c003c00U, 0x7e017c00U, 0};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      Registers<3, 64> regs;
+      for (int lane = 0; lane < 64; ++lane) {
+        regs.v[0][lane] = a[lane % 4];
+        regs.v[1][lane] = b[lane % 4];
+        regs.v[2][lane] = c[lane % 4];
+      }
+      const auto before = regs;
+      uint32_t status = 0x100U;
+      const int error = rj_arith_v_pk_fmac_f16_w64_gfx942(
+          cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, ~0ULL,
+          RJ_ARITH_ALU_SDWA | RJ_ARITH_ALU_OMOD_HALF, regs.v + 2, regs.v, regs.v + 1, &status);
+      if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+        EXPECT_EQ(error, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+        regs.expect_preserved(before, 0, 0);
+      } else if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+        EXPECT_EQ(error, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+        regs.expect_preserved(before, 0, 0);
+      } else {
+        ASSERT_EQ(error, RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < 64; ++lane) {
+          EXPECT_EQ(regs.v[2][lane], golden[lane % 4]) << cpu << ':' << semantics << ':' << lane;
+        }
+      }
+      EXPECT_EQ(status, 0x100U);
+    }
+  }
+  EXPECT_EQ(rj_arith_v_pk_fmac_f16_w64_gfx942(0, 0, RJ_ARITH_ALU_SDWA | RJ_ARITH_DPP16, nullptr,
+                                              nullptr, nullptr, nullptr),
+            RJ_ARITH_ERROR_INVALID_FLAGS);
+  EXPECT_EQ(
+      rj_arith_v_pk_fmac_f16_w64_gfx12(0, 0, RJ_ARITH_ALU_SDWA, nullptr, nullptr, nullptr, nullptr),
+      RJ_ARITH_ERROR_INVALID_FLAGS);
+}

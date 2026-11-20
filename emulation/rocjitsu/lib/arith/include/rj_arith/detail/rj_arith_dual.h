@@ -32,7 +32,11 @@ extern "C" {
 // NaN/IEEE behavior. DOT2ACC additionally has different accumulation models.
 // FMAC and literal FMA retain exact fused results on both architectures but reject
 // FP status reporting in mode 3.
-// DUAL_MUL inherits ordinary MUL's nearest-even FP-status reporting contract.
+// DUAL_MUL inherits ordinary MUL's strict nearest-even FP-status reporting contract.
+// Gfx12 Compatibility additionally reports the inherited FMA-style causes under
+// guest rounding/denormal controls, with valid status storage required. Other
+// numeric-only modes leave the pointer unused. Other dual operations retain
+// their separately documented Compatibility policies.
 // Invalid calls preserve the outputs.
 int rj_arith_v_dual_fmac_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
@@ -155,6 +159,159 @@ int rj_arith_v_dual_dot2acc_f32_bf16_w32_gfx12(uint64_t flags, uint32_t exec_mas
                                                uint64_t instruction_flags, uint32_t *const *d,
                                                const uint32_t *const *a, const uint32_t *const *b,
                                                uint32_t *excp_flag_user);
+
+// gfx1250 decoded FP64 dual slots. Each operand occupies two VGPRs; only
+// NEG_A/NEG_B (and NEG_C for FMA) are encoded. Guest rounding and denormal
+// controls follow the ordinary FP64 instructions. Stage both slots before writes.
+int rj_arith_v_dual_add_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_mul_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_min_num_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_max_num_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_fma_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *excp_flag_user);
+
+// gfx1250 FP32 slots accept encoded source NEG flags, but no ABS/CLAMP/OMOD.
+// MUL returns UNSUPPORTED_FP_STATUS in mode 3 pending gfx1250 qualification.
+// The additional integer slots have no modifiers. BITOP2 uses bits 0..7 of
+// instruction_flags as the BITOP3 truth table evaluated with C=0.
+int rj_arith_v_dual_add_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_sub_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_subrev_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a, const uint32_t *const *b,
+                                           uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_mul_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_mul_dx9_zero_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                                 uint64_t instruction_flags, uint32_t *const *d,
+                                                 const uint32_t *const *a, const uint32_t *const *b,
+                                                 uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_min_num_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_max_num_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_fmac_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_fma_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *excp_flag_user);
+
+int rj_arith_v_dual_sub_nc_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b);
+
+int rj_arith_v_dual_lshrrev_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b);
+
+int rj_arith_v_dual_ashrrev_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b);
+
+int rj_arith_v_dual_min_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b);
+
+int rj_arith_v_dual_max_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b);
+
+int rj_arith_v_dual_bitop2_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b);
+
+// VOPD3 CNDMASK applies NEG_A/NEG_B as sign-bit flips before selection.
+int rj_arith_v_dual_cndmask_b32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t condition);
+// gfx1150 shares the ordinary inherited arithmetic, CPU paths and guest controls.
+// No instruction fields are accepted. Compatibility with FP_DX10_CLAMP_OFF accumulates
+// legacy FP causes for FMA-based slots; DX9 multiplication leaves status unused.
+// DX9 retains native post-round output flushing; strict empirical modes are unqualified.
+// Its legacy two-NaN payload priority remains backend-dependent.
+// FMAC reads old D. Literal FMA arguments contain raw FP32 bits. Pair-wide source
+// staging and Wave32 register-bank constraints remain the caller's preconditions.
+int rj_arith_v_dual_add_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+
+int rj_arith_v_dual_sub_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+
+int rj_arith_v_dual_subrev_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a, const uint32_t *const *b,
+                                           uint32_t *trapsts);
+
+int rj_arith_v_dual_mul_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        uint32_t *trapsts);
+
+int rj_arith_v_dual_fmac_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         uint32_t *trapsts);
+
+int rj_arith_v_dual_fmaak_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          uint32_t literal, uint32_t *trapsts);
+
+int rj_arith_v_dual_fmamk_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a, uint32_t literal,
+                                          const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_dual_mul_dx9_zero_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                                 uint64_t instruction_flags, uint32_t *const *d,
+                                                 const uint32_t *const *a, const uint32_t *const *b,
+                                                 uint32_t *trapsts);
 
 #ifdef __cplusplus
 } // extern "C"

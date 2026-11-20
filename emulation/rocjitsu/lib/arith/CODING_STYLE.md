@@ -55,6 +55,8 @@ Shared implementation definitions belong to that namespace, so the linker cannot
 substitute a definition compiled for a different ISA. Backend entry points carry
 their ISA in their name; cross-backend headers contain declarations only.
 File-local helpers may instead have internal linkage.
+ISA-independent read-only integer data may be shared across domains when its
+constant initializer does not depend on CPU options; this exception contains no code.
 
 Implementation code avoids runtime C++ standard-library functions, including
 implicit calls through containers and initializer lists. Use the small internal

@@ -10,8 +10,11 @@ import pytest
 from amdisa.codegen.execute.rj_arith_pair_move import gen_pair_move
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
-@pytest.mark.parametrize('packed', [False, True])
+@pytest.mark.parametrize(
+    'arch,packed',
+    [(arch, packed) for arch in ['cdna3', 'cdna4', 'cdna5'] for packed in [False, True]]
+    + [('cdna2', True)],
+)
 def test_pair_move_binding(arch, packed):
     ctx = SimpleNamespace(
         arch_name=arch,
@@ -26,7 +29,10 @@ def test_pair_move_binding(arch, packed):
         assert 'RJ_ARITH_PK_LO_A_HIGH' in body
         assert 'RJ_ARITH_PK_LO_B_HIGH' in body
         assert 'dst, a, &b' in body
+        assert '(inst_.op_sel & 1)' in body
+        assert '(inst_.op_sel & 2)' in body
+        assert 'inst_.op_sel_hi' not in body
     else:
         assert 'wf, 0, dst, a, nullptr' in body
-    ctx.arch_name = 'cdna2'
+    ctx.arch_name = 'cdna1'
     assert gen_pair_move(ctx) is None

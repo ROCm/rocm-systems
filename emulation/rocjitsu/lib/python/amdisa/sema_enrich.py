@@ -9,8 +9,7 @@ Transforms raw SemaAST trees into enriched versions by:
 - Wrapping VOP3 destination with CLAMP/OMOD modifier application
 - Applying known-bug patches keyed by instruction name and ISA
 
-EXEC mask wrapping is NOT done here — it is the lowering pass's
-responsibility (``sema_lower.py``).
+EXEC masking belongs to instruction execution, not this metadata pass.
 """
 
 from __future__ import annotations

@@ -102,6 +102,27 @@ template <Unary Op, bool Rdna3 = false, bool PreserveClampNan = false>
     if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && (value & 0x7fff) < 0x400) {
       value &= 0x8000;
     }
+  } else if constexpr (Op == Unary::Fract) {
+    // The inherited raw-encoding FRACT model: every finite half difference fits
+    // exactly in FP64; only the destination narrowing uses guest rounding.
+    if (magnitude >= 0x7c00) {
+      value = magnitude == 0x7c00 ? 0xfe00 : input | 0x200;
+    } else {
+      if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && magnitude < 0x400) {
+        input &= 0x8000;
+      }
+      const double x = double(f16_to_float(uint16_t(input)));
+      value = half_fma_narrow(rocjitsu::arith::bit_cast<uint64_t>(x - __builtin_floor(x)), false,
+                              unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
+      // All integer inputs produce +0, and rounded fractions remain below one.
+      value = value & 0x7fff;
+      if (value > 0x3bff) {
+        value = 0x3bff;
+      }
+      if ((flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) && value < 0x400) {
+        value = 0;
+      }
+    }
   } else if constexpr (Op == rocjitsu::arith::Unary::FrexpMant) {
     // Flush at the source precision before normalizing the half-width fields.
     if (magnitude >= 0x7c00) {
@@ -133,12 +154,13 @@ template <Unary Op, bool Rdna3 = false, bool PreserveClampNan = false>
   // OMOD flushes tiny inputs to +0; newly tiny div:2 results retain their sign.
   magnitude = value & 0x7fff;
   if (omod && magnitude < 0x7c00) {
-    if (!magnitude ||
-        ((Op == rocjitsu::arith::Unary::Rcp || Op == Unary::Exp || Op == Unary::Log) &&
-         magnitude < 0x400)) {
+    if (!magnitude || ((Op == rocjitsu::arith::Unary::Rcp || Op == Unary::Exp || Op == Unary::Log ||
+                        Op == Unary::Fract) &&
+                       magnitude < 0x400)) {
       value = 0;
     } else if (omod == 3 &&
-               (Op == rocjitsu::arith::Unary::Rcp || Op == Unary::Exp || Op == Unary::Log) &&
+               (Op == rocjitsu::arith::Unary::Rcp || Op == Unary::Exp || Op == Unary::Log ||
+                Op == Unary::Fract) &&
                magnitude < 0x800) {
       value &= 0x8000;
     } else if (omod == 3) {

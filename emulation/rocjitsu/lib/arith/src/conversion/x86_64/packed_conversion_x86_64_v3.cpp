@@ -4,6 +4,7 @@
 // AVX2 pairwise FP32 packing into RTZ FP16 or saturating I16/U16.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/sdwa_output.h"
 #include "conversion/float_conversion.h"
 #include "conversion/packed_conversion.h"
 #include "conversion/x86_64/lanes.h"
@@ -50,8 +51,12 @@ void packed_conversion_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mo
         conversion_detail::float_policy<conversion_detail::fmt::F32, conversion_detail::fmt::F16>(
             (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO,
             (mode >> 1) & (RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A));
+    const auto output = sdwa_output_policy(flags, mode);
     for (int lane = 0; lane < 32; lane += V::size()) {
       V result = low(V(a + lane)) | (high(V(b + lane)) << 16);
+      if (mode & RJ_ARITH_CVT_SDWA) {
+        result = sdwa_finalize_packed_f16(result, output);
+      }
       result.store(d + lane, exec_mask >> lane);
     }
     return;

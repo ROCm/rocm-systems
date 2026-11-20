@@ -4,8 +4,8 @@
 // AVX-512 lane permutations across rows, half-waves, and whole waves.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "common/simd.h"
 #include "register/permlane.h"
+#include "register/swap.h"
 #include "rj_arith/detail/rj_arith_register.h"
 
 #include <immintrin.h>

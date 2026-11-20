@@ -18,10 +18,17 @@ constexpr bool half_unary_rcp_rsq_sqrt = Op == Unary::Rcp || Op == Unary::Rsq ||
 
 // Loose FP16 unary arithmetic through FP32, with half selection and modifiers.
 // Preserve inactive lanes and the unselected half; D may alias A.
+// FractRounding retains the inherited rounded FRACT model; other callers keep Loose arithmetic.
 // Requires AVX2 and validated instruction controls.
-template <Unary Op, bool GuestDenormals = true>
+template <Unary Op, bool GuestDenormals = true, bool FractRounding = false>
 void half_unary_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                           const uint32_t *a);
+
+// Loose FP16 roots and EXP/LOG through FP32 SIMD, with selected halves and modifiers.
+// Requires v4 and validated controls; preserve inactive lanes and permit D/A overlap.
+template <Unary Op>
+void half_unary_loose_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                                const uint32_t *a);
 
 // Exact FP16 RCP/RSQ/SQRT using the inherited approximation and half narrowing.
 // Preserve inactive lanes and the unselected half; D may alias A.
@@ -30,11 +37,11 @@ template <Unary Op>
 void half_unary_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                                 const uint32_t *a, bool quiet_snan);
 
-// Exact FP16 TRUNC/CEIL/FLOOR/RNDNE, with half selection and modifiers.
+// Exact FP16 TRUNC/CEIL/FLOOR/RNDNE/FREXP_MANT/FRACT, with half selection and modifiers.
 // Preserve inactive lanes and the unselected half; D may alias A.
 // Requires x86-64-v4 and validated instruction controls.
 template <Unary Op>
-void half_round_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+void half_unary_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                                 const uint32_t *a);
 
 } // namespace rocjitsu::arith

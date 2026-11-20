@@ -7,6 +7,7 @@
 // Works on raw encodings; guest FP controls never change the host FP environment.
 
 #include "common/bits.h"
+#include "common/compiler.h"
 #include <cstdint>
 #include <type_traits>
 
@@ -53,6 +54,7 @@ template <typename V> constexpr V bit_width(V value) {
     static_assert(std::is_unsigned_v<Lane>);
     constexpr unsigned kLaneBits = 8 * sizeof(Lane);
     // Set every bit below the leading one; the width is then the number of ones.
+    RJ_ARITH_UNROLL(6)
     for (unsigned shift = 1; shift < kLaneBits; shift <<= 1) {
       value |= value >> shift;
     }
@@ -60,6 +62,7 @@ template <typename V> constexpr V bit_width(V value) {
     value = (value & V(static_cast<Lane>(0x3333333333333333ull))) +
             ((value >> 2) & V(static_cast<Lane>(0x3333333333333333ull)));
     value = (value + (value >> 4)) & V(static_cast<Lane>(0x0f0f0f0f0f0f0f0full));
+    RJ_ARITH_UNROLL(3)
     for (unsigned shift = 8; shift < kLaneBits; shift <<= 1) {
       value = value + (value >> shift);
     }

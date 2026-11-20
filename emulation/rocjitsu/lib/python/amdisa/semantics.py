@@ -126,7 +126,7 @@ FLOAT_COMPARE_DTYPES = frozenset({'f16', 'f32', 'f64'})
 
 
 def is_float_relation(dtype: str | None, op: str | None) -> bool:
-    """Whether a compare is a floating relation evaluated by shared/comparison.h."""
+    """Whether a compare is a floating-point relation rather than a CLASS test."""
     return dtype in FLOAT_COMPARE_DTYPES and op in FLOAT_COMPARE_RELATIONS
 
 

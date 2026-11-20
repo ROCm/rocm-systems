@@ -3,8 +3,19 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
+#include "rocjitsu/isa/operand.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
+#include "rocjitsu/vm/amdgpu/register_access.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+
+#include <bit>
+#include <cstdint>
 
 namespace rocjitsu::amdgpu {
 

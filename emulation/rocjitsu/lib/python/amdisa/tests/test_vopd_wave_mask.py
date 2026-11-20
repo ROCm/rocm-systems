@@ -1,18 +1,10 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""VOPD `v_dual_cndmask_b32` must read its lane mask at the wave's width.
+"""VOPD CNDMASK reads its condition at the wave width.
 
-The emitted body used `read_scalar64` unconditionally. In wave32 the lane mask
-is 32 bits, and a 64-bit read of it goes through `resolve_src_scalar64`, which
-rejects any selector that cannot begin a register pair. `VCC_HI` (107) is such a
-selector, so the model threw `std::logic_error` and the process aborted --
-`_topk_topp_kernel` on gfx1250 did exactly that in all eight of its shapes.
-
-`read_wave_mask_scalar` picks the width from `wf_size()` and is what the
-non-VOPD cndmask has always used. These tests pin the VOPD path to it. The
-first checks the generator template, the second checks the checked-in generated
-files, because a template fix that is never regenerated changes nothing.
+Wave32 permits single-SGPR selectors such as VCC_HI; a pair read would reject
+those selectors. Check both the active generator and its checked-in output.
 """
 
 from pathlib import Path
@@ -22,13 +14,12 @@ import pytest
 
 _ROCJITSU = Path(__file__).resolve().parents[3]
 _GENERATED = _ROCJITSU / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
-_TEMPLATE = Path(__file__).resolve().parents[1] / 'codegen/_generator.py'
+_TEMPLATE = Path(__file__).resolve().parents[1] / 'codegen/execute/rj_arith_vopd.py'
 
 
 def _cndmask_condition(text: str) -> str:
     """The complete assignment expression that resolves the cndmask condition."""
-    # rj-arith's RDNA3/RDNA4 VOPD calls take a Wave32 condition; legacy paths
-    # retain a 64-bit local. Both must resolve the source at the wave width.
+    # Resolve the source at the wave width before passing its lane condition.
     assignments = re.findall(r'uint(?:32|64)_t condition\s*=([^;]+);', text)
     assert len(assignments) == 1, f'expected one condition, found {len(assignments)}'
     return assignments[0]

@@ -40,14 +40,22 @@ void check_binary64_rounding(Call call, uint64_t a, uint64_t b, const uint64_t (
   }
 }
 
+// Controls that differ between instruction families without changing the numeric runner.
+struct BinaryArithmeticOptions {
+  bool half_selectors = true;
+  bool compatibility_reports_status = false;
+};
+
 // Test ADD/SUB/SUBREV/MUL, using the independent scalar reference at the call site.
 // FP32 and packed FP16 have exact numeric support on these inputs; other FP16/FP64
 // and packed arithmetic support Loose/Compatibility but reject explicit exact modes. Reporting is
 // supported only by FP32 MUL, whose
-// named tests also exercise its literal exception cases separately.
+// named tests also exercise its literal exception cases separately. Compatibility
+// classifiers likewise get instruction-specific cause witnesses at the call site.
 template <int Width, int Lanes, bool Packed = false, typename Call, typename Reference>
 void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
-                             bool fp_status_supported = false, bool compatibility_status = false) {
+                             bool fp_status_supported = false,
+                             BinaryArithmeticOptions options = {}) {
   static_assert(Width == 16 || Width == 32 || Width == 64);
   static_assert(Lanes == 32 || Lanes == 64);
   static_assert(!Packed || Width == 16);
@@ -70,7 +78,15 @@ void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
   std::vector<uint64_t> instruction_flag_cases = {0, RJ_ARITH_ALU_NEG_A,
                                                   Packed ? RJ_ARITH_PK_CLAMP : RJ_ARITH_ALU_CLAMP};
   if constexpr (Width == 16 && !Packed) {
-    instruction_flag_cases.push_back(RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D);
+    if (options.half_selectors) {
+      instruction_flag_cases.push_back(RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D);
+    } else {
+      for (uint64_t high : {RJ_ARITH_ALU_HIGH_A, RJ_ARITH_ALU_HIGH_B, RJ_ARITH_ALU_HIGH_D}) {
+        EXPECT_EQ(call(RJ_ARITH_CPU_BASELINE | RJ_ARITH_SEMANTICS_LOOSE, ~Mask(0), high, nullptr,
+                       nullptr, nullptr, nullptr),
+                  RJ_ARITH_ERROR_INVALID_FLAGS);
+      }
+    }
   }
   if constexpr (Width != 64 && !Packed) {
     instruction_flag_cases.push_back(RJ_ARITH_DPP8 | (0x53977ULL << RJ_ARITH_DPP8_SELECT_SHIFT));
@@ -117,7 +133,8 @@ void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
             ASSERT_EQ(error, RJ_ARITH_SUCCESS);
             bool reporting =
                 (fp_status_supported && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) ||
-                (compatibility_status && semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
+                (options.compatibility_reports_status &&
+                 semantics == RJ_ARITH_SEMANTICS_COMPATIBILITY);
             if (!reporting || !exec_mask) {
               EXPECT_EQ(fp_status, 0x80000000U);
             } else {
