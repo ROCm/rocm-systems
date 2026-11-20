@@ -21,6 +21,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from amdsmi import amdsmi_exception
 
+try:
+    from amdsmi_i18n import gettext as _T
+except ImportError:  # CLI dir not on sys.path yet; resolved by the fallback below
+
+    def _T(message):
+        return message
+
+
 # Set the environment variable for GPU metrics cache duration
 gpu_metrics_cache_ms = os.environ.setdefault("AMDSMI_GPU_METRICS_CACHE_MS", "100")
 logging.debug("AMDSMI_GPU_METRICS_CACHE_MS = %sms", gpu_metrics_cache_ms)
@@ -52,11 +60,17 @@ except ImportError:
         from amdsmi_logger import AMDSMILogger
         import amdsmi_cli_exceptions
     except ImportError as e:
-        print(f"Unhandled import error: {e}")
-        print(f"Unable to import amdsmi_cli files. Check {cli_files_path} if they are present.")
+        print(_T("Unhandled import error: {e}").format(e=e))
+        print(
+            _T(
+                "Unable to import amdsmi_cli files. Check {cli_files_path} if they are present."
+            ).format(cli_files_path=cli_files_path)
+        )
         from amdsmi_cli_exceptions import AmdSmiExitCode
 
         sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
+
+from amdsmi_i18n import gettext as _T  # noqa: E402,F811
 
 
 def _print_error(e, destination):
@@ -66,7 +80,11 @@ def _print_error(e, destination):
         f = open(destination, "w", encoding="utf-8")
         f.write(e)
         f.close()
-        print("Error occurred. Result written to " + str(destination) + " file")
+        print(
+            _T("Error occurred. Result written to {destination} file").format(
+                destination=str(destination)
+            )
+        )
 
 
 def configure_logging_and_execute(args, amd_smi_commands):

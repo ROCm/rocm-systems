@@ -14,6 +14,21 @@ from pathlib import Path
 
 from amdsmi_cli_exceptions import AmdSmiExitCode
 
+try:
+    from amdsmi_i18n import gettext as _T
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
+    try:
+        from amdsmi_i18n import gettext as _T
+    except ImportError:  # copied without amdsmi_i18n.py: English only
+
+        def _T(message):
+            return message
+
+
 # CLI module resolution order (distinct from `import amdsmi` in a user script):
 #   1. this installation's share/amd_smi copy -- the modules the CLI shipped
 #      with, always preferred so `amd-smi` uses its own version even on a host
@@ -33,9 +48,11 @@ if (_share_dir / "amdsmi").is_dir():
 try:
     from amdsmi import amdsmi_exception, amdsmi_interface
 except ImportError as e:
-    print(f"Unhandled import error: {e}")
+    print(_T("Unhandled import error: {e}").format(e=e))
     print(
-        "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
+        _T(
+            "Failed to import the amdsmi Python library. Install amd-smi-lib (rpm/deb) or pip install the amdsmi wheel."
+        )
     )
     sys.exit(int(AmdSmiExitCode.IMPORT_ERROR))
 
@@ -176,7 +193,7 @@ def amdsmi_cli_init():
         # The library hung with no status, so exit with a CLI code (not a borrowed
         # library status) -- the exit code unambiguously means the CLI watchdog gave up.
         logging.error(
-            "amdsmi_init() timed out after %ds. The GPU driver may be unresponsive.",
+            _T("amdsmi_init() timed out after %ds. The GPU driver may be unresponsive."),
             _INIT_TIMEOUT_SEC,
         )
         sys.exit(int(AmdSmiExitCode.INIT_TIMEOUT))
@@ -192,7 +209,7 @@ def amdsmi_cli_init():
             amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
             amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
         ):
-            logging.error("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)")
+            logging.error(_T("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)"))
             sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
         else:
             raise e
@@ -203,7 +220,7 @@ def amdsmi_cli_init():
     # manage. The always-on INIT_AMD_NICS request can let amdsmi_init() succeed
     # on such a host, so NIC presence is confirmed here rather than assumed.
     if not mandatory_drivers_present and not _any_nic_present():
-        logging.error("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)")
+        logging.error(_T("Drivers not loaded (amdgpu, amd_hsmp drivers not found in modules)"))
         sys.exit(int(AmdSmiExitCode.DRIVERS_NOT_LOADED))
 
     logging.debug(
@@ -222,7 +239,7 @@ def amdsmi_cli_shutdown():
     try:
         amdsmi_interface.amdsmi_shut_down()
     except amdsmi_exception.AmdSmiLibraryException as e:
-        logging.error("Unable to cleanly shut down amd-smi-lib")
+        logging.error(_T("Unable to cleanly shut down amd-smi-lib"))
         raise e
 
 
@@ -232,7 +249,7 @@ def signal_handler(sig, frame):
         sys.exit(0)
     except Exception as e:
         logging.error(
-            "Unable to cleanly shut down amd-smi-lib, exception: %s", str(type(e).__name__)
+            _T("Unable to cleanly shut down amd-smi-lib, exception: %s"), str(type(e).__name__)
         )
         os._exit(0)
 

@@ -4,6 +4,15 @@
 import logging
 import re
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
+from amdsmi_i18n import gettext as _T
+
 
 class BDF:
     """BDF Class to cast and compare BDF objects using built-in python comparators
@@ -33,25 +42,27 @@ class BDF:
             bdf_format_regex = r"^(?:[0-9a-fA-F]{4}:)?[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$"
             if not re.match(bdf_format_regex, bdf):
                 raise self.BDFError(
-                    f"Invalid BDF format: '{bdf}'. Expected format: [SSSS:]BB:DD.F (where F is 0-7)"
+                    _T(
+                        "Invalid BDF format: '{bdf}'. Expected format: [SSSS:]BB:DD.F (where F is 0-7)"
+                    ).format(bdf=bdf)
                 )
 
             try:
                 bdf_components = [int(x, 16) for x in re.split("[:.]", bdf)]
             except self.BDFError as e:
-                logging.error(f"Invalid string passed: {bdf}")
+                logging.error(_T("Invalid string passed: {bdf}").format(bdf=bdf))
                 raise e
 
             self.segment = bdf_components[0] if len(bdf_components) == 4 else 0
             self.bus, self.device, self.function = bdf_components[-3:]
             if self.segment > 65535:
-                raise self.BDFError("Segment can't be greater than 65535")
+                raise self.BDFError(_T("Segment can't be greater than 65535"))
             if self.bus > 255:
-                raise self.BDFError("Bus can't be greater than 255")
+                raise self.BDFError(_T("Bus can't be greater than 255"))
             if self.device > 31:
-                raise self.BDFError("Device can't be greater than 31")
+                raise self.BDFError(_T("Device can't be greater than 31"))
             if self.function > 7:
-                raise self.BDFError("Function can't be greater than 7")
+                raise self.BDFError(_T("Function can't be greater than 7"))
 
     class BDFError(Exception):
         """BDF Class Error"""
