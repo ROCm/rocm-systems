@@ -32,6 +32,11 @@
 # Inputs are located via ROCDECODE_PERF_DIR (default: $HOME/rocDecodePerformance),
 # which must contain the per-codec stream subdirectories AvcPerformance,
 # HevcPerformance, Av1Performance, Vp9Performance and the baseline HTML file.
+#
+# The HTML baseline holds decode-only numbers (videoDecodePerf -m 3). Other output
+# memory types (--mem-type 0/1/2) are compared against a local baseline CSV,
+# <perf-dir>/local_baselines/<GPU>_m<N>.csv, recorded on this machine with
+# --save-baseline.
 
 import argparse
 import datetime
@@ -71,6 +76,13 @@ CODECS = [
     ("AV1", "Av1Performance"),
     ("VP9", "Vp9Performance"),
 ]
+
+# videoDecodePerf -m values. The sample's default is 3 (decode only), which is
+# what the HTML baseline measures.
+MEM_TYPE_NAMES = {0: "device internal", 1: "device copied", 2: "host copied",
+                  3: "not mapped / decode only"}
+DEFAULT_MEM_TYPE = 3
+LOCAL_BASELINE_DIR = "local_baselines"
 
 # ANSI colors (match validate.sh)
 GREEN, RED, YELLOW, NC = "\033[0;32m", "\033[0;31m", "\033[0;33m", "\033[0m"
@@ -270,36 +282,113 @@ def load_baseline(baseline_path, label):
     return baseline, str(col)
 
 
-def measure_stream(stream_path, runs, device):
-    """Run videodecodeperf directly N times on one stream; return averaged FPS or None."""
+def local_baseline_path(perf_dir, label, mem_type):
+    """Default local baseline CSV for one GPU and output memory type."""
+    return perf_dir / LOCAL_BASELINE_DIR / f"{label}_m{mem_type}.csv"
+
+
+def load_local_baseline(csv_path, mem_type=None, label=None):
+    """Return {basename: baseline_fps} from a baseline CSV written by --save-baseline.
+
+    When the CSV has the Mem Type or GPU columns that --save-baseline writes, they
+    must match the run's memory type and GPU: comparing, say, a decode-only run
+    against a copied-mode baseline would hide regressions. A CSV with only File and
+    FPS is accepted as is."""
+    df = pd.read_csv(csv_path)
+    if "File" not in df.columns or "FPS" not in df.columns:
+        raise ValueError(f"baseline CSV {csv_path} needs 'File' and 'FPS' columns")
+    if mem_type is not None and "Mem Type" in df.columns:
+        recorded = set(pd.to_numeric(df["Mem Type"], errors="coerce").dropna().astype(int))
+        if recorded and recorded != {mem_type}:
+            raise ValueError(f"baseline CSV {csv_path} was recorded with memory type "
+                             f"{sorted(recorded)}, but this run uses {mem_type}")
+    if label is not None and "GPU" in df.columns:
+        recorded = set(df["GPU"].dropna().astype(str).str.strip())
+        if recorded and recorded != {label}:
+            raise ValueError(f"baseline CSV {csv_path} was recorded on GPU "
+                             f"{sorted(recorded)}, but this run is on {label}")
+    baseline = {}
+    for _, row in df.iterrows():
+        fname = str(row["File"]).strip()
+        # str(NaN) is "nan", so test the raw cell as well as the stripped name.
+        if pd.isna(row["File"]) or not fname:
+            raise ValueError(f"baseline CSV {csv_path} contains an empty File value")
+        fps = pd.to_numeric(row["FPS"], errors="coerce")
+        # FPS is a divisor in the comparison, so it must be finite and positive.
+        if pd.isna(fps) or not (0 < float(fps) < float("inf")):
+            raise ValueError(f"baseline CSV {csv_path} has invalid FPS for {fname!r}")
+        if fname in baseline:
+            # Streams are identified by file name alone, so a repeat (e.g. the same
+            # name under two codecs) would make one row silently replace the other.
+            raise ValueError(f"baseline CSV {csv_path} lists {fname!r} more than once")
+        baseline[fname] = float(fps)
+    if not baseline:
+        # An empty baseline would compare no streams and report a pass.
+        raise ValueError(f"baseline CSV {csv_path} contains no usable entries")
+    return baseline
+
+
+def measure_stream(stream_path, runs, device, mem_type=None):
+    """Run videodecodeperf directly N times on one stream; return the averaged FPS,
+    or None if any run fails. A failed run is not averaged away: a stream that
+    decodes only some of the time is a failure, and an average of fewer runs than
+    requested would misrepresent a saved baseline."""
+    cmd = [str(PERF_EXE), "-i", str(stream_path), "-t", "1", "-d", str(device)]
+    if mem_type is not None:
+        cmd += ["-m", str(mem_type)]
     vals = []
     for _ in range(runs):
-        out = _run([str(PERF_EXE), "-i", str(stream_path), "-t", "1", "-d", str(device)])
+        out = _run(cmd)
         m = re.search(r"avg decode FPS:\s*([\d.]+)", out.stdout + out.stderr)
-        if m:
-            vals.append(float(m.group(1)))
-    return sum(vals) / len(vals) if vals else None
+        if out.returncode != 0 or not m:
+            return None
+        vals.append(float(m.group(1)))
+    return sum(vals) / len(vals)
+
+
+STREAM_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".img", ".ivf", ".av1", ".265", ".h265", ".hevc"}
+
+
+def list_streams(codec_dir):
+    """Every stream file under a codec dir, in sorted order."""
+    return sorted(p for p in codec_dir.rglob("*")
+                  if p.is_file() and p.suffix.lower() in STREAM_EXTS)
 
 
 def build_stream_index(codec_dir):
     """Map basename -> full path for every stream file under a codec dir."""
-    exts = {".mp4", ".mov", ".mkv", ".webm", ".img", ".ivf", ".av1", ".265", ".h265", ".hevc"}
-    idx = {}
-    for p in codec_dir.rglob("*"):
-        if p.is_file() and p.suffix.lower() in exts:
-            idx[p.name] = p
-    return idx
+    return {p.name: p for p in list_streams(codec_dir)}
 
 
-def summary_box(rows, overall_ok, measure_only=False):
+def find_duplicate_streams(perf_dir):
+    """Return {basename: [paths]} for stream file names that occur more than once
+    across all codec dirs. Baselines (HTML and CSV) identify a stream by its file
+    name alone, so a repeated name would make two streams share one baseline."""
+    paths = {}
+    for _, subdir in CODECS:
+        codec_dir = perf_dir / subdir
+        if codec_dir.is_dir():
+            for p in list_streams(codec_dir):
+                paths.setdefault(p.name, []).append(p)
+    return {name: ps for name, ps in paths.items() if len(ps) > 1}
+
+
+SUMMARY_TITLES = {"compare": "rocDecode Performance Regression",
+                  "measure": "rocDecode Performance (measure only)",
+                  "save": "rocDecode Performance (saving baseline)"}
+
+
+def summary_box(rows, overall_ok, mode="compare"):
+    """mode: "compare" against a baseline, "measure" with no baseline, or "save" a baseline."""
     labels = [r[0] for r in rows] + ["Overall"]
-    title = "rocDecode Performance" + (" (measure only)" if measure_only else " Regression")
+    title = SUMMARY_TITLES[mode]
     width = max(len(x) for x in labels + [title])
     inner = width + 12
     line = lambda l, f, r: l + f * inner + r
     status = {"PASSED": (GREEN, "✓ PASSED"), "REGRESSED": (RED, "✗ REGRESSED"),
               "WARNING": (YELLOW, "⚠ WARNING"), "SKIPPED": (YELLOW, "- SKIPPED"),
-              "NO BASELINE": (YELLOW, "— NO BASELINE")}
+              "NO BASELINE": (YELLOW, "— NO BASELINE"), "MEASURED": (GREEN, "✓ MEASURED"),
+              "FAILED": (RED, "✗ FAILED")}
     print()
     print(line("╔", "═", "╗"))
     print("║  " + title.ljust(inner - 2) + "║")
@@ -309,7 +398,10 @@ def summary_box(rows, overall_ok, measure_only=False):
         pad = inner - len(lbl) - 3
         print(f"║  {name.ljust(pad)} {color}{lbl}{NC}  ║")
     print(line("╠", "═", "╣"))
-    if measure_only:
+    failed = any(st == "FAILED" for _, st in rows)
+    if failed:
+        color, lbl = RED, "✗ FAILED"
+    elif mode != "compare":
         color, lbl = YELLOW, "— MEASURED"
     elif overall_ok:
         color, lbl = GREEN, "✓ PASSED"
@@ -320,18 +412,31 @@ def summary_box(rows, overall_ok, measure_only=False):
     print(line("╚", "═", "╝"))
 
 
+def positive_int(text):
+    """argparse type for counts that must be at least 1 (e.g. --runs, which is a divisor)."""
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"'{text}' is not an integer")
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
 def main():
     ap = argparse.ArgumentParser(description="rocDecode performance regression check")
     ap.add_argument("--perf-dir", default=os.environ.get(
         "ROCDECODE_PERF_DIR", str(Path.home() / "rocDecodePerformance")),
         help="dir with per-codec stream subdirs and the baseline HTML")
     ap.add_argument("--baseline", default=None,
-        help="baseline HTML path (default: <perf-dir>/rocDecode_perf_baseline.html)")
+        help="baseline file, HTML or CSV (default: <perf-dir>/rocDecode_perf_baseline.html "
+             "for --mem-type 3, <perf-dir>/local_baselines/<GPU>_m<N>.csv otherwise)")
     ap.add_argument("--tolerance", type=float,
         default=float(os.environ.get("ROCDECODE_PERF_TOLERANCE", "5")),
         help="regression threshold: %% Avg FPS drop below baseline (default: 5)")
-    ap.add_argument("--runs", type=int, default=3,
-        help="runs to average when confirming a flagged stream (default: 3)")
+    ap.add_argument("--runs", type=positive_int, default=3,
+        help="runs to average when confirming a flagged stream, or per stream with "
+             "--save-baseline (default: 3)")
     ap.add_argument("--device", type=int, default=0, help="GPU device id (default: 0)")
     ap.add_argument("--gpu", default=None,
         help="GPU name for baseline lookup (e.g. Navi31, MI300X). "
@@ -340,6 +445,16 @@ def main():
         help="only verify the ROCm toolchain (ROCM_PATH) and exit")
     ap.add_argument("--quick", action="store_true",
         help="fast check: one baseline stream per leaf subfolder, capped at <=4K")
+    ap.add_argument("--mem-type", type=int, choices=range(4), default=DEFAULT_MEM_TYPE,
+        help="output memory type passed to videodecodeperf as -m: 0 device internal, "
+             "1 device copied, 2 host copied, 3 not mapped / decode only (default: 3). "
+             "3 is compared against the HTML baseline; 0-2 against a local baseline "
+             "recorded with --save-baseline")
+    ap.add_argument("--save-baseline", action="store_true",
+        help="measure every stream (averaging --runs runs each) and save the result as the "
+             "local baseline for this GPU and --mem-type, instead of comparing")
+    ap.add_argument("--force", action="store_true",
+        help="with --save-baseline, overwrite an existing baseline file")
     args = ap.parse_args()
 
     # Verify the ROCm toolchain up front (and exit early if only checking).
@@ -352,72 +467,184 @@ def main():
         return 0
 
     perf_dir = Path(os.path.expanduser(args.perf_dir))
-    baseline_path = Path(args.baseline) if args.baseline else perf_dir / "rocDecode_perf_baseline.html"
+    html_baseline = perf_dir / "rocDecode_perf_baseline.html"
+    mem = args.mem_type
     tol = args.tolerance
+
+    if args.save_baseline and args.quick:
+        # Later runs compare only the streams that are in the baseline, so a
+        # quick (partial) baseline would silently shrink their coverage.
+        print("ERROR: --save-baseline cannot be combined with --quick; a baseline must "
+              "cover every stream.", file=sys.stderr)
+        return 1
+    if args.force and not args.save_baseline:
+        print("ERROR: --force only applies together with --save-baseline.", file=sys.stderr)
+        return 1
 
     if not PERF_EXE.is_file():
         print(f"ERROR: videodecodeperf not built: {PERF_EXE}", file=sys.stderr)
         print("       Build it first: cmake --build build (or test/build_samples.sh)", file=sys.stderr)
         return 1
 
+    duplicates = find_duplicate_streams(perf_dir)
+    if duplicates:
+        print("ERROR: stream file names must be unique across the perf dir, because "
+              "baselines are keyed by file name. Duplicates:", file=sys.stderr)
+        for name, ps in sorted(duplicates.items()):
+            print(f"       {name}: {', '.join(str(p) for p in ps)}", file=sys.stderr)
+        return 1
+
     label, detail = detect_gpu(args.device, args.gpu)
+    # label is replaced by a generic "device-N" below when detection fails, so
+    # remember the failure for messages that need a real GPU name.
+    gpu_unidentified = label is None
     baseline = {}
     col = None
+    baseline_kind = None
+    # measure_only: every stream is measured and none is compared. That is the case
+    # both with no usable baseline and with --save-baseline; the reporting tells them
+    # apart through summary_mode. measure_only_reason is set only for the former.
     measure_only = False
     measure_only_reason = ""
-    if label is None:
-        if not baseline_path.is_file():
-            # GPU unknown and no baseline — measure-only is still useful for
-            # collecting FPS data. Use a generic label for the CSV.
-            label = f"device-{args.device}"
-            detail = f"unidentified ({detail}); labelled as {label}"
-            measure_only = True
-            measure_only_reason = (f"GPU could not be identified ({detail}) "
-                                   f"and baseline file not found: {baseline_path}")
-        else:
-            # GPU unknown but baseline exists — we need a column name to look up,
-            # so detection failure is fatal.
-            print(f"ERROR: could not identify the GPU ({detail}).", file=sys.stderr)
+    save_path = None
+
+    if args.save_baseline:
+        if label is None:
+            # The default file name is keyed by GPU, and a baseline from an
+            # unidentified GPU could not be matched to later runs.
+            print(f"ERROR: could not identify the GPU ({detail}); a baseline needs a GPU name.",
+                  file=sys.stderr)
             print("       Use --gpu <name> (e.g. --gpu Navi31) or set ROCDECODE_PERF_GPU.",
                   file=sys.stderr)
             return 1
-    elif not baseline_path.is_file():
-        # GPU known but no baseline file — measure-only mode.
-        measure_only = True
-        measure_only_reason = f"baseline file not found: {baseline_path}"
-    else:
-        try:
-            baseline, col = load_baseline(baseline_path, label)
-        except ValueError as e:
-            # Invalid baseline (e.g. no table with a 'File' column) — fatal.
-            print(f"ERROR: {e}", file=sys.stderr)
+        save_path = Path(args.baseline) if args.baseline else local_baseline_path(perf_dir, label, mem)
+        if save_path.suffix.lower() != ".csv":
+            print(f"ERROR: a saved baseline must be a .csv file: {save_path}", file=sys.stderr)
             return 1
-        except KeyError as e:
-            # No baseline column for this GPU — switch to measure-only mode.
-            # All streams are still measured and saved to CSV so the results can
-            # serve as a future baseline.
+        if save_path.exists() and not args.force:
+            print(f"ERROR: baseline already exists: {save_path}", file=sys.stderr)
+            print("       Pass --force to overwrite it.", file=sys.stderr)
+            return 1
+        measure_only = True
+    else:
+        # Baseline files to try, in order, as (path, kind). The HTML baseline holds
+        # decode-only (-m 3) numbers, so other memory types use a local CSV; for
+        # -m 3 the local CSV is a fallback for GPUs the HTML has no column for.
+        if args.baseline:
+            p = Path(args.baseline)
+            suffix = p.suffix.lower()
+            if suffix == ".csv":
+                kind = "csv"
+            elif suffix in (".html", ".htm"):
+                kind = "html"
+            else:
+                # Without this, any other suffix (e.g. a ".cvs" typo) was parsed as
+                # HTML and failed with an unrelated "No tables found" error.
+                print(f"ERROR: unsupported baseline file type: {p}", file=sys.stderr)
+                print("       A baseline must be a .csv (local baseline) or .html "
+                      "(SharePoint baseline).", file=sys.stderr)
+                return 1
+            tries = [(p, kind)]
+            if kind == "html" and mem != DEFAULT_MEM_TYPE:
+                print(f"WARNING: the HTML baseline holds decode-only (-m {DEFAULT_MEM_TYPE}) "
+                      f"numbers; comparing -m {mem} against it will over-report regressions.")
+        elif mem == DEFAULT_MEM_TYPE:
+            tries = [(html_baseline, "html")]
+            if label is not None:
+                tries.append((local_baseline_path(perf_dir, label, mem), "csv"))
+        else:
+            tries = [(local_baseline_path(perf_dir, label, mem), "csv")] if label is not None else []
+
+        reasons = []
+        for path, kind in tries:
+            if not path.is_file():
+                reasons.append(f"baseline file not found: {path}")
+                continue
+            if kind == "csv":
+                try:
+                    baseline = load_local_baseline(path, mem, label)
+                except (ValueError, pd.errors.ParserError, pd.errors.EmptyDataError) as e:
+                    print(f"ERROR: {e}", file=sys.stderr)
+                    return 1
+                col, baseline_kind = str(path), "csv"
+                break
+            if label is None:
+                # GPU unknown but the HTML baseline exists — we need a column name
+                # to look up, so detection failure is fatal.
+                print(f"ERROR: could not identify the GPU ({detail}).", file=sys.stderr)
+                print("       Use --gpu <name> (e.g. --gpu Navi31) or set ROCDECODE_PERF_GPU.",
+                      file=sys.stderr)
+                return 1
+            try:
+                baseline, col = load_baseline(path, label)
+                baseline_kind = "html"
+                break
+            except ValueError as e:
+                # Invalid baseline (e.g. no table with a 'File' column) — fatal.
+                print(f"ERROR: {e}", file=sys.stderr)
+                return 1
+            except KeyError as e:
+                # No baseline column for this GPU — try the next file, else
+                # measure only.
+                reasons.append(str(e))
+
+        if baseline_kind is None:
+            # No usable baseline — measure every stream and save the results to
+            # CSV, which can serve as a future baseline.
             measure_only = True
-            measure_only_reason = str(e)
+            if label is None:
+                label = f"device-{args.device}"
+                detail = f"unidentified ({detail}); labelled as {label}"
+                reasons.insert(0, f"GPU could not be identified ({detail})")
+            measure_only_reason = "; ".join(reasons)
+
     print(f"GPU: {label}  ({detail})")
-    if measure_only:
+    print(f"Memory type: {mem} ({MEM_TYPE_NAMES[mem]})")
+    if args.save_baseline:
+        print(f"Saving baseline: {save_path}  (averaging {args.runs} runs per stream)")
+    elif measure_only:
         print(f"WARNING: {measure_only_reason}")
         print("Running in measure-only mode — all streams will be measured and")
         print("saved to CSV; no regression comparison.")
+        # Repeat the options that decide what gets measured and where the baseline
+        # is written, so the suggested command records the baseline this run needs.
+        hint = ["test/perf_regression.py", "--mem-type", str(mem)]
+        if args.perf_dir != ap.get_default("perf_dir"):
+            hint += ["--perf-dir", args.perf_dir]
+        if args.device != 0:
+            hint += ["--device", str(args.device)]
+        if gpu_unidentified:
+            hint += ["--gpu", "<name>"]
+        elif args.gpu:
+            hint += ["--gpu", args.gpu]
+        hint.append("--save-baseline")
+        print(f"To record a baseline: {' '.join(hint)}")
+        if gpu_unidentified:
+            print("  (the GPU could not be identified: replace <name> with its baseline name,")
+            print("   e.g. Navi31, or set ROCDECODE_PERF_GPU)")
+    elif baseline_kind == "csv":
+        print(f"Baseline file: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
     else:
         print(f"Baseline column: {col}  ({len(baseline)} streams)  tolerance: {tol}%")
     if args.quick:
         print("Quick mode: one stream per leaf subfolder, capped at <=4K")
     print()
 
+    summary_mode = "save" if args.save_baseline else ("measure" if measure_only else "compare")
+
     ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     # Write results outside the repo tree (default: $HOME) so they do not clutter
     # `git status`. Override the base dir with ROCDECODE_PERF_RESULTS_DIR.
     results_base = Path(os.path.expanduser(os.environ.get(
         "ROCDECODE_PERF_RESULTS_DIR", str(Path.home() / "rocDecode_perf_results"))))
-    out_dir = results_base / ts  # created only if there are results to write
+    out_dir = results_base / f"{ts}_m{mem}"  # created only if there are results to write
     detail_rows = []
     summary_rows = []
     overall_ok = True
+    # With --save-baseline, anything that could not be measured. Later runs
+    # compare only the streams in the baseline, so saving without them would
+    # silently drop them from regression coverage.
+    save_failures = []
     t0 = time.time()
 
     for disp, subdir in CODECS:
@@ -425,6 +652,8 @@ def main():
         if not codec_dir.is_dir():
             print(f"=== {disp}: stream dir not found ({codec_dir}) -- skipping ===")
             summary_rows.append((disp, "WARNING"))
+            if args.save_baseline:
+                save_failures.append(f"{disp} stream dir not found ({codec_dir})")
             continue
         print(f"=== Measuring {disp} ({codec_dir}) ===")
         index = build_stream_index(codec_dir)
@@ -448,28 +677,55 @@ def main():
                     picked.append((name, path))
             candidates = picked
         # Measure each selected stream once (flagged streams are re-measured below
-        # to rule out run-to-run noise). Measuring videoDecodePerf directly avoids
-        # writing any results into the repo tree.
+        # to rule out run-to-run noise); a saved baseline averages --runs runs so
+        # it is not skewed by one noisy run. Measuring videoDecodePerf directly
+        # avoids writing any results into the repo tree.
+        runs = args.runs if args.save_baseline else 1
         measured = {}
+        failed = []  # streams of this codec that could not be measured
         for name, path in candidates:
-            fps = measure_stream(path, 1, args.device)
+            fps = measure_stream(path, runs, args.device, mem)
             if fps is not None:
                 measured[name] = fps
-        if not measured:
+            else:
+                failed.append(name)
+        if not candidates:
             print(f"    no results produced for {disp}")
             summary_rows.append((disp, "WARNING"))
+            if args.save_baseline:
+                save_failures.append(f"{disp} has no streams in {codec_dir}")
+            continue
+        # A stream that fails to decode is a failure in every mode: dropping it
+        # would let a build that crashes on it pass, and saving without it would
+        # remove it from later comparisons.
+        for name in failed:
+            print(f"    {RED}FAILED   {NC} {name}  (videodecodeperf failed or reported no FPS)")
+            detail_rows.append({
+                "Codec": disp, "File": name, "Mem Type": mem,
+                "Baseline FPS": round(baseline[name], 2) if name in baseline else "",
+                "Measured FPS": "", "Delta %": "", "Verdict": "FAILED", "Note": "",
+            })
+        save_failures.extend(failed)
+        if failed:
+            overall_ok = False
+        if not measured:
+            summary_rows.append((f"{disp} ({len(failed)}/{len(candidates)} failed)", "FAILED"))
             continue
 
         if measure_only:
             # No baseline — just record the measured FPS for each stream.
             for name, m_fps in measured.items():
                 detail_rows.append({
-                    "Codec": disp, "File": name, "Baseline FPS": "",
+                    "Codec": disp, "File": name, "Mem Type": mem, "Baseline FPS": "",
                     "Measured FPS": round(m_fps, 2), "Delta %": "",
-                    "Verdict": "MEASURED", "Note": "",
+                    "Verdict": "MEASURED", "Note": f"avg of {runs} runs" if runs > 1 else "",
                 })
                 print(f"    {GREEN}MEASURED {NC} {name}  {m_fps:8.1f} fps")
-            summary_rows.append((f"{disp} ({len(measured)} streams)", "NO BASELINE"))
+            if failed:
+                summary_rows.append((f"{disp} ({len(failed)}/{len(candidates)} failed)", "FAILED"))
+            else:
+                summary_rows.append((f"{disp} ({len(measured)} streams)",
+                                     "MEASURED" if args.save_baseline else "NO BASELINE"))
         else:
             regressions = 0
             compared = 0
@@ -482,28 +738,38 @@ def main():
                 if delta < -tol:
                     # candidate regression -- confirm with an averaged re-run
                     confirmed = m_fps
+                    rerun_failed = False
                     if name in index:
-                        avg = measure_stream(index[name], args.runs, args.device)
+                        avg = measure_stream(index[name], args.runs, args.device, mem)
                         if avg is not None:
                             confirmed = avg
                             delta = (avg - b_fps) / b_fps * 100.0
                             note = f"re-ran {args.runs}x"
+                        else:
+                            rerun_failed = True
+                            note = "re-run failed"
                     m_fps = confirmed
-                    if delta < -tol:
+                    if rerun_failed:
+                        verdict = "FAILED"
+                        failed.append(name)
+                    elif delta < -tol:
                         verdict = "REGRESSED"
                         regressions += 1
                     else:
                         verdict = "OK*"  # recovered on re-run
                 detail_rows.append({
-                    "Codec": disp, "File": name, "Baseline FPS": round(b_fps, 2),
+                    "Codec": disp, "File": name, "Mem Type": mem, "Baseline FPS": round(b_fps, 2),
                     "Measured FPS": round(m_fps, 2), "Delta %": round(delta, 2),
                     "Verdict": verdict, "Note": note,
                 })
-                tag = {"OK": GREEN, "OK*": YELLOW, "REGRESSED": RED}[verdict]
+                tag = {"OK": GREEN, "OK*": YELLOW, "REGRESSED": RED, "FAILED": RED}[verdict]
                 print(f"    {tag}{verdict:9}{NC} {name}  "
                       f"{m_fps:8.1f} vs {b_fps:8.1f} fps  ({delta:+.1f}%){(' '+note) if note else ''}")
 
-            if compared == 0:
+            if failed:
+                overall_ok = False
+                summary_rows.append((f"{disp} ({len(failed)}/{len(candidates)} failed)", "FAILED"))
+            elif compared == 0:
                 summary_rows.append((f"{disp} (0 matched)", "WARNING"))
             elif regressions:
                 summary_rows.append((f"{disp} ({regressions}/{compared} regressed)", "REGRESSED"))
@@ -511,19 +777,42 @@ def main():
             else:
                 summary_rows.append((f"{disp} ({compared} streams)", "PASSED"))
 
-    if measure_only:
+    if measure_only and not args.save_baseline:
         print(f"\nWARNING: {measure_only_reason}")
     if detail_rows:
         out_dir.mkdir(parents=True, exist_ok=True)
         csv_path = out_dir / "perf_comparison.csv"
         pd.DataFrame(detail_rows).to_csv(csv_path, index=False)
-        summary_box(summary_rows, overall_ok, measure_only=measure_only)
+        summary_box(summary_rows, overall_ok, mode=summary_mode)
         print(f"Results saved to: {out_dir}/")
-        if measure_only:
+        if args.save_baseline and save_failures:
+            # Any existing baseline is left untouched: it is only written below.
+            print(f"ERROR: baseline not saved; could not measure: {'; '.join(save_failures)}",
+                  file=sys.stderr)
+            return 1
+        if args.save_baseline:
+            bad = [r["File"] for r in detail_rows if not r["Measured FPS"] > 0]
+            if bad:
+                # load_local_baseline rejects non-positive FPS, so do not write a
+                # baseline that could never be loaded.
+                print(f"ERROR: no valid FPS measured for {', '.join(bad)}; baseline not saved.",
+                      file=sys.stderr)
+                return 1
+            # The loader reads File and FPS; the other columns record where the
+            # baseline came from.
+            recorded = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            rocm_path = os.environ.get("ROCM_PATH", _DEFAULT_ROCM)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame([{
+                "Codec": r["Codec"], "File": r["File"], "FPS": r["Measured FPS"],
+                "Mem Type": mem, "GPU": label, "Recorded": recorded, "ROCM_PATH": rocm_path,
+            } for r in detail_rows]).to_csv(save_path, index=False)
+            print(f"Baseline saved to: {save_path}  ({len(detail_rows)} streams)")
+        elif measure_only:
             print("These measurements can serve as a future baseline for this GPU.")
     else:
         if measure_only:
-            summary_box(summary_rows, overall_ok, measure_only=measure_only)
+            summary_box(summary_rows, overall_ok, mode=summary_mode)
             print("ERROR: No streams were measured; no results CSV was saved.",
                   file=sys.stderr)
             return 1

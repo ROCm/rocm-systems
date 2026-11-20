@@ -7,6 +7,7 @@ allowed-tools:
   - Bash(python3 test/perf_regression.py *)
   - Bash(python test/perf_regression.py *)
   - Bash(nproc)
+  - Bash(grep ^ROCM_PATH samples/videoDecodePerf/build/CMakeCache.txt)
   - Bash(cmd //c "rmdir *)
 ---
 
@@ -20,10 +21,17 @@ IMPORTANT: Run each command as a SEPARATE Bash tool call. Do not chain commands 
 The skill accepts optional arguments:
 - `quick` — fast one-stream-per-subfolder check (≤4K only), e.g. `/perf-check quick`
 - `--gpu <name>` — specify the GPU name for baseline lookup (e.g. `/perf-check --gpu Navi31`)
-- Both can be combined: `/perf-check quick --gpu Navi31`
+- `m0` / `m1` / `m2` / `m3` — output surface memory type for `videoDecodePerf` (`-m`):
+  0 device internal, 1 device copied, 2 host copied, 3 decode only (the default).
+  e.g. `/perf-check m1`
+- `save-baseline` — record the local baseline for this GPU and memory type instead of
+  comparing (e.g. `/perf-check m1 save-baseline`); add `force` to overwrite an existing one
+- Arguments can be combined: `/perf-check quick m1 --gpu Navi31`
 
-Parse the arguments and pass `--quick` and/or `--gpu <name>` to `perf_regression.py`
-in Step 3.
+Parse the arguments and pass them to `perf_regression.py` in Step 3: `quick` → `--quick`,
+`--gpu <name>` as is, `m<N>` → `--mem-type <N>`, `save-baseline` → `--save-baseline`,
+`force` → `--force`. If `save-baseline` and `quick` are both given, stop and tell the user
+they cannot be combined (a baseline must cover every stream) instead of running.
 
 First determine the OS and follow the matching section below. Under Git Bash on Windows,
 `uname -s` returns `MINGW64_NT-...`; on Linux it returns `Linux`.
@@ -41,6 +49,12 @@ Perf streams and the baseline file are located via `ROCDECODE_PERF_DIR` (default
 subdirectories `AvcPerformance`, `Av1Performance`, `HevcPerformance`, `Vp9Performance`, and
 the baseline `rocDecode_perf_baseline.html` (download it from SharePoint first). The
 regression threshold is 5% Avg FPS drop, overridable via `ROCDECODE_PERF_TOLERANCE`.
+
+The SharePoint baseline holds decode-only (`m3`) numbers. `m0`, `m1` and `m2` are compared
+against a local baseline, `$ROCDECODE_PERF_DIR/local_baselines/<GPU>_m<N>.csv`, which is
+recorded on this machine with `save-baseline`. If it does not exist yet, the run is
+measure-only and prints the command to record one; pass that on to the user rather than
+recording a baseline unasked, because a baseline should come from a known-good build.
 
 ### Step 1 — Verify the ROCm toolchain
 
@@ -60,12 +74,19 @@ Each sample builds in its own directory. Run these two commands separately:
 This requires rocDecode to be installed already (`make install`); run the `/validate` skill
 first if you have not built and installed the library this session.
 
+Stale-build-dir pitfall: the sample caches `ROCM_PATH` on first configure, and re-running
+cmake does not update it. After switching install trees (for example to a newer TheRock
+build), `samples/videoDecodePerf/build` keeps building and linking against the old tree, so
+the check silently measures the old library. If
+`grep ^ROCM_PATH samples/videoDecodePerf/build/CMakeCache.txt` does not match `ROCM_PATH`,
+delete `samples/videoDecodePerf/build` before Step 2.
+
 ### Step 3 — Run the regression check
 
 Run: `test/perf_regression.py`
 
-Add `--quick` if the skill was invoked with `quick`, and `--gpu <name>` if a GPU name was
-provided (e.g. `test/perf_regression.py --quick --gpu Navi31`).
+Add the options parsed from the skill arguments (e.g.
+`test/perf_regression.py --quick --gpu Navi31` or `test/perf_regression.py --mem-type 1`).
 
 `--quick` measures one stream per leaf subfolder capped at ≤4K (the 8K streams dominate
 runtime, so they are skipped). Use it for a fast sanity check; use the full run before
@@ -74,8 +95,9 @@ finalizing. Each run prints its own elapsed time.
 Streams within tolerance pass on a single run; streams that appear to regress are
 re-measured (3-run average) to rule out noise before being reported.
 
-Report the final summary box from perf_regression.py to the user, and list any streams
-marked REGRESSED (with their measured vs. baseline FPS and delta%).
+Report the final summary box from perf_regression.py to the user, state the memory type
+that was measured, and list any streams marked REGRESSED (with their measured vs. baseline
+FPS and delta%). For `save-baseline`, report where the baseline was saved instead.
 
 ---
 
@@ -140,8 +162,10 @@ stale directory first. On Windows `rm -rf` may be blocked by permissions; use
 
 Run: `python test/perf_regression.py`
 
-Add `--quick` if the skill was invoked with `quick`, and `--gpu <name>` if a GPU name was
-provided (e.g. `python test/perf_regression.py --quick --gpu Navi31`).
+Add the options parsed from the skill arguments (e.g.
+`python test/perf_regression.py --quick --gpu Navi31` or
+`python test/perf_regression.py --mem-type 1`).
 
-Report the final summary box from perf_regression.py to the user, and list any streams
-marked REGRESSED (with their measured vs. baseline FPS and delta%).
+Report the final summary box from perf_regression.py to the user, state the memory type
+that was measured, and list any streams marked REGRESSED (with their measured vs. baseline
+FPS and delta%). For `save-baseline`, report where the baseline was saved instead.
