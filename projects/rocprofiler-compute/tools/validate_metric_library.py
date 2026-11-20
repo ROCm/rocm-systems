@@ -34,7 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rocprof_compute_soc.metric_library import loader
 from utils.metrics.expression import build_eval_string
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import config_arch_members
+from utils.utils_common import canonical_config_arch
 from utils.utils_counter_defs import counter_to_block
 
 # Categories named after panels, not hardware.
@@ -137,7 +137,7 @@ def canonical_formula(equation: object) -> Optional[str]:
 def arch_ceilings(arch: str) -> Set[str]:
     """Return the measured roofline ceilings of any device of arch."""
     ceilings: Set[str] = set()
-    for device in config_arch_members(arch):
+    for device in _member_archs(arch):
         ceilings.update(mi_gpu_specs.get_roofline_columns(device))
     return ceilings
 
@@ -354,7 +354,7 @@ def _set_metric_errors(
                 f"[{arch}] set {set_option}: unknown metric ids {unknown_metric_ids}"
             )
             continue
-        for gpu_arch in config_arch_members(arch):
+        for gpu_arch in _member_archs(arch):
             errors.extend(_one_pass_errors(gpu_arch, set_option, entry, library))
     return errors
 
@@ -393,6 +393,15 @@ def _counters_over_block_limits(
         for block, counters_of_block in sorted(block_counters.items())
         if block in perfmon_config and len(counters_of_block) > perfmon_config[block]
     }
+
+
+def _member_archs(arch: str) -> List[str]:
+    """Return the GPU archs with the analysis configs of arch."""
+    return [
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == arch
+    ]
 
 
 def _parse_errors(arch: str, metrics: Dict[str, Any]) -> List[str]:

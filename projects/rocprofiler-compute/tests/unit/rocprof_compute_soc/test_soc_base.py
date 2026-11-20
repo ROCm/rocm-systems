@@ -27,7 +27,6 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     canonical_config_arch,
-    config_arch_members,
 )
 from utils.utils_counter_defs import Collectables, extract_counters_and_variables
 
@@ -94,10 +93,9 @@ Panel Config:
 
 # One arch per analysis config directory (gfx115x parts share one).
 CONFIG_ARCHS = sorted(
-    config_arch_members(config_arch)[0]
-    for config_arch in {
-        canonical_config_arch(arch) for arch in mi_gpu_specs.get_gpu_series_dict()
-    }
+    {
+        canonical_config_arch(arch): arch for arch in mi_gpu_specs.get_gpu_series_dict()
+    }.values()
 )
 
 
