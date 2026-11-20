@@ -201,27 +201,30 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
     return;
   }
 
+  // value->status carries an rdc_status_t, as in every other fetch path.
   auto gpu_block = field_to_block_(field_id);
   if (gpu_block == AMDSMI_GPU_BLOCK_INVALID) {
-    value->status = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    value->status = Smi2RdcError(AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
+    return;
   }
 
   err = amdsmi_get_gpu_ecc_status(processor_handle, gpu_block, &err_state);
   if (err != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_INFO, "Error in ecc status [" << gpu_block << "]:" << err);
-    value->status = err;
+    value->status = Smi2RdcError(err);
     return;
   }
 
   amdsmi_error_count_t ec;
   err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
   if (err != AMDSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR, "Error in ecc count [" << gpu_block << "]:" << err);
-    value->status = err;
+    value->status = Smi2RdcError(err);
+    RDC_LOG(is_capability_miss(static_cast<rdc_status_t>(value->status)) ? RDC_INFO : RDC_ERROR,
+            "Error in ecc count [" << gpu_block << "]:" << err);
     return;
   }
 
-  value->status = AMDSMI_STATUS_SUCCESS;
+  value->status = RDC_ST_OK;
   value->type = INTEGER;
   if (is_correctable) {
     value->value.l_int = ec.correctable_count;
@@ -345,7 +348,7 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   }
 
   // Without a count from any block, as on GPUs without ECC, report N/A rather than 0 errors.
-  value->status = counted ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
+  value->status = counted ? RDC_ST_OK : RDC_ST_NOT_SUPPORTED;
   value->type = INTEGER;
   if (field_id == RDC_FI_ECC_CORRECT_TOTAL) {
     value->value.l_int = correctable_count;
@@ -409,26 +412,27 @@ void RdcMetricFetcherImpl::get_ecc_deferred(uint32_t gpu_index, rdc_field_t fiel
   };
 
   auto gpu_block = field_to_block_de(field_id);
+  // value->status carries an rdc_status_t, as in get_ecc() and every other fetch path.
   if (gpu_block == AMDSMI_GPU_BLOCK_INVALID) {
-    value->status = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+    value->status = Smi2RdcError(AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
     return;
   }
 
   amdsmi_ras_err_state_t err_state = AMDSMI_RAS_ERR_STATE_INVALID;
   err = amdsmi_get_gpu_ecc_status(processor_handle, gpu_block, &err_state);
   if (err != AMDSMI_STATUS_SUCCESS) {
-    value->status = err;
+    value->status = Smi2RdcError(err);
     return;
   }
 
   amdsmi_error_count_t ec;
   err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
   if (err != AMDSMI_STATUS_SUCCESS) {
-    value->status = err;
+    value->status = Smi2RdcError(err);
     return;
   }
 
-  value->status = AMDSMI_STATUS_SUCCESS;
+  value->status = RDC_ST_OK;
   value->type = INTEGER;
   value->value.l_int = ec.deferred_count;
 }
@@ -646,7 +650,7 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.average_gfx_activity);
           break;
         default:
-          value.field_value.status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value.field_value.status = RDC_ST_NOT_SUPPORTED;
           break;
       }
       if (value.field_value.status == AMDSMI_STATUS_SUCCESS) {
@@ -709,7 +713,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     RdcFieldKey f_key(gpu_index, field_id);
     smi_data = get_smi_data(f_key);
     if (smi_data == nullptr) {
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       return;
     }
 
@@ -774,7 +778,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
                                << gpu_metrics_value_ite->second);
       }
     }
-    value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+    value->status = RDC_ST_NOT_SUPPORTED;
   };
 
   switch (field_id) {
@@ -952,7 +956,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         // Max value means not supported
         if (raw == std::numeric_limits<uint32_t>::max() ||
             raw == std::numeric_limits<uint64_t>::max()) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(raw);
         }
@@ -1019,7 +1023,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         break;
       }
 
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       RDC_LOG(RDC_ERROR, "AMDSMI: cannot get POWER_USAGE");
       return RDC_ST_NO_DATA;
     }
@@ -1161,7 +1165,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       if (field_id == RDC_FI_OAM_ID) {
         // 0xFFFF means not supported for OAM ID
         if (asic_info.oam_id == 0xFFFF) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = asic_info.oam_id;
         }
@@ -1171,13 +1175,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         value->value.l_int = asic_info.rev_id;
       } else if (field_id == RDC_FI_TARGET_GRAPHICS_VERSION) {
         if (asic_info.target_graphics_version == 0xFFFFFFFFFFFFFFFF) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = asic_info.target_graphics_version;
         }
       } else if (field_id == RDC_FI_NUM_OF_COMPUTE_UNITS) {
         if (asic_info.num_of_compute_units == 0xFFFFFFFF) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = asic_info.num_of_compute_units;
         }
@@ -1192,7 +1196,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
     }
     case RDC_FI_GPU_MM_ENC_UTIL: {
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       RDC_LOG(RDC_ERROR, "AMDSMI Not Supported: cannot get MM_ENC_ACTIVITY");
       return RDC_ST_NO_DATA;
     }
@@ -1518,7 +1522,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
             break;
         }
         if (smi_not_available(raw)) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(raw);
         }
@@ -1908,7 +1912,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
     }
 
     default:
-      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      value->status = RDC_ST_NOT_SUPPORTED;
       RDC_LOG(RDC_DEBUG, "CPU field " << field_id << " not supported");
       break;
   }
@@ -1974,7 +1978,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
 
   value->ts = now();
   value->field_id = field_id;
-  value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+  value->status = RDC_ST_NOT_SUPPORTED;
   // Most fields are integers and only the string ones set a type. A caller's
   // value is often uninitialised, so without this a successful integer field
   // reaches the cache, and the log below, with an arbitrary rdc_field_type_t.
@@ -1995,7 +1999,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     return RDC_ST_NOT_SUPPORTED;
   }
 
-  if (status != RDC_ST_OK) {
+  // The platform cannot serve this health field. rdc_health_set reports it
+  // when the watch is set, so the per-fetch lines are informational only.
+  const bool health_miss =
+      is_health_field(field_id) && is_capability_miss(static_cast<rdc_status_t>(value->status));
+  if (status != RDC_ST_OK && !health_miss) {
     RDC_LOG(RDC_ERROR, "Fetch status is not ok error: " << status);
   }
 
@@ -2003,6 +2011,10 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   if (value->status != AMDSMI_STATUS_SUCCESS) {
     if (async_fetching) {  //!< Async fetching is not an error
       RDC_LOG(RDC_DEBUG, "Async fetch " << field_id_string(field_id));
+    } else if (health_miss) {
+      RDC_LOG(RDC_INFO, "Health field " << gpu_index << ":" << field_id_string(field_id)
+                                        << " not supported, status " << value->status
+                                        << ", latency " << latency);
     } else {
       RDC_LOG(RDC_ERROR, "Fail to fetch " << gpu_index << ":" << field_id_string(field_id)
                                           << " with rsmi error code " << value->status
