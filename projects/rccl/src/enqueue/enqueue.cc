@@ -2153,7 +2153,8 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
             strides[1] = pairChannelsMax;
           maxStride = std::max(strides[0], strides[1]);
           if (maxStride > pairChannelsMax) {
-            bool maySplit = recv && send && sendRank != comm->rank && strides[0] != strides[1];
+            bool maySplit = recv && send && sendRank != comm->rank &&
+                            (strides[0] != strides[1] || recvBytes != sendBytes);
             roundBatches = maySplit ? maxStride + pairChannelsMax : maxStride;
             roundWorks = maySplit ? 2 : 1;
           }

@@ -90,6 +90,8 @@ void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage) {}
 // construction. None of these paths executes before the test seam returns.
 ncclResult_t scheduleRmaTasksToPlan(struct ncclComm*, struct ncclKernelPlan*) { return ncclInternalError; }
 hipError_t hipLaunchHostFunc(hipStream_t, hipHostFn_t, void*) { return hipErrorInvalidValue; }
+struct ncclTransport p2pTransport = {};
+struct ncclTransport shmTransport = {};
 
 class EnqueueMicrotest : public ::testing::Test {
  protected:
@@ -7144,6 +7146,8 @@ struct WidenedP2pScene {
   std::vector<ncclChannelPeer> channelPeers = std::vector<ncclChannelPeer>(kRanks);
   std::vector<ncclChannelPeer*> peerSlots = std::vector<ncclChannelPeer*>(kRanks);
   std::vector<ncclPeerInfo> peerInfo = std::vector<ncclPeerInfo>(kRanks);
+  std::vector<channelMasks> connectSend = std::vector<channelMasks>(kRanks * NCCL_MAX_CONNS);
+  std::vector<channelMasks> connectRecv = std::vector<channelMasks>(kRanks * NCCL_MAX_CONNS);
   ncclTaskP2p send{};
   ncclTaskP2p recv{};
   char sendBuf[8]{};
@@ -7172,6 +7176,10 @@ struct WidenedP2pScene {
     c->p2pSchedule = rounds.data();
     c->planner.peers = plannerPeers.data();
     c->peerInfo = peerInfo.data();
+    c->connectSend = connectSend.data();
+    c->connectRecv = connectRecv.data();
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type)
+      c->groupNext[type] = reinterpret_cast<ncclComm*>(NCCL_COMM_GROUP_INVALID);
     for (int ch = 0; ch < kP2pChannels; ++ch) c->channels[ch].peers = peerSlots.data();
 
     send.func = ncclFuncSend;
@@ -7186,6 +7194,19 @@ struct WidenedP2pScene {
     recv.bytes = recvBytes;
     recv.buff = recvBuf;
     recv.maxCTAs = MAXCHANNELS;
+  }
+  ~WidenedP2pScene() {
+    for (int type = 0; type < ncclGroupTaskTypeNum; ++type) ncclGroupCommHead[type] = nullptr;
+  }
+
+  ncclResult_t append(ncclFunc_t func, int peer, size_t bytes) {
+    ncclInfo info = MakeCollInfo(bp.c(), /*decisionValid=*/false, NCCL_ALGO_UNDEF);
+    info.coll = func;
+    info.recvbuff = func == ncclFuncSend ? static_cast<void*>(sendBuf) : static_cast<void*>(recvBuf);
+    info.count = bytes;
+    info.datatype = ncclInt8;
+    info.root = peer;
+    return p2pTaskAppend(bp.c(), &info, func, func, info.recvbuff, info.count, info.datatype, peer, /*allowUB=*/true);
   }
 
   ncclResult_t add(bool* recvFirst = nullptr) {
@@ -7216,6 +7237,15 @@ struct WidenedP2pScene {
   }
 };
 }  // namespace
+
+TEST_F(EnqueueMicrotest, P2pTaskAppend_WidenedDirectTaskPreconnectsBothTiles) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+
+  ASSERT_EQ(ncclSuccess, sc.append(ncclFuncSend, WidenedP2pScene::kSendRank, size_t(1) << 30));
+  EXPECT_EQ(0b11, sc.plannerPeers[WidenedP2pScene::kSendRank].sendSeen);
+  int maskIndex = WidenedP2pScene::kSendRank + CHANNEL_MASK_OFFSET(WidenedP2pScene::kRanks, 1);
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, countOneBits(sc.connectSend[maskIndex]));
+}
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_WidenedSendWithPerPeerRecv_SplitsWidenedWorkFirst) {
   WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
@@ -7436,6 +7466,15 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_UnequalTinyDirectionsKeepOneNarrowWork) {
   EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
   EXPECT_EQ(321, sc.bp.p()->nWorkBatches);
   ASSERT_EQ(1u, sc.works().size());
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_UnequalPotentiallyWideDirectionsReserveSplit) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(4) << 20);
+  sc.bp.p()->nWorkBatches = 317;
+
+  ASSERT_EQ(ncclSuccess, sc.schedule(508 * kBatch));
+  EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the split round must wait for a fresh plan";
+  EXPECT_EQ(317, sc.bp.p()->nWorkBatches);
 }
 
 TEST_F(EnqueueMicrotest, ScheduleP2p_EqualSizeMixedNetP2p_ReservesBothTiles) {
