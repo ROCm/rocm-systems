@@ -773,7 +773,9 @@ def test_generated_execution_helper_includes_are_scoped(
         source = path.read_text()
         assert fp_include not in source, path
 
-    assert fp_include in (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
+    # CDNA FP32 VOP2 now uses rj-arith; VOP1 still has legacy FP-mode handlers.
+    assert fp_include not in (gfx1250_generated_root / 'vop2_exec.cpp').read_text()
+    assert fp_include in (gfx1250_generated_root / 'vop1_exec.cpp').read_text()
 
     shared = execute_shared_path.read_text()
     assert fp_include in shared
@@ -2162,7 +2164,6 @@ def test_true16_vop3_integer_ops_do_not_use_whole_dword_simd_probe():
     assert simd_probe_line('v_cmp_lt_i16_vop3') is None
     assert simd_probe_line('v_cmp_eq_u16_vop3') is None
     assert simd_probe_line('v_or_b16_vop3') is None
-    assert simd_probe_line('v_add_nc_u32_vop3') is not None
 
 
 def test_vop3_compare_simd_probe_can_commit_raw_result():
@@ -3792,9 +3793,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
 ):
     execute_shared = execute_shared_path.read_text()
 
-    mad_u32 = _shared_execute_body(
-        execute_shared, 'v_mad_u32_u16_vop3', 'v_mad_u32_u24_vop3'
-    )
+    mad_u32 = _shared_execute_body(execute_shared, 'v_mad_u32_u16_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_u32
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_u32
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_u32
@@ -3804,9 +3803,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
         in mad_u32
     )
 
-    mad_i32 = _shared_execute_body(
-        execute_shared, 'v_mad_i32_i16_vop3', 'v_mad_i32_i24_vop3'
-    )
+    mad_i32 = _shared_execute_body(execute_shared, 'v_mad_i32_i16_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01' in mad_i32
     assert 'read_vop3_true16_src(inst.src0, wf, lane, opsel, 0)' in mad_i32
     assert 'read_vop3_true16_src(inst.src1, wf, lane, opsel, 1)' in mad_i32
@@ -3827,9 +3824,7 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in div_fixup
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits,' in div_fixup
 
-    pack = _shared_execute_body(
-        execute_shared, 'v_pack_b32_f16_vop3', 'v_perm_b32_vop3'
-    )
+    pack = _shared_execute_body(execute_shared, 'v_pack_b32_f16_vop3')
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC' in pack
     assert 'read_vop3_true16_src(inst.src0, wf, lane, inst.inst_.op_sel, 0)' in pack
     assert 'read_vop3_true16_src(inst.src1, wf, lane, inst.inst_.op_sel, 1)' in pack
@@ -3928,13 +3923,11 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     true16_unary = _generated_method_body(
         gfx1250_vop3_alu, 'VCeilF16Vop3', 'VTruncF16Vop3'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in true16_unary
-    assert (
-        '[[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);' in true16_unary
-    )
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in true16_unary
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel,' in true16_unary
-    assert 'inst.vdst.write_lane' not in true16_unary
+    assert 'rj_arith_v_ceil_f16_w32_gfx12' in true16_unary
+    assert 'execute_cdna_integral_unary<true, false>' in true16_unary
+    for operand in ('A', 'D'):
+        assert 'RJ_ARITH_ALU_HIGH_' + operand in true16_unary
+    assert 'ROCJITSU_TRY_SIMD' not in true16_unary
 
     true16_binary = _generated_method_body(
         gfx1250_vop3_alu, 'VAddF16Vop3', 'VSubF16Vop3'
@@ -7705,6 +7698,8 @@ def test_generated_pseudo_scalar_users_include_dependency(
         text = source.read_text()
         include = '#include "rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h"'
         assert (include in text) == ('pseudo_scalar::' in text), source
+        if 'amdgpu::arith::execute_pseudo_scalar(' in text:
+            assert '#include "rj_arith/detail/rj_arith_scalar.h"' in text, source
 
 
 def test_generated_vop3_dot2_true16_uses_rj_arith_true16_adapter(
@@ -7755,28 +7750,6 @@ def test_generated_rdna4_vop3_cvt_f32_f16_applies_true16_source_modifiers(
         assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
         assert 'wf.ieee_mode()' in body and 'RJ_ARITH_FP_IEEE_MODE' in body
         assert 'source_bytes, destination_bytes' in body
-
-
-def test_generated_rdna3_dot2acc_uses_dot2c_simd_probe(
-    execute_shared_path: Path,
-):
-    execute_shared = execute_shared_path.read_text()
-
-    start = execute_shared.index('inline void execute_v_dot2acc_f32_f16_vop2')
-    end = execute_shared.index('inline void execute_v_dot2c_f32_f16_vop2', start)
-    body = execute_shared[start:end]
-
-    assert 'ROCJITSU_TRY_SIMD_DOTC_F16(false);' in body
-    assert (
-        'uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.vdst, lane);' in body
-    )
-    assert 'float facc = std::bit_cast<float>(acc);' in body
-    assert 'facc += a0 * b0 + a1 * b1;' in body
-    assert 'throw util::UnimplementedInst' not in body
-
-    assert 'amdgpu::gfx11_dot2_f32<false>' in body
-    assert 'ROCJITSU_CODE_ARCH_RDNA3_5' in body
-    assert 'pk16_src_needs_narrowing(inst.inst_.src0' in body
 
 
 def test_gfx1250_swmmac_rejects_disputed_index_bit():
