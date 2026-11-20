@@ -405,6 +405,38 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
   return AMDSMI_STATUS_SUCCESS;
 }
 
+amdsmi_status_t get_gpu_slot_from_entity(uint32_t entity_id, uint32_t* slot) {
+  if (slot == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  const rdc_entity_info_t info = rdc_get_info_from_entity_index(entity_id);
+  if (info.device_type != RDC_DEVICE_TYPE_GPU) {
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+
+  std::shared_ptr<const GpuHandleTable> table = get_flat_gpu_table();
+  if (info.entity_role == RDC_DEVICE_ROLE_PHYSICAL && info.instance_index == 0) {
+    // A physical GPU's id is its slot. A placeholder counts: a GPU AMD SMI cannot identify right
+    // now keeps its slot here, as it keeps its index everywhere else in RDC.
+    if (info.device_index >= table->size()) {
+      return AMDSMI_STATUS_NOT_FOUND;
+    }
+    *slot = info.device_index;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  // A partition names a socket and one of its processors, as the lookup above reads one.
+  for (uint32_t i = 0; i < table->size(); i++) {
+    if ((*table)[i].socket_index == info.device_index &&
+        (*table)[i].proc_index == info.instance_index) {
+      *slot = i;
+      return AMDSMI_STATUS_SUCCESS;
+    }
+  }
+  return AMDSMI_STATUS_NOT_FOUND;
+}
+
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,
                                                  uint32_t* gpu_index) {
   if (!gpu_index) {

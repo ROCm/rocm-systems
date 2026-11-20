@@ -57,6 +57,17 @@ std::string value_or_na(T value) {
   return value == std::numeric_limits<T>::max() ? "n/a" : std::to_string(value);
 }
 
+// Whether amd-smi reports evidence that the process uses a GPU: GPU memory it holds, or compute
+// units it occupies. A field at its own type's maximum is a value amd-smi could not read, which
+// is no evidence either way.
+bool uses_a_gpu(const amdsmi_process_info_t& proc) {
+  const bool holds_memory =
+      proc.vram_usage > 0 && proc.vram_usage < std::numeric_limits<uint64_t>::max();
+  const bool occupies_cus =
+      proc.cu_occupancy > 0 && proc.cu_occupancy < std::numeric_limits<uint32_t>::max();
+  return holds_memory || occupies_cus;
+}
+
 }  // namespace
 
 RdcSmiDiagnosticImpl::RdcSmiDiagnosticImpl() {}
@@ -78,6 +89,33 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
   // RDC_GROUP_MAX_ENTITIES); RDC_MAX_NUM_DEVICES is the bound of result->gpu_results[].
   gpu_count = std::min<uint32_t>(gpu_count, RDC_MAX_NUM_DEVICES);
 
+  // Map first: each distinct entity of the group gives the slot it holds in RDC's flat GPU table,
+  // which is the number amd-smi reports a process's GPUs by. Positions that hold the same entity
+  // share its mapping, and an entity that maps to nothing gets no row and no sentence.
+  std::map<uint32_t, uint32_t> entity_slots;
+  // The group's positions by slot: two entities can name one slot, a physical GPU and a partition
+  // of it, and both get the row of a process placed there.
+  std::map<uint32_t, std::vector<uint32_t>> slot_positions;
+  for (uint32_t i = 0; i < gpu_count; i++) {
+    auto mapped = entity_slots.find(gpu_index[i]);
+    if (mapped == entity_slots.end()) {
+      uint32_t slot = kNoGpu;
+      if (get_gpu_slot_from_entity(gpu_index[i], &slot) != AMDSMI_STATUS_SUCCESS) {
+        slot = kNoGpu;  // no GPU of the table: this entity is left out of the check
+      }
+      mapped = entity_slots.emplace(gpu_index[i], slot).first;
+    }
+    if (mapped->second != kNoGpu) {
+      slot_positions[mapped->second].push_back(i);
+    }
+  }
+  // A group of which no GPU can be found is skipped before the process list is read, so that its
+  // result does not depend on processes elsewhere on the host.
+  if (slot_positions.empty()) {
+    strncpy_with_null(result->info, "No GPU of the group could be found.", MAX_DIAG_MSG_LENGTH);
+    return RDC_ST_OK;
+  }
+
   // A process that starts between the count call and the fill call can leave the fill without
   // room; amd-smi then fills in process IDs only, so the list is read again.
   std::vector<amdsmi_process_info_t> procs;
@@ -89,7 +127,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
       RDC_LOG(RDC_DEBUG, "Fail to get process information: " << err);
       strncpy_with_null(result->info, "Fail to retrieve process information from amd_smi_lib",
                         MAX_DIAG_MSG_LENGTH);
-      return Smi2RdcError(err);
+      // The Skip result carries the failure; rdcd sends no result for any other status.
+      return RDC_ST_OK;
     }
 
     // No process found
@@ -104,7 +143,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
       return RDC_ST_OK;
     }
 
-    // An entry amd-smi reports but does not write has a CU occupancy of 0 and is skipped below.
+    // An entry amd-smi reports but does not write is all zero, which is no evidence that its
+    // process uses a GPU, so it is left out below.
     const uint32_t room = std::min(count + kProcessesStarting, kMaxProcesses);
     procs.assign(room, amdsmi_process_info_t{});
     num_items = room;
@@ -117,7 +157,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
       RDC_LOG(RDC_DEBUG, "Fail to get process detail information: " << err);
       strncpy_with_null(result->info, "Fail to retrieve process information from amd_smi_lib",
                         MAX_DIAG_MSG_LENGTH);
-      return Smi2RdcError(err);
+      // The Skip result carries the failure; rdcd sends no result for any other status.
+      return RDC_ST_OK;
     }
     if (attempt == kProcessListReads) {
       RDC_LOG(RDC_DEBUG,
@@ -126,12 +167,6 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
                         MAX_DIAG_MSG_LENGTH);
       return RDC_ST_OK;
     }
-  }
-
-  // The positions of each of the group's GPUs in the group.
-  std::map<uint32_t, std::vector<uint32_t>> group_positions;
-  for (uint32_t i = 0; i < gpu_count; i++) {
-    group_positions[gpu_index[i]].push_back(i);
   }
 
   // Per group GPU, the IDs of the processes running on it.
@@ -148,9 +183,10 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
   for (uint32_t i = 0; i < num_items; i++) {
     if (procs[i].process_id == self) continue;
 
-    // Skip the process does not occupy any GPUs. The hsa_shutdown()
-    // will not clear /proc sys file until the process is terminated.
-    if (procs[i].cu_occupancy == 0) continue;
+    // A process counts only on evidence that it uses a GPU, so that one which has a GPU open
+    // without using it is left out: a process that has called hsa_shutdown() and released its
+    // GPU memory stays listed in /proc until it ends, and an idle server keeps its GPUs open.
+    if (!uses_a_gpu(procs[i])) continue;
 
     // The GPUs the process runs on, through a list: amd-smi rejects the NULL list that would ask
     // for their count. An entry still holding kNoGpu was not written.
@@ -171,8 +207,9 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
 
     const std::string pid = std::to_string(procs[i].process_id);
     for (uint32_t j = 0; j < std::min<uint32_t>(num_devices, RDC_MAX_NUM_DEVICES); j++) {
-      const auto positions = group_positions.find(gpus[j]);
-      if (gpus[j] == kNoGpu || positions == group_positions.end()) continue;
+      // The numbers amd-smi reports are rocm_smi device indexes, which are the table's slots.
+      const auto positions = slot_positions.find(gpus[j]);
+      if (gpus[j] == kNoGpu || positions == slot_positions.end()) continue;
       for (uint32_t position : positions->second) {
         running[position].add(pid);
       }
@@ -267,19 +304,28 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
   // RDC_GROUP_MAX_ENTITIES); RDC_MAX_NUM_DEVICES is the most this check reads of them.
   gpu_count = std::min<uint32_t>(gpu_count, RDC_MAX_NUM_DEVICES);
 
+  // One lookup per position of the group, before the pairs are walked: a lookup of a partition
+  // entity lists amd-smi's sockets and processors. A GPU that cannot be found keeps its nullptr,
+  // and the handles stay valid while the caller's amd-smi session lives.
+  std::array<amdsmi_processor_handle, RDC_MAX_NUM_DEVICES> handles{};
+  for (uint32_t i = 0; i < gpu_count; i++) {
+    amdsmi_processor_handle handle = nullptr;
+    if (get_processor_handle_from_id(gpu_index[i], &handle) == AMDSMI_STATUS_SUCCESS) {
+      handles[i] = handle;
+    }
+  }
+
   DiagText info;
   uint32_t pairs = 0;
   for (uint32_t i = 0; i < gpu_count; i++) {
     for (uint32_t j = 0; j < gpu_count; j++) {
       if (gpu_index[i] == gpu_index[j]) continue;
-      std::pair<amdsmi_processor_handle, amdsmi_processor_handle> ph{nullptr, nullptr};
-      if (get_processor_handle_from_id(gpu_index[i], &ph.first) != AMDSMI_STATUS_SUCCESS ||
-          get_processor_handle_from_id(gpu_index[j], &ph.second) != AMDSMI_STATUS_SUCCESS) {
+      if (handles[i] == nullptr || handles[j] == nullptr) {
         continue;  // an unavailable GPU has no links to check
       }
 
       uint64_t weight = 0;
-      const amdsmi_status_t err = amdsmi_topo_get_link_weight(ph.first, ph.second, &weight);
+      const amdsmi_status_t err = amdsmi_topo_get_link_weight(handles[i], handles[j], &weight);
       if (err != AMDSMI_STATUS_SUCCESS) {
         result->status = RDC_DIAG_RESULT_FAIL;
         result->details.code = err;
@@ -287,7 +333,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
                                      "," + std::to_string(gpu_index[j]) + ", &weight) fail";
         strncpy_with_null(result->details.msg, err_info.c_str(), MAX_DIAG_MSG_LENGTH);
         strncpy_with_null(result->info, err_info.c_str(), MAX_DIAG_MSG_LENGTH);
-        return RDC_ST_SMI_ERROR;
+        // The Fail result carries the failure; rdcd sends no result for any other status.
+        return RDC_ST_OK;
       }
 
       pairs++;

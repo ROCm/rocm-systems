@@ -22,9 +22,9 @@ THE SOFTWARE.
 
 // The flat GPU table in SmiUtils.cc and RDC's AMD SMI session, against the fake
 // AMD SMI functions below: a slot per GPU, a placeholder for a processor AMD SMI
-// cannot identify, the retries that fill placeholders in place, and the
-// session's reference count. SmiUtils.cc is compiled into this binary, so it
-// needs neither librdc nor a GPU.
+// cannot identify, the retries that fill placeholders in place, the slot an
+// entity id maps to, and the session's reference count. SmiUtils.cc is compiled
+// into this binary, so it needs neither librdc nor a GPU.
 
 #include <gtest/gtest.h>
 
@@ -43,6 +43,7 @@ THE SOFTWARE.
 namespace {
 
 using amd::rdc::get_flat_gpu_table;
+using amd::rdc::get_gpu_slot_from_entity;
 using amd::rdc::get_kfd_node_id;
 using amd::rdc::get_kfd_partition_id;
 using amd::rdc::get_processor_handle_from_id;
@@ -87,6 +88,13 @@ std::vector<std::vector<FakeProcessor>> gpus(uintptr_t n) {
   return sockets;
 }
 
+// A system where a slot is not its socket's index: two GPUs on socket 0 (slots 0 and 1), a GPU
+// and a processor AMD SMI cannot identify on socket 1 (slot 2 and the placeholder slot 3), and a
+// CPU socket, which gets no slot at all.
+void two_gpu_sockets_and_a_cpu() {
+  g_sockets = {{gpu(1), gpu(2)}, {gpu(3), unknown(4)}, {cpu(10)}};
+}
+
 const FakeProcessor* find_processor(amdsmi_processor_handle handle) {
   for (const auto& socket : g_sockets) {
     for (const auto& proc : socket) {
@@ -109,6 +117,16 @@ uint32_t PartitionEntityIndex(uint32_t socket, uint32_t proc) {
   info.instance_index = proc;
   info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
   info.device_type = RDC_DEVICE_TYPE_GPU;
+  return rdc_get_entity_index_from_info(info);
+}
+
+// The encoded entity index of a CPU, which the GPU table holds no slot for.
+uint32_t CpuEntityIndex(uint32_t index) {
+  rdc_entity_info_t info = {};
+  info.device_index = index;
+  info.instance_index = 0;
+  info.entity_role = RDC_DEVICE_ROLE_PHYSICAL;
+  info.device_type = RDC_DEVICE_TYPE_CPU;
   return rdc_get_entity_index_from_info(info);
 }
 
@@ -545,4 +563,92 @@ TEST_F(GpuTable, ANullNodeIdIsRefused) {
 TEST_F(GpuTable, ANullPartitionIdIsRefused) {
   g_sockets = gpus(2);
   EXPECT_EQ(get_kfd_partition_id(handle_of(1), nullptr), AMDSMI_STATUS_INVAL);
+}
+
+// The slot an entity id maps to, which is also its rocm_smi device index and so the number AMD
+// SMI reports a process's GPUs by. These are the tests of get_gpu_slot_from_entity itself, not
+// admission cases: the function does not exist on the base, where they would not compile.
+
+TEST_F(GpuTable, SlotOfAPhysicalEntityIsItsIndex) {
+  two_gpu_sockets_and_a_cpu();
+  ASSERT_EQ(availability(), (std::vector<bool>{true, true, true, false}));
+  uint32_t slot = 99;
+  EXPECT_EQ(get_gpu_slot_from_entity(0, &slot), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 0u);
+  EXPECT_EQ(get_gpu_slot_from_entity(1, &slot), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 1u);
+  // Socket 1's GPU is slot 2, not slot 1: a physical id is its slot, not a socket index. This
+  // kills the mutation that looks a physical entity up in the table instead.
+  EXPECT_EQ(get_gpu_slot_from_entity(2, &slot), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 2u);
+}
+
+TEST_F(GpuTable, SlotOfAPlaceholderEntityIsItsIndex) {
+  // A GPU AMD SMI cannot identify right now keeps its slot, so a process on it keeps its row.
+  // This kills the mutation that adds an availability check to the physical path.
+  two_gpu_sockets_and_a_cpu();
+  uint32_t slot = 99;
+  EXPECT_EQ(get_gpu_slot_from_entity(3, &slot), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 3u);
+}
+
+TEST_F(GpuTable, APhysicalEntityPastTheTableHasNoSlot) {
+  two_gpu_sockets_and_a_cpu();
+  uint32_t slot = 99;
+  EXPECT_EQ(get_gpu_slot_from_entity(4, &slot), AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(get_gpu_slot_from_entity(RDC_MAX_NUM_DEVICES, &slot), AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(slot, 99u);
+}
+
+TEST_F(GpuTable, SlotOfAPartitionEntityIsItsSocketsProcessor) {
+  two_gpu_sockets_and_a_cpu();
+  uint32_t slot = 99;
+  EXPECT_EQ(get_gpu_slot_from_entity(PartitionEntityIndex(0, 1), &slot), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 1u);
+  EXPECT_EQ(get_gpu_slot_from_entity(PartitionEntityIndex(1, 0), &slot), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 2u);
+  // Socket 1's second processor is the placeholder, which is a slot like any other. This kills
+  // the mutation that adds an availability check to the partition path.
+  EXPECT_EQ(get_gpu_slot_from_entity(PartitionEntityIndex(1, 1), &slot), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 3u);
+}
+
+TEST_F(GpuTable, APartitionEntityWithNoEntryHasNoSlot) {
+  two_gpu_sockets_and_a_cpu();
+  uint32_t slot = 99;
+  EXPECT_EQ(get_gpu_slot_from_entity(PartitionEntityIndex(0, 2), &slot), AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(get_gpu_slot_from_entity(PartitionEntityIndex(5, 0), &slot), AMDSMI_STATUS_NOT_FOUND);
+  // The CPU socket holds no slot of the table, so no partition of it maps to one.
+  EXPECT_EQ(get_gpu_slot_from_entity(PartitionEntityIndex(2, 0), &slot), AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(slot, 99u);
+}
+
+TEST_F(GpuTable, APhysicalRoleWithAnInstanceIsReadAsSocketAndProcessor) {
+  // Only instance 0 of the physical role is a physical GPU's id. get_processor_handle_from_id
+  // reads any other as a socket index and a processor index, so the slot is read that way too.
+  // This kills the mutation that drops the instance check, which would give slot 0.
+  two_gpu_sockets_and_a_cpu();
+  rdc_entity_info_t info = {};
+  info.device_index = 0;
+  info.instance_index = 1;
+  info.entity_role = RDC_DEVICE_ROLE_PHYSICAL;
+  info.device_type = RDC_DEVICE_TYPE_GPU;
+  uint32_t slot = 99;
+  EXPECT_EQ(get_gpu_slot_from_entity(rdc_get_entity_index_from_info(info), &slot),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(slot, 1u);
+}
+
+TEST_F(GpuTable, ACpuEntityHasNoSlot) {
+  // The table holds GPUs only, so a CPU names none of its slots. This kills the mutation that
+  // drops the device-type check, which would read a CPU's index as a GPU slot.
+  two_gpu_sockets_and_a_cpu();
+  uint32_t slot = 99;
+  EXPECT_EQ(get_gpu_slot_from_entity(CpuEntityIndex(0), &slot), AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(slot, 99u);
+}
+
+TEST_F(GpuTable, ANullSlotIsRefused) {
+  two_gpu_sockets_and_a_cpu();
+  EXPECT_EQ(get_gpu_slot_from_entity(0, nullptr), AMDSMI_STATUS_INVAL);
 }
