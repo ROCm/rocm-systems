@@ -258,15 +258,19 @@ the instruction; addressing and storage must be valid at the observation point.
 |---|---|
 | Register addressing | The anchor must preserve VGPR bank selection. GPR indexing and VSKIP must be proven disabled where the ISA supports them; unproven state is rejected. |
 | Register usage | Before preservation planning, `AfterInst` requires enumerable physical VGPR accesses and liveness propagated across resolved guest calls and returns, including recognized computed jumps to kernel entries. Relative or GPR-indexed usage is rejected. |
-| Allocated storage | Every kernel that can reach the `AfterInst` site must use static VGPR allocation. With dynamic allocation, the descriptor count can exceed the VGPRs available to the probe and its save/restore instructions. An unresolved successor in a dynamic kernel conservatively excludes the entire object. Even with static allocation, admission rejects sites at or after an unproven `s_alloc_vgpr` or VGPR/scratch release. |
+| Allocated storage | Every kernel that can reach the site must use static VGPR allocation. Admission also rejects `AfterInst` at or after an unproven `s_alloc_vgpr` or VGPR/scratch release. |
 | Register hazards | Callable `AfterInst` is conservatively rejected throughout code objects containing MFMA/SMFMAC, or CDNA5 matrix or transcendental producers, until the required register dependency spacing can be proven. |
 | Instruction order | Callable `AfterInst` rejects CDNA5 code objects containing packed permutes that require an immediate safe VALU follower. Moving either the permute or its follower can break that adjacency. |
 
 Inherited GPR indexing, VSKIP, and storage availability also constrain callable
 `BeforeInst` and `KernelExit` observations on targets that support those states.
-A static descriptor bounds the initial VGPR allocation. Guest instructions can
-subsequently change storage availability. `KernelEntry` uses dispatch-entry
-state because guest backedges to the original entry bypass the descriptor stub.
+On RDNA4 and CDNA5, a dynamic wave can start with fewer VGPRs than its
+descriptor declares. Growing that count cannot guarantee registers for either
+the probe body or its save and restore instructions. Callable `BeforeInst`,
+`AfterInst`, and `KernelExit` sites must therefore be unreachable from dynamic
+dispatches. An unresolved successor in a dynamic kernel excludes those sites
+throughout the code object. `KernelEntry` checks its own dispatch descriptor
+for static allocation because guest backedges bypass the entry stub.
 
 The callable-state analysis follows resolved branches in a leaf helper when
 every path leaves the state under analysis unchanged and returns through the
