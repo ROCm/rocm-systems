@@ -1711,6 +1711,9 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
   info->source = AMDSMI_CUID_SOURCE_UNKNOWN;
 
 #ifdef BUILD_CUID
+  // A BDF lookup can itself rediscover the node on a miss. Use the same
+  // exclusive guard as the listing through the last property read.
+  const std::lock_guard<std::mutex> inventory_lock(cuid_inventory_mutex);
   amdcuid_id_t handle = {};
   const amdsmi_status_t lookup = cuid_handle_for(processor_handle, handle);
   if (lookup != AMDSMI_STATUS_SUCCESS) {
