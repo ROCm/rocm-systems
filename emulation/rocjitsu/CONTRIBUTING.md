@@ -118,7 +118,15 @@ When modifying instruction semantics or adding instruction support:
 - Add tests for new functionality. Place them in `tests/` mirroring
   the source directory structure.
 - Run the test suite: `ctest --test-dir build`
-- Run ISA codegen tests: `cd lib/python && python -m pytest amdisa/tests/ -x`
+- Run ISA codegen tests from the rocjitsu project root in an active virtual
+  environment:
+  ```bash
+  python -m pip install -e 'lib/python[test]'
+  python -m pytest lib/python/amdisa/tests/ -x
+  ```
+  For a clean uv environment, use `uv pip install -e 'lib/python[test]'` to
+  install the dependencies. The `test` extra includes pip, setuptools, and wheel
+  because the installed-package test invokes pip with build isolation disabled.
 - Run Python API tests: `python -B python/tests/test_api.py -v` after installing
   the package and native runtime as described in [python/README.md](python/README.md).
   The CTest `PythonApiTest` entry uses the configured Python interpreter's native

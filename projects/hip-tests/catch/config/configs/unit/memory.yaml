@@ -1738,6 +1738,9 @@ memory:
   Unit_hipMemcpy_KernelLaunch:
     <<: *level_default
     tags: [P0]
+  Unit_hipMemcpy_LargeDeviceToDevice:
+    <<: *level_default
+    tags: [transfer, P1]
   Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem:
     <<: *level_default
     tags: [P1]
@@ -2865,6 +2868,12 @@ memory:
     <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayGetInfo_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetPlane_Negative_NotSupported:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetPlane_Negative_Parameters:
     <<: *level_default
     tags: [query, image, P1]
   Unit_hipArrayCreate_DiffSizes:

@@ -34,6 +34,8 @@ use std::path::Path;
 pub(crate) struct KfdNode {
     /// A coherent host XGMI route supports atomic access to local controls.
     pub host_atomics: bool,
+    /// Native debug metadata retained from the same discovery snapshot.
+    pub debug: KfdDebugProperties,
     /// Sysfs topology node number.
     pub node: u32,
     /// Native KFD GPU identifier used by ioctls.
@@ -50,6 +52,35 @@ pub(crate) struct KfdNode {
     pub local_memory_bytes: u64,
     /// Host-visible local memory in bytes.
     pub public_memory_bytes: u64,
+}
+
+/// Debug metadata not already retained by queue and endpoint identity fields.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct KfdDebugProperties {
+    /// Native `location_id` field from KFD or the matching PCI endpoint.
+    pub location_id: u32,
+    /// Native `vendor_id` field from KFD or the matching PCI endpoint.
+    pub vendor_id: u32,
+    /// Native `device_id` field from KFD or the matching PCI endpoint.
+    pub device_id: u32,
+    /// Native `revision_id` field from KFD or the matching PCI endpoint.
+    pub revision_id: u32,
+    /// Native `subsystem_vendor_id` field from KFD or the matching PCI endpoint.
+    pub subsystem_vendor_id: u32,
+    /// Native `subsystem_device_id` field from KFD or the matching PCI endpoint.
+    pub subsystem_device_id: u32,
+    /// Native `fw_version` field from KFD or the matching PCI endpoint.
+    pub fw_version: u32,
+    /// Native `simd_count` field from KFD or the matching PCI endpoint.
+    pub simd_count: u32,
+    /// Native `max_waves_per_simd` field from KFD or the matching PCI endpoint.
+    pub max_waves_per_simd: u32,
+    /// Native `simd_arrays_per_engine` field from KFD or the matching PCI endpoint.
+    pub simd_arrays_per_engine: u32,
+    /// Native `capability` field from KFD or the matching PCI endpoint.
+    pub capability: u32,
+    /// Native `debug_prop` field from KFD or the matching PCI endpoint.
+    pub debug_prop: u32,
 }
 
 /// Queue and shader properties required to qualify KFD transports.
@@ -1162,7 +1193,8 @@ fn read_node(
         ));
     }
     name[..text.len()].copy_from_slice(text.as_bytes());
-    let native = KfdNode {
+    let mut native = KfdNode {
+        debug: KfdDebugProperties::default(),
         host_atomics: host_local_atomics(root, node, memory_links.as_deref().map(Vec::as_slice))?,
         node,
         gpu_id,
@@ -1196,6 +1228,20 @@ fn read_node(
             "render endpoint no longer matches topology",
         ));
     }
+    native.debug = KfdDebugProperties {
+        location_id: location,
+        vendor_id: vendor,
+        device_id: device,
+        revision_id: pci.revision_id,
+        subsystem_vendor_id: pci.subsystem_vendor_id,
+        subsystem_device_id: pci.subsystem_device_id,
+        fw_version: p.optional_u32("fw_version")?.unwrap_or(0),
+        simd_count: simds,
+        max_waves_per_simd: p.u32("max_waves_per_simd")?,
+        simd_arrays_per_engine: arrays_per_engine,
+        capability,
+        debug_prop: p.optional_u32("debug_prop")?.unwrap_or(0),
+    };
     let supports_aql = super::queue::supports_aql(&native);
     let supports_pm4 = super::queue::supports_pm4(&native);
     let endpoint = Endpoint {

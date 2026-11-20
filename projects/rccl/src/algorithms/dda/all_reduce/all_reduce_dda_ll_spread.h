@@ -85,17 +85,6 @@ __host__ __device__ constexpr size_t ddaLLSpreadShardLen(size_t nPk, size_t shar
   return first < nPk ? (nPk - first < shardPkts ? nPk - first : shardPkts) : (size_t)0;
 }
 
-// Workgroup barrier for LDS only: on gfx1250 __syncthreads() would also wait for every remote store in flight.
-__device__ __forceinline__ void ddaLLSpreadLdsBarrier() {
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-  __builtin_amdgcn_s_barrier();
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
-#else
-  __syncthreads();
-#endif
-}
-
 // Polls the lines of up to kDdaLLSpreadBatch units this thread owns (mask bit i = unit i valid); false if aborted.
 __device__ __forceinline__ bool ddaLLSpreadPoll(const uint32_t* const (&line)[kDdaLLSpreadBatch], uint32_t mask,
                                                 uint32_t flag, DdaKernelParams params,
@@ -255,7 +244,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
     if (aborted) {
       ldsAborted = 1;
     }
-    ddaLLSpreadLdsBarrier();
+    ddaLdsBarrier();
     aborted = aborted || ldsAborted != 0;
     // Partial sums: skip the fold, my recvbuff shard and the publish. aborted is uniform here, so no barrier is split.
     if (aborted) {
@@ -284,7 +273,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
       out[w + 1] = acc1;
       ldsAcc[k] = make_uint2(acc0, acc1);
     }
-    ddaLLSpreadLdsBarrier();
+    ddaLdsBarrier();
 
     for (size_t u = tid; u < pollUnits; u += nthr) {
       const int peer = unitPeer(u, plen32);
