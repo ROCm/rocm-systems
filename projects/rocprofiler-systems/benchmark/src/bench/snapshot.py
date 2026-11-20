@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,6 +35,22 @@ def new_snapshot_dir(root: str, now: datetime) -> Path:
     return path
 
 
+def settings_hash(doc: dict[str, Any]) -> str:
+    """Short hash of what each command of a result ran: its argv, with absolute paths
+    reduced to their file name so a checkout in another directory matches, and its
+    settings (the variables the scenario gave it)."""
+    commands = {
+        name: {
+            "argv": [
+                os.path.basename(a) if os.path.isabs(a) else a for a in c["command"]
+            ],
+            "env": c["env"],
+        }
+        for name, c in doc["commands"].items()
+    }
+    return hashlib.sha256(json.dumps(commands, sort_keys=True).encode()).hexdigest()[:12]
+
+
 def scenario_entry(
     name: str, scenario_path: str, result_path: Path, exit_code: int, doc: dict[str, Any]
 ) -> dict[str, Any]:
@@ -44,6 +62,7 @@ def scenario_entry(
         "exit": exit_code,
         "reference": doc["meta"]["reference"],
         "tool_versions": doc["meta"].get("tool_versions", {}),
+        "settings_hash": settings_hash(doc),
         "summary": doc["summary"],
         "comparison": doc["comparison"],
     }
@@ -141,12 +160,19 @@ def compare_command(
     return rows
 
 
+def settings_changed(entry_a: dict[str, Any], entry_b: dict[str, Any]) -> bool:
+    """Both snapshots recorded the scenario's settings hash, and the hashes differ."""
+    hash_a, hash_b = entry_a.get("settings_hash"), entry_b.get("settings_hash")
+    return hash_a is not None and hash_b is not None and hash_a != hash_b
+
+
 def compare_snapshots(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """Raises ValueError when a scenario has a different reference in the two snapshots."""
     by_a = {s["name"]: s for s in a["scenarios"]}
     by_b = {s["name"]: s for s in b["scenarios"]}
+    common = sorted(set(by_a) & set(by_b))
     rows: dict[str, list[dict[str, Any]]] = {}
-    for name in sorted(set(by_a) & set(by_b)):
+    for name in common:
         ref = by_a[name]["reference"]
         if by_b[name]["reference"] != ref:
             raise ValueError(
@@ -159,16 +185,19 @@ def compare_snapshots(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
         "system": system_diff(a["system"], b["system"]),
         "tool_versions": [
             (f"{s}.{k}", va, vb)
-            for s in sorted(set(by_a) & set(by_b))
+            for s in common
             for k, va, vb in system_diff(
                 by_a[s]["tool_versions"], by_b[s]["tool_versions"]
             )
         ],
         "only_in_a": sorted(set(by_a) - set(by_b)),
         "only_in_b": sorted(set(by_b) - set(by_a)),
+        "settings_changed": [
+            name for name in common if settings_changed(by_a[name], by_b[name])
+        ],
         "failed_in_b": [
             name
-            for name in sorted(set(by_a) & set(by_b))
+            for name in common
             # a command whose runs all failed has an empty summary, so it yields no rows
             if by_b[name]["exit"] != 0
             or any(
@@ -192,6 +221,10 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
         ("only in A", cmp["only_in_a"]),
         ("only in B", cmp["only_in_b"]),
         (
+            "whose commands or settings differ between A and B (not judged)",
+            cmp["settings_changed"],
+        ),
+        (
             "with failed runs or missing commands in B (counted as REGRESSION)",
             cmp["failed_in_b"],
         ),
@@ -203,9 +236,12 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
         lines.append(
             f"  {'command':<16}{'metric':<10}{'A':>12}{'B':>12}{'Δ %':>9}  verdict"
         )
+        changed = name in cmp["settings_changed"]
         for r in rows:
             if r["reference"]:
                 verdict = "reference moved" if r["real"] else "reference"
+            elif changed:
+                verdict = "settings changed"
             elif r["real"]:
                 verdict = "REGRESSION" if r["worse"] else "improved"
             else:
@@ -223,7 +259,8 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
     lines.append(
         "verdict: REGRESSION or improved only if |Δ overhead| > max(2 x standard error, "
         "1% of the command's median in A); Δ % is the change in % of A, n/a when A is "
-        "below that 1%"
+        "below that 1%; settings changed: the scenario ran different commands or settings "
+        "in A and B, so its overheads are shown but not judged"
     )
     return "\n".join(lines)
 
@@ -231,7 +268,8 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
 def has_regression(cmp: dict[str, Any]) -> bool:
     return bool(cmp["failed_in_b"]) or any(
         r["real"] and r["worse"] and not r["reference"]
-        for rows in cmp["scenarios"].values()
+        for name, rows in cmp["scenarios"].items()
+        if name not in cmp["settings_changed"]
         for r in rows
     )
 

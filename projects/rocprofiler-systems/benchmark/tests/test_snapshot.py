@@ -197,6 +197,46 @@ def test_compare_rejects_a_changed_reference() -> None:
         snapshot.compare_snapshots(a, b)
 
 
+def test_snapshot_records_a_settings_hash_per_scenario(tmp_path, capsys):
+    doc = json.loads((take(tmp_path, "a") / "snapshot.json").read_text())
+    settings_hash = doc["scenarios"][0]["settings_hash"]
+    assert len(settings_hash) == 12 and int(settings_hash, 16) >= 0
+
+
+def result_doc(
+    workload: str = "/home/u/build/app",
+    env: dict[str, str] | None = None,
+    args: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    command = ["rocprof-sys-run", "--", workload, *args]
+    settings = {"ROCPROFSYS_TRACE": "true"} if env is None else env
+    return {"commands": {"tool": {"command": command, "env": settings}}}
+
+
+def test_settings_hash_ignores_the_checkout_location_but_not_the_settings() -> None:
+    reference = snapshot.settings_hash(result_doc())
+    assert snapshot.settings_hash(result_doc(workload="/srv/ci/build/app")) == reference
+    assert (
+        snapshot.settings_hash(result_doc(env={"ROCPROFSYS_TRACE": "false"})) != reference
+    )
+    assert snapshot.settings_hash(result_doc(args=("--size=512",))) != reference
+
+
+def test_compare_shows_but_does_not_judge_a_scenario_whose_settings_changed() -> None:
+    a = snap("baseline", baseline=1000, tool=1100)
+    b = snap("baseline", baseline=1000, tool=1500)
+    a["scenarios"][0]["settings_hash"] = "aaa"
+    b["scenarios"][0]["settings_hash"] = "bbb"
+    cmp = snapshot.compare_snapshots(a, b)
+    assert cmp["settings_changed"] == ["s"] and not snapshot.has_regression(cmp)
+    text = snapshot.format_comparison(a, b, cmp)
+    assert [line for line in text.splitlines() if " wall " in line][1].endswith(
+        "settings changed"
+    )
+    b["scenarios"][0]["settings_hash"] = "aaa"
+    assert snapshot.has_regression(snapshot.compare_snapshots(a, b))
+
+
 def test_cli_compare_exit_codes(tmp_path, capsys):
     directory = take(tmp_path, "a")
     assert (
