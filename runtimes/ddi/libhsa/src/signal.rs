@@ -521,7 +521,9 @@ impl SignalState {
             recycled_signals: Vec::new(),
             batches: HashMap::new(),
             batch_members: HashMap::new(),
-            event_service: SignalEventService::new(session).map_err(map_error)?,
+            event_service: SignalEventService::new(session).map_err(|error| {
+                crate::runtime::map_startup_error("signal_event_service", error)
+            })?,
             interrupt_signals: HashMap::new(),
             signal_event_pool: Vec::new(),
             owned_ipc_signals: HashMap::new(),

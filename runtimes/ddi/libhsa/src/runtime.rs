@@ -92,7 +92,7 @@ pub(crate) use lifecycle::{HsaLifecycle, LIFECYCLE};
 #[cfg(test)]
 use logging::logging_flag_enabled;
 pub(crate) use logging::{LogOutput, LogWork, LogWriteScope};
-pub(crate) use status::{boundary, map_error, plain_boundary};
+pub(crate) use status::{boundary, map_error, map_startup_error, plain_boundary};
 
 /// Initialization error with evidence that native rollback also failed.
 pub(crate) struct InitFailure {
@@ -454,27 +454,29 @@ impl HsaState {
 
     /// Discovers host and GPU agents and constructs process HSA state.
     pub(crate) fn create() -> Result<Self, InitFailure> {
-        let host_page_size =
-            usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
-                .map_err(|_| ERROR)?;
+        let host_page_size = usize::try_from(
+            rocddi::memory::host::host_page_size()
+                .map_err(|error| map_startup_error("host_page_size", error))?,
+        )
+        .map_err(|_| ERROR)?;
         if host_page_size < 4096 || !host_page_size.is_power_of_two() {
             return Err(ERROR.into());
         }
         // Clean HSA generations rejoin the exact retained native process VM.
         // Native process ownership validates identity, loss and prior disable;
         // the HSA lifecycle gate prevents rejoining an uncertain generation.
-        let session = Session::new(DriverContextLifetime::Process).map_err(map_error)?;
+        let session = Session::new(DriverContextLifetime::Process)
+            .map_err(|error| map_startup_error("session", error))?;
         let mut pending = PendingInit {
             debugger: None,
             session: Some(session),
             gpus: Vec::new(),
         };
-        let topology = match pending
-            .session
-            .as_ref()
-            .ok_or(ERROR)
-            .and_then(|session| session.topology_graph_snapshot().map_err(map_error))
-        {
+        let topology = match pending.session.as_ref().ok_or(ERROR).and_then(|session| {
+            session
+                .topology_graph_snapshot()
+                .map_err(|error| map_startup_error("topology", error))
+        }) {
             Ok(topology) => topology,
             Err(status) => {
                 return Err(InitFailure {
@@ -543,7 +545,7 @@ impl HsaState {
                 .as_mut()
                 .ok_or(ERROR)?
                 .configure(configuration)
-                .map_err(map_error)?;
+                .map_err(|error| map_startup_error("configuration", error))?;
         }
         pending.debugger = Some(PendingDebugger::default());
         let session = pending.session.as_ref().ok_or(ERROR)?;
@@ -636,7 +638,7 @@ impl HsaState {
             }
             session
                 .populate_endpoint(&mut endpoint)
-                .map_err(map_error)?;
+                .map_err(|error| map_startup_error("populate_endpoint", error))?;
             let info = endpoint.gpu().copied().ok_or(ERROR)?;
             let agent = HsaAgent {
                 handle: GPU_AGENT_BASE + pending.gpus.len() as u64,
@@ -653,7 +655,9 @@ impl HsaState {
                     u32::try_from(cache.size_bytes).unwrap_or(u32::MAX),
                 ));
             }
-            let device = session.activate(&endpoint).map_err(map_error)?;
+            let device = session
+                .activate(&endpoint)
+                .map_err(|error| map_startup_error("activate", error))?;
             pending
                 .debugger
                 .as_mut()
@@ -664,7 +668,7 @@ impl HsaState {
                     device
                         .gpu()
                         .and_then(|gpu| gpu.xnack_enabled())
-                        .map_err(map_error)?
+                        .map_err(|error| map_startup_error("xnack_query", error))?
                 } else {
                     false
                 };
