@@ -450,6 +450,146 @@ TEST_F(EnqueueMicrotest, P2pReservationChannels_P2pNetPreservesAinicScatterLimit
   EXPECT_EQ(1, rcclP2pReservationChannels(comm.get(), /*recv=*/nullptr, &task));
 }
 
+// gfx942 remote alltoall cap (enqueue.cc). Returns 2 when the stored
+// p2pnChannelsPerPeer is still above 2. paths.cc has already fitted that
+// count to p2pMaxPeers, so this function does not fit again. The peer in
+// this table is on the other node. A same-node peer, every other collective,
+// arch, node count, a user-set nChannelsPerNetPeer, and RCCL_SATURATE_P2P_NCHANNELS
+// fall through. gfx110 alltoall still reaches its own table entry.
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_Gfx942MultiNodeAlltoallCapsAboveTwoFittedChannels) {
+  struct Case {
+    const char* name;
+    int nNodes, nRanks, channels, perPeer;
+    const char* gcn;
+    ncclFunc_t coll;
+    bool userSet;
+    int user;
+    int expect;
+  };
+  const Case cases[] = {
+    {"2x8 alltoall", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, 2},
+    // A larger job whose stored count paths.cc left above 2 is capped too.
+    // The old nRanks loop returned -1 here (4*24 > 64 halved to 2).
+    {"3-node stored count still 4", 3, 24, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, 2},
+    {"non-pow2 per peer", 2, 16, 64, 6, "gfx942", ncclFuncAlltoAll, false, 0, 2},
+    // IsArchMatch is a prefix compare, so a stepping suffix still matches.
+    {"gfx942 stepping", 2, 16, 64, 4, "gfx942:xnack-", ncclFuncAlltoAll, false, 0, 2},
+    {"stored count 2", 4, 32, 64, 2, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    {"stored count 1", 8, 64, 64, 1, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    {"single node", 1, 8, 64, 4, "gfx942", ncclFuncAlltoAll, false, 0, -1},
+    {"gfx950", 2, 16, 64, 4, "gfx950", ncclFuncAlltoAll, false, 0, -1},
+    // Misses gfx942, then the gfx110 table returns 1. Single node must too:
+    // the new gate is not allowed to swallow that entry.
+    {"gfx110 multi-node", 2, 16, 64, 4, "gfx1100", ncclFuncAlltoAll, false, 0, 1},
+    {"gfx110 single-node", 1, 8, 64, 4, "gfx1100", ncclFuncAlltoAll, false, 0, 1},
+    {"send", 2, 16, 64, 4, "gfx942", ncclFuncSend, false, 0, -1},
+    {"recv", 2, 16, 64, 4, "gfx942", ncclFuncRecv, false, 0, -1},
+    {"sendrecv", 2, 16, 64, 4, "gfx942", ncclFuncSendRecv, false, 0, -1},
+    {"gather", 2, 16, 64, 4, "gfx942", ncclFuncGather, false, 0, -1},
+    {"alltoallv", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAllv, false, 0, -1},
+    // Either explicit count skips the cap, including one equal to the cap.
+    {"user count 4", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAll, true, 4, -1},
+    {"user count 2", 2, 16, 64, 4, "gfx942", ncclFuncAlltoAll, true, 2, -1},
+  };
+
+  for (const Case& k : cases) {
+    auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+    auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.channels, k.perPeer);
+    comm->topo = topo.get();
+    topo->nodes[GPU].count = 1;
+    std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn,
+                  sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "%s", k.gcn);
+    if (k.userSet) comm->config.nChannelsPerNetPeer = k.user;
+    int rankNode[2] = {0, 1};
+    comm->node = 0;
+    comm->rankToNode = rankNode;
+    ncclTaskP2p task{};
+    task.collAPI = k.coll;
+    task.root = 1;
+    EXPECT_EQ(k.expect, rcclP2pPolicyChannels(comm.get(), &task)) << k.name;
+  }
+
+  // task->root is the peer. Both ends see the other node, so both cap; a peer
+  // on this node does not.
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->rankToNode = rankNode;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  comm->node = 0;
+  task.root = 1;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "node 0 to node 1";
+  comm->node = 1;
+  task.root = 0;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "node 1 to node 0";
+  comm->node = 0;
+  task.root = 0;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "same-node peer";
+
+  // maxP2pPeers below nRanks must not grow a second fit. The stored count is the input.
+  comm->p2pMaxPeers = 2;
+  comm->nRanks = 16;
+  comm->node = 0;
+  task.root = 1;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "p2pMaxPeers below nRanks";
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_P2pDisableStillCapsRemoteGfx942Alltoall) {
+  g_loadParam = [](const char* env, int64_t deft) {
+    return std::strcmp(env, "P2P_DISABLE") == 0 ? int64_t(1) : deft;
+  };
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->node = 0;
+  comm->rankToNode = rankNode;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  task.root = 1;
+  EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "remote peer, P2P disabled";
+  task.root = 0;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "same-node peer, P2P disabled";
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx1100");
+  task.root = 1;
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "gfx110 stays below the disable return";
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_SaturateP2pSkipsTheGfx942Cap) {
+  auto topo = std::unique_ptr<ncclTopoSystem>(new ncclTopoSystem{});
+  auto comm = P2pPartsComm(/*nNodes=*/2, /*nRanks=*/16, /*p2pnChannels=*/64, /*perPeer=*/4);
+  comm->topo = topo.get();
+  topo->nodes[GPU].count = 1;
+  std::snprintf(topo->nodes[GPU].nodes[0].gpu.gcn, sizeof(topo->nodes[GPU].nodes[0].gpu.gcn), "gfx942");
+  int rankNode[2] = {0, 1};
+  comm->node = 0;
+  comm->rankToNode = rankNode;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncAlltoAll;
+  task.root = 1;
+
+  // paths.cc turns saturation on for every value other than 0 and UNSET (-2),
+  // including -1. A <= 0 gate caps -1 and still passes a test that only sets 1 and 0.
+  for (int64_t on : {int64_t(1), int64_t(-1)}) {
+    g_loadParam = [on](const char* env, int64_t deft) {
+      return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? on : deft;
+    };
+    EXPECT_EQ(-1, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate " << on;
+  }
+  for (int64_t off : {int64_t(0), int64_t(RCCL_VALUE_UNSET)}) {
+    g_loadParam = [off](const char* env, int64_t deft) {
+      return std::strcmp(env, "RCCL_SATURATE_P2P_NCHANNELS") == 0 ? off : deft;
+    };
+    EXPECT_EQ(2, rcclP2pPolicyChannels(comm.get(), &task)) << "saturate " << off;
+  }
+}
+
 // ===========================================================================
 // calcP2pChannelCount (enqueue.cc:1550)
 //
@@ -5453,6 +5593,79 @@ struct ScopedP2pCeEnv {
     else unsetenv("NCCL_P2P_USE_CUDA_MEMCPY");
   }
 };
+
+// Single-node all-XGMI gfx942/gfx950 legacy-LL gate. cudaArch is 100*major+10*minor,
+// so gfx942 is 940; BatchPlanComm's default 942 does not enter the branch.
+// p2pChunkSize is the single-node default (512 KiB), so the SIMPLE estimate is 1
+// channel at or below 64 KiB/peer. nChannelsMax is 1 on purpose: the bug is the
+// protocol choice, not how many channels the LL recompute would then stripe.
+struct Gfx94P2pLlOpts {
+  int cudaArch = 940;
+  int nNodes = 1;
+  int isAllNvlink = 1;
+  bool ll128OptIn = false;
+  int p2pChunkSize = 1 << 19;
+};
+
+struct Gfx94P2pLlScene {
+  BatchPlanComm bp;
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclChannelPeer> peers;
+  std::vector<ncclChannelPeer*> peerSlots;
+  char llBuf[8]{};
+  char ll128Buf[8]{};
+  char sendMem[8]{};
+  char recvMem[8]{};
+
+  explicit Gfx94P2pLlScene(Gfx94P2pLlOpts opts) : bp(opts.nNodes, opts.cudaArch) {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = 2;
+    c->nNodes = opts.nNodes;
+    c->maxLocalRanks = 2;  // nNodes > 1 divides the P2P channel base by this
+    c->cudaArch = opts.cudaArch;
+    c->isAllNvlink = opts.isAllNvlink;
+    c->allocP2pNetLLBuffers = opts.ll128OptIn;
+    c->ll128LineElems = 8;
+    c->ll128DataElems = 7;
+    c->p2pnChannels = 1;
+    c->p2pnChannelsPerPeer = 1;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = opts.p2pChunkSize;
+    c->buffSizes[NCCL_PROTO_LL] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_LL128] = 1 << 20;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 20;
+    SetSingleGpuArch(topo.get(), opts.cudaArch == 950 ? "gfx950" : "gfx942");
+    topo->ll128Enabled = opts.ll128OptIn;
+    c->topo = topo.get();
+
+    peers.resize(2);
+    peerSlots.resize(2);
+    for (int i = 0; i < 2; ++i) {
+      peerSlots[i] = &peers[i];
+      for (int ci = 0; ci < NCCL_MAX_CONNS; ++ci) {
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL] = llBuf;
+        peers[i].send[ci].conn.buffs[NCCL_PROTO_LL128] = peers[i].recv[ci].conn.buffs[NCCL_PROTO_LL128] = ll128Buf;
+      }
+    }
+    c->channels[0].peers = peerSlots.data();
+  }
+
+  ncclResult_t add(ssize_t bytes) {
+    struct ncclTaskP2p* tasks[2] = {nullptr, nullptr};
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+                        /*sendRank=*/1, sendMem, bytes, /*recvRank=*/1, recvMem, bytes,
+                        /*sendOpCount=*/0, /*recvOpCount=*/0, tasks);
+  }
+
+  ncclDevWorkP2p* p2pWork() {
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) return reinterpret_cast<ncclDevWorkP2p*>(node + 1);
+    }
+    return nullptr;
+  }
+};
 }  // namespace
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1Mixed2KiB8KiB_OneLl128WorkItem) {
@@ -5779,6 +5992,98 @@ TEST_F(EnqueueMicrotest, AddPersistentPlanRef_DropsNonLiveRefsAndKeepsLiveOnes) 
   ncclPersistentPlanRefDrop(live);
   ncclPersistentPlanRefDrop(registered);
   ncclPersistentPlanRefDrop(registered);
+}
+
+// Pin the numeric cutoff through the redirected ncclParamP2pLLThreshold (g_loadParam,
+// no cache). Whether the user set NCCL_P2P_LL_THRESHOLD is a separate ncclGetEnv
+// read: the widen applies when that name is absent or empty, so an explicit 4096
+// stays on the stock per-channel rule even though the number matches the default.
+void PinP2pLlThreshold(bool userSet) {
+  if (userSet) SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "4096");
+  else SetMicroEnvAbsent("NCCL_P2P_LL_THRESHOLD");
+  SetParam("P2P_LL_THRESHOLD", 4096);
+}
+
+void ExpectGfx94RecvProtoLL(Gfx94P2pLlOpts opts, ssize_t bytes, int protoLL) {
+  Gfx94P2pLlScene sc(opts);
+  ASSERT_EQ(ncclSuccess, sc.add(bytes)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->recvProtoLL)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+  EXPECT_EQ(protoLL, int(work->sendProtoLL)) << "arch=" << opts.cudaArch << " bytes=" << bytes;
+}
+
+void ExpectGfx94RecvProtoLL(int cudaArch, ssize_t bytes, int protoLL) {
+  Gfx94P2pLlOpts opts;
+  opts.cudaArch = cudaArch;
+  ExpectGfx94RecvProtoLL(opts, bytes, protoLL);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UnsetLlThreshold_WidensLlThrough64KiB) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  const struct {
+    ssize_t bytes;
+    int protoLL;
+  } cases[] = {
+      {16 << 10, 1}, {32 << 10, 1}, {64 << 10, 1}, {(64 << 10) + 1, 0},
+      {128 << 10, 0}, {256 << 10, 0}, {512 << 10, 0},
+  };
+  for (const auto& c : cases) ExpectGfx94RecvProtoLL(940, c.bytes, c.protoLL);
+  // gfx950 shares the gate. 942 is not 100*9+10*4, so the default BatchPlanComm
+  // arch must stay SIMPLE at 16 KiB.
+  ExpectGfx94RecvProtoLL(950, 16 << 10, 1);
+  ExpectGfx94RecvProtoLL(942, 16 << 10, 0);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94UserLlThreshold_KeepsPerChannelRule) {
+  PinP2pLlThreshold(/*userSet=*/true);
+  ExpectGfx94RecvProtoLL(940, 16 << 10, 0);
+  ExpectGfx94RecvProtoLL(950, 16 << 10, 0);
+}
+
+// NCCL_P2P_LL_THRESHOLD= is present but empty. ncclLoadParam uses the default, so
+// the widen still applies. A nullptr-only check would treat this as user-set.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94EmptyLlThreshold_Widens) {
+  SetMicroEnv("NCCL_P2P_LL_THRESHOLD", "");
+  SetParam("P2P_LL_THRESHOLD", 4096);
+  ExpectGfx94RecvProtoLL(940, 16 << 10, 1);
+}
+
+// 32 KiB is inside the widen (stock cutoff is 4 KiB). Each gate that is off must
+// stay SIMPLE; dropping nNodes, isAllNvlink, or !useLL128OptIn would pick LL.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94WidenGates_StaySimple) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  // nNodes > 1 takes the channel base through rcclParamPxnOptQpUsage, which the
+  // host fake aborts on. PXN disabled is the production default and skips that
+  // call. The widen still requires a single node.
+  {
+    ScopedHook pxnDisable(g_pxnDisable, [](struct ncclComm*) { return 1; });
+    Gfx94P2pLlOpts multiNode;
+    multiNode.nNodes = 2;
+    ExpectGfx94RecvProtoLL(multiNode, 32 << 10, 0);
+  }
+  Gfx94P2pLlOpts pcie;
+  pcie.isAllNvlink = 0;
+  ExpectGfx94RecvProtoLL(pcie, 32 << 10, 0);
+  Gfx94P2pLlOpts ll128;
+  ll128.ll128OptIn = true;
+  ExpectGfx94RecvProtoLL(ll128, 32 << 10, 0);
+}
+
+// The default 512 KiB chunk makes p2pChunkSize/8 equal the 64 KiB cap, so either
+// operand of the min would pass. A smaller chunk stops at chunk/8. A larger one
+// stays at the cap.
+TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx94ChunkSize_BoundsTheWiden) {
+  PinP2pLlThreshold(/*userSet=*/false);
+  Gfx94P2pLlOpts small;
+  small.p2pChunkSize = 256 << 10;
+  ExpectGfx94RecvProtoLL(small, 32 << 10, 1);
+  ExpectGfx94RecvProtoLL(small, (32 << 10) + 1, 0);
+  Gfx94P2pLlOpts large;
+  large.p2pChunkSize = 1 << 20;
+  ExpectGfx94RecvProtoLL(large, 64 << 10, 1);
+  ExpectGfx94RecvProtoLL(large, (64 << 10) + 1, 0);
+  ExpectGfx94RecvProtoLL(large, 128 << 10, 0);
 }
 
 // ===========================================================================
@@ -6794,5 +7099,122 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_Nvls_UsesNvlsChannelsCappedByCommOnlyFo
     ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, 1 << 20, tbl.ptr(), /*simInfo=*/nullptr));
     EXPECT_EQ(c.algo, task.algorithm);
     EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.algo << " nNodes=" << c.nNodes;
+  }
+}
+
+// ===========================================================================
+// scheduleP2pTasksToPlan -- per-round kernel-argument budget.
+// A round emits one work item and at most one new batch per channel. Reserving
+// more than that moved the last round of a 4-rank, 64-channel-per-peer AllToAll
+// into a second kernel launch.
+// ===========================================================================
+
+namespace {
+struct AllToAllPlanScene {
+  static constexpr int kRanks = 4;
+  static constexpr int kChannelsPerPeer = 64;
+  static constexpr int kP2pChannels = kRanks * kChannelsPerPeer;
+
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/942};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclComm::P2pSchedulePair> rounds = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<ncclKernelPlanner::Peer> plannerPeers = std::vector<ncclKernelPlanner::Peer>(kRanks);
+  std::vector<ncclChannelPeer> channelPeers = std::vector<ncclChannelPeer>(kRanks);
+  std::vector<ncclChannelPeer*> peerSlots = std::vector<ncclChannelPeer*>(kRanks);
+  std::vector<ncclTaskP2p> sends = std::vector<ncclTaskP2p>(kRanks);
+  std::vector<ncclTaskP2p> recvs = std::vector<ncclTaskP2p>(kRanks);
+  std::vector<char> sendBufs = std::vector<char>(kRanks);
+  std::vector<char> recvBufs = std::vector<char>(kRanks);
+
+  AllToAllPlanScene() {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = kRanks;
+    c->p2pnChannels = kP2pChannels;
+    c->p2pnChannelsPerPeer = kChannelsPerPeer;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 512 << 10;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 4 << 20;
+    SetSingleGpuArch(topo.get(), "gfx942");
+    c->topo = topo.get();
+
+    for (int round = 0; round < kRanks; ++round) {
+      rounds[round].sendRank = round;
+      rounds[round].recvRank = (kRanks - round) % kRanks;
+    }
+    c->p2pSchedule = rounds.data();
+    c->planner.peers = plannerPeers.data();
+    for (int peer = 0; peer < kRanks; ++peer) peerSlots[peer] = &channelPeers[peer];
+    for (int ch = 0; ch < kP2pChannels; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    for (int peer = 0; peer < kRanks; ++peer) {
+      for (ncclTaskP2p* t : {&sends[peer], &recvs[peer]}) {
+        t->collAPI = ncclFuncAlltoAll;
+        t->bytes = size_t(1) << 30;
+        t->maxCTAs = MAXCHANNELS;
+      }
+      sends[peer].func = ncclFuncSend;
+      sends[peer].buff = &sendBufs[peer];
+      recvs[peer].func = ncclFuncRecv;
+      recvs[peer].buff = &recvBufs[peer];
+      ncclIntruQueueEnqueue(&plannerPeers[peer].sendQueue, &sends[peer]);
+      ncclIntruQueueEnqueue(&plannerPeers[peer].recvQueue, &recvs[peer]);
+    }
+    c->planner.nTasksP2p = 2 * kRanks;
+    c->planner.nTasksP2pSend = kRanks;
+    c->planner.nTasksP2pRecv = kRanks;
+  }
+
+  ncclResult_t schedule(ssize_t inArgsBytes, ssize_t outArgsBytes = ssize_t(1) << 30) {
+    ncclKernelPlanBudget budget = MakeBudget(inArgsBytes, outArgsBytes);
+    int epoch = 0, round = 0;
+    return scheduleP2pTasksToPlan(bp.c(), &epoch, &round, bp.p(), &budget);
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_FourRoundsOf64Channels_FitOneKernelLaunch) {
+  AllToAllPlanScene sc;
+  const ssize_t inArgs = ssize_t(ncclMaxKernelArgsSize(sc.bp.c()->cudaArch)) - ssize_t(sizeof(struct ncclDevKernelArgs));
+  ASSERT_GE(inArgs, ssize_t(AllToAllPlanScene::kP2pChannels) * kBatch)
+      << "precondition: the kernel-argument budget holds one batch per channel";
+  ASSERT_EQ(ncclSuccess, sc.schedule(inArgs));
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "every AllToAll round must land in the first plan";
+  EXPECT_EQ(AllToAllPlanScene::kP2pChannels, sc.bp.p()->nWorkBatches);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneBatchPerChannelForTheNextRound) {
+  // Three rounds use 192 batches. The fourth needs 64 more: one batch short must
+  // defer it to the next plan, an exact fit must not.
+  const int used = 3 * AllToAllPlanScene::kChannelsPerPeer;
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((used + AllToAllPlanScene::kChannelsPerPeer - 1) * kBatch));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the fourth round's send and recv must wait";
+    EXPECT_EQ(used, sc.bp.p()->nWorkBatches);
+  }
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((used + AllToAllPlanScene::kChannelsPerPeer) * kBatch));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(used + AllToAllPlanScene::kChannelsPerPeer, sc.bp.p()->nWorkBatches);
+  }
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneWorkItemForTheNextRound) {
+  const ssize_t inArgs = AllToAllPlanScene::kP2pChannels * kBatch;
+  const ssize_t work = sizeof(struct ncclDevWorkP2p);
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule(inArgs, 4 * work - 1));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the fourth round's send and recv must wait";
+    EXPECT_EQ(3 * work, sc.bp.p()->workBytes);
+  }
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule(inArgs, 4 * work));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(4 * work, sc.bp.p()->workBytes);
   }
 }

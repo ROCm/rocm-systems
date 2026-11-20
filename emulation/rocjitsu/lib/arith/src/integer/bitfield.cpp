@@ -24,7 +24,7 @@ template <rocjitsu::arith::Bitfield Op> uint32_t evaluate(uint32_t a, uint32_t b
       return (a >> offset) & field_mask;
     }
 
-    // rocjitsu's simd_bfe_i32 sign-extends A before extracting: fields
+    // The inherited model sign-extends A before extracting: fields
     // crossing bit 31 include copies of A's sign bit.
     uint32_t sign = 0u - (a >> 31);
     uint32_t field = (((a ^ sign) >> offset) ^ sign) & field_mask;

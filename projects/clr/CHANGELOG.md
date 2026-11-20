@@ -21,6 +21,9 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipArrayGetSparseProperties` returns the layout properties of a sparse HIP array in a
         `hipArraySparseProperties` structure. Added for source compatibility: AMD devices do not
         support sparse arrays, so it zeroes the structure and returns `hipErrorNotSupported`.
+      * `hipArrayGetPlane` returns a single format plane of a multiplanar HIP array. Added for
+        source compatibility: HIP does not implement multiplanar arrays, so no array has planes
+        and it validates its arguments and returns `hipErrorNotSupported`.
     - Execution affinity: support for API parity with corresponding CUDA API.
       * `hipDeviceGetExecAffinitySupport` reports whether a device supports a given execution-affinity
         type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
@@ -40,6 +43,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 
 ### Changed
 
+* Code object version 4 and earlier are now rejected on devices that use the extended dispatch packet (gfx1250). COV4 device-libs read grid dimensions from the AQL dispatch packet, which has different field semantics on these devices, producing silently wrong results. Users must rebuild with `-mcode-object-version=5` or later.
 * After `hipFuncSetCacheConfig`, `preferredShmemCarveout` reads back `-1` for `hipFuncCachePreferNone` (was `0`) and `0` for `hipFuncCachePreferL1` (was `1`).
 * `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 * On gfx12 and later, pitched allocations use 128-byte alignment instead of 256, matching the hardware's linear pitch granularity. `hipMallocPitch`, `hipMemAllocPitch` and `hipMalloc3D` return a 128-byte-aligned pitch, and `hipDeviceProp_t::texturePitchAlignment` (OpenCL `CL_DEVICE_IMAGE_PITCH_ALIGNMENT`) reports 128. A 260-byte row now yields a 384-byte pitch rather than 512, so the allocation size changes with it. Earlier hardware is unchanged at 256 bytes. Applications that hard-coded the previous pitch, or derived a buffer size from it, will see different values.

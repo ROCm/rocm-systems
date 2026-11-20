@@ -97,6 +97,7 @@ typedef enum {
   // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
   // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
   RCCL_SYMMETRIC_TDM,
+  RCCL_AG_GIN_SDMA,     // AllGather via GIN LSA/SDMA
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -389,6 +390,11 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 // when set, else the AllReduce LL128 tier cap where the arch table has that tier,
 // else the env var's default.
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL128 one-shot AllReduce: RCCL_DDA_LL128_ONESHOT_THRESHOLD
+// when set; with the peer-parallel kernels and an arch table that sets
+// ddaArLL128OneShotRankBytes, min(the env var's default, that / nRanks); else the
+// env var's default.
+size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
@@ -407,6 +413,12 @@ int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// DDA LL128 Broadcast thread count from the arch table, or 0 when it sets none.
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
+// DDA LL128 ReduceScatter batched kernel block size from the arch table, or 0 when it sets none.
+int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
+// Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.
+size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
 // skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to

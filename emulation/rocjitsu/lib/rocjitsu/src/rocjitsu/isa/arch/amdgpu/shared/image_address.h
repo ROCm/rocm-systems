@@ -3,36 +3,20 @@
 
 /// @file image_address.h
 /// @brief Dependency-light image address encoding helpers.
-/// @details Generated decoder-model sources include this header to describe
-/// register operands, so it must remain free of VM dependencies. Keep only
-/// encoding-level value types here; execution helpers belong in image_access.h.
+/// @details Generated image decoder-model sources use these helpers to describe
+/// register operands. Keep this header free of VM dependencies.
 
 #pragma once
+
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address_types.h"
 
 #include <array>
 #include <bit>
 #include <cstdint>
+#include <numeric>
+#include <optional>
 
 namespace rocjitsu::amdgpu {
-
-/// @brief LOD input mode of a qualified sampling instruction.
-enum class ImageSampleMode { Implicit, Zero, Explicit, Bias, Derivatives, Derivatives16 };
-
-/// Encoded controls selecting active and derivative coordinates for RDNA sampler operations.
-struct ImageSampleSources {
-  uint16_t sampler;
-  uint8_t dim;
-  ImageSampleMode mode;
-  bool query;
-  bool linear_candidate;
-  bool unorm;
-  bool offset;
-  bool compare;
-  bool clamp;
-  bool gather;
-  bool lod_warning = false;
-  bool filtered_feedback_candidate = false;
-};
 
 /// The top and left edges provide implicit texture gradients for a 2x2 pixel quad.
 class ImageDerivativeQuad {
@@ -47,8 +31,13 @@ public:
   }
 };
 
-constexpr bool linear_image_needs_implicit_lod(unsigned mip_filter, unsigned base, unsigned last) {
-  return mip_filter != 0 && base != last;
+constexpr bool linear_image_needs_implicit_lod(uint32_t sampler_filter, unsigned base,
+                                               unsigned last, bool gather) {
+  const unsigned mip = (sampler_filter >> 26) & 3u;
+  const unsigned mag = (sampler_filter >> 20) & 3u;
+  const unsigned min = (sampler_filter >> 22) & 3u;
+  // Gathers select a mip but always use their fixed XY footprint.
+  return (mip && base != last) || (!gather && min != mag);
 }
 
 /// Unnormalized repeat clamps to the edge and mirror reflects once before clamping.
@@ -69,14 +58,6 @@ constexpr bool graphics_image_needs_gradients(bool query, unsigned maximum_mip, 
   const unsigned min = (sampler_filter >> 22) & mask;
   return !gather && (min != mag || (min & 2) || (mag & 2));
 }
-
-/// @brief Candidate wave-relative VGPR selectors for image coordinates.
-/// @details Printing and dependency metadata consume the prefix selected by
-/// the instruction's DIM and A16 fields. Linear execution may consume a
-/// shorter prefix selected by the resource type after checking that DIM
-/// supplies enough coordinates. Entries outside a caller's prefix need not
-/// name valid registers.
-using ImageAddressRegisters = std::array<uint32_t, 13>;
 
 /// SQ_RSRC_IMG_* resource types.
 inline constexpr uint32_t kImage1d = 8;
@@ -201,6 +182,81 @@ inline ImageAddressRegisters mimg_image_address_registers(uint32_t extension_wor
 inline ImageAddressRegisters mimg_nsa_image_address_registers(bool nsa, uint32_t first,
                                                               const uint32_t *raw_encoding) {
   return mimg_image_address_registers(nsa, true, first, raw_encoding);
+}
+
+enum class Gfx11BvhNodeType : uint8_t {
+  Triangle0,
+  Triangle1,
+  Triangle2,
+  Triangle3,
+  Box16,
+  Box32,
+  Instance,
+  Procedural
+};
+
+constexpr Gfx11BvhNodeType gfx11_bvh_node_type(uint64_t pointer) {
+  return static_cast<Gfx11BvhNodeType>(pointer & 7);
+}
+
+constexpr uint64_t gfx11_bvh_node_index(uint64_t pointer) {
+  return (pointer >> 3) & ((uint64_t{1} << 42) - 1);
+}
+
+/// BVH instructions interpret TYPE 8 as a four-DWORD node array resource.
+/// Words 2 and 3 encode the inclusive last 64-byte node index in bits 41:0.
+inline constexpr uint32_t kGfx11BvhResourceType = 8;
+
+/// Return the inclusive last node index for a GFX11 BVH resource.
+constexpr std::optional<uint64_t> gfx11_bvh_last_node(uint32_t word2, uint32_t word3) {
+  if ((word3 >> 28) != kGfx11BvhResourceType)
+    return std::nullopt;
+  return word2 | (uint64_t{word3 & 0x3ff} << 32);
+}
+
+/// Return whether the descriptor enables the ten flag bits in a 64-bit node pointer.
+constexpr bool gfx11_bvh_pointer_flags_enabled(uint32_t word3) { return word3 & (1u << 23); }
+
+/// @brief Test whether the tagged pointer can fetch the complete node.
+/// @details When the descriptor disables pointer_flags, nonzero bits 63:54 reject the pointer.
+/// Instance and procedural nodes do not fetch. A Box32 needs two slots.
+constexpr bool bvh_node_can_load(uint64_t pointer, uint64_t last_node, bool pointer_flags) {
+  if (!pointer_flags && pointer >> 54)
+    return false;
+  const auto type = gfx11_bvh_node_type(pointer);
+  const uint64_t index = gfx11_bvh_node_index(pointer);
+  return type <= Gfx11BvhNodeType::Box32 &&
+         (index < last_node || (index == last_node && type != Gfx11BvhNodeType::Box32));
+}
+
+// GFX11 NSA names the start of each contiguous group. GFX10.3 shares only the total width.
+constexpr std::array<unsigned, 5> gfx11_bvh_group_widths(bool wide, bool a16) {
+  return {1u + wide, 1, 3, 3, a16 ? 0u : 3u};
+}
+
+// GFX10.3 and GFX11 consume 11/12 words for a 32/64-bit pointer, or 8/9 with A16.
+constexpr uint32_t bvh_address_words(bool wide, bool a16) {
+  const auto widths = gfx11_bvh_group_widths(wide, a16);
+  return std::accumulate(widths.begin(), widths.end(), 0u);
+}
+
+/// @brief Decode the grouped GFX11 BVH NSA selectors.
+/// @details Groups name the node pointer, extent, XYZ origin, direction and inverse
+/// direction. A16 packs both directions into three registers. When present, NSA
+/// points to the third encoding word.
+inline ImageAddressRegisters gfx11_bvh_registers(bool wide, bool a16, uint32_t first,
+                                                 const uint32_t *nsa) {
+  if (!nsa)
+    return contiguous_image_address_registers(first);
+  ImageAddressRegisters registers{};
+  const auto widths = gfx11_bvh_group_widths(wide, a16);
+  unsigned word = 0;
+  for (unsigned group = 0; group < widths.size(); ++group) {
+    const unsigned start = group ? (*nsa >> ((group - 1) * 8)) & 255 : first;
+    for (unsigned i = 0; i < widths[group]; ++i)
+      registers[word++] = start + i;
+  }
+  return registers;
 }
 
 /// @brief Decode GFX12 explicit selectors and its trailing consecutive group.

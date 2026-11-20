@@ -266,12 +266,15 @@ constexpr uint16_t vopd_src0_vgpr(uint16_t reg) { return 256 + reg; }
 enum class VopdOp : uint16_t {
   FmamkF32 = 2,
   MulF32 = 3,
+  AddF32 = 4,
   MulDx9ZeroF32 = 7,
   MovB32 = 8,
   CndmaskB32 = 9,
   FmaF32 = 19,
   FmaF64 = 32,
   AddF64 = 33,
+  MaxNumF64 = 35,
+  MinNumF64 = 36,
 };
 
 struct VopdSlot {

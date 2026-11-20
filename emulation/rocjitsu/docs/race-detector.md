@@ -15,6 +15,7 @@ gfx1151 (GFX11.5/RDNA3.5), with end-to-end tests for each. Support for gfx1250
 (CDNA5) is limited and under active development; end-to-end tests currently
 cover its tensor DMA races (see Tensor DMA races below) and its counter-capacity
 backpressure. The plugin also tracks partial waits and FLAT destination lanes on RDNA4.
+Native tests cover CDNA1/2 counter capacity and EXEC-zero VMCNT accounting.
 
 ## Quick start
 
@@ -264,7 +265,12 @@ races. Some examples:
 
 - **VGPR races**: a vector register is read or overwritten by an instruction
   before a pending global or LDS load has completed (`s_waitcnt vmcnt` /
-  `s_waitcnt lgkmcnt` insufficient).
+  `s_waitcnt lgkmcnt` insufficient). On GFX10, `DS_ORDERED_COUNT` supplies a
+  whole-wave result under LGKMCNT and an outgoing contribution from the first
+  active lane under EXPCNT. The detector warns when an instruction reads or
+  overwrites the pending result. It also warns when an instruction overwrites
+  the contributing lane of the outgoing VGPR before its EXPCNT event retires.
+  Waiting for one counter leaves the other obligation in effect.
 - **Scalar-register races**: an SGPR or TTMP is read or overwritten before a
   pending scalar-memory load has completed. A later scalar load to the same
   destination is also checked because scalar-memory results can complete out
@@ -427,7 +433,7 @@ that does not identify a completed event remains conservatively pending. VMCNT
 is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
 The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
+through rocjitsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
 issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
 through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
 `s_sendmsg_rtn_*`, which also counts its returned data (CDNA5 ISA 5.4). On
@@ -458,8 +464,9 @@ proves that the oldest read into `v0` completed. If those pending operations
 belonged to different or unordered classes, the capacity stall would not prove
 which individual event completed.
 
-On RDNA1 and RDNA2, GWS operations hold the contributing source VGPR and EXEC
-until EXPCNT allows an overwrite.
+On RDNA1 and RDNA2, GDS loads and returning atomics expose their destination through
+LGKMCNT. EXPCNT separately protects the source VGPRs and EXEC from overwrite.
+A wait on only one counter releases only its associated dependency.
 
 The detector records the target-specific wait-counter family on every event.
 It handles both the combined wait fields and the standalone counter forms on
@@ -478,6 +485,14 @@ the individual counters used by the operation. LOADCNT, STORECNT, DSCNT,
 SAMPLECNT, ASYNCCNT and TENSORCNT hold up to 63 positions where implemented,
 KMCNT holds up to 31, and BVHCNT and EXPCNT hold up to 7. Generic FLAT
 uses the target-specific admission rules above.
+
+On CDNA1 through CDNA4, the detector retains ordered VMCNT slots for buffer,
+global and scratch instructions issued with EXEC zero. These slots count
+toward backpressure and partial waits but have no register or LDS accesses.
+For example, after an active buffer load and an EXEC-zero buffer load,
+`s_waitcnt vmcnt(1)` completes the older load.
+
+EXEC-zero DS and generic FLAT instructions remain outside this accounting.
 
 On gfx1250 it is modeled for each split counter: LOADcnt, STOREcnt, DScnt,
 ASYNCcnt and TENSORcnt are 6-bit counters and KMcnt is a 5-bit counter (the
@@ -529,8 +544,11 @@ ordinary VMEM loads and image samples advance VMCNT in issue order, so a
 partial wait counts younger loads of either kind. Their register writes can
 complete out of order across the two kinds. The detector checks overlapping
 destinations separately when deciding whether to report an overwrite.
-The inline GFX10 query `IMAGE_GET_RESINFO` occupies VMCNT. The detector tracks
-the VGPRs and lanes it writes in ordinary load writeback order.
+
+Inline `IMAGE_GET_LOD` on GFX10/11 and `IMAGE_GET_RESINFO` occupy VMCNT
+(LOADCNT for GFX12 RESINFO). The detector tracks the VGPRs and lanes written
+by each successful query. GET_LOD uses sample writeback order and GET_RESINFO
+uses ordinary load writeback order.
 
 The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
@@ -671,7 +689,7 @@ ctest --test-dir build -R "RaceDetector|IntervalSet"
 
 To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
-and point the wrapper at the RocJITsu build being tested. Set
+and point the wrapper at the rocjitsu build being tested. Set
 `ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
 `tests/race-detector/race_test_config.json` for gfx950, `configs/gfx1151.json` for
 gfx1151 or `configs/gfx1250_mi455x.json` for gfx1250, using absolute paths from

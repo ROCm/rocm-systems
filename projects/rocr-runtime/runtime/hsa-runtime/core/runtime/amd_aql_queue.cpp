@@ -646,7 +646,8 @@ void AqlQueue::AllocRegisteredRingBuffer(uint32_t queue_size_pkts) {
         agent_->node_id());
   }
 
-  assert(ring_buf_ != NULL && "AQL queue memory allocation failure");
+  // Leave ring_buf_ null so the caller can fail the queue creation
+  if (ring_buf_ == nullptr) return;
   if (ring_buf_metadata_alloc_bytes_)
     ring_buf_metadata_ = reinterpret_cast<uint8_t*>(ring_buf_) + ring_buf_alloc_bytes_;
 

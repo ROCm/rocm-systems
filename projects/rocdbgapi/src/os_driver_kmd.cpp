@@ -1253,23 +1253,16 @@ kmd_driver_t::init_adapter (D3DKMT_HANDLE adapter)
           cmd.Input.cmd = KMD_DBGR_CMD_OP_GET_TRAP_VERSION;
 
           if (auto status = send_escape (agent, cmd, false);
-              status != STATUS_SUCCESS)
+              status == STATUS_SUCCESS)
             {
-              warning ("failed to retrieve AMDGPU driver's version for %s: %s",
-                       to_string (agent.handle).c_str (),
-                       to_string (status).c_str ());
+              agent.kmd_version
+                = { cmd.Output.getTrapVersionOut.majorVersion,
+                    cmd.Output.getTrapVersionOut.minorVersion };
 
-              /* This version will fail the check_version() validation
-                 later.  */
-              agent.kmd_version = { 0, 0 };
+              use_adapter = true;
+              destroy_device.release ();
+              m_agents.push_back (agent);
             }
-          else
-            agent.kmd_version = { cmd.Output.getTrapVersionOut.majorVersion,
-                                  cmd.Output.getTrapVersionOut.minorVersion };
-
-          use_adapter = true;
-          destroy_device.release ();
-          m_agents.push_back (agent);
         }
     }
 
@@ -1498,7 +1491,7 @@ kmd_driver_t::enable_debug (os_exception_mask_t exceptions_reported,
 
   dbgapi_assert (!is_debug_enabled () && "debug is already enabled");
 
-  std::vector<const kmd::agent_t *> activated (m_agents.size ());
+  std::vector<const kmd::agent_t *> activated;
   auto rollback = utils::make_scope_exit (
     [&activated, this] ()
     {
