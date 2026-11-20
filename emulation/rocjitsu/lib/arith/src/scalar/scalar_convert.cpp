@@ -14,6 +14,7 @@
 #include "common/validation.h"
 #include "conversion/conversion32.h"
 #include "conversion/float_conversion.h"
+#include "fp/rounding_status.h"
 #include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/fp_status.h"
 
@@ -130,8 +131,9 @@ template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uin
   if constexpr (Op == Convert::PackedHalfRtz) {
     return 0;
   } else if constexpr (Op == Convert::SignedToFloat || Op == Convert::UnsignedToFloat) {
+    // Every 32-bit integer is exact in FP64; only INEXACT can occur.
     const double exact = Op == Convert::SignedToFloat ? double(int32_t(a)) : double(a);
-    return scalar_result_causes<false>(exact, result, rounding);
+    return a ? rounding_causes<false>(double_bits(exact), result, rounding) : 0;
   } else {
     constexpr bool half = Op == Convert::HalfToFloat || Op == Convert::HighHalfToFloat;
     constexpr uint32_t normal = half ? 0x400 : 0x800000;
@@ -151,8 +153,8 @@ template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uin
       if (!__builtin_isfinite(exact) || exact < low || __builtin_trunc(exact) > high) {
         return RJ_ARITH_EXCEPTION_INVALID;
       }
-    } else if (__builtin_isfinite(exact)) {
-      causes |= scalar_result_causes<!half>(exact, result, rounding);
+    } else if (__builtin_isfinite(exact) && exact != 0) {
+      causes |= rounding_causes<!half>(double_bits(exact), result, rounding);
     }
     return causes;
   }
