@@ -108,7 +108,7 @@ TEST(DerivedExpressionTest, MfmaUtilIsEvaluatedOnItsInputs)
 
     auto       slots = input_slots{};
     auto const expression =
-        parse_derived_expression(k_mfma_util, sdk_definitions(), slots);
+        expression_parser::parse(k_mfma_util, sdk_definitions(), slots);
 
     ASSERT_EQ(expression.evaluation, derived_evaluation::interval);
     ASSERT_THAT(slots, ::testing::UnorderedElementsAre(
@@ -128,7 +128,7 @@ TEST(DerivedExpressionTest, MfmaUtilIsEvaluatedOnItsInputs)
 
 TEST(DerivedExpressionTest, OperatorsFollowPrecedenceAndReduceOperations)
 {
-    auto const expression = parse_derived_expression(
+    auto const expression = expression_parser::parse(
         "reduce(GRBM_COUNT,max) - reduce(GRBM_COUNT,min) * 2 + reduce(GRBM_COUNT,avr)",
         sdk_definitions());
 
@@ -138,7 +138,7 @@ TEST(DerivedExpressionTest, OperatorsFollowPrecedenceAndReduceOperations)
 
 TEST(DerivedExpressionTest, DivisionByZeroIntervalIsZero)
 {
-    auto const expression = parse_derived_expression(k_mfma_util, sdk_definitions());
+    auto const expression = expression_parser::parse(k_mfma_util, sdk_definitions());
 
     auto const inputs =
         std::array{ reduction_of({ 0.0 }), reduction_of({ 0.0 }), reduction_of({ 4.0 }) };
@@ -184,7 +184,7 @@ TEST(DerivedExpressionTest, ClassifiesHowASampleIsObtained)
     {
         SCOPED_TRACE(test_case.expression);
         auto const expression =
-            parse_derived_expression(test_case.expression, sdk_definitions());
+            expression_parser::parse(test_case.expression, sdk_definitions());
         EXPECT_EQ(expression.evaluation, test_case.expected);
     }
 }
@@ -223,7 +223,7 @@ TEST(DerivedExpressionTest, RejectsUnsupportedExpressionsNamingTheReason)
         SCOPED_TRACE(test_case.expression);
         auto const parse = [&test_case] {
             [[maybe_unused]] auto const expression =
-                parse_derived_expression(test_case.expression, sdk_definitions());
+                expression_parser::parse(test_case.expression, sdk_definitions());
         };
         EXPECT_THAT(parse, ::testing::ThrowsMessage<std::invalid_argument>(
                                ::testing::HasSubstr(std::string{ test_case.reason })));

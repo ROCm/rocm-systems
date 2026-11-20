@@ -248,7 +248,7 @@ private:
         }
 
         auto expression =
-            parse_derived_expression(meta.expression, definitions, slots_by_name);
+            expression_parser::parse(meta.expression, definitions, slots_by_name);
         switch(expression.evaluation)
         {
             case derived_evaluation::constant:

@@ -270,7 +270,7 @@ private:
             try
             {
                 auto const expression =
-                    collectors::gpu_perf_counter::parse_derived_expression(
+                    collectors::gpu_perf_counter::expression_parser::parse(
                         meta.expression, lookup.definitions);
                 referenced = expression.referenced_names;
                 collect_inputs =

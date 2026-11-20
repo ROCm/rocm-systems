@@ -12,6 +12,8 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <array>
+#include <concepts>
 #include <cstddef>
 #include <span>
 #include <stdexcept>
@@ -32,7 +34,7 @@ using input_slots = std::unordered_map<std::string, size_t>;
  *
  * Grammar: numbers, counter names, `+ - * /`, parentheses and
  * `reduce(<counter>, sum|max|min|avr)`. A name of another derived counter is expanded
- * to its expression. Build it with parse_derived_expression().
+ * to its expression. Build it with expression_parser::parse().
  */
 struct derived_expression
 {
@@ -51,9 +53,6 @@ struct derived_expression
     }
 };
 
-namespace detail
-{
-
 /**
  * @brief Recursive descent parser: expression text to an expression_tree.
  *
@@ -63,6 +62,35 @@ namespace detail
 class expression_parser
 {
 public:
+    /**
+     * @brief Parses @p expression and expands derived names through @p definitions.
+     *
+     * Every counter the expression reads gets a slot in @p slots, added after the ones
+     * already there, so expressions parsed with one map share their input slots.
+     * @throws std::invalid_argument on a syntax error, an unknown name, a cyclic
+     *         definition, `accumulate(...)`, or an interval expression that reads a
+     *         counter outside `reduce()`.
+     */
+    [[nodiscard]] static derived_expression parse(std::string_view           expression,
+                                                  const counter_definitions& definitions,
+                                                  input_slots&               slots)
+    {
+        return expression_parser{ definitions, expression, slots }.parse_root();
+    }
+
+    /// @brief As above, for a caller that does not need the input slots.
+    [[nodiscard]] static derived_expression parse(std::string_view           expression,
+                                                  const counter_definitions& definitions)
+    {
+        auto slots = input_slots{};
+        return parse(expression, definitions, slots);
+    }
+
+private:
+    using expression_scanner = detail::expression_scanner;
+    using node_kind          = detail::node_kind;
+    using input_read         = detail::input_read;
+
     expression_parser(const counter_definitions& definitions, std::string_view expression,
                       input_slots& slots)
     : m_definitions{ definitions }
@@ -70,8 +98,7 @@ public:
     , m_slots{ slots }
     {}
 
-    /// @brief Parses the expression; call once.
-    [[nodiscard]] derived_expression parse()
+    [[nodiscard]] derived_expression parse_root()
     {
         auto       scanner = expression_scanner{ m_expression, m_expression };
         auto const root    = parse_complete(scanner);
@@ -87,7 +114,6 @@ public:
         return std::move(m_result);
     }
 
-private:
     // A parsed sub-expression: its node, how its sample value behaves, and whether it
     // reads a counter outside reduce() (one value per counter instance).
     struct subexpression
@@ -96,6 +122,19 @@ private:
         derived_evaluation shape{ derived_evaluation::constant };
         bool               per_instance{ false };
     };
+
+    struct binary_operator
+    {
+        char      symbol;
+        node_kind kind;
+    };
+
+    static constexpr auto k_sum_operators =
+        std::array{ binary_operator{ '+', node_kind::add },
+                    binary_operator{ '-', node_kind::subtract } };
+    static constexpr auto k_product_operators =
+        std::array{ binary_operator{ '*', node_kind::multiply },
+                    binary_operator{ '/', node_kind::divide } };
 
     [[nodiscard]] subexpression parse_complete(expression_scanner& scanner)
     {
@@ -106,41 +145,32 @@ private:
 
     [[nodiscard]] subexpression parse_sum(expression_scanner& scanner)
     {
-        auto result = parse_product(scanner);
-        while(true)
-        {
-            if(scanner.consume('+'))
-            {
-                result = add_binary(node_kind::add, result, parse_product(scanner));
-            }
-            else if(scanner.consume('-'))
-            {
-                result = add_binary(node_kind::subtract, result, parse_product(scanner));
-            }
-            else
-            {
-                return result;
-            }
-        }
+        return parse_chain(scanner, k_sum_operators,
+                           [&] { return parse_product(scanner); });
     }
 
     [[nodiscard]] subexpression parse_product(expression_scanner& scanner)
     {
-        auto result = parse_factor(scanner);
+        return parse_chain(scanner, k_product_operators,
+                           [&] { return parse_factor(scanner); });
+    }
+
+    // operand (operator operand)*, combined left to right.
+    [[nodiscard]] subexpression parse_chain(expression_scanner&              scanner,
+                                            std::span<const binary_operator> operators,
+                                            std::invocable auto parse_operand)
+    {
+        auto result = parse_operand();
         while(true)
         {
-            if(scanner.consume('*'))
-            {
-                result = add_binary(node_kind::multiply, result, parse_factor(scanner));
-            }
-            else if(scanner.consume('/'))
-            {
-                result = add_binary(node_kind::divide, result, parse_factor(scanner));
-            }
-            else
+            auto const next = std::ranges::find_if(operators, [&](binary_operator op) {
+                return scanner.consume(op.symbol);
+            });
+            if(next == operators.end())
             {
                 return result;
             }
+            result = add_binary(next->kind, result, parse_operand());
         }
     }
 
@@ -277,25 +307,20 @@ private:
 
     [[nodiscard]] input_read to_input_read(std::string_view operation) const
     {
-        if(operation == "sum")
+        using read_name               = std::pair<std::string_view, input_read>;
+        static constexpr auto k_reads = std::array{ read_name{ "sum", input_read::sum },
+                                                    read_name{ "max", input_read::max },
+                                                    read_name{ "min", input_read::min },
+                                                    read_name{ "avr", input_read::avr } };
+
+        auto const itr = std::ranges::find(k_reads, operation, &read_name::first);
+        if(itr == k_reads.end())
         {
-            return input_read::sum;
+            throw std::invalid_argument(fmt::format(
+                "derived counter expression '{}': unknown reduce operation '{}'",
+                m_expression, operation));
         }
-        if(operation == "max")
-        {
-            return input_read::max;
-        }
-        if(operation == "min")
-        {
-            return input_read::min;
-        }
-        if(operation == "avr")
-        {
-            return input_read::avr;
-        }
-        throw std::invalid_argument(
-            fmt::format("derived counter expression '{}': unknown reduce operation '{}'",
-                        m_expression, operation));
+        return itr->second;
     }
 
     // accumulate() selects an SQ counter collection mode that the SDK applies only
@@ -340,32 +365,5 @@ private:
     derived_expression         m_result;
     std::vector<std::string>   m_expanding;
 };
-
-}  // namespace detail
-
-/**
- * @brief Parses @p expression and expands derived names through @p definitions.
- *
- * Every counter the expression reads gets a slot in @p slots, added after the ones
- * already there, so expressions parsed with one map share their input slots.
- * @throws std::invalid_argument on a syntax error, an unknown name, a cyclic
- *         definition, `accumulate(...)`, or an interval expression that reads a
- *         counter outside `reduce()`.
- */
-[[nodiscard]] inline derived_expression
-parse_derived_expression(std::string_view           expression,
-                         const counter_definitions& definitions, input_slots& slots)
-{
-    return detail::expression_parser{ definitions, expression, slots }.parse();
-}
-
-/// @brief As above, for a caller that does not need the input slots.
-[[nodiscard]] inline derived_expression
-parse_derived_expression(std::string_view           expression,
-                         const counter_definitions& definitions)
-{
-    auto slots = input_slots{};
-    return parse_derived_expression(expression, definitions, slots);
-}
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter
