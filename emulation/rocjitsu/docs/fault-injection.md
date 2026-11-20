@@ -526,7 +526,7 @@ provider dependencies. To run the focused suites:
 
 ```bash
 ctest --test-dir emulation/rocjitsu/build --show-only \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
 ctest --test-dir emulation/rocjitsu/build --output-on-failure --no-tests=error \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits|B96Lds|ScalarTwoLds|CdnaLds'
 ```

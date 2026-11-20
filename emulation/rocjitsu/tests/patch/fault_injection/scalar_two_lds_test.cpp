@@ -86,6 +86,39 @@ TEST_P(ScalarTwoLds, ExactAndOrdinalPreserveEveryNonAddressField) {
     }
   }
 }
+TEST(ScalarTwoLdsControls, CdnaAccumulatorTuplesPreserveEveryNonAddressField) {
+  for (rj_code_target_id_t target : {ROCJITSU_CODE_TARGET_GFX942, ROCJITSU_CODE_TARGET_GFX950}) {
+    SCOPED_TRACE(static_cast<int>(target));
+    const decltype(test::kScalarTwoCases)::const_iterator found =
+        std::ranges::find_if(test::kScalarTwoCases, [&](const test::LdsFormCase &fixture) {
+          return fixture.target == target && fixture.form == "ds_write2_b64";
+        });
+    ASSERT_NE(found, test::kScalarTwoCases.end());
+    test::LdsFormCase fixture = *found;
+    // llvm-mc: ds_write2_b64 v2, a[4:5], a[6:7] offset0:1 offset1:3.
+    fixture.words = {0xda9c0301u, 0x00060402u};
+    const FaultMutationContext source(test::make_scalar_two_elf(fixture));
+    FaultMutationError error;
+    const FailureOr<LdsInventory> inventory =
+        discover_lds_wrong_address(source, "test_kernel", error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    ASSERT_EQ(inventory.value().sites().size(), 1u);
+    EXPECT_EQ(inventory.value().sites()[0].form, fixture.form);
+    const FailureOr<LdsSelection> selected = select_lds_wrong_address(inventory.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<LdsResult> mutant = apply_lds_wrong_address(source, selected.value(), 6, error);
+    ASSERT_TRUE(mutant.succeeded()) << error.message;
+    EXPECT_TRUE(test::lds_form_output_matches(source, fixture, 0, 6, mutant.value().image));
+    std::vector<uint8_t> corrupted = mutant.value().image;
+    const AmdGpuCodeObject changed(corrupted.data(), corrupted.size());
+    ASSERT_TRUE(changed.is_valid());
+    const std::optional<uint64_t> guest =
+        test::lds_emitted_guest(*changed.text_sections().front(), 0, fixture.target);
+    ASSERT_TRUE(guest);
+    corrupted[changed.text_sections().front()->sectionOffset() + *guest + 3] ^= 2; // Clear ACC.
+    EXPECT_FALSE(test::lds_form_output_matches(source, fixture, 0, 6, corrupted));
+  }
+}
 TEST(ScalarTwoLdsControls, UnsupportedAtomicNopAndSplitDoNotBecomeSites) {
   for (const rj_code_target_id_t target :
        {ROCJITSU_CODE_TARGET_GFX1200, ROCJITSU_CODE_TARGET_GFX1201, ROCJITSU_CODE_TARGET_GFX942,
