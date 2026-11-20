@@ -1919,9 +1919,9 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
         'S_PREFETCH_DATA',
         'S_PREFETCH_DATA_PC_REL',
         'S_BUFFER_PREFETCH_DATA',
-        'S_ATC_PROBE',
-        'S_ATC_PROBE_BUFFER',
     ):
+        return InstructionSemantics(name, 'scalar_prefetch')
+    if upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'true_nop')
     # Cache invalidation / writeback instructions.
     if upper in ('S_DCACHE_INV', 'S_DCACHE_INV_VOL'):
@@ -2209,7 +2209,7 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
     if upper == 'GLOBAL_WBINV':
         return InstructionSemantics(name, 'gl1_wbinv')
     if upper in ('FLAT_PREFETCH_B8', 'GLOBAL_PREFETCH_B8'):
-        return InstructionSemantics(name, 'true_nop')
+        return InstructionSemantics(name, 'vector_prefetch')
     if '_ATOMIC_' in upper:
         # Extract the operation suffix after _ATOMIC_.
         # Strip _X2 (64-bit variant) and type suffixes (_B32, _U32, _I32, etc.).

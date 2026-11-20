@@ -153,8 +153,8 @@ public:
   /// ordinary access result determines whether execution succeeds or faults.
   [[nodiscard]] bool can_fetch_range(uint64_t addr, uint32_t size, uint32_t vmid = 0) const;
 
-  /// Copy valid resident bytes for a speculative K$ fill without accessing backing.
-  [[nodiscard]] bool copy_resident_line(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid);
+  /// Warm a line backed by sparse RAM or a granted local mapping. Never evict dirty data.
+  void prefetch_line(uint64_t addr, const GpuVmAccess *access);
 
   /// @brief Read a cache line worth of data (or partial line).
   ///

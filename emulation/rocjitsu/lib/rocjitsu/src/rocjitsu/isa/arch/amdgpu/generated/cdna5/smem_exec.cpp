@@ -410,15 +410,15 @@ void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
 void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 
-void SPrefetchInstSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SPrefetchInstSmem::execute_impl(amdgpu::Wavefront &wf) { scalar_prefetch(inst_, wf); }
 
-void SPrefetchInstPcRelSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SPrefetchInstPcRelSmem::execute_impl(amdgpu::Wavefront &wf) { scalar_prefetch(inst_, wf); }
 
-void SPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) { scalar_prefetch(inst_, wf); }
 
-void SBufferPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SBufferPrefetchDataSmem::execute_impl(amdgpu::Wavefront &wf) { scalar_prefetch(inst_, wf); }
 
-void SPrefetchDataPcRelSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SPrefetchDataPcRelSmem::execute_impl(amdgpu::Wavefront &wf) { scalar_prefetch(inst_, wf); }
 
 } // namespace cdna5
 } // namespace rocjitsu

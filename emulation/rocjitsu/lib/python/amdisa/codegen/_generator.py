@@ -1730,6 +1730,8 @@ class CodeGenerator:
                 'smem_load',
                 'tensor_load_to_lds',
                 'true_nop',
+                'scalar_prefetch',
+                'vector_prefetch',
             }
         )
         op_kinds: dict[int, str] = {}
@@ -9421,6 +9423,11 @@ class CodeGenerator:
                 '  }\n'
                 '  set_data(std::move(d));'
             )
+
+        if cls in ('scalar_prefetch', 'vector_prefetch'):
+            if self.isa_spec.arch_name == 'cdna5':
+                return f'  {cls}(inst_, wf);'
+            return '  (void)wf;'
 
         if cls == 'dcache_inv':
             return '  wf.cu().l1_scalar().invalidate_all();'

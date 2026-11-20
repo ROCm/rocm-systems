@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
@@ -190,6 +191,53 @@ void Wavefront::observe_lds_direct_read(uint32_t address, uint32_t bytes, uint32
 }
 
 bool Wavefront::has_gpu_memory() const { return cu_.memory() != nullptr; }
+
+bool Wavefront::in_shared_aperture(uint64_t address) const {
+  const auto base = use_wave_apertures() ? shared_aperture_base_ : cu_.shared_aperture_base_;
+  const auto limit = use_wave_apertures() ? shared_aperture_limit_ : cu_.shared_aperture_limit_;
+  return flat_in_shared_aperture(address, base, limit);
+}
+
+void Wavefront::prefetch(uint64_t address, uint32_t bytes, PrefetchTarget target) {
+  const bool translated = address_space_ || process_id_ != 0;
+  const auto access = translated ? snapshot_vm_access() : std::nullopt;
+  if (translated && !access)
+    return;
+  if (target == PrefetchTarget::NonSpeculativeL2 && access &&
+      access->probe(address, 1, VmAccessKind::Read) != VmAccessOutcome::Complete)
+    return; // The host receives a failed translation; the wave receives no completion.
+  if (target == PrefetchTarget::Instruction) {
+    if ((!access && !cu_.memory()) || cu_.debug_active())
+      return;
+    for (uint32_t offset = 0; offset < bytes; offset += InstructionCache::kLineSize) {
+      const uint64_t line = address + offset;
+      if (access) {
+        cu_.instruction_cache().prefetch(*access, line);
+      } else if (cu_.memory()->has_page(line)) {
+        uint8_t ignored;
+        cu_.instruction_cache().fetch(*cu_.memory(), line, &ignored, 1);
+      }
+    }
+    return;
+  }
+
+  auto *l2 = cu_.l2();
+  if (!l2)
+    return;
+  if (access && !access->info().legacy_cache_compatible)
+    return;
+  const uint32_t step = target == PrefetchTarget::Scalar ? L1ScalarCache::CacheStore::LINE_SIZE
+                                                         : L1VectorCache::LINE_SIZE;
+  for (uint32_t offset = 0; offset < bytes; offset += step) {
+    const uint64_t line = address + offset;
+    if (target == PrefetchTarget::Scalar)
+      cu_.l1_scalar().prefetch_resident(line, access ? &*access : nullptr, true);
+    else if (target == PrefetchTarget::Vector)
+      cu_.l1_vector().prefetch_resident(line, access ? &*access : nullptr);
+    else
+      l2->prefetch_line(line, access ? &*access : nullptr);
+  }
+}
 
 uint64_t Wavefront::shader_cycles() const { return cu_.cycle_count(); }
 

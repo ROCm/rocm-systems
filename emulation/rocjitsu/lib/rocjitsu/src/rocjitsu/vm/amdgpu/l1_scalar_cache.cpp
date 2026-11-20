@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
+#include "rocjitsu/vm/amdgpu/prefetch_resident.h"
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -225,28 +226,11 @@ VmAccessOutcome L1ScalarCache::ensure_line(uint64_t addr, uint32_t vmid,
   return VmAccessOutcome::Complete;
 }
 
-void L1ScalarCache::prefetch_resident(uint64_t addr, uint32_t vmid) {
+void L1ScalarCache::prefetch_resident(uint64_t addr, const GpuVmAccess *access, bool warm_l2) {
+  auto l1_access = DeviceCacheCoherence::acquire_l1_access(registered_domain_.get());
+  std::lock_guard lock(maintenance_mutex_);
   synchronize_epoch();
-  if (!l2_)
-    return;
-  const uint64_t line = CacheStore::line_address(addr);
-  RequestMtypeResolver mtypes(gpu_vm_, vmid, mtype_cache_, Mtype::RW);
-  const Mtype policy = mtypes.at(line);
-  if (policy == Mtype::UC || policy == Mtype::CC ||
-      !l2_->can_fetch_range(line, CacheStore::LINE_SIZE, vmid))
-    return;
-  const auto *resident = cache_.peek(line, vmid);
-  if (resident && CacheStore::bytes_valid(*resident, 0, CacheStore::LINE_SIZE))
-    return;
-  std::array<uint8_t, CacheStore::LINE_SIZE> bytes;
-  if (!l2_->copy_resident_line(line, bytes, vmid))
-    return;
-  if (resident)
-    cache_.fill_missing_bytes(line, bytes.data(), vmid);
-  else {
-    cache_.allocate(line, vmid);
-    cache_.fill_line(line, bytes.data(), vmid);
-  }
+  prefetch_resident_line(cache_, l2_, addr, access, warm_l2);
 }
 
 void L1ScalarCache::cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,

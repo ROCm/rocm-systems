@@ -790,14 +790,10 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
   if (d.translation_probe) {
     if (d.memviol || !d.load_dword_mask)
       return VmAccessOutcome::Complete;
-    if (wf.address_space()) {
-      const auto snapshot = wf.snapshot_vm_access();
-      if (!snapshot ||
-          snapshot->query_access(d.addr, 1, VmAccessKind::Read) != VmAccessOutcome::Complete ||
-          !snapshot->info().legacy_cache_compatible)
-        return VmAccessOutcome::Complete;
-    }
-    l1_->prefetch_resident(d.addr, wf.process_id());
+    const bool translated = wf.address_space() || wf.process_id() != 0;
+    const auto snapshot = translated ? wf.snapshot_vm_access() : std::nullopt;
+    if (snapshot || !translated)
+      l1_->prefetch_resident(d.addr, snapshot ? &*snapshot : nullptr);
     return VmAccessOutcome::Complete;
   }
   if (d.memviol)

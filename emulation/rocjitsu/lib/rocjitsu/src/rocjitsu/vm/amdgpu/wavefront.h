@@ -488,6 +488,10 @@ public:
   /// @brief Return whether this wave's compute unit has GPU memory backing.
   bool has_gpu_memory() const;
 
+  enum class PrefetchTarget { Instruction, Scalar, Vector, L2, NonSpeculativeL2 };
+  /// Issue a cache hint without creating a memory completion or retry obligation.
+  void prefetch(uint64_t address, uint32_t bytes, PrefetchTarget target);
+
   /// @brief Capture the current translated address-space view for one operation.
   /// @details The returned access retains the translator, physical backing, and
   /// invalidation generation needed to resume an unavailable operation without
@@ -737,6 +741,7 @@ public:
   uint64_t private_aperture_base() const { return private_aperture_base_; }
   bool flat_pointer32() const { return flat_pointer32_; }
   uint64_t private_aperture_limit() const { return private_aperture_limit_; }
+  bool in_shared_aperture(uint64_t address) const;
   bool use_wave_apertures() const { return flat_pointer32_ || aperture_override_; }
   void set_apertures(uint64_t sb, uint64_t sl, uint64_t pb, uint64_t pl, bool override_launch) {
     aperture_override_ = override_launch;

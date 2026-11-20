@@ -968,17 +968,53 @@ bool L2Cache::try_read_scalar_ram(uint64_t addr, uint32_t *dst, uint32_t num_dwo
   });
 }
 
-bool L2Cache::copy_resident_line(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid) {
-  const uint32_t offset = CacheStore::line_offset(addr);
-  if (dst.size() > LINE_SIZE - offset)
-    return false;
+void L2Cache::prefetch_line(uint64_t addr, const GpuVmAccess *access) {
+  if (!backing_memory_)
+    return;
+  const uint64_t line = CacheStore::line_address(addr);
+  const uint32_t vmid = access ? access->info().vmid : 0;
+  uint64_t generation = 0;
+  uint64_t identity = 0;
+  if (access) {
+    if (!access->info().legacy_cache_compatible)
+      return;
+    const auto grant = access->local_grant_generation(line, LINE_SIZE);
+    if (!grant)
+      return;
+    const auto policy = access->query_mtype(line);
+    if (!policy || (*policy != Mtype::RW && *policy != Mtype::WB))
+      return;
+    identity = access->cache_identity();
+    generation = *grant;
+  }
   auto maintenance_lock = acquire_cache_access();
-  std::lock_guard lock(set_mutex(addr));
-  const auto *tag = cache_.peek(addr, vmid);
-  if (!tag || !CacheStore::bytes_valid(*tag, offset, dst.size()))
-    return false;
-  cache_.read_line(addr, dst.data(), offset, dst.size(), vmid);
-  return true;
+  std::lock_guard lock(set_mutex(line));
+  const auto *resident = cache_.peek(line, vmid);
+  if (resident &&
+      (resident->cache_identity != identity || resident->admission_generation != generation ||
+       CacheStore::bytes_valid(*resident, 0, LINE_SIZE)))
+    return;
+  std::array<uint8_t, LINE_SIZE> bytes;
+  if (access) {
+    if (!access->try_read_contiguous(line, std::as_writable_bytes(std::span(bytes))))
+      return;
+  } else {
+    if (!backing_memory_->has_page(line))
+      return;
+    backing_memory_->read_block(line, bytes);
+  }
+  diagnostics(line).backing_reads.fetch_add(1, std::memory_order_relaxed);
+  if (resident) {
+    cache_.fill_missing_bytes(line, bytes.data(), vmid);
+  } else {
+    const auto allocation = cache_.allocate_clean_victim_with_data(line, vmid);
+    if (!allocation.tag)
+      return;
+    allocation.tag->cache_identity = identity;
+    allocation.tag->admission_generation = generation;
+    allocation.tag->coherence = simdojo::CoherenceState::EXCLUSIVE;
+    cache_.fill_line(line, bytes.data(), vmid);
+  }
 }
 
 VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype mtype,

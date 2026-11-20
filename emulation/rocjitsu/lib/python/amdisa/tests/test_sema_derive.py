@@ -2158,11 +2158,19 @@ class TestDeriveSmemHints:
             'S_PREFETCH_DATA',
             'S_PREFETCH_DATA_PC_REL',
             'S_BUFFER_PREFETCH_DATA',
+        ],
+    )
+    def test_scalar_prefetch(self, name):
+        assert derive_semantics(name, 'ENC_SMEM').semantic_class == 'scalar_prefetch'
+
+    @pytest.mark.parametrize(
+        'name',
+        [
             'S_ATC_PROBE',
             'S_ATC_PROBE_BUFFER',
         ],
     )
-    def test_gfx1250_prefetch_hints_are_true_nop(self, name):
+    def test_atc_probes_are_true_nop(self, name):
         sem = derive_semantics(name, 'ENC_SMEM')
         assert sem is not None
         assert sem.semantic_class == 'true_nop'
@@ -2303,13 +2311,8 @@ class TestDeriveFlatLoad:
             ('GLOBAL_PREFETCH_B8', 'ENC_VGLOBAL'),
         ],
     )
-    def test_gfx1250_flat_global_prefetch_hints_are_true_nop(self, name, enc_name):
-        sem = derive_semantics(name, enc_name)
-        assert sem is not None
-        assert sem.semantic_class == 'true_nop'
-        block = derive_sema_block(sem)
-        assert block is not None
-        assert block.is_empty
+    def test_gfx1250_vector_prefetch(self, name, enc_name):
+        assert derive_semantics(name, enc_name).semantic_class == 'vector_prefetch'
 
     @pytest.mark.parametrize(
         ('name', 'num_elems'),

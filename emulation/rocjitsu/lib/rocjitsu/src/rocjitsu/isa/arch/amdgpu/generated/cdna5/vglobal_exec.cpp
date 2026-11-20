@@ -1787,7 +1787,7 @@ void GlobalAtomicMaxNumF64Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-void GlobalPrefetchB8Vglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalPrefetchB8Vglobal::execute_impl(amdgpu::Wavefront &wf) { vector_prefetch(inst_, wf); }
 
 void GlobalLoadAsyncToLdsB8Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   std::unique_ptr<amdgpu::VectorMemState> d =

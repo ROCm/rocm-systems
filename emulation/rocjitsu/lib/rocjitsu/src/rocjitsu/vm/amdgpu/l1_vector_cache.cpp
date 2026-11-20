@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
+#include "rocjitsu/vm/amdgpu/prefetch_resident.h"
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
@@ -901,6 +902,13 @@ VmAccessOutcome L1VectorCache::store(const uint64_t *addrs, uint64_t lane_mask, 
         return outcome == VmAccessOutcome::Complete;
       });
   return outcome;
+}
+
+void L1VectorCache::prefetch_resident(uint64_t addr, const GpuVmAccess *access) {
+  auto l1_access = DeviceCacheCoherence::acquire_l1_access(registered_domain_.get());
+  std::lock_guard lock(maintenance_mutex_);
+  synchronize_epoch();
+  prefetch_resident_line(cache_, l2_, addr, access, true);
 }
 
 void L1VectorCache::invalidate(uint64_t addr, uint32_t vmid) {

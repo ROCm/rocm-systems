@@ -48,6 +48,10 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
 void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d);
 
+void scalar_prefetch(const SmemMachineInst &inst, amdgpu::Wavefront &wf);
+void vector_prefetch(const VflatMachineInst &inst, amdgpu::Wavefront &wf);
+void vector_prefetch(const VglobalMachineInst &inst, amdgpu::Wavefront &wf);
+
 /// @brief Compute an absolute async LDS address within the workgroup allocation.
 ///
 /// @returns amdgpu::kInvalidLdsAddress when any byte in the access is outside

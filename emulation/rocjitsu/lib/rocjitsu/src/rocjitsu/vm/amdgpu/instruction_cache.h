@@ -192,6 +192,31 @@ public:
     return VmAccessOutcome::Complete;
   }
 
+  /// Optionally warm one aligned line in an ordinary, granted RAM mapping.
+  /// Demand fetches still validate the execute grant on every use.
+  void prefetch(const GpuVmAccess &access, uint64_t address) {
+    if (!access.info().legacy_cache_compatible)
+      return;
+    const auto generation = access.local_grant_generation(address, kLineSize);
+    if (!generation)
+      return;
+    synchronize_coherence_epoch();
+    Line &line = lines_[(address / kLineSize) & (kNumLines - 1)];
+    if (line.valid && line.translated && line.addr == address &&
+        line.cache_namespace == access.cache_namespace() &&
+        line.admission_generation == *generation)
+      return;
+    if (!access.try_read_contiguous(address, std::as_writable_bytes(std::span(line.data))))
+      return;
+    line.addr = address;
+    line.vmid = 0;
+    line.cache_namespace = access.cache_namespace();
+    line.admission_generation = *generation;
+    line.translated = true;
+    line.valid = true;
+    has_cached_lines_ = true;
+  }
+
   /// @brief Bind instruction invalidation to the same domain as the CU's L2.
   void set_l2(const L2Cache *l2) {
     coherence_ = l2 ? l2->coherence_domain() : std::make_shared<DeviceCacheCoherence>();

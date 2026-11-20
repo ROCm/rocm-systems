@@ -329,6 +329,40 @@ public:
   }
 };
 
+TEST(GpuVmPipeline, GlobalPrefetchReportsOnlyNonSpeculativeTranslationFaultsToHost) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  std::vector<uint64_t> faults;
+  const auto space = context.sim.soc->gpu_vm().register_address_space(
+      78, context.external, context.external, [&](uint64_t address, amdgpu::VmAccessKind kind) {
+        EXPECT_EQ(kind, amdgpu::VmAccessKind::Read);
+        faults.push_back(address);
+      });
+  ASSERT_TRUE(space);
+  context.wf->set_process_id(78);
+  context.wf->set_address_space(space);
+  context.wf->set_exec(1);
+  const auto reg = context.wf->vgpr_alloc().base;
+  constexpr uint32_t missing = 0x12345;
+  context.cu->write_vgpr(reg, 0, missing);
+  context.cu->write_vgpr(reg + 1, 0, 0);
+  for (uint32_t hint : {0u, 1u, 2u, 3u, 4u, 5u, 6u}) {
+    SCOPED_TRACE(hint);
+    // global_prefetch_b8 v[0:1], off scope:SCOPE_DEV
+    const auto inst = decode_gfx1250(std::array{0xee17407cu, (2u << 18) | (hint << 20), 0u},
+                                     "global_prefetch_b8");
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(context.cu->execute_instruction(inst.get(), *context.wf).succeeded());
+    EXPECT_EQ(faults,
+              (hint == 1 || hint == 3 ? std::vector<uint64_t>{missing} : std::vector<uint64_t>{}));
+    EXPECT_EQ(context.external->read_calls, 0u);
+    EXPECT_EQ(context.wf->wait_counters().vmcnt, 0u);
+    faults.clear();
+  }
+  context.wf->halt();
+}
+
 class TrackedMemoryInstruction final : public Instruction {
 public:
   explicit TrackedMemoryInstruction(uint32_t &destructions)

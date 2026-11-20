@@ -95,6 +95,8 @@ public:
                                                       Mtype instruction_mtype, bool non_temporal,
                                                       bool request_l1_bypass);
 
+  void prefetch_resident(uint64_t addr, const GpuVmAccess *access);
+
   void invalidate(uint64_t addr, uint32_t vmid = 0);
   void invalidate_all();
   void flush_all();

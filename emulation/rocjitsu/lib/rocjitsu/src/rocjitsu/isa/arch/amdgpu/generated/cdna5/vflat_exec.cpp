@@ -1617,7 +1617,7 @@ void FlatAtomicMaxNumF64Vflat::execute_impl(amdgpu::Wavefront &wf) {
   set_data(std::move(d));
 }
 
-void FlatPrefetchB8Vflat::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void FlatPrefetchB8Vflat::execute_impl(amdgpu::Wavefront &wf) { vector_prefetch(inst_, wf); }
 
 void FlatLoadMonitorB32Vflat::execute_impl(amdgpu::Wavefront &wf) {
   std::unique_ptr<amdgpu::VectorMemState> d =

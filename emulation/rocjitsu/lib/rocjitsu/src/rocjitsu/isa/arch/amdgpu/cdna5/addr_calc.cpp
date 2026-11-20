@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_scalar.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -102,32 +104,17 @@ bool byte_range_exceeds(int64_t offset, uint32_t size, uint64_t bound) {
   return unsigned_offset > bound || size > bound - unsigned_offset;
 }
 
-template <typename Inst>
-void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
-                                     amdgpu::VectorMemState &d, bool decode_flat_private) {
+template <typename Inst, typename Visit>
+bool visit_flat_global_addresses(const Inst &inst, amdgpu::Wavefront &wf, uint64_t exec,
+                                 uint32_t scale, Visit visit) {
   auto &cu = wf.cu();
-  init_vector_mem_state(wf, d);
-  // GFX1250 VGLOBAL transpose loads have OPF_EXEC_ALL_1 semantics: a nonzero
-  // incoming EXEC enables every wave32 lane. Do this before reading address
-  // VGPRs so the computed addresses, request mask, and eventual transpose all
-  // see the same effective execution mask. FLAT and ordinary VGLOBAL accesses
-  // continue to use architectural EXEC, and zero EXEC still skips the load.
-  if (!decode_flat_private && d.transpose != 0) {
-    d.exec_mask = amdgpu::wave32_exec_all_if_nonzero(d.exec_mask);
-    d.lane_mask = d.exec_mask;
-  }
-  if (d.transpose && !d.exec_mask)
-    return;
-  uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   bool saddr_present = has_saddr(inst.saddr);
   auto saddr = saddr_present ? read_sreg64_operand(wf, inst.saddr) : std::optional<uint64_t>{0};
   if (!saddr) {
-    amdgpu::reject_vector_memory_access(d);
-    return;
+    return false;
   }
   uint64_t saddr_val = *saddr;
-  uint32_t scale = saddr_present && inst.scale_offset ? scaled_vaddr_factor(d) : 1;
   uint32_t vbase = resolved_vgpr_base(wf, inst.vaddr, amdgpu::VgprMsbRole::Src0);
   amdgpu::RegisterAccess regs(cu);
   auto vaddr_region = regs.read_vgpr_region(vbase, saddr_present ? 1 : 2, exec);
@@ -152,28 +139,123 @@ void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
-    uint64_t addr = saddr_val + vaddr + offset;
-    if (decode_flat_private) {
-      const auto translated = amdgpu::translate_flat_address(
-          wf, addr, lane, amdgpu::flat_private_layout(wf.cu().arch()));
-      if (translated.private_address) {
-        addr = translated.value;
-        d.scratch_swizzle = true;
-        d.requires_scratch_backing = true;
-        d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
-        d.scratch_lane_mask |= uint64_t{1} << lane;
-      }
-    } else {
-      assert(!amdgpu::translate_flat_address(wf, addr, lane,
-                                             amdgpu::flat_private_layout(wf.cu().arch()))
-                  .private_address &&
-             "gfx1250 global memory address must not use flat private scratch encoding");
-    }
-    d.per_lane_addr[lane] = addr;
+    visit(lane, saddr_val + vaddr + offset);
   }
+  return true;
+}
+
+template <typename Inst>
+void flat_global_calculate_addresses(const Inst &inst, amdgpu::Wavefront &wf,
+                                     amdgpu::VectorMemState &d, bool decode_flat_private) {
+  init_vector_mem_state(wf, d);
+  // GFX1250 VGLOBAL transpose loads have OPF_EXEC_ALL_1 semantics: a nonzero
+  // incoming EXEC enables every wave32 lane. Do this before reading address
+  // VGPRs so the computed addresses, request mask, and eventual transpose all
+  // see the same effective execution mask. FLAT and ordinary VGLOBAL accesses
+  // continue to use architectural EXEC, and zero EXEC still skips the load.
+  if (!decode_flat_private && d.transpose != 0) {
+    d.exec_mask = amdgpu::wave32_exec_all_if_nonzero(d.exec_mask);
+    d.lane_mask = d.exec_mask;
+  }
+  if (d.transpose && !d.exec_mask)
+    return;
+  const uint32_t scale = has_saddr(inst.saddr) && inst.scale_offset ? scaled_vaddr_factor(d) : 1;
+  const bool valid =
+      visit_flat_global_addresses(inst, wf, d.exec_mask, scale, [&](uint32_t lane, uint64_t addr) {
+        if (decode_flat_private) {
+          const auto translated = amdgpu::translate_flat_address(
+              wf, addr, lane, amdgpu::flat_private_layout(wf.cu().arch()));
+          if (translated.private_address) {
+            addr = translated.value;
+            d.scratch_swizzle = true;
+            d.requires_scratch_backing = true;
+            d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
+            d.scratch_lane_mask |= uint64_t{1} << lane;
+          }
+        } else {
+          assert(!amdgpu::translate_flat_address(wf, addr, lane,
+                                                 amdgpu::flat_private_layout(wf.cu().arch()))
+                      .private_address &&
+                 "gfx1250 global memory address must not use flat private scratch encoding");
+        }
+        d.per_lane_addr[lane] = addr;
+      });
+  if (!valid)
+    amdgpu::reject_vector_memory_access(d);
+}
+
+template <typename Inst>
+void prefetch_vector_addresses(const Inst &inst, amdgpu::Wavefront &wf, bool flat) {
+  if (!wf.exec())
+    return;
+  using Target = amdgpu::Wavefront::PrefetchTarget;
+  // For GL2 prefetch, TH 1 and 3 request a translation walk and host notification.
+  const bool non_speculative = !flat && inst.scope != 0 && (inst.th == 1 || inst.th == 3);
+  const auto target = non_speculative   ? Target::NonSpeculativeL2
+                      : inst.scope == 0 ? Target::Vector
+                                        : Target::L2;
+  // Each enabled lane supplies one byte. Adjacent lanes commonly select the same line.
+  std::optional<uint64_t> previous;
+  visit_flat_global_addresses(inst, wf, wf.exec(), 1, [&](uint32_t lane, uint64_t address) {
+    if (flat && wf.in_shared_aperture(address))
+      return;
+    if (flat) {
+      const auto translated =
+          amdgpu::translate_flat_address(wf, address, lane, amdgpu::FlatPrivateLayout::EncodedLane);
+      if (translated.private_address && translated.private_offset >= wf.scratch_lane_size())
+        return;
+      address = translated.value;
+    }
+    const uint64_t line = amdgpu::L1VectorCache::CacheStore::line_address(address);
+    if (non_speculative || previous != line)
+      wf.prefetch(address, 1, target);
+    previous = line;
+  });
 }
 
 } // namespace
+
+void vector_prefetch(const VflatMachineInst &inst, amdgpu::Wavefront &wf) {
+  prefetch_vector_addresses(inst, wf, true);
+}
+
+void vector_prefetch(const VglobalMachineInst &inst, amdgpu::Wavefront &wf) {
+  prefetch_vector_addresses(inst, wf, false);
+}
+
+void scalar_prefetch(const SmemMachineInst &inst, amdgpu::Wavefront &wf) {
+  constexpr uint32_t kScalarPrefetchEnable = 1u << 24;
+  if (!(wf.mode_raw() & kScalarPrefetchEnable))
+    return;
+  const int32_t offset = signed_ioffset(inst.ioffset);
+  const bool buffer = inst.op == kSBufferPrefetchDataSmem;
+  if (buffer && offset < 0)
+    return;
+  const bool relative = inst.op == kSPrefetchInstPcRelSmem || inst.op == kSPrefetchDataPcRelSmem;
+  uint64_t base = wf.vm_instruction_pc() + sizeof(inst);
+  if (!relative) {
+    const auto pair = amdgpu::try_read_scalar_selector64(wf, inst.sbase * 2);
+    if (!pair)
+      return;
+    // Section 15.6 uses only the low 48 bits of the buffer descriptor for this hint.
+    base = buffer ? (*pair & 0x0000ffffffffffffULL) : *pair;
+  }
+  const auto length = amdgpu::try_read_scalar_selector(wf, inst.soffset);
+  if (!length)
+    return;
+  const uint64_t address = ((base & ~uint64_t{3}) + (offset & ~3)) & ~uint64_t{127};
+  const uint32_t bytes = (((*length + inst.sdata) & 31u) + 1u) * 128u;
+  using Target = amdgpu::Wavefront::PrefetchTarget;
+  const bool instructions = inst.op == kSPrefetchInstSmem || inst.op == kSPrefetchInstPcRelSmem;
+  if (instructions) {
+    wf.prefetch(address, bytes, Target::Instruction);
+  } else {
+    // Use the scalar load cache policy for data hints; instruction hints ignore TH/SCOPE.
+    const auto policy = amdgpu::mtype_from_flags_gfx12(inst.scope, inst.th);
+    if (policy != amdgpu::Mtype::UC)
+      wf.prefetch(address, bytes, policy == amdgpu::Mtype::RW ? Target::Scalar : Target::L2);
+  }
+}
 
 BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd2, uint32_t srd3) {
   BufferResource resource{};
