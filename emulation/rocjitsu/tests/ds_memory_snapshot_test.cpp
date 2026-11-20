@@ -228,6 +228,54 @@ constexpr std::array kStoreTargets = {
                 rdna4::kDsStoreAddtidB32Vds},
 };
 
+TEST(DsMemorySnapshot, Cdna1Src2UsesLdsAtIssueAndSignedDwordOffsets) {
+  SnapshotFixture fx(64, ROCJITSU_CODE_ARCH_CDNA1, 32);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_m0(UINT32_MAX);
+  fx.wf->set_lds_base(512);
+  fx.wf->set_lds_size(512);
+  fx.wf->set_exec(1);
+  auto &lds = fx.wf->lds();
+  LocalMemPipeline pipeline;
+  // All 31 DS_SRC2 operations. Initial A=6, B=2 also represent positive
+  // subnormal floats; the denormal-preserving mode makes FP ADD bit-exact.
+  fx.wf->set_fp_denorm_mode(15);
+  struct Case {
+    uint16_t op;
+    uint32_t result;
+  };
+  constexpr Case cases[] = {
+      {128, 8}, {129, 4}, {130, -4u}, {131, 0}, {132, 2}, {133, 2}, {134, 6}, {135, 2},
+      {136, 6}, {137, 2}, {138, 6},   {139, 4}, {141, 2}, {146, 2}, {147, 6}, {149, 8},
+      {192, 8}, {193, 4}, {194, -4u}, {195, 0}, {196, 2}, {197, 2}, {198, 6}, {199, 2},
+      {200, 6}, {201, 2}, {202, 6},   {203, 4}, {205, 2}, {210, 2}, {211, 6}};
+  auto other = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  for (auto [op, result] : cases) {
+    SCOPED_TRACE(op);
+    const bool wide = op >= 192;
+    for (bool indirect : {false, true}) {
+      // Either signed immediate -2 or signed VGPR offset -2. The second
+      // location precedes the destination by 8 bytes for both data widths.
+      const auto words =
+          cdna1::build_ds(op, {.offset0 = static_cast<uint8_t>(indirect ? 0 : 0xfe),
+                               .offset1 = static_cast<uint8_t>(indirect ? 0x80 : 0x7f),
+                               .addr = 1});
+      EXPECT_TRUE(other->decode(words.data()).failed());
+      fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 0, indirect ? (0x7ffeu << 17) | 16 : 16);
+      auto inst = fx.issue_encoded(words);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_NE(inst->data(), nullptr);
+      // Source and destination become visible after instruction preparation.
+      lds.write64(528, 6);
+      lds.write64(520, 2);
+      ASSERT_EQ(pipeline.issue(inst.release(), *fx.wf), VmAccessOutcome::Complete);
+      const uint64_t expected = (wide && op == 194) ? uint64_t{0} - 4 : result;
+      EXPECT_EQ(wide ? lds.read64(528) : lds.read32(528), expected);
+      EXPECT_EQ(lds.read64(520), 2u);
+    }
+  }
+}
+
 TEST(DsMemorySnapshot, CdnaWideDsChecksTheWholeTransferAtTheWorkgroupBoundary) {
   constexpr uint32_t lds_base = 512;
   constexpr uint32_t lds_size = 1536; // A whole number of B96 and B128 transfers.
@@ -273,6 +321,109 @@ TEST(DsMemorySnapshot, CdnaWideDsChecksTheWholeTransferAtTheWorkgroupBoundary) {
       }
     }
   }
+}
+
+TEST(DsMemorySnapshot, Cdna1Src2OutOfRangeReadContributesZeroToValidDestination) {
+  SnapshotFixture fx(64, ROCJITSU_CODE_ARCH_CDNA1, 32);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_m0(UINT32_MAX);
+  fx.wf->set_exec(3);
+  fx.wf->set_lds_base(512);
+  fx.wf->set_lds_size(512);
+  auto &lds = fx.wf->lds();
+  LocalMemPipeline pipeline;
+  for (bool wide : {false, true}) {
+    const unsigned bytes = wide ? 8 : 4;
+    for (bool below : {false, true}) {
+      const uint32_t first = below ? 0 : 512 - bytes;
+      const uint32_t second = 256;
+      const int displacement = below ? -2 : 2;
+      const uint16_t imm = static_cast<uint16_t>(displacement) & 0x7fff;
+      fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 0, first);
+      fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 1, second);
+      if (wide)
+        lds.write64(512 + first, 9);
+      else
+        lds.write32(512 + first, 9);
+      lds.write64(512 + second, 9);
+      lds.write64(512 + second + displacement * 4, 5);
+      auto inst = fx.issue_encoded(
+          cdna1::build_ds(wide ? 205 : 141, {.offset0 = static_cast<uint8_t>(imm),
+                                             .offset1 = static_cast<uint8_t>(imm >> 8),
+                                             .addr = 1}));
+      ASSERT_NE(inst, nullptr);
+      const auto &state = *inst->data_as<VectorMemState>();
+      EXPECT_EQ(state.lane_mask, 3u);
+      EXPECT_EQ(state.ds2_oob_lane_mask, 1u);
+      ASSERT_EQ(pipeline.issue(inst.release(), *fx.wf), VmAccessOutcome::Complete);
+      EXPECT_EQ(wide ? lds.read64(512 + first) : lds.read32(512 + first), 0u);
+      EXPECT_EQ(wide ? lds.read64(512 + second) : lds.read32(512 + second), 5u);
+    }
+    // A is outside the workgroup. A valid secondary read cannot change the neighboring group.
+    fx.wf->set_exec(1);
+    fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 0, 512);
+    lds.write64(1024, 0x12345);
+    lds.write64(1016, 7);
+    auto invalid_dst = fx.issue_encoded(
+        cdna1::build_ds(wide ? 205 : 141, {.offset0 = 0xfe, .offset1 = 0x7f, .addr = 1}));
+    ASSERT_NE(invalid_dst, nullptr);
+    EXPECT_EQ(invalid_dst->data_as<VectorMemState>()->lane_mask, 0u);
+    ASSERT_EQ(pipeline.issue(invalid_dst.release(), *fx.wf), VmAccessOutcome::Complete);
+    EXPECT_EQ(lds.read64(1024), 0x12345u);
+    fx.wf->set_exec(3);
+  }
+}
+
+TEST(DsMemorySnapshot, Cdna1Src2ClampsEachAddressToM0AndTheAllocation) {
+  SnapshotFixture fx(64, ROCJITSU_CODE_ARCH_CDNA1, 32);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_lds_base(512);
+  fx.wf->set_lds_size(512);
+  fx.wf->set_exec(1);
+  fx.cu->write_vgpr(fx.wf->vgpr_alloc().base + 1, 0, 32);
+  LocalMemPipeline pipeline;
+  auto &lds = fx.wf->lds();
+  struct Case {
+    uint32_t m0;
+    int displacement;
+    uint32_t expected;
+  };
+  for (const auto &[m0, displacement, expected] : std::array<Case, 5>{
+           {{32, -1, 7}, {36, -1, 3}, {UINT32_MAX, -1, 3}, {36, 1, 0}, {40, 1, 5}}}) {
+    fx.wf->set_m0(m0);
+    lds.write32(512 + 28, 3);
+    lds.write32(512 + 32, 7);
+    lds.write32(512 + 36, 5);
+    const uint16_t imm = static_cast<uint16_t>(displacement) & 0x7fff;
+    auto inst = fx.issue_encoded(cdna1::build_ds(141, // DS_WRITE_SRC2_B32
+                                                 {.offset0 = static_cast<uint8_t>(imm),
+                                                  .offset1 = static_cast<uint8_t>(imm >> 8),
+                                                  .addr = 1}));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(pipeline.issue(inst.release(), *fx.wf), VmAccessOutcome::Complete);
+    EXPECT_EQ(lds.read32(512 + 32), expected);
+  }
+}
+
+TEST(DsMemorySnapshot, Cdna1Src2UnallocatedAddrReadsVgpr0) {
+  SnapshotFixture fx(64, ROCJITSU_CODE_ARCH_CDNA1, 32);
+  ASSERT_NE(fx.wf, nullptr);
+  fx.wf->set_m0(UINT32_MAX);
+  fx.wf->set_exec(1);
+  fx.wf->set_lds_base(512);
+  fx.wf->set_lds_size(512);
+  auto &lds = fx.wf->lds();
+  fx.cu->write_vgpr(fx.wf->vgpr_alloc().base, 0, 32);
+  lds.write32(512, 7);
+  lds.write32(516, 3);
+  lds.write32(544, 100);
+  lds.write32(548, 5);
+  auto inst = fx.issue_encoded(cdna1::build_ds(cdna1::kDsAddSrc2U32, {.offset0 = 1, .addr = 40}));
+  ASSERT_NE(inst, nullptr);
+  LocalMemPipeline pipeline;
+  ASSERT_EQ(pipeline.issue(inst.release(), *fx.wf), VmAccessOutcome::Complete);
+  EXPECT_EQ(lds.read32(512), 7u);
+  EXPECT_EQ(lds.read32(544), 105u);
 }
 
 TEST(DsMemorySnapshot, Cdna1ExchangeNullifiesBothAddressesForUnallocatedSecondResult) {
