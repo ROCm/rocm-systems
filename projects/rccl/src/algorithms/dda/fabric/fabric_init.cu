@@ -145,21 +145,32 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   std::vector<void*> h_ptrs(nRanks, nullptr);
   const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
+  bool scratchReady = false;
 
   res = ncclCuMemAlloc(&scratch, &scratchHandle, ncclCuMemHandleType, bytes, comm->memManager);
   if (res != ncclSuccess || scratch == nullptr) {
     INFO(NCCL_INIT, "ncclDdaFabricCommInit: VMM scratch alloc failed; skipping fabric DDA path");
     scratch = nullptr;
-    goto fail;
-  }
-
-  handler = new (std::nothrow) ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager);
-  if (handler == nullptr) {
+  } else if ((handler = new (std::nothrow)
+                ncclFabricMemHandler(comm->bootstrap, comm->rank, nRanks, comm->memManager)) == nullptr) {
     WARN("ncclDdaFabricCommInit: OOM allocating ncclFabricMemHandler");
-    goto fail;
+  } else {
+    scratchReady = handler->addSelfDeviceMem(scratch, scratchHandle, bytes) == ncclSuccess;
   }
+  res = ncclSuccess;
 
-  NCCLCHECKGOTO(handler->addSelfDeviceMem(scratch, scratchHandle, bytes), res, fail);
+  {
+    // A rank without scratch would skip the pointer exchange its peers wait in, so the ranks agree first.
+    std::vector<int> allScratchReady(nRanks, 0);
+    allScratchReady[comm->rank] = scratchReady ? 1 : 0;
+    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, allScratchReady.data(), sizeof(int)), res, fail);
+    for (int r = 0; r < nRanks; ++r) {
+      if (!allScratchReady[r]) {
+        INFO(NCCL_INIT, "ncclDdaFabricCommInit: rank %d failed to set up its scratch; skipping fabric DDA path", r);
+        goto fail;
+      }
+    }
+  }
   NCCLCHECKGOTO(handler->exchangeMemPtrs(), res, fail);
 
   CUDACHECKGOTO(cudaMalloc(&peerDev, nRanks * sizeof(void*)), res, fail);
