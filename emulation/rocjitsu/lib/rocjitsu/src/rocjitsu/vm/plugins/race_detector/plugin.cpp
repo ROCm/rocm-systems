@@ -1219,7 +1219,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const bool defer_lds =
         mixedFlat && d.routed_issue_info && !intervals.empty() && !obligations.empty();
     if (defer_lds) {
-      auto &pending = s->mixed_lds.emplace();
+      auto &pending = s->mixed_lds.emplace(RaceWavefrontState::MixedLdsAccess{});
       pending.order = ldsOrder;
       pending.reads = d.is_load || ldsAccess.read_modify_write;
       pending.writes = !d.is_load || ldsAccess.read_modify_write;
