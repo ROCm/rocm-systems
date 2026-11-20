@@ -51,14 +51,14 @@ def test_data_structure(input_data):
 def test_dispatch_count(input_data, expected_dispatches):
     """Every graph kernel dispatch was captured. The workload synchronizes each replay,
     so every completion retires before the process exits and none of the graph's own
-    dispatches may be missing. The graph geometry is a floor rather than an exact count:
-    a run can also contain dispatches the workload did not launch itself."""
+    dispatches may be missing. The expected count includes the workload's setup kernels as well as
+    every graph node."""
     sdk_data = input_data["rocprofiler-sdk-json-tool"]
     dispatches = sdk_data["buffer_records"]["kernel_dispatch"]
 
     assert (
-        len(dispatches) >= expected_dispatches
-    ), f"expected at least {expected_dispatches} dispatches, got {len(dispatches)}"
+        len(dispatches) == expected_dispatches
+    ), f"expected exactly {expected_dispatches} dispatches, got {len(dispatches)}"
 
 
 def test_dispatch_records_well_formed(input_data):
