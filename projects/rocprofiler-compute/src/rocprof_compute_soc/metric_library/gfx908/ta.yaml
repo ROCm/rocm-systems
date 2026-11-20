@@ -5,6 +5,55 @@ ta.address_stall:
   description: >-
     Percent of the total CU cycles the address processor was stalled from sending
     address requests further into the vL1D pipeline.
+ta.buffer_atomic_insts:
+  name: TA Buffer Atomic Instructions
+  formula: SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of buffer atomic instructions processed by the address processing
+    unit, per normalization unit.
+ta.buffer_coalesced_rd:
+  name: TA Buffer Coalesced Read
+  formula: SUM(TA_BUFFER_COALESCED_READ_CYCLES_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the address processing unit spent working on coalesced buffer
+    read instructions, per normalization unit.
+ta.buffer_coalesced_wr:
+  name: TA Buffer Coalesced Write
+  formula: SUM(TA_BUFFER_COALESCED_WRITE_CYCLES_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the address processing unit spent working on coalesced buffer
+    write instructions, per normalization unit.
+ta.buffer_insts:
+  name: TA Buffer Instructions
+  formula: SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of buffer memory instructions executed on all compute units on the
+    accelerator, per normalization unit.
+ta.buffer_rd_insts:
+  name: TA Buffer Read Instructions
+  formula: SUM(TA_BUFFER_READ_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of buffer read instructions processed by the address processing
+    unit, per normalization unit.
+ta.buffer_total_cycles:
+  name: TA Buffer Total Cycles
+  formula: SUM(TA_BUFFER_TOTAL_CYCLES_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles the address processing unit spent working on buffer
+    instructions, per normalization unit.
+ta.buffer_wr_insts:
+  name: TA Buffer Write Instructions
+  formula: SUM(TA_BUFFER_WRITE_WAVEFRONTS_sum) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of buffer write instructions processed by the address processing
+    unit, per normalization unit.
 ta.busy:
   name: Address Processing Unit Busy
   formula: 100 * SUM(TA_TA_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -54,57 +103,6 @@ ta.global_wr_insts:
   description: >-
     The total number of global & generic memory write instructions executed on all
     compute units on the accelerator, per normalization unit.
-ta.spill_atomic_insts:
-  name: TA Spill/Stack Atomic Instructions
-  formula: SUM(TA_BUFFER_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
-  unit: (Instructions + $normUnit)
-  description: >-
-    The total number of spill/stack memory atomic (with and without return) instructions
-    executed on all compute units on the accelerator, per normalization unit. Typically
-    unused as these memory operations are typically used to implement thread-local
-    storage.
-ta.spill_insts:
-  name: TA Spill/Stack Instructions
-  formula: SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM($denom)
-  unit: (Instructions + $normUnit)
-  description: >-
-    The total number of spill/stack memory instructions executed on all compute units
-    on the accelerator, per normalization unit.
-ta.spill_rd_insts:
-  name: TA Spill/Stack Read Instructions
-  formula: SUM(TA_BUFFER_READ_WAVEFRONTS_sum) / SUM($denom)
-  unit: (Instructions + $normUnit)
-  description: >-
-    The total number of spill/stack memory read instructions executed on all compute
-    units on the accelerator, per normalization unit.
-ta.spill_stack_coalesced_rd:
-  name: TA Spill/Stack Coalesced Read
-  formula: SUM(TA_BUFFER_COALESCED_READ_CYCLES_sum) / SUM($denom)
-  unit: (Cycles + $normUnit)
-  description: >-
-    The number of cycles the address processing unit spent working on coalesced spill/stack
-    read instructions, per normalization unit.
-ta.spill_stack_coalesced_wr:
-  name: TA Spill/Stack Coalesced Write
-  formula: SUM(TA_BUFFER_COALESCED_WRITE_CYCLES_sum) / SUM($denom)
-  unit: (Cycles + $normUnit)
-  description: >-
-    The number of cycles the address processing unit spent working on coalesced spill/stack
-    write instructions, per normalization unit.
-ta.spill_stack_total_cycles:
-  name: TA Spill/Stack Total Cycles
-  formula: SUM(TA_BUFFER_TOTAL_CYCLES_sum) / SUM($denom)
-  unit: (Cycles + $normUnit)
-  description: >-
-    The number of cycles the address processing unit spent working on spill/stack
-    instructions, per normalization unit.
-ta.spill_wr_insts:
-  name: TA Spill/Stack Write Instructions
-  formula: SUM(TA_BUFFER_WRITE_WAVEFRONTS_sum) / SUM($denom)
-  unit: (Instructions + $normUnit)
-  description: >-
-    The total number of spill/stack memory write instructions executed on all compute
-    units on the accelerator, per normalization unit.
 ta.total_insts:
   name: TA Total Instructions
   formula: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM($denom)

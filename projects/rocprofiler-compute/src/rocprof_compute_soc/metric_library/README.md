@@ -53,19 +53,17 @@ compute.salu_util:
 | `name` | A name specific to the hardware, in title case, unique on the arch. An id has one name and one unit on every arch. |
 | `formula` | The one equation of the metric on this arch. |
 | `unit` | One spelling per unit, such as `GB/s` or `Percent`. |
-| `description` | The text of one panel with the metric, word for word. May be empty. |
+| `description` | What the metric counts; it matches its formula, unit and counters. May be empty. |
 | `peak` | Optional. The theoretical peak. |
 | `peak_empirical` | Optional. The roofline benchmark's ceiling, as `$<ceiling>_empirical_peak`. |
 
-A description keeps the panel's words, with only these edits:
+A description starts from the panel's words, with these edits:
 
 - plain ASCII (`->` for an arrow, no trademark mark);
 - no sentence about how a panel shows the metric ("also presented as a percent of the
   peak");
 - no panel 3000 `Equation:` sentence, since `formula` holds the equation;
 - no TODO note.
-
-Better wording goes to the metric owners in a separate change.
 
 ## Sets
 

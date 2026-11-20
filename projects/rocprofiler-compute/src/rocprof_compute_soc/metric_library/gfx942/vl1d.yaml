@@ -17,8 +17,6 @@ vl1d.l2_bw_by_size:
   unit: GB/s
   description: >-
     The number of bytes transferred across the vL1D-L2 interface as a result of VMEM
-    instructions, divided by total duration. The number of bytes is calculated as
-    the number of cache lines requested multiplied by the cache line size. This value
-    does not consider partial requests, so for instance, if only a single value is
-    requested in a cache line, the data movement will still be counted as a full cache
-    line.
+    instructions, divided by total duration. Each read request counts as 128 bytes and
+    each write or atomic request as 64 bytes, so, for example, a request for a single
+    value still counts as a full request.
