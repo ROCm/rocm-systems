@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Type
 
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
+from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS, OPERATOR_BACKENDS
 from utils.logger import console_warning
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import METRIC_ID_RE, resolve_rocm_library_path
