@@ -370,7 +370,7 @@ def test_dot4_formats_and_c_modifiers(name):
     )
 
 
-@pytest.mark.parametrize('arch, count', [('rdna3', 6), ('rdna4', 12)])
+@pytest.mark.parametrize('arch, count', [('rdna3', 6), ('rdna3_5', 6), ('rdna4', 12)])
 def test_generated_float_dot_methods_replace_all_legacy_paths(arch, count):
     root = (
         Path(__file__).resolve().parents[3]
@@ -397,7 +397,7 @@ def test_generated_float_dot_methods_replace_all_legacy_paths(arch, count):
     assert checked == count
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4'])
 @pytest.mark.parametrize('name', ['V_DOT2_F16_F16', 'V_DOT2_BF16_BF16'])
 def test_half_dot_packed_sources_and_partial_accumulator(arch, name):
     from amdisa.codegen.execute.rj_arith_float import gen_half_dot
@@ -421,7 +421,7 @@ def test_half_dot_packed_sources_and_partial_accumulator(arch, name):
     )
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna3_5', 'rdna4'])
 def test_generated_half_dot_regular_and_dpp_bodies_use_rj_arith(arch):
     source = (
         Path(__file__).resolve().parents[3]
@@ -1324,10 +1324,6 @@ def test_integer_dot_dispatch(arch, name):
     body = generator._gen_execute_body(
         inst, derive_semantics(name, 'ENC_VOP3P'), 'ENC_VOP3P'
     )
-    if arch == 'rdna3_5':
-        assert 'arith::execute_ternary32' not in body
-        assert 'rj_arith_' not in body
-        return
     assert 'arith::execute_ternary32' in body
     assert 'wf.cu().arithmetic_flags(),' in body
     for flag in ('CLAMP', 'LO_A_HIGH', 'LO_B_HIGH', 'HI_A_LOW', 'HI_B_LOW'):
@@ -1344,7 +1340,6 @@ def test_integer_dot_dispatch(arch, name):
 @pytest.mark.parametrize(
     'arch,encoding',
     [
-        ('rdna3_5', 'ENC_VOP3P'),
         ('rdna3', 'ENC_VOP3'),
         ('rdna4', 'ENC_VOP3'),
     ],
@@ -1561,40 +1556,6 @@ def test_cdna_mixed_bf16_preserves_raw_inline_halves(name):
             )
             is None
         )
-
-
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
-def test_cdna_float_dot_bindings(arch):
-    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
-
-    for fmt in ('F16', 'BF16'):
-        for accumulate in (False, True):
-            name = f'V_DOT2{"C" if accumulate else ""}_F32_{fmt}'
-            for encoding in (
-                ('ENC_VOP2', 'ENC_VOP3') if accumulate else ('ENC_VOP3P',)
-            ):
-                body = gen_float_dot32(
-                    context(
-                        arch,
-                        name,
-                        ['d'],
-                        ['a', 'b'] if accumulate else ['a', 'b', 'c'],
-                        enc_name=encoding,
-                        opsel_exprs=('low', 'high'),
-                    )
-                )
-                if arch == 'cdna3' and fmt == 'BF16':
-                    assert body is None
-                    continue
-                suffix = 'gfx942' if fmt == 'F16' else 'gfx950'
-                assert f'rj_arith_v_dot2_f32_{fmt.lower()}_w64_{suffix},' in body
-                assert 'const unsigned replicate_sources = 0;' in body
-                if accumulate:
-                    assert 'const unsigned narrow_sources = 0;' in body
-                    assert 'const uint64_t modifiers = 0;' in body
-                    assert ', d, ' in body
-                else:
-                    assert 'pk16_src_needs_narrowing' in body
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
@@ -2873,3 +2834,116 @@ def test_cdna2_half_mad_has_no_retired_evaluator():
         assert 'execute_cdna2_mad_f16' not in text
         assert 'MadVop2::Accumulate, true' not in text
     assert 'cdna2_mad_f16' not in (generated / 'shared/simd_glue.h').read_text()
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna2', 'cdna3', 'cdna4'])
+def test_host_model_float_dot_bindings(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
+
+    for fmt in ('F16', 'BF16'):
+        for accumulate in (False, True):
+            name = f'V_DOT2{"C" if accumulate else ""}_F32_{fmt}'
+            for encoding in (
+                ('ENC_VOP2', 'ENC_VOP3') if accumulate else ('ENC_VOP3P',)
+            ):
+                body = gen_float_dot32(
+                    context(
+                        arch,
+                        name,
+                        ['d'],
+                        ['a', 'b'] if accumulate else ['a', 'b', 'c'],
+                        enc_name=encoding,
+                        opsel_exprs=('low', 'high'),
+                    )
+                )
+                if arch != 'cdna4' and fmt == 'BF16':
+                    assert body is None
+                    continue
+                suffix = 'gfx942' if fmt == 'F16' else 'gfx950'
+                assert f'rj_arith_v_dot2_f32_{fmt.lower()}_w64_{suffix},' in body
+                assert 'const unsigned replicate_sources = 0;' in body
+                if accumulate:
+                    assert 'const unsigned narrow_sources = 0;' in body
+                    assert 'const uint64_t modifiers = 0;' in body
+                    assert ', d, ' in body
+                else:
+                    assert 'pk16_src_needs_narrowing' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna2'])
+def test_older_float_dot_generated_routes(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    checked = 0
+    for source in root.glob('*_exec.cpp'):
+        text = source.read_text()
+        for match in re.finditer(
+            r'void (VDot2(?:c)?F32F16\w+)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+            text,
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (text[end] == '{') - (text[end] == '}')
+                end += 1
+            body = text[match.end() : end - 1]
+            assert 'rj_arith_v_dot2_f32_f16_w64_gfx942' in body, match[1]
+            assert 'arith::execute_dot2_f32' in body, match[1]
+            assert 'ROCJITSU_TRY_SIMD' not in body, match[1]
+            assert 'amdgpu::execute_v_dot' not in body, match[1]
+            assert 'shared/rj_arith_float_exec.h' in text, source
+            checked += 1
+    assert checked == (3 if arch == 'rdna2' else 4)
+
+
+def test_gfx1150_bf16_inline_uses_upper_float_half():
+    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32
+
+    body = gen_float_dot32(
+        context(
+            'rdna3_5',
+            'V_DOT2_F32_BF16',
+            ['d'],
+            ['a', 'b', 'c'],
+            enc_name='ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+        )
+    )
+    assert 'rj_arith_v_dot2_f32_bf16_w32,' in body
+    assert 'dot2_src_needs_half_replication(inst_.src0)' in body
+    assert 'is_inline_float_src' not in body
+    assert 'RJ_ARITH_DOT_ABS_C' in body and 'RJ_ARITH_DOT_NEG_C' in body
+
+
+@pytest.mark.parametrize(
+    'name,half,accumulate',
+    [
+        ('V_DOT2_F32_F16', False, False),
+        ('V_DOT2_F32_BF16', False, False),
+        ('V_DOT2_F16_F16', True, False),
+        ('V_DOT2_BF16_BF16', True, False),
+        ('V_DOT2ACC_F32_F16', False, True),
+    ],
+)
+def test_gfx1150_float_dot_rejects_unqualified_strict_replay(name, half, accumulate):
+    from amdisa.codegen.execute.rj_arith_float import gen_float_dot32, gen_half_dot
+
+    body = (gen_half_dot if half else gen_float_dot32)(
+        context(
+            'rdna3_5',
+            name,
+            ['d'],
+            ['a', 'b'] if accumulate else ['a', 'b', 'c'],
+            is_vop3=half,
+            enc_name='ENC_VOP3' if half else 'ENC_VOP2' if accumulate else 'ENC_VOP3P',
+            opsel_exprs=('low', 'high'),
+        )
+    )
+    assert (
+        body.index('if (!wf.exec())')
+        < body.index('UnsupportedOperandValue')
+        < body.index('execute_dot2_')
+    )
+    assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body

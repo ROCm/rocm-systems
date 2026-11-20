@@ -710,15 +710,16 @@ INTEGER_DOT_NAMES = (
 
 
 def gen_integer_dot(ctx: ExecuteContext) -> str | None:
+    """Route packed integer reductions and accumulating aliases through rj-arith."""
     arch = ctx.arch_name
     mnemonic = ctx.inst.name
     dst = ctx.dst_ops
     src = ctx.src_ops
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
-    if arch in ('cdna3', 'cdna4'):
+    if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna2'):
         names = CDNA_INTEGER_DOT_NAMES | ACCUMULATING_INTEGER_DOT_NAMES
-    elif arch in ('rdna3', 'rdna4', 'cdna5'):
+    elif arch in ('rdna3_5', 'rdna3', 'rdna4', 'cdna5'):
         names = MODERN_INTEGER_DOT_NAMES
     else:
         return None

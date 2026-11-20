@@ -2,6 +2,16 @@
 // SPDX-License-Identifier: MIT
 
 #include "compute_unit_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+
 #include "fixtures/float_dot/gfx1100_cases.h"
 #include "fixtures/float_dot/gfx1201_cases.h"
 #include "rj_arith/rj_arith.h"
@@ -148,7 +158,10 @@ public:
 
   explicit BridgeFixture(rj_code_arch_t arch, uint32_t lanes = 32, ArithmeticPolicy policy = {},
                          uint32_t vgprs = 256)
-      : backend(arch == ROCJITSU_CODE_ARCH_CDNA1   ? &rocjitsu::cdna1::execution_backend()
+      : backend(arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? &rocjitsu::rdna3_5::execution_backend()
+                : arch == ROCJITSU_CODE_ARCH_CDNA1 ? &rocjitsu::cdna1::execution_backend()
+                : arch == ROCJITSU_CODE_ARCH_CDNA2 ? &rocjitsu::cdna2::execution_backend()
+                : arch == ROCJITSU_CODE_ARCH_RDNA2 ? &rocjitsu::rdna2::execution_backend()
                 : arch == ROCJITSU_CODE_ARCH_RDNA3 ? &rocjitsu::rdna3::execution_backend()
                 : arch == ROCJITSU_CODE_ARCH_CDNA3 ? &rocjitsu::cdna3::execution_backend()
                 : arch == ROCJITSU_CODE_ARCH_CDNA4 ? &rocjitsu::cdna4::execution_backend()
@@ -2817,7 +2830,9 @@ TEST(ArithBridgeTest, HalfFmaFormsRoundingPartialAccumulatorsAndState) {
 TEST(ArithBridgeTest, HalfDotModifiersSelectorsAliasesAndByteObservations) {
   // Small binary fractions make the FP32 intermediate and half result exact;
   // a tight atol/rtol still expresses the API's loose numerical contract.
-  for (bool is_rdna3 : {false, true}) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool is_rdna3 = arch != ROCJITSU_CODE_ARCH_RDNA4;
     for (bool bf16 : {false, true}) {
       auto narrow = [bf16](float value) {
         return bf16 ? util::f32_to_bf16(value) : util::f32_to_f16(value);
@@ -2831,7 +2846,7 @@ TEST(ArithBridgeTest, HalfDotModifiersSelectorsAliasesAndByteObservations) {
       for (uint32_t lanes : {32u, 64u}) {
         ArithmeticPolicy policy{};
         policy.semantics = ArithmeticSemantics::Loose;
-        BridgeFixture fixture(is_rdna3, lanes, policy);
+        BridgeFixture fixture(arch, lanes, policy);
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
         const uint64_t exec_mask = lanes == 32 ? 0x80000005ULL : 0x8000000180000005ULL;
         fixture.wave->set_exec(exec_mask);
@@ -2843,24 +2858,34 @@ TEST(ArithBridgeTest, HalfDotModifiersSelectorsAliasesAndByteObservations) {
               for (unsigned source = 0; source < 3; ++source)
                 for (uint32_t lane = 0; lane < lanes; ++lane)
                   fixture.cu->write_vgpr(fixture.base() + source, lane, inputs[source]);
-              const auto words = is_rdna3 ? rdna3::build_vop3(bf16 ? rdna3::kVDot2Bf16Bf16Vop3
-                                                                   : rdna3::kVDot2F16F16Vop3,
-                                                              {.vdst = dest,
-                                                               .abs = uint8_t(controls & 7),
-                                                               .op_sel = uint8_t(halves << 2),
-                                                               .src0 = 256,
-                                                               .src1 = 257,
-                                                               .src2 = 258,
-                                                               .neg = uint8_t(controls >> 3)})
-                                          : rdna4::build_vop3(bf16 ? rdna4::kVDot2Bf16Bf16Vop3
-                                                                   : rdna4::kVDot2F16F16Vop3,
-                                                              {.vdst = dest,
-                                                               .abs = uint8_t(controls & 7),
-                                                               .opsel = uint8_t(halves << 2),
-                                                               .src0 = 256,
-                                                               .src1 = 257,
-                                                               .src2 = 258,
-                                                               .neg = uint8_t(controls >> 3)});
+              const auto words = arch == ROCJITSU_CODE_ARCH_RDNA3_5
+                                     ? rdna3_5::build_vop3(bf16 ? rdna3_5::kVDot2Bf16Bf16Vop3
+                                                                : rdna3_5::kVDot2F16F16Vop3,
+                                                           {.vdst = dest,
+                                                            .abs = uint8_t(controls & 7),
+                                                            .op_sel = uint8_t(halves << 2),
+                                                            .src0 = 256,
+                                                            .src1 = 257,
+                                                            .src2 = 258,
+                                                            .neg = uint8_t(controls >> 3)})
+                                 : is_rdna3 ? rdna3::build_vop3(bf16 ? rdna3::kVDot2Bf16Bf16Vop3
+                                                                     : rdna3::kVDot2F16F16Vop3,
+                                                                {.vdst = dest,
+                                                                 .abs = uint8_t(controls & 7),
+                                                                 .op_sel = uint8_t(halves << 2),
+                                                                 .src0 = 256,
+                                                                 .src1 = 257,
+                                                                 .src2 = 258,
+                                                                 .neg = uint8_t(controls >> 3)})
+                                            : rdna4::build_vop3(bf16 ? rdna4::kVDot2Bf16Bf16Vop3
+                                                                     : rdna4::kVDot2F16F16Vop3,
+                                                                {.vdst = dest,
+                                                                 .abs = uint8_t(controls & 7),
+                                                                 .opsel = uint8_t(halves << 2),
+                                                                 .src0 = 256,
+                                                                 .src1 = 257,
+                                                                 .src2 = 258,
+                                                                 .neg = uint8_t(controls >> 3)});
               auto instruction = fixture.decoder->decode_window(words);
               ASSERT_TRUE(instruction.succeeded());
               ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
@@ -2903,7 +2928,9 @@ TEST(ArithBridgeTest, HalfDotModifiersSelectorsAliasesAndByteObservations) {
 }
 
 TEST(ArithBridgeTest, HalfDotInlineReplicationAndRejectedPartialWrites) {
-  for (bool is_rdna3 : {false, true}) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool is_rdna3 = arch != ROCJITSU_CODE_ARCH_RDNA4;
     for (bool bf16 : {false, true}) {
       for (uint32_t lanes : {32u, 64u}) {
         for (unsigned policy_index = 0; policy_index < 3; ++policy_index) {
@@ -2913,7 +2940,7 @@ TEST(ArithBridgeTest, HalfDotInlineReplicationAndRejectedPartialWrites) {
           } else if (policy_index == 2) {
             policy.semantics = ArithmeticSemantics::BitExactEmpirical;
           }
-          BridgeFixture fixture(is_rdna3, lanes, policy);
+          BridgeFixture fixture(arch, lanes, policy);
           ASSERT_FALSE(::testing::Test::HasFatalFailure());
           fixture.wave->set_exec(lanes == 32 ? 0x80000001ULL : 0x8000000000000001ULL);
           fixture.wave->set_trapsts(0x10);
@@ -2922,16 +2949,20 @@ TEST(ArithBridgeTest, HalfDotInlineReplicationAndRejectedPartialWrites) {
             fixture.cu->write_vgpr(fixture.base() + 2, lane, 0xdead0000);
           }
           const auto words =
-              is_rdna3 ? rdna3::build_vop3(
-                             bf16 ? rdna3::kVDot2Bf16Bf16Vop3 : rdna3::kVDot2F16F16Vop3,
-                             {.vdst = 2, .op_sel = 8, .src0 = 242, .src1 = 257, .src2 = 258})
-                       : rdna4::build_vop3(
-                             bf16 ? rdna4::kVDot2Bf16Bf16Vop3 : rdna4::kVDot2F16F16Vop3,
-                             {.vdst = 2, .opsel = 8, .src0 = 242, .src1 = 257, .src2 = 258});
+              arch == ROCJITSU_CODE_ARCH_RDNA3_5
+                  ? rdna3_5::build_vop3(
+                        bf16 ? rdna3_5::kVDot2Bf16Bf16Vop3 : rdna3_5::kVDot2F16F16Vop3,
+                        {.vdst = 2, .op_sel = 8, .src0 = 242, .src1 = 257, .src2 = 258})
+              : is_rdna3 ? rdna3::build_vop3(
+                               bf16 ? rdna3::kVDot2Bf16Bf16Vop3 : rdna3::kVDot2F16F16Vop3,
+                               {.vdst = 2, .op_sel = 8, .src0 = 242, .src1 = 257, .src2 = 258})
+                         : rdna4::build_vop3(
+                               bf16 ? rdna4::kVDot2Bf16Bf16Vop3 : rdna4::kVDot2F16F16Vop3,
+                               {.vdst = 2, .opsel = 8, .src0 = 242, .src1 = 257, .src2 = 258});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
           const bool rejected =
-              policy_index == 2; // Exact arithmetic is supported; FP status is not.
+              policy_index == 2 || (policy_index == 1 && arch == ROCJITSU_CODE_ARCH_RDNA3_5);
           EXPECT_EQ(
               fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
               rejected);
@@ -2964,15 +2995,18 @@ TEST(ArithBridgeTest, HalfDotInlineReplicationAndRejectedPartialWrites) {
 
 TEST(ArithBridgeTest, Dot2HardwareBitsWaveWidthsAliasesAndStatePolicy) {
   // Existing rocjitsu hardware captures validate both architecture models.
-  auto check = [](bool is_rdna3, bool bf16, const auto &cases) {
+  auto check = [](rj_code_arch_t arch, bool bf16, const auto &cases) {
+    const bool is_rdna3 = arch != ROCJITSU_CODE_ARCH_RDNA4;
     for (uint32_t lanes : {32u, 64u}) {
       for (bool observed : {false, true}) {
         for (bool report : {false, true}) {
-          ArithmeticPolicy policy{ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
+          ArithmeticPolicy policy{arch == ROCJITSU_CODE_ARCH_RDNA3_5
+                                      ? ArithmeticSemantics::Compatibility
+                                      : ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
           if (report)
             if (policy.semantics != ArithmeticSemantics::Loose)
               policy.semantics = ArithmeticSemantics::BitExactEmpirical;
-          BridgeFixture fixture(is_rdna3, lanes, policy);
+          BridgeFixture fixture(arch, lanes, policy);
           ASSERT_FALSE(::testing::Test::HasFatalFailure());
           if (!observed) {
             fixture.cu->set_plugin_group(nullptr);
@@ -2983,12 +3017,16 @@ TEST(ArithBridgeTest, Dot2HardwareBitsWaveWidthsAliasesAndStatePolicy) {
           const uint64_t exec_mask = lanes == 32 ? 0xa55a5aa5ULL : 0xa55a5aa5a55a5aa5ULL;
           fixture.wave->set_exec(exec_mask);
           const auto words =
-              is_rdna3 ? rdna3::build_vop3p(
-                             bf16 ? rdna3::kVDot2F32Bf16Vop3p : rdna3::kVDot2F32F16Vop3p,
-                             {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3})
-                       : rdna4::build_vop3p(
-                             bf16 ? rdna4::kVDot2F32Bf16Vop3p : rdna4::kVDot2F32F16Vop3p,
-                             {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3});
+              arch == ROCJITSU_CODE_ARCH_RDNA3_5
+                  ? rdna3_5::build_vop3p(
+                        bf16 ? rdna3_5::kVDot2F32Bf16Vop3p : rdna3_5::kVDot2F32F16Vop3p,
+                        {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3})
+              : is_rdna3 ? rdna3::build_vop3p(
+                               bf16 ? rdna3::kVDot2F32Bf16Vop3p : rdna3::kVDot2F32F16Vop3p,
+                               {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3})
+                         : rdna4::build_vop3p(
+                               bf16 ? rdna4::kVDot2F32Bf16Vop3p : rdna4::kVDot2F32F16Vop3p,
+                               {.vdst = 2, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3});
           auto instruction = fixture.decoder->decode_window(words);
           ASSERT_TRUE(instruction.succeeded());
           for (size_t offset = 0; offset < cases.size(); offset += lanes) {
@@ -3018,10 +3056,42 @@ TEST(ArithBridgeTest, Dot2HardwareBitsWaveWidthsAliasesAndStatePolicy) {
       }
     }
   };
-  check(true, false, kDot2F16Cases);
-  check(true, true, kDot2BF16Cases);
-  check(false, false, kGfx12DotF16Cases);
-  check(false, true, kGfx12DotBF16Cases);
+  check(ROCJITSU_CODE_ARCH_RDNA3, false, kDot2F16Cases);
+  check(ROCJITSU_CODE_ARCH_RDNA3, true, kDot2BF16Cases);
+  // gfx1150 inherits the gfx11 software model; these are not gfx1150 hardware captures.
+  check(ROCJITSU_CODE_ARCH_RDNA3_5, false, kDot2F16Cases);
+  check(ROCJITSU_CODE_ARCH_RDNA3_5, true, kDot2BF16Cases);
+  check(ROCJITSU_CODE_ARCH_RDNA4, false, kGfx12DotF16Cases);
+  check(ROCJITSU_CODE_ARCH_RDNA4, true, kGfx12DotBF16Cases);
+}
+
+TEST(ArithBridgeTest, Gfx1150DotRejectsUnqualifiedStrictNumeric) {
+  for (uint32_t lanes : {32U, 64U}) {
+    BridgeFixture fixture(ROCJITSU_CODE_ARCH_RDNA3_5, lanes,
+                          {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    fixture.wave->set_exec(1);
+    const std::array words = {
+        rdna3_5::build_vop3p(rdna3_5::kVDot2F32F16Vop3p,
+                             {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}),
+        rdna3_5::build_vop3p(rdna3_5::kVDot2F32Bf16Vop3p,
+                             {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}),
+        rdna3_5::build_vop3(rdna3_5::kVDot2F16F16Vop3,
+                            {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258}),
+        rdna3_5::build_vop3(rdna3_5::kVDot2Bf16Bf16Vop3,
+                            {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258}),
+        std::array<uint32_t, 2>{rdna3_5::build_vop2(rdna3_5::kVDot2accF32F16Vop2,
+                                                    {.src0 = 256, .vsrc1 = 1, .vdst = 4})[0],
+                                0}};
+    for (const auto &encoding : words) {
+      fixture.cu->write_vgpr(fixture.base() + 4, 0, 0x12345678);
+      auto instruction = fixture.decoder->decode_window(encoding);
+      ASSERT_TRUE(instruction.succeeded());
+      EXPECT_TRUE(
+          fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed());
+      EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, 0), 0x12345678U);
+    }
+  }
 }
 
 TEST(ArithBridgeTest, Dot2DppLooseRoutingAndWriteFilter) {
@@ -11688,6 +11758,85 @@ TEST(ArithBridgeTest, CdnaFloatDotPairSumAndAccumulation) {
         }
       }
     }
+  }
+}
+
+// Pair summation must precede addition to old D: two ones survive next to 2^24.
+TEST(ArithBridgeTest, OlderFloatDotPairSumAndAliasing) {
+  auto check = [](rj_code_arch_t arch, uint32_t lanes, const auto &words, bool selected = false) {
+    for (bool scalar : {false, true}) {
+      struct RestoreScalar {
+        bool previous = util::force_scalar();
+        ~RestoreScalar() { util::set_force_scalar_for_testing(previous); }
+      } restore;
+      util::set_force_scalar_for_testing(scalar);
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose,
+                             ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+                             ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                             ArithmeticSemantics::BitExactEmpirical}) {
+        BridgeFixture fixture(arch, lanes, {semantics});
+        ASSERT_NE(fixture.wave, nullptr);
+        fixture.wave->set_exec(1ULL | (1ULL << (lanes - 1)));
+        fixture.wave->set_mode_raw(0x3ff); // DOT ignores guest rounding and denormal controls.
+        fixture.wave->set_trapsts(0x10);
+        for (uint32_t lane = 0; lane < lanes; ++lane) {
+          fixture.cu->write_vgpr(fixture.base(), lane, selected ? 0x40003c00U : 0x3c003c00U);
+          fixture.cu->write_vgpr(fixture.base() + 1, lane, selected ? 0x44004200U : 0x3c003c00U);
+          fixture.cu->write_vgpr(fixture.base() + 2, lane, selected ? 0xc0a00000U : 0x4b800000U);
+        }
+        auto instruction = fixture.decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const bool rejected = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                              semantics == ArithmeticSemantics::BitExactEmpirical;
+        EXPECT_EQ(
+            fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).failed(),
+            rejected);
+        for (uint32_t lane = 0; lane < lanes; ++lane) {
+          EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 2, lane),
+                    !rejected && (lane == 0 || lane == lanes - 1)
+                        ? (selected ? 0xc1700000U : 0x4b800001U)
+                        : (selected ? 0xc0a00000U : 0x4b800000U));
+        }
+        EXPECT_EQ(fixture.wave->trapsts(), 0x10U);
+      }
+    }
+  };
+  check(ROCJITSU_CODE_ARCH_CDNA1, 64,
+        cdna1::build_vop3p(
+            cdna1::kVDot2F32F16Vop3p,
+            {.vdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}));
+  check(ROCJITSU_CODE_ARCH_CDNA1, 64,
+        cdna1::build_vop2(cdna1::kVDot2cF32F16Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2}));
+  check(ROCJITSU_CODE_ARCH_CDNA1, 64,
+        cdna1::build_vop3(cdna1::kVDot2cF32F16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257}));
+  check(ROCJITSU_CODE_ARCH_CDNA2, 64,
+        cdna2::build_vop3p(
+            cdna2::kVDot2F32F16Vop3p,
+            {.vdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}));
+  check(ROCJITSU_CODE_ARCH_CDNA2, 64,
+        cdna2::build_vop2(cdna2::kVDot2cF32F16Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2}));
+  check(ROCJITSU_CODE_ARCH_CDNA2, 64,
+        cdna2::build_vop3(cdna2::kVDot2cF32F16Vop3, {.vdst = 2, .src0 = 256, .src1 = 257}));
+  // Distinct halves, split negation, and ABS+NEG on C must survive the binding.
+  // CLAMP remains ignored: (-2*3) + (1*-4) + (-abs(-5)) = -15.
+  check(ROCJITSU_CODE_ARCH_CDNA1, 64,
+        cdna1::build_vop3p(cdna1::kVDot2F32F16Vop3p, {.vdst = 2,
+                                                      .neg_hi = 6,
+                                                      .op_sel = 1,
+                                                      .clamp = 1,
+                                                      .src0 = 256,
+                                                      .src1 = 257,
+                                                      .src2 = 258,
+                                                      .op_sel_hi = 2,
+                                                      .neg = 5}),
+        true);
+  for (uint32_t lanes : {32U, 64U}) {
+    check(ROCJITSU_CODE_ARCH_RDNA2, lanes,
+          rdna2::build_vop3p(
+              rdna2::kVDot2F32F16Vop3p,
+              {.vdst = 2, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258, .op_sel_hi = 3}));
+    check(ROCJITSU_CODE_ARCH_RDNA2, lanes,
+          rdna2::build_vop2(rdna2::kVDot2cF32F16Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 2}));
   }
 }
 
