@@ -12,9 +12,16 @@ class NodeCommands:
         """Every component's CUID, named by type and position within its type."""
         try:
             components = amdsmi_interface.amdsmi_get_cuid_components()
-        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as e:
+        except AttributeError as e:
             logging.debug("Failed to list CUID components | %s", e)
             return "N/A"
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            logging.debug("Failed to list CUID components | %s", e)
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                return "N/A"
+            # A failure such as a missing machine-id is not an empty node, and
+            # a script reading the exit code has to be able to tell.
+            return self.helpers.record_or_raise(e, "node CUID components")
 
         counts = {}
         result = {}

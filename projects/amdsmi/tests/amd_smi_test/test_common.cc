@@ -4,9 +4,12 @@
 #include "test_common.h"
 
 #include <getopt.h>
+#include <unistd.h>
 
 #include <cassert>
+#include <cctype>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
@@ -297,3 +300,25 @@ void DumpMonitorInfo(const TestBase* test) {
   std::cout << delim << std::endl;
 }
 #endif
+
+bool HostHasMachineId() {
+  const char* path =
+      access("/etc/machine-id", F_OK) == 0 ? "/etc/machine-id" : "/var/lib/dbus/machine-id";
+  std::ifstream file(path);
+  std::string line;
+  if (!std::getline(file, line) || line.size() != 32) return false;
+  bool nonzero = false;
+  for (char c : line) {
+    if (!std::isxdigit(static_cast<unsigned char>(c))) return false;
+    if (c != '0') nonzero = true;
+  }
+  return nonzero;
+}
+
+bool CuidMissingForNoMachineId(amdsmi_status_t status) {
+  return status == AMDSMI_STATUS_NO_DATA && !HostHasMachineId();
+}
+
+const char kNoMachineIdSkip[] =
+    "no machine identity on this host, so no temporary CUID; asserted by "
+    "GpuUnit.CuidWithoutAMachineIdThereIsNoTemporaryCuid";

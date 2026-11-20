@@ -584,3 +584,57 @@ TEST(cuidtstUnprivileged, WholeGpuRechecksItsOwnUnitId) {
   WriteFile(dir.path() + "/cuid_unit_id", "2");
   EXPECT_EQ(gpu.get_temporary_input(input), AMDCUID_STATUS_INVALID_FORMAT);
 }
+
+namespace {
+
+// The first partition of UnpublishedPartitions with `value` in its
+// cuid_unit_id, which WriteFile ends with the kernel's newline.
+CuidGpu FirstWithUnitId(const UnpublishedPartitions& fake, const std::string& value) {
+  WriteFile(fake.root() + "/pci/fffe:63:00.0/xcp/cuid_unit_id", value);
+  return fake.First();
+}
+
+}  // namespace
+
+// A partition's cuid_unit_id that exists is decimal digits from 2 to 8128, or
+// the partition has no CUID and says INVALID_FORMAT, as a whole device does.
+// KFD names this partition too, but a published value is never passed over.
+TEST(cuidtst, MalformedPartitionUnitIdIsInvalidFormat) {
+  const std::vector<std::string> malformed = {
+      "",
+      "x",
+      "2x",
+      " 2",
+      "+2",
+      "0x2",
+      "-18446744073709551607",
+      std::string("9\0x", 3),
+      "9\n",
+      "0",
+      "1",
+      "8129",
+      "65538",
+      "18446744073709551618",
+  };
+  for (const auto& value : malformed) {
+    SCOPED_TRACE("cuid_unit_id \"" + value + "\"");
+    UnpublishedPartitions fake;
+    const CuidGpu partition = FirstWithUnitId(fake, value);
+    EXPECT_FALSE(partition.get_info().partition_metadata_valid);
+    CuidUtilities::AuxiliaryInput input{};
+    EXPECT_EQ(partition.get_temporary_input(input), AMDCUID_STATUS_INVALID_FORMAT);
+  }
+}
+
+TEST(cuidtst, PublishedPartitionUnitIdIsRead) {
+  for (const uint16_t unit_id : {2, 9, 8128}) {
+    SCOPED_TRACE(unit_id);
+    UnpublishedPartitions fake;
+    const CuidGpu partition = FirstWithUnitId(fake, std::to_string(unit_id));
+    EXPECT_TRUE(partition.get_info().partition_metadata_valid);
+    EXPECT_EQ(partition.get_info().header.fields.gpu.unit_id, unit_id);
+    CuidUtilities::AuxiliaryInput input{};
+    ASSERT_EQ(partition.get_temporary_input(input), AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(input.unit_id, unit_id);
+  }
+}

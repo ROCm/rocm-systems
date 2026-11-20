@@ -147,6 +147,10 @@ class TestCliBase(unittest.TestCase):
         "reset": {"--xgmierr": amdsmi.AmdSmiStatus.INVAL},
     }
 
+    # Exit codes a CUID command answers on a host without a machine identity,
+    # which has no temporary CUID. Accepted only on such a host.
+    NO_MACHINE_ID_CODES = {"node": {"--cuid": amdsmi.AmdSmiStatus.NO_DATA}}
+
     # The only flags ``metric --nic`` accepts. The parser rejects any GPU or CPU
     # metric flag given with --nic, so a command carrying one expects a failure.
     NIC_METRIC_FLAGS = frozenset(
@@ -663,6 +667,9 @@ class TestCliBase(unittest.TestCase):
             tolerated = self._lookup(self.SWEEP_TOLERATED_CODES, cmd)
             if tolerated is not None:
                 cond = [*ok, tolerated]
+            no_machine_id = self._lookup(self.NO_MACHINE_ID_CODES, cmd)
+            if no_machine_id is not None and not common.host_has_machine_id():
+                cond = [*cond, no_machine_id]
             while self.openCurlyBrace in cmd:
                 items = cmd.split()
                 # Find gpu index. No --gpu, "all" or a bdf all target every device.
