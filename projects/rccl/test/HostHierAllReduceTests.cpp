@@ -41,6 +41,8 @@ struct HostHierMockComm
         comm.archName = archBuf;
         comm.MNNVL    = mnnvl ? 1 : 0;
         comm.nRanks   = static_cast<int>(hostOf.size());
+        // One clique holding every rank, as on a single MNNVL fabric.
+        comm.clique.size = mnnvl ? comm.nRanks : 0;
         comm.rank     = rank;
         setHosts(hostOf);
         comm.hostHierState = rcclHostHierUnprobed;
@@ -249,6 +251,12 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 << "scale-out gfx1250 without MNNVL";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx1250", true, true))
                 << "registered window";
+            {
+                HostHierMockComm mock(blockHosts(2, 8), 0);
+                mock.comm.clique.size = 8;
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
+                    << "two MNNVL cliques";
+            }
         })
         .withTimeout(std::chrono::seconds(30))
         .withNumGpus(0);

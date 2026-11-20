@@ -530,12 +530,12 @@ collected in the following table.
           inside a group or a graph capture, while ``NCCL_ALGO`` is set, or
           while a backend is forced. The first eligible call splits the
           communicator, so all ranks must use the same value.
-      - | ``-1``: Auto (default). On gfx1250 with MNNVL, used for
-          ``ncclFloat32`` ``ncclSum`` on buffers outside registered windows,
-          with eight ranks per host and these message sizes: above 1 MiB to
-          2 MiB, 8 to 16 MiB and 128 to 512 MiB on two hosts, 2 MiB to 1 GiB
-          on four hosts, and 2 MiB to 2 GiB on eight hosts. Not used with
-          other host counts.
+      - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
+          clique, used for ``ncclFloat32`` ``ncclSum`` on buffers outside
+          registered windows, with eight ranks per host and these message
+          sizes: above 1 MiB to 2 MiB, 8 to 16 MiB and 128 to 512 MiB on two
+          hosts, 2 MiB to 1 GiB on four hosts, and 2 MiB to 2 GiB on eight
+          hosts. Not used with other host counts.
         | ``0``: Disabled.
         | ``1``: Enabled for every eligible AllReduce.
 

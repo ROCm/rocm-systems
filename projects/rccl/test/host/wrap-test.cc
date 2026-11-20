@@ -4692,14 +4692,16 @@ struct HostHierCalls {
 // Selects a sum AllReduce of 1024 floats with host-hierarchical eligibility and
 // the child-comm build scripted. Ring is the fallback for MakeSelectComm.
 int SelectHostHier(HostHierCalls* calls, bool query, ncclResult_t ensureResult = ncclSuccess,
-                   bool graphCapturingHint = false, ncclComm* comm = nullptr) {
-  ScopedHook eligible(g_hostHierAllReduceEligible, [calls](ncclComm*, size_t count, ncclDataType_t type,
-                                                           ncclRedOp_t op, bool registeredBuffers) {
+                   bool graphCapturingHint = false, ncclComm* comm = nullptr, const void* sendbuff = nullptr,
+                   void* recvbuff = nullptr, bool expectRegistered = false) {
+  ScopedHook eligible(g_hostHierAllReduceEligible, [calls, expectRegistered](ncclComm*, size_t count,
+                                                                             ncclDataType_t type, ncclRedOp_t op,
+                                                                             bool registeredBuffers) {
     calls->eligible++;
     EXPECT_EQ(1024u, count);
     EXPECT_EQ(ncclFloat32, type);
     EXPECT_EQ(ncclSum, op);
-    EXPECT_FALSE(registeredBuffers) << "no window is registered";
+    EXPECT_EQ(expectRegistered, registeredBuffers);
     return true;
   });
   ScopedHook ensure(g_hostHierEnsure, [calls, ensureResult](ncclComm*) {
@@ -4709,12 +4711,28 @@ int SelectHostHier(HostHierCalls* calls, bool query, ncclResult_t ensureResult =
   const bool ownComm = comm == nullptr;
   if (ownComm) comm = MakeSelectComm();
   rcclCollDecision decision{};
-  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/1024, ncclFloat32, ncclSum,
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, sendbuff, recvbuff, /*count=*/1024, ncclFloat32, ncclSum,
                                               /*stream=*/nullptr, query, graphCapturingHint, &decision));
   if (ownComm) DeleteCommWithArch(comm);
   return decision.algo;
 }
 }  // namespace
+
+// Buffers inside registered windows reach the eligibility check as registered, which auto
+// mode leaves to the symmetric and CE paths.
+TEST(WrapMicrotestIsolated, SelectAllReduce_HostHierSeesRegisteredWindows) {
+  RUN_ISOLATED_TEST("Wrap_SelectAllReduce_HostHierSeesRegisteredWindows", []() {
+    HostHierCalls calls;
+    ncclComm* comm = MakeSelectComm();
+    alignas(16) static char sendbuf[4096];
+    alignas(16) static char recvbuf[4096];
+    SymmetricTestWindows windows(comm, sendbuf, sizeof(sendbuf), recvbuf, sizeof(recvbuf));
+    SelectHostHier(&calls, /*query=*/true, ncclSuccess, /*graphCapturingHint=*/false, comm, sendbuf, recvbuf,
+                   /*expectRegistered=*/true);
+    EXPECT_EQ(1, calls.eligible);
+    DeleteCommWithArch(comm);
+  });
+}
 
 // A query reports the host-hierarchical path without building the child comms,
 // which is collective and must only happen inside a real AllReduce.
