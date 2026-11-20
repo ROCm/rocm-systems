@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <atomic>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -45,6 +46,14 @@ struct correlation_id;
 namespace hsa
 {
 class Queue;
+
+// The application's device-resident completion signal of a dispatch that completes a pooled
+// signal in its place, and whether that signal has been completed from the host yet.
+struct signal_relay_t
+{
+    hsa_signal_t      app_signal = {.handle = 0};
+    std::atomic<bool> completed  = false;
+};
 
 // per-packet data
 struct packet_data_t
@@ -61,6 +70,7 @@ struct packet_data_t
     rocprofiler_user_data_t user_data               = {.value = 0};
     pooled_signal_t*        pooled_signal           = nullptr;
     bool                    is_serialized           = false;
+    signal_relay_t*         signal_relay            = nullptr;
 };
 
 // Internal session information that is used by write interceptor
