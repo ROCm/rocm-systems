@@ -13,6 +13,7 @@
 #include "utils/debug.hpp"
 #include "utils/nontemporal.hpp"
 #include <algorithm>
+#include <limits>
 #include <map>
 
 namespace amd::roc {
@@ -2893,7 +2894,8 @@ bool KernelBlitManager::fillBuffer3D(device::Memory& memory, const void* pattern
 bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Coord3D& dstOrigin,
                                          const amd::Coord3D& srcOrigin, const amd::Coord3D& sizeIn,
                                          bool entire, const uint32_t blitWg,
-                                         amd::CopyMetadata copyMetadata, bool attachSignal) const {
+                                         amd::CopyMetadata copyMetadata, bool attachSignal,
+                                         bool localCopy) const {
   constexpr uint32_t kBlitType = BlitCopyBuffer;
   constexpr uint32_t kMaxAlignment = 2 * sizeof(uint64_t);
   amd::Coord3D size(sizeIn[0]);
@@ -2910,6 +2912,22 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
   // Program the dispatch dimensions
   const size_t localWorkSize = (aligned) ? 512 : 1024;
   size_t globalWorkSize = std::min(blitWg * localWorkSize, size[0]);
+  uint32_t copy_mode = aligned_size;
+  const size_t mallSize = dev().info().l3CacheSize_;
+  if (localCopy && aligned && mallSize != 0 && sizeIn[0] > mallSize / 2) {
+    // Above half of the MALL, source and destination no longer both stay resident and the copy
+    // is DRAM bound. One element per work-item dispatches workgroups in address order, which
+    // keeps the in-flight window contiguous, and nontemporal stores keep the destination from
+    // evicting the source. Once the source alone exceeds the MALL, it is streamed too.
+    // Copies beyond the 32-bit grid fall back to the grid-stride loop. An explicit
+    // DEBUG_CLR_LIMIT_BLIT_WG keeps its workgroup cap.
+    if (flagIsDefault(DEBUG_CLR_LIMIT_BLIT_WG)) {
+      const size_t maxGridSize =
+          amd::alignDown(size_t{std::numeric_limits<uint32_t>::max()}, localWorkSize);
+      globalWorkSize = std::min(size[0], maxGridSize);
+    }
+    copy_mode = (sizeIn[0] > mallSize) ? CopyStreamLoadStore : CopyStreamStore;
+  }
   globalWorkSize = amd::alignUp(globalWorkSize, localWorkSize);
 
   // Program kernels arguments for the blit operation
@@ -2925,7 +2943,7 @@ bool KernelBlitManager::shaderCopyBuffer(address dst, address src, const amd::Co
   setArgument(kernels_[kBlitType], 2, sizeof(copySize), &copySize);
 
   setArgument(kernels_[kBlitType], 3, sizeof(remainder), &remainder);
-  setArgument(kernels_[kBlitType], 4, sizeof(aligned_size), &aligned_size);
+  setArgument(kernels_[kBlitType], 4, sizeof(copy_mode), &copy_mode);
 
   // End pointer is the aligned copy size and destination offset
   uint64_t end_ptr = reinterpret_cast<uint64_t>(dst) + dstOrigin[0] + sizeIn[0] - remainder;
@@ -3543,10 +3561,15 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
         // scope issued by synchronization packet.
         gpu().addSystemScope();
       }
-      result =
-          shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
-                           reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
-                           srcOrigin, sizeIn, entire, blitWg, copyMetadata, !copyMetadata.isAsync_);
+      const uint64_t localAgent = dev().getBackendDevice().handle;
+      const bool localCopy = !srcMemory.isHostMemDirectAccess() &&
+                             !dstMemory.isHostMemDirectAccess() &&
+                             srcRocMemory.getOwningAgent().handle == localAgent &&
+                             dstRocMemory.getOwningAgent().handle == localAgent;
+      result = shaderCopyBuffer(reinterpret_cast<address>(dstMemory.virtualAddress()),
+                                reinterpret_cast<address>(srcMemory.virtualAddress()), dstOrigin,
+                                srcOrigin, sizeIn, entire, blitWg, copyMetadata,
+                                !copyMetadata.isAsync_, localCopy);
     }
   }
 
