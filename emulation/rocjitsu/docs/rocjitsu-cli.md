@@ -104,7 +104,7 @@ Usage: rocjitsu [options] -- <app> [args...]
 | `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. Dedicated flags win over `--option`, regardless of argument order. |
 | `--option KEY=VALUE`, `-o KEY=VALUE` | Override a supported top-level config value for this launch. Supported keys are `cpu_thread_budget` and `wait_checking`; `--cpu-thread-budget` and `--wait-checking` take precedence. |
 | `--env KEY=VALUE` | Add or replace an environment variable for the launched app/debugger. Attach socket lookup uses these child runtime-directory overrides before validating the socket. |
-| `--clear-env-vars` | Start the launched app/debugger from a clean environment, preserving `PATH`, `HOME`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, and `TMPDIR`, then applying `--env`. |
+| `--clear-env-vars` | Start the launched app/debugger from a scrubbed environment that keeps only basic process/session variables needed for executable lookup, home/terminal/locale behavior, and temporary files: `PATH`, `HOME`, `TERM`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, and `TMPDIR`. Apply `--env` afterward to replace or remove values. |
 | `--workdir <dir>` | Change to an existing directory before executing the target. Relative app paths are resolved from this directory. |
 | `--gdb` | Run the launched app under `rocgdb`. Unless `--attach` is used, debugger launches implicitly start a daemon so ROCgdb and the inferior share one simulated GPU backend. |
 | `--gdb-ex <cmd>` | Add a `rocgdb` command before the program. May be repeated, implies `--gdb`, and runs ROCgdb in batch mode when commands are present. |
@@ -117,6 +117,8 @@ Usage: rocjitsu [options] -- <app> [args...]
 | `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit. |
 | `paths [--json]` | Print config/runtime search paths, the daemon socket, and `config_handoff_path`, the process-independent fallback config handoff opened by the interposer when no invocation directory is set. A launch writes its own handoff under `$ROCJITSU_INVOCATION_DIR/config_path` inside the exec'd app. `--json` must follow `paths`, as in `rocjitsu paths --json`. |
 | `--` | Separator between rocjitsu options and the target application command line. |
+
+When `--attach` is combined with `--clear-env-vars` and no child runtime override remains, rocjitsu keeps the launcher-selected daemon by exporting the resolved invocation directory. An explicit empty `--env ROCJITSU_RUNTIME_DIR=` follows the normal child fallback through `XDG_RUNTIME_DIR` and then `/tmp/rocjitsu-<uid>`.
 
 ### Usage Examples
 
@@ -147,6 +149,15 @@ rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 
 # Daemon-only: run server (no app launched)
 rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
+
+# Multi-node manifest: start one daemon per local node with a distinct runtime
+ROCJITSU_RUNTIME_DIR=/tmp/rocjitsu-node-a \
+  rocjitsu --daemon --config configs/system_manifest.json --node node-a
+ROCJITSU_RUNTIME_DIR=/tmp/rocjitsu-node-b \
+  rocjitsu --daemon --config configs/system_manifest.json --node node-b
+
+# Connect a client to a specific node daemon
+rocjitsu --attach /tmp/rocjitsu-node-a -- ./rank0
 
 # Attach to the daemon in the current runtime directory
 rocjitsu --attach default -- ./app
