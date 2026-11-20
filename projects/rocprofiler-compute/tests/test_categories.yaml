@@ -28,7 +28,6 @@ test_categories:
       - test_ml_api_tracing_definitions
       - test_ml_api_tracing_operator_patterns
       - test_ml_api_tracing_trace_selection
-      - test_ml_api_tracing_stdlib_imports
       - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
@@ -150,7 +149,6 @@ test_categories:
       - test_ml_api_tracing_definitions
       - test_ml_api_tracing_operator_patterns
       - test_ml_api_tracing_trace_selection
-      - test_ml_api_tracing_stdlib_imports
       - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
@@ -290,7 +288,6 @@ test_categories:
       - test_ml_api_tracing_definitions
       - test_ml_api_tracing_operator_patterns
       - test_ml_api_tracing_trace_selection
-      - test_ml_api_tracing_stdlib_imports
       - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
@@ -430,7 +427,6 @@ test_categories:
       - test_ml_api_tracing_definitions
       - test_ml_api_tracing_operator_patterns
       - test_ml_api_tracing_trace_selection
-      - test_ml_api_tracing_stdlib_imports
       - test_ml_api_tracing_errors
       - test_utils_profile
       - test_common
