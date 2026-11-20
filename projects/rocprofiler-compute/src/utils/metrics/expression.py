@@ -3,10 +3,9 @@
 
 """AST transformation and expression-building helpers."""
 
-from __future__ import annotations
-
 import ast
 import re
+from typing import Dict, FrozenSet, Set, Union
 
 from utils.logger import console_warning
 from utils.utils_common import SUPPORTED_FIELD
@@ -20,7 +19,7 @@ class InvalidExpressionError(ValueError):
 
 
 # ast.Attribute is deliberately omitted — it enables dunder-chain escapes.
-ALLOWED_AST_NODES: frozenset[type] = frozenset({
+ALLOWED_AST_NODES: FrozenSet[type] = frozenset({
     ast.Module,
     ast.Expr,
     ast.Expression,
@@ -68,7 +67,7 @@ ALLOWED_AST_NODES: frozenset[type] = frozenset({
     ast.Or,
 })
 
-SUPPORTED_CALL: dict[str, str] = {
+SUPPORTED_CALL: Dict[str, str] = {
     # If the below has a single arg, like(expr), it is an aggr,
     # in which case it turns into a pandas function.
     # If it has args like a list [], it turns into a Python function.
@@ -137,7 +136,7 @@ class CodeTransformer(ast.NodeTransformer):
     #     in correct way or work around.
     #   - The 'raw_pmc_df' is hack code. For other data sources, like wavefront
     #     data,We need to think about template or pass it as a parameter.
-    def visit_Name(self, node: ast.Name) -> ast.Name | ast.Subscript:
+    def visit_Name(self, node: ast.Name) -> Union[ast.Name, ast.Subscript]:
         self.generic_visit(node)
         if (not node.id.startswith("ammolite__")) and (not node.id in SUPPORTED_CALL):
             return ast.Subscript(
@@ -163,6 +162,11 @@ def transform_expression(
         console_warning(f"Invalid metric expression '{source}': {exc}")
         return False
     return True
+
+
+# Eval strings of the valid equations translated so far. Analyze translates the
+# same formulas for every kernel and pass table, so each is parsed only once.
+_EVAL_STRINGS: Dict[str, str] = {}
 
 
 def build_eval_string(equation: str) -> str:
@@ -211,7 +215,10 @@ def build_eval_string(equation: str) -> str:
     if not equation:
         return ""
 
-    equation_string = str(equation)
+    key = str(equation)
+    if key in _EVAL_STRINGS:
+        return _EVAL_STRINGS[key]
+    equation_string = key
 
     # build-in variable starts with '$', python can not handle it.
     # replace '$' with 'ammolite__'.
@@ -222,21 +229,19 @@ def build_eval_string(equation: str) -> str:
     if not transform_expression(ast_node, equation):
         return ""
 
-    equation_string = ast.unparse(ast_node)
-
     # correct column name/label in df with [], such as TCC_HIT[0],
     # the target is df['TCC_HIT[0]']
-    equation_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", equation_string)
+    eval_string = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", ast.unparse(ast_node))
+    _EVAL_STRINGS[key] = eval_string
+    return eval_string
 
-    return equation_string
 
-
-def columns_read(eval_string: str, build_in_vars: dict[str, str]) -> set[str]:
+def columns_read(eval_string: str, build_in_vars: Dict[str, str]) -> Set[str]:
     """Return the raw_pmc_df columns an eval string reads. Columns that its
     built-in variables read count too."""
     columns = set(RAW_PMC_COLUMN_RE.findall(eval_string))
     pending = set(AMMOLITE_VAR_RE.findall(eval_string))
-    seen: set[str] = set()
+    seen: Set[str] = set()
     while pending:
         name = pending.pop()
         seen.add(name)
