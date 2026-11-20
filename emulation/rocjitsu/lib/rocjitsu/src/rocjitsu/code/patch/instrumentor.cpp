@@ -2553,10 +2553,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
   // Redirect at the original descriptor offset; replace_text then shifts the
   // entry field with everything else. Resource sizes are committed together
-  // with their metadata after text replacement.
-  if (entry_patch &&
-      !patcher.redirect_kernel_entry(kernels.front().descriptor_file_offset,
-                                     kernels.front().entry_text_offset, entry_patch->stub_offset)) {
+  // with their metadata after text replacement. The code ends where the cave
+  // cursor stopped, before the code-end padding.
+  if (entry_patch && !patcher.redirect_kernel_entry(kernels.front().descriptor_file_offset,
+                                                    kernels.front().entry_text_offset,
+                                                    entry_patch->stub_offset, cave_cursor, arch_)) {
     result.errors.emplace_back("failed to redirect the kernel entry to the entry-prologue stub");
     return result;
   }
@@ -2646,6 +2647,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   }
   for (const auto &a : applied)
     append_words(new_text, a.bytes.trampoline_words);
+  assert(new_text.size() == cave_cursor && "the cave is assembled as it was laid out");
   // The cave follows the original code's end padding, so it ends with the same:
   // the instruction prefetcher runs ahead of the last trampoline.
   if (append_code_end_padding(new_text, arch_, &append_error).failed())

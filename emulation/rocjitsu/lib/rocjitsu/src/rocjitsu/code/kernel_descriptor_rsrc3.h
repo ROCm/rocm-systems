@@ -45,6 +45,10 @@ enum class Rsrc3Layout : uint8_t {
 /// @brief True for the layouts that encode SHARED_VGPR_COUNT in bits 3:0.
 [[nodiscard]] bool rsrc3_layout_has_shared_vgpr_count(Rsrc3Layout layout);
 
+/// @brief Bytes in one INST_PREF_SIZE unit: an instruction-cache line on GFX11
+///        and later.
+inline constexpr uint64_t kInstPrefLineBytes = 128;
+
 /// @brief INST_PREF_SIZE in @p rsrc3 for @p arch: the instruction-cache lines a
 ///        wave prefetches from its entry at launch.
 ///

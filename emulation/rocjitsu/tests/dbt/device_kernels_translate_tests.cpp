@@ -382,7 +382,8 @@ TEST(KernelDescriptorTranslator, Cdna4ToRdna4SkipsPrologueWhenNoWorkgroupIdsAreE
   auto patch_plan = *translated;
   patch_plan.target_entry_text_offset = patch_plan.entry_text_offset;
   patch_plan.target_body_entry_text_offset = patch_plan.entry_text_offset;
-  EXPECT_TRUE(patcher.apply_kernel_descriptor_translation(patch_plan, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_TRUE(patcher.apply_kernel_descriptor_translation(patch_plan, ROCJITSU_CODE_ARCH_RDNA4,
+                                                          patcher.text_bytes().size()));
 
   const auto patched_image = patcher.emit();
   const auto *patched_kd =
@@ -454,7 +455,8 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseAboveSemanticScratch)
   auto patch_plan = *translated;
   patch_plan.target_entry_text_offset = patch_plan.entry_text_offset;
   patch_plan.target_body_entry_text_offset = patch_plan.entry_text_offset;
-  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(patch_plan, ROCJITSU_CODE_ARCH_CDNA3));
+  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(patch_plan, ROCJITSU_CODE_ARCH_CDNA3,
+                                                          patcher.text_bytes().size()));
 
   const auto patched_image = patcher.emit();
   const auto *patched_kd =
@@ -492,7 +494,8 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaMovesAccVgprBaseWithoutReportedAccVgp
   rocjitsu::AmdGpuCodeObject mutated(fixture.image.data(), fixture.image.size());
   ASSERT_TRUE(mutated.is_valid());
   rocjitsu::CodeObjectPatcher patcher(mutated);
-  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA3));
+  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA3,
+                                                          patcher.text_bytes().size()));
 
   const auto patched_image = patcher.emit();
   const auto *patched_kd =
@@ -557,7 +560,8 @@ TEST(KernelDescriptorTranslator, Cdna1KeepsVgprAndAccumulatorAllocationsSeparate
     rocjitsu::AmdGpuCodeObject mutated(fixture.image.data(), fixture.image.size());
     ASSERT_TRUE(mutated.is_valid());
     rocjitsu::CodeObjectPatcher patcher(mutated);
-    ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA1));
+    ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA1,
+                                                            patcher.text_bytes().size()));
     const auto patched_image = patcher.emit();
     const auto *patched_kd =
         reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
@@ -738,7 +742,8 @@ TEST(CodeObjectPatcher, RejectsOutOfRangeKernelDescriptorUpdates) {
 
   rocjitsu::KdTranslation invalid;
   invalid.descriptor_file_offset = image_size;
-  EXPECT_FALSE(patcher.apply_kernel_descriptor_translation(invalid, ROCJITSU_CODE_ARCH_RDNA4));
+  EXPECT_FALSE(patcher.apply_kernel_descriptor_translation(invalid, ROCJITSU_CODE_ARCH_RDNA4,
+                                                           patcher.text_bytes().size()));
 }
 
 TEST(BinaryTranslatorE2E, OutputDecodesAsValidRdna4) {

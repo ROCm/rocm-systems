@@ -1524,7 +1524,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       continue;
     if (!applied_descriptors.insert(translation.descriptor_file_offset).second)
       continue;
-    if (!patcher.apply_kernel_descriptor_translation(translation, host_arch)) {
+    if (!patcher.apply_kernel_descriptor_translation(translation, host_arch,
+                                                     translated_text.size())) {
       append_error(
           diagnostics, DiagnosticKind::KernelDescriptor,
           translation.skipped

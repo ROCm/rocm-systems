@@ -178,8 +178,12 @@ public:
   /// owns text relocation and any local prologue layout. The patcher only
   /// mutates descriptor bytes and redirects the descriptor to the already-known
   /// relocated entry offset.
+  ///
+  /// @p code_end_text_offset is where the translated code ends in `.text`; see
+  /// redirect_kernel_entry().
   [[nodiscard]] bool apply_kernel_descriptor_translation(const KdTranslation &translation,
-                                                         rj_code_arch_t target_arch);
+                                                         rj_code_arch_t target_arch,
+                                                         uint64_t code_end_text_offset);
 
   /// @brief Append non-symbolized sidecar descriptors in loaded memory after .text.
   ///
@@ -205,14 +209,26 @@ public:
                                              uint64_t alignment = 1);
 
   /// @brief Redirect one kernel descriptor from @p old_entry_text_offset to @p
-  /// new_entry_text_offset.
+  /// new_entry_text_offset, in a `.text` whose code ends at @p
+  /// code_end_text_offset (before any code-end padding).
   ///
   /// AMDHSA stores the entry as a signed KD-relative byte offset. The
   /// text-offset delta is the same delta in KD-relative coordinates, so the
   /// patcher does not need symbol virtual addresses here.
+  ///
+  /// A GFX11+ wave prefetches INST_PREF_SIZE instruction-cache lines from its
+  /// entry at launch, and a prefetch past the loaded code object faults. The
+  /// compiler sized it for the original entry, so when the entry moves on a
+  /// GFX11 or GFX12.0 target it is lowered to the lines from the new entry's
+  /// line to the end of the code, and never raised. gfx1250 keeps the
+  /// compiler's value even when the entry moves.
+  ///
+  /// @returns false if the descriptor does not fit in the image, or if the new
+  /// entry is at or past @p code_end_text_offset.
   [[nodiscard]] bool redirect_kernel_entry(uint64_t descriptor_file_offset,
                                            uint64_t old_entry_text_offset,
-                                           uint64_t new_entry_text_offset);
+                                           uint64_t new_entry_text_offset,
+                                           uint64_t code_end_text_offset, rj_code_arch_t arch);
 
   std::vector<uint8_t> emit() const &;
   std::vector<uint8_t> emit() &&;

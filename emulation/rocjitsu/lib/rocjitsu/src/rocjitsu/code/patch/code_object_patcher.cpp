@@ -11,6 +11,7 @@
 #include "rocjitsu/code/kernel_descriptor_rsrc3.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cassert>
@@ -1752,7 +1753,8 @@ bool CodeObjectPatcher::patch_kernel_resources(const KernelDescriptorInfo &kerne
 }
 
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
-                                                            rj_code_arch_t target_arch) {
+                                                            rj_code_arch_t target_arch,
+                                                            uint64_t code_end_text_offset) {
   auto desc = read_kernel_descriptor(image_, translation.descriptor_file_offset);
   if (!desc)
     return false;
@@ -1763,7 +1765,8 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
   if (!write_kernel_descriptor(image_, translation.descriptor_file_offset, *desc))
     return false;
   if (!redirect_kernel_entry(translation.descriptor_file_offset, translation.entry_text_offset,
-                             translation.target_entry_text_offset))
+                             translation.target_entry_text_offset, code_end_text_offset,
+                             target_arch))
     return false;
   return true;
 }
@@ -1982,8 +1985,10 @@ bool CodeObjectPatcher::append_nonalloc_section(std::string_view name,
 
 bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
                                               uint64_t old_entry_text_offset,
-                                              uint64_t new_entry_text_offset) {
-  if (!image_contains_range(image_.size(), descriptor_file_offset, sizeof(KD)))
+                                              uint64_t new_entry_text_offset,
+                                              uint64_t code_end_text_offset, rj_code_arch_t arch) {
+  if (!image_contains_range(image_.size(), descriptor_file_offset, sizeof(KD)) ||
+      new_entry_text_offset >= code_end_text_offset)
     return false;
 
   KD desc;
@@ -1995,6 +2000,21 @@ bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
   // after the descriptor in virtual address order. Preserve that signed value
   // when applying the text-relative delta.
   desc.kernel_code_entry_byte_offset = redirected;
+
+  // LLVM sizes the launch prefetch as the function's bytes rounded up to whole
+  // lines; apply that from the new entry's line, in virtual addresses so the
+  // lines are the hardware's. The clamp currently skips gfx1250, so a moved
+  // gfx1250 entry keeps the compiler's value and its launch prefetch can still
+  // run past the code.
+  const std::optional<uint32_t> lines = inst_pref_size(desc.compute_pgm_rsrc3, arch);
+  if (delta != 0 && lines && rsrc3_layout(arch) != Rsrc3Layout::Gfx125) {
+    const uint64_t entry_line =
+        (text_vaddr_ + new_entry_text_offset) / kInstPrefLineBytes * kInstPrefLineBytes;
+    const uint64_t code_lines =
+        util::ceil_div(text_vaddr_ + code_end_text_offset - entry_line, kInstPrefLineBytes);
+    if (code_lines < *lines)
+      set_inst_pref_size(desc.compute_pgm_rsrc3, arch, static_cast<uint32_t>(code_lines));
+  }
   std::memcpy(image_.data() + descriptor_file_offset, &desc, sizeof(desc));
   return true;
 }

@@ -5642,6 +5642,62 @@ TEST(InstrumentorKernelBoundary, EntryDoesNotRelocateOrOverwriteATwelveByteInstr
   EXPECT_EQ(words.at(branch_pc / 4), branch_word.value());
 }
 
+// The entry stub sits after the probe bodies, near the end of the patched .text, so the
+// compiler's launch prefetch, sized for the original entry, would run past the code from it. The
+// patched descriptor prefetches from the stub's line to the end of the trampolines, rounded up to
+// a line, which ends inside the code-end padding.
+TEST(InstrumentorKernelBoundary, TheEntryStubPrefetchesOnlyThePatchedCode) {
+  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr util::FailureOr<uint32_t> nop = build_s_nop(0, kArch);
+  constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kArch);
+  constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
+  static_assert(nop.succeeded() && endpgm.succeeded() && setpc.succeeded());
+  // 4,100 bytes of code, for which the compiler sets ceil(4100 / 128) = 33 lines.
+  std::vector<uint32_t> kernel_words(1024, nop.value());
+  kernel_words.push_back(endpgm.value());
+  constexpr uint32_t kCompilerLines = 33;
+  std::vector<uint8_t> image = make_gfx1200_wave32_kernel_elf(kernel_words, 0);
+  {
+    const AmdGpuCodeObject source(image.data(), image.size());
+    const Section *text = source.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    ASSERT_EQ(kernels.size(), 1u);
+    amdhsa::kernel_descriptor_t descriptor = kernels.front().descriptor;
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
+                       amdhsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE, kCompilerLines);
+    std::memcpy(image.data() + kernels.front().descriptor_file_offset, &descriptor,
+                sizeof(descriptor));
+  }
+  const std::vector<uint8_t> body = make_gfx1200_probe_elf("boundary", {setpc.value()});
+  const AmdGpuCodeObject object(image.data(), image.size());
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  Instrumentor instrumentor(object, kArch);
+  InstrumentationPoint point;
+  point.kind = InstrumentationKind::KernelEntry;
+  point.probe_obj = &probe;
+  point.probe_symbol = "boundary";
+  instrumentor.add_point(point);
+  const InstrumentedCodeObject result = instrumentor.patch();
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  const Section *text = patched.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const uint64_t entry = kernels.front().entry_text_offset;
+  const uint64_t code_end = code_end_offset(section_words(patched, ".text"), kArch);
+  ASSERT_GE(entry, kernel_words.size() * sizeof(uint32_t)) << "the entry is the stub in the cave";
+  ASSERT_LT(entry, code_end);
+  const uint64_t entry_line = (text->vaddr() + entry) / 128 * 128;
+  const uint64_t expected_lines = (text->vaddr() + code_end - entry_line + 127) / 128;
+  ASSERT_LT(expected_lines, kCompilerLines);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(kernels.front().descriptor.compute_pgm_rsrc3,
+                               amdhsa::COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE),
+            expected_lines);
+}
+
 TEST(InstrumentorResources, ScratchGrowthWithoutMetadataPublishesNothing) {
   const std::vector<uint8_t> image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, 64);
   const std::vector<uint8_t> original = image;

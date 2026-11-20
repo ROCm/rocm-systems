@@ -282,7 +282,10 @@ every trampoline appended after the original bytes with `append_words()` /
 and applies it with a single `replace_text()`. A patch
 carrying an entry prologue first calls `redirect_kernel_entry()` to point the
 descriptor at the stub, at the descriptor's original file offset, before
-`replace_text()` shifts the entry field with everything else. After text
+`replace_text()` shifts the entry field with everything else. The redirect also
+takes the end of the code and lowers a moved entry's `INST_PREF_SIZE` (see
+[Launch prefetch](#launch-prefetch)); DBT's descriptor commit passes the end of
+its translated `.text` and gets the same rule. After text
 replacement, it adds the `.rocjitsu.kernarg` record when entry storage is used.
 
 Resource edits use the descriptor rediscovered in that rewritten image.
@@ -745,6 +748,12 @@ The kernarg pair is the loads' address operand while the storage pairs are their
 ### Placement
 
 `Instrumentor::plan_entry_prologue` places the prologue in a stub in the cave, ending in an `s_branch` to the kernel's original entry, and `CodeObjectPatcher::redirect_kernel_entry` points the descriptor's `kernel_code_entry_byte_offset` at the stub. The original entry keeps its bytes, so it is an ordinary anchor and a point on it runs after the prologue. The cave becomes `[probe bodies][s_nop padding][entry stub][trampolines][code-end padding]`. Hardware takes the entry address shifted right by 8, so the padding (`padding_for_residue` / `append_nop_padding`, shared with DBT's launch stubs) gives the stub the original entry's 256-byte residue; `.text` grows in place, so the stub is as aligned as the entry. The padding is unreachable, since the probe bodies ahead of it end in their return. DBT's `append_relocated_kernel_text` is not reusable here: it builds a fresh `.text` around a relocated body, and DBI patches in place.
+
+### Launch prefetch
+
+On GFX11 and later a wave prefetches `INST_PREF_SIZE` 128-byte instruction-cache lines from its entry at launch. On gfx1201 hardware a prefetch past the loaded code object is a fatal page fault, although no instruction reaches those bytes. The compiler sizes the field for the original entry, so from the stub, near the end of the patched `.text`, it can reach past the object. `CodeObjectPatcher::redirect_kernel_entry` therefore lowers it to the lines from the stub's line to the end of the code, rounded up as LLVM rounds the function's own size, and never raises it. The Instrumentor passes the cave cursor as the end, so the prefetch stops inside the code-end padding. An unmoved entry keeps the compiler's value.
+
+The clamp currently skips gfx1250: a moved gfx1250 entry keeps the compiler's value, so its launch prefetch can still run past the code. The simulator does not prefetch, so the rule is checked on the descriptor: `CodeObjectPatcher.RedirectKeepsTheLaunchPrefetchInsideTheCode` and `InstrumentorKernelBoundary.TheEntryStubPrefetchesOnlyThePatchedCode`.
 
 The prologue is **not idempotent**: a second run would load through the guest kernarg pointer the first run restored. Dispatch is the only way into the stub, so a loop, call, rewritten return, or indirect jump that reaches the original entry runs guest code only. The simulator does not check the entry's alignment, so the 256-byte residue is asserted statically.
 
