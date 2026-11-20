@@ -1,9 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ML API marker call-tree processing and inclusive kernel statistics."""
+"""ML API call-tree processing, inclusive statistics, and copied views."""
 
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 import numpy as np
@@ -24,7 +25,7 @@ from ml_api_tracing.analyze.errors import (
     OverlappingMarkerRangeError,
     UncorrelatedLauncherIntervalError,
 )
-from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS
+from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS, USER_REGION_BACKEND
 from ml_api_tracing.marker_format import split_operator_args
 from utils.utils_common import NS_TO_MS
 
@@ -39,6 +40,18 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
     Mean is None only when there are no launches; zero-duration launches
     contribute to the mean and can produce 0.
     """
+    child_rollups = [rollup_node_stats(child) for child in node.children]
+    return _roll_up_from_child_rollups(node, child_rollups)
+
+
+def _roll_up_from_child_rollups(
+    node: CallTreeNode, child_rollups: Sequence[NodeRollup]
+) -> NodeRollup:
+    """Set node's inclusive fields from its kernels and its children's rollups.
+
+    The children's rollups are already complete, so the node does not walk its
+    descendants again. Kernels are added first, then each child in order.
+    """
     launches = 0
     total_duration_ns = 0.0
     minimum_durations: List[float] = []
@@ -52,8 +65,7 @@ def rollup_node_stats(node: CallTreeNode) -> NodeRollup:
         if stats.max_duration_ns is not None:
             maximum_durations.append(stats.max_duration_ns)
 
-    for child in node.children:
-        child_rollup = rollup_node_stats(child)
+    for child_rollup in child_rollups:
         launches += child_rollup.launches
         total_duration_ns += child_rollup.total_duration_ns
         if child_rollup.min_dispatch_ns is not None:
@@ -227,6 +239,41 @@ def validate_all_markers_nested(
                 thread_id=thread_id,
                 start_timestamp=float(row.Start_Timestamp),
             )
+
+
+def fold_identical_sibling_subtrees(
+    nodes: List[CallTreeNode],
+) -> List[CallTreeNode]:
+    """Merge siblings with matching operator, source location, backend,
+    kernel names, and child shape.
+
+    Returns new nodes sorted by total GPU duration. Does not mutate nodes.
+    """
+    return [node for node, _rollup in _fold_siblings(nodes, {})]
+
+
+def copy_matched_operator_subtree(
+    forest: CallTreeForest,
+    matched_nodes: List[CallTreeNode],
+) -> CallTreeForest:
+    """Copy matching operators with the ancestors needed to reach them.
+
+    A framework match keeps its framework's descendant kernels. An independently
+    matched backend adds its own descendants. Ancestors keep their metadata and
+    child paths, but not their own kernels. A matched user region keeps every
+    descendant, including Torch, Triton and nested user regions.
+    """
+    matched_node_ids = {id(node) for node in matched_nodes}
+    subtree: CallTreeForest = {}
+    for thread_id, roots in forest.items():
+        kept_roots: List[CallTreeNode] = []
+        for root in roots:
+            scoped_root = _copy_scoped_operator_node(root, matched_node_ids, set())
+            if scoped_root is not None:
+                kept_roots.append(scoped_root[0])
+        if kept_roots:
+            subtree[thread_id] = kept_roots
+    return subtree
 
 
 def _optional_marker_file_name(value: object) -> Optional[str]:
@@ -433,3 +480,157 @@ def _nested_invocation_keys(
         for node, _path in iter_call_tree_paths(roots)
         for invocation_id in node.invocation_ids
     }
+
+
+def _subtree_shape_key(node: CallTreeNode, shape_keys: Dict[int, tuple]) -> tuple:
+    """Return a hashable key for a node's operator, location, kernels and children.
+
+    shape_keys caches finished keys by node id. A node is keyed once even when
+    its ancestors are folded at several levels.
+    """
+    shape_key = shape_keys.get(id(node))
+    if shape_key is None:
+        line_number = "" if node.line_number is None else str(node.line_number)
+        child_keys = tuple(
+            sorted(_subtree_shape_key(child, shape_keys) for child in node.children)
+        )
+        kernel_names = tuple(sorted(node.kernels))
+        shape_key = (
+            node.name,
+            node.file_name or "",
+            line_number,
+            node.backend or "",
+            kernel_names,
+            child_keys,
+        )
+        shape_keys[id(node)] = shape_key
+    return shape_key
+
+
+def _add_kernel_stats(
+    destination: Dict[str, KernelStats], name: str, stats: KernelStats
+) -> None:
+    existing = destination.get(name)
+    if existing is None:
+        destination[name] = KernelStats(
+            launches=stats.launches,
+            total_duration_ns=stats.total_duration_ns,
+            min_duration_ns=stats.min_duration_ns,
+            max_duration_ns=stats.max_duration_ns,
+            pmc_group_keys=list(stats.pmc_group_keys),
+        )
+        return
+    minimum_durations = [
+        duration
+        for duration in (existing.min_duration_ns, stats.min_duration_ns)
+        if duration is not None
+    ]
+    maximum_durations = [
+        duration
+        for duration in (existing.max_duration_ns, stats.max_duration_ns)
+        if duration is not None
+    ]
+    existing.launches += stats.launches
+    existing.total_duration_ns += stats.total_duration_ns
+    existing.min_duration_ns = min(minimum_durations) if minimum_durations else None
+    existing.max_duration_ns = max(maximum_durations) if maximum_durations else None
+    existing.pmc_group_keys.extend(stats.pmc_group_keys)
+
+
+def _merge_args_invocations(
+    destination: Dict[str, Set[str]], source: Dict[str, Set[str]]
+) -> None:
+    for args_blob, recorded_invocation_ids in source.items():
+        destination.setdefault(args_blob, set()).update(recorded_invocation_ids)
+
+
+def _fold_siblings(
+    nodes: List[CallTreeNode], shape_keys: Dict[int, tuple]
+) -> List[Tuple[CallTreeNode, NodeRollup]]:
+    """Fold identical siblings; return each new node with its completed rollup."""
+    groups: Dict[tuple, List[CallTreeNode]] = {}
+    for node in nodes:
+        groups.setdefault(_subtree_shape_key(node, shape_keys), []).append(node)
+    folded = [
+        _merge_identical_sibling_group(group, shape_keys) for group in groups.values()
+    ]
+    folded.sort(key=lambda folded_node: folded_node[0].total_duration_ms, reverse=True)
+    return folded
+
+
+def _merge_identical_sibling_group(
+    group: List[CallTreeNode], shape_keys: Dict[int, tuple]
+) -> Tuple[CallTreeNode, NodeRollup]:
+    first = group[0]
+    kernels: Dict[str, KernelStats] = {}
+    for node in group:
+        for kernel_name, stats in node.kernels.items():
+            _add_kernel_stats(kernels, kernel_name, stats)
+    folded_children = _fold_siblings(
+        [child for node in group for child in node.children], shape_keys
+    )
+    merged = CallTreeNode(
+        name=first.name,
+        children=[child for child, _child_rollup in folded_children],
+        kernels=kernels,
+        file_name=first.file_name,
+        line_number=first.line_number,
+        backend=first.backend,
+        thread_id=first.thread_id,
+        launcher_thread_id=first.launcher_thread_id,
+    )
+    for node in group:
+        merged.invocation_ids.update(node.invocation_ids)
+        _merge_args_invocations(merged.args_invocations, node.args_invocations)
+    rollup = _roll_up_from_child_rollups(
+        merged, [child_rollup for _child, child_rollup in folded_children]
+    )
+    return merged, rollup
+
+
+def _copy_subtree(node: CallTreeNode) -> CallTreeNode:
+    """Copy a node and its descendants; the copies share the kernel stats."""
+    return replace(node, children=[_copy_subtree(child) for child in node.children])
+
+
+def _copy_scoped_operator_node(
+    node: CallTreeNode,
+    matched_node_ids: Set[int],
+    inherited_backends: Set[str],
+) -> Optional[Tuple[CallTreeNode, NodeRollup]]:
+    """Copy one node, keeping match kernels and in-scope descendant kernels.
+
+    Returns the copy with its completed rollup, or None when nothing under the
+    node is kept. Ancestors use the rollups of their kept children instead of
+    walking the copied descendants again.
+    """
+    node_is_match = id(node) in matched_node_ids
+    if node_is_match and node.backend == USER_REGION_BACKEND:
+        copied_subtree = _copy_subtree(node)
+        return copied_subtree, rollup_node_stats(copied_subtree)
+    descendant_backends = inherited_backends
+    if node_is_match and node.backend is not None:
+        descendant_backends = set(inherited_backends)
+        descendant_backends.add(node.backend)
+    kept_children: List[Tuple[CallTreeNode, NodeRollup]] = []
+    for child in node.children:
+        scoped_child = _copy_scoped_operator_node(
+            child,
+            matched_node_ids,
+            descendant_backends,
+        )
+        if scoped_child is not None:
+            kept_children.append(scoped_child)
+    backend_in_scope = node.backend is not None and node.backend in inherited_backends
+    keep_kernels = node_is_match or backend_in_scope
+    if not keep_kernels and not kept_children:
+        return None
+    copied_node = replace(
+        node,
+        children=[child for child, _child_rollup in kept_children],
+        kernels=node.kernels if keep_kernels else {},
+    )
+    rollup = _roll_up_from_child_rollups(
+        copied_node, [child_rollup for _child, child_rollup in kept_children]
+    )
+    return copied_node, rollup

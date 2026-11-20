@@ -1124,6 +1124,10 @@ ML API trace
 ``--trace-ml-api`` without values traces every supported ML framework.
 Every ``--trace-ml-api`` run also records user ROCTx regions.
 
+The accepted framework values are ``torch`` and ``triton``, separated by
+spaces, as in ``--trace-ml-api torch triton``. User regions are always
+included, so ``user`` is not a profile value.
+
 .. warning::
 
    ML API trace is currently an experimental feature. You must pass
