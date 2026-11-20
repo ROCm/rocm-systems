@@ -20,7 +20,6 @@ from roofline.roofline_hover import (
     build_roof_hover,
     format_bandwidth_pair,
     format_hover_number,
-    truncate_kernel_name,
     wrap_hover_name,
 )
 from roofline.roofline_html import (
@@ -34,6 +33,7 @@ from roofline.roofline_html import (
 from roofline.run_benchmark import (
     BENCHMARKING_SUPPORTED as ROOFLINE_SUPPORTED,  # noqa: F401
 )
+from utils.html_report.report_shell import truncate_kernel_name, write_report
 from utils.logger import (
     console_debug,
     console_error,
@@ -638,20 +638,6 @@ class Roofline:
     ) -> Optional[str]:
         """Write one precision-selectable Plotly HTML document to disk and
         return its path, or None when there is nothing to plot."""
-        dev_id = str(self.__run_parameters["device_id"])
-        kernel_list = ""
-        if self.__run_parameters.get("kernel_filter", False):
-            kernels = getattr(self.__args, "gpu_kernel", None)
-            if kernels:
-                flat = [
-                    str(k)
-                    for group in kernels
-                    for k in (group if isinstance(group, list) else [group])
-                ]
-                for name in sorted(flat):
-                    kernel_list += "_" + name
-
-        workload_dir = self.__run_parameters["workload_dir"]
         figure, view_model = self._combined_html_figure(ops_figure, flops_figure)
         if figure is not None:
             document = build_interactive_document(
@@ -659,9 +645,13 @@ class Roofline:
                 view_model,
                 title="Empirical Roofline Analysis",
             )
-            path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
-            Path(path).write_text(document, encoding="utf-8")
-            return path
+            return write_report(
+                self.__run_parameters["workload_dir"],
+                "empirRoof",
+                self.__run_parameters["device_id"],
+                getattr(self.__args, "gpu_kernel", None),
+                document,
+            )
         return None
 
     def _combined_html_figure(

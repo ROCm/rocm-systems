@@ -177,7 +177,6 @@ class cli_analysis(OmniAnalyze_Base):
                                 "workload_dir": workload_path,
                                 "device_id": 0,
                                 "gpu_arch": gpu_arch,
-                                "kernel_filter": bool(args.gpu_kernel),
                                 "iteration_multiplexing": self._profiling_config.get(
                                     "iteration_multiplexing"
                                 ),

@@ -27,6 +27,7 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+
 SINGLE_PASS_SET = "launch_stats"
 
 SUPPORTED_ARCHS = {
@@ -42,6 +43,17 @@ SUPPORTED_ARCHS = {
     "gfx1201": {"navi48_1": ["NAVI48_1"], "navi48_2": ["NAVI48_2"]},
     "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
+
+
+def embedded_model(document: str, model_id: str) -> dict:
+    """The JSON model an HTML report embeds under *model_id*."""
+    match = re.search(
+        rf'<script id="{model_id}" type="application/json">(.*?)</script>',
+        document,
+        re.DOTALL,
+    )
+    assert match is not None
+    return json.loads(match.group(1))
 
 
 def memory_chart_archs() -> list[str]:

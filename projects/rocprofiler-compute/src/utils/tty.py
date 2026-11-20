@@ -5,7 +5,7 @@ import argparse
 import copy
 import textwrap
 from io import StringIO
-from typing import Any, Optional, TextIO
+from typing import Any, Dict, Optional, TextIO
 
 import pandas as pd
 from rich.console import Console as RichConsole
@@ -184,12 +184,20 @@ def has_time_data(df: pd.DataFrame) -> bool:
     )
 
 
+def saved_report_text(runs: Dict[str, Any], path_attribute: str, report: str) -> str:
+    """Lines naming where analyze saved a report, read from the given attribute
+    of each run; empty when it saved none."""
+    paths = (getattr(workload, path_attribute, None) for workload in runs.values())
+    return "".join(
+        f"\nInteractive {report} saved to {path}\n" for path in paths if path
+    )
+
+
 def _print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) -> None:
     """Print where analyze saved the interactive roofline HTML, if it did."""
-    for workload in runs.values():
-        html_path = getattr(workload, "roofline_html_path", None)
-        if html_path:
-            print(f"\nInteractive roofline plot saved to {html_path}\n", file=output)
+    text = saved_report_text(runs, "roofline_html_path", "roofline plot")
+    if text:
+        print(text, file=output)
 
 
 def show_roofline(
