@@ -342,7 +342,8 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
     EXPECT_GT(_agent_data.agent_count, 0);
     EXPECT_EQ(_agent_data.agent_count, _agent_data.agents.size());
 
-#if !defined(__OPTIMIZE__) || (defined(CODECOV) && CODECOV > 0)
+#if !defined(__OPTIMIZE__) || (defined(CODECOV) && CODECOV > 0) ||                                 \
+    (defined(ROCPROFILER_LLVM_COVERAGE) && ROCPROFILER_LLVM_COVERAGE > 0)
     EXPECT_GT(cb_data.client_elapsed, 0);
     EXPECT_GT(elapsed, 0);
 #else

@@ -13,7 +13,9 @@ find_package(rocprofiler-sdk REQUIRED)
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
 set(PYTEST_ARGS)
-if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer" OR ROCPROFILER_BUILD_CODECOV)
+if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer"
+   OR ROCPROFILER_BUILD_CODECOV
+   OR ROCPROFILER_BUILD_LLVM_COVERAGE)
     set(PYTEST_ARGS -k "not test_total_runtime")
 endif()
 

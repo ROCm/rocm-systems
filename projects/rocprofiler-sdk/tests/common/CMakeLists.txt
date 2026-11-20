@@ -241,7 +241,7 @@ function(rocprofiler_add_integration_execute_test NAME)
     set(_FLAG_OPTS
         "WILL_FAIL" # failure is expected in order for test to pass
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
-        "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
+        "DISABLED_CODECOV" # disable when gcov or LLVM coverage is enabled
         "DISABLED_NO_KFD" # disable when KFD is unavailable
         "WSL_TIMEOUT_SCALE" # scale TIMEOUT when KFD is unavailable
         )
@@ -305,7 +305,8 @@ function(rocprofiler_add_integration_execute_test NAME)
     endif()
 
     # the tests shouldn't be run when rocprofiler-sdk is built with code-coverage support
-    if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLED_CODECOV)
+    if((ROCPROFILER_BUILD_CODECOV OR ROCPROFILER_BUILD_LLVM_COVERAGE)
+       AND arg_DISABLED_CODECOV)
         set(arg_DISABLED ON)
     endif()
 
@@ -438,7 +439,7 @@ function(rocprofiler_add_integration_validate_test NAME)
     set(_FLAG_OPTS
         "WILL_FAIL" # failure is expected in order for test to pass
         "UNSTABLE" # disable when ROCPROFILER_DISABLE_UNSTABLE_CTESTS=ON
-        "DISABLED_CODECOV" # disable when ROCPROFILER_BUILD_CODECOV=ON
+        "DISABLED_CODECOV" # disable when gcov or LLVM coverage is enabled
         "DISABLED_NO_KFD" # disable when KFD is unavailable
         "STRIP_PARAM_BRACKETS"
         "INCLUDE_FILE_PATH"
@@ -515,7 +516,8 @@ function(rocprofiler_add_integration_validate_test NAME)
     endforeach()
 
     # the tests shouldn't be run when rocprofiler-sdk is built with code-coverage support
-    if(ROCPROFILER_BUILD_CODECOV AND arg_DISABLED_CODECOV)
+    if((ROCPROFILER_BUILD_CODECOV OR ROCPROFILER_BUILD_LLVM_COVERAGE)
+       AND arg_DISABLED_CODECOV)
         set(arg_DISABLED ON)
     endif()
 
