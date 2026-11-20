@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <algorithm>
 #include <iostream>
 #include <iomanip>
 #include <vector>
@@ -66,10 +67,13 @@ void DecProc(RocVideoDecoder *p_dec, VideoDemuxer *demuxer, int *pn_frame, int *
         }
         n_frame += n_frame_returned;
         n_pic_decoded += decoded_pics;
-        if (max_num_frames && max_num_frames <= n_frame) {
+        if (max_num_frames && max_num_frames <= n_frame + p_dec->GetNumOfFlushedFrames()) {
             break;
         }
     } while (n_video_bytes);
+    n_frame += p_dec->GetNumOfFlushedFrames();
+    // A single DecodeFrame call can output several frames, so report at most the -f limit.
+    if (max_num_frames) n_frame = std::min(n_frame, max_num_frames);
     if (mem_type == OUT_SURFACE_MEM_NOT_MAPPED) {
         p_dec->WaitForDecodeCompletion();
     }

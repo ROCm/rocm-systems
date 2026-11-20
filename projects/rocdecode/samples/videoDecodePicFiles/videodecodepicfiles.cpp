@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <algorithm>
 #include <iostream>
 #include <fstream>
 #include <cstring>
@@ -289,8 +290,10 @@ int main(int argc, char **argv) {
             reconfig_user_struct.md5_generator_handle = static_cast<void*>(md5_generator);
         }
         viddec->SetReconfigParams(&reconfig_params);
+        // Frames output so far, counting those the reconfigure flush callback output.
+        auto frames_done = [&]() { return n_frame + static_cast<uint32_t>(viddec->GetNumOfFlushedFrames()); };
 
-        for (int i = 0; i < num_iterations; i++) {
+        for (int i = 0; i < num_iterations && FramesLeft(num_decoded_frames, frames_done()) > 0; i++) {
             int num_frames_decoded_in_loop = 0;
             pkg_flags = 0;
             for ( const char* file_name : file_names) {
@@ -316,6 +319,8 @@ int main(int argc, char **argv) {
                 if (num_frames_decoded_in_loop + 1 == file_names.size()) {
                     pkg_flags |= ROCDEC_PKT_ENDOFSTREAM;
                 }
+                // A reconfigure inside DecodeFrame flushes frames through the callback; keep those within -f too.
+                reconfig_user_struct.frames_left = FramesLeft(num_decoded_frames, frames_done());
                 n_frame_returned = viddec->DecodeFrame(bitstream.data(), n_video_bytes, pkg_flags, pts, &decoded_pics);
                 num_frames_decoded_in_loop++;
 
@@ -323,7 +328,7 @@ int main(int argc, char **argv) {
                     std::cerr << "Error: Failed to get Output Surface Info!" << std::endl;
                     break;
                 }
-                for (int i = 0; i < n_frame_returned; i++) {
+                for (int i = 0; i < n_frame_returned && FramesLeft(num_decoded_frames, frames_done()) > 0; i++) {
                     pframe = viddec->GetFrame(&pts);
                     if (b_generate_md5 && pframe) {
                         md5_generator->UpdateMd5ForFrame(pframe, surf_info);
@@ -333,18 +338,20 @@ int main(int argc, char **argv) {
                     }
                     // release frame
                     viddec->ReleaseFrame(pts);
+                    n_frame++;
                 }
                 auto end_time = std::chrono::high_resolution_clock::now();
                 auto time_per_decode = std::chrono::duration<double, std::milli>(end_time - start_time).count();
                 total_dec_time += time_per_decode;
-                n_frame += n_frame_returned;
                 n_pic_decoded += decoded_pics;
-                if (num_decoded_frames && num_decoded_frames <= n_frame) {
+                if (FramesLeft(num_decoded_frames, frames_done()) == 0) {
                     break;
                 }
             }
         }
-        n_frame += viddec->GetNumOfFlushedFrames();
+        n_frame = frames_done();
+        // In -m 3 the decoder counts the pictures pending at a reconfigure itself, without the callback.
+        if (num_decoded_frames) n_frame = std::min(n_frame, num_decoded_frames);
 
         std::cout << "info: Total pictures decoded: " << n_pic_decoded << std::endl;
         std::cout << "info: Total frames output/displayed: " << n_frame << std::endl;

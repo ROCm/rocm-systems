@@ -491,6 +491,12 @@ int RocVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
     bool is_bit_depth_changed = p_video_format->bit_depth_luma_minus8 != bitdepth_minus_8_;
     bool is_dec_surface_num_changed = p_video_format->min_num_decode_surfaces != num_decode_surfaces_;
 
+    // NOT_MAPPED pictures have no frame for the flush callback to drain, so count the ones
+    // displayed but not yet returned as flushed here; the count is reset below.
+    if (out_mem_type_ == OUT_SURFACE_MEM_NOT_MAPPED) {
+        num_frames_flushed_during_reconfig_ += output_frame_cnt_;
+        output_frame_cnt_ = 0;
+    }
     // Flush and clear internal frame store to reconfigure when either coded size or display size has changed.
     if (p_reconfig_params_ && p_reconfig_params_->p_fn_reconfigure_flush)
         num_frames_flushed_during_reconfig_ += p_reconfig_params_->p_fn_reconfigure_flush(this, p_reconfig_params_->reconfig_flush_mode, static_cast<void *>(p_reconfig_params_->p_reconfig_user_struct));
