@@ -77,6 +77,7 @@ impl GpuDevice<'_> {
         byte_length: u64,
         cancel: &AtomicBool,
     ) -> Result<(), CopyFailure> {
+        let _operation = self.driver.admit().map_err(retired)?;
         if address == 0 || byte_length == 0 || address.checked_add(byte_length).is_none() {
             return Err(invalid(
                 ErrorKind::InvalidArgument,

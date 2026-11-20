@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_transfer_batch.h"
 #include "rocjitsu/vm/amdgpu/vm_local_grants.h"
 
 #include "util/log.h"
@@ -1036,12 +1037,21 @@ template <typename Span>
 VmAccessOutcome GpuVmAccess::transfer_tokenized(
     uint64_t address, Span bytes, std::size_t &completed_bytes, VmTransferToken &token,
     VmAccessKind access, bool allow_deferred, const VmTransferMaintenance &maintenance,
-    const VmTransferIngress &ingress, const VmPrivateUcGttCopySource &copy_source) const {
+    const VmTransferIngress &ingress, const VmPrivateUcGttCopySource &copy_source,
+    GpuVmTransferBatch *batch) const {
+  const auto release_batch = [&] {
+    if (batch)
+      batch->release();
+  };
+  // A carried token may poll, reconcile revocation or cancel on any exit.
+  if (token.pending())
+    release_batch();
   if (access == VmAccessKind::Execute || completed_bytes > bytes.size()) {
     token.cancel();
     return VmAccessOutcome::Malformed;
   }
   if (bytes.size() != 0 && bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address) {
+    release_batch();
     report_terminal_fault(address, access, VmAccessOutcome::Malformed);
     token.cancel();
     return VmAccessOutcome::Malformed;
@@ -1109,10 +1119,17 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
                                              : VmAccessOutcome::Unavailable;
     }
 
-    MemoryIngressAdmission pt_admitted = admit_pt_rewalk();
-    if (pt_admitted.outcome != VmAccessOutcome::Complete)
-      return pt_admitted.outcome;
-    const MemoryPtEpoch admitted_epoch = pt_admitted.permit.pt_epoch();
+    MemoryIngressAdmission pt_admitted;
+    if (batch) {
+      if (const auto outcome = batch->acquire(); outcome != VmAccessOutcome::Complete)
+        return outcome;
+    } else {
+      pt_admitted = admit_pt_rewalk();
+      if (pt_admitted.outcome != VmAccessOutcome::Complete)
+        return pt_admitted.outcome;
+    }
+    const MemoryPtEpoch admitted_epoch =
+        batch ? batch->pt_permit_.pt_epoch() : pt_admitted.permit.pt_epoch();
     const std::optional<MemoryPtEpoch> token_epoch =
         admitted_epoch ? std::optional<MemoryPtEpoch>{admitted_epoch} : std::nullopt;
     std::optional<VmTransferToken> prepared;
@@ -1209,6 +1226,8 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
     // acquires its own permit before its entered effect and validation rewalk.
     pt_admitted.permit.reset();
     if (prepared) {
+      // Prepared operations can cancel in their destructor, including malformed requests.
+      release_batch();
       if (!allow_deferred)
         return VmAccessOutcome::Malformed;
       if (!prepared->pending() || prepared->operation_->read_result_.empty() ||
@@ -1224,6 +1243,7 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
       continue;
     }
     if (step.outcome != VmAccessOutcome::Complete) {
+      release_batch();
       if (step.report_translation_fault && step.outcome != VmAccessOutcome::Unavailable &&
           step.outcome != VmAccessOutcome::Revoked)
         report_terminal_fault(address + completed_bytes, access, step.outcome);
@@ -1234,6 +1254,39 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
     completed_bytes += step.completed_bytes;
   }
   return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome GpuVmTransferBatch::acquire() {
+  if (!boundary_) {
+    auto admitted = access_.admit_pt_rewalk();
+    if (admitted.outcome != VmAccessOutcome::Complete)
+      return admitted.outcome;
+    pt_permit_ = std::move(admitted.permit);
+    boundary_.emplace(coherence_.acquire_atomic_boundary());
+  }
+  return boundary_->outcome();
+}
+
+void GpuVmTransferBatch::release() {
+  boundary_.reset();
+  pt_permit_.reset();
+}
+
+template <typename Byte>
+VmAccessOutcome GpuVmTransferBatch::transfer(uint64_t address, std::span<Byte> bytes) {
+  constexpr auto kind = std::is_const_v<Byte> ? VmAccessKind::Write : VmAccessKind::Read;
+  const auto outcome = access_.transfer_tokenized(address, bytes, completed_bytes_, token_, kind,
+                                                  true, {}, {}, {}, this);
+  if (outcome == VmAccessOutcome::Complete)
+    completed_bytes_ = 0;
+  return outcome;
+}
+
+VmAccessOutcome GpuVmTransferBatch::read(uint64_t address, std::span<std::byte> bytes) {
+  return transfer(address, bytes);
+}
+VmAccessOutcome GpuVmTransferBatch::write(uint64_t address, std::span<const std::byte> bytes) {
+  return transfer(address, bytes);
 }
 
 VmAccessOutcome GpuVmAccess::read(uint64_t address, std::span<std::byte> bytes,
