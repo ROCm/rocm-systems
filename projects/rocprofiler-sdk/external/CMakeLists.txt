@@ -92,13 +92,14 @@ if(ROCPROFILER_BUILD_ABSEIL)
                   $<BUILD_INTERFACE:absl::check>
                   $<BUILD_INTERFACE:absl::log_globals>
                   $<BUILD_INTERFACE:absl::vlog_is_on>
-                  $<BUILD_INTERFACE:absl::failure_signal_handler>)
+                  $<BUILD_INTERFACE:absl::failure_signal_handler>
+                  $<BUILD_INTERFACE:absl::hash>)
 else()
     find_package(absl REQUIRED)
     target_link_libraries(
         rocprofiler-sdk-abseil
         INTERFACE absl::log absl::log_initialize absl::check absl::log_globals
-                  absl::vlog_is_on absl::failure_signal_handler)
+                  absl::vlog_is_on absl::failure_signal_handler absl::hash)
 endif()
 
 if(ROCPROFILER_BUILD_FMT)

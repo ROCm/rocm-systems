@@ -66,6 +66,74 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+set(ROCPROFILER_LIB_KFD_RECORD_PROCESSOR_TEST_SOURCES record_processor_test.cpp)
+
+add_executable(kfd-dlog-record-processor)
+
+target_sources(kfd-dlog-record-processor
+               PRIVATE ${ROCPROFILER_LIB_KFD_RECORD_PROCESSOR_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-record-processor
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-record-processor
+    SOURCES ${ROCPROFILER_LIB_KFD_RECORD_PROCESSOR_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_CHUNK_POOL_TEST_SOURCES record_chunk_pool_test.cpp)
+
+add_executable(kfd-dlog-chunk-pool)
+
+target_sources(kfd-dlog-chunk-pool PRIVATE ${ROCPROFILER_LIB_KFD_CHUNK_POOL_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-chunk-pool
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+# gtest_add_tests creates one ctest entry per case; both stress tests fit the normal 45 s
+# timeout (measured < 7 s under ASan).
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-chunk-pool
+    SOURCES ${ROCPROFILER_LIB_KFD_CHUNK_POOL_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+set(ROCPROFILER_LIB_KFD_RECORD_STREAM_TEST_SOURCES record_stream_test.cpp)
+
+add_executable(kfd-dlog-record-stream)
+
+target_sources(kfd-dlog-record-stream
+               PRIVATE ${ROCPROFILER_LIB_KFD_RECORD_STREAM_TEST_SOURCES})
+
+target_link_libraries(
+    kfd-dlog-record-stream
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
+
+# gtest_add_tests creates one ctest entry per case.
+rocprofiler_add_unit_test(
+    TARGET kfd-dlog-record-stream
+    SOURCES ${ROCPROFILER_LIB_KFD_RECORD_STREAM_TEST_SOURCES}
+    TIMEOUT 45
+    LABELS "unittests;kfd-dlog"
+    ENVIRONMENT
+        "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 set(ROCPROFILER_LIB_KFD_DLOG_TEST_SOURCES data_structures.cpp)
 
 add_executable(kfd-dlog-data-structures)
@@ -152,23 +220,25 @@ rocprofiler_add_unit_test(
         "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${CMAKE_LIBRARY_OUTPUT_DIRECTORY}:${CMAKE_INSTALL_PREFIX}/lib:${CMAKE_INSTALL_PREFIX}/llvm/lib:${ROCM_PATH}/lib:${ROCM_PATH}/llvm/lib:$ENV{LD_LIBRARY_PATH}"
     FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-set(ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES dispatch_hub_cap_test.cpp)
+set(ROCPROFILER_LIB_KFD_DLOG_HUB_NOCAP_TEST_SOURCES dispatch_hub_nocap_test.cpp)
 
-add_executable(kfd-dlog-hub-cap)
+add_executable(kfd-dlog-hub-nocap)
 
-target_sources(kfd-dlog-hub-cap PRIVATE ${ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES})
+target_sources(kfd-dlog-hub-nocap
+               PRIVATE ${ROCPROFILER_LIB_KFD_DLOG_HUB_NOCAP_TEST_SOURCES})
 
 target_link_libraries(
-    kfd-dlog-hub-cap
+    kfd-dlog-hub-nocap
     PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
             GTest::gtest_main)
 
-# Pins the per-GPU hub cap to 1 for the whole binary so register_batch admit/refuse and
-# eligible-only eviction are exercised (the accessor caches its env read once).
+# Pins the removed cap knob at 1 for the whole binary: on a tree that still honors
+# ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_PER_GPU the admission tests in this file fail
+# (the fail-first proof of the cap removal); with the cap removed the variable is inert.
 rocprofiler_add_unit_test(
-    TARGET kfd-dlog-hub-cap
-    SOURCES ${ROCPROFILER_LIB_KFD_DLOG_HUB_CAP_TEST_SOURCES}
+    TARGET kfd-dlog-hub-nocap
+    SOURCES ${ROCPROFILER_LIB_KFD_DLOG_HUB_NOCAP_TEST_SOURCES}
     TIMEOUT 45
     LABELS "unittests;kfd-dlog"
     ENVIRONMENT
