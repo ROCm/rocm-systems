@@ -21,6 +21,7 @@ pub(crate) mod advice;
 pub(crate) mod compute_copy;
 pub(crate) mod copy_svm;
 pub(crate) mod interop;
+pub(crate) mod prefetch;
 pub(crate) mod svm;
 use copy_svm::*;
 pub(crate) use copy_svm::{copy, image_copy_borrow, image_device_address};
@@ -167,6 +168,8 @@ pub(crate) struct MemoryState {
     pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     /// Active virtual-memory mappings ordered by base address.
     pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
+    /// Most recently issued prefetch destinations until native work retires.
+    pub(crate) pending_prefetches: prefetch::PendingPrefetches,
     /// Prefetch and copy workers joined before memory owners are released.
     pub(crate) workers: Vec<thread::JoinHandle<()>>,
 }
@@ -185,6 +188,7 @@ impl MemoryState {
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
             vmem_mappings: BTreeMap::new(),
+            pending_prefetches: prefetch::PendingPrefetches::default(),
             workers: Vec::new(),
         }
     }
@@ -225,6 +229,7 @@ impl MemoryState {
 
     /// Releases HSA metadata after queues, copies, and signal users stop.
     pub(crate) fn clear(&mut self) {
+        self.pending_prefetches = prefetch::PendingPrefetches::default();
         self.locked_allocations.clear();
         // Mappings borrow handles and reservations. Release them first, then
         // the physical handles and finally their reserved address ranges.

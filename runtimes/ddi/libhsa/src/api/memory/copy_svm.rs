@@ -348,6 +348,15 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
                 return status;
             }
         }
+        let prefetch = match pending
+            .memory
+            .pending_prefetches
+            .prepare(address, size, agent)
+        {
+            Ok(prefetch) => prefetch,
+            Err(status) => return status,
+        };
+        let operation = prefetch.operation();
         let worker_handles = pending.handles.clone();
         let dependency_len = dependency_slice.len();
         let worker = match thread::Builder::new()
@@ -364,6 +373,7 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
                             location,
                         )
                     }));
+                    crate::memory::prefetch::retire(operation);
                     release_async_resources(&[], &reservations, false);
                     finish_async_signal(completion, matches!(result, Ok(true)));
                     release_async_resources(&worker_handles, &[], false);
@@ -372,6 +382,9 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
         };
+        // Queries and worker retirement take the registry lock held here, so
+        // even an immediately completed worker cannot outrun publication.
+        pending.memory.pending_prefetches.publish(prefetch);
         pending.transfer_to_worker();
         pending.memory.workers.push(worker);
         SUCCESS
