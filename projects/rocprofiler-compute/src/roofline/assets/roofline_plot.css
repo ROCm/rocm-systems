@@ -96,10 +96,6 @@
   accent-color: var(--report-accent);
 }
 
-.roofline-kernel-name {
-  font-family: var(--report-kernel-font, monospace);
-}
-
 .roofline-kernel-pct {
   flex: 0 0 auto;
   margin-left: auto;

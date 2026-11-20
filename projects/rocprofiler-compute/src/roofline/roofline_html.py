@@ -11,8 +11,7 @@ from typing import Any, Dict, Final, List, Optional
 
 import plotly.graph_objects as go
 
-from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
-from utils.html_report.report_shell import build_document, read_asset
+from utils.html_report.report_shell import build_page, read_asset
 
 ALL_PEAKS_VALUE = "all"
 LIMITING_PEAK_VALUE = "limiting"
@@ -20,6 +19,7 @@ LIMITING_PEAK_VALUE = "limiting"
 ROOF_EXTRAP_MIN_AI = 1e-150
 ROOF_EXTRAP_MAX_AI = 1e150
 
+MODEL_ID = "roofline-model"
 _PLOT_DIV_ID = "roofline-plot"
 _ASSETS_DIR: Final[Path] = Path(__file__).parent / "assets"
 
@@ -58,7 +58,6 @@ class RooflineViewModel:
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
             "limitingPeakValue": LIMITING_PEAK_VALUE,
-            "kernelNameFontFamily": KERNEL_NAME_FONT_FAMILY,
         }
 
 
@@ -97,11 +96,11 @@ def build_interactive_document(
         ),
         PLOT_FRAGMENT=fragment,
     )
-    return build_document(
+    return build_page(
+        _ASSETS_DIR,
+        "roofline_plot",
         title=title,
-        body_html=body_html,
-        page_css=read_asset(_ASSETS_DIR, "roofline_plot.css"),
-        page_js=read_asset(_ASSETS_DIR, "roofline_plot.js"),
-        model_id="roofline-model",
+        model_id=MODEL_ID,
         model=view_model.to_payload(),
+        body_html=body_html,
     )
