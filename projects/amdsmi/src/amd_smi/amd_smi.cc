@@ -1519,8 +1519,8 @@ amdsmi_status_t fill_cuid_info(const amdcuid_id_t& handle, amdsmi_cuid_info_t* i
   copy_cuid_string(handle, info->derived, sizeof(info->derived));
 
   // A temporary CUID has no primary, for any caller; a permanent one is
-  // root-only because its payload embeds the raw serial number. Either way
-  // the caller gets an empty primary and a successful call.
+  // root-only because its payload embeds the raw serial number. If a primary
+  // is available, copy it; otherwise leave the primary field empty.
   amdcuid_id_t primary = {};
   uint32_t length = sizeof(primary);
   const amdcuid_status_t primary_status =
