@@ -31,7 +31,7 @@
 
 #include "fakes/init_fakes.h"
 #include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
-#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
+#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize, g_symkAgHierAvailable
 #include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
 #include "fakes/mgmt_task_enq_fakes.h"               // g_ncclMgmtTaskEnqueue
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
@@ -10836,6 +10836,7 @@ struct Tr_AllGatherInfo {
   int nc;
   int romeTopoModelIdx;
   int treeCompact;
+  bool blocking;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];
@@ -10848,6 +10849,11 @@ struct Tr_AllGatherInfo {
   int localCollNetCount;
   int isAllNvlink;
   bool nicFused;
+  int minCTAs;
+  int maxCTAs;
+  int symAgHierMaxBlocks;
+  int64_t symAgHierMaxChunkBytes;
+  int64_t symCtas;
 };
 
 // One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
@@ -11550,6 +11556,49 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
 }
 
+TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWhereHierAllGatherCanRun) {
+  using Patch = std::function<void(Tr_AllGatherInfo&)>;
+  // The mismatch and kTrPostsetReached share a code, so the Postset call count tells them apart.
+  // Every comm is partitioned, so a hierarchical AllGather that can't run (MI300X, MI355X) must skip the check.
+  auto reachesPostset = [](bool hierAvailable, const Patch& patch) {
+    TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+    Tr_ReachAllGather3(c, "gfx900");
+    c.get()->config.minCTAs = 3;
+    c.get()->config.maxCTAs = 5;
+    ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+      return std::string(env) == "SYM_CTAS" ? 7 : deft;
+    });
+    ScopedHook available(g_symkAgHierAvailable, [=](ncclComm*) { return hierAvailable; });
+    std::vector<PeerSpec> specs(4);
+    for (auto& s : specs) s.mloPart = 1;
+    const auto gathers = Tr_InstallGathers(c, specs, [&](int r, Tr_AllGatherInfo& row) {
+      if (r == 0) {
+        EXPECT_EQ(row.minCTAs, 3);
+        EXPECT_EQ(row.maxCTAs, 5);
+        EXPECT_EQ(row.symCtas, 7);
+        EXPECT_EQ(row.symAgHierMaxBlocks, ncclSymkAgHierMaxBlocks);
+        EXPECT_EQ(row.symAgHierMaxChunkBytes, int64_t(ncclSymkAgHierMaxChunkBytes));
+      }
+      if (r == 2 && patch) patch(row);
+    });
+    const int before = g_ncclTopoPostsetCalls;
+    EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+    return g_ncclTopoPostsetCalls > before;
+  };
+  const Patch patches[] = {
+      [](Tr_AllGatherInfo& row) { row.minCTAs += 1; },
+      [](Tr_AllGatherInfo& row) { row.maxCTAs -= 1; },
+      [](Tr_AllGatherInfo& row) { row.symAgHierMaxBlocks += 1; },
+      [](Tr_AllGatherInfo& row) { row.symAgHierMaxChunkBytes *= 2; },
+      [](Tr_AllGatherInfo& row) { row.symCtas += 1; },
+  };
+  EXPECT_TRUE(reachesPostset(/*hierAvailable=*/true, nullptr)) << "matching values";
+  for (size_t i = 0; i < std::size(patches); i++) {
+    EXPECT_TRUE(reachesPostset(/*hierAvailable=*/false, patches[i])) << "hier unavailable, field " << i;
+    EXPECT_FALSE(reachesPostset(/*hierAvailable=*/true, patches[i])) << "field " << i;
+  }
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_TopoPresetFails_PropagatesBeforeTheSecondAllGather) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
@@ -11620,6 +11669,28 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerReportsLowerMinNetBw_FoldsDownToIt)
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, minBw.calls);
   EXPECT_FLOAT_EQ(kPeerBw, c.get()->minNetBw);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_AllRanksBlockingAgreesAcrossLocalAndPeerModes) {
+  for (int rankCount : {1, 2, 4}) {
+    const int modeCount = 1 << rankCount;
+    for (int blockingMask = 0; blockingMask < modeCount; ++blockingMask) {
+      for (int selfRank = 0; selfRank < rankCount; ++selfRank) {
+        SCOPED_TRACE(testing::Message() << "ranks=" << rankCount << " blockingMask=" << blockingMask
+                                       << " selfRank=" << selfRank);
+        TransportsRankComm comm(rankCount, selfRank);
+        comm.get()->config.blocking = (blockingMask >> selfRank) & 1;
+        comm.get()->allRanksBlocking = blockingMask != modeCount - 1;
+        Tr_ReachAllGather3(comm, "gfx900");
+        const auto gathers = Tr_InstallGathers(comm, {}, [&](int peer, Tr_AllGatherInfo& row) {
+          if (peer == selfRank) EXPECT_EQ(row.blocking, comm.get()->config.blocking != 0);
+          row.blocking = ((blockingMask >> peer) & 1) != 0;
+        });
+        EXPECT_EQ(kTrPostsetReached, initTransportsRank(comm.get(), nullptr, comm.timers()));
+        EXPECT_EQ(comm.get()->allRanksBlocking, blockingMask == modeCount - 1);
+      }
+    }
+  }
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_AnyPeerNotAllNvlink_ClearsIsAllNvlink) {

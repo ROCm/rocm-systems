@@ -260,7 +260,7 @@ public:
   static amdgpu::VmAccessOutcome route(amdgpu::ComputeUnitCore &cu,
                                        std::unique_ptr<Instruction> &&instruction,
                                        amdgpu::Wavefront &wave) {
-    return cu.route_memory_inst(std::move(instruction), wave);
+    return cu.route_memory_inst(instruction, wave);
   }
 
   static void retry(amdgpu::ComputeUnitCore &cu) { cu.global_mem_pipeline_.tick(); }
@@ -928,21 +928,27 @@ TEST(GpuAliasIngressGateTest, LocalPermitsJoinExactCloseAndCrossThreadRelease) {
   const Gate::Key second{1, 202, 0x2000, 8, 12};
   const Gate::Key other{2, 101, 0x1000, 7, 11};
   const std::array keys{first, second};
-  auto a = gate->try_acquire_local(first);
-  auto b = std::async(std::launch::async, [&] { return gate->try_acquire_local(second); }).get();
+  Gate::LocalCache cache;
+  auto a = gate->try_acquire_local(first, cache);
+  auto b = std::async(std::launch::async, [&] {
+             Gate::LocalCache worker_cache;
+             return gate->try_acquire_local(second, worker_cache);
+           }).get();
   ASSERT_TRUE(a);
   ASSERT_TRUE(b);
   EXPECT_EQ(gate->tracked_generation_count(), 2u);
   EXPECT_FALSE(gate->try_freeze_for_effect(keys));
-  auto independent =
-      std::async(std::launch::async, [&] { return gate->try_acquire_local(other); }).get();
+  auto independent = std::async(std::launch::async, [&] {
+                       Gate::LocalCache worker_cache;
+                       return gate->try_acquire_local(other, worker_cache);
+                     }).get();
   ASSERT_TRUE(independent);
   std::function<void()> posted;
   int drained = 0;
   ASSERT_TRUE(
       gate->close_batch(keys, [&](auto done) { posted = std::move(done); }, [&] { ++drained; }));
-  EXPECT_FALSE(gate->try_acquire_local(first));
-  EXPECT_TRUE(gate->try_acquire_local(other));
+  EXPECT_FALSE(gate->try_acquire_local(first, cache));
+  EXPECT_TRUE(gate->try_acquire_local(other, cache));
   a.reset();
   EXPECT_FALSE(posted);
   b.reset();
@@ -952,11 +958,35 @@ TEST(GpuAliasIngressGateTest, LocalPermitsJoinExactCloseAndCrossThreadRelease) {
   ASSERT_TRUE(gate->reopen_batch(keys));
   auto freeze = gate->try_freeze_for_effect(keys);
   ASSERT_TRUE(freeze);
-  EXPECT_FALSE(gate->try_acquire_local(second));
+  EXPECT_FALSE(gate->try_acquire_local(second, cache));
   freeze.reset();
-  EXPECT_TRUE(gate->try_acquire_local(second));
+  EXPECT_TRUE(gate->try_acquire_local(second, cache));
   independent.reset();
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, LocalPermitsRetainGatesAfterCacheReplacementAndScopeExit) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  std::array<std::weak_ptr<Gate>, 2> gates;
+  std::array<std::optional<rocjitsu::amdgpu::MemoryIngressPermit>, 2> permits;
+  {
+    Gate::LocalCache cache;
+    for (size_t index = 0; index < gates.size(); ++index) {
+      auto gate = std::make_shared<Gate>();
+      gates[index] = gate;
+      permits[index] = gate->try_acquire_local({1, 101, 0x1000, 7, 11}, cache);
+      ASSERT_TRUE(permits[index]);
+    }
+  }
+  for (const auto &gate : gates)
+    EXPECT_FALSE(gate.expired());
+  std::jthread releaser([permits = std::move(permits)]() mutable {
+    for (auto &permit : permits)
+      permit.reset();
+  });
+  releaser.join();
+  for (const auto &gate : gates)
+    EXPECT_TRUE(gate.expired());
 }
 
 TEST(GpuAliasIngressGateTest, CopiedDrainAuthorityExpiresAfterOwnerContinuation) {
@@ -13990,6 +14020,7 @@ TEST_F(KfdIoctlTest, FreedFixedBoViewsRetireWithHostChanges) {
         }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
   using rocjitsu::amdgpu::VmAccessOutcome;
   constexpr size_t kPage = 4096;
@@ -14096,6 +14127,7 @@ TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
   std::byte value{};
   EXPECT_EQ(access->read(userptr.va_addr, std::span(&value, 1)), VmAccessOutcome::Faulted);
 }
+#endif
 
 TEST_F(KfdIoctlTest, NewSvmHostGrantClaimsOnlyItsFreedUserptrSpan) {
   using rocjitsu::amdgpu::VmAccessOutcome;
@@ -17317,6 +17349,9 @@ public:
   explicit KfdCuAtomicInstruction(std::unique_ptr<rocjitsu::DynamicInstState> state)
       : Instruction("global_atomic_add", nullptr) {
     flags_ |= rocjitsu::MEMORY_OP;
+    set_amdgpu_operation(rocjitsu::amdgpu::Operation::GLOBAL_ATOMIC_ADD);
+    set_amdgpu_memory(rocjitsu::amdgpu::MemoryAddressing::Global,
+                      rocjitsu::amdgpu::MemoryKind::Atomic);
     set_data(std::move(state));
   }
 };
@@ -22208,8 +22243,10 @@ TEST_P(KfdRuntimeSaveTest, PreservesQueueOwnershipAndRuntimeHeaders) {
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EFAULT);
   state.ctl_stack_address = save_address;
   // A failed image query must not undo the caller's explicit suspension.
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
   process->unmap_pages(save_address, save.size());
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_GET_QUEUE_WAVE_STATE, &state), -EIO);
+#endif
   for (uint32_t xcc = 0; xcc < soc_->num_xcds(); ++xcc)
     EXPECT_TRUE(soc_->xcd(xcc)->command_processor()->queue_runtime_suspended_for_test(
         create.queue_id, driver_->local_process_id()));
@@ -22224,6 +22261,7 @@ INSTANTIATE_TEST_SUITE_P(QueueOwnership, KfdRuntimeSaveTest,
                                                               QueueSaveMode::Debugger),
                                             ::testing::Bool()));
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   constexpr uint64_t save_address = 0x600100000ULL;
   constexpr uint32_t area_size = 0x10000;
@@ -22298,6 +22336,7 @@ TEST_F(KfdIoctlTest, FailedResumeThenRuntimeSaveUsesCurrentWave) {
   EXPECT_EQ(vm_read32(save_address + end - 64 - 128 + 4, pid), wave->pc);
   EXPECT_FALSE(process->queue_snapshot_map_.at(create.queue_id).debugger_owns_cwsr);
 }
+#endif
 
 class KfdFatalTrapSaveTest : public KfdIoctlTest, public ::testing::WithParamInterface<bool> {
 protected:
@@ -27722,7 +27761,16 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
       const bool edited = (edited_flags & 1u) != 0;
       const bool saved_barrier = (saved_flags & 2u) != 0;
       const bool in_handler = saved_barrier && edited;
-      wave->set_sleep_wakeup(incoming);
+      if (incoming) {
+        auto *sender = cu->dispatch_wf(0, wave->pc, 16, 4);
+        ASSERT_NE(sender, nullptr);
+        sender->set_process_id(wave->process_id());
+        sender->set_queue_id(wave->queue_id());
+        sender->set_dispatch_id(wave->dispatch_id());
+        sender->set_status_raw(rocjitsu::amdgpu::Wavefront::kStatusInTgMask);
+        issue(*sender, 0xbfb40000u); // s_wakeup
+        sender->halt(rocjitsu::amdgpu::Wavefront::CpCompletionNotice::Suppress);
+      }
       // The two workgroup flags carry independent values through the record.
       wave->set_workgroup_barrier_complete(saved_barrier);
       issue(*wave, 0xb8820844u); // s_getreg_b32 s2, hwreg(STATE_PRIV,1,2)
@@ -29114,6 +29162,7 @@ TEST_P(KfdPendingMemorySaveTest, SnapshotDrainsRetainedLoadsBeforeCapturingRegis
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   constexpr uint64_t kernel = 0x600000000ULL, context = 0x600100000ULL;
   constexpr uint32_t area_size = 0x10000, expected = 0x12345678;
@@ -29196,6 +29245,7 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   EXPECT_TRUE(std::ranges::any_of(
       waves, [&](const auto &wave) { return !wave.sgprs.empty() && wave.sgprs[0] == expected; }));
 }
+#endif
 
 INSTANTIATE_TEST_SUITE_P(QueueOwners, KfdPendingMemorySaveTest,
                          ::testing::Values(PendingMemorySaveMode::Runtime,

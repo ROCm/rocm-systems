@@ -14,8 +14,9 @@ use std::ffi::c_void;
 use crate::ffi::*;
 use crate::image::descriptor as image_descriptor;
 use crate::isa::isa_handle;
-use crate::runtime::{boundary, lock, map_error};
-use crate::{platform, runtime};
+use crate::lifecycle::lock;
+use crate::platform;
+use crate::status::{boundary, map_error};
 
 /// Maximum dimensions of a kernel cluster.
 pub(crate) const KERNEL_CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 {
@@ -101,7 +102,7 @@ pub unsafe extern "C" fn hsa_iterate_agents(callback: AgentCallback, data: *mut 
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            (runtime.cpus.len(), runtime.gpus.len())
+            (runtime.agents.cpus.len(), runtime.agents.gpus.len())
         };
         for index in 0..cpu_count {
             // SAFETY: Traversal callbacks are synchronous and data remains live.
@@ -160,10 +161,10 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
-            let policy = &runtime.gpus[index].scratch;
+            let policy = &runtime.agents.gpus[index].scratch;
             let limit = if policy.asynchronous {
                 policy
                     .async_limit
@@ -208,17 +209,17 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            if let Some(index) = runtime.cpu_index(agent) {
+            if let Some(index) = runtime.agents.cpu_index(agent) {
                 (
                     None,
                     None,
-                    runtime.cpus[index].name.clone(),
-                    runtime.cpus[index].name.clone(),
-                    runtime.cpus[index].compute_units,
-                    runtime.cpus[index].maximum_clock_mhz,
+                    runtime.agents.cpus[index].name.clone(),
+                    runtime.agents.cpus[index].name.clone(),
+                    runtime.agents.cpus[index].compute_units,
+                    runtime.agents.cpus[index].maximum_clock_mhz,
                     None,
-                    host_alloc_dmabuf_supported(runtime.gpus.len()),
-                    runtime.agent_cache_sizes(agent),
+                    host_alloc_dmabuf_supported(runtime.agents.gpus.len()),
+                    runtime.agents.agent_cache_sizes(agent),
                     0,
                     [0; 2],
                     None,
@@ -226,17 +227,22 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     false,
                     false,
                     64,
-                    Some(runtime.cpus[index].native_node),
+                    Some(runtime.agents.cpus[index].native_node),
                     HsaAgent { handle: 0 },
                 )
-            } else if let Some(index) = runtime.gpu_index(agent) {
-                let endpoint = &runtime.gpus[index].endpoint;
-                let host_xgmi_atomics = runtime.route_from_nearest_cpu(index).is_some_and(|link| {
-                    link.kind == rocddi::topology::MemoryLinkType::Xgmi
-                        && link.coherent_support
-                        && link.atomic_support_64bit
-                });
+            } else if let Some(index) = runtime.agents.gpu_index(agent) {
+                let endpoint = &runtime.agents.gpus[index].endpoint;
+                let host_xgmi_atomics =
+                    runtime
+                        .agents
+                        .route_from_nearest_cpu(index)
+                        .is_some_and(|link| {
+                            link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                                && link.coherent_support
+                                && link.atomic_support_64bit
+                        });
                 let cacheline_size = runtime
+                    .agents
                     .topology
                     .caches_for_endpoint(endpoint)
                     .filter(|cache| cache.level == 2)
@@ -249,32 +255,32 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                         | AMD_AGENT_INFO_MEMORY_AVAIL
                         | AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE
                 ) {
-                    let Some(token) = runtime.inflight.enter() else {
+                    let Some(token) = runtime.control.inflight.enter() else {
                         return OUT_OF_RESOURCES;
                     };
-                    Some((runtime.gpus[index].device.clone(), token))
+                    Some((runtime.agents.gpus[index].device.clone(), token))
                 } else {
                     None
                 };
                 (
                     Some(index),
-                    Some(runtime.gpus[index].endpoint.clone()),
-                    runtime.gpus[index].name.clone(),
-                    runtime.gpus[index].product_name().into(),
+                    Some(runtime.agents.gpus[index].endpoint.clone()),
+                    runtime.agents.gpus[index].name.clone(),
+                    runtime.agents.gpus[index].product_name().into(),
                     0,
                     0,
                     native_device,
-                    host_alloc_dmabuf_supported(runtime.gpus.len()),
-                    runtime.agent_cache_sizes(agent),
-                    runtime.gpus[index].asic_family_id(),
-                    runtime.gpus[index].hdp_flush,
-                    Some(runtime.gpus[index].persisting_l2_cache_size.clone()),
-                    runtime.gpus[index].timestamp_frequency_hz(),
-                    runtime.gpus[index].pc_sampling_supported,
+                    host_alloc_dmabuf_supported(runtime.agents.gpus.len()),
+                    runtime.agents.agent_cache_sizes(agent),
+                    runtime.agents.gpus[index].asic_family_id(),
+                    runtime.agents.gpus[index].hdp_flush,
+                    Some(runtime.agents.gpus[index].persisting_l2_cache_size.clone()),
+                    runtime.agents.gpus[index].timestamp_frequency_hz(),
+                    runtime.agents.gpus[index].pc_sampling_supported,
                     host_xgmi_atomics,
                     cacheline_size,
                     None,
-                    runtime.nearest_cpu_agent(endpoint),
+                    runtime.agents.nearest_cpu_agent(endpoint),
                 )
             } else {
                 return INVALID_AGENT;
@@ -283,7 +289,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         let clock_counters = if attribute == AMD_AGENT_INFO_CLOCK_COUNTERS {
             native_device
                 .as_ref()
-                .map(|(device, _)| runtime::clock_counters(device))
+                .map(|(device, _)| crate::clock::clock_counters(device))
         } else {
             None
         };
@@ -693,16 +699,16 @@ pub unsafe extern "C" fn hsa_amd_agent_set_attribute(
             if value.is_null() {
                 return INVALID_ARGUMENT;
             }
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             if attribute != AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE {
                 return INVALID_ARGUMENT;
             }
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            let gpu = &runtime.gpus[index];
+            let gpu = &runtime.agents.gpus[index];
             (
                 gpu.device.clone(),
                 gpu.info().persisting_l2_cache_size_max,
@@ -761,7 +767,7 @@ pub unsafe extern "C" fn hsa_agent_get_exception_policies(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         // SAFETY: The caller supplied writable output storage.
@@ -797,13 +803,13 @@ pub unsafe extern "C" fn hsa_agent_extension_supported(
         }
         // ROCr clears the result before validating the agent handle.
         unsafe { result.write(false) };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
-        let gpu_index = runtime.gpu_index(agent);
+        let gpu_index = runtime.agents.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.gpus[index].info()),
-            EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
+            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.agents.gpus[index].info()),
+            EXTENSION_AMD_PC_SAMPLING => runtime.agents.gpus[index].pc_sampling_supported,
             _ => true,
         });
         let supported = legacy_agent_extension_supported(
@@ -846,13 +852,13 @@ pub unsafe extern "C" fn hsa_agent_major_extension_supported(
         }
         // ROCr clears the result before validating the agent handle.
         unsafe { result.write(false) };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
-        let gpu_index = runtime.gpu_index(agent);
+        let gpu_index = runtime.agents.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.gpus[index].info()),
-            EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
+            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.agents.gpus[index].info()),
+            EXTENSION_AMD_PC_SAMPLING => runtime.agents.gpus[index].pc_sampling_supported,
             _ => true,
         });
         let supported = major_agent_extension_supported(extension, supported_gpu, version_major);

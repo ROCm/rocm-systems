@@ -6,9 +6,10 @@
 use std::ffi::{c_char, c_void};
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::executable::state::*;
 use crate::loader::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 use rocloader::CodeObject as LoaderCodeObject;
 
 #[cfg_attr(
@@ -314,10 +315,10 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_executable_load_agent_code_object_at
         if let Err(error) = record.core.can_load(false) {
             return map_loader_error(error);
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
-        if runtime.gpus[index].endpoint.local_memory_bytes == 0 {
+        if runtime.agents.gpus[index].endpoint.local_memory_bytes == 0 {
             return INVALID_AGENT;
         }
         let Some((bytes, storage)) = runtime

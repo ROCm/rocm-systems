@@ -960,12 +960,23 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
     ) -> Result<(), Error> {
         mapping.set_permissions(permissions)
     }
+    fn diagnostic_virtual_host_mapping(
+        mapping: &KfdVirtualHostMapping,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        mapping.diagnostic_memory()
+    }
     fn free_virtual_host_mapping(mapping: &mut KfdVirtualHostMapping) -> Result<(), Error> {
         mapping.free()
     }
 }
 
 impl UserQueueResource for KfdQueue {
+    fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        KfdQueue::core_snapshot(self)
+    }
+
     type DeviceState = DeviceState;
 
     fn check(&self) -> Result<(), Error> {

@@ -25,7 +25,7 @@ pub(super) struct NativeMipLayout {
 
 /// Computes the image capability flags for a format and geometry.
 pub(crate) fn image_capability(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     agent: HsaAgent,
     geometry: u32,
     format: HsaExtImageFormat,
@@ -43,7 +43,7 @@ pub(crate) fn image_capability(
 
 /// Computes the native image layout requested by an HSA descriptor.
 pub(super) fn image_layout(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     agent: HsaAgent,
     descriptor: HsaExtImageDescriptor,
     permission: u32,
@@ -69,7 +69,7 @@ pub(super) fn image_layout(
         return Err(IMAGE_FORMAT_UNSUPPORTED);
     }
     let format = descriptor::format(descriptor.format).ok_or(IMAGE_FORMAT_UNSUPPORTED)?;
-    let info = runtime.gpus[index].info();
+    let info = runtime.agents.gpus[index].info();
     let architecture = Generation::from_gpu(&info).ok_or(NOT_SUPPORTED)?;
     let mut surface = if architecture == Generation::Gfx12 {
         descriptor::layout(descriptor, format, row_pitch, slice_pitch)?
@@ -77,7 +77,7 @@ pub(super) fn image_layout(
         descriptor::layout(descriptor, format, 0, 0)?
     };
     if architecture != Generation::Gfx12 && descriptor.geometry != 5 {
-        let config = runtime.gpus[index]
+        let config = runtime.agents.gpus[index]
             .device
             .gpu()
             .and_then(|gpu| gpu.surface_config())
@@ -155,11 +155,11 @@ pub(super) fn native_mip_layout(
             0,
             0,
         )?;
-        let token = runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+        let token = runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
         (
             format,
             surface,
-            runtime.gpus[index].device.clone(),
+            runtime.agents.gpus[index].device.clone(),
             generation,
             token,
         )
