@@ -993,7 +993,8 @@ int main(int argc, char *argv[]) {
     std::cout << rj_get_version_string() << "\n";
     return 0;
   }
-  if (parsed.value().positionals_before_separator != 0) {
+  if (parsed.value().positionals_before_separator != 0 ||
+      (!parsed.value().saw_separator && !parsed.value().positional.empty())) {
     std::cerr << "rocjitsu: application arguments must follow --\n";
     print_usage();
     return 1;
