@@ -98,12 +98,10 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveParamet
   }
 }
 
-template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParameters(
-                                                           bool extLaunch = false) {
+template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParameters() {
   auto mg = ModuleGuard::InitModule("launch_kernel_module.code");
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
-  hipError_t expectedErrorLaunchParam = (extLaunch == true) ? hipErrorInvalidConfiguration
-                                                             : hipErrorInvalidValue;
+  hipError_t expectedErrorLaunchParam = hipErrorInvalidValue;
 
   SECTION("f == nullptr") {
     HIP_CHECK_ERROR(

@@ -269,7 +269,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Positive_Parameters) {
 }
 
 HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Negative_Parameters) {
-  ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>(true);
+  ModuleLaunchKernelNegativeParameters<hipExtModuleLaunchKernel>();
 }
 /**
  * Test Description
