@@ -2003,11 +2003,11 @@ bool CodeObjectPatcher::redirect_kernel_entry(uint64_t descriptor_file_offset,
 
   // LLVM sizes the launch prefetch as the function's bytes rounded up to whole
   // lines; apply that from the new entry's line, in virtual addresses so the
-  // lines are the hardware's. The clamp currently skips gfx1250, so a moved
-  // gfx1250 entry keeps the compiler's value and its launch prefetch can still
-  // run past the code.
+  // lines are the hardware's. All code after the entry stays inside the
+  // prefetch, which is what the gfx1250 kernels behind
+  // Gfx1250PreservesSourceInstPrefSize depend on.
   const std::optional<uint32_t> lines = inst_pref_size(desc.compute_pgm_rsrc3, arch);
-  if (delta != 0 && lines && rsrc3_layout(arch) != Rsrc3Layout::Gfx125) {
+  if (delta != 0 && lines) {
     const uint64_t entry_line =
         (text_vaddr_ + new_entry_text_offset) / kInstPrefLineBytes * kInstPrefLineBytes;
     const uint64_t code_lines =

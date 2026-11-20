@@ -2720,7 +2720,7 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
 
 // A wave prefetches INST_PREF_SIZE 128-byte lines from its entry at launch. A moved entry gets
 // LLVM's rule from its own line, ceil((code end - entry line) / 128), and never a larger value.
-// An unmoved entry and gfx1250 keep the compiler's value; every other RSRC3 bit is kept.
+// An unmoved entry keeps the compiler's value; every other RSRC3 bit is kept.
 TEST(CodeObjectPatcher, RedirectKeepsTheLaunchPrefetchInsideTheCode) {
   const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
   AmdGpuCodeObject source(image.data(), image.size());
@@ -2749,8 +2749,8 @@ TEST(CodeObjectPatcher, RedirectKeepsTheLaunchPrefetchInsideTheCode) {
     return redirected.compute_pgm_rsrc3;
   };
 
-  // INST_PREF_SIZE starts at bit 4 on GFX11 and GFX12. The other bits are GFX12's GLG_EN (13)
-  // and GFX11's IMAGE_OP (31) and SHARED_VGPR_COUNT (3:0).
+  // INST_PREF_SIZE starts at bit 4 on GFX11 and GFX12. The other bits are GFX12's GLG_EN (13),
+  // GFX11's IMAGE_OP (31) and SHARED_VGPR_COUNT (3:0), and GFX125's NAMED_BAR_CNT (16:14).
   struct Case {
     const char *name;
     rj_code_arch_t arch;
@@ -2769,7 +2769,7 @@ TEST(CodeObjectPatcher, RedirectKeepsTheLaunchPrefetchInsideTheCode) {
       {"never raised", ROCJITSU_CODE_ARCH_RDNA4, 0, 1, 0, 512, 812, 1},
       {"unmoved", ROCJITSU_CODE_ARCH_RDNA4, 0, 200, 512, 512, 812, 200},
       {"GFX11 six-bit field", ROCJITSU_CODE_ARCH_RDNA3, (1u << 31) | 5u, 60, 0, 512, 812, 3},
-      {"gfx1250 excluded", ROCJITSU_CODE_ARCH_CDNA5, 0, 200, 0, 512, 812, 200},
+      {"gfx1250", ROCJITSU_CODE_ARCH_CDNA5, 5u << 14, 200, 0, 512, 812, 3},
   };
   for (const Case &c : cases) {
     SCOPED_TRACE(c.name);
