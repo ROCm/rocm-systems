@@ -671,8 +671,10 @@ def create_summary_region_queries(
     # rocprofiler-systems writes rocm_marker_*, rocprofiler-sdk writes marker_*, and
     # "markers" is a common typo. Treat all of them as the single "marker" category.
     marker_aliases = {"markers", "rocm_marker", "rocm_markers"}
+    marker_prefixes = ("marker_", "rocm_marker_")
     region_categories = {
-        "marker" if cat in marker_aliases else cat for cat in region_categories
+        "marker" if cat in marker_aliases or cat.startswith(marker_prefixes) else cat
+        for cat in region_categories
     }
 
     category_map = {
@@ -724,7 +726,7 @@ def create_summary_region_queries(
         "'" + c.replace("'", "''") + "'" for c in marker_categories
     )
 
-    marker_query_name = "marker"
+    marker_query_name = "rocm_marker" if "rocm_marker" in marker_in_list else "marker"
     marker_query = f"""
         SELECT COALESCE(JSON_EXTRACT(extdata, '$.message'), name) AS marker_name, *
         FROM regions_and_samples

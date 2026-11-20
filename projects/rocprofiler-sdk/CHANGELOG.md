@@ -15,10 +15,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Extensible check framework with decorator-based registration; prerequisites run first and are pulled into `--only` selections, and skip propagation keeps one root cause from cascading. A check that breaks is reported as `error` (a doctor bug), never as a system failure.
     - Exit code 0 (warnings only), 1 (at least one failure), 2 (tool error, an `--only` pattern matching no check, or a broken check with no failures).
     - Works with every ROCm installation layout, not only `/opt/rocm`: legacy system packages, TheRock system packages (`/opt/rocm/core-X.Y`), TheRock Python packages, tarballs, and custom prefixes. The inspected root, how it was found, and the installation type are reported, and remediation commands match the installation type.
-  - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
-    - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
-  - `rocpd` summary `--summary-by-rank` includes a Rank column when an MPI rank can be detected from the recorded process environment.
-  - `rocpd` summary writes a files table that maps each profiled process (Process_Id, Hostname, and Rank with `--summary-by-rank`) to the database output it was recorded in.
+- rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
+  - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
+- `rocpd` summary `--summary-by-rank` includes a Rank column when an MPI rank can be detected from the recorded process environment.
+- `rocpd` summary writes a files table that maps each profiled process (Process_Id, Hostname, and Rank with `--summary-by-rank`) to the database output it was recorded in.
 
 
 ### Changed

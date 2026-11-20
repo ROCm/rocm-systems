@@ -593,7 +593,7 @@ The following commands demonstrate the usage of advanced analysis options such a
 
 **Output files:**
 
-- ``files.{format}`` - List of filenames to help map the file to process ID, hostname, and rank number (when by-rank is generated).
+- ``files.{format}`` - Maps each profiled process (process ID, hostname, and rank, when by-rank is generated) to the output database name, at profiling time.
 
 - ``kernels_summary.{format}`` - GPU kernel execution summary.
 
@@ -756,7 +756,7 @@ In summary, here is how the output generated using ``rocpd summary`` enhances pe
 
 - **Unified summaries:** Provides aggregate statistics across all input databases, showing combined performance metrics.
 
-- **Rankwise summaries:** Generates separate statistical reports for each input database, enabling direct comparison of performance characteristics.
+- **Rankwise summaries:** Generates one table per category (HIP, HSA, etc) with rows per process (or rank if multiprocess run).
 
 - **Comparative metrics:** Highlights performance variations, identifies outliers, and reveals load balancing opportunities.
 
