@@ -3964,6 +3964,7 @@ typedef struct {
  *          which fails every component rather than leaving the list empty,
  *          ::AMDSMI_STATUS_INSUFFICIENT_SIZE when @p components is too small
  *          (the first N entries, N being the input *@p count, are written),
+ *          ::AMDSMI_STATUS_RETRY if the inventory keeps growing during enumeration,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support,
  *          non-zero on other failures
  */

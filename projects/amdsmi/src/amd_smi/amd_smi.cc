@@ -1776,10 +1776,13 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
   std::vector<amdcuid_id_t> handles;
   amdcuid_status_t cuid_status = AMDCUID_STATUS_INSUFFICIENT_SIZE;
   uint32_t total = 0;
-  while (cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE) {
+  // One size query, one fill, and a retry if another library user refreshed
+  // a growing inventory. Never turn churn into an unbounded critical section.
+  for (int attempt = 0; attempt < 3 && cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE; ++attempt) {
     handles.resize(total);
     cuid_status = amdcuid_get_all_handles(handles.data(), &total);
   }
+  if (cuid_status == AMDCUID_STATUS_INSUFFICIENT_SIZE) return AMDSMI_STATUS_RETRY;
   // No component at all: an empty inventory, not a failure. A node with no
   // usable machine-id is a failure, not an empty node: it has components and
   // cannot name any of them.
