@@ -500,11 +500,16 @@ mi_gpu_spec:
           valu: [FP16, FP32, FP64, I32]
           wmma: [FP8, FP16, BF16]
         models:
-          - gpu_model: rdna4_navi48
+          - gpu_model: navi48_1
             design:
               memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
             chip_ids:
-              physical: 30032  # 0x7550, Radeon RX 9070 and RX 9070 XT
+              physical: 30032  # 0x7550
+          - gpu_model: navi48_2
+            design:
+              memory_levels: ["LDS", "L0", "L1", "L2", "MALL", "VRAM"]
+            chip_ids:
+              physical: 30033  # 0x7551
 
   #########################################################
   # gfx1250 family

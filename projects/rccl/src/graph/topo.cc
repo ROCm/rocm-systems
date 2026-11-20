@@ -25,6 +25,8 @@
 #include <fcntl.h>
 #include "cpuset.h"
 #include "bootstrap.h"
+#include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <float.h>
 
@@ -633,7 +635,7 @@ ncclResult_t ncclTopoAddGpu(struct ncclXmlNode* xmlGpu, struct ncclTopoSystem* s
 #endif
   const char* gcnArch;
   const char* gcnArchName;
-  NCCLCHECK(xmlGetAttr(xmlGpu, "gcn", &gcnArch));
+  NCCLCHECK(xmlGetAttrStr(xmlGpu, "gcn", &gcnArch));
   convertGcnArchToGcnArchName(gcnArch, &gcnArchName);
   strncpy(gpu->gpu.gcn, gcnArchName, GCN_ARCH_NAME_LEN - 1);
   gpu->gpu.gcn[GCN_ARCH_NAME_LEN - 1] = '\0';
@@ -1014,6 +1016,55 @@ static ncclResult_t rcclTopoXmlIsCrossClique(struct ncclXmlNode* node, bool* cro
   return ncclSuccess;
 }
 
+// RCCL: sum of the link counts of the fabric peer entries of the GPU that owns an xgmi node, which is what the
+// default (count * XGMI speed) DEV<->NVS bandwidth adds up to.
+static int rcclTopoXmlFabricPeerCount(struct ncclXmlNode* xgmi) {
+  struct ncclXmlNode* gpu = xgmi->parent;
+  if (gpu == NULL || strcmp(gpu->name, "gpu") != 0) return 0;
+  int total = 0;
+  for (int s = 0; s < gpu->nSubs; s++) {
+    struct ncclXmlNode* sub = gpu->subs[s];
+    int fabricSupported = 0, count = 0;
+    if (strcmp(sub->name, "xgmi") != 0) continue;
+    if (xmlGetAttrIntDefault(sub, "fabric_supported", &fabricSupported, 0) != ncclSuccess || fabricSupported != 1) {
+      continue;
+    }
+    if (xmlGetAttrIntDefault(sub, "count", &count, 0) == ncclSuccess) total += count;
+  }
+  return total;
+}
+
+// RCCL: DEV<->NVS link at fabric_bw_gbps once per DEV, else count * XGMI speed per fabric entry.
+static ncclResult_t rcclTopoConnectFabricSwitch(struct ncclXmlNode* xgmi, struct ncclTopoNode* devNode,
+                                                struct ncclTopoNode* nvs, int count) {
+  float platformBw = 0;
+  NCCLCHECK(xmlGetAttrFloatDefault(xgmi, "fabric_bw_gbps", &platformBw, 0.0f));
+  bool linked = false;
+  for (int l = 0; l < devNode->nlinks; l++) {
+    if (devNode->links[l].remNode == nvs && devNode->links[l].type == LINK_NVL) linked = true;
+  }
+  const bool fromPlatform = std::isfinite(platformBw) && platformBw > 0;
+  if (fromPlatform && linked) return ncclSuccess;
+
+  float bw = platformBw;
+  if (!fromPlatform) {
+    const float nvlSpeed = ncclTopoXGMISpeed(devNode->dev.gcn);
+    bw = count * nvlSpeed;
+    if (!linked) {
+      // The first entry also logs what the whole DEV will get.
+      INFO(NCCL_GRAPH, "UALoE switch: DEV %lx-%lx <-> NVS %.1f GB/s per direction (default)",
+           NCCL_TOPO_ID_SYSTEM_ID(devNode->id), NCCL_TOPO_ID_LOCAL_ID(devNode->id),
+           std::max(rcclTopoXmlFabricPeerCount(xgmi), count) * nvlSpeed);
+    }
+  } else {
+    INFO(NCCL_GRAPH, "UALoE switch: DEV %lx-%lx <-> NVS %.1f GB/s per direction (platform)",
+         NCCL_TOPO_ID_SYSTEM_ID(devNode->id), NCCL_TOPO_ID_LOCAL_ID(devNode->id), bw);
+  }
+  NCCLCHECK(ncclTopoConnectNodes(devNode, nvs, LINK_NVL, bw));
+  NCCLCHECK(ncclTopoConnectNodes(nvs, devNode, LINK_NVL, bw));
+  return ncclSuccess;
+}
+
 // RCCL: XGMI is the AMD analogue of NVLink. Upstream v2.30 introduced the generic DEV
 // (physical device) topology node, with GPU (rank) nodes hanging off their parent DEV node
 // via LINK_LOC. ncclTopoComputePaths()/search now assemble inter-GPU links as DEV->DEV hops
@@ -1048,7 +1099,7 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
     NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
     struct ncclTopoNode* remote = NULL;
     // RCCL: amd-smi lists only local fabric peers, so with several MNNVL hosts link every GPU's fabric
-    // entries to one shared NVS (each adds one link width); a single host keeps direct links.
+    // entries to one shared NVS; a single host keeps direct links.
     int fabricSupported = 0;
     NCCLCHECK(xmlGetAttrIntDefault(node, "fabric_supported", &fabricSupported, 0));
     bool viaFabricSwitch = false;
@@ -1072,10 +1123,12 @@ ncclResult_t ncclTopoAddXGMI(struct ncclXmlNode* node, struct ncclTopoSystem* sy
         remote = system->nodes[NVS].nodes;
       }
     }
-    if (remote) {
+    if (remote && viaFabricSwitch) {
+      NCCLCHECK(rcclTopoConnectFabricSwitch(node, devNode, remote, count));
+    } else if (remote) {
       float nvlSpeed = ncclTopoXGMISpeed(devNode->dev.gcn);
       NCCLCHECK(ncclTopoConnectNodes(devNode, remote, LINK_NVL, count * nvlSpeed));
-      if (targetType != GPU || viaFabricSwitch) {
+      if (targetType != GPU) {
         NCCLCHECK(ncclTopoConnectNodes(remote, devNode, LINK_NVL, count * nvlSpeed));
       }
     }
