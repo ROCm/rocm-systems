@@ -859,6 +859,7 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipArrayGetInfo",
     "hipArrayGetSparseProperties",
     "hipArrayDestroy",
+    "hipArrayGetPlane",
     "hipGetChannelDesc",
     "hipCreateTextureObject",
     "hipDestroyTextureObject",
@@ -2115,8 +2116,11 @@ _HEADER_PREAMBLE = """\
  * wrong API.
  * v16: hipDeviceGetExecAffinitySupport was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v15 reader would decode
- * those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)16u)
+ * those events as the wrong API.
+ * v17: hipArrayGetPlane was appended to HipDispatchTable, shifting the
+ * compiler API IDs up by one. A v16 reader would decode those events as
+ * the wrong API. */
+#define HRR_VERSION ((uint16_t)17u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
