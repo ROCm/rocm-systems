@@ -14,3 +14,5 @@
   `<bindir>/hip-fortran`.
   The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
   you call.
+  The package sets `hip_FORTRAN_LIBRARIES`, the target to link (`hip::hip_fortran`), and
+  `hip_FORTRAN_INCLUDE_DIRS`, the directory of its `.mod` files.

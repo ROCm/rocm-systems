@@ -123,6 +123,11 @@ if(NOT _hip_dir STREQUAL "${_hip_built_dir}")
   endforeach()
 endif()
 
+# The target and the .mod directory, for a project that does not want to spell
+# the target's namespace or that passes the paths to another build system.
+set(hip_FORTRAN_LIBRARIES hip::hip_fortran)
+set(hip_FORTRAN_INCLUDE_DIRS "${_hip_incdir}/${_hip_dir}")
+
 set(hip_FORTRAN_FOUND TRUE)
 
 check_required_components(hip-fortran)

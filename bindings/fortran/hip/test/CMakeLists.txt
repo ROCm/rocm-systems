@@ -169,44 +169,12 @@ file(
 ]=]
 )
 
-# occupancy and cooperative_launch take a kernel's host stub, so the kernel is
-# compiled into the test executable.
-if(NOT CMAKE_HIP_COMPILER_LOADED)
-    include(CheckLanguage)
-    check_language(HIP)
-    if(CMAKE_HIP_COMPILER)
-        enable_language(HIP)
-    endif()
-endif()
-
-if(CMAKE_HIP_COMPILER_LOADED)
-    foreach(_kt IN ITEMS occupancy cooperative_launch)
-        hip_fortran_add_test(${_kt})
-        target_sources(hip_fortran_test_${_kt} PRIVATE vecadd_kernel.hip.cpp)
-        set_source_files_properties(
-            vecadd_kernel.hip.cpp
-            PROPERTIES LANGUAGE HIP
-        )
-        set_target_properties(
-            hip_fortran_test_${_kt}
-            PROPERTIES LINKER_LANGUAGE Fortran POSITION_INDEPENDENT_CODE ON
-        )
-    endforeach()
-else()
-    message(
-        STATUS
-        "HIP: no HIP compiler, skipping the Fortran binding tests that embed a "
-        "GPU kernel (occupancy, cooperative_launch)"
-    )
-endif()
-
-# module_kernel loads the same kernel as a standalone code object at runtime.
-find_program(
-    HIP_FORTRAN_HIPCC
-    hipcc
-    HINTS "${HIPCC_BIN_DIR}" "${ROCM_PATH}/bin" /opt/rocm/bin
-)
-
+# The GPU architecture of the tests that build GPU code: occupancy,
+# cooperative_launch, and the code object of module_kernel and library_module.
+# An explicit CMAKE_HIP_ARCHITECTURES, GPU_TARGETS or AMDGPU_TARGETS wins, and
+# otherwise the first GPU that rocm_agent_enumerator reports. With neither, as
+# on a login node, these tests are skipped: built for the compiler's default
+# architecture, they would fail on the GPU they later run on.
 set(_archs "")
 foreach(_v CMAKE_HIP_ARCHITECTURES GPU_TARGETS AMDGPU_TARGETS)
     if(NOT _archs AND ${_v})
@@ -235,19 +203,61 @@ if(NOT _archs)
     endif()
 endif()
 
+if(_archs AND NOT CMAKE_HIP_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "${_archs}")
+endif()
+
+# occupancy and cooperative_launch take a kernel's host stub, so the kernel is
+# compiled into the test executable.
+if(_archs AND NOT CMAKE_HIP_COMPILER_LOADED)
+    include(CheckLanguage)
+    check_language(HIP)
+    if(CMAKE_HIP_COMPILER)
+        enable_language(HIP)
+    endif()
+endif()
+
+if(NOT _archs)
+    message(
+        STATUS
+        "HIP: no GPU architecture known, skipping the Fortran binding tests that "
+        "build GPU code. Set CMAKE_HIP_ARCHITECTURES or GPU_TARGETS to build them."
+    )
+elseif(CMAKE_HIP_COMPILER_LOADED)
+    foreach(_kt IN ITEMS occupancy cooperative_launch)
+        hip_fortran_add_test(${_kt})
+        target_sources(hip_fortran_test_${_kt} PRIVATE vecadd_kernel.hip.cpp)
+        set_source_files_properties(
+            vecadd_kernel.hip.cpp
+            PROPERTIES LANGUAGE HIP
+        )
+        set_target_properties(
+            hip_fortran_test_${_kt}
+            PROPERTIES LINKER_LANGUAGE Fortran POSITION_INDEPENDENT_CODE ON
+        )
+    endforeach()
+else()
+    message(
+        STATUS
+        "HIP: no HIP compiler, skipping the Fortran binding tests that embed a "
+        "GPU kernel (occupancy, cooperative_launch)"
+    )
+endif()
+
+# module_kernel loads the same kernel as a standalone code object at runtime.
+find_program(
+    HIP_FORTRAN_HIPCC
+    hipcc
+    HINTS "${HIPCC_BIN_DIR}" "${ROCM_PATH}/bin" /opt/rocm/bin
+)
+
 if(NOT HIP_FORTRAN_HIPCC)
     message(
         STATUS
         "HIP: hipcc not found, skipping the module_kernel and library_module "
         "Fortran binding tests (they load a code object built with hipcc --genco)"
     )
-elseif(NOT _archs)
-    message(
-        STATUS
-        "HIP: no GPU architecture known, skipping the module_kernel and library_module "
-        "Fortran binding tests. Set CMAKE_HIP_ARCHITECTURES or GPU_TARGETS to build them."
-    )
-else()
+elseif(_archs)
     set(_arch_flags "")
     foreach(_a IN LISTS _archs)
         list(APPEND _arch_flags "--offload-arch=${_a}")
