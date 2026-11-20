@@ -7,7 +7,7 @@ Separate linked images may select different subsets without creating a global
 union.
 
 Providers simplify source-integrated new-product introduction (NPI) and
-per-image composition. They do not make RocJITsu open-world: a target with new
+per-image composition. They do not make rocjitsu open-world: a target with new
 semantics may still require changes to public enums, ISA traits, code-object
 handling, analysis, DBT, patching, or simulation in the downstream source tree.
 
@@ -29,7 +29,7 @@ inline constexpr IsaTargetDescriptor kTargetDescriptor{
 ```
 
 The canonical string ID and aliases identify the target within the selected
-registry. The optional architecture and GPU bindings connect it to RocJITsu's
+registry. The optional architecture and GPU bindings connect it to rocjitsu's
 closed public enums, offload-bundle processor names, and ELF machine values.
 
 One ISA family may bind multiple concrete targets to a variant-aware decoder

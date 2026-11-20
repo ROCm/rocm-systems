@@ -15,6 +15,7 @@
 * When a failed fastpath I/O is completed by the compatibility path, `hipFileRead()` and `hipFileWrite()` now clear the HIP Runtime's last error.
 * The CMake cache variable that selects the include-what-you-use executable when building with `HIPFILE_USE_IWYU` is now `HIPFILE_IWYU_EXE` instead of `IWYU_EXE`. If you set `IWYU_EXE`, set `HIPFILE_IWYU_EXE` instead.
 * Building with `HIPFILE_USE_IWYU` no longer runs include-what-you-use on a GoogleTest that the build downloads, so its suggestions now cover only hipFile's own code. Neither include-what-you-use nor clang-tidy runs on a downloaded GoogleTest when set directly through the `CMAKE_C_INCLUDE_WHAT_YOU_USE`, `CMAKE_CXX_INCLUDE_WHAT_YOU_USE`, or `CMAKE_CXX_CLANG_TIDY` cache variables, either.
+* After a fastpath I/O fails with `ENOTTY` because the amdgpu kernel driver doesn't support AIS, hipFile now disables the fastpath for the rest of the process, and later I/O goes straight to the fallback path. Previously, every I/O tried the fastpath first, failed with `ENOTTY`, and was then retried on the fallback path. `ais-stats` now counts I/O submitted after the fastpath is disabled under "Fastpath Rejections". If the fallback path is disabled with `HIPFILE_ALLOW_COMPAT_MODE=false`, later `hipFileRead()` and `hipFileWrite()` calls will return `-hipFileInternalError` instead of `-1` with `errno` set to `ENOTTY`.
 
 ### Fixed
 
