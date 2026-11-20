@@ -75,7 +75,8 @@ repos:
         name: clang-tidy (advisory, configures a build)
         language: script
         entry: projects/rccl/maint/run-clang-tidy.sh
-        files: ^projects/rccl/.*\.(c|cc|cpp|cu)$
+        # Only src/ is in the compile database: no tests, tools or plugins.
+        files: ^projects/rccl/src/.*\.(c|cc|cpp|cu)$
         stages: [manual]
         verbose: true
 
