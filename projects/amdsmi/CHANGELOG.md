@@ -46,6 +46,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
+- **Fixed the xGMI traffic counters showing `N/A` on MI450 GPUs with amdgpu 7.2 drivers**.  
+  - `amdsmi_get_gpu_metrics_info()` now reports MI450's xGMI traffic to and from the CPU in KB with these drivers, and `amd-smi xgmi -m` shows it for the CPU link. The values follow the driver's counter, which reads lower than the traffic measured by copy tests. With 7.1 drivers these fields still hold the driver's counts without the conversion to KB.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added

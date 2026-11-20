@@ -1297,6 +1297,10 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t {
   kMetricTempMid,  // v1.9+
   kMetricTempAid,  // v1.9+
   kMetricTempXcd,  // v1.9+
+
+  // xGMI bandwidth accumulators
+  kMetricXgmiReadBandwidthAccumulator,   // v1.9+
+  kMetricXgmiWriteBandwidthAccumulator,  // v1.9+
 };
 using AMDGpuMetricsUnitTypeTranslationTbl_t = std::map<AMDGpuMetricsUnitType_t, std::string>;
 

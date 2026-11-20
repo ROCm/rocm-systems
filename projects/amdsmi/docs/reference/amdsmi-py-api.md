@@ -4055,8 +4055,8 @@ Output: Dictionary with fields
 `pcie_l0_to_recov_count_acc` | PCIe L0 to recovery state transition accumulated count |
 `pcie_replay_count_acc` | PCIe replay accumulated count |
 `pcie_replay_rover_count_acc` | PCIe replay rollover accumulated count |
-`xgmi_read_data_acc` | XGMI accumulated read data transfer size (KiloBytes) | KB
-`xgmi_write_data_acc` | XGMI accumulated write data transfer size (KiloBytes) | KB
+`xgmi_read_data_acc` | XGMI accumulated read data transfer size (KiloBytes). MI450 uses only the first element, its xGMI link to the CPU; the others are N/A | KB
+`xgmi_write_data_acc` | XGMI accumulated write data transfer size (KiloBytes). MI450 uses only the first element, its xGMI link to the CPU; the others are N/A | KB
 `current_gfxclks` | List of current gfx clock frequencies | MHz
 `current_socclks` | List of current soc clock frequencies | MHz
 `current_vclk0s` | List of current v0 clock frequencies | MHz

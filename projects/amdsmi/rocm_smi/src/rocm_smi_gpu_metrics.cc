@@ -344,6 +344,11 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
     {AMDGpuMetricsUnitType_t::kMetricTempMid, "TempMid"}, /* v1.9+ */
     {AMDGpuMetricsUnitType_t::kMetricTempAid, "TempAid"}, /* v1.9+ */
     {AMDGpuMetricsUnitType_t::kMetricTempXcd, "TempXcd"}, /* v1.9+ */
+
+    {AMDGpuMetricsUnitType_t::kMetricXgmiReadBandwidthAccumulator,
+     "XgmiReadBandwidthAcc"}, /* v1.9+ */
+    {AMDGpuMetricsUnitType_t::kMetricXgmiWriteBandwidthAccumulator,
+     "XgmiWriteBandwidthAcc"}, /* v1.9+ */
 };
 
 // Non-logging classification shared by translate_header_to_flag_version() and
@@ -777,6 +782,17 @@ rsmi_status_t GpuMetricsBaseDynamic_t::populate_metrics_dynamic_tbl() {
       case details::AMDGpuMetricAttributeId_t::XGMI_WRITE_DATA_ACC:
         emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed,
              AMDGpuMetricsUnitType_t::kMetricXgmiWriteDataAccumulator, "xgmi_write_data_acc", r);
+        break;
+      // Raw accumulator counts; the public metrics report them in KB.
+      case details::AMDGpuMetricAttributeId_t::XGMI_READ_BANDWIDTH_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed,
+             AMDGpuMetricsUnitType_t::kMetricXgmiReadBandwidthAccumulator,
+             "xgmi_read_bandwidth_acc", r);
+        break;
+      case details::AMDGpuMetricAttributeId_t::XGMI_WRITE_BANDWIDTH_ACC:
+        emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed,
+             AMDGpuMetricsUnitType_t::kMetricXgmiWriteBandwidthAccumulator,
+             "xgmi_write_bandwidth_acc", r);
         break;
       case details::AMDGpuMetricAttributeId_t::XGMI_LINK_STATUS:
         emit(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed,
@@ -2512,6 +2528,18 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBaseDynamic_t::copy_internal_to_externa
     std::copy_n(v->data(), n, dst);
   };
 
+  // Newer drivers publish the traffic of MI450's xGMI link to the CPU as bandwidth
+  // accumulators instead of data counters. A table with data counter rows keeps
+  // those, even unset ones.
+  bool has_xgmi_read_data = false;
+  bool has_xgmi_write_data = false;
+  std::uint64_t xgmi_read_bandwidth_acc[RSMI_MAX_NUM_XGMI_LINKS];
+  std::uint64_t xgmi_write_bandwidth_acc[RSMI_MAX_NUM_XGMI_LINKS];
+  std::fill(std::begin(xgmi_read_bandwidth_acc), std::end(xgmi_read_bandwidth_acc),
+            init_max_uint_types<std::uint64_t>());
+  std::fill(std::begin(xgmi_write_bandwidth_acc), std::end(xgmi_write_bandwidth_acc),
+            init_max_uint_types<std::uint64_t>());
+
   for (const auto& r : m_dyn.get_metric_rows()) {
     switch (r.m_instance.m_attribute_id) {
       // Temps
@@ -2621,10 +2649,20 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBaseDynamic_t::copy_internal_to_externa
       // XGMI accumulators / link status (arrays)
       case details::AMDGpuMetricAttributeId_t::XGMI_READ_DATA_ACC: {
         assign_vector(out.xgmi_read_data_acc, r, RSMI_MAX_NUM_XGMI_LINKS);
+        has_xgmi_read_data = true;
         break;
       }
       case details::AMDGpuMetricAttributeId_t::XGMI_WRITE_DATA_ACC: {
         assign_vector(out.xgmi_write_data_acc, r, RSMI_MAX_NUM_XGMI_LINKS);
+        has_xgmi_write_data = true;
+        break;
+      }
+      case details::AMDGpuMetricAttributeId_t::XGMI_READ_BANDWIDTH_ACC: {
+        assign_vector(xgmi_read_bandwidth_acc, r, RSMI_MAX_NUM_XGMI_LINKS);
+        break;
+      }
+      case details::AMDGpuMetricAttributeId_t::XGMI_WRITE_BANDWIDTH_ACC: {
+        assign_vector(xgmi_write_bandwidth_acc, r, RSMI_MAX_NUM_XGMI_LINKS);
         break;
       }
       case details::AMDGpuMetricAttributeId_t::XGMI_LINK_STATUS: {
@@ -2728,6 +2766,24 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBaseDynamic_t::copy_internal_to_externa
       default:
         break;
     }
+  }
+
+  // One count is a link's average GB/s over one 1 ms accumulation tick: 1 MB, or 1000 KB.
+  constexpr std::uint64_t kKbPerBandwidthCount = 1000;
+  const auto bandwidth_acc_to_kb = [](const std::uint64_t (&acc)[RSMI_MAX_NUM_XGMI_LINKS],
+                                      std::uint64_t (&kb)[RSMI_MAX_NUM_XGMI_LINKS]) {
+    for (std::size_t i = 0; i < RSMI_MAX_NUM_XGMI_LINKS; ++i) {
+      // The all-ones "not reported" value is also too large to convert.
+      if (acc[i] <= std::numeric_limits<std::uint64_t>::max() / kKbPerBandwidthCount) {
+        kb[i] = acc[i] * kKbPerBandwidthCount;
+      }
+    }
+  };
+  if (!has_xgmi_read_data) {
+    bandwidth_acc_to_kb(xgmi_read_bandwidth_acc, out.xgmi_read_data_acc);
+  }
+  if (!has_xgmi_write_data) {
+    bandwidth_acc_to_kb(xgmi_write_bandwidth_acc, out.xgmi_write_data_acc);
   }
 
   out.current_gfxclk = out.current_gfxclks[0];

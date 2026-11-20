@@ -110,10 +110,11 @@ using AttrId = amd::smi::details::AMDGpuMetricAttributeId_t;
 
 using AttrType = amd::smi::details::AMDGpuMetricAttributeType_t;
 
+using TypedAttr = std::tuple<AttrId, AttrType, std::vector<uint64_t>>;
+
 // Serializes a dynamic (v1.9) gpu_metrics table, laid out as the driver emits
-// it: header, attribute count, then encoded id + values, all of one type.
-auto BuildDynamicBlob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>>& attrs,
-                      AttrType type = AttrType::TYPE_UINT64) -> std::vector<std::byte> {
+// it: header, attribute count, then each attribute's encoded id and its values.
+auto BuildMixedTypeDynamicBlob(const std::vector<TypedAttr>& attrs) -> std::vector<std::byte> {
   std::vector<std::byte> blob;
   auto put = [&blob](const auto& v) {
     const auto* p = reinterpret_cast<const std::byte*>(&v);
@@ -121,11 +122,13 @@ auto BuildDynamicBlob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>
   };
   put(amd::smi::details::AMDGpuDynamicMetricsHeader_v1_t{0, 1, 9});
   put(static_cast<uint32_t>(attrs.size()));
-  for (const auto& [id, values] : attrs) {
+  for (const auto& [id, type, values] : attrs) {
     put(amd::smi::details::amdgpu_metrics_encode_attr(0, static_cast<uint64_t>(type),
                                                       static_cast<uint64_t>(id), values.size()));
     for (const auto v : values) {
-      if (type == AttrType::TYPE_UINT32) {
+      if (type == AttrType::TYPE_UINT16) {
+        put(static_cast<uint16_t>(v));
+      } else if (type == AttrType::TYPE_UINT32) {
         put(static_cast<uint32_t>(v));
       } else {
         put(v);
@@ -135,6 +138,16 @@ auto BuildDynamicBlob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>
   const auto size = static_cast<uint16_t>(blob.size());
   std::memcpy(blob.data(), &size, sizeof(size));
   return blob;
+}
+
+// The same, with every attribute of one type.
+auto BuildDynamicBlob(const std::vector<std::pair<AttrId, std::vector<uint64_t>>>& attrs,
+                      AttrType type = AttrType::TYPE_UINT64) -> std::vector<std::byte> {
+  std::vector<TypedAttr> typed;
+  for (const auto& [id, values] : attrs) {
+    typed.emplace_back(id, type, values);
+  }
+  return BuildMixedTypeDynamicBlob(typed);
 }
 
 auto ToPublicMetrics(const std::vector<std::byte>& blob) -> amd::smi::AMGpuMetricsPublicLatest_t {
@@ -287,6 +300,100 @@ TEST(GpuUnit, DynamicMetricsSingleInstanceOutOfRangeStaysUnset) {
   EXPECT_EQ(wide.xgmi_link_status[0], UINT16_MAX);
   const auto fits = ToPublicMetrics(BuildDynamicBlob({{AttrId::XGMI_LINK_STATUS, {1}}}));
   EXPECT_EQ(fits.xgmi_link_status[0], 1u);
+}
+
+// The attribute enum mirrors the driver's numbering, which tables use on the wire.
+static_assert(static_cast<int>(AttrId::REVISION) == 106);
+
+// MI450 on amdgpu 7.2 drivers publishes its CPU link's traffic as bandwidth accumulators (driver
+// IDs 104 and 105, GB/s added per 1 ms tick) and an ignored REVISION row (106). Link 0 gets KB.
+TEST(GpuUnit, DynamicMetricsXgmiBandwidthAccumulatorsFillFirstLinkInKb) {
+  const auto out = ToPublicMetrics(BuildMixedTypeDynamicBlob({
+      {static_cast<AttrId>(104), AttrType::TYPE_UINT64, {13631}},
+      {static_cast<AttrId>(106), AttrType::TYPE_UINT16, {1}},
+      {static_cast<AttrId>(105), AttrType::TYPE_UINT64, {8080}},
+  }));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 13631000u);
+  EXPECT_EQ(out.xgmi_write_data_acc[0], 8080000u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], UINT64_MAX);
+  EXPECT_EQ(out.xgmi_write_data_acc[1], UINT64_MAX);
+}
+
+// A direction with a data counter row keeps it, whichever row comes first and even when it is
+// unset; the other direction still converts its accumulator.
+TEST(GpuUnit, DynamicMetricsXgmiDataCountersWinOverBandwidthAccumulators) {
+  const auto bandwidth_first = ToPublicMetrics(BuildDynamicBlob({
+      {AttrId::XGMI_READ_BANDWIDTH_ACC, {5}},
+      {AttrId::XGMI_READ_DATA_ACC, {449353}},
+      {AttrId::XGMI_WRITE_BANDWIDTH_ACC, {7}},
+  }));
+  EXPECT_EQ(bandwidth_first.xgmi_read_data_acc[0], 449353u);
+  EXPECT_EQ(bandwidth_first.xgmi_write_data_acc[0], 7000u);
+  const auto data_first = ToPublicMetrics(BuildDynamicBlob({
+      {AttrId::XGMI_WRITE_DATA_ACC, {449353}},
+      {AttrId::XGMI_WRITE_BANDWIDTH_ACC, {5}},
+  }));
+  EXPECT_EQ(data_first.xgmi_write_data_acc[0], 449353u);
+  const auto unset_data = ToPublicMetrics(BuildDynamicBlob({
+      {AttrId::XGMI_READ_DATA_ACC, {UINT64_MAX}},
+      {AttrId::XGMI_READ_BANDWIDTH_ACC, {5}},
+  }));
+  EXPECT_EQ(unset_data.xgmi_read_data_acc[0], UINT64_MAX);
+}
+
+// An accumulator row with one value per link converts link by link, as the data counter rows map.
+TEST(GpuUnit, DynamicMetricsXgmiBandwidthAccumulatorPerLinkConvertsEachLink) {
+  const auto out = ToPublicMetrics(BuildDynamicBlob({
+      {AttrId::XGMI_READ_BANDWIDTH_ACC, {1, 2}},
+      {AttrId::XGMI_WRITE_BANDWIDTH_ACC, {3, 4}},
+  }));
+  EXPECT_EQ(out.xgmi_read_data_acc[0], 1000u);
+  EXPECT_EQ(out.xgmi_read_data_acc[1], 2000u);
+  EXPECT_EQ(out.xgmi_read_data_acc[2], UINT64_MAX);
+  EXPECT_EQ(out.xgmi_write_data_acc[0], 3000u);
+  EXPECT_EQ(out.xgmi_write_data_acc[1], 4000u);
+  EXPECT_EQ(out.xgmi_write_data_acc[2], UINT64_MAX);
+}
+
+// The largest convertible count converts exactly; a larger one, including the all-ones
+// "not reported" value, stays unavailable.
+TEST(GpuUnit, DynamicMetricsXgmiBandwidthAccumulatorRangeLimits) {
+  const auto limits = ToPublicMetrics(BuildDynamicBlob({
+      {AttrId::XGMI_READ_BANDWIDTH_ACC, {UINT64_MAX / 1000}},
+      {AttrId::XGMI_WRITE_BANDWIDTH_ACC, {UINT64_MAX / 1000 + 1}},
+  }));
+  EXPECT_EQ(limits.xgmi_read_data_acc[0], UINT64_MAX / 1000 * 1000);
+  EXPECT_EQ(limits.xgmi_write_data_acc[0], UINT64_MAX);
+  const auto unset =
+      ToPublicMetrics(BuildDynamicBlob({{AttrId::XGMI_READ_BANDWIDTH_ACC, {UINT64_MAX}}}));
+  EXPECT_EQ(unset.xgmi_read_data_acc[0], UINT64_MAX);
+}
+
+// A driver may declare the accumulator narrower; a real value converts, all-ones stays unset.
+TEST(GpuUnit, DynamicMetricsXgmiBandwidthAccumulatorNarrowerTypeConverts) {
+  const auto narrow = ToPublicMetrics(BuildDynamicBlob(
+      {{AttrId::XGMI_READ_BANDWIDTH_ACC, {1234}}, {AttrId::XGMI_WRITE_BANDWIDTH_ACC, {UINT32_MAX}}},
+      AttrType::TYPE_UINT32));
+  EXPECT_EQ(narrow.xgmi_read_data_acc[0], 1234000u);
+  EXPECT_EQ(narrow.xgmi_write_data_acc[0], UINT64_MAX);
+}
+
+// The per-attribute metrics table keeps the driver's raw counts.
+TEST(GpuUnit, DynamicMetricsXgmiBandwidthAccumulatorsStayRawInTheMetricsTable) {
+  const auto blob = BuildDynamicBlob({
+      {AttrId::XGMI_READ_BANDWIDTH_ACC, {13631}},
+      {AttrId::XGMI_WRITE_BANDWIDTH_ACC, {8080}},
+  });
+  amd::smi::AMDGpuDynamicMetrics_t dyn;
+  ASSERT_EQ(dyn.parse_from_buffer(blob.data(), blob.size()), RSMI_STATUS_SUCCESS);
+  amd::smi::GpuMetricsBaseDynamic_t metrics;
+  metrics.set_parsed_dynamic(std::move(dyn));
+  ASSERT_EQ(metrics.populate_metrics_dynamic_tbl(), RSMI_STATUS_SUCCESS);
+  using Unit = amd::smi::AMDGpuMetricsUnitType_t;
+  const auto tbl = metrics.get_metrics_dynamic_tbl();
+  const auto& links = tbl.at(amd::smi::AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed);
+  EXPECT_EQ(links.at(Unit::kMetricXgmiReadBandwidthAccumulator).at(0).m_value, 13631u);
+  EXPECT_EQ(links.at(Unit::kMetricXgmiWriteBandwidthAccumulator).at(0).m_value, 8080u);
 }
 
 // gpu_metrics versions we can model must build an object; versions we cannot
