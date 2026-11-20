@@ -19,7 +19,7 @@ struct ncclComm;
 
 // Default false, so the selector never reaches the host-hierarchical branch
 // unless a test opts in.
-extern std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t)> g_hostHierAllReduceEligible;
+extern std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t, bool)> g_hostHierAllReduceEligible;
 // Fail loud until a test installs them.
 extern std::function<ncclResult_t(ncclComm*)> g_hostHierEnsure;
 extern std::function<ncclResult_t(const void*, void*, size_t, ncclDataType_t, ncclRedOp_t, ncclComm*, hipStream_t)>

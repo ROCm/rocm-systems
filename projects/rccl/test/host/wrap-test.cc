@@ -4694,11 +4694,12 @@ struct HostHierCalls {
 int SelectHostHier(HostHierCalls* calls, bool query, ncclResult_t ensureResult = ncclSuccess,
                    bool graphCapturingHint = false, ncclComm* comm = nullptr) {
   ScopedHook eligible(g_hostHierAllReduceEligible, [calls](ncclComm*, size_t count, ncclDataType_t type,
-                                                           ncclRedOp_t op) {
+                                                           ncclRedOp_t op, bool registeredBuffers) {
     calls->eligible++;
     EXPECT_EQ(1024u, count);
     EXPECT_EQ(ncclFloat32, type);
     EXPECT_EQ(ncclSum, op);
+    EXPECT_FALSE(registeredBuffers) << "no window is registered";
     return true;
   });
   ScopedHook ensure(g_hostHierEnsure, [calls, ensureResult](ncclComm*) {

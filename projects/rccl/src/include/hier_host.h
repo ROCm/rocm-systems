@@ -20,23 +20,23 @@ struct ncclComm;
 // comm->hostHierState values.
 enum rcclHostHierState {
   rcclHostHierUnprobed = 0,
-  rcclHostHierOff,      // No usable host layout, or a host-hierarchical child comm
-  rcclHostHierLayout,   // Layout known, child comms not built yet
-  rcclHostHierReady,    // Child comms built
-  rcclHostHierFailed,   // Building the child comms failed. Not retried.
+  rcclHostHierOff, // No usable host layout, or a host-hierarchical child comm
+  rcclHostHierLayout, // Layout known, child comms not built yet
+  rcclHostHierReady, // Child comms built on every rank
+  rcclHostHierFailed, // Building the child comms failed on some rank. Not retried.
 };
 
 struct rcclHostLayout {
   int nHosts;
   int ranksPerHost;
-  int hostIndex;  // Hosts are numbered in order of their first rank
-  int localRank;  // Position among this host's ranks, in rank order
+  int hostIndex; // Hosts are numbered in order of their first rank
+  int localRank; // Position among this host's ranks, in rank order
 };
 
 struct rcclHostHier {
   struct rcclHostLayout layout;
-  ncclComm_t intra;  // Ranks of this host, ordered by local rank
-  ncclComm_t inter;  // The same local rank on every host, ordered by host. Null with one host
+  ncclComm_t intra; // Ranks of this host, ordered by local rank
+  ncclComm_t inter; // The same local rank on every host, ordered by host. Null with one host
   // Shared by every host-hierarchical collective on the comm, so running them
   // concurrently on two streams is unsafe.
   void* scratch;
@@ -52,20 +52,23 @@ bool rcclHostLayoutGet(const struct ncclComm* comm, struct rcclHostLayout* layou
 const struct rcclHostLayout* rcclHostHierGetLayout(struct ncclComm* comm);
 
 // Builds the intra-host and inter-host comms on the first call. Collective over
-// comm: every rank must call it together, outside a group.
+// comm: every rank must call it together, outside a group. The ranks agree on the
+// result, so either all of them use the children or none do.
 ncclResult_t rcclHostHierEnsure(struct ncclComm* comm);
 
-// Destroys the child comms. Called from commFree.
+// Destroys the child comms, or aborts them when comm is being aborted. Called from commFree.
 ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 
 // Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in
-// gfx1250 fp32 sum measurements with 8 ranks per host. False for unmeasured host counts.
+// gfx1250 MNNVL fp32 sum measurements with 8 ranks per host. False for unmeasured host counts.
 bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes);
 
 // Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical
-// AllReduce. The caller also checks the dispatch context: group depth 0, no
-// graph capture, no enqueue-only mode.
-bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op);
+// AllReduce. registeredBuffers: the send or receive buffer is in a registered
+// window, which auto mode leaves to the paths that use it. The caller also checks
+// the dispatch context: group depth 0, no graph capture, no enqueue-only mode.
+bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                                   bool registeredBuffers);
 
 // ReduceScatter within the host, AllReduce across hosts, then AllGather within
 // the host. Needs rcclHostHierEnsure to have succeeded.

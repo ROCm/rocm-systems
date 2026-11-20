@@ -11,10 +11,11 @@
 #include "hier_host.h"
 #include "signature-drift.h"
 
-std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t)> g_hostHierAllReduceEligible =
-    [](ncclComm*, size_t, ncclDataType_t, ncclRedOp_t) { return false; };
-bool rcclHostHierAllReduceEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
-  return g_hostHierAllReduceEligible(comm, count, datatype, op);
+std::function<bool(ncclComm*, size_t, ncclDataType_t, ncclRedOp_t, bool)> g_hostHierAllReduceEligible =
+    [](ncclComm*, size_t, ncclDataType_t, ncclRedOp_t, bool) { return false; };
+bool rcclHostHierAllReduceEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                                   bool registeredBuffers) {
+  return g_hostHierAllReduceEligible(comm, count, datatype, op, registeredBuffers);
 }
 ASSERT_HOOK_MATCHES_PROD(g_hostHierAllReduceEligible, rcclHostHierAllReduceEligible);
 

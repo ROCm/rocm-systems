@@ -34,11 +34,12 @@ struct HostHierMockComm
     std::vector<ncclPeerInfo> peers;
     char                      archBuf[16]{};
 
-    HostHierMockComm(const std::vector<int>& hostOf, int rank, const char* arch = "gfx1250")
+    HostHierMockComm(const std::vector<int>& hostOf, int rank, const char* arch = "gfx1250", bool mnnvl = true)
     {
         std::memset(&comm, 0, sizeof(comm));
         std::strncpy(archBuf, arch, sizeof(archBuf) - 1);
         comm.archName = archBuf;
+        comm.MNNVL    = mnnvl ? 1 : 0;
         comm.nRanks   = static_cast<int>(hostOf.size());
         comm.rank     = rank;
         setHosts(hostOf);
@@ -192,8 +193,8 @@ TEST(HostHierAllReduce, NeedsChildComms)
 
 TEST(HostHierAllReduce, AutoWindowEdges)
 {
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, kMiB - 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, kMiB + 1));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 2 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 2 * kMiB + 1));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 4 * kMiB));
@@ -204,13 +205,13 @@ TEST(HostHierAllReduce, AutoWindowEdges)
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 512 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 1024 * kMiB));
 
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, kMiB - 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 2 * kMiB - 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 2 * kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 1024 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 1024 * kMiB + 1));
 
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, kMiB - 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 2 * kMiB - 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 2 * kMiB));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 2048 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 2048 * kMiB + 1));
 
@@ -226,21 +227,28 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
         []()
         {
             auto eligible = [](const std::vector<int>& hostOf, size_t count, ncclDataType_t type = ncclFloat32,
-                               ncclRedOp_t op = ncclSum, const char* arch = "gfx1250") {
-                HostHierMockComm mock(hostOf, 0, arch);
-                return rcclHostHierAllReduceEligible(mock.get(), count, type, op);
+                               ncclRedOp_t op = ncclSum, const char* arch = "gfx1250", bool mnnvl = true,
+                               bool registered = false) {
+                HostHierMockComm mock(hostOf, 0, arch, mnnvl);
+                return rcclHostHierAllReduceEligible(mock.get(), count, type, op, registered);
             };
-            EXPECT_TRUE(eligible(blockHosts(2, 8), floats(kMiB)));
-            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(kMiB) - 8)) << "below the window";
+            EXPECT_TRUE(eligible(blockHosts(2, 8), floats(2 * kMiB)));
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(kMiB))) << "below the window";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(4 * kMiB))) << "2-host gap";
+            EXPECT_FALSE(eligible(blockHosts(4, 8), floats(kMiB))) << "four hosts, below the window";
+            EXPECT_TRUE(eligible(blockHosts(4, 8), floats(2 * kMiB)));
             EXPECT_TRUE(eligible(blockHosts(4, 8), floats(1024 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(4, 8), floats(2048 * kMiB)));
             EXPECT_TRUE(eligible(blockHosts(8, 8), floats(2048 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(1, 8), floats(16 * kMiB))) << "single host";
             EXPECT_FALSE(eligible(blockHosts(2, 4), floats(16 * kMiB))) << "four ranks per host";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB / 2, ncclBfloat16)) << "bf16";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(kMiB), ncclFloat32, ncclMax)) << "max";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(kMiB), ncclFloat32, ncclSum, "gfx950")) << "gfx950";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclMax)) << "max";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx950")) << "gfx950";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx1250", false))
+                << "scale-out gfx1250 without MNNVL";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx1250", true, true))
+                << "registered window";
         })
         .withTimeout(std::chrono::seconds(30))
         .withNumGpus(0);
@@ -253,7 +261,7 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             []()
             {
                 HostHierMockComm mock(blockHosts(2, 8), 0);
-                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(kMiB), ncclFloat32, ncclSum));
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false));
                 EXPECT_EQ(rcclHostHierUnprobed, mock.comm.hostHierState) << "disabled mode must not probe";
             })
             .withEnvironment({{"RCCL_HOST_HIER_ALLREDUCE", "0"}})
@@ -264,11 +272,15 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
             []()
             {
                 auto eligible = [](const std::vector<int>& hostOf, size_t count, ncclDataType_t type,
-                                   ncclRedOp_t op, const char* arch = "gfx1250") {
-                    HostHierMockComm mock(hostOf, 0, arch);
-                    return rcclHostHierAllReduceEligible(mock.get(), count, type, op);
+                                   ncclRedOp_t op, const char* arch = "gfx1250", bool mnnvl = true,
+                                   bool registered = false) {
+                    HostHierMockComm mock(hostOf, 0, arch, mnnvl);
+                    return rcclHostHierAllReduceEligible(mock.get(), count, type, op, registered);
                 };
                 EXPECT_TRUE(eligible(blockHosts(2, 4), 1000, ncclBfloat16, ncclMax, "gfx950"));
+                EXPECT_TRUE(eligible(blockHosts(2, 8), 16, ncclFloat32, ncclSum, "gfx1250", false)) << "no MNNVL";
+                EXPECT_TRUE(eligible(blockHosts(2, 8), 16, ncclFloat32, ncclSum, "gfx1250", true, true))
+                    << "registered window";
                 EXPECT_TRUE(eligible(blockHosts(1, 8), 8, ncclInt32, ncclMin));
                 EXPECT_TRUE(eligible(blockHosts(2, 8), 16, ncclInt64, ncclProd));
                 EXPECT_TRUE(eligible(blockHosts(2, 8), 16, ncclFloat32, ncclAvg));

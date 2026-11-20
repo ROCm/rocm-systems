@@ -8,13 +8,14 @@
 
 #include "algorithms/dda/fabric/fabric_init.h"
 #include "alloc.h"
-#include "archinfo.h"
+#include "bootstrap.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
 #include "param.h"
 #include "recorder.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <vector>
@@ -30,6 +31,13 @@ ncclResult_t initChildFabric(struct ncclComm* child) {
   if (child->ddaFabricMemHandler != nullptr) return ncclSuccess;
   if (!ncclDdaUseFabricPath(child)) return ncclSuccess;
   return ncclDdaFabricCommInit(child);
+}
+
+// A destroy syncs the child's streams and waits at its intra-node barrier, which hangs when a peer is gone, so
+// abort instead when that can be the case.
+ncclResult_t releaseChild(ncclComm_t child, bool abort) {
+  if (child == nullptr) return ncclSuccess;
+  return abort ? ncclCommAbort(child) : ncclCommDestroy(child);
 }
 
 ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes, cudaStream_t stream) {
@@ -58,8 +66,8 @@ bool opSplitsAcrossStages(ncclRedOp_t op, ncclDataType_t datatype) {
   case ncclMin:
     return true;
   case ncclAvg:
-    return datatype == ncclFloat16 || datatype == ncclFloat32 || datatype == ncclFloat64 ||
-           datatype == ncclBfloat16 || datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2;
+    return datatype == ncclFloat16 || datatype == ncclFloat32 || datatype == ncclFloat64 || datatype == ncclBfloat16 ||
+           datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2;
   default:
     return false;
   }
@@ -137,33 +145,43 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm) {
   comm->config.blocking = 1;
   ncclResult_t res = ncclSuccess;
 
-  NCCLCHECKGOTO(ncclCommSplit(comm, layout->hostIndex, layout->localRank, &h->intra, nullptr), res, fail);
-  NCCLCHECKGOTO(ncclCommEnsureReady(h->intra), res, fail);
+  NCCLCHECKGOTO(ncclCommSplit(comm, layout->hostIndex, layout->localRank, &h->intra, nullptr), res, vote);
+  NCCLCHECKGOTO(ncclCommEnsureReady(h->intra), res, vote);
   h->intra->hostHierState = rcclHostHierOff;
   if (layout->nHosts > 1) {
-    NCCLCHECKGOTO(ncclCommSplit(comm, layout->localRank, layout->hostIndex, &h->inter, nullptr), res, fail);
-    NCCLCHECKGOTO(ncclCommEnsureReady(h->inter), res, fail);
+    NCCLCHECKGOTO(ncclCommSplit(comm, layout->localRank, layout->hostIndex, &h->inter, nullptr), res, vote);
+    NCCLCHECKGOTO(ncclCommEnsureReady(h->inter), res, vote);
     h->inter->hostHierState = rcclHostHierOff;
   }
-  NCCLCHECKGOTO(initChildFabric(h->intra), res, fail);
-  NCCLCHECKGOTO(initChildFabric(h->inter), res, fail);
+  NCCLCHECKGOTO(initChildFabric(h->intra), res, vote);
+  NCCLCHECKGOTO(initChildFabric(h->inter), res, vote);
 
+vote:
   comm->config.blocking = parentBlocking;
-  comm->hostHierState = rcclHostHierReady;
-  INFO(NCCL_INIT, "Host-hierarchical comms: rank %d host %d/%d localRank %d/%d intraDda %d interDda %d", comm->rank,
-       layout->hostIndex, layout->nHosts, layout->localRank, layout->ranksPerHost,
-       h->intra->ddaFabricMemHandler != nullptr, h->inter != nullptr && h->inter->ddaFabricMemHandler != nullptr);
-  return ncclSuccess;
+  {
+    // Each rank builds its children on its own. If only some succeeded, they would run the first stage while the
+    // others take the default path, so every rank waits for all of them before using the children.
+    std::vector<uint8_t> ready(comm->nRanks);
+    ready[comm->rank] = res == ncclSuccess;
+    const ncclResult_t voteRes = bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t));
+    if (voteRes == ncclSuccess && std::find(ready.begin(), ready.end(), 0) == ready.end()) {
+      comm->hostHierState = rcclHostHierReady;
+      INFO(NCCL_INIT, "Host-hierarchical comms: rank %d host %d/%d localRank %d/%d intraDda %d interDda %d", comm->rank,
+           layout->hostIndex, layout->nHosts, layout->localRank, layout->ranksPerHost,
+           h->intra->ddaFabricMemHandler != nullptr, h->inter != nullptr && h->inter->ddaFabricMemHandler != nullptr);
+      return ncclSuccess;
+    }
+    if (res == ncclSuccess) res = voteRes != ncclSuccess ? voteRes : ncclRemoteError;
+  }
 
-fail:
-  comm->config.blocking = parentBlocking;
   // A failed split can leave the parent's bootstrap mid-exchange, so never retry.
   comm->hostHierState = rcclHostHierFailed;
-  if (h->inter != nullptr) (void)ncclCommDestroy(h->inter);
-  if (h->intra != nullptr) (void)ncclCommDestroy(h->intra);
+  (void)releaseChild(h->inter, /*abort=*/true);
+  (void)releaseChild(h->intra, /*abort=*/true);
   h->inter = nullptr;
   h->intra = nullptr;
-  WARN("Host-hierarchical comms: split failed on rank %d (%s)", comm->rank, ncclGetErrorString(res));
+  ATTN("Host-hierarchical comms: setup failed on rank %d (%s), using the default path", comm->rank,
+       ncclGetErrorString(res));
   return res;
 }
 
@@ -172,10 +190,13 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   comm->hostHier = nullptr;
   comm->hostHierState = rcclHostHierOff;
   if (h == nullptr) return ncclSuccess;
+  const bool aborting =
+    comm->abortFlag != nullptr && COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) != 0;
   ncclResult_t res = ncclSuccess;
+  NCCLCHECKGOTO(releaseChild(h->inter, aborting), res, exit);
+  NCCLCHECKGOTO(releaseChild(h->intra, aborting), res, exit);
+  // The children's collectives read the scratch buffer.
   if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
-  if (h->inter != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->inter), res, exit);
-  if (h->intra != nullptr) NCCLCHECKGOTO(ncclCommDestroy(h->intra), res, exit);
 exit:
   free(h);
   return res;
@@ -185,23 +206,25 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
   switch (nHosts) {
   case 2:
-    return (bytes >= 1 * MiB && bytes <= 2 * MiB) || (bytes >= 8 * MiB && bytes <= 16 * MiB) ||
+    return (bytes > 1 * MiB && bytes <= 2 * MiB) || (bytes >= 8 * MiB && bytes <= 16 * MiB) ||
            (bytes >= 128 * MiB && bytes <= 512 * MiB);
   case 4:
-    return bytes >= 1 * MiB && bytes <= 1024 * MiB;
+    return bytes >= 2 * MiB && bytes <= 1024 * MiB;
   case 8:
-    return bytes >= 1 * MiB && bytes <= 2048 * MiB;
+    return bytes >= 2 * MiB && bytes <= 2048 * MiB;
   default:
     return false;
   }
 }
 
-bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op) {
+bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                                   bool registeredBuffers) {
   const int64_t mode = rcclParamHostHierAllReduce();
   if (mode == 0) return false;
   if (count == 0 || !opSplitsAcrossStages(op, datatype)) return false;
   const bool forced = mode == 1;
-  if (!forced && !(IsArchMatch(comm->archName, "gfx1250") && datatype == ncclFloat32 && op == ncclSum)) {
+  // Registered windows are left to the symmetric and CE paths: the child comms do not see the registrations.
+  if (!forced && (registeredBuffers || !(ncclDdaUseFabricPath(comm) && datatype == ncclFloat32 && op == ncclSum))) {
     return false;
   }
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);

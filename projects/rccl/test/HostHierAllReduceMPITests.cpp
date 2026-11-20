@@ -14,6 +14,10 @@
  * two ranks per host, including a single host. Each test checks the output data
  * and whether the communicator built its host-hierarchical child communicators,
  * so a correct fallback cannot hide a regression.
+ *
+ * On one node every rank has the same host hash, so the inter-host stage would
+ * never run. RCCL_TEST_HOST_HIER_HOSTS=<n> splits the ranks into n emulated hosts
+ * of consecutive ranks through a per-rank NCCL_HOSTID.
  */
 
 #ifdef MPI_TESTS_ENABLED
@@ -31,8 +35,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -136,9 +142,10 @@ RunResult runAllReduce(ncclComm_t                             comm,
 class HostHierAllReduceMPITest : public MPITestBase
 {
 protected:
-    int            rank_   = 0;
-    int            nRanks_ = 0;
-    rcclHostLayout layout_{};
+    int                                      rank_   = 0;
+    int                                      nRanks_ = 0;
+    rcclHostLayout                           layout_{};
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> hostGuard_;
 
     void SetUp() override
     {
@@ -149,6 +156,22 @@ protected:
             GTEST_SKIP() << "RCCL_HOST_HIER_ALLREDUCE was not cached as 1; "
                             "launch with RCCL_HOST_HIER_ALLREDUCE=1 to force the hierarchical path";
 
+        // getHostHash reads NCCL_HOSTID once per process, so this id holds for later tests too.
+        const char* hostsEnv      = getenv("RCCL_TEST_HOST_HIER_HOSTS");
+        const int   emulatedHosts = hostsEnv != nullptr ? atoi(hostsEnv) : 0;
+        if(emulatedHosts > 1)
+        {
+            const int         worldSize = MPIEnvironment::world_size;
+            const std::string skipHosts = mpiCoordinatedSkipReason(
+                worldSize % emulatedHosts != 0 || worldSize / emulatedHosts < 2,
+                "RCCL_TEST_HOST_HIER_HOSTS needs at least two ranks per emulated host, evenly split");
+            if(!skipHosts.empty())
+                GTEST_SKIP() << skipHosts;
+            const std::string hostId =
+                "hier-host-" + std::to_string(MPIEnvironment::world_rank * emulatedHosts / worldSize);
+            hostGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_HOSTID", hostId.c_str());
+        }
+
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
         ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(comm(), &rank_));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(comm(), &nRanks_));
@@ -158,6 +181,8 @@ protected:
                                      "Hosts are not uniform with at least two ranks each");
         if(!skip.empty())
             GTEST_SKIP() << skip;
+        if(emulatedHosts > 1)
+            ASSERT_MPI_EQ(emulatedHosts, layout_.nHosts);
     }
 
     ncclComm_t comm() { return getActiveCommunicator(); }
@@ -253,6 +278,9 @@ TEST_F(HostHierAllReduceMPITest, GrowingSizesReuseChildComms)
         RunResult run = fp32Sum(countFor(perHostRank), false);
         ASSERT_RUN_OK(run);
         ASSERT_MPI_TRUE(builtChildComms());
+        // One stage's chunk, twice with an inter-host stage, which runs out of place.
+        const size_t chunkBytes = perHostRank * sizeof(float);
+        ASSERT_MPI_TRUE(comm()->hostHier->scratchBytes >= (layout_.nHosts > 1 ? 2 : 1) * chunkBytes);
     }
 }
 
