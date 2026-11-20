@@ -22,6 +22,7 @@ set(TEST_SRC
     hipModuleEnumerateFunctions.cc
     hipModuleLoadFatBinary.cc
     test_fatbin_mixed_arch.cc
+    test_fatbin_xnack_off_apu.cc
 )
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -57,6 +58,34 @@ if (HIP_PLATFORM MATCHES "amd")
                     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
                ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
+endif()
+
+# Fixtures for Unit_FatBin_XnackOffApu_* (gfx9 client APUs, which run without XNACK):
+# fixed archs, NOT ${OFFLOAD_ARCH_LIST}. The tests skip on other devices. The two reject
+# fixtures are raw ELF code objects (--no-gpu-bundle-output) so that they reach
+# amd::Isa::isCompatible() instead of being skipped by the COMGR fat-binary lookup.
+if (HIP_PLATFORM MATCHES "amd")
+  set(XNACK_OFF_APU_FIXTURES
+      "xnack_off|--offload-arch=gfx902:xnack-|--offload-arch=gfx909:xnack-|--offload-arch=gfx90c:xnack-"
+      "generic|-mcode-object-version=6|--offload-arch=gfx9-generic"
+      "generic_xnack_on|-mcode-object-version=6|--no-gpu-bundle-output|--offload-arch=gfx9-generic:xnack+"
+      "generic_xnack_off|-mcode-object-version=6|--no-gpu-bundle-output|--offload-arch=gfx9-generic:xnack-")
+  set(XNACK_OFF_APU_CODES)
+  foreach(fixture ${XNACK_OFF_APU_FIXTURES})
+    string(REPLACE "|" ";" fixture_args "${fixture}")
+    list(POP_FRONT fixture_args fixture_name)
+    set(fixture_code ${CMAKE_CURRENT_BINARY_DIR}/fatbin_xnack_off_apu_${fixture_name}.code)
+    add_custom_command(OUTPUT ${fixture_code}
+                       COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                       ${fixture_args} --cuda-device-only
+                       -x hip ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_xnack_off_apu_module.cc
+                       -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                       -o ${fixture_code}
+                       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/fatbin_xnack_off_apu_module.cc)
+    list(APPEND XNACK_OFF_APU_CODES ${fixture_code})
+  endforeach()
+  add_custom_target(fatbin_xnack_off_apu_module DEPENDS ${XNACK_OFF_APU_CODES})
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${XNACK_OFF_APU_CODES})
 endif()
 
 if (NOT WIN32)
@@ -456,6 +485,7 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
   add_dependencies(ModuleTest addKernel_code)
   add_dependencies(ModuleTest fatbin_mismatch_module)
+  add_dependencies(ModuleTest fatbin_xnack_off_apu_module)
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_dependencies(ModuleTest addKernel_spv)

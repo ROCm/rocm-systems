@@ -396,3 +396,21 @@ module:
       targets: [nvidia_linux, nvidia_windows]
       reason: "AIRUNTIME-2744 - compiled-in kernel path; fixture/build support is amd-only; needs to be re-triaged."
     tags: [load]
+  Unit_FatBin_XnackOffApu_LoadsXnackOffCodeObject:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "fixtures are AMD gfx9 code objects, built only on the amd platform; the test skips on devices other than gfx902/gfx909/gfx90c."
+    tags: [load]
+  Unit_FatBin_XnackOffApu_LoadsGenericCodeObject:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "fixtures are AMD gfx9 code objects, built only on the amd platform; the test skips on devices other than gfx902/gfx909/gfx90c."
+    tags: [load]
+  Unit_FatBin_XnackOffApu_RejectsGenericWithExplicitXnack:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia_linux, nvidia_windows]
+      reason: "fixtures are AMD gfx9 code objects, built only on the amd platform; the test skips on devices other than gfx902/gfx909/gfx90c."
+    tags: [load]

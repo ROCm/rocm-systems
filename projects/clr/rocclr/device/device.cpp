@@ -298,16 +298,13 @@ bool Isa::isCompatible(const Isa& codeObjectIsa, const Isa& agentIsa) {
       codeObjectIsa.sramecc() != agentIsa.sramecc())
     return false;
 
-  if (!agentIsa.isXnackSupported()) {
-    // The agent runs without XNACK (e.g. gfx9 client APUs, which ROCr reports as xnack-off).
-    // Code objects for an XNACK-capable generic target (e.g. gfx9-generic) are fine as long
-    // as they do not require XNACK.
-    assert(isGeneric || !codeObjectIsa.isXnackSupported());
-    if (codeObjectIsa.xnack() == Feature::Enabled) return false;
-    return true;
-  }
-
-  assert(codeObjectIsa.isXnackSupported() && agentIsa.xnack() != Feature::Any);
+  // gfx9 client APUs: ROCr reports XNACK as unsupported for the agent (xnack-off mode), while
+  // their generic target (gfx9-generic) is XNACK-capable. As in ROCr, such generic code objects
+  // are compatible only without an explicit xnack setting, which the check below enforces
+  // (the agent's xnack() is None).
+  assert((codeObjectIsa.isXnackSupported() == agentIsa.isXnackSupported() ||
+          (isGeneric && !agentIsa.isXnackSupported())) &&
+         agentIsa.xnack() != Feature::Any);
   if ((codeObjectIsa.xnack() == Feature::Enabled || codeObjectIsa.xnack() == Feature::Disabled) &&
       codeObjectIsa.xnack() != agentIsa.xnack())
     return false;
