@@ -130,8 +130,17 @@ __device__ __forceinline__ uint64_t ld_acquire(const uint64_t* ptr, bool isLocal
 }
 
 #ifdef STAGING_PIPE_SYNC_TIMEOUT_DEBUG
+#if defined(__HIP_PLATFORM_AMD__)
+/* clock64() is not monotonic on AMD; the 100 MHz wall clock is. Default: 5 s. */
+#define STAGING_PIPE_SYNC_CLOCK() wall_clock64()
+#ifndef STAGING_PIPE_SYNC_TIMEOUT_CYCLES
+#define STAGING_PIPE_SYNC_TIMEOUT_CYCLES 500000000ULL
+#endif
+#else
+#define STAGING_PIPE_SYNC_CLOCK() clock64()
 #ifndef STAGING_PIPE_SYNC_TIMEOUT_CYCLES
 #define STAGING_PIPE_SYNC_TIMEOUT_CYCLES 10000000000ULL
+#endif
 #endif
 
 __device__ __forceinline__ void staging_pipe_sync_timeout(StagingKernelParams* params, uint64_t epoch, int channel_id,
@@ -142,14 +151,18 @@ __device__ __forceinline__ void staging_pipe_sync_timeout(StagingKernelParams* p
          "observed=%llu elapsed_cycles=%llu\n",
          params->myRank, params->myLocalRank, (unsigned long long)epoch, channel_id, label, peer,
          (unsigned long long)progress, (unsigned long long)expected, (unsigned long long)observed, elapsed);
+#if defined(__HIP_PLATFORM_AMD__)
+  __builtin_trap();
+#else
   asm volatile("trap;");
+#endif
 }
 
 __device__ __forceinline__ void staging_pipe_check_timeout(StagingKernelParams* params, uint64_t epoch,
                                                            int channel_id, const char* label, int peer,
                                                            size_t progress, uint64_t expected, uint64_t observed,
                                                            unsigned long long start) {
-  const unsigned long long elapsed = clock64() - start;
+  const unsigned long long elapsed = STAGING_PIPE_SYNC_CLOCK() - start;
   if (elapsed > STAGING_PIPE_SYNC_TIMEOUT_CYCLES) {
     staging_pipe_sync_timeout(params, epoch, channel_id, label, peer, progress, expected, observed, elapsed);
   }
@@ -251,7 +264,7 @@ __device__ __forceinline__ void rdma_wait_for_credits_debug(ncclGin& gin, Stagin
                                                             StagingKernelParams* params, uint64_t epoch,
                                                             int channel_id, const char* label, int peer,
                                                             size_t progress) {
-  const unsigned long long start = clock64();
+  const unsigned long long start = STAGING_PIPE_SYNC_CLOCK();
   const uint64_t expected = fc.shadowTail - (uint64_t)fc.peerNumSlots + 1;
   if (fc.isLocal) {
     char* staging_base = (char*)ncclGetLocalPointer(region.window, 0);
@@ -276,7 +289,7 @@ __device__ __forceinline__ void lsa_wait_for_credits_debug(StagingRegion& region
                                                            size_t progress) {
   char* staging_base = (char*)ncclGetLocalPointer(region.window, 0);
   uint64_t* local_head_ptr = (uint64_t*)(staging_base + fc.localHeadOffset);
-  const unsigned long long start = clock64();
+  const unsigned long long start = STAGING_PIPE_SYNC_CLOCK();
   const uint64_t expected = fc.shadowTail - (uint64_t)fc.peerNumSlots + 1;
   uint64_t observed = ld_acquire(local_head_ptr, fc.isLocal) - fc.lsaHeadBase;
   while ((fc.shadowTail - observed) >= (uint64_t)fc.peerNumSlots) {
@@ -289,7 +302,7 @@ __device__ __forceinline__ void lsa_rdma_wait_for_credits_debug(ncclGin& gin, St
                                                                  uint64_t base_offset, StagingKernelParams* params,
                                                                  uint64_t epoch, int channel_id, const char* label,
                                                                  int peer, size_t progress) {
-  const unsigned long long start = clock64();
+  const unsigned long long start = STAGING_PIPE_SYNC_CLOCK();
   const uint64_t expected = fc.shadowTail - (uint64_t)fc.peerNumSlots + 1 - base_offset;
   uint64_t observed = gin.readCounter(fc.localPutCounter);
   while ((fc.shadowTail - observed - base_offset) >= (uint64_t)fc.peerNumSlots) {

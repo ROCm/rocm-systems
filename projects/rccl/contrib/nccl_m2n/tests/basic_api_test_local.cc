@@ -18,6 +18,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -431,6 +432,191 @@ static LocalCaseResult runLocalCase(const TestCase& tc, ApiKind api) {
 }
 
 class BasicApiLocalTest : public ::testing::TestWithParam<LocalParam> {};
+
+/* Grouped then back-to-back calls of two alternating shapes, one thread per rank; a deadlock trips the watchdog and exits. */
+static int32_t threadedDirectValue(size_t row, size_t col, int tensor) {
+  return static_cast<int32_t>(row * 1000003u + col * 7u + static_cast<size_t>(tensor) * 131u);
+}
+
+static void runThreadedBackToBack(const char* testName) {
+  if (gWorldSize < 2 || gWorldSize % 2 != 0) {
+    GTEST_SKIP() << "requires an even number of local ranks";
+  }
+
+  constexpr int kTensors = 8;
+  constexpr int kTimeoutSeconds = 120;
+  const int numSrc = gWorldSize / 2;
+  const int numDst = gWorldSize - numSrc;
+  const size_t rows = 64 * static_cast<size_t>(numSrc);
+  const size_t baseCols = 64 * static_cast<size_t>(numDst);
+  auto colsOf = [&](int t) { return baseCols * static_cast<size_t>(1 + (t & 1)); };
+
+  struct RankState {
+    std::atomic<int> stage{0};
+    std::atomic<bool> done{false};
+    ncclResult_t ncclResult = ncclSuccess;
+    cudaError_t cudaResult = cudaSuccess;
+    long wrongElements = 0;
+    std::string ncclError;
+  };
+  std::vector<RankState> states(gWorldSize);
+
+  auto runRank = [&](int rank) {
+    RankState& st = states[rank];
+    const bool isSrc = rank < numSrc;
+    const size_t srcRows = rows / numSrc;
+    auto elementsOf = [&](int t) { return isSrc ? srcRows * colsOf(t) : rows * (colsOf(t) / numDst); };
+    std::vector<int32_t> host(elementsOf(1));
+    std::vector<void*> buffers(kTensors, nullptr);
+    cudaStream_t stream = nullptr;
+
+    auto cudaOk = [&](cudaError_t e) {
+      if (e != cudaSuccess && st.cudaResult == cudaSuccess) st.cudaResult = e;
+      return e == cudaSuccess;
+    };
+    auto ncclOk = [&](ncclResult_t r) {
+      if (r != ncclSuccess && st.ncclResult == ncclSuccess) {
+        st.ncclResult = r;
+        st.ncclError = ncclM2nGetLastError();
+      }
+      return r == ncclSuccess;
+    };
+
+    int srcDims[2] = {1, numSrc};
+    int dstDims[2] = {1, numDst};
+    ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+    ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+    srcMesh.ndims = 2;
+    srcMesh.dims = srcDims;
+    srcMesh.startRank = 0;
+    dstMesh.ndims = 2;
+    dstMesh.dims = dstDims;
+    dstMesh.startRank = numSrc;
+    int srcPlacements[2] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(0)};
+    int dstPlacements[2] = {NCCL_RESHARD_REPLICATE, NCCL_RESHARD_SHARD(1)};
+
+    auto reshardAll = [&]() {
+      for (int t = 0; t < kTensors; t++) {
+        size_t srcShape[2] = {srcRows, colsOf(t)};
+        size_t dstShape[2] = {rows, colsOf(t) / numDst};
+        ncclDistTensor_t src = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+        ncclDistTensor_t dst = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+        src.dataPtr = isSrc ? buffers[t] : nullptr;
+        src.localShape = srcShape;
+        src.ndims = 2;
+        src.dtype = ncclInt32;
+        src.mesh = &srcMesh;
+        src.placements = srcPlacements;
+        dst.dataPtr = isSrc ? nullptr : buffers[t];
+        dst.localShape = dstShape;
+        dst.ndims = 2;
+        dst.dtype = ncclInt32;
+        dst.mesh = &dstMesh;
+        dst.placements = dstPlacements;
+        if (!ncclOk(ncclReshard(gM2nHandles[rank], gComms[rank], &src, &dst, stream))) return false;
+      }
+      return true;
+    };
+    auto verifyAndReset = [&]() {
+      if (isSrc) return true;
+      const int dstIdx = rank - numSrc;
+      for (int t = 0; t < kTensors; t++) {
+        const size_t dstCols = colsOf(t) / numDst;
+        const size_t bytes = elementsOf(t) * sizeof(int32_t);
+        if (!cudaOk(cudaMemcpy(host.data(), buffers[t], bytes, cudaMemcpyDeviceToHost))) return false;
+        for (size_t i = 0; i < rows; i++) {
+          for (size_t j = 0; j < dstCols; j++) {
+            st.wrongElements += host[i * dstCols + j] != threadedDirectValue(i, dstIdx * dstCols + j, t);
+          }
+        }
+        if (!cudaOk(cudaMemset(buffers[t], 0xff, bytes))) return false;
+      }
+      return true;
+    };
+
+    bool ok = cudaOk(cudaSetDevice(rank)) && cudaOk(cudaStreamCreate(&stream));
+    for (int t = 0; ok && t < kTensors; t++) {
+      const size_t cols = colsOf(t);
+      const size_t bytes = elementsOf(t) * sizeof(int32_t);
+      ok = cudaOk(cudaMalloc(&buffers[t], bytes));
+      if (ok && isSrc) {
+        for (size_t i = 0; i < srcRows; i++) {
+          for (size_t j = 0; j < cols; j++) host[i * cols + j] = threadedDirectValue(rank * srcRows + i, j, t);
+        }
+        ok = cudaOk(cudaMemcpy(buffers[t], host.data(), bytes, cudaMemcpyHostToDevice));
+      } else if (ok) {
+        ok = cudaOk(cudaMemset(buffers[t], 0xff, bytes));
+      }
+    }
+    ok = ok && cudaOk(cudaDeviceSynchronize());
+
+    st.stage = 1;
+    ok = ok && ncclOk(ncclM2nGroupStart());
+    if (ok) {
+      ok = reshardAll();
+      const ncclResult_t groupEnd = ncclM2nGroupEnd();
+      ok = ncclOk(groupEnd) && ok;
+    }
+    ok = ok && cudaOk(cudaStreamSynchronize(stream)) && verifyAndReset();
+
+    st.stage = 2;
+    ok = ok && reshardAll() && cudaOk(cudaStreamSynchronize(stream)) && verifyAndReset();
+
+    st.stage = 3;
+    for (void* buffer : buffers) {
+      if (buffer != nullptr) cudaOk(cudaFree(buffer));
+    }
+    if (stream != nullptr) cudaOk(cudaStreamDestroy(stream));
+    st.done = true;
+  };
+
+  std::vector<std::thread> threads;
+  for (int rank = 0; rank < gWorldSize; rank++) threads.emplace_back(runRank, rank);
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kTimeoutSeconds);
+  for (;;) {
+    bool allDone = true;
+    for (const RankState& st : states) allDone = allDone && st.done.load();
+    if (allDone) break;
+    if (std::chrono::steady_clock::now() > deadline) {
+      static const char* const kStageNames[] = {"setup", "grouped calls", "back-to-back calls", "teardown"};
+      fflush(stdout);
+      for (int rank = 0; rank < gWorldSize; rank++) {
+        if (!states[rank].done.load()) {
+          fprintf(stderr, "%s: rank %d hung in %s\n", testName, rank, kStageNames[states[rank].stage.load()]);
+        }
+      }
+      fprintf(stderr, "[  FAILED  ] %s: no progress after %d s (deadlock)\n", testName, kTimeoutSeconds);
+      fflush(stderr);
+      std::_Exit(1);
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+  for (std::thread& thread : threads) thread.join();
+
+  for (int rank = 0; rank < gWorldSize; rank++) {
+    EXPECT_EQ(ncclSuccess, states[rank].ncclResult) << "rank " << rank << ": " << states[rank].ncclError;
+    EXPECT_EQ(cudaSuccess, states[rank].cudaResult) << "rank " << rank;
+    EXPECT_EQ(0, states[rank].wrongElements) << "rank " << rank;
+  }
+}
+
+TEST(ThreadedDirectTest, BackToBackAndGroupedCallsDoNotDeadlock) {
+  if (strcmp(gResolvedCopyAlgorithm, "DIRECT") != 0) {
+    GTEST_SKIP() << "run with --algorithm direct or --copy-algorithm direct";
+  }
+  if (gCli.filter != nullptr && strcmp(gCli.filter, "threaded_direct_back_to_back") != 0) {
+    GTEST_SKIP() << "run with --filter threaded_direct_back_to_back or without --filter";
+  }
+  runThreadedBackToBack("ThreadedDirectTest.BackToBackAndGroupedCallsDoNotDeadlock");
+}
+
+TEST(ThreadedPipeTest, TwoShapesBackToBackDoNotDeadlock) {
+  if (strcmp(gResolvedCopyAlgorithm, "PIPE") != 0) {
+    GTEST_SKIP() << "run with --copy-algorithm pipe";
+  }
+  runThreadedBackToBack("ThreadedPipeTest.TwoShapesBackToBackDoNotDeadlock");
+}
 
 /* Exercises cross-rank agreement on the split decision: the two ranks supply
  * deliberately different local values and must receive the same reduced

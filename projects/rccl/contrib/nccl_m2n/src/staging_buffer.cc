@@ -422,62 +422,34 @@ static int channelPeerGroup(int channel, int peerGroupCount) {
   return peerGroupCount > 0 ? channel % peerGroupCount : 0;
 }
 
-static int edgePeerGroup(int sourceIdxOnDest, int targetIdxOnSource, int peerGroupCount) {
+static int edgePeerGroup(int edgeColor, int peerGroupCount) {
   if (peerGroupCount <= 1) {
     return 0;
   }
-  return positiveMod(sourceIdxOnDest + targetIdxOnSource, peerGroupCount);
+  return positiveMod(edgeColor, peerGroupCount);
 }
 
-static bool channelHasEdge(int channel, int sourceIdxOnDest, int targetIdxOnSource, int peerGroupCount) {
+static bool channelHasEdge(int channel, int edgeColor, int peerGroupCount) {
   if (peerGroupCount <= 1) {
     return true;
   }
-  return channelPeerGroup(channel, peerGroupCount) == edgePeerGroup(sourceIdxOnDest, targetIdxOnSource, peerGroupCount);
+  return channelPeerGroup(channel, peerGroupCount) == edgePeerGroup(edgeColor, peerGroupCount);
 }
 
-static int channelTargetIndexForSource(const StagingTransferDescriptor* desc, int sourceIdx) {
-  if (sourceIdx >= 0 && sourceIdx < desc->numSources) {
-    return desc->channelTargetIndexOnSource[sourceIdx];
-  }
-  return 0;
+static int sourceEdgeColor(const StagingTransferDescriptor* desc, int sourceIdx) {
+  return desc->sourceColor[sourceIdx];
 }
 
-static int targetIndexForTarget(const StagingTransferDescriptor* desc, int targetIdx) {
-  if (desc->isDest && !desc->isSource) {
-    int sourceIdx = desc->sourceIndexOnDest[targetIdx];
-    if (sourceIdx >= 0 && sourceIdx < desc->numSources) {
-      return channelTargetIndexForSource(desc, sourceIdx);
-    }
-  }
-  return targetIdx;
-}
-
-static void channelEdgeKeyForSource(const StagingTransferDescriptor* desc, int sourceIdx, int* sourceKey,
-                                    int* targetKey) {
-  if (sourceKey == nullptr || targetKey == nullptr) {
-    return;
-  }
-  *sourceKey = sourceIdx;
-  *targetKey = channelTargetIndexForSource(desc, sourceIdx);
-}
-
-static void channelEdgeKeyForTarget(const StagingTransferDescriptor* desc, int targetIdx, int* sourceKey,
-                                    int* targetKey) {
-  if (sourceKey == nullptr || targetKey == nullptr) {
-    return;
-  }
-  *sourceKey = desc->sourceIndexOnDest[targetIdx];
-  *targetKey = targetIndexForTarget(desc, targetIdx);
+static int targetEdgeColor(const StagingTransferDescriptor* desc, int targetIdx) {
+  const int sourceIdxOnDest = desc->sourceIndexOnDest[targetIdx];
+  return (sourceIdxOnDest >= 0 && sourceIdxOnDest < MAX_SOURCES) ? desc->destSourceColor[targetIdx][sourceIdxOnDest]
+                                                                  : 0;
 }
 
 static int countSourcesForGroup(const StagingTransferDescriptor* desc, int group, int peerGroupCount) {
   int count = 0;
   for (int j = 0; j < desc->numSources; j++) {
-    int sourceKey = 0;
-    int targetKey = 0;
-    channelEdgeKeyForSource(desc, j, &sourceKey, &targetKey);
-    if (edgePeerGroup(sourceKey, targetKey, peerGroupCount) == group) {
+    if (edgePeerGroup(sourceEdgeColor(desc, j), peerGroupCount) == group) {
       count++;
     }
   }
@@ -487,10 +459,7 @@ static int countSourcesForGroup(const StagingTransferDescriptor* desc, int group
 static int countTargetsForGroup(const StagingTransferDescriptor* desc, int group, int peerGroupCount) {
   int count = 0;
   for (int j = 0; j < desc->numTargets; j++) {
-    int sourceKey = 0;
-    int targetKey = 0;
-    channelEdgeKeyForTarget(desc, j, &sourceKey, &targetKey);
-    if (edgePeerGroup(sourceKey, targetKey, peerGroupCount) == group) {
+    if (edgePeerGroup(targetEdgeColor(desc, j), peerGroupCount) == group) {
       count++;
     }
   }
@@ -509,10 +478,7 @@ static size_t maxPeersInChannelGroup(const StagingTransferDescriptor* desc, int 
 static int targetRankInGroup(const StagingTransferDescriptor* desc, int targetIdx, int group, int peerGroupCount) {
   int rank = 0;
   for (int j = 0; j < targetIdx; j++) {
-    int sourceKey = 0;
-    int targetKey = 0;
-    channelEdgeKeyForTarget(desc, j, &sourceKey, &targetKey);
-    if (edgePeerGroup(sourceKey, targetKey, peerGroupCount) == group) {
+    if (edgePeerGroup(targetEdgeColor(desc, j), peerGroupCount) == group) {
       rank++;
     }
   }
@@ -527,22 +493,26 @@ struct StagingReceiverSourceLayout {
   int sourceRank;
 };
 
+/* receiverSourceColors holds the edge color of each of the receiver's
+ * sources, in source order. The sources that share this edge's channel group
+ * split the group's data region in that order. */
 static StagingReceiverSourceLayout stagingResolveReceiverSourceLayout(size_t regionStart, size_t regionSize,
                                                                        size_t chunkSize, int receiverSourceCount,
-                                                                       int sourceIndexOnReceiver, int targetIndexOnSource,
+                                                                       int sourceIndexOnReceiver,
+                                                                       const uint8_t* receiverSourceColors,
                                                                        int peerGroupCount) {
-  const int group = edgePeerGroup(sourceIndexOnReceiver, targetIndexOnSource, peerGroupCount);
   int sourceCount = receiverSourceCount;
   int sourceRank = sourceIndexOnReceiver;
   if (peerGroupCount > 1) {
-    /* Sources assigned to a group are one residue class modulo
-     * peerGroupCount. Compute its size and this source's ordinal directly;
-     * this helper is called for every populated edge. */
-    const int firstSource = positiveMod(group - targetIndexOnSource, peerGroupCount);
-    sourceCount = (receiverSourceCount > firstSource) ?
-                    1 + (receiverSourceCount - 1 - firstSource) / peerGroupCount :
-                    0;
-    sourceRank = (sourceIndexOnReceiver - firstSource) / peerGroupCount;
+    const int group = edgePeerGroup(receiverSourceColors[sourceIndexOnReceiver], peerGroupCount);
+    sourceCount = 0;
+    sourceRank = 0;
+    for (int k = 0; k < receiverSourceCount; k++) {
+      if (edgePeerGroup(receiverSourceColors[k], peerGroupCount) == group) {
+        sourceRank += (k < sourceIndexOnReceiver) ? 1 : 0;
+        sourceCount++;
+      }
+    }
   }
   /* Whole slots only, so each source's slots start chunk-aligned. */
   const int numSlots = (sourceCount > 0 && chunkSize > 0) ? (int)(regionSize / (size_t)sourceCount / chunkSize) : 0;
@@ -552,18 +522,22 @@ static StagingReceiverSourceLayout stagingResolveReceiverSourceLayout(size_t reg
 
 static ncclResult_t stagingSetReceiverSourceLayout(StagingFlowCtrl* fc, size_t regionStart, size_t regionSize,
                                                     size_t chunkSize, int receiverSourceCount,
-                                                    int sourceIndexOnReceiver, int targetIndexOnSource,
+                                                    int sourceIndexOnReceiver, const uint8_t* receiverSourceColors,
                                                     int peerGroupCount, int rank, const char* path) {
+  NCCL_M2N_CHECK_ARG(receiverSourceCount > 0 && receiverSourceCount <= MAX_SOURCES && sourceIndexOnReceiver >= 0 &&
+                       sourceIndexOnReceiver < receiverSourceCount,
+                     rank, "[STAGING] invalid receiver %s source %d/%d", path, sourceIndexOnReceiver,
+                     receiverSourceCount);
   const StagingReceiverSourceLayout layout = stagingResolveReceiverSourceLayout(
-    regionStart, regionSize, chunkSize, receiverSourceCount, sourceIndexOnReceiver, targetIndexOnSource,
+    regionStart, regionSize, chunkSize, receiverSourceCount, sourceIndexOnReceiver, receiverSourceColors,
     peerGroupCount);
   NCCL_M2N_CHECK_ARG(layout.sourceCount > 0 && layout.sourceRank >= 0 && layout.sourceRank < layout.sourceCount &&
                        layout.numSlots >= 1,
                      rank,
-                     "[STAGING] invalid receiver %s layout (sources=%d source=%d target=%d group=%d "
+                     "[STAGING] invalid receiver %s layout (sources=%d source=%d color=%d group=%d "
                      "group_sources=%d source_rank=%d data=%zu chunk=%zu)",
-                     path, receiverSourceCount, sourceIndexOnReceiver, targetIndexOnSource,
-                     edgePeerGroup(sourceIndexOnReceiver, targetIndexOnSource, peerGroupCount), layout.sourceCount,
+                     path, receiverSourceCount, sourceIndexOnReceiver, receiverSourceColors[sourceIndexOnReceiver],
+                     edgePeerGroup(receiverSourceColors[sourceIndexOnReceiver], peerGroupCount), layout.sourceCount,
                      layout.sourceRank, layout.dataSize, chunkSize);
   setFcDataRegion(fc, layout.dataOffset, layout.numSlots, chunkSize);
   return ncclSuccess;
@@ -881,10 +855,8 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
           if (!desc->targets[j].isRdma) {
             continue;
           }
-          int sourceKey = 0;
-          int targetKey = 0;
-          channelEdgeKeyForTarget(desc, j, &sourceKey, &targetKey);
-          if (groupPeersByChannel && !channelHasEdge(ch, sourceKey, targetKey, peerGroupCount)) {
+          const int edgeColor = targetEdgeColor(desc, j);
+          if (groupPeersByChannel && !channelHasEdge(ch, edgeColor, peerGroupCount)) {
             continue;
           }
           rdmaTargetRanks[j] = activeRdmaTargetCount++;
@@ -917,10 +889,8 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         if (!desc->sources[j].isRdma) {
           continue;
         }
-        int sourceKey = 0;
-        int targetKey = 0;
-        channelEdgeKeyForSource(desc, j, &sourceKey, &targetKey);
-        if (groupPeersByChannel && !channelHasEdge(ch, sourceKey, targetKey, peerGroupCount)) {
+        const int edgeColor = sourceEdgeColor(desc, j);
+        if (groupPeersByChannel && !channelHasEdge(ch, edgeColor, peerGroupCount)) {
           continue;
         }
         int rdmaJ = sourceRdmaIdx[j];
@@ -941,7 +911,7 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         fc->remoteRank = desc->sources[j].peerWorldRank;
 
         NCCL_M2N_CHECK(stagingSetReceiverSourceLayout(fc, rdmaRegionStart, dataRegionSize, chunkSize,
-                                                       desc->numSources, sourceKey, targetKey, peerGroupCount, R,
+                                                       desc->numSources, j, desc->sourceColor, peerGroupCount, R,
                                                        "RDMA"));
 
         int myTargetIdxOnSource = desc->rdmaTargetIndexOnSource[j];
@@ -959,10 +929,8 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         if (desc->sources[j].isRdma) {
           continue;
         }
-        int sourceKey = 0;
-        int targetKey = 0;
-        channelEdgeKeyForSource(desc, j, &sourceKey, &targetKey);
-        if (groupPeersByChannel && !channelHasEdge(ch, sourceKey, targetKey, peerGroupCount)) {
+        const int edgeColor = sourceEdgeColor(desc, j);
+        if (groupPeersByChannel && !channelHasEdge(ch, edgeColor, peerGroupCount)) {
           continue;
         }
         int lsaJ = sourceLsaIdx[j];
@@ -982,7 +950,7 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         fc->remoteRank = desc->sources[j].peerLocalRank;
 
         NCCL_M2N_CHECK(stagingSetReceiverSourceLayout(fc, lsaRegionStart, dataRegionSize, chunkSize,
-                                                       desc->numSources, sourceKey, targetKey, peerGroupCount, R,
+                                                       desc->numSources, j, desc->sourceColor, peerGroupCount, R,
                                                        "LSA"));
 
         int sourceLsaHeadIdxForMe = desc->sourceLsaHeadIndexOnProvider[j];
@@ -997,11 +965,9 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         if (!desc->targets[j].isRdma) {
           continue;
         }
-        int sourceKey = 0;
-        int targetKey = 0;
-        channelEdgeKeyForTarget(desc, j, &sourceKey, &targetKey);
+        const int edgeColor = targetEdgeColor(desc, j);
         int mySrcIdxOnDest = desc->sourceIndexOnDest[j];
-        if (groupPeersByChannel && !channelHasEdge(ch, sourceKey, targetKey, peerGroupCount)) {
+        if (groupPeersByChannel && !channelHasEdge(ch, edgeColor, peerGroupCount)) {
           continue;
         }
         int rdmaJ = targetRdmaIdx[j];
@@ -1022,7 +988,7 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         fc->remoteRank = desc->targets[j].peerWorldRank;
 
         NCCL_M2N_CHECK(stagingSetReceiverSourceLayout(fc, rdmaRegionStart, dataRegionSize, chunkSize,
-                                                       desc->destNumSources[j], mySrcIdxOnDest, targetKey,
+                                                       desc->destNumSources[j], mySrcIdxOnDest, desc->destSourceColor[j],
                                                        peerGroupCount, R, "RDMA"));
 
         int rdmaSrcIdxOnDest = desc->rdmaSourceIndexOnDest[j];
@@ -1041,11 +1007,9 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         if (desc->targets[j].isRdma) {
           continue;
         }
-        int sourceKey = 0;
-        int targetKey = 0;
-        channelEdgeKeyForTarget(desc, j, &sourceKey, &targetKey);
+        const int edgeColor = targetEdgeColor(desc, j);
         int mySrcIdxOnDest = desc->sourceIndexOnDest[j];
-        if (groupPeersByChannel && !channelHasEdge(ch, sourceKey, targetKey, peerGroupCount)) {
+        if (groupPeersByChannel && !channelHasEdge(ch, edgeColor, peerGroupCount)) {
           continue;
         }
         int lsaJ = targetLsaIdx[j];
@@ -1065,7 +1029,7 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
         fc->remoteRank = desc->targets[j].peerLocalRank;
 
         NCCL_M2N_CHECK(stagingSetReceiverSourceLayout(fc, lsaRegionStart, dataRegionSize, chunkSize,
-                                                       desc->destNumSources[j], mySrcIdxOnDest, targetKey,
+                                                       desc->destNumSources[j], mySrcIdxOnDest, desc->destSourceColor[j],
                                                        peerGroupCount, R, "LSA"));
 
         setFcLsaProducer(fc, ctrlSlotBase, lsaJ, mySrcIdxOnDest);
@@ -1077,10 +1041,8 @@ ncclResult_t stagingPrepareTransfer(const StagingBufferState* state, const Stagi
     /* ---------- 5c. Per-target local pipeline FC (source side only) ---------- */
     if (desc->isSource) {
       for (int j = 0; j < desc->numTargets; j++) {
-        int sourceKey = 0;
-        int targetKey = 0;
-        channelEdgeKeyForTarget(desc, j, &sourceKey, &targetKey);
-        if (groupPeersByChannel && !channelHasEdge(ch, sourceKey, targetKey, peerGroupCount)) {
+        const int edgeColor = targetEdgeColor(desc, j);
+        if (groupPeersByChannel && !channelHasEdge(ch, edgeColor, peerGroupCount)) {
           continue;
         }
         int ctrlIdx = STAGING_LOCAL_FC_BASE + j;
