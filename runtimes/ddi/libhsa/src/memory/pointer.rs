@@ -33,19 +33,87 @@ pub(crate) fn pointer_description(
     runtime: &HsaSession,
     address: usize,
 ) -> Option<PointerDescription> {
+    pointer_description_for_range(runtime, address, 1)
+}
+
+/// Selects a complete locked range when several registrations share an alias.
+pub(crate) fn pointer_description_for_range(
+    runtime: &HsaSession,
+    address: usize,
+    size: usize,
+) -> Option<PointerDescription> {
     vmem_pointer_description(runtime, address).or_else(|| {
         owned_memory(runtime, address)
             .map(|memory| memory.description.clone())
             .or_else(|| {
                 runtime
                     .memory_state
-                    .locked_allocations
+                    .locked_pointer_description(address, size)
+            })
+    })
+}
+
+impl MemoryState {
+    /// Finds one complete live registration with access for the selected GPU.
+    pub(super) fn locked_gpu_description(
+        &self,
+        address: usize,
+        size: usize,
+        gpu: HsaAgent,
+    ) -> Option<PointerDescription> {
+        self.locked_allocations
+            .iter()
+            .rev()
+            .find(|memory| {
+                memory.description.offset_range(address, size).is_some()
+                    && memory.description.accessible.contains(&gpu)
+                    && !memory.description.host_base.is_some_and(|host| {
+                        matches!(self.host_locks.get(&host), Some(HostLockState::Retiring))
+                    })
+            })
+            .map(|memory| memory.description.clone())
+    }
+
+    /// Keeps retiring aliases recognizable and rejects access through their metadata.
+    pub(super) fn locked_pointer_description(
+        &self,
+        address: usize,
+        size: usize,
+    ) -> Option<PointerDescription> {
+        let memory = self
+            .locked_allocations
+            .iter()
+            .rev()
+            .find(|memory| {
+                memory.description.offset_range(address, size).is_some()
+                    && !memory.description.host_base.is_some_and(|host| {
+                        matches!(self.host_locks.get(&host), Some(HostLockState::Retiring))
+                    })
+            })
+            .or_else(|| {
+                self.locked_allocations
+                    .iter()
+                    .rev()
+                    .find(|memory| memory.description.offset_range(address, size).is_some())
+            })
+            .or_else(|| {
+                self.locked_allocations
                     .iter()
                     .rev()
                     .find(|memory| memory.contains(address))
-                    .map(|memory| memory.description.clone())
-            })
-    })
+            })?;
+        let mut description = memory.description.clone();
+        if description
+            .host_base
+            .is_some_and(|host| matches!(self.host_locks.get(&host), Some(HostLockState::Retiring)))
+        {
+            // An unknown address would be accepted as an ordinary CPU pointer.
+            // Retain its bounds until every native owner finishes cleanup.
+            description.pointer_type = POINTER_TYPE_RESERVED_ADDR;
+            description.accessible.clear();
+        }
+        Some(description)
+    }
 }
 
 /// Projects pointer metadata to the public allocation-ownership contract.
@@ -181,7 +249,7 @@ pub(crate) fn host_copy_address(
     required_access: u32,
 ) -> Result<usize, Status> {
     address.checked_add(size).ok_or(INVALID_ARGUMENT)?;
-    if let Some(description) = pointer_description(runtime, address) {
+    if let Some(description) = pointer_description_for_range(runtime, address, size) {
         if description.pointer_type == POINTER_TYPE_RESERVED_ADDR {
             return Err(INVALID_ALLOCATION);
         }

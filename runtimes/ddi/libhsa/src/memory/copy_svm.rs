@@ -664,7 +664,7 @@ pub(crate) fn copy_pointer_description(
     if pointer.checked_add(size).is_none() {
         return Err(INVALID_ARGUMENT);
     }
-    let description = pointer_description(runtime, pointer);
+    let description = pointer_description_for_range(runtime, pointer, size);
     if let Some(description) = &description {
         if description.pointer_type == POINTER_TYPE_RESERVED_ADDR {
             return Err(INVALID_ALLOCATION);
@@ -685,6 +685,16 @@ pub(crate) fn gpu_copy_address(
     gpu: HsaAgent,
     required_access: u32,
 ) -> Result<(u64, usize), Status> {
+    // Repeated locks can share a numeric alias but carry different GPU grants.
+    // Select one registration that covers this operation; never merge metadata.
+    let locked_description = description
+        .filter(|description| description.pointer_type == POINTER_TYPE_LOCKED)
+        .and_then(|_| {
+            runtime
+                .memory_state
+                .locked_gpu_description(pointer, size, gpu)
+        });
+    let description = locked_description.as_ref().or(description);
     let description = description.ok_or(INVALID_ALLOCATION)?;
     if !description.accessible.contains(&gpu) {
         return Err(INVALID_AGENT);
