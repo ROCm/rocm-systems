@@ -1,1 +1,1 @@
-* The gfx1250 DDA LL128 `ncclAllReduce` adds peer-parallel one-shot and two-shot kernels, on by default; the new `RCCL_DDA_LL128_AR_PEER_PARALLEL=0` restores the previous kernels. With them, the one-shot cap on gfx1250 SPX scales as 4 MiB / `nRanks`, and the SPX DDA LL ceiling for `ncclAllReduce` drops to 1 MiB at every rank count, so LL128 takes the larger messages.
+* The gfx1250 DDA LL128 `ncclAllReduce` adds peer-parallel one-shot and two-shot kernels, on by default; the new `RCCL_DDA_LL128_AR_PEER_PARALLEL=0` restores the previous kernels.
