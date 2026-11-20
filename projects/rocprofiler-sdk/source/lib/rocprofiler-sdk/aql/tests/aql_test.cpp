@@ -67,6 +67,7 @@ get_api_table()
         val.hsa_queue_create_fn        = hsa_queue_create;
         val.hsa_queue_destroy_fn       = hsa_queue_destroy;
         val.hsa_signal_wait_relaxed_fn = hsa_signal_wait_relaxed;
+        val.hsa_memory_copy_fn         = hsa_memory_copy;
         return val;
     }();
     return _v;

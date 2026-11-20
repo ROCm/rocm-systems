@@ -1,0 +1,118 @@
+{
+    "reference": "workload",
+    "run": {
+        "clean": [
+            "/tmp/rocprofsys-bench-ai_hpc_cpu_sampling_freq"
+        ],
+        "mode": "medium",
+        "output": "../../results/sampling_freq/ai_hpc_cpu_sampling_freq.json",
+        "runs": 150
+    },
+    "tools": [
+        {
+            "name": "sampling_300",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_CONFIG_FILE",
+                    "value": "../../configs/sampling_perfetto.cfg"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_MPI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_FREQ",
+                    "value": "300"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_DELAY",
+                    "value": "0.01"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-ai_hpc_cpu_sampling_freq"
+                }
+            ]
+        },
+        {
+            "name": "sampling_1000",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_CONFIG_FILE",
+                    "value": "../../configs/sampling_perfetto.cfg"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_MPI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_FREQ",
+                    "value": "1000"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_DELAY",
+                    "value": "0.01"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-ai_hpc_cpu_sampling_freq"
+                }
+            ]
+        },
+        {
+            "name": "sampling_2000",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_CONFIG_FILE",
+                    "value": "../../configs/sampling_perfetto.cfg"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_MPI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_FREQ",
+                    "value": "2000"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_DELAY",
+                    "value": "0.01"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-ai_hpc_cpu_sampling_freq"
+                }
+            ]
+        },
+        {
+            "name": "sampling_5000",
+            "tool": "rocprof-sys-run",
+            "tool_env": [
+                {
+                    "key": "ROCPROFSYS_CONFIG_FILE",
+                    "value": "../../configs/sampling_perfetto.cfg"
+                },
+                {
+                    "key": "ROCPROFSYS_USE_MPI",
+                    "value": "false"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_FREQ",
+                    "value": "5000"
+                },
+                {
+                    "key": "ROCPROFSYS_SAMPLING_DELAY",
+                    "value": "0.01"
+                },
+                {
+                    "key": "ROCPROFSYS_OUTPUT_PATH",
+                    "value": "/tmp/rocprofsys-bench-ai_hpc_cpu_sampling_freq"
+                }
+            ]
+        }
+    ],
+    "workload": "../../../build/ai_hpc_cpu"
+}

@@ -20,6 +20,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Changed
 
+- Profiling a child that continues after `fork()` without `exec()` is unsupported. Use
+  `fork()` followed by `exec()` or a spawn operation to profile a new child process.
 - `rocprof-attach` and `rocprofv3 --attach` now profile the target process with the tool library of the rocprofiler-sdk installation that the target is running, located through `/proc/<pid>/maps`. When that library cannot be found, they fall back to the tool library of the attaching installation and print a warning. With `--attach-children`, every process in the tree uses the selection made for the target PID.
 - A warning is printed when the target runs a different rocprofiler-sdk installation, because options that installation does not support are ignored or skipped. Aggregate options such as `--sys-trace` only enable what the target's installation supports.
 - `rocprof-attach -t/--attach-tool-library` is now optional. A tool library given with `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` is used exactly as given and is interpreted in the target's filesystem. `rocprofv3 --attach` now honors a user-set `ROCPROF_ATTACH_TOOL_LIBRARY`.

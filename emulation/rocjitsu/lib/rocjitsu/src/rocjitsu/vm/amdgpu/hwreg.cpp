@@ -54,6 +54,8 @@ enum class HwregState : uint8_t {
   ShaderTmaLoGfx10,
   ShaderTmaHiGfx10,
   ShaderCyclesGfx1030,
+  ShaderCyclesLoGfx12,
+  ShaderCyclesHiGfx12,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   LdsAllocCdna,
@@ -381,8 +383,8 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {23, "WAVE_HW_ID1", HwregState::HwId1Gfx11, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {29, "SHADER_CYCLES_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {30, "SHADER_CYCLES_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {29, "SHADER_CYCLES_LO", HwregState::ShaderCyclesLoGfx12, HwregWritePolicy::ReadOnly},
+    {30, "SHADER_CYCLES_HI", HwregState::ShaderCyclesHiGfx12, HwregWritePolicy::ReadOnly},
 };
 
 constexpr HwregDescriptor GFX1250_HWREGS[] = {
@@ -629,6 +631,14 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::ShaderCyclesGfx1030:
     raw_value = wf.shader_cycles() & 0xfffffu;
     return HwregAccessResult::Success;
+  // RDNA4 widens the counter to 64 bits, read as two halves; gfx1201 LO reads
+  // exceed the 20 bits that gfx11 keeps.
+  case HwregState::ShaderCyclesLoGfx12:
+    raw_value = static_cast<uint32_t>(wf.shader_cycles());
+    return HwregAccessResult::Success;
+  case HwregState::ShaderCyclesHiGfx12:
+    raw_value = static_cast<uint32_t>(wf.shader_cycles() >> 32);
+    return HwregAccessResult::Success;
   case HwregState::StatePrivGfx12:
     raw_value = gfx12_state_priv_from_status(wf, wf.status_raw(), wf.scratch_base() != 0);
     return HwregAccessResult::Success;
@@ -761,6 +771,8 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::PcHi:
   case HwregState::ApertureBases:
   case HwregState::ShaderCycles:
+  case HwregState::ShaderCyclesLoGfx12:
+  case HwregState::ShaderCyclesHiGfx12:
     return HwregAccessResult::ReadOnly;
   case HwregState::Gfx11Status: {
     constexpr uint32_t writable = 0x1fu | (1u << 8) | (1u << 13) | (1u << 18) | (3u << 20) |
