@@ -172,7 +172,9 @@ Notes:
   ([hipfile-ci-system.yml](../../.github/workflows/hipfile-ci-system.yml))
   on several kinds of storage, along with
   [`util/ci-aiscp-test.sh`](util/ci-aiscp-test.sh), which copies files with
-  the `aiscp` example on both I/O paths.
+  the `aiscp` example on both I/O paths. To save runner time, they run only
+  in the `amdclang++` C++20 builds; the `clang++`, `g++`, and C++23 builds
+  run just the unit tests.
 - **Every change to library behavior needs tests**
   ([STYLEGUIDE.md](STYLEGUIDE.md)): new functionality gets tests, including
   its error paths, and a bug fix gets a test that fails before the fix and

@@ -6,10 +6,17 @@ env:
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
   # LLVM major version of the upstream clang-tidy used for linting. Keep this in
   # sync with the LLVM major version of the ROCm toolchain in the CI image
-  # (ROCm 7.14 and 10.0 are both LLVM 23).
-  AIS_CLANG_TIDY_VERSION: 23
+  # (ROCm 10.2 is LLVM 24).
+  AIS_CLANG_TIDY_VERSION: 24
   # Ubuntu codename for the apt.llvm.org repository, matching the CI image.
   AIS_CLANG_TIDY_DISTRO: noble
+  # apt.llvm.org repository that provides clang-tidy-${AIS_CLANG_TIDY_VERSION}.
+  # A released LLVM version has its own repository
+  # (llvm-toolchain-<distro>-<version>), but the development version only comes
+  # from the nightly trunk snapshot (llvm-toolchain-<distro>, no version). LLVM
+  # 24 is still in development, so this uses the snapshot; switch to
+  # llvm-toolchain-noble-24 once LLVM 24 branches for release.
+  AIS_CLANG_TIDY_APT_SUITE: llvm-toolchain-noble
 
 on:
   workflow_call:
@@ -80,11 +87,12 @@ jobs:
         # compiler under test is still ROCm's amdclang++.
         #
         # AIS_CLANG_TIDY_VERSION must track the LLVM major version of the ROCm
-        # toolchain (ROCm 7.14 and 10.0 are both LLVM 23). Mismatched clang-tidy
-        # versions report conflicting diagnostics.
+        # toolchain (ROCm 10.2 is LLVM 24). Mismatched clang-tidy versions report
+        # conflicting diagnostics.
         run: |
           docker exec \
             -t \
+            -e AIS_CLANG_TIDY_APT_SUITE \
             -e AIS_CLANG_TIDY_DISTRO \
             -e AIS_CLANG_TIDY_VERSION \
             "${AIS_CONTAINER_NAME}" \
@@ -94,7 +102,7 @@ jobs:
               apt-get install -y --no-install-recommends ca-certificates curl gnupg
               curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
                 -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-              echo "deb http://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/ llvm-toolchain-${AIS_CLANG_TIDY_DISTRO}-${AIS_CLANG_TIDY_VERSION} main" \
+              echo "deb http://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/ ${AIS_CLANG_TIDY_APT_SUITE} main" \
                 > /etc/apt/sources.list.d/llvm.list
               apt-get update
               apt-get install -y --no-install-recommends clang-tidy-${AIS_CLANG_TIDY_VERSION}
