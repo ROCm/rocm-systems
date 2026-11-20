@@ -77,24 +77,16 @@ hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
 
 ## Run under the race detector
 
-From `emulation/rocjitsu`, copy `configs/gfx950_mi350x.json` to
-`my_config.json` and add these top-level settings to activate the race detector:
-
-``` json
-{ "require_all_plugins": true, "plugins": { "race": {} } }
-```
-
-`require_all_plugins` makes initialization fail if the race detector cannot
-load, including when its configuration is invalid. The example checks HIP
-errors and exits with a failure status, so a skipped detector cannot be
-mistaken for a successful race check.
-
-Launch the binary with that configuration, where `BUILD_DIR` is your
+Launch the binary with the race detector enabled, where `BUILD_DIR` is your
 rocjitsu build directory:
 
 ``` bash
-$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --plugin race -- /tmp/race_example
 ```
+
+`--plugin race` requires the race detector to load for this launch. The example
+checks HIP errors and exits with a failure status, so a skipped detector cannot
+be mistaken for a successful race check.
 
 ## Interpret the race report
 
@@ -162,7 +154,7 @@ Recompile and rerun:
 
 ``` bash
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
-$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
+$BUILD_DIR/tools/rocjitsu/rocjitsu --plugin race -- /tmp/race_example
 ```
 
 The run should exit successfully with `done` and no `RACE` reports. A HIP
@@ -171,13 +163,18 @@ error or a failed process exit does not establish that the kernel is race-free.
 ## Save reports to a file
 
 For CI pipelines or scripted workflows, create the output directory with
-`mkdir -p /tmp/output` and add a `sinks` section to `my_config.json`:
+`mkdir -p /tmp/output`, copy `configs/gfx950_mi350x.json` to `my_config.json`,
+and add plugin sink settings:
 
 ``` json
-{ "sinks": { "types": ["file"], "dir": "/tmp/output" } }
+{ "plugins": { "race": {} }, "sinks": { "types": ["file"], "dir": "/tmp/output" } }
 ```
 
-Rerun with the same command. Reports are written to `/tmp/output/race.log`.
+Rerun with the config file. Reports are written to `/tmp/output/race.log`:
+
+``` bash
+$BUILD_DIR/tools/rocjitsu/rocjitsu --config my_config.json -- /tmp/race_example
+```
 
 The plugin writes its summary of emitted reports and suppressed observations
 at VM teardown. A successful application can emit complete `RACE` blocks

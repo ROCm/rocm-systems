@@ -859,6 +859,15 @@ add_test(
 )
 
 add_test(
+    NAME RocjitsuVfioRejectsPlugin
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--plugin;race;--vfio-socket;/tmp/rocjitsu-vfio.sock"
+        "-DTEST_REGEX=--plugin cannot be combined with --vfio-socket" -P
+        ${_rj_cli_failure_script}
+)
+
+add_test(
     NAME RocjitsuLaunchEnvRejectsInvalid
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"

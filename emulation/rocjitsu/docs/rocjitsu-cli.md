@@ -100,6 +100,9 @@ Usage: rocjitsu [options] -- <app> [args...]
 | `--config <path>` | Path to simulation config JSON. Cannot be combined with `--profile`. |
 | `--profile <name>` | Bundled profile config to run. Defaults to `mi350x` when neither `--config` nor `--profile` is supplied outside attach mode. |
 | `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach` or `dbt_guest` mode. |
+| `--exec-mode <mode>` | Override top-level `exec_mode` for this launch. Supported values are `functional` and `clocked`. Not available with `--attach` or `dbt_guest` mode. |
+| `--gpus-per-node <n>` | Set `vm.gpu.num_gpus` for legacy configs. With a system manifest, the selected node must already have this GPU count. Not available with `--attach` or `dbt_guest` mode. |
+| `--plugin <name>` | Require an execution plugin for this launch, using built-in defaults when the config has no entry for the plugin. Repeatable. Not available with `--attach`, `--vfio-socket`, or hardware-backed `dbt_guest` mode. |
 | `--cpu-thread-budget <n>`, `--cpu-thread-budget=<n>` | Replace `cpu_thread_budget` for this launch only; the source JSON is left unchanged. Zero selects automatic sizing. Not available with `--attach`. Dedicated flags win over `--option`, regardless of argument order. |
 | `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. Dedicated flags win over `--option`, regardless of argument order. |
 | `--option KEY=VALUE`, `-o KEY=VALUE` | Override a supported top-level config value for this launch. Supported keys are `cpu_thread_budget` and `wait_checking`; `--cpu-thread-budget` and `--wait-checking` take precedence. |
@@ -231,11 +234,11 @@ then `/tmp/rocjitsu-<uid>`.
 
 The daemon has already built its machine from the config it was started with.
 For that reason, attach rejects launch-only settings that would otherwise mutate
-the machine being built, including `--profile`, `--node`,
-`--cpu-thread-budget`, and `--wait-checking`. `--attach <target> --config <path>`
-validates the named config, but it does not write a per-PID config handoff and
-does not change the running daemon's config. The attached client gets its active
-machine state from the daemon it connects to.
+the machine being built, including `--profile`, `--node`, `--exec-mode`,
+`--gpus-per-node`, `--plugin`, `--cpu-thread-budget`, and `--wait-checking`.
+`--attach <target> --config <path>` validates the named config, but it does not
+write a per-PID config handoff and does not change the running daemon's config.
+The attached client gets its active machine state from the daemon it connects to.
 
 The only shared state selected by attach is the runtime directory and its
 well-known daemon socket. The default runtime directory is selected from

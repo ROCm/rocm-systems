@@ -884,7 +884,7 @@ void print_usage() {
       << " -- ./app          Run with a bundled profile config\n"
          "  rocjitsu --exec-mode clocked --thread-budget-table\n"
          "                                               Inspect clocked launch planning\n"
-         "  rocjitsu --gpus-per-node 2 -- ./app         Override the emulated GPU count\n"
+         "  rocjitsu --gpus-per-node 2 -- ./app         Set a legacy config GPU count\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach default -- ./app           Attach to a running daemon\n"
@@ -907,7 +907,8 @@ void print_usage() {
          "                    config has no entry for it, built-in defaults are used.\n"
          "                    Repeatable.\n"
          "  --gpus-per-node <n>\n"
-         "                    Override the emulated GPU count for this launch.\n"
+         "                    Set vm.gpu.num_gpus for legacy configs. With a system\n"
+         "                    manifest, the selected node must already have this count.\n"
          "  --daemon         Run a daemon, optionally launching an application.\n"
          "  --attach <id_or_path>\n"
          "                    Attach to an existing daemon target: default, an ID under\n"
@@ -1176,6 +1177,10 @@ int main(int argc, char *argv[]) {
   }
   if (!overrides.plugins.empty() && attach_mode) {
     std::cerr << "rocjitsu: --plugin cannot be combined with --attach\n";
+    return 1;
+  }
+  if (!overrides.plugins.empty() && !vfio_sockets.empty()) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with --vfio-socket\n";
     return 1;
   }
   if (overrides.cpu_thread_budget && attach_mode) {

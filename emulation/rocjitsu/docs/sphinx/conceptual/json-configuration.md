@@ -84,8 +84,8 @@ checks are off. If warnings appear incorrect or checking slows a workload, use
 `--wait-checking=on` enables ordinary checks only; `--wait-checking=all` also
 enables XCNT. The flag overrides JSON settings on every CU and GPU for the launch,
 leaving the source file unchanged. Omitting it preserves JSON settings and defaults.
-`mirage run` accepts the same flag with profiles or `--config`, including alongside
-`--cpu-thread-budget` in daemon and in-process modes.
+The rocjitsu CLI accepts the same flag with profiles or `--config`, including
+alongside `--cpu-thread-budget` in daemon and in-process modes.
 See the source [memory wait diagnostics guide](../../memory-wait-diagnostics.md)
 for coverage, per-CU controls and launch-mode restrictions.
 

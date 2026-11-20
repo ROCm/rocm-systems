@@ -1,63 +1,19 @@
 ---
 myst:
     html_meta:
-        "description": "Runtime environment variables for rocjitsu, including logging, race detection, output sinks, and path configuration."
-        "keywords": "rocjitsu, ROCm, environment variables, RJ_RACE, RJ_LOG, RJ_SINKS, configuration"
+        "description": "Runtime environment variables for rocjitsu path resolution and diagnostics."
+        "keywords": "rocjitsu, ROCm, environment variables, runtime directory, diagnostics"
 ---
 # Environment variable reference
 
-rocjitsu reads environment variables at runtime to control execution
-plugins, diagnostic output, and path resolution. This page documents
-each variable, its default value, allowed values, and effect.
+rocjitsu reads environment variables at runtime for path resolution and
+diagnostics. This page documents each variable's default value, allowed values,
+and effect. Plugin selection uses JSON config entries or the rocjitsu CLI
+`--plugin` flag; plugin sinks are configured with the JSON `sinks` object.
 
-For details on how plugins use these variables, see
-[Execution plugin system](../conceptual/execution-plugins.md). For
-command-line options that interact with these variables, see
-[rocjitsu CLI reference](rocjitsu-cli.md).
-
-## Execution plugins
-
-### `RJ_RACE`
-
-Enables the race detection plugin.
-
-| | |
-|---|---|
-| **Default** | Disabled (unset) |
-| **Allowed values** | `1` to enable |
-| **Effect** | When set to `1`, the race detection plugin hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races within a workgroup. Reports violations with disassembly traces. |
-
-### `RJ_LOG`
-
-Enables the kernel logging plugin.
-
-| | |
-|---|---|
-| **Default** | Disabled (unset) |
-| **Allowed values** | `1` to enable |
-| **Effect** | When set to `1`, the kernel logging plugin records kernel dispatch metadata (entry PC, grid dimensions, workgroup dimensions, register counts, kernel name) and reports the first MFMA or WMMA instruction seen in each dispatch. |
-
-## Output sinks
-
-### `RJ_SINKS`
-
-Selects where plugin diagnostic output is written.
-
-| | |
-|---|---|
-| **Default** | `stderr` |
-| **Allowed values** | Comma-separated list of: `stderr`, `stdout`, `file` |
-| **Effect** | Controls the destination for plugin output such as race reports and kernel logs. Multiple sinks can be active simultaneously. When `file` is included, each plugin writes to `<RJ_SINK_DIR>/<plugin_name>.log`. Plugin names are fixed: `race` for the race detection plugin, `logging` for the kernel logging plugin. |
-
-### `RJ_SINK_DIR`
-
-Directory path for file-based sinks.
-
-| | |
-|---|---|
-| **Default** | None |
-| **Allowed values** | Any valid directory path |
-| **Effect** | Required when `file` is included in `RJ_SINKS`. Plugin output files are written to this directory. For example, race reports are written to `<RJ_SINK_DIR>/race.log`. |
+For plugin configuration details, see
+[Execution plugin system](../conceptual/execution-plugins.md). For command-line
+options that interact with these variables, see [rocjitsu CLI reference](rocjitsu-cli.md).
 
 ## Plugin log groups
 
