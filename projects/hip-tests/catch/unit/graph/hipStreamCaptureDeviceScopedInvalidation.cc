@@ -617,3 +617,334 @@ TEST_CASE("ThreadLocal_GraphLaunch_DifferentDevice",
   HIP_CHECK(hipFree(dB_dst));
   HIP_CHECK(hipStreamDestroy(streamB));
 }
+
+// ================================================================================================
+// Non-blocking stream capture tests (SWDEV-612450).
+//
+// Legacy stream sync APIs (hipMemset, hipMemcpy without stream arg) have no implicit
+// dependency on non-blocking streams. CUDA does NOT invalidate non-blocking captures
+// for these APIs. The following 6 tests cover all 3 capture modes x 2 thread scenarios.
+// ================================================================================================
+
+/**
+ * Test: ThreadLocal capture on a non-blocking stream, sync API from another thread on same device.
+ *
+ * Thread A: ThreadLocal capture on non-blocking stream, GPU 0
+ * Thread B: hipMemcpy on GPU 0 (same device, legacy stream)
+ *
+ * Expected (per CUDA): Thread A's capture is NOT invalidated.
+ * Non-blocking streams have no implicit dependency on the legacy stream.
+ */
+TEST_CASE("NonBlocking_ThreadLocal_SameDevice_SyncDoesNotInvalidate",
+          "[graph][capture][multithreaded][nonblocking]") {
+  hipStream_t streamA = nullptr;
+  int *dA = nullptr, *dB = nullptr, *hB = nullptr;
+  hipGraph_t graphA = nullptr;
+  hipError_t captureErrA = hipSuccess;
+  hipError_t endCaptureErrA = hipSuccess;
+  hipError_t syncErrB = hipSuccess;
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipStreamCreateWithFlags(&streamA, hipStreamNonBlocking));
+  HIP_CHECK(hipMalloc(&dA, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dB, kN * sizeof(int)));
+  hB = (int*)malloc(kN * sizeof(int));
+  memset(hB, 0, kN * sizeof(int));
+
+  std::promise<void> captureStarted, syncDone;
+  auto captureReady = captureStarted.get_future();
+  auto syncReady = syncDone.get_future();
+
+  std::thread threadA([&]() {
+    HIP_CHECK_THREAD(hipSetDevice(0));
+    captureErrA = hipStreamBeginCapture(streamA, hipStreamCaptureModeThreadLocal);
+    captureStarted.set_value();
+    syncReady.wait();
+
+    if (captureErrA == hipSuccess) {
+      addKernel<<<(kN + 63) / 64, 64, 0, streamA>>>(dA, dA, kN);
+      endCaptureErrA = hipStreamEndCapture(streamA, &graphA);
+    }
+  });
+
+  std::thread threadB([&]() {
+    HIP_CHECK_THREAD(hipSetDevice(0));  // Same device
+    captureReady.wait();
+
+    // Legacy stream sync — should NOT invalidate non-blocking capture
+    syncErrB = hipMemcpy(dB, hB, kN * sizeof(int), hipMemcpyHostToDevice);
+
+    syncDone.set_value();
+  });
+
+  threadA.join();
+  threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
+
+  INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
+                      << " syncErrB=" << syncErrB);
+
+  REQUIRE(syncErrB == hipSuccess);
+  REQUIRE(captureErrA == hipSuccess);
+  REQUIRE(endCaptureErrA == hipSuccess);
+  REQUIRE(graphA != nullptr);
+
+  if (graphA) HIP_CHECK(hipGraphDestroy(graphA));
+  HIP_CHECK(hipFree(dA));
+  HIP_CHECK(hipFree(dB));
+  free(hB);
+  HIP_CHECK(hipStreamDestroy(streamA));
+}
+
+// ================================================================================================
+/**
+ * Test: Global capture on a non-blocking stream, sync API from another thread on same device.
+ *
+ * Thread A: Global capture on non-blocking stream, GPU 0
+ * Thread B: hipMemcpy on GPU 0 (same device, legacy stream)
+ *
+ * Expected (per CUDA): Thread A's capture is NOT invalidated.
+ */
+TEST_CASE("NonBlocking_Global_SameDevice_SyncDoesNotInvalidate",
+          "[graph][capture][multithreaded][nonblocking]") {
+  hipStream_t streamA = nullptr;
+  int *dA = nullptr, *dB = nullptr, *hB = nullptr;
+  hipGraph_t graphA = nullptr;
+  hipError_t captureErrA = hipSuccess;
+  hipError_t endCaptureErrA = hipSuccess;
+  hipError_t syncErrB = hipSuccess;
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipStreamCreateWithFlags(&streamA, hipStreamNonBlocking));
+  HIP_CHECK(hipMalloc(&dA, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dB, kN * sizeof(int)));
+  hB = (int*)malloc(kN * sizeof(int));
+  memset(hB, 0, kN * sizeof(int));
+
+  std::promise<void> captureStarted, syncDone;
+  auto captureReady = captureStarted.get_future();
+  auto syncReady = syncDone.get_future();
+
+  std::thread threadA([&]() {
+    HIP_CHECK_THREAD(hipSetDevice(0));
+    captureErrA = hipStreamBeginCapture(streamA, hipStreamCaptureModeGlobal);
+    captureStarted.set_value();
+    syncReady.wait();
+
+    if (captureErrA == hipSuccess) {
+      addKernel<<<(kN + 63) / 64, 64, 0, streamA>>>(dA, dA, kN);
+      endCaptureErrA = hipStreamEndCapture(streamA, &graphA);
+    }
+  });
+
+  std::thread threadB([&]() {
+    HIP_CHECK_THREAD(hipSetDevice(0));  // Same device
+    captureReady.wait();
+
+    syncErrB = hipMemcpy(dB, hB, kN * sizeof(int), hipMemcpyHostToDevice);
+
+    syncDone.set_value();
+  });
+
+  threadA.join();
+  threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
+
+  INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
+                      << " syncErrB=" << syncErrB);
+
+  REQUIRE(syncErrB == hipSuccess);
+  REQUIRE(captureErrA == hipSuccess);
+  REQUIRE(endCaptureErrA == hipSuccess);
+  REQUIRE(graphA != nullptr);
+
+  if (graphA) HIP_CHECK(hipGraphDestroy(graphA));
+  HIP_CHECK(hipFree(dA));
+  HIP_CHECK(hipFree(dB));
+  free(hB);
+  HIP_CHECK(hipStreamDestroy(streamA));
+}
+
+// ================================================================================================
+/**
+ * Test: Relaxed capture on a non-blocking stream, sync API from another thread on same device.
+ *
+ * Thread A: Relaxed capture on non-blocking stream, GPU 0
+ * Thread B: hipMemcpy on GPU 0 (same device, legacy stream)
+ *
+ * Expected (per CUDA): Thread A's capture is NOT invalidated.
+ */
+TEST_CASE("NonBlocking_Relaxed_SameDevice_SyncDoesNotInvalidate",
+          "[graph][capture][multithreaded][nonblocking]") {
+  hipStream_t streamA = nullptr;
+  int *dA = nullptr, *dB = nullptr, *hB = nullptr;
+  hipGraph_t graphA = nullptr;
+  hipError_t captureErrA = hipSuccess;
+  hipError_t endCaptureErrA = hipSuccess;
+  hipError_t syncErrB = hipSuccess;
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipStreamCreateWithFlags(&streamA, hipStreamNonBlocking));
+  HIP_CHECK(hipMalloc(&dA, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dB, kN * sizeof(int)));
+  hB = (int*)malloc(kN * sizeof(int));
+  memset(hB, 0, kN * sizeof(int));
+
+  std::promise<void> captureStarted, syncDone;
+  auto captureReady = captureStarted.get_future();
+  auto syncReady = syncDone.get_future();
+
+  std::thread threadA([&]() {
+    HIP_CHECK_THREAD(hipSetDevice(0));
+    captureErrA = hipStreamBeginCapture(streamA, hipStreamCaptureModeRelaxed);
+    captureStarted.set_value();
+    syncReady.wait();
+
+    if (captureErrA == hipSuccess) {
+      addKernel<<<(kN + 63) / 64, 64, 0, streamA>>>(dA, dA, kN);
+      endCaptureErrA = hipStreamEndCapture(streamA, &graphA);
+    }
+  });
+
+  std::thread threadB([&]() {
+    HIP_CHECK_THREAD(hipSetDevice(0));  // Same device
+    captureReady.wait();
+
+    syncErrB = hipMemcpy(dB, hB, kN * sizeof(int), hipMemcpyHostToDevice);
+
+    syncDone.set_value();
+  });
+
+  threadA.join();
+  threadB.join();
+  HIP_CHECK_THREAD_FINALIZE();
+
+  INFO("captureErrA=" << captureErrA << " endCaptureErrA=" << endCaptureErrA
+                      << " syncErrB=" << syncErrB);
+
+  REQUIRE(syncErrB == hipSuccess);
+  REQUIRE(captureErrA == hipSuccess);
+  REQUIRE(endCaptureErrA == hipSuccess);
+  REQUIRE(graphA != nullptr);
+
+  if (graphA) HIP_CHECK(hipGraphDestroy(graphA));
+  HIP_CHECK(hipFree(dA));
+  HIP_CHECK(hipFree(dB));
+  free(hB);
+  HIP_CHECK(hipStreamDestroy(streamA));
+}
+
+// ================================================================================================
+/**
+ * Test: ThreadLocal capture on a non-blocking stream, sync API from SAME thread.
+ *
+ * Single thread: ThreadLocal capture on non-blocking stream, then hipMemcpy on same device.
+ *
+ * Expected (per CUDA): Capture is NOT invalidated.
+ * Non-blocking streams have no legacy stream dependency even within the same thread.
+ */
+TEST_CASE("NonBlocking_ThreadLocal_SameThread_SyncDoesNotInvalidate",
+          "[graph][capture][nonblocking]") {
+  hipStream_t streamA = nullptr;
+  int *dA = nullptr, *dB = nullptr, *hB = nullptr;
+  hipGraph_t graphA = nullptr;
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipStreamCreateWithFlags(&streamA, hipStreamNonBlocking));
+  HIP_CHECK(hipMalloc(&dA, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dB, kN * sizeof(int)));
+  hB = (int*)malloc(kN * sizeof(int));
+  memset(hB, 0, kN * sizeof(int));
+
+  HIP_CHECK(hipStreamBeginCapture(streamA, hipStreamCaptureModeThreadLocal));
+
+  // Legacy stream sync on same thread — should NOT invalidate non-blocking capture
+  HIP_CHECK(hipMemcpy(dB, hB, kN * sizeof(int), hipMemcpyHostToDevice));
+
+  addKernel<<<(kN + 63) / 64, 64, 0, streamA>>>(dA, dA, kN);
+  HIP_CHECK(hipStreamEndCapture(streamA, &graphA));
+
+  REQUIRE(graphA != nullptr);
+
+  HIP_CHECK(hipGraphDestroy(graphA));
+  HIP_CHECK(hipFree(dA));
+  HIP_CHECK(hipFree(dB));
+  free(hB);
+  HIP_CHECK(hipStreamDestroy(streamA));
+}
+
+// ================================================================================================
+/**
+ * Test: Global capture on a non-blocking stream, sync API from SAME thread.
+ *
+ * Single thread: Global capture on non-blocking stream, then hipMemcpy on same device.
+ *
+ * Expected (per CUDA): Capture is NOT invalidated.
+ */
+TEST_CASE("NonBlocking_Global_SameThread_SyncDoesNotInvalidate",
+          "[graph][capture][nonblocking]") {
+  hipStream_t streamA = nullptr;
+  int *dA = nullptr, *dB = nullptr, *hB = nullptr;
+  hipGraph_t graphA = nullptr;
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipStreamCreateWithFlags(&streamA, hipStreamNonBlocking));
+  HIP_CHECK(hipMalloc(&dA, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dB, kN * sizeof(int)));
+  hB = (int*)malloc(kN * sizeof(int));
+  memset(hB, 0, kN * sizeof(int));
+
+  HIP_CHECK(hipStreamBeginCapture(streamA, hipStreamCaptureModeGlobal));
+
+  // Legacy stream sync on same thread — should NOT invalidate non-blocking capture
+  HIP_CHECK(hipMemcpy(dB, hB, kN * sizeof(int), hipMemcpyHostToDevice));
+
+  addKernel<<<(kN + 63) / 64, 64, 0, streamA>>>(dA, dA, kN);
+  HIP_CHECK(hipStreamEndCapture(streamA, &graphA));
+
+  REQUIRE(graphA != nullptr);
+
+  HIP_CHECK(hipGraphDestroy(graphA));
+  HIP_CHECK(hipFree(dA));
+  HIP_CHECK(hipFree(dB));
+  free(hB);
+  HIP_CHECK(hipStreamDestroy(streamA));
+}
+
+// ================================================================================================
+/**
+ * Test: Relaxed capture on a non-blocking stream, sync API from SAME thread.
+ *
+ * Single thread: Relaxed capture on non-blocking stream, then hipMemcpy on same device.
+ *
+ * Expected (per CUDA): Capture is NOT invalidated.
+ */
+TEST_CASE("NonBlocking_Relaxed_SameThread_SyncDoesNotInvalidate",
+          "[graph][capture][nonblocking]") {
+  hipStream_t streamA = nullptr;
+  int *dA = nullptr, *dB = nullptr, *hB = nullptr;
+  hipGraph_t graphA = nullptr;
+
+  HIP_CHECK(hipSetDevice(0));
+  HIP_CHECK(hipStreamCreateWithFlags(&streamA, hipStreamNonBlocking));
+  HIP_CHECK(hipMalloc(&dA, kN * sizeof(int)));
+  HIP_CHECK(hipMalloc(&dB, kN * sizeof(int)));
+  hB = (int*)malloc(kN * sizeof(int));
+  memset(hB, 0, kN * sizeof(int));
+
+  HIP_CHECK(hipStreamBeginCapture(streamA, hipStreamCaptureModeRelaxed));
+
+  // Legacy stream sync on same thread — should NOT invalidate non-blocking capture
+  HIP_CHECK(hipMemcpy(dB, hB, kN * sizeof(int), hipMemcpyHostToDevice));
+
+  addKernel<<<(kN + 63) / 64, 64, 0, streamA>>>(dA, dA, kN);
+  HIP_CHECK(hipStreamEndCapture(streamA, &graphA));
+
+  REQUIRE(graphA != nullptr);
+
+  HIP_CHECK(hipGraphDestroy(graphA));
+  HIP_CHECK(hipFree(dA));
+  HIP_CHECK(hipFree(dB));
+  free(hB);
+  HIP_CHECK(hipStreamDestroy(streamA));
+}
