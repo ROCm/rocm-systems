@@ -14,6 +14,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **The `amdsmi` Python wheel now uses standard SPDX license metadata**.  
+  - `pip show amdsmi` reports `License-Expression: MIT`; building the wheel from source now needs setuptools 77 or later (Python 3.9 or later).
+
 - **`amdsmi_get_gpu_kfd_info()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` on WSL**.
   - WSL has no KFD, so the call previously returned success with placeholder values; it now reports the data as unsupported.
 
