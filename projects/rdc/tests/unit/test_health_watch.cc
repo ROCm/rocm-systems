@@ -303,4 +303,17 @@ TEST_F(HealthWatchTest, MemoryCheckEvaluatesRetiredPagesWhenPendingIsUnreadable)
   EXPECT_TRUE(over_limit);
 }
 
+TEST_F(HealthWatchTest, WeeklyDeltaStillRunsWithoutDebugfsThreshold) {
+  fetcher_->set(kGpu, RDC_FI_ECC_UNCORRECT_TOTAL, RDC_ST_OK, 0);
+  fetcher_->set(kGpu, RDC_HEALTH_PENDING_PAGE_NUM, RDC_ST_OK, 0);
+  fetcher_->set(kGpu, RDC_HEALTH_RETIRED_PAGE_NUM, RDC_ST_OK, 1);
+  fetcher_->set(kGpu, RDC_HEALTH_RETIRED_PAGE_LIMIT, RDC_ST_NOT_SUPPORTED);
+  ASSERT_EQ(RDC_ST_OK, table_->rdc_health_set(group_, RDC_HEALTH_WATCH_MEM));
+  fetcher_->set(kGpu, RDC_HEALTH_RETIRED_PAGE_NUM, RDC_ST_OK, 4);
+  auto response = check();
+  ASSERT_EQ(response.incidents_count, 1u);
+  EXPECT_EQ(response.incidents[0].error.code, RDC_FR_RETIRED_PAGES_UNCORRECTABLE_LIMIT);
+  EXPECT_EQ(response.overall_health, RDC_HEALTH_RESULT_FAIL);
+}
+
 }  // namespace
