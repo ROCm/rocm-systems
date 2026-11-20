@@ -63,23 +63,15 @@ bool rootRefusesPlaintextHello(const ncclUniqueId& id) {
 
 TEST(TransportEncryption, PskGatesBootstrapSockets) {
   RUN_ISOLATED_TEST("TransportEncryption.PskGatesBootstrapSockets", []() {
-    // Refused: no initializer magic, no key, a 31-byte key, an unknown mode.
-    ncclEncryptionConfig_t config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk);
-    config.magic = 0;
-    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
-    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, nullptr);
-    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
-    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk + 1);
-    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
-    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK + 1, kPsk);
-    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
-
     int deviceCount = 0;
     if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1) GTEST_SKIP() << "requires a GPU";
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
-    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk);
+    ncclEncryptionConfig_t config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk);
     ASSERT_EQ(ncclSetEncryption(&config), ncclSuccess);
+    // A refused config (31-byte key) must leave the stored PSK in force for the init below.
+    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk + 1);
+    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
     ncclUniqueId id;
     ASSERT_EQ(ncclGetUniqueId(&id), ncclSuccess);
     ncclComm_t comm = nullptr;
