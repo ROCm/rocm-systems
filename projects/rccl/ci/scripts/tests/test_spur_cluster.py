@@ -65,6 +65,9 @@ class ManifestTest(TempWork):
             self.assertEqual(env["NCCL_IB_HCA"].split(","),
                              [f"ionic_{i}:1" for i in range(8)])
             self.assertEqual(env["NCCL_IB_GID_INDEX"], "1")
+            self.assertEqual(env["NCCL_IB_TC"], "104")
+            self.assertEqual(env["NCCL_IB_FIFO_TC"], "192")
+            self.assertEqual(env["RCCL_IB_QPS_PER_P2P"], "4")
             self.assertEqual(env["NCCL_IGNORE_CPU_AFFINITY"], "1")
             self.assertEqual(env["GLOO_SOCKET_IFNAME"], "ens3")
 

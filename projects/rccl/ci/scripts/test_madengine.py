@@ -450,6 +450,12 @@ CLUSTER_CONFIGS = {
             "NCCL_IB_DISABLE": "0",
             "NCCL_IB_HCA": "ionic_0:1,ionic_1:1,ionic_2:1,ionic_3:1,ionic_4:1,ionic_5:1,ionic_6:1,ionic_7:1",
             "NCCL_IB_GID_INDEX": "1",
+            # The fabric's RoCE traffic classes: data QPs, then the FIFO QP.
+            "NCCL_IB_TC": "104",
+            "NCCL_IB_FIFO_TC": "192",
+            # P2P connections otherwise get a single QP, and 4-node all-to-all
+            # then fails with ibv receive-completion errors.
+            "RCCL_IB_QPS_PER_P2P": "4",
             "NCCL_SOCKET_IFNAME": "ens3",
             "NCCL_DEBUG": "WARN",
             "NCCL_NET_PLUGIN": "none",
