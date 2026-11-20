@@ -129,6 +129,7 @@ struct AsyncDecoder {
     uint64_t consumed = 0;                    // frames finished by the consumer
     bool draining = false;                    // producer waits for the queue to empty
     bool eos = false;
+    bool consumer_stopped = false;            // the consumer exited early; producer waits must not block
 
     // sync-copy buffer pool.
     std::vector<uint8_t *> all_buffers;
@@ -264,12 +265,14 @@ static bool AllocateBufferPool(AsyncDecoder &dec) {
 // Wait until the consumer has finished every queued frame. Called before a reconfigure,
 // which frees the decode surfaces' HIP mappings that no-copy frames point into, and before the
 // buffer pool is resized. Lag and hold waits end early while draining.
-static void DrainQueue(AsyncDecoder &dec) {
+// Returns false if the consumer stopped early, so the queue can never drain.
+static bool DrainQueue(AsyncDecoder &dec) {
     std::unique_lock<std::mutex> lock(dec.mtx);
     dec.draining = true;
     dec.cv.notify_all();
-    dec.cv.wait(lock, [&] { return dec.consumed == dec.displayed; });
+    dec.cv.wait(lock, [&] { return dec.consumed == dec.displayed || dec.consumer_stopped; });
     dec.draining = false;
+    return !dec.consumer_stopped;
 }
 
 static void UpdateGeometry(AsyncDecoder &dec, const RocdecVideoFormat *format) {
@@ -365,7 +368,10 @@ static int ROCDECAPI HandleVideoSequence(void *user_data, RocdecVideoFormat *for
 
     // A later sequence header. Frames already queued were displayed with the old format and,
     // for no-copy, point into decode surfaces a reconfigure would unmap, so finish them first.
-    DrainQueue(dec);
+    if (!DrainQueue(dec)) {
+        dec.failed = true;
+        return 0;
+    }
 
     if (format->codec != dec.codec || format->chroma_format != dec.chroma_format) {
         std::cerr << "Error: Reconfigure is not supported for a codec or chroma format change" << std::endl;
@@ -451,7 +457,11 @@ static int ROCDECAPI HandlePictureDisplay(void *user_data, RocdecParserDispInfo 
         {
             // Back-pressure: wait for a free pool buffer if the consumer has fallen behind.
             std::unique_lock<std::mutex> lock(dec.mtx);
-            dec.cv.wait(lock, [&] { return !dec.free_buffers.empty(); });
+            dec.cv.wait(lock, [&] { return !dec.free_buffers.empty() || dec.consumer_stopped; });
+            if (dec.consumer_stopped) {
+                dec.failed = true;
+                return 0;
+            }
             item.buffer = dec.free_buffers.back();
             dec.free_buffers.pop_back();
         }
@@ -469,7 +479,11 @@ static int ROCDECAPI HandlePictureDisplay(void *user_data, RocdecParserDispInfo 
 
     {
         std::unique_lock<std::mutex> lock(dec.mtx);
-        dec.cv.wait(lock, [&] { return dec.queue.size() < dec.opt.queue_depth; });
+        dec.cv.wait(lock, [&] { return dec.queue.size() < dec.opt.queue_depth || dec.consumer_stopped; });
+        if (dec.consumer_stopped) {
+            dec.failed = true;
+            return 0;
+        }
         item.index = dec.displayed++;
         dec.queue.push_back(item);
     }
@@ -486,10 +500,22 @@ struct ConsumerResult {
     uint64_t frames = 0;
 };
 
+// Called when the consumer exits before the end of the stream. Without it the producer would
+// wait forever for a free buffer, queue space or a drain that only the consumer can provide.
+static void StopConsumer(AsyncDecoder &dec, ConsumerResult *result, const char *reason) {
+    std::cerr << "Error: consumer stopped: " << reason << std::endl;
+    result->ok = false;
+    {
+        std::lock_guard<std::mutex> lock(dec.mtx);
+        dec.consumer_stopped = true;
+    }
+    dec.cv.notify_all();
+}
+
 static void ConsumerLoop(AsyncDecoder &dec, MD5Generator *md5, std::ofstream *md5_frames, ConsumerResult *result) {
     // HIP's current device is per thread, so select the decoder's device here as well.
     if (hipSetDevice(dec.opt.device_id) != hipSuccess) {
-        result->ok = false;
+        StopConsumer(dec, result, "hipSetDevice failed");
         return;
     }
     hipStream_t stream = nullptr;
@@ -497,7 +523,7 @@ static void ConsumerLoop(AsyncDecoder &dec, MD5Generator *md5, std::ofstream *md
     size_t late_copy_size = 0;
     std::mt19937 rng(12345);
     if (hipStreamCreate(&stream) != hipSuccess) {
-        result->ok = false;
+        StopConsumer(dec, result, "hipStreamCreate failed");
         return;
     }
 
