@@ -1691,9 +1691,10 @@ TEST(RaceDetector, TensorDma_SameWaveLoadsOverTheSameTileRace) {
   builder.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   builder.tensorLoadToLds(/*wave=*/0, {{.address = 0, .bytes = 16}});
   EXPECT_TRUE(builder.hasRace());
+  builder.clearViolations();
   builder.waitTensorcnt(/*wave=*/0, /*tensorcnt=*/0);
   builder.checkLdsRead(/*wave=*/0, /*lane=*/0, /*addr=*/0, /*bytes=*/4);
-  EXPECT_TRUE(builder.hasRace());
+  EXPECT_FALSE(builder.hasRace());
 }
 
 TEST(RaceDetector, TensorDma_SameWaveLoadsAfterTensorcntAreSafe) {

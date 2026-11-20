@@ -12241,7 +12241,8 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
       PluginSinkConfig sinks;
       auto &sink = sinks.emplace<StringSink>();
       f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
-      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      ASSERT_TRUE(
+          f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(R"({"lds_waw":true})")));
       f.soc->set_plugin_group(f.plugin_group_);
       f.plugin_group_->onInit();
       auto *cu = f.cu();
@@ -12374,6 +12375,10 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
     };
     ASSERT_NO_FATAL_FAILURE(check(Op::FlatAdd, Op::DsAdd, Wait::None, true));
     ASSERT_NO_FATAL_FAILURE(check(Op::DsAdd, Op::FlatAdd, Wait::None, true));
+    // Matching atomics remain exempt after completion, while their LDS history
+    // is still visible to the other wave without a barrier.
+    ASSERT_NO_FATAL_FAILURE(check(Op::FlatAdd, Op::DsAdd, Wait::Both, true));
+    ASSERT_NO_FATAL_FAILURE(check(Op::DsAdd, Op::FlatAdd, Wait::Both, true));
     // A 64-bit atomic at byte zero overlaps the DWORD at byte four without
     // denoting the same atomic element.
     ASSERT_NO_FATAL_FAILURE(check(Op::FlatAdd, Op::DsAdd64, Wait::None, true));
