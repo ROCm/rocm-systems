@@ -1,6 +1,6 @@
 ---
 name: amdsmi-python-style-guide
-description: "ROCm Python style guide based on TheRock. Use when: writing Python code, reviewing Python PRs, checking Python style, creating Python scripts, Python 3.6 compatibility, type hints, error handling patterns, pathlib usage, argparse CLI design."
+description: "ROCm Python style guide based on TheRock. Use when: writing Python code, reviewing Python PRs, checking Python style, creating Python scripts, type hints, error handling patterns, pathlib usage, argparse CLI design."
 ---
 
 # Python Style Guide (ROCm / TheRock)
@@ -17,20 +17,24 @@ Source: [TheRock python_style_guide.md](https://github.com/ROCm/TheRock/blob/mai
 
 ## Type Hints
 
+Rules in this section and its subsections that name a Python version apply to code that must run
+on Python 3.6.8 (RHEL 8, SLES 15): `py-interface/`, `amdsmi_cli/`, `tests/python/unit/`,
+`tests/python/common/`, `tests/python/test_*.py`, and scripts that `language: system` pre-commit
+hooks run.
+
 - Type hints on **all** function signatures
 - **Never** use `Any` except in rare generic code
-- Use `typing` generics: `List[str]`, `Dict[str, int]`, `Tuple[int, ...]`, `Optional[T]`, `Union[X, Y]`
-- **Never** write `list[str]` / `dict[str, int]` (3.9+) or `X | None` (3.10+) in an annotation,
-  not even quoted
+- Use `typing` generics (`List[str]`, `Dict[str, int]`, `Tuple[int, ...]`, `Optional[T]`,
+  `Union[X, Y]`), **never** `list[str]` / `dict[str, int]` (3.9+) or `X | None` (3.10+), not even
+  quoted
 - **Do NOT** use `from __future__ import annotations` (a `SyntaxError` on 3.6)
 
 ### Extract Complex Types
 
 - Type appears in multiple signatures → `NamedTuple` or a plain alias (`BdfList = List[str]`)
-- Dict/tuple with 3+ fields → `NamedTuple`
+- Dict/tuple with 3+ fields → `dataclass` or `NamedTuple`
 - If you document what tuple fields mean → use `NamedTuple`
 - No `dataclasses` (3.7+), no `TypeAlias` (3.10+)
-- Tuples OK for: simple pairs `(x, y)`, stdlib unpacking, single-use immediate unpacking
 
 ```python
 # Good
@@ -43,31 +47,10 @@ class KpackInfo(NamedTuple):
 def get_info() -> Tuple[Path, int, int]: ...
 ```
 
----
+### Dataclasses Over Tuples
 
-## Python 3.6.8 Floor
-
-amd-smi supports Python 3.6.8, the `python3` of RHEL 8 and SLES 15. The floor covers:
-
-- Shipped code: `py-interface/`, `amdsmi_cli/`
-- Tests that CI runs on 3.6: `tests/python/unit/` and `tests/python/common/` (AMDSMI CI: RHEL8,
-  AlmaLinux8, SLES) and the `tests/python/test_*.py` guards (AMDSMI Python Version Tests)
-
-CI runs the functional and CLI suites on Python 3.8 and newer only.
-
-| Breaks 3.6 | Since | Use instead |
-|------------|-------|-------------|
-| `from __future__ import annotations`, `dataclasses` | 3.7 | `typing` generics; `NamedTuple` |
-| `subprocess` `text=`, `capture_output=` | 3.7 | `universal_newlines=True`; `stdout=subprocess.PIPE, stderr=subprocess.PIPE` |
-| `namedtuple(defaults=)`, module-level `__getattr__`, `time.*_ns()` | 3.7 | `__new__.__defaults__`; `__getattr__` on a `ModuleType` subclass; the float clock |
-| `open()` / `read_text()` without `encoding=` | 3.7 | `encoding="utf-8"`: 3.6 reads as ASCII in the C locale |
-| `:=`, f-string `{x=}`, positional-only `/` | 3.8 | Plain assignment, `{x}`, regular parameters |
-| `ast.Module(body, [])`; `isinstance(node, ast.Constant)` on parsed code | 3.8 | `ast.Module(body=..., type_ignores=[])`; `ast.literal_eval(node)` |
-| `addClassCleanup()`; mock `call.args`, `call.kwargs` | 3.8 | `common.add_class_cleanup()`; `args, kwargs = call` |
-| `list[str]`, `dict[str, int]` in an annotation; `str.removeprefix()` | 3.9 | `List[str]`, `Dict[str, int]`; slice after `startswith()` |
-| `X \| None`, `TypeAlias`, `match`, parenthesized context managers | 3.10 | `Optional[X]`, plain alias, `if`/`elif`, nested `with` |
-
-Check: `sudo python3.6 tests/python/unit_tests.py -v`
+Structured data with multiple fields → `@dataclass` or `NamedTuple`, not raw tuples.
+Tuples OK for: simple pairs `(x, y)`, stdlib unpacking, single-use immediate unpacking.
 
 ---
 
@@ -206,10 +189,10 @@ Changes to `_detect_install_context`, `_build_candidate_paths`, or `_load_librar
 
 When reviewing Python code, verify:
 
-- [ ] Type hints on all functions: `typing` generics, no `Any`
-- [ ] No `from __future__ import annotations`
-- [ ] Nothing from the Python 3.6.8 Floor table where the floor applies
-- [ ] Complex types extracted to `NamedTuple`
+- [ ] Type hints on all functions, no `Any`
+- [ ] Where Python 3.6.8 must work: `typing` generics, no `from __future__ import annotations`,
+  no `dataclasses`
+- [ ] Complex types extracted to `NamedTuple`/`dataclass`
 - [ ] Specific exception handling — no bare `except Exception`
 - [ ] Fail-fast — no silent `continue` on errors
 - [ ] `from e` on all re-raises
