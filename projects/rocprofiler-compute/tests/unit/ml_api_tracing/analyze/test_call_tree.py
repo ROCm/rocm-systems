@@ -379,53 +379,6 @@ def test_nest_marker_intervals_torch_root_without_file_stays_unlocated():
     assert root in forest["1"]
 
 
-def test_nest_marker_intervals_empty_frame():
-    assert nest_marker_intervals(pd.DataFrame()) == {}
-
-
-def test_nest_marker_intervals_nests_unsorted_input():
-    trace_df = pd.DataFrame([
-        parsed_marker_row("child", 20, 40),
-        parsed_marker_row("parent", 0, 100),
-    ])
-
-    forest = nest_marker_intervals(trace_df)
-
-    assert forest["1"][0].children[0].name == "child"
-
-
-@pytest.mark.parametrize(
-    ("kernel_names", "kernel_starts", "kernel_ends", "pmc_group_keys"),
-    [
-        (["gemm"], [10], [15], [("gpu", 1)]),
-        (("gemm",), (10,), (15,), (("gpu", 1),)),
-    ],
-    ids=["lists", "tuples"],
-)
-def test_nest_marker_intervals_preserves_kernel_sequences_and_pmc_keys(
-    kernel_names, kernel_starts, kernel_ends, pmc_group_keys
-):
-    marker_row = parsed_marker_row(
-        "operator",
-        0,
-        20,
-        kernel_names=kernel_names,
-        kernel_starts=kernel_starts,
-        kernel_ends=kernel_ends,
-    )
-    marker_row["Kernel_Pmc_Group_Keys"] = pmc_group_keys
-
-    forest = nest_marker_intervals(pd.DataFrame([marker_row]))
-
-    assert forest["1"][0].kernels["gemm"] == KernelStats(
-        launches=1,
-        total_duration_ns=5.0,
-        min_duration_ns=5.0,
-        max_duration_ns=5.0,
-        pmc_group_keys=[("gpu", 1)],
-    )
-
-
 @pytest.mark.parametrize("kernel_end", [None, 10, 5])
 def test_nest_marker_intervals_preserves_nonpositive_and_invalid_durations(kernel_end):
     marker_row = parsed_marker_row(

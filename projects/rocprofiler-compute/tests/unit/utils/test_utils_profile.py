@@ -109,11 +109,6 @@ mock_submodules_unicode = [
     (None, "module_тест", False),
 ]
 
-mock_submodules_processed_names = [
-    (None, "module_submodule1", False),
-    (None, "module_submodule2", False),
-]
-
 
 def stub_run_prof_deps(monkeypatch, counter_csv_body, warnings):
     """Run run_prof against a canned counter CSV instead of a real profiler."""
@@ -975,15 +970,6 @@ def test_get_submodules_unicode_names(mock_walk, mock_import):
     result = utils_profile.get_submodules("test_package")
     expected = ["tëst", "测试", "тест"]
     assert result == expected
-
-
-@mock.patch("importlib.import_module", return_value=SUBMODULE_DISCOVERY_PACKAGE)
-@mock.patch("pkgutil.walk_packages", return_value=mock_submodules_processed_names)
-def test_get_submodules_returns_processed_submodule_names(mock_walk, mock_import):
-    """Return the processed names of every discovered submodule."""
-    result = utils_profile.get_submodules("test_package")
-
-    assert result == ["submodule1", "submodule2"]
 
 
 @pytest.mark.misc

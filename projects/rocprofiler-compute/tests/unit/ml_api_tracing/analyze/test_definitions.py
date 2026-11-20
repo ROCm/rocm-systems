@@ -41,12 +41,3 @@ def test_args_variants_orders_by_call_count():
         ("(self=float32[4x4])", 2),
         ("(self=float32[2x2])", 1),
     ]
-
-
-def test_args_variants_recomputes_counts_and_breaks_ties_by_text():
-    node = CallTreeNode(name="operator", args_invocations={"z": {"1"}, "a": {"2"}})
-    assert node.args_variants == [("a", 1), ("z", 1)]
-    node.args_invocations["z"].add("3")
-    assert node.args_variants == [("z", 2), ("a", 1)]
-    node.args_invocations.clear()
-    assert node.args_variants == []

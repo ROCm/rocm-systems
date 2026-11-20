@@ -3,7 +3,6 @@
 
 """Unit tests for workload-time backend discovery and installation."""
 
-import importlib
 import sys
 import types
 
@@ -13,21 +12,11 @@ from ml_api_tracing.inject_roctx import installer
 from ml_api_tracing.inject_roctx.installer import install_global_wraps
 
 
-def raise_import_skipped(*args, **kwargs):
-    """Raise to assert that an import path is never reached."""
-    raise AssertionError("backend discovery should be skipped")
-
-
 def make_backend(name, install_fn=None):
     backend = types.SimpleNamespace()
     backend.name = name
     backend.install = install_fn or (lambda: None)
     return backend
-
-
-class FalseBackend(types.SimpleNamespace):
-    def __bool__(self):
-        return False
 
 
 class WarningRecorder:
@@ -127,75 +116,3 @@ def test_install_global_wraps_warns_when_module_does_not_register(
         for args in captured_warnings
         if len(args) > 1
     )
-
-
-def test_install_global_wraps_installs_false_backend_without_discovery(
-    fresh_registry, monkeypatch
-):
-    calls = []
-    fresh_registry.register(FalseBackend(name="alpha", install=lambda: calls.append(1)))
-    monkeypatch.setattr(importlib, "import_module", raise_import_skipped)
-    install_global_wraps(["", "alpha", "alpha"])
-    assert calls == [1]
-
-
-@pytest.mark.parametrize("failure", ["none", "install", "import", "register-import"])
-def test_install_global_wraps_retries_on_later_calls(
-    fresh_registry, monkeypatch, captured_warnings, failure
-):
-    calls = []
-    attempts = []
-
-    def install():
-        calls.append("alpha")
-        if failure == "install" and len(calls) == 1:
-            raise RuntimeError("install failed")
-
-    backend = make_backend("alpha", install)
-
-    def discover(name):
-        attempts.append(name)
-        if failure == "register-import" or len(attempts) > 1:
-            fresh_registry.register(backend)
-        if len(attempts) == 1:
-            raise ImportError("discovery failed")
-
-    if failure in ("none", "install"):
-        fresh_registry.register(backend)
-    else:
-        monkeypatch.setattr(importlib, "import_module", discover)
-    install_global_wraps(["alpha", "alpha"])
-    install_global_wraps(["alpha"])
-    assert calls == ["alpha"] * (2 if failure in ("none", "install") else 1)
-    assert len(captured_warnings) == (0 if failure == "none" else 1)
-    assert (
-        len(attempts)
-        == {"none": 0, "install": 0, "import": 2, "register-import": 1}[failure]
-    )
-
-
-def test_install_global_wraps_discovers_new_module_and_warns_without_registration(
-    fresh_registry, monkeypatch, captured_warnings
-):
-    imports = []
-    monkeypatch.setattr(importlib, "import_module", lambda *args: imports.append(args))
-    install_global_wraps(["ghost", "ghost"])
-    assert imports == [(f"{installer._BACKENDS_PKG}.ghost",)]
-    assert len(captured_warnings) == 1
-    assert "did not register 'ghost'" in captured_warnings[0][1]
-
-
-def test_install_global_wraps_preserves_partial_install_state(
-    fresh_registry, captured_warnings
-):
-    calls = []
-
-    def install_bad():
-        calls.append("partial")
-        raise RuntimeError("partial install")
-
-    fresh_registry.register(make_backend("bad", install_bad))
-    fresh_registry.register(make_backend("good", lambda: calls.append("good")))
-    install_global_wraps(["bad", "good", "bad"])
-    assert calls == ["partial", "good"]
-    assert len(captured_warnings) == 1

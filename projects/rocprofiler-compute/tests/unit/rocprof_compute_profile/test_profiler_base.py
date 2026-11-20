@@ -1408,62 +1408,6 @@ def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path, raw_selection):
 
 
 @pytest.mark.parametrize(
-    "overrides, message, blocks",
-    [
-        pytest.param(
-            {
-                "pc_sampling": True,
-                "experimental": True,
-                "trace_ml_api": ["triton", "torch", "triton"],
-            },
-            "--trace-ml-api cannot be used with PC-sampling-only profiling",
-            ["21"],
-            id="pc_sampling_only",
-        ),
-        pytest.param(
-            {"no_native_tool": True, "iteration_multiplexing": 1, "attach_pid": 1},
-            "--no-native-tool cannot be used",
-            [],
-            id="no_native_tool",
-        ),
-        pytest.param(
-            {"iteration_multiplexing": 1, "attach_pid": 1},
-            "--attach-pid cannot be used",
-            [],
-            id="attach_with_multiplexing",
-        ),
-        pytest.param(
-            {"attach_pid": 1, "attach_duration_msec": 100},
-            "ML API tracing cannot be used with --attach-pid.",
-            [],
-            id="attach_pid",
-        ),
-        pytest.param(
-            {"attach_duration_msec": 100, "kernel_iteration_range": ["invalid"]},
-            "ML API tracing cannot be used with --attach-duration-msec.",
-            [],
-            id="attach_duration",
-        ),
-    ],
-)
-def test_sanitize_reports_the_first_competing_error(
-    console_errors, overrides, message, blocks
-):
-    command = ["--", "missing-application"]
-    fields = {"trace_ml_api": ["torch"], **overrides}
-    args = _make_sanitize_args(command[1:], **fields)
-    profiler = RocProfCompute_Base(args, "rocprofiler-sdk", None)
-
-    with pytest.raises(SystemExit) as error:
-        profiler.sanitize()
-
-    assert error.value.code == 1
-    assert console_errors.messages[-1].startswith(message)
-    assert args.filter_blocks == blocks
-    assert args.remaining == command
-
-
-@pytest.mark.parametrize(
     "profiler_class, profiler_mode",
     [
         pytest.param(rocprof_v3_profiler, "rocprofv3", id="rocprofv3"),

@@ -89,6 +89,19 @@ class UnreadableDtype:
         raise ValueError("dtype is unavailable")
 
 
+class SubclassWrapperInstaller:
+    """Install one subclass-hook wrapper with a test base class as its state."""
+
+    def __init__(self, monkeypatch, state_attribute, installer_name):
+        self.monkeypatch = monkeypatch
+        self.state_attribute = state_attribute
+        self.installer_name = installer_name
+
+    def __call__(self, base):
+        self.monkeypatch.setattr(torch_backend._CoreState, self.state_attribute, base)
+        getattr(torch_backend, self.installer_name)()
+
+
 @pytest.fixture(
     params=[
         ("process_group", "patch_process_group_methods"),
@@ -97,13 +110,7 @@ class UnreadableDtype:
     ids=["process-group", "autograd-function"],
 )
 def install_subclass_wrappers(request, monkeypatch):
-    state_attribute, installer_name = request.param
-
-    def install(base):
-        monkeypatch.setattr(torch_backend._CoreState, state_attribute, base)
-        getattr(torch_backend, installer_name)()
-
-    return install
+    return SubclassWrapperInstaller(monkeypatch, *request.param)
 
 
 @pytest.fixture

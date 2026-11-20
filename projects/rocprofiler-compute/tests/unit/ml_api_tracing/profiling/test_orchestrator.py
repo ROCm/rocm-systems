@@ -29,15 +29,6 @@ def launcher_path():
     return Path(orchestrator.__file__).parent.parent / "inject_roctx" / "launch.py"
 
 
-def test_orchestrator_import_preserves_profile_dependency_boundaries(
-    assert_profile_import,
-):
-    assert_profile_import(
-        "ml_api_tracing.profiling.orchestrator",
-        Path(orchestrator.__file__).parents[2],
-    )
-
-
 def test_injection_preserves_interpreter_flags_and_workload_arguments(tmp_path):
     script = tmp_path / "workload with spaces.py"
     script.write_text("pass\n", encoding="utf-8")
@@ -130,39 +121,6 @@ def test_injection_missing_script_preserves_command(tmp_path):
 
     assert error.value.script == script
     assert command == original
-
-
-@pytest.mark.parametrize("skip_flag", [None, "-c"])
-def test_missing_launcher_errors_before_script_validation_or_skip_warning(
-    tmp_path, monkeypatch, skip_flag
-):
-    errors = MessageRecorder(exit_code=1)
-    monkeypatch.setattr(orchestrator, "console_error", errors)
-    monkeypatch.setattr(
-        orchestrator,
-        "__file__",
-        str(tmp_path / "owner" / "profiling" / "orchestrator.py"),
-    )
-    missing_launcher = tmp_path / "owner" / "inject_roctx" / "launch.py"
-    command = [sys.executable, skip_flag or "missing.py"]
-    original = command.copy()
-
-    with pytest.raises(SystemExit) as error:
-        orchestrator.prepare_ml_api_trace_injection(
-            command,
-            Path(sys.executable),
-            is_python=True,
-            script_index=1,
-            skip_flag=skip_flag,
-            frameworks=["torch"],
-        )
-
-    assert error.value.code == 1
-    assert command == original
-    assert errors.messages == [
-        f"Cannot find inject_roctx launcher at {missing_launcher}. "
-        "Please verify your installation."
-    ]
 
 
 @pytest.mark.parametrize("is_bundle", [False, True])

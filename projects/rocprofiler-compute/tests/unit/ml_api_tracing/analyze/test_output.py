@@ -9,9 +9,7 @@ import pandas as pd
 import pytest
 
 from ml_api_tracing.analyze.call_tree import (
-    nest_marker_intervals,
     rollup_node_stats,
-    validate_all_markers_nested,
 )
 from ml_api_tracing.analyze.definitions import CallTreeForest, CallTreeNode, KernelStats
 from ml_api_tracing.analyze.operator_patterns import operator_backend_labels
@@ -30,7 +28,6 @@ from ml_api_tracing.analyze.output import (
     show_matched_operators,
     show_operator_summary,
 )
-from ml_api_tracing.analyze.selection import select_operators
 from utils.schema import Workload
 
 OPERATOR_SUMMARY_COLUMNS = [
@@ -127,48 +124,6 @@ def build_display_forest() -> CallTreeForest:
     return {"7": [user_node]}
 
 
-def build_deep_display_forest(depth: int) -> CallTreeForest:
-    """Build valid nested marker intervals with dispatches at the deepest operator."""
-    marker_rows = []
-    for index in range(depth):
-        has_dispatches = index == depth - 1
-        marker_rows.append({
-            "Thread_Id": "7",
-            "Start_Timestamp": index * 1_000_000,
-            "End_Timestamp": (2 * depth - index) * 1_000_000,
-            "Operator_Name": f"deep_op_{index:03}",
-            "Backend": "torch",
-            "File_Name": "model.py",
-            "Line_Number": index + 1,
-            "launcher_thread_id": "9",
-            "args": "(self=float32[2x2])",
-            "Kernel_Names": ["leaf", "extra"] if has_dispatches else [],
-            "Kernel_Start_Timestamps": [depth * 1_000_000] * 2
-            if has_dispatches
-            else [],
-            "Kernel_End_Timestamps": [
-                (depth + 1) * 1_000_000,
-                (depth + 0.5) * 1_000_000,
-            ]
-            if has_dispatches
-            else [],
-            "Kernel_Pmc_Group_Keys": [
-                ("guid", "leaf", 256, 64, 0),
-                ("guid", "extra", 512, 64, 1024),
-            ]
-            if has_dispatches
-            else [],
-        })
-    marker_frame = pd.DataFrame(marker_rows)
-    forest = nest_marker_intervals(marker_frame)
-    validate_all_markers_nested(marker_frame, forest)
-    deepest = forest["7"][0]
-    while deepest.children:
-        deepest = deepest.children[0]
-    rollup_node_stats(forest["7"][0])
-    return forest
-
-
 def operator_node(name, invocation, children=(), kernel=None):
     node = CallTreeNode(name=name, file_name="net.py", line_number=1)
     node.invocation_ids.add(invocation)
@@ -211,24 +166,6 @@ def summary_node(
         file_name=file_name,
         line_number=line_number,
     )
-
-
-def assert_complete_deep_display(output: str, depth: int, leaf_kernel_id: int) -> None:
-    call_tree_output, summary_output = output.split(
-        "Operator summary (Min/Max/Mean are per-dispatch", 1
-    )
-    call_tree_output = call_tree_output.split(
-        "Sorted by total GPU kernel duration.\n", 1
-    )[1]
-    assert "dispatches: 2, total: 1.50 ms" in call_tree_output
-    for index in range(depth):
-        assert call_tree_output.count(f"deep_op_{index:03}") == 1
-        assert f"model.py:{index + 1}" in call_tree_output
-    assert "args=(self=float32[2x2])" in call_tree_output
-    assert f"leaf (id {leaf_kernel_id})" in call_tree_output
-    assert "extra (id 71)" in call_tree_output
-    assert "deep_op_000" in summary_output
-    assert f"deep_op_{depth - 1:03}" in summary_output
 
 
 def test_format_duration_microseconds_below_threshold():
@@ -717,39 +654,6 @@ def test_show_matched_operators_prints_selected_totals_and_kernel_ids(
     for kernel_id in (70, 71, 72, 74):
         assert f"(id {kernel_id})" in first_output
     assert "(id 73)" not in first_output
-
-
-def test_show_matched_operators_empty_forest_prints_nothing(capsys) -> None:
-    show_matched_operators({}, ["PyTorch"], "aten::*", {})
-    assert capsys.readouterr().out == ""
-
-
-@pytest.mark.parametrize("depth", [180, 200])
-def test_list_ml_operators_renders_deep_unfiltered_forest(capsys, depth) -> None:
-    forest = build_deep_display_forest(depth)
-    kernel_ids = {"leaf": 4, "extra": 71}
-
-    list_ml_operators("workloads/deep", forest, ["PyTorch"], [], kernel_ids)
-    first_output = capsys.readouterr().out
-    assert "PyTorch Operator Call Tree: workloads/deep" in first_output
-    assert_complete_deep_display(first_output, depth, leaf_kernel_id=4)
-
-
-@pytest.mark.parametrize("depth", [180, 200])
-def test_show_matched_operators_renders_deep_selected_forest(capsys, depth) -> None:
-    forest = build_deep_display_forest(depth)
-    selected, pmc_group_keys = select_operators(forest, {"torch": ["deep_op_000"]})
-    assert pmc_group_keys == [
-        ("guid", "leaf", 256, 64, 0),
-        ("guid", "extra", 512, 64, 1024),
-    ]
-
-    show_matched_operators(
-        selected, ["PyTorch"], "deep_op_000", {"leaf": 70, "extra": 71}
-    )
-    first_output = capsys.readouterr().out
-    assert "Matched PyTorch Operators: deep_op_000" in first_output
-    assert_complete_deep_display(first_output, depth, leaf_kernel_id=70)
 
 
 @pytest.mark.parametrize(

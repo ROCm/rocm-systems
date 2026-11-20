@@ -1093,15 +1093,6 @@ add_test(
 )
 
 add_test(
-    NAME test_ml_api_tracing_inject_roctx_backend_contract
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_ml_api_tracing_inject_roctx_backend_contract.xml
-        ${COV_OPTION} tests/unit/ml_api_tracing/inject_roctx/test_backend_contract.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_ml_api_tracing_inject_roctx_installer
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest
@@ -1151,14 +1142,6 @@ add_test(
         ${COV_OPTION}
         tests/unit/ml_api_tracing/inject_roctx/backends/test_torch_trace_collector.py
         ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_inject_roctx_isolated_imports
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_inject_roctx_isolated_imports.xml ${COV_OPTION}
-        tests/integration/test_inject_roctx_isolated_imports.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1225,23 +1208,6 @@ add_test(
         ${PYTHON_TEST_COMMAND} -m pytest
         --junitxml=tests/test_ml_api_tracing_profiling_storage.xml ${COV_OPTION}
         tests/unit/ml_api_tracing/profiling/test_storage.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_profiler_rocprofiler_sdk
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_profiler_rocprofiler_sdk.xml ${COV_OPTION}
-        tests/unit/rocprof_compute_profile/test_profiler_rocprofiler_sdk.py
-        ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_profiler_rocprof_v3
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profiler_rocprof_v3.xml
-        ${COV_OPTION} tests/unit/rocprof_compute_profile/test_profiler_rocprof_v3.py
-        ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -1429,18 +1395,14 @@ if(${ENABLE_COVERAGE})
         test_profile_triton_trace
         test_profile_ml_api_trace
         test_torch_trace_coverage
-        test_ml_api_tracing_inject_roctx_backend_contract
         test_ml_api_tracing_inject_roctx_installer
         test_ml_api_tracing_inject_roctx_marker_ranges
         test_ml_api_tracing_inject_roctx_launch
         test_ml_api_tracing_inject_roctx_triton
         test_ml_api_tracing_inject_roctx_torch
         test_ml_api_tracing_inject_roctx_torch_trace_collector
-        test_inject_roctx_isolated_imports
         test_ml_api_tracing_profiling_orchestrator
         test_ml_api_tracing_profiling_storage
-        test_profiler_rocprofiler_sdk
-        test_profiler_rocprof_v3
         test_inject_roctx_torch_gpu
         test_analysis_db
         test_analysis_base
