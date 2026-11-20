@@ -28,6 +28,7 @@ struct TwoRankComm {
         comm->p2pnChannels        = p2pnChannels;
         comm->p2pnChannelsPerPeer = p2pnChannelsPerPeer;
         comm->workArgsBytes       = sizeof(ncclDevKernelArgs) + argsBatches * sizeof(ncclDevWorkBatch);
+        comm->workFifoBytes       = 1 << 20;
         peerInfo[0].hostHash      = 0x1234;
         peerInfo[1].hostHash      = 0x1234;
         comm->peerInfo            = peerInfo.data();
@@ -98,6 +99,14 @@ TEST(P2pDirectMaxChannelsTests, RequestedPoolLeavesRoomForASplitRound)
 
     TwoRankComm tight(64, 16, 32);
     EXPECT_EQ(rcclP2pChannelStrideForApi(tight.get(), ncclFuncSendRecv, kPeer, 128), 16);
+}
+
+TEST(P2pDirectMaxChannelsTests, SmallWorkFifoLeavesInlineRoomForBothSplitWorks)
+{
+    TwoRankComm comm(64, 16, 48);
+    comm.get()->workFifoBytes = 2 * sizeof(ncclDevWorkP2p);
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 128), 16);
 }
 
 TEST(P2pDirectMaxChannelsTests, ShiftedMultiNodeMappingCapsTheWidenedTile)

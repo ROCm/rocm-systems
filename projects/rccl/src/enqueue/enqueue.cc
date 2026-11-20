@@ -1487,8 +1487,15 @@ int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int pe
   if (peer == comm->rank || directMaxChannels <= 0 || !directApi || useMemcpy || ncclParamP2pDisable() ||
       comm->p2pNet || !rcclP2pPeerIsLocal(comm, peer))
     return comm->p2pnChannelsPerPeer;
-  // A split round needs batches for the widened plus the per-peer tile, and must fit an empty plan.
-  int argsRoom = ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes) - comm->p2pnChannelsPerPeer;
+  // A split round needs both work records plus the widened and per-peer batches in one empty plan.
+  // Work spills only when the non-persistent FIFO budget can hold both records; otherwise reserve
+  // their inline bytes before deriving how many channel batches fit.
+  ssize_t splitWorkBytes = 2 * sizeof(struct ncclDevWorkP2p);
+  ssize_t inlineWorkBytes = splitWorkBytes <= comm->workFifoBytes / 2 ? 0 : splitWorkBytes;
+  ssize_t batchBytes =
+    ssize_t(comm->workArgsBytes) - ssize_t(sizeof(struct ncclDevKernelArgs)) - inlineWorkBytes;
+  int argsRoom = std::max<ssize_t>(0, batchBytes / sizeof(struct ncclDevWorkBatch)) -
+                 comm->p2pnChannelsPerPeer;
   // The shifted multi-node mapping only tells p2pnChannels >> shift parts apart.
   int poolParts = (comm->nNodes > 2 && comm->p2pChannelShiftSize >= 0) ?
                     comm->p2pnChannels >> comm->p2pChannelShiftSize :
@@ -2048,6 +2055,19 @@ static int rcclP2pReservationChannels(struct ncclComm* comm, struct ncclTaskP2p*
   return channels;
 }
 
+// Bound a direction's reservation by the largest tile its byte count can select. A valid
+// computeP2pChannels step has a minimum part size of one byte, so that gives a protocol-independent
+// upper bound without inspecting endpoint-local connector state.
+static int rcclP2pReservationStride(struct ncclComm* comm, struct ncclTaskP2p* task, int pairChannelsMax,
+                                    int maxCTAs) {
+  int requested = rcclP2pChannelStride(comm, task);
+  if (task == nullptr || requested <= pairChannelsMax || requested > maxCTAs) return pairChannelsMax;
+  int minStep = comm->nNodes > 1 ? 2 : 8;
+  int possible = computeP2pChannels(task->bytes, requested, requested, minStep, comm->nNodes);
+  return rcclP2pDirectTileChannels(possible, pairChannelsMax, requested) > pairChannelsMax ? requested :
+                                                                                           pairChannelsMax;
+}
+
 static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch, int* p2pRound,
                                            struct ncclKernelPlan* plan, struct ncclKernelPlanBudget* budget) {
   int nRanks = comm->nRanks;
@@ -2121,9 +2141,8 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         int pairChannelsMax = std::min(comm->p2pnChannelsPerPeer, pairMaxCTAs);
         int maxCTAs = std::min(planMaxCTAs, pairMaxCTAs);
         struct ncclTaskP2p* p2pTasks[2] = {recv, send};
-        int requestedStrides[2] = {rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send)};
-        int strides[2] = {requestedStrides[0] <= maxCTAs ? requestedStrides[0] : pairChannelsMax,
-                          requestedStrides[1] <= maxCTAs ? requestedStrides[1] : pairChannelsMax};
+        int strides[2] = {rcclP2pReservationStride(comm, recv, pairChannelsMax, maxCTAs),
+                          rcclP2pReservationStride(comm, send, pairChannelsMax, maxCTAs)};
         int maxStride = std::max(strides[0], strides[1]);
         int roundBatches = std::min(pairChannelsMax, rcclP2pReservationChannels(comm, recv, send));
         int roundWorks = 1;
@@ -2134,8 +2153,7 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
             strides[1] = pairChannelsMax;
           maxStride = std::max(strides[0], strides[1]);
           if (maxStride > pairChannelsMax) {
-            bool maySplit =
-              recv && send && sendRank != comm->rank && (strides[0] != strides[1] || recvBytes != sendBytes);
+            bool maySplit = recv && send && sendRank != comm->rank && strides[0] != strides[1];
             roundBatches = maySplit ? maxStride + pairChannelsMax : maxStride;
             roundWorks = maySplit ? 2 : 1;
           }

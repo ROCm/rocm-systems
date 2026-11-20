@@ -7428,6 +7428,16 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_SplitRound_ReservesBothTiles) {
   }
 }
 
+TEST_F(EnqueueMicrotest, ScheduleP2p_UnequalTinyDirectionsKeepOneNarrowWork) {
+  WidenedP2pScene sc(ncclFuncSend, /*sendBytes=*/1, ncclFuncRecv, /*recvBytes=*/2);
+  sc.bp.p()->nWorkBatches = 320;
+
+  ASSERT_EQ(ncclSuccess, sc.schedule(508 * kBatch));
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+  EXPECT_EQ(321, sc.bp.p()->nWorkBatches);
+  ASSERT_EQ(1u, sc.works().size());
+}
+
 TEST_F(EnqueueMicrotest, ScheduleP2p_EqualSizeMixedNetP2p_ReservesBothTiles) {
   // Both direct tasks have a 128-channel policy cap and equal sizes, but the send connector is
   // NET and is reduced to the 64-channel per-peer tile inside addP2pToPlan. The receive remains
