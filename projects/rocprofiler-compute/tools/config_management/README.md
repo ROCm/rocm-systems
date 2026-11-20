@@ -1,203 +1,23 @@
-# ROCProfiler-Compute Configuration Management
+# Metric configuration tools
 
-This directory contains the authoritative configuration-management system for ROCProfiler-Compute analysis configurations.
+The metric library (`src/rocprof_compute_soc/metric_library/`) defines the metrics, and the
+analysis views (`src/rocprof_compute_soc/views/`) say which metrics each panel shows. The
+tools here check them and generate the files made from them.
 
-It is designed to guarantee:
+| File | What it does |
+|---|---|
+| `check_metric_config.py` | The `metric-config-check` pre-commit hook: runs the metric library, view and membw tree spec checks, then regenerates the metric lock and the metric description files and lists those that change. With `--fix` it writes them; the hook runs it with `--fix`, so the commit fails until their diff is staged. |
+| `metric_lock.py` | Writes `metric_lock/<arch>.yaml`: each metric's formula, unit, peaks and the counters profile collects for it, after inheritance. |
+| `metric_lock/` | The generated lock, one file per metric library arch. Do not edit it. |
+| `metric_description_manager.py` | Writes the metric description files (`docs/data/metrics/<arch>_metrics.yaml`, with the `plain`, `rst` and `unit` of each row) from the views and the library, in sections named after the view tables (`DOCS_SECTIONS` names the others). The docs show `rst`. |
+| `utils_ruamel.py` | Round-trip YAML helpers for `metric_description_manager.py`. |
 
-- **Structural correctness** across GPU architectures
-- **Byte-level immutability** of panel YAMLs enforced via hashes
-- **CI enforcement** of all invariants
+After editing the library or the views, run:
 
-All workflows are orchestrated by a single sequential driver script:
+    python tools/config_management/check_metric_config.py --fix
 
-```bash
-tools/config_management/master_config_workflow_script.py
-```
+and stage the files it lists. The diff of `metric_lock/` shows what the edit changes on
+each arch: a changed formula, unit or peak, and counters added to or removed from profiling.
 
-## Repository Layout
-
-```bash
-rocprofiler-compute/
-├── src/rocprof_compute_soc/
-│   └── analysis_configs/
-│       ├── gfx908/
-│       │   └── 0000_top_stats.yaml
-│       ├── gfx90a/
-│       ├── gfx942/
-│       ├── gfx950/
-│       ├── gfx115x/                     # RDNA 3.5 shared analysis configs
-│       ├── gfx1201/                     # Navi48 RDNA4 analysis configs
-│       ├── gfx1250/
-│       ├── gfx9_config_template.yaml    # CDNA (gfx9) panel contract
-│       ├── gfx11_config_template.yaml   # RDNA 3.5 (gfx115*) panel contract
-│       ├── gfx120_config_template.yaml  # RDNA4 (gfx120*) panel contract
-│       └── gfx125_config_template.yaml  # CDNA5 (gfx125*) panel contract
-│
-└── tools/config_management/
-    ├── master_config_workflow_script.py
-    ├── metric_description_manager.py
-    ├── parse_config_template.py
-    ├── verify_against_config_template.py
-    ├── hash_manager.py
-    ├── hash_checker.py
-    ├── utils_ruamel.py
-    ├── .config_hashes.json
-    └── README.md
-```
-
-## Core Concepts
-### Panel YAMLs
-
-- Live under:
-```bash
-analysis_configs/<arch>/*.yaml
-```
-- Must conform strictly to the template schema
-- Are edited in-place using ruamel.yaml round-trip mode
-
-### Hash Database
-
-- Stored at:
-```bash
-tools/config_management/.config_hashes.json
-```
-- Records md5 hashes of panel YAMLs per arch
-- Machine-generated only
-- Enforced by the pre-commit `hash-check` hook (see [Automated Testing](#automated-testing))
-
-## Architecture Diagram (End-to-End Flow)
-```text
-                   ┌──────────────────────────┐
-                   │  analysis_configs/       │
-                   │  gfx9_config_template    │
-                   └───────────┬──────────────┘
-                               │
-                               ▼
-                 ┌───────────────────────────────┐
-                 │ verify_against_config_template│
-                 │ (structural validation)       │
-                 └───────────┬───────────────────┘
-                             │
-                             ▼
-                 ┌───────────────────────────────┐
-                 │ hash_manager.py --compute-all │
-                 │ (refresh .config_hashes.json) │
-                 └───────────┬───────────────────┘
-                             │
-                             ▼
-                 ┌───────────────────────────────┐
-                 │ hash_checker.py               │
-                 │ (panel-file hash consistency) │
-                 └───────────────────────────────┘
-```
-
-## Contributor Quick Start
-
-> [!NOTE]
-> **Required Python Dependency**
-> This configuration management system requires the `ruamel.yaml` Python package.
-> It is used to safely modify YAML files while preserving comments, ordering,
-> and formatting. The workflow scripts will not function correctly without it.
->
-> See [Development dependencies](../../README.md#development-dependencies) for install instructions.
-
-### 1. Validate the current state
-
-Before making **any** config changes:
-```bash
-python tools/config_management/master_config_workflow_script.py --validate-only
-```
-
-This must pass.
-
-### 2. Editing an existing architecture
-
-Edit panel YAMLs **directly** under:
-```bash
-src/rocprof_compute_soc/analysis_configs/<arch>/
-```
-
-Rules:
-
-- Preserve structure
-- Preserve ordering
-- Use multiline `>-` formatting for metric descriptions
-- Do **not** regenerate entire files
-
-After editing:
-```bash
-python tools/config_management/master_config_workflow_script.py --validate-only
-python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs
-```
-
-The first command verifies structural conformance. The second refreshes the hash DB so `hash_checker.py` agrees.
-
-### 3. Hash checks (fast local / CI)
-```bash
-python tools/config_management/master_config_workflow_script.py --hash-only
-```
-
-or:
-```bash
-python tools/config_management/master_config_workflow_script.py --ci
-```
-
-This runs panel-file hash validation only.
-
-## Automated Testing
-
-### Pre-commit Hash Consistency Hook
-
-Hash integrity is enforced automatically by the pre-commit `hash-check` hook,
-which runs `tools/config_management/hash_checker.py` on every commit touching
-the project. The same script can be run manually from the project root:
-```bash
-python3 tools/config_management/hash_checker.py
-```
-
-This check:
-
-- parses `.config_hashes.json`
-- verifies **byte-for-byte** integrity of panel YAMLs
-- fails on:
-  - missing files
-  - changed content
-  - stale hash DB
-
-## Contributor Rules (Strict)
-
-- Do **not** edit `.config_hashes.json` manually
-- Do **not** regenerate full YAMLs unnecessarily
-- Use in-place edits (ruamel round-trip)
-- Expect CI to reject inconsistent states
-
-## Metric Descriptions
-
-Metric descriptions flow unidirectionally from panel YAMLs to documentation:
-
-```
-Panel YAMLs (src/) → Per-Arch YAMLs (tools/) → Docs YAMLs (docs/) → Sphinx HTML
-```
-
-**Files:**
-```bash
-tools/per_arch_metric_definitions/
-  ├── gfx{908,90a,940,941,942,950,115x,1201,1250}_metrics_description.yaml   # plain + rst + unit
-
-docs/data/metrics/
-  └── <arch>_metrics.yaml                                  # per-arch rst + unit (generated)
-```
-
-**After editing panel `metrics_description` sections:**
-```bash
-python tools/config_management/metric_description_manager.py --sync-all src/rocprof_compute_soc/analysis_configs
-python tools/config_management/metric_description_manager.py --generate-docs
-```
-
-To regenerate the docs YAML for a single architecture without rewriting the others:
-
-```bash
-python tools/config_management/metric_description_manager.py --generate-docs --docs-arch <arch>
-```
-
-**Manual RST edits:** Edit per-arch YAMLs directly. The framework preserves an edit when its `rst` differs from `plain`.
+To edit an `rst` text by hand, edit `docs/data/metrics/<arch>_metrics.yaml`; the manager
+keeps an `rst` that differs from `plain`.

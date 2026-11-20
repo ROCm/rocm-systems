@@ -668,7 +668,7 @@ To see a list of available sets, use the ``--list-sets`` option.
 
    launch_stats                        Launch Stats                        Grid Size                      7.1.0
                                                                            Workgroup Size                 7.1.1
-                                                                           Total Wavefronts               7.1.2
+                                                                           Dispatched Wavefronts          7.1.2
                                                                            VGPRs                          7.1.5
                                                                            AGPRs                          7.1.6
                                                                            SGPRs                          7.1.7
