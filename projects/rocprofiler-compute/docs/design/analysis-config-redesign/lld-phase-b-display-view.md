@@ -164,12 +164,13 @@ selection read the views, with each metric from the metric library:
 | `--list-metrics` | `_build_arch_metric_details()`, `rocprof_compute_base.py` | `arch_panel_configs()` |
 | Memory chart | `PanelConfigs.for_arch()`, `memory_chart/loader.py` | `arch_panel_configs()` |
 | `-b` panel aliases (analyze, profile, `--list-metrics`, `--list-blocks`) | `get_arch_panel_id_to_alias()`, `utils/analysis_views.py` | The `alias` of each view |
-| Profile counters (no filter, `-b`, `--set`) and metric-aware counter grouping | `detect_counters()`, `_append_expressions_for_filter_token()` and `_iter_profile_metrics()`, `rocprof_compute_soc/soc_base.py` | `arch_panel_configs()`, through `_profile_panel_configs()` |
+| Profile counters for metric library ids (`-b`, `--set`) | `detect_counters()`, `rocprof_compute_soc/soc_base.py` | `MetricLibrary.get_counters_for_metrics()` |
+| Profile counters (no filter, other `-b` ids) and metric-aware counter grouping | `detect_counters()`, `_append_expressions_for_filter_token()` and `_iter_profile_metrics()`, `rocprof_compute_soc/soc_base.py` | `arch_panel_configs()`, through `_profile_panel_configs()` |
 | Collectables and built-in variables | `Collectables.of_arch()`, `rocprof_compute_soc/metric_library/loader.py` | `MetricLibrary.collectable_formulas()` |
 | Counter grouping inspector, metric health report, membw tree spec check | `tools/` | `arch_panel_configs()` |
 
-A numeric `-b` id or numeric set id selects the row at that position in the views, the
-id analyze shows.
+A numeric `-b` id selects the row at that position in the views, the id analyze shows.
+`--set` selects the metric ids of a library set (`metric_library/{arch}/sets.yaml`).
 
 **No fallback release:** the cutover release makes the new path the only path and removes
 the old one: `analysis_configs/` (the panel files, the config templates and
@@ -206,7 +207,7 @@ backward compatibility.
 
 | Tool | What changes |
 |---|---|
-| `validate_sets_metric_ids.py` | Checks the numeric set files against the views, and the library sets against the numeric set files, until `--set` reads the library sets; deleted with the numeric set files. `tools/validate_metric_library.py` checks the string-ID sets. |
+| `validate_sets_metric_ids.py` | Deleted with the numeric set files; `tools/validate_metric_library.py` checks the string-ID sets. |
 | `verify_against_config_template.py`, `parse_config_template.py` | Deleted with the config templates. `tools/validate_views.py` checks the views and `tools/validate_metric_library.py` the library. |
 | `metric_description_manager.py` | Reads the views and the library, and writes one description file per arch, `docs/data/metrics/<arch>_metrics.yaml`, with a section per view table named after its title. |
 | `hash_manager.py`, `hash_checker.py`, `master_config_workflow_script.py` | Replaced by the metric lock: `check_metric_config.py` (the `metric-config-check` pre-commit hook) runs the checks and regenerates `metric_lock/<arch>.yaml` and the description files. |
@@ -231,9 +232,9 @@ backward compatibility.
 Sets are defined in Layer 2 (see [Sets migration](lld-phase-a-metric-library.md#sets-migration)). What Layer 3 decides is how a
 set's results are shown:
 
-- **Which panels analyze shows after `profile --set`.** Today the set's numeric IDs are
-  saved as `filter_blocks` and select panels. A string ID such as `compute.salu_util`
-  appears in several panels (e.g. 2 and 11), so the views must decide. This is HLD OQ2.
-- **What `--list-sets` prints.** Today it prints numeric IDs.
-
-When `--set` switches to the Layer 2 sets, these display rules are in place.
+- **Which rows analyze shows after `profile --set`.** The set's metric ids are saved as
+  `filter_blocks`, and analyze filters rows by them as `-b` does with metric ids: each id
+  selects every view row that shows it (`metric_placements()`), so `compute.salu_util`
+  shows in both panels 2 and 11. A flat set view is HLD OQ2.
+- **What `--list-sets` prints.** Each set's option and title, and the name and metric id
+  of each of its metrics.
