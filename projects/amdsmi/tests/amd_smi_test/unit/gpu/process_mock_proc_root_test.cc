@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -691,6 +692,54 @@ class ScopedKfdProcessLister {
   ScopedKfdProcessLister(const ScopedKfdProcessLister&) = delete;
   ScopedKfdProcessLister& operator=(const ScopedKfdProcessLister&) = delete;
 };
+
+// Lists KFD processes as KFD does, counting the listings in g_listings.
+int CountListing(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t* num_found) {
+  ++g_listings;
+  return amd::smi::GetProcessInfo(procs, num_allocated, num_found);
+}
+
+TEST(GpuUnit, ProcessListOfAGpuIsNeverServedFromAnotherGpusCache) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // A process on each of two GPUs, placed by its KFD queue.
+  constexpr uint32_t kOnFirst = 4270;
+  constexpr uint32_t kOnSecond = 4271;
+  for (const auto& [pid, gpu_id, pdev] :
+       {std::tuple<uint32_t, uint64_t, const char*>{kOnFirst, kKfdGpuId, kBdfText},
+        std::tuple<uint32_t, uint64_t, const char*>{kOnSecond, kOtherKfdGpuId, kOtherBdfText}}) {
+    roots.kfd().WriteFile(std::to_string(pid) + "/queues/0/gpuid", std::to_string(gpu_id) + "\n");
+    AddKfdFilesForEveryGpu(&roots.kfd(), std::to_string(pid));
+    AddProcess(&roots.proc(), pid, pdev);
+  }
+  TestGpu first;
+  TestGpu second("card10", OtherTestBdf(), kOtherKfdGpuId);
+  ScopedKfdNode first_node(kKfdGpuId, first.index());
+  ScopedKfdNode second_node(kOtherKfdGpuId, second.index());
+  ScopedKfdProcessLister lister(CountListing);
+  WaitOutProcessListCache();
+  g_listings = 0;
+  // Back to back, within the cache period (1 ms by default), so a list cached
+  // for one GPU would be served for the other.
+  auto listed_pid = [](amdsmi_processor_handle handle) {
+    uint32_t num_processes = 4;
+    amdsmi_proc_info_t list[4] = {};
+    EXPECT_EQ(amdsmi_get_gpu_process_list(handle, &num_processes, list), AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(num_processes, 1U);
+    return list[0].pid;
+  };
+  const uint32_t first_pid = listed_pid(first.handle());
+  const uint32_t second_pid = listed_pid(second.handle());
+  const uint32_t first_pid_again = listed_pid(first.handle());
+  // Every call listed KFD's processes anew: they came further apart than the
+  // cache period, or it is 0, so no list could come from a cache.
+  if (g_listings == 3) {
+    GTEST_SKIP() << "No list was served from a cache";
+  }
+  EXPECT_EQ(first_pid, kOnFirst);
+  EXPECT_EQ(second_pid, kOnSecond);
+  EXPECT_EQ(first_pid_again, kOnFirst);
+}
 
 TEST(GpuUnit, ProcessListByPidLeavesOutOnlyAGpuWhoseListFails) {
   ScopedAmdsmiInit smi_init;
