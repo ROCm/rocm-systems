@@ -11,6 +11,8 @@ import ctypes
 import os
 import re
 import signal
+import socket
+import struct
 import subprocess
 import threading
 import time
@@ -434,6 +436,194 @@ def test_a_registration_survives_an_rdcd_restart(tools, tmp_path, monkeypatch):
     finally:
         if client:
             client.disconnect()
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+def _varint(value):
+    out = b""
+    while value > 0x7F:
+        out += bytes([value & 0x7F | 0x80])
+        value >>= 7
+    return out + bytes([value])
+
+
+class _Http2:
+    """A bare HTTP/2 connection to rdcd for RegisterPolicy streams, without grpcio.
+
+    Every stream starts with a receive window of 0. A reading stream gets window for what
+    arrives and counts the messages; a stopped one never gets any, so rdcd's writes to it pile
+    up in gRPC's buffers and then wait, as for a client that stays connected but stops reading.
+    The connection answers rdcd's pings, so keepalive keeps it open.
+    """
+
+    def __init__(self, port):
+        self.port = port
+        self.sock = socket.create_connection(("127.0.0.1", port), timeout=10 * FACTOR)
+        self.sock.settimeout(None)  # the reader thread waits for frames for as long as it takes
+        self.send_lock = threading.Lock()
+        self.lock = threading.Lock()  # guards streams
+        self.streams = {}  # id -> {"read", "admitted", "ended", "messages", "bytes", "pending"}
+        self.next_id = 1
+        settings = struct.pack(">HI", 0x4, 0)  # SETTINGS_INITIAL_WINDOW_SIZE = 0
+        self._send(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n" + self._frame(0x4, 0, 0, settings))
+        threading.Thread(target=self._read_frames, daemon=True).start()
+
+    @staticmethod
+    def _frame(kind, flags, stream, payload=b""):
+        return (
+            struct.pack(">I", len(payload))[1:]
+            + bytes([kind, flags])
+            + struct.pack(">I", stream)
+            + payload
+        )
+
+    @staticmethod
+    def _literal(name, value):
+        # HPACK literal header field without indexing, new name, no Huffman coding.
+        name, value = name.encode(), value.encode()
+        return b"\x00" + bytes([len(name)]) + name + bytes([len(value)]) + value
+
+    def _send(self, data):
+        with self.send_lock:
+            self.sock.sendall(data)
+
+    def register(self, group, read):
+        with self.lock:
+            sid = self.next_id
+            self.next_id += 2
+            self.streams[sid] = {
+                "read": read,
+                "admitted": False,
+                "ended": False,
+                "messages": 0,
+                "bytes": 0,  # of whole messages, 5-byte prefixes included
+                "pending": b"",
+            }
+        headers = b"".join(
+            self._literal(name, value)
+            for name, value in (
+                (":method", "POST"),
+                (":scheme", "http"),
+                (":path", "/rdc.RdcAPI/RegisterPolicy"),
+                (":authority", f"127.0.0.1:{self.port}"),
+                ("content-type", "application/grpc"),
+                ("te", "trailers"),  # codespell:ignore
+            )
+        )
+        request = b"\x08" + _varint(group)  # RegisterPolicyRequest.group_id
+        message = b"\x00" + struct.pack(">I", len(request)) + request
+        frames = self._frame(0x1, 0x4, sid, headers)  # HEADERS, END_HEADERS
+        frames += self._frame(0x0, 0x1, sid, message)  # DATA, END_STREAM
+        if read:
+            frames += self._frame(0x8, 0, sid, struct.pack(">I", 1 << 20))  # WINDOW_UPDATE
+        self._send(frames)
+        return sid
+
+    def state(self, sid, key):
+        with self.lock:
+            return self.streams[sid][key]
+
+    def _read_frames(self):
+        buf = b""
+        try:
+            while True:
+                while len(buf) < 9 or len(buf) < 9 + int.from_bytes(buf[:3], "big"):
+                    chunk = self.sock.recv(1 << 16)
+                    if not chunk:
+                        return
+                    buf += chunk
+                length = int.from_bytes(buf[:3], "big")
+                kind, flags = buf[3], buf[4]
+                sid = int.from_bytes(buf[5:9], "big") & 0x7FFFFFFF
+                payload, buf = buf[9 : 9 + length], buf[9 + length :]
+                self._on_frame(kind, flags, sid, payload)
+        except OSError:
+            return  # closed by close()
+
+    def _on_frame(self, kind, flags, sid, payload):
+        if kind == 0x4 and not flags & 0x1:  # SETTINGS: acknowledge
+            self._send(self._frame(0x4, 0x1, 0))
+        elif kind == 0x6 and not flags & 0x1:  # PING: answer
+            self._send(self._frame(0x6, 0x1, 0, payload))
+        with self.lock:
+            stream = self.streams.get(sid)
+            if stream is None:
+                return
+            if kind == 0x1:  # HEADERS: initial metadata, or trailers with END_STREAM
+                stream["ended" if flags & 0x1 else "admitted"] = True
+            elif kind == 0x3:  # RST_STREAM
+                stream["ended"] = True
+            elif kind == 0x0:  # DATA: whole gRPC messages, 5-byte prefix each
+                stream["pending"] += payload
+                while len(stream["pending"]) >= 5:
+                    size = 5 + int.from_bytes(stream["pending"][1:5], "big")
+                    if len(stream["pending"]) < size:
+                        break
+                    stream["pending"] = stream["pending"][size:]
+                    stream["messages"] += 1
+                    stream["bytes"] += size
+                if flags & 0x1:
+                    stream["ended"] = True
+        if kind == 0x0 and payload and stream["read"]:  # give the window back, to both
+            update = struct.pack(">I", len(payload))
+            self._send(self._frame(0x8, 0, 0, update) + self._frame(0x8, 0, sid, update))
+
+    def close(self):
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        self.sock.close()
+
+
+def test_unregistering_ends_the_stream_of_a_client_that_stopped_reading(tools, tmp_path):
+    # rdcd's write to a client that stays connected (it answers pings) but reads nothing waits
+    # once gRPC holds 64 KiB of the stream that the client has not taken. A stop must cancel
+    # that write: else the stream and its thread stay until the client goes away.
+    gpus = 64
+    d = Rdcd(tools, tmp_path, gpus=gpus, RDC_LOG="DEBUG").start()
+    conn = None
+    try:
+        gid = int(_created_id(d.ok("group", "-c", "all_gpus")))
+        d.ok("group", "-g", str(gid), "-a", ",".join(str(g) for g in range(gpus)))
+        d.ok("policy", "-g", str(gid), "-T", "1", "-P", "1", "-A", "0")  # both met on every GPU
+        conn = _Http2(d.port)
+        stopped = conn.register(gid, read=False)
+        reading = conn.register(gid, read=True)
+        assert _wait_until(
+            lambda: conn.state(stopped, "admitted") and conn.state(reading, "admitted"), 10
+        ), "rdcd did not admit both streams"
+        # rdcd sends both streams the same notifications. Once the reading one has half as much
+        # again as fills 64 KiB, the write to the stopped one waits.
+        assert _wait_until(lambda: conn.state(reading, "messages") >= 100, 10), "no notification"
+        size = conn.state(reading, "bytes") / conn.state(reading, "messages")
+        need = int(1.5 * 65536 / size)
+        assert _wait_until(lambda: conn.state(reading, "messages") >= need, 60), (
+            f"{conn.state(reading, 'messages')} of {need} notifications"
+        )
+        assert not conn.state(stopped, "ended"), "the stopped stream ended by itself"
+        assert conn.state(stopped, "messages") == 0 and not conn.state(stopped, "pending"), (
+            "rdcd sent data on a stream without window"
+        )
+        client = Client(_lib(), d)
+        try:
+            assert client.unregister(gid) == RDC_ST_OK
+        finally:
+            client.disconnect()
+        # rdcd's handler for the stopped stream waits in Write(): only a cancel ends it.
+        assert _wait_until(lambda: conn.state(stopped, "ended"), 10), (
+            "the stream of the client that stopped reading did not end"
+        )
+        # Both handlers return and log "Policy stream for group N ended". RDC_LOG writes a line in
+        # pieces, so the two lines can mix: count the last piece, " ended", not the whole line.
+        # Read the whole log, not output(), which keeps only its end.
+        assert _wait_until(
+            lambda: d.out_log.read_text(errors="replace").count(" ended") == 2, 10
+        ), d.output()
+    finally:
+        if conn is not None:
+            conn.close()
         code = d.stop()
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
 

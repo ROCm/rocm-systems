@@ -82,10 +82,17 @@ void RdcAPIServiceImpl::Shutdown() {
   }
 }
 
-// Ends a RegisterPolicy stream now, not at its next 1 s wakeup.
+// Ends a RegisterPolicy stream now, not at its next 1 s wakeup. A Write() can wait indefinitely
+// for a client that stays connected but stops reading, so a stream in Write() has its call
+// cancelled, which ends the Write(). The caller holds policy_mutex_ and the stream is listed,
+// so its call is still running.
 void RdcAPIServiceImpl::stop_policy_stream(PolicyStream* stream) {
   std::lock_guard<std::mutex> lock(stream->mutex);
   stream->stop = true;
+  if (stream->writing && !stream->cancelled) {
+    stream->cancelled = true;
+    stream->context->TryCancel();
+  }
   stream->cv.notify_all();
 }
 
@@ -1031,16 +1038,31 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
     if (group == policy_streams_.end()) {
       group = policy_streams_.emplace(group_id, std::vector<std::shared_ptr<PolicyStream>>()).first;
     }
+    stream->context = context;
     group->second.push_back(stream);
     policy_stream_count_++;
   }
+  // Unlists the stream on the way out, also when an exception leaves the handler: a stop uses
+  // the call's context only while the stream is listed.
+  struct Unlist {
+    RdcAPIServiceImpl* service;
+    uint32_t group_id;
+    std::shared_ptr<PolicyStream> stream;
+    bool done = false;
+    void now() {
+      done = true;
+      service->end_policy_stream(group_id, stream);
+    }
+    ~Unlist() {
+      if (!done) service->end_policy_stream(group_id, stream);
+    }
+  } unlist{this, group_id, stream};
   RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " admitted");
   context->AddInitialMetadata(kRdcPolicyAdmissionKey, "1");
   writer->SendInitialMetadata();
 
   // The stream ends when a write fails, the client cancels or goes away (keepalive),
   // UnRegisterPolicy ends the group's streams, or rdcd stops.
-  bool shutdown = false;
   while (true) {
     rdc_policy_callback_response_t response;
     bool send = false;
@@ -1051,13 +1073,13 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
                           [&stream] { return !stream->pending.empty() || stream->stop; });
       // A stopped stream drops the notifications it still holds.
       if (stream->stop) {
-        shutdown = stream->shutdown;
         break;
       }
       if (!stream->pending.empty()) {
         response = stream->pending.front();
         stream->pending.pop_front();
         send = true;
+        stream->writing = true;  // from here on, a stop cancels the call
       }
       dropped = stream->dropped;
       stream->dropped = 0;
@@ -1082,15 +1104,27 @@ void RdcAPIServiceImpl::end_policy_stream(uint32_t group_id,
       cond->set_value(response.condition.value);
       reply.set_gpu_index(response.gpu_index);
       reply.set_reset_triggered(response.reset_triggered != 0);
-      if (!writer->Write(reply)) {
+      const bool written = writer->Write(reply);
+      {
+        std::lock_guard<std::mutex> lock(stream->mutex);
+        stream->writing = false;
+      }
+      if (!written) {
         break;
       }
     }
   }
 
-  end_policy_stream(group_id, stream);
+  unlist.now();
   RDC_LOG(RDC_DEBUG, "Policy stream for group " << group_id << " ended");
-  if (shutdown) {
+  // Unlisted now, so no stop changes these any more.
+  std::lock_guard<std::mutex> lock(stream->mutex);
+  if (stream->cancelled) {
+    // gRPC requires an error status from a call that the server cancelled, also when rdcd
+    // stops; the client sees the call cancelled.
+    return ::grpc::Status(::grpc::StatusCode::CANCELLED, "the policy registration was ended");
+  }
+  if (stream->shutdown) {
     return ::grpc::Status(::grpc::StatusCode::UNAVAILABLE, "rdcd is stopping");
   }
   return ::grpc::Status::OK;

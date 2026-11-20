@@ -1108,8 +1108,9 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
       ::grpc::Status status = reader->Finish();
       {
         std::lock_guard<std::mutex> lock(s->mutex);
-        // rdc_policy_register() reports an end it sees; log one that comes later.
-        if (s->returned && !s->stop && !status.ok()) {
+        // rdc_policy_register() reports an end it sees; log one that comes later, unless this
+        // handle gave the stream up (rdcd may then cancel it while it writes).
+        if (s->returned && !s->stop && !s->cancel && !status.ok()) {
           RDC_LOG(RDC_ERROR, "The policy registration of group "
                                  << group_id
                                  << " ended: " << rdc_status_string(policy_stream_status(status))
