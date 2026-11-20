@@ -130,6 +130,7 @@ def run_instance(
     bodies: int,
     device: int,
     experimental: bool,
+    no_native_tool: bool,
 ) -> PhaseTiming:
     label = label_for_path(rocprof_path)
     instance_dir = work_parent / label
@@ -142,11 +143,13 @@ def run_instance(
     env["PYTHONPATH"] = f"{repo_src}:{existing}" if existing else repo_src
 
     experimental_args = ["--experimental"] if experimental else []
+    native_tool_args = ["--no-native-tool"] if no_native_tool else []
     block_ids = non_roofline_block_ids(detect_gpu_arch())
     profile_cmd = [
         *rocprof_cmd,
         "profile",
         *experimental_args,
+        *native_tool_args,
         "-b",
         *block_ids,
         "--overwrite",
@@ -283,6 +286,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Pass --experimental to profile and analyze (e.g. gfx1201)",
     )
+    parser.add_argument(
+        "--no-native-tool",
+        action="store_true",
+        help="Pass --no-native-tool to profile (skip native counter tool build)",
+    )
     return parser.parse_args(argv)
 
 
@@ -308,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
                     bodies=args.bodies,
                     device=args.device,
                     experimental=args.experimental,
+                    no_native_tool=args.no_native_tool,
                 )
             )
     except Exception as exc:
