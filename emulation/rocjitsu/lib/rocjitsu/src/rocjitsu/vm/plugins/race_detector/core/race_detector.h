@@ -116,28 +116,13 @@ public:
                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                     uint8_t atomicBytes = 0) const;
 
-  /// @brief Check for WAR and WAW hazards against outstanding LDS accesses.
+  /// @brief Check one LDS range for WAR and WAW hazards.
   /// @details Uses the same LDS access ordering as validateRead.
   /// If checkLdsWaw is enabled at construction, WAW is reported at the write,
   /// independent of values or later reads.
-  /// For an instruction with multiple ranges, call validateWriteAfterRead for
-  /// every range before calling validateWriteAfterWrite, so a WAW cannot hide
-  /// a WAR when the handler reports only one conflict per instruction.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                      uint8_t atomicBytes = 0) const;
-
-  /// @brief Check a write against pending LDS reads, including SRC2 sources.
-  /// @details Uses the same LDS access ordering as validateRead.
-  void validateWriteAfterRead(int addr, WaveId, int lane, int nBytes,
-                              MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
-                              uint8_t atomicBytes = 0) const;
-
-  /// @brief Check a write against pending LDS writes when checkLdsWaw is enabled.
-  /// @details Uses the same LDS access ordering as validateRead.
-  void validateWriteAfterWrite(int addr, WaveId, int lane, int nBytes,
-                               MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
-                               uint8_t atomicBytes = 0) const;
 
   /// @brief Conservatively check an instruction's LDS intervals for conflicts.
   /// @details The intervals must describe valid LDS byte ranges. False proves
@@ -219,6 +204,17 @@ public:
   static constexpr int kMaxWaves = 64;
 
 private:
+  friend class RaceDetectorPlugin;
+
+  // The plugin checks every written range for WAR before starting WAW checks,
+  // so a WAW cannot hide a WAR when only one conflict is reported per instruction.
+  void validateWriteAfterRead(int addr, WaveId, int lane, int nBytes,
+                              MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                              uint8_t atomicBytes = 0) const;
+  void validateWriteAfterWrite(int addr, WaveId, int lane, int nBytes,
+                               MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                               uint8_t atomicBytes = 0) const;
+
   void indexLdsIntervals(EventId event);
 
   /// A slot for one round. Closed slots keep their storage for reuse, since a
