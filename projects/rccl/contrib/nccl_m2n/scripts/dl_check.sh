@@ -21,7 +21,7 @@ MPI="mpirun -np $NP $PLACE --map-by ppr:8:node --bind-to none --mca pml ob1 --mc
  --mca oob_tcp_if_include $NCCL_SOCKET_IFNAME --mca btl_tcp_if_include $NCCL_SOCKET_IFNAME \
  -x PATH -x LD_LIBRARY_PATH -x NCCL_GIN_ENABLE -x NCCL_GIN_TYPE -x NCCL_CUMEM_ENABLE -x NCCL_DMABUF_ENABLE \
  -x HSA_NO_SCRATCH_RECLAIM -x NCCL_ENV_PLUGIN -x NCCL_SOCKET_IFNAME -x NCCL_DEBUG -x NCCL_RESHARD_ALGORITHM \
- -x NCCL_RESHARD_LOG_LEVEL"
+ -x NCCL_RESHARD_LOG_LEVEL -x NCCL_M2N_ENABLE_EXPERIMENTAL"
 RSH="ssh -p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
 declare -A SHAPE=(
@@ -37,11 +37,15 @@ declare -A SHAPE=(
 declare -A SIZE=( [2M]="136,136,129 --iterations 20 --warmup 3" [64M]="504,504,257 --iterations 10 --warmup 2" [1G]="1016,1016,1021 --iterations 5 --warmup 1" )
 declare -A TMO=( [2M]=180 [64M]=180 [1G]=300 )
 MODES=${MODES:-pack direct pipe default}
+# PIPE is rejected on ROCm unless NCCL_M2N_ENABLE_EXPERIMENTAL=1.
+EXPERIMENTAL=${NCCL_M2N_ENABLE_EXPERIMENTAL:-0}
 
 printf "%-8s %-8s %-4s %-5s %-10s %s\n" mode shape size res "GB/s/rank" "total GB/s" > $OUT/summary.txt
 NBAD=0
 for m in $MODES; do
   unset NCCL_RESHARD_ALGORITHM NCCL_RESHARD_LOG_LEVEL
+  export NCCL_M2N_ENABLE_EXPERIMENTAL=$EXPERIMENTAL
+  [[ $m == pipe ]] && export NCCL_M2N_ENABLE_EXPERIMENTAL=1
   case $m in
     default) ARGS="" ;;
     *) ARGS="--algorithm direct --copy-algorithm $m"; export NCCL_RESHARD_ALGORITHM=DIRECT ;;

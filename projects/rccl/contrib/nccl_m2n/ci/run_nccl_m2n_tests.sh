@@ -54,7 +54,7 @@ fi
 if (( numGpus >= 8 )); then
   pipeLog="$(mktemp)"
   trap 'rm -f "${log}" "${pipeLog}"' EXIT
-  if ! "${binary}" -N 8 --filter pipe_lsa_fanout_reuse --algorithm ring --api window --copy-algorithm pipe \
+  if ! NCCL_M2N_ENABLE_EXPERIMENTAL=1 "${binary}" -N 8 --filter pipe_lsa_fanout_reuse --algorithm ring --api window --copy-algorithm pipe \
     >"${pipeLog}" 2>&1; then
     cat "${pipeLog}"
     exit 1

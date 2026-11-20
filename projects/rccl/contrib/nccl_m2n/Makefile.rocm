@@ -201,6 +201,7 @@ TEST_HELPERS_NAME := test_helpers.cu
 TEST_MPI_NAMES    := basic_api_test_mpi.cc pipe_graph_path_test.cc $(TEST_HELPERS_NAME)
 TEST_LOCAL_NAMES  := nonblocking_comm_test.cc basic_api_test_local.cc \
                      pack_staging_pool_test.cc devcomm_cache_test.cc memcpy3d_test.cc \
+                     validated_config_test.cc \
                      $(TEST_HELPERS_NAME)
 
 # -- Bench source lists (identical to benchmarks/Makefile) -------------------

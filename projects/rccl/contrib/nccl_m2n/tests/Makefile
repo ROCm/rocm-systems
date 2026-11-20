@@ -52,6 +52,7 @@ TEST_LOCAL_SRCS  := $(TESTSDIR)/nonblocking_comm_test.cc \
                     $(TESTSDIR)/pack_staging_pool_test.cc \
                     $(TESTSDIR)/devcomm_cache_test.cc \
                     $(TESTSDIR)/memcpy3d_test.cc \
+                    $(TESTSDIR)/validated_config_test.cc \
                     $(TEST_HELPERS_SRC)
 
 .PHONY: all tests basic_api_test_mpi basic_api_test_local gtest gtest-clean clean help

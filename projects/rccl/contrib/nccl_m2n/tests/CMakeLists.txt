@@ -126,6 +126,7 @@ add_executable(basic_api_test_local
     pack_staging_pool_test.cc
     devcomm_cache_test.cc
     memcpy3d_test.cc
+    validated_config_test.cc
     test_helpers.cu
     ${SRCS}
 )

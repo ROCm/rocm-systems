@@ -203,7 +203,8 @@ runNonBlockingCoverage() {
     --filter tiny_contribution --algorithm ring --api default --copy-algorithm pack --lb-mode uniform
   runNonBlockingCase "nonblocking PACK/window API" \
     --filter tiny_contribution --algorithm ring --api window --copy-algorithm pack --lb-mode uniform
-  NCCL_RESHARD_PIPE_NET_MODE=HOST_RMA runNonBlockingCase "nonblocking PIPE host-RMA/default API" \
+  NCCL_RESHARD_PIPE_NET_MODE=HOST_RMA NCCL_M2N_ENABLE_EXPERIMENTAL=1 \
+    runNonBlockingCase "nonblocking PIPE host-RMA/default API" \
     --filter tiny_contribution --algorithm ring --api default --copy-algorithm pipe --lb-mode uniform
   if [[ "${NCCL_M2N_MPI_TEST_PROFILE}" == eight_rank ]]; then
     NCCL_COMM_BLOCKING=0 runPackGroupCase
@@ -341,7 +342,7 @@ runEightRankDefaultMatrix() {
   fi
   rm -f "${log}"
 
-  runCase "PIPE LSA fanout reuse" \
+  NCCL_M2N_ENABLE_EXPERIMENTAL=1 runCase "PIPE LSA fanout reuse" \
     --filter pipe_lsa_fanout_reuse --algorithm ring --api window --copy-algorithm pipe \
     --gtest_filter='Matrix/BasicApiMpiTest.*'
 }
@@ -406,7 +407,7 @@ case "${NCCL_M2N_MPI_TEST_PROFILE}" in
     done
     # LSA followers pull 12-byte forwarded pieces, which are not a multiple
     # of the 16-byte bulk-copy granule.
-    BENCH_DST_LAYOUT="2 reps x 2 shards" \
+    BENCH_DST_LAYOUT="2 reps x 2 shards" NCCL_M2N_ENABLE_EXPERIMENTAL=1 \
       runBenchmark "PIPE LSA fan-out, unaligned pieces" \
       --src-mesh-dims 1,4 --dst-mesh-dims 2,2 --tensor-dims 2,24 \
       --src-shard-dim 1 --dst-shard-dim 1 --validate \
