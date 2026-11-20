@@ -358,6 +358,9 @@ memory:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux."
     tags: [P1]
+  Unit_hipHostRegister_SharedLockDeviceSubset:
+    <<: *level_default
+    tags: [multigpu, P1]
   Unit_hipHostRegister_SameChunkRepeat:
     <<: *level_default
     tags: [alloc, P1]
