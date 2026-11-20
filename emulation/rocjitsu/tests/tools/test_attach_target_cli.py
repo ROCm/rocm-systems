@@ -65,6 +65,7 @@ class AttachTargetCliTest(unittest.TestCase):
         cases = [
             ("default", self.runtime, "default"),
             ("worker-a", self.runtime / "worker-a", "id"),
+            ("9999999", self.runtime / "9999999", "numeric-id"),
             (self.root / "explicit", self.root / "explicit", "path"),
             (
                 self.root / "explicit-socket" / "daemon.sock",
