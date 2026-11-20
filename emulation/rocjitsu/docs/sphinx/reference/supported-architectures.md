@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "Supported GPU architectures for rocJITsu, including GFX target IDs, ISA families, and architecture enum mappings."
-        "keywords": "rocJITsu, ROCm, GPU architecture, CDNA, RDNA, RISC-V, GFX target, ISA, simulation, DBT, DBI"
+        "description": "Supported GPU architectures for rocjitsu, including GFX target IDs, ISA families, and architecture enum mappings."
+        "keywords": "rocjitsu, ROCm, GPU architecture, CDNA, RDNA, RISC-V, GFX target, ISA, simulation, DBT, DBI"
 ---
 
 # Supported GPU architectures
 
-rocJITsu supports simulation, dynamic binary translation (DBT), and dynamic binary instrumentation (DBI) across multiple AMD GPU architecture generations and a RISC-V target. The tables below list the supported architecture groups and concrete CDNA5 targets together with their ISA family grouping. Individual tools can support different subsets, as noted below and in their command reference.
+rocjitsu supports simulation, dynamic binary translation (DBT), and dynamic binary instrumentation (DBI) across multiple AMD GPU architecture generations and a RISC-V target. The tables below list the supported architecture groups and concrete CDNA5 targets together with their ISA family grouping. Individual tools can support different subsets, as noted below and in their command reference.
 
 ## Architecture table
 
@@ -28,7 +28,7 @@ rocJITsu supports simulation, dynamic binary translation (DBT), and dynamic bina
 
 ## Architecture enum
 
-The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the rocJITsu C API. Use these values when creating decoders, specifying translation options, or querying architecture properties. For the full enumeration and the rest of the code object and instruction API, see [API reference: code object](/reference/api-code-object.md).
+The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the rocjitsu C API. Use these values when creating decoders, specifying translation options, or querying architecture properties. For the full enumeration and the rest of the code object and instruction API, see [API reference: code object](/reference/api-code-object.md).
 
 ## Target ID enum
 
@@ -42,7 +42,7 @@ callbacks.
 
 ## ISA family groupings
 
-rocJITsu groups architectures into ISA families that share encoding structure and instruction-set characteristics. The DBT legalization tables and cross-ISA analysis use these groupings to determine translation strategies.
+rocjitsu groups architectures into ISA families that share encoding structure and instruction-set characteristics. The DBT legalization tables and cross-ISA analysis use these groupings to determine translation strategies.
 
 ### GFX9 (CDNA)
 
