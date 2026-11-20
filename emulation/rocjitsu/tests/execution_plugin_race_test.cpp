@@ -2793,19 +2793,101 @@ TEST_F(LdsBarrierCellRaceTest, PollingACellAfterTheWavesOwnAsyncArriveIsNotARace
 }
 
 // A plain store to the cell is ordinary LDS data. A tensor transfer's arrival
-// at a cell another wave initialized, with no barrier between them, races with
-// the store. The arrival has no lane.
+// at a cell another wave stores to, with no barrier between them, races with
+// the store in either order: the store can erase the arrival. The arrival has
+// no lane.
 TEST_F(LdsBarrierCellRaceTest, TensorArrivalOverAnUnorderedInitRaces) {
-  EXPECT_FALSE(ds_write(1, kCell));
-  wait_dscnt(1, 0);
+  {
+    SCOPED_TRACE("store, then arrival");
+    EXPECT_FALSE(ds_write(1, kCell));
+    wait_dscnt(1, 0);
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "RACE "), 1) << report;
+    EXPECT_EQ(occurrences(report, std::format("type=LDS access=read reg={} wave=0 lane=-1", kCell)),
+              1)
+        << report;
+  }
+  {
+    SCOPED_TRACE("arrival, then store");
+    const uint32_t cell = kCell + 16;
+    waves[0]->pc = 0x3000;
+    const uint64_t transfer_pc = waves[0]->pc + 16;
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile + 16, .bytes = 16}}));
+    EXPECT_FALSE(arrived(0, Source::TensorDma, cell, /*completes=*/true));
+    const size_t previous = sink->str().size();
+    EXPECT_TRUE(ds_write(1, cell));
+    const std::string report = sink->str().substr(previous);
+    EXPECT_EQ(occurrences(report, "RACE "), 1) << report;
+    EXPECT_EQ(occurrences(report, std::format("type=LDS access=write reg={} wave=1 lane=0", cell)),
+              1)
+        << report;
+    EXPECT_EQ(occurrences(report, "write-after-read (WAR)"), 1) << report;
+    EXPECT_EQ(occurrences(
+                  report,
+                  std::format("  Conflict: arrival at an LDS barrier cell at PC 0x{:x}, wave 0.\n",
+                              transfer_pc)),
+              1)
+        << report;
+  }
+}
+
+// A wave that polled the cell after the phase completed acquired the transfer
+// and its arrival, so it may store to the cell.
+TEST_F(LdsBarrierCellRaceTest, StoreToTheCellAfterPollingATensorArrivalIsSafe) {
   EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
-  const size_t previous = sink->str().size();
-  EXPECT_TRUE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
-  const std::string report = sink->str().substr(previous);
-  EXPECT_EQ(occurrences(report, "RACE "), 1) << report;
-  EXPECT_EQ(occurrences(report, std::format("type=LDS access=read reg={} wave=0 lane=-1", kCell)),
-            1)
-      << report;
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(poll(1));
+  EXPECT_FALSE(ds_write(1, kCell));
+}
+
+// The arrival updates the cell atomically, as another wave's arrive does.
+TEST_F(LdsBarrierCellRaceTest, ArriveAfterATensorArrivalIsNotARace) {
+  for (const Source source : {Source::DsAtomic, Source::AsyncDsAtomic}) {
+    SCOPED_TRACE(source == Source::DsAtomic ? "rtn" : "async");
+    EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+    EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/false));
+    EXPECT_FALSE(arrive(1, source, kCell, /*completes=*/true));
+  }
+}
+
+// The ISA does not order a tensor transfer's arrival with its wave's DS
+// instructions (CDNA5 ISA 10.11.1), so the wave has to wait for the transfer
+// before it stores to the cell.
+TEST_F(LdsBarrierCellRaceTest, OwnStoreToTheCellBeforeTheTransfersWaitRaces) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_TRUE(ds_write(0, kCell));
+}
+
+// The cell shares the transfer's wait: once the wave has waited for the
+// transfer, its own store to the cell follows the arrival. Another wave's
+// store needs a barrier as well.
+TEST_F(LdsBarrierCellRaceTest, StoreToTheCellAfterTheTransfersWait) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  wait_tensorcnt(0, 0);
+  EXPECT_FALSE(ds_write(0, kCell)) << "after the wait";
+  wait_dscnt(0, 0);
+  EXPECT_TRUE(ds_write(1, kCell)) << "another wave, no barrier";
+  wait_dscnt(1, 0);
+  barrier();
+  EXPECT_FALSE(ds_write(1, kCell)) << "another wave, after a barrier";
+}
+
+// The arrival takes no TENSORcnt slot: s_wait_tensorcnt 1 after two transfers
+// completes the first and its arrival, and not the second and its arrival.
+TEST_F(LdsBarrierCellRaceTest, TensorArrivalTakesNoTensorcntSlot) {
+  const uint32_t second_cell = kCell + 16;
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, kCell, /*completes=*/true));
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile + 16, .bytes = 16}}));
+  EXPECT_FALSE(arrived(0, Source::TensorDma, second_cell, /*completes=*/true));
+  wait_tensorcnt(0, 1);
+  EXPECT_FALSE(ds_write(0, kCell));
+  EXPECT_TRUE(ds_write(0, second_cell));
 }
 
 // The ISA does not order a tensor transfer's arrival with its wave's DS

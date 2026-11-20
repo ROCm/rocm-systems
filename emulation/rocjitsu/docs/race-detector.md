@@ -523,7 +523,12 @@ clock as barriers:
   arriving wave has read. For the same wave, a DS store needs no wait before the
   wave's `ds_atomic_barrier_arrive_rtn_b64`, which stays in order with it, and
   a `s_wait_dscnt` before its `ds_atomic_async_barrier_arrive_b64` or before a
-  tensor transfer that arrives at the cell.
+  tensor transfer that arrives at the cell. A tensor transfer's arrival lasts
+  as long as the transfer: a plain store to the cell after the transfer issues
+  races with the arrival until the transfer is ordered before the store, by the
+  transfer's wave waiting on TENSORcnt and, for another wave, a barrier, or by
+  the storing wave reading the cell once the phase completes. The arrival
+  shares the transfer's one TENSORcnt slot.
 
 ```asm
 ; wave 0                                 ; wave 1
@@ -924,9 +929,10 @@ this source tree. The original
   - A cell is remembered for the life of the workgroup. A load of those bytes
     after the kernel reuses them as data still acquires the cell's completed
     phases.
-  - A tensor transfer's arrival is checked against pending writes of the cell
-    when it arrives but leaves no event, so a plain store to the cell after
-    the arrival is not reported against it.
+  - A tensor transfer that touches no LDS bytes can leave no event. Its
+    arrival is then checked against pending writes of the cell when it
+    arrives, and a plain store to the cell after the arrival is not reported
+    against it.
   - Every poll of a cell is an LDS read that stays in the history until the
     other live waves acquire the polling wave's next release, so a wave that
     polls many times between its own releases grows the history by one read
