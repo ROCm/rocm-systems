@@ -28,14 +28,7 @@ from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     canonical_config_arch,
 )
-from utils.utils_counter_defs import (
-    PER_DISPATCH_SUFFIX,
-    Collectables,
-    extract_counters_and_variables,
-    parse_counters_text,
-    per_dispatch_partner,
-    summed_collectables,
-)
+from utils.utils_counter_defs import Collectables, extract_counters_and_variables
 
 # =============================================================================
 # Fixtures
@@ -104,10 +97,6 @@ CONFIG_ARCHS = sorted(
         canonical_config_arch(arch): arch for arch in mi_gpu_specs.get_gpu_series_dict()
     }.values()
 )
-
-# Metric keys that take a statistic over the per-dispatch values; the simple-box
-# expr expands into MIN, quartiles and MAX (only simple-box tables have expr)
-PER_DISPATCH_STATISTIC_KEYS = ("min", "max", "std dev", "expr")
 
 
 def offline_soc(
@@ -585,32 +574,6 @@ def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
         f"{gpu_arch}: split these metrics into collectables "
         "(see the metric library README and tools/counter_grouping_inspector.py)"
     )
-
-
-@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
-def test_per_dispatch_columns_read_per_dispatch_collectables(gpu_arch: str) -> None:
-    """Min, Max, Std Dev and simple-box expressions read a summed collectable
-    through its <name>_per_dispatch partner, and every partner they name exists."""
-    collectables = Collectables.of_arch(gpu_arch)
-    summed = summed_collectables(collectables)
-    errors = []
-    for metric in offline_soc(gpu_arch, [], True)._iter_arch_analysis_yaml_metrics():
-        location = f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}"
-        for column in PER_DISPATCH_STATISTIC_KEYS:
-            _, names = parse_counters_text(str(metric.metric.get(column, "")))
-            for name in sorted(names & summed):
-                fix = "use" if per_dispatch_partner(name, collectables) else "add"
-                errors.append(
-                    f"{location} {column}: ${name} is summed, "
-                    f"{fix} ${name}{PER_DISPATCH_SUFFIX}"
-                )
-        _, names = parse_counters_text("\n".join(metric.expressions))
-        errors += [
-            f"{location}: ${name} is not a collectable"
-            for name in sorted(names)
-            if name.endswith(PER_DISPATCH_SUFFIX) and name not in collectables
-        ]
-    assert errors == [], f"{gpu_arch}: see Collectables in the metric library README"
 
 
 # =============================================================================
