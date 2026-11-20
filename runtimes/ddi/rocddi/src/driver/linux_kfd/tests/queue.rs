@@ -9,6 +9,8 @@
 
 use super::super::memory;
 use super::*;
+#[path = "queue_context.rs"]
+mod context;
 use crate::session::DriverContextLifetime;
 use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {

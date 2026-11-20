@@ -4,6 +4,7 @@
 //! Cold queue-context planning before native resource acquisition.
 
 use super::{Error, ErrorKind, error, native_error, os_memory, sysfs};
+use crate::topology::GpuTargetProfile;
 
 /// Computed context-save allocation requirements for a compute queue.
 pub(super) struct ComputeStorage {
@@ -19,9 +20,39 @@ pub(super) struct ComputeStorage {
     pub(super) total_size: u64,
 }
 
-// Debugger backing follows the trap-save wave bound even when KFD reports
-// authoritative context and control-stack sizes. Resident occupancy cannot
-// size this separately allocated area.
+// KFD validates reported CWSR backing against its saved-wave debugger extent.
+// Discovery already divided array_count by simd_arrays_per_engine and XCCs
+// to obtain shader_engine_count_per_xcc; retain that single kernel division.
+fn gfx9_saved_waves(
+    properties: sysfs::KfdQueueProperties,
+    compute_units_per_xcc: u32,
+) -> Result<u32, Error> {
+    if properties.simd_arrays_per_engine == 0 || properties.shader_engine_count_per_xcc == 0 {
+        return Err(error(
+            ErrorKind::Unsupported,
+            "missing GFX9 save-wave geometry",
+        ));
+    }
+    let overflow = || {
+        error(
+            ErrorKind::DriverContract,
+            "GFX9 context-save sizing overflows",
+        )
+    };
+    let wave_limit = properties
+        .shader_engine_count_per_xcc
+        .checked_mul(properties.xcc_count)
+        .and_then(|engines| engines.checked_mul(512))
+        .filter(|limit| *limit != 0)
+        .ok_or_else(overflow)?;
+    Ok(compute_units_per_xcc
+        .checked_mul(40)
+        .ok_or_else(overflow)?
+        .min(wave_limit))
+}
+
+// Missing gfx942 sizes follow the pinned libhsakmt derivation, including its
+// second NumArrays division. Positive native metadata uses the kernel bound.
 fn gfx942_saved_waves(
     properties: sysfs::KfdQueueProperties,
     compute_units_per_xcc: u32,
@@ -115,14 +146,17 @@ pub(super) fn compute_storage(
         ));
     }
     let compute_units_per_xcc = properties.compute_units / xcc_count;
-    let saved_waves = if properties.gfx_target == 90402 {
+    let legacy_sizes = context_size == 0 && control_stack_size == 0;
+    let saved_waves = if properties.gfx_target == 90402 && legacy_sizes {
         gfx942_saved_waves(properties, compute_units_per_xcc)?
+    } else if properties.target_profile == GpuTargetProfile::Gfx9 {
+        gfx9_saved_waves(properties, compute_units_per_xcc)?
     } else {
         compute_units_per_xcc
             .checked_mul(properties.maximum_wave_count_per_compute_unit)
             .ok_or_else(|| error(ErrorKind::DriverContract, "KFD wave count overflows"))?
     };
-    if context_size == 0 && control_stack_size == 0 {
+    if legacy_sizes {
         (context_size, control_stack_size) =
             legacy_gfx942_sizes(properties, compute_units_per_xcc, saved_waves)?;
     }
