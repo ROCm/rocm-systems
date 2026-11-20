@@ -53,10 +53,13 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, bool blocking_only
     }
 
     // Fallback bounce copies run at the greatest priority; parking a stream there could queue them behind it.
-    auto priorities = Context<Hip>::get()->hipDeviceGetStreamPriorityRange();
-    if (priorities.least != priorities.greatest &&
-        Context<Hip>::get()->hipStreamGetPriority(hip_stream) == priorities.greatest) {
-        throw ReservedStreamPriority();
+    {
+        DeviceGuard guard{device_id};
+        auto        priorities = Context<Hip>::get()->hipDeviceGetStreamPriorityRange();
+        if (priorities.least != priorities.greatest &&
+            Context<Hip>::get()->hipStreamGetPriority(hip_stream) == priorities.greatest) {
+            throw ReservedStreamPriority();
+        }
     }
 
     // A transient (unregistered) stream always uses the blocking offload path, so it needs no signal
