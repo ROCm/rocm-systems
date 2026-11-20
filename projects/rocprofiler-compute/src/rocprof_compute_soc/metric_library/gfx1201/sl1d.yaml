@@ -6,7 +6,6 @@ sl1d.hits_per_req:
     Percentage of scalar data cache accesses that hit. High hit rates indicate efficient
     reuse of constant and uniform data. Low rates may suggest excessive unique constant
     data or poor temporal locality.
-  peak: 100
 sl1d.req:
   name: sL1D Requests
   formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)

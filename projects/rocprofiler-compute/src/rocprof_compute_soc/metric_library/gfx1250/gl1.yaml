@@ -25,7 +25,6 @@ gl1.gl1a_util:
   formula: 100 * SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum)
   unit: Percent
   description: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
-  peak: 100
 gl1.gl1c_buffer_full_stall:
   name: GL1C Buffer Full Stall
   formula: 100 * SUM(GL1C_STALL_BUFFER_FULL_sum) / SUM(GL1C_BUSY_sum)

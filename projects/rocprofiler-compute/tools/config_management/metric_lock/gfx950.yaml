@@ -7,12 +7,10 @@ compute.bf16_ops:
 compute.branch_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_MISC) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_ACTIVE_INST_MISC, SQ_WAVES]
 compute.cu_util:
   formula: 100 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_BUSY_CU_CYCLES, SQ_WAVES]
 compute.dual_issue_valu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU2) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
@@ -234,12 +232,10 @@ compute.mfma_iops_int8:
 compute.mfma_util:
   formula: 100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) / (4 * SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_VALU_MFMA_BUSY_CYCLES, SQ_WAVES]
 compute.salu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_ACTIVE_INST_SCA, SQ_WAVES]
 compute.se_util:
   formula: 100 * SUM(SQ_BUSY_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
@@ -285,7 +281,6 @@ compute.valu_flops_f64:
 compute.valu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_ACTIVE_INST_VALU, SQ_WAVES]
 compute.vmem_lat:
   formula: SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)
@@ -306,7 +301,6 @@ compute.vmem_ta_data_stall:
 compute.vmem_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_ACTIVE_INST_FLAT, SQ_ACTIVE_INST_VMEM, SQ_WAVES]
 cp.cpc_adc_util:
   formula: 100 * SUM(CPC_TG_SEND) / SUM(CPC_GD_BUSY)
@@ -615,7 +609,6 @@ l1i.fetch_lat:
 l1i.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQC_ICACHE_HITS, SQC_ICACHE_MISSES, SQ_WAVES]
 l1i.hit_rate_incl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
@@ -761,7 +754,6 @@ l2.evict_vl1d_req:
 l2.hit_rate:
   formula: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, TCC_HIT_sum, TCC_MISS_sum]
 l2.hits:
   formula: SUM(TCC_HIT_sum) / SUM($denom)
@@ -970,7 +962,6 @@ sl1d.bw_util:
 sl1d.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQC_DCACHE_HITS, SQC_DCACHE_MISSES, SQ_WAVES]
 sl1d.hit_rate_incl_dup:
   formula: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE)
@@ -1321,7 +1312,6 @@ vl1d.coalescing:
 vl1d.hit_rate:
   formula: 100 - $vl1d_read_write_miss_rate - $vl1d_atomic_miss_rate
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum, TCP_TCC_ATOMIC_WITH_RET_REQ_sum, TCP_TCC_READ_REQ_sum, TCP_TCC_WRITE_REQ_sum, TCP_TOTAL_CACHE_ACCESSES_sum]
 vl1d.hit_ratio:
   formula: 100 * SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)

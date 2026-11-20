@@ -52,7 +52,6 @@ gl2.hit_rate:
     system memory. Higher hit rates reduce memory bandwidth pressure and improve
     performance. Low hit rates may indicate poor data locality or working sets that
     exceed cache capacity.
-  peak: 100
 gl2.hits:
   name: GL2 Cache Hits
   formula: SUM(GL2C_HIT_sum) / SUM($denom)
