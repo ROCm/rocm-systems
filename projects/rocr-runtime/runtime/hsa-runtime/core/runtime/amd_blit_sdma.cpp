@@ -217,8 +217,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   // HDP flush supported on gfx900 and forward.
   // gfx90a can support xGMI host to device connections so bypass HDP flush
   // in this case.
-  // gfx101x seems to have issues with HDP flushes
-  if (major >= 9 && !(major == 10 && minor == 1)) {
+  // gfx101x and gfx13 have issues with HDP flushes
+  if (major >= 9 && !(major == 10 && minor == 1) && major != 13) {
     hdp_flush_support_ = link.info.link_type != HSA_AMD_LINK_INFO_TYPE_XGMI;
   }
 
