@@ -114,7 +114,7 @@ class ImageFootprint {
 public:
   std::array<int32_t, 4> gradients{};
   std::array<uint32_t, 2> norms{};
-  std::array<int32_t, 2> lods{-8192, -8192};
+  std::array<int32_t, 2> lods{kZeroGradientLodFixed, kMinimumAnisotropicLodFixed};
 
   /// Normalize the transformed gradient vectors before combining their
   /// polygonal norms. Products retain separate exponents until alignment;
@@ -234,7 +234,9 @@ inline ImageFootprint image_footprint(double xu, double xv, double yu, double yv
         (512 * denominator);
     return (exponent - 11 + static_cast<int32_t>(leading)) * 256 + static_cast<int32_t>(logarithm);
   };
-  return {fixed, {first_norm, second_norm}, {logarithm(major), logarithm(minor)}};
+  return {fixed,
+          {first_norm, second_norm},
+          {logarithm(major), minor ? logarithm(minor) : kMinimumAnisotropicLodFixed}};
 }
 
 /// Add a footprint offset with the coordinate adder's 24-bit significand.
@@ -267,8 +269,7 @@ inline uint32_t image_anisotropic_filter_count(const ImageFootprint &footprint,
   if (max_anisotropy == 1)
     return 1;
   const auto [major_lod, minor_lod] = footprint.lods;
-  const int32_t footprint_lod =
-      std::max(minor_lod, major_lod - int32_t(std::countr_zero(max_anisotropy) * 256));
+  const int32_t footprint_lod = image_anisotropic_lod(major_lod, minor_lod, max_anisotropy);
   const uint32_t perf_scale = kImagePerfScales[perf_mod];
   const int32_t bias_lod = static_cast<int32_t>((bias * perf_scale >> 4) * 8);
   // The anisotropy limit can already enlarge the footprint. Apply only the
@@ -301,8 +302,7 @@ inline double image_anisotropic_filter_step(const ImageFootprint &footprint,
   if (count <= 1)
     return 0;
   const auto [major_lod, minor_lod] = footprint.lods;
-  const int32_t rho =
-      std::max({0, minor_lod, major_lod - int32_t(std::countr_zero(max_anisotropy) * 256)});
+  const int32_t rho = std::max(0, image_anisotropic_lod(major_lod, minor_lod, max_anisotropy));
   constexpr std::array<uint16_t, 64> spans{
       128, 129, 131, 132, 134, 135, 137, 138, 140, 141, 143, 144, 146, 147, 149, 151,
       152, 154, 156, 157, 159, 161, 162, 164, 166, 168, 170, 171, 173, 175, 177, 179,

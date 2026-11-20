@@ -18,6 +18,7 @@
 
 namespace rocjitsu {
 class Instruction;
+class Operand;
 namespace amdgpu {
 class Wavefront;
 enum class WaitCounterType : uint8_t;
@@ -169,7 +170,10 @@ public:
     uint64_t writeback_lanes = ~uint64_t{0};
     VmemWriteback writeback = VmemWriteback::Ordinary;
     bool gds_source_lock = false;
-    bool holds_source() const { return gds_source_lock || counter == WaitCounterKind::X; }
+    bool export_source = false; // EXP reads its original VGPR and EXEC values at completion.
+    bool holds_source() const {
+      return gds_source_lock || export_source || counter == WaitCounterKind::X;
+    }
     uint8_t shadow_kind() const {
       return holds_source() ? MemoryWaitShadow::kSource : MemoryWaitShadow::kResult;
     }
@@ -206,7 +210,7 @@ public:
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
   void before(const Instruction &inst, rj_code_arch_t arch);
   /// Return whether address preparation can change which lanes supply VDATA.
-  static bool needs_buffer_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
+  static bool needs_prepared_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
   /// Check the GFX11/12 image store's payload after addressing has selected the requested lanes.
   void check_image_store_payload(const Instruction &inst, const Wavefront &wf);
@@ -283,6 +287,8 @@ private:
                      WriteOrder ordered_write_order, const DeferredWrite *deferred);
   void rebuild_mask();
   void clear_destination(const Event &event);
+  void check_image_atomic_payload(const Instruction &inst, const Operand &payload,
+                                  const Wavefront &wf, uint64_t lanes);
   void retire_completed();
   void supersede_flat_result(const Event &replacement);
   bool apply_wait(WaitCounterKind counter, uint32_t threshold);

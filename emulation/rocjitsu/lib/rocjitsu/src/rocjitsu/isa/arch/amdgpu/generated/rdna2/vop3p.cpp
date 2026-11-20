@@ -38,6 +38,7 @@ VPkMadI16Vop3p::VPkMadI16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MAD_I16);
 }
 
 namespace detail {
@@ -69,6 +70,7 @@ VPkMulLoU16Vop3p::VPkMulLoU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MUL_LO_U16);
 }
 
 namespace detail {
@@ -101,6 +103,7 @@ VPkAddI16Vop3p::VPkAddI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_ADD_I16);
 }
 
 namespace detail {
@@ -132,6 +135,7 @@ VPkSubI16Vop3p::VPkSubI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_SUB_I16);
 }
 
 namespace detail {
@@ -163,6 +167,7 @@ VPkLshlrevB16Vop3p::VPkLshlrevB16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_LSHLREV_B16);
 }
 
 namespace detail {
@@ -195,6 +200,7 @@ VPkLshrrevB16Vop3p::VPkLshrrevB16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_LSHRREV_B16);
 }
 
 namespace detail {
@@ -227,6 +233,7 @@ VPkAshrrevI16Vop3p::VPkAshrrevI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_ASHRREV_I16);
 }
 
 namespace detail {
@@ -259,6 +266,7 @@ VPkMaxI16Vop3p::VPkMaxI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MAX_I16);
 }
 
 namespace detail {
@@ -290,6 +298,7 @@ VPkMinI16Vop3p::VPkMinI16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MIN_I16);
 }
 
 namespace detail {
@@ -327,6 +336,7 @@ VPkMadU16Vop3p::VPkMadU16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MAD_U16);
 }
 
 namespace detail {
@@ -358,6 +368,7 @@ VPkAddU16Vop3p::VPkAddU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_ADD_U16);
 }
 
 namespace detail {
@@ -389,6 +400,7 @@ VPkSubU16Vop3p::VPkSubU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_SUB_U16);
 }
 
 namespace detail {
@@ -420,6 +432,7 @@ VPkMaxU16Vop3p::VPkMaxU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MAX_U16);
 }
 
 namespace detail {
@@ -451,6 +464,7 @@ VPkMinU16Vop3p::VPkMinU16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MIN_U16);
 }
 
 namespace detail {
@@ -488,6 +502,7 @@ VPkFmaF16Vop3p::VPkFmaF16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_FMA_F16);
 }
 
 namespace detail {
@@ -519,6 +534,7 @@ VPkAddF16Vop3p::VPkAddF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_ADD_F16);
 }
 
 namespace detail {
@@ -550,6 +566,7 @@ VPkMulF16Vop3p::VPkMulF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MUL_F16);
 }
 
 namespace detail {
@@ -581,6 +598,7 @@ VPkMinF16Vop3p::VPkMinF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MIN_F16);
 }
 
 namespace detail {
@@ -612,6 +630,7 @@ VPkMaxF16Vop3p::VPkMaxF16Vop3p(const MachineInst *inst)
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_PK_MAX_F16);
 }
 
 namespace detail {
@@ -649,6 +668,7 @@ VDot2F32F16Vop3p::VDot2F32F16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_DOT2_F32_F16);
 }
 
 namespace detail {
@@ -687,6 +707,7 @@ VDot2I32I16Vop3p::VDot2I32I16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_DOT2_I32_I16);
 }
 
 namespace detail {
@@ -725,6 +746,7 @@ VDot2U32U16Vop3p::VDot2U32U16Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_DOT2_U32_U16);
 }
 
 namespace detail {
@@ -763,6 +785,7 @@ VDot4I32I8Vop3p::VDot4I32I8Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_DOT4_I32_I8);
 }
 
 namespace detail {
@@ -801,6 +824,7 @@ VDot4U32U8Vop3p::VDot4U32U8Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_DOT4_U32_U8);
 }
 
 namespace detail {
@@ -839,6 +863,7 @@ VDot8I32I4Vop3p::VDot8I32I4Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_DOT8_I32_I4);
 }
 
 namespace detail {
@@ -877,6 +902,7 @@ VDot8U32U4Vop3p::VDot8U32U4Vop3p(const MachineInst *inst)
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3pInstLiteralMachineInst *>(inst)->simm32));
+  set_amdgpu_operation(amdgpu::Operation::V_DOT8_U32_U4);
 }
 
 namespace detail {
@@ -921,6 +947,7 @@ VFmaMixF32Vop3p::VFmaMixF32Vop3p(const MachineInst *inst)
       src1.decoded_vgpr() && (inst_.op_sel_hi & 2) ? ((inst_.op_sel & 2) ? 0xc : 0x3) : 0xf);
   src2.set_register_byte_mask(
       src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
+  set_amdgpu_operation(amdgpu::Operation::V_FMA_MIX_F32);
 }
 
 namespace detail {
@@ -967,6 +994,7 @@ VFmaMixloF16Vop3p::VFmaMixloF16Vop3p(const MachineInst *inst)
   src2.set_register_byte_mask(
       src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
   vdst.set_register_byte_mask(0x3);
+  set_amdgpu_operation(amdgpu::Operation::V_FMA_MIXLO_F16);
 }
 
 namespace detail {
@@ -1019,6 +1047,7 @@ VFmaMixhiF16Vop3p::VFmaMixhiF16Vop3p(const MachineInst *inst)
   src2.set_register_byte_mask(
       src2.decoded_vgpr() && (inst_.op_sel_hi_2) ? ((inst_.op_sel & 4) ? 0xc : 0x3) : 0xf);
   vdst.set_register_byte_mask(0xc);
+  set_amdgpu_operation(amdgpu::Operation::V_FMA_MIXHI_F16);
 }
 
 namespace detail {

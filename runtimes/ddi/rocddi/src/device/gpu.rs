@@ -17,6 +17,7 @@ use crate::{Error, ErrorKind};
 
 mod code_cache;
 mod copy;
+pub mod diagnostic;
 pub mod event;
 pub mod image;
 pub(crate) mod kernel_queue;
@@ -82,6 +83,14 @@ pub struct GpuSurfaceConfig {
 }
 
 impl GpuDevice<'_> {
+    /// Captures native device metadata even after a reported process fault.
+    ///
+    /// # Errors
+    /// Returns native-query or unsupported-provider failures.
+    pub fn core_snapshot(&self) -> Result<diagnostic::CoreDeviceSnapshot, Error> {
+        self.driver.core_snapshot()
+    }
+
     /// Returns the provider-resolved ASIC family captured at activation.
     /// This performs no native query and leaves discovery metadata unchanged.
     #[must_use]

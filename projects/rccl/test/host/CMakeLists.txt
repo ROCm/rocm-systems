@@ -189,6 +189,12 @@ while(_rccl_cast_pins)
   rccl_assert_source_line("${_rccl_src_root}/${_src}" "${_prod}" "fakes/${_fake}")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/${_fake}" "${_copy}" "the ${_src} copy")
 endwhile()
+rccl_assert_source_line("${_rccl_src_root}/graph/paths.cc"
+  "RCCL_PARAM(SaturateP2pNChannels, \"SATURATE_P2P_NCHANNELS\", RCCL_VALUE_UNSET)"
+  "fakes/enqueue_test_deps.cc: rcclParamSaturateP2pNChannels()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/enqueue_test_deps.cc"
+  "int64_t rcclParamSaturateP2pNChannels() { return g_loadParam(\"RCCL_SATURATE_P2P_NCHANNELS\", RCCL_VALUE_UNSET); }"
+  "the SaturateP2pNChannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -299,7 +305,8 @@ foreach(_dda_param
     "RCCL_PARAM(DdaLL, \"DDA_LL\", 1)"
     "RCCL_PARAM(DdaLLOneShotThreshold, \"DDA_LL_ONESHOT_THRESHOLD\", (size_t)(1) * 1024 * 1024)"
     "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)"
-    "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)")
+    "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)"
+    "RCCL_PARAM(DdaLL128ArPeerParallel, \"DDA_LL128_AR_PEER_PARALLEL\", 1)")
   rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc" "${_dda_param}"
     "the rccl_wrap.cc DDA param")
@@ -591,6 +598,12 @@ function(rccl_standalone_setup)
                      "${CMAKE_BINARY_DIR}/external/fmt")
   endif()
 
+  # --- __hip_atomic_* poison: after GTest/fmt so a fetched googletest is not built with it ---
+  option(RCCL_POISON_HIP_ATOMICS "Reject __hip_atomic_* builtins in RCCL sources" ON)
+  if(RCCL_POISON_HIP_ATOMICS)
+    add_compile_options(--include=${CMAKE_CURRENT_SOURCE_DIR}/../../src/include/poison_hip_atomics.h)
+  endif()
+
   # --- Resolve RCCL build directory ---
   set(RCCL_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build" CACHE PATH
       "RCCL build directory (auto-detects release/debug subdirs)")
@@ -738,6 +751,11 @@ function(rccl_standalone_setup)
         $<TARGET_PROPERTY:${_hip_tgt},INTERFACE_COMPILE_DEFINITIONS>)
     endif()
   endforeach()
+  # wrapper_link_stubs.cpp defines int-returning HIP stubs, so it must not see
+  # the hip_runtime.h that the force-included poison_hip_atomics.h pulls in.
+  set_source_files_properties(wrapper_link_stubs.cpp PROPERTIES
+    COMPILE_DEFINITIONS RCCL_POISON_HIP_ATOMICS_NO_HIP_INCLUDES
+  )
   # accl_profiler_wrapper.cc needs the non-hipified profiler headers;
   # scope the extra include to just that file to avoid os.h/rocmwrap.h
   # conflicts with the hipified sources used by other wrappers.
