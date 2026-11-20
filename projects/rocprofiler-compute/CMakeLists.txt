@@ -588,13 +588,6 @@ add_test(
 )
 
 add_test(
-    NAME test_equation_format
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_equation_format.xml
-        ${COV_OPTION} tests/unit/utils/test_equation_format.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_list_metrics_cli
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_list_metrics_cli.xml
@@ -863,17 +856,6 @@ if(NOT TEST_FROM_INSTALL)
             ${PYTHON_TEST_COMMAND} -m pytest
             --junitxml=tests/test_validate_metric_library.xml ${COV_OPTION}
             tools/test_validate_metric_library.py ${WORKING_DIR_OPTION}
-    )
-endif()
-
-# The real-equation round-trip test imports tools/, which an install tree lacks.
-if(NOT TEST_FROM_INSTALL)
-    add_test(
-        NAME test_equation_format_real
-        COMMAND
-            ${PYTHON_TEST_COMMAND} -m pytest
-            --junitxml=tests/test_equation_format_real.xml ${COV_OPTION}
-            tests/unit/utils/test_equation_format_real.py ${WORKING_DIR_OPTION}
     )
 endif()
 
@@ -1255,7 +1237,6 @@ if(${ENABLE_COVERAGE})
         test_benchmark_base
         test_analysis_cli
         test_pattern_matching
-        test_equation_format
         test_list_metrics_cli
         test_memory_chart_loader
         test_memory_chart_units

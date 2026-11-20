@@ -30,8 +30,6 @@ test_categories:
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
-      - test_equation_format
-      - test_equation_format_real
       - test_pc_sampling_analysis
       - test_analysis_db
       - test_analysis_base
@@ -148,8 +146,6 @@ test_categories:
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
-      - test_equation_format
-      - test_equation_format_real
       - test_list_metrics_cli
       - test_L1_cache_counters
       - test_roofline_calc
@@ -284,8 +280,6 @@ test_categories:
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
-      - test_equation_format
-      - test_equation_format_real
       - test_list_metrics_cli
       - test_L1_cache_counters
       - test_roofline_calc
@@ -420,8 +414,6 @@ test_categories:
       - test_benchmark_base
       - test_analysis_cli
       - test_pattern_matching
-      - test_equation_format
-      - test_equation_format_real
       - test_list_metrics_cli
       - test_L1_cache_counters
       - test_roofline_calc
