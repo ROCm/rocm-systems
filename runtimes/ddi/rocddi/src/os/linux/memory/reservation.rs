@@ -745,6 +745,129 @@ impl Drop for Reservation {
 mod tests {
     use super::*;
 
+    /// Looks up the kernel's permissions without touching inaccessible padding.
+    fn mapping_permissions(address: usize) -> Option<String> {
+        std::fs::read_to_string("/proc/self/maps")
+            .unwrap()
+            .lines()
+            .find_map(|line| {
+                let mut fields = line.split_whitespace();
+                let (begin, end) = fields.next()?.split_once('-')?;
+                let begin = usize::from_str_radix(begin, 16).ok()?;
+                let end = usize::from_str_radix(end, 16).ok()?;
+                let permissions = fields.next()?;
+                (begin <= address && address < end).then(|| permissions.to_owned())
+            })
+    }
+
+    #[test]
+    fn anonymous_page_commit_preserves_bytes_and_excludes_alignment_padding() {
+        let page = page_size().unwrap();
+        let alignment = page * 16;
+        for logical_size in [1, 4, 8, 128, page - 1, page, page + 1, page * 2 + 1] {
+            let usable_size = logical_size.next_multiple_of(page);
+            let mut reservation =
+                Reservation::new_at(usable_size, alignment, (0, u64::MAX), 0).unwrap();
+            let address = reservation.address();
+            let base = reservation.base;
+            let length = reservation.length;
+            assert_eq!(address % alignment, 0);
+            assert_eq!(reservation.usable_size(), usable_size);
+            assert_eq!(length, usable_size + alignment - page);
+
+            // SAFETY: This owner exclusively retains the fresh anonymous
+            // usable pages; retained alignment padding is excluded.
+            unsafe {
+                super::super::commit_svm_range(address, usable_size).unwrap();
+                let first = address as *mut u8;
+                let last = first.add(logical_size - 1);
+                assert_eq!(first.read_volatile(), 0);
+                assert_eq!(last.read_volatile(), 0);
+                first.write_volatile(0x5a);
+                last.write_volatile(0x5a);
+                super::super::commit_svm_range(address, usable_size).unwrap();
+                assert_eq!(first.read_volatile(), 0x5a);
+                assert_eq!(last.read_volatile(), 0x5a);
+            }
+            for offset in (0..length).step_by(page) {
+                let current = base + offset;
+                assert_eq!(
+                    mapping_permissions(current).as_deref(),
+                    Some(if current >= address && current < address + usable_size {
+                        "rw-p"
+                    } else {
+                        "---p"
+                    })
+                );
+            }
+
+            reservation.fail_release_once(libc::ENOMEM);
+            assert_eq!(
+                reservation.release().unwrap_err().raw_os_error(),
+                Some(libc::ENOMEM)
+            );
+            assert_eq!(reservation.base, base);
+            assert_eq!(reservation.length, length);
+            let mut resident = vec![0; length / page];
+            // SAFETY: A failed release retains every usable and padding page.
+            assert_eq!(
+                unsafe { libc::mincore(base as *mut c_void, length, resident.as_mut_ptr()) },
+                0
+            );
+            // SAFETY: Failed release preserves the committed logical bytes.
+            unsafe {
+                assert_eq!((address as *const u8).read_volatile(), 0x5a);
+                assert_eq!(
+                    (address as *const u8).add(logical_size - 1).read_volatile(),
+                    0x5a
+                );
+            }
+            reservation.release().unwrap();
+            assert_eq!(reservation.length, 0);
+            assert!(!reservation.is_live());
+            reservation.release().unwrap();
+        }
+    }
+
+    #[test]
+    fn anonymous_hint_fallback_keeps_occupied_contents() {
+        let page = page_size().unwrap();
+        let occupied = Reservation::new(page, page, (0, u64::MAX), true).unwrap();
+        let original = occupied.address();
+        // SAFETY: The occupied writable page remains owned throughout the test.
+        unsafe { (original as *mut u8).write_volatile(0xa5) };
+        for requested in [original, original + 1, usize::MAX] {
+            let mut reservation =
+                Reservation::new_at(page, page, (0, isize::MAX as u64), requested).unwrap();
+            let address = reservation.address();
+            assert_ne!(address, original);
+            assert_eq!(address % page, 0);
+            // SAFETY: The fallback owns distinct anonymous pages. Committing
+            // them must preserve the occupied hint and its contents.
+            unsafe {
+                super::super::commit_svm_range(address, page).unwrap();
+                (address as *mut u8).write_volatile(0x5a);
+                assert_eq!((original as *const u8).read_volatile(), 0xa5);
+            }
+            reservation.release().unwrap();
+        }
+    }
+
+    #[test]
+    fn virtual_reservation_keeps_native_page_and_padding_overflow_checks() {
+        let page = page_size().unwrap();
+        for size in [0, 1, page - 1, page + 1, isize::MAX as usize, usize::MAX] {
+            assert!(matches!(
+                Reservation::new_at(size, page, (0, u64::MAX), 0),
+                Err(error) if error.kind() == io::ErrorKind::InvalidInput
+            ));
+        }
+        assert!(matches!(
+            Reservation::new_at(page, 1 << (usize::BITS - 1), (0, u64::MAX), 0),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
+    }
+
     #[test]
     fn failed_file_map_keeps_its_original_reservation_live() {
         let page = page_size().unwrap();
