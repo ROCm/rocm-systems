@@ -150,12 +150,20 @@ def insert_dispatch(
 
 
 def insert_counter(
-    conn: sqlite3.Connection, *, row_id: int, event_id: int, pmc_id: int, value: float
+    conn: sqlite3.Connection,
+    *,
+    row_id: int,
+    event_id: int,
+    pmc_id: int,
+    value: float,
+    replay_pass: int = 0,
 ) -> None:
+    # Pass 0 keeps the column default. Later passes carry the index the export writes.
+    extdata = "{}" if replay_pass == 0 else f'{{"replay_pass":{replay_pass}}}'
     conn.execute(
-        "INSERT INTO rocpd_pmc_event (id, guid, event_id, pmc_id, value)"
-        " VALUES (?, 'test-guid', ?, ?, ?)",
-        (row_id, event_id, pmc_id, value),
+        "INSERT INTO rocpd_pmc_event (id, guid, event_id, pmc_id, value, extdata)"
+        " VALUES (?, 'test-guid', ?, ?, ?, ?)",
+        (row_id, event_id, pmc_id, value, extdata),
     )
     conn.commit()
 
@@ -180,6 +188,7 @@ def populate_replay_run(conn: sqlite3.Connection) -> None:
             event_id=1,
             pmc_id=pmc_ids["SQ_WAVES"],
             value=SQ_WAVES_PER_PASS,
+            replay_pass=pass_index,
         )
         counter_row_id += 1
         insert_counter(
@@ -188,6 +197,7 @@ def populate_replay_run(conn: sqlite3.Connection) -> None:
             event_id=1,
             pmc_id=pmc_ids[GROUP_UNIQUE_COUNTERS[pass_index]],
             value=100.0 * (pass_index + 1),
+            replay_pass=pass_index,
         )
         counter_row_id += 1
 
