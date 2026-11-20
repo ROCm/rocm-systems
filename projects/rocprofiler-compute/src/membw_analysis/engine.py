@@ -20,6 +20,7 @@ from membw_analysis.models import (
     SupportingMetric,
     TreeSpec,
 )
+from membw_analysis.summary import active_leaves
 from membw_analysis.tree_spec import collect_metric_keys, load_tree_spec, tree_spec_path
 from utils.logger import console_warning
 
@@ -353,20 +354,8 @@ def _collect_active_leaf_guidance_ids(
     nodes: tuple[BottleneckNode, ...],
 ) -> list[str]:
     """Collect guidance_ids from active leaf nodes."""
-    result: list[str] = []
-    _walk_for_guidance(nodes, result)
-    return result
-
-
-def _walk_for_guidance(
-    nodes: tuple[BottleneckNode, ...],
-    result: list[str],
-) -> None:
-    """Recursively walk evaluated nodes for guidance IDs."""
-    for node in nodes:
-        if node.state != "active":
-            continue
-        has_active_child = any(child.state == "active" for child in node.children)
-        if not has_active_child and node.guidance_id is not None:
-            result.append(node.guidance_id)
-        _walk_for_guidance(node.children, result)
+    return [
+        node.guidance_id
+        for node in active_leaves(nodes)
+        if node.guidance_id is not None
+    ]

@@ -3,6 +3,8 @@
 
 """Terminal-independent summaries of memory bandwidth analysis results."""
 
+from typing import Iterator, Optional, Tuple
+
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 
 ACTIVE_FALLBACK_TEXT = (
@@ -16,6 +18,25 @@ def has_active_nodes(nodes: tuple[BottleneckNode, ...]) -> bool:
         if node.state == "active" or has_active_nodes(node.children):
             return True
     return False
+
+
+def active_leaves(nodes: Tuple[BottleneckNode, ...]) -> Iterator[BottleneckNode]:
+    """Active nodes with no active child, in tree order: the bottlenecks to report."""
+    for node in nodes:
+        if node.state != "active":
+            continue
+        if not any(child.state == "active" for child in node.children):
+            yield node
+        yield from active_leaves(node.children)
+
+
+def status_line(membw_result: MemBwAnalysisResult) -> Optional[str]:
+    """The line to show instead of guidance, or None when there is guidance to show."""
+    if not has_active_nodes(membw_result.nodes):
+        return status_text(membw_result)
+    if not any(membw_result.guidance_blocks):
+        return ACTIVE_FALLBACK_TEXT
+    return None
 
 
 def status_text(membw_result: MemBwAnalysisResult) -> str:
