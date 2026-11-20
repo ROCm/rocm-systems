@@ -46,6 +46,7 @@ THE SOFTWARE.
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdint>
 #include <cstring>
 #include <deque>
 #include <fstream>
@@ -146,6 +147,10 @@ struct AsyncDecoder {
     double display_callback_ms = 0;           // producer time inside the display callback
 };
 
+// Each queue slot holds a full-frame pool buffer in sync-copy, so larger depths would only fail
+// to allocate; the cap also keeps queue_depth + 2 and lag + 1 from wrapping.
+constexpr uint32_t kMaxQueueDepth = 256;
+
 static void ShowHelpAndExit(const char *option = nullptr) {
     std::cout << "Options:" << std::endl
     << "-i Input file path - required" << std::endl
@@ -155,16 +160,26 @@ static void ShowHelpAndExit(const char *option = nullptr) {
     << "      no-copy:   queue the decode surface pointer without copying (unsafe control)" << std::endl
     << "-w Consumer workload: md5 | lag:<L> | hold:<min>-<max>; optional; default: md5" << std::endl
     << "      md5:       hash each frame as soon as it is dequeued" << std::endl
-    << "      lag:<L>:   hash frame n only after frame n+L has been displayed (deterministic hold)" << std::endl
+    << "      lag:<L>:   hash frame n only after frame n+L has been displayed (deterministic hold), L 1-" << kMaxQueueDepth - 1 << std::endl
     << "      hold:<min>-<max>: wait a random time in milliseconds before hashing each frame" << std::endl
     << "-dd Display delay passed to the parser; optional; default: 1" << std::endl
     << "-ds Max number of decode surfaces passed to the parser; optional; default: 1 (parser decides)" << std::endl
-    << "-q Queue depth between producer and consumer; optional; default: 4 (raised to L+1 for lag:<L>)" << std::endl
+    << "-q Queue depth between producer and consumer, 1-" << kMaxQueueDepth << "; optional; default: 4 (raised to L+1 for lag:<L>)" << std::endl
     << "-md5 Generate the MD5 digest of the output frames; optional" << std::endl
     << "-md5_check MD5 file path - generate the MD5 digest and compare it to the reference in the file; optional" << std::endl
     << "-md5_frames File path - write one MD5 digest per output frame; optional" << std::endl
     << "-expect_mismatch Invert the -md5_check result: succeed only if the digest does NOT match (control runs); optional" << std::endl;
     exit(option == nullptr ? 0 : 1);
+}
+
+// Parse a decimal number in [min_value, max_value]. std::stoul alone would accept a sign (wrapping
+// -1 to a huge value), drop trailing text and throw on input that is not a number.
+static bool ParseUint(const std::string &s, uint32_t min_value, uint32_t max_value, uint32_t &value) {
+    if (s.empty() || s.size() > 10 || !std::all_of(s.begin(), s.end(), [](unsigned char c) { return std::isdigit(c); })) return false;
+    uint64_t v = std::stoull(s);
+    if (v < min_value || v > max_value) return false;
+    value = static_cast<uint32_t>(v);
+    return true;
 }
 
 static bool ParseWorkload(const std::string &arg, Options &opt) {
@@ -174,16 +189,14 @@ static bool ParseWorkload(const std::string &arg, Options &opt) {
     }
     if (arg.rfind("lag:", 0) == 0) {
         opt.workload = Workload::Lag;
-        opt.lag = static_cast<uint32_t>(std::stoul(arg.substr(4)));
-        return opt.lag > 0;
+        return ParseUint(arg.substr(4), 1, kMaxQueueDepth - 1, opt.lag);
     }
     if (arg.rfind("hold:", 0) == 0) {
         size_t dash = arg.find('-', 5);
         if (dash == std::string::npos) return false;
         opt.workload = Workload::Hold;
-        opt.hold_min_ms = static_cast<uint32_t>(std::stoul(arg.substr(5, dash - 5)));
-        opt.hold_max_ms = static_cast<uint32_t>(std::stoul(arg.substr(dash + 1)));
-        return opt.hold_min_ms <= opt.hold_max_ms;
+        return ParseUint(arg.substr(5, dash - 5), 0, UINT32_MAX, opt.hold_min_ms) &&
+               ParseUint(arg.substr(dash + 1), 0, UINT32_MAX, opt.hold_max_ms) && opt.hold_min_ms <= opt.hold_max_ms;
     }
     return false;
 }
@@ -455,6 +468,9 @@ static int ROCDECAPI HandlePictureDecode(void *user_data, RocdecPicParams *param
 
 static int ROCDECAPI HandlePictureDisplay(void *user_data, RocdecParserDispInfo *disp_info) {
     AsyncDecoder &dec = *static_cast<AsyncDecoder *>(user_data);
+    // The parser ignores the return value and keeps displaying the rest of a flush, so stop here
+    // once the run has failed; otherwise failed copies could empty the pool and block forever.
+    if (dec.failed) return 0;
     auto start = Clock::now();
     RocdecProcParams proc_params = {};
     proc_params.progressive_frame = disp_info->progressive_frame;
@@ -487,6 +503,8 @@ static int ROCDECAPI HandlePictureDisplay(void *user_data, RocdecParserDispInfo 
         if (hip_status == hipSuccess) hip_status = hipStreamSynchronize(dec.producer_stream);
         if (hip_status != hipSuccess) {
             std::cerr << "Error: frame copy failed: " << hipGetErrorName(hip_status) << std::endl;
+            std::lock_guard<std::mutex> lock(dec.mtx);
+            dec.free_buffers.push_back(item.buffer);
             dec.failed = true;
             return 0;
         }
@@ -640,7 +658,11 @@ int main(int argc, char **argv) {
         };
         if (arg == "-h") ShowHelpAndExit();
         else if (arg == "-i") opt.input_path = next("-i");
-        else if (arg == "-d") opt.device_id = std::stoi(next("-d"));
+        else if (arg == "-d") {
+            uint32_t device_id = 0;
+            if (!ParseUint(next("-d"), 0, UINT8_MAX, device_id)) ShowHelpAndExit("-d");
+            opt.device_id = static_cast<int>(device_id);
+        }
         else if (arg == "-p") {
             std::string p = next("-p");
             if (p == "sync-copy") opt.policy = Policy::SyncCopy;
@@ -648,9 +670,9 @@ int main(int argc, char **argv) {
             else ShowHelpAndExit("-p");
         }
         else if (arg == "-w") { if (!ParseWorkload(next("-w"), opt)) ShowHelpAndExit("-w"); }
-        else if (arg == "-dd") opt.display_delay = static_cast<uint32_t>(std::stoul(next("-dd")));
-        else if (arg == "-ds") opt.decode_surfaces = static_cast<uint32_t>(std::stoul(next("-ds")));
-        else if (arg == "-q") opt.queue_depth = static_cast<uint32_t>(std::stoul(next("-q")));
+        else if (arg == "-dd") { if (!ParseUint(next("-dd"), 0, UINT32_MAX, opt.display_delay)) ShowHelpAndExit("-dd"); }
+        else if (arg == "-ds") { if (!ParseUint(next("-ds"), 0, UINT32_MAX, opt.decode_surfaces)) ShowHelpAndExit("-ds"); }
+        else if (arg == "-q") { if (!ParseUint(next("-q"), 1, kMaxQueueDepth, opt.queue_depth)) ShowHelpAndExit("-q"); }
         else if (arg == "-md5") opt.md5 = true;
         else if (arg == "-md5_check") { opt.md5 = true; opt.md5_check_path = next("-md5_check"); }
         else if (arg == "-md5_frames") opt.md5_frames_path = next("-md5_frames");
@@ -658,7 +680,6 @@ int main(int argc, char **argv) {
         else ShowHelpAndExit(argv[i]);
     }
     if (opt.input_path.empty()) ShowHelpAndExit("-i");
-    if (opt.queue_depth < 1) ShowHelpAndExit("-q");
     if (opt.expect_mismatch && opt.md5_check_path.empty()) {
         std::cerr << "Error: -expect_mismatch needs -md5_check" << std::endl;
         return 1;

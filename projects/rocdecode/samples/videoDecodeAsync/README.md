@@ -48,10 +48,10 @@ cmake --build . --config Release
 ./videodecodeasync -i <input video file [required]>
                    -d <GPU device ID - 0:device 0 / 1:device 1/ ... [optional - default:0]>
                    -p <display policy: sync-copy | no-copy [optional - default: sync-copy]>
-                   -w <consumer workload: md5 | lag:<L> | hold:<min>-<max> [optional - default: md5]>
+                   -w <consumer workload: md5 | lag:<L> (L 1-255) | hold:<min>-<max> [optional - default: md5]>
                    -dd <display delay passed to the parser [optional - default: 1]>
                    -ds <max number of decode surfaces passed to the parser [optional - default: 1, the parser decides]>
-                   -q <queue depth between producer and consumer [optional - default: 4, raised to L+1 for lag:<L>]>
+                   -q <queue depth between producer and consumer, 1-256 [optional - default: 4, raised to L+1 for lag:<L>]>
                    -md5 <generate MD5 message digest on the output frames [optional]>
                    -md5_check MD5_File_Path <generate MD5 message digest and compare to the reference MD5 string in a file [optional]>
                    -md5_frames File_Path <write one MD5 digest per output frame [optional]>
