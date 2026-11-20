@@ -109,6 +109,7 @@ class TestRunnerFilters(unittest.TestCase):
 
     def test_exclude_applies_on_top_of_keyword(self) -> None:
         self.assertEqual(self._list("-k", "test_alpha", "-x", "test_two"), [_ONE] + self.unloaded)
+        self.assertEqual(self._list("-k", "test_tw", "-x", "test_two"), self.unloaded)
 
     def test_exclude_takes_no_wildcards(self) -> None:
         self.assertEqual(self._list("-x", "test_t*"), [_ONE, _TWO] + self.unloaded)
