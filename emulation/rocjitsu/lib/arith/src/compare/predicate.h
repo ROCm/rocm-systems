@@ -34,7 +34,7 @@ enum ComparePredicate : unsigned {
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Combine less/equal masks into the requested integer predicate mask.
-template <unsigned Predicate> uint32_t integer_compare_result(uint32_t less, uint32_t equal) {
+template <unsigned Predicate, typename Mask> Mask integer_compare_result(Mask less, Mask equal) {
   if constexpr (Predicate == CompareLess) {
     return less;
   }
@@ -51,6 +51,11 @@ template <unsigned Predicate> uint32_t integer_compare_result(uint32_t less, uin
     return ~equal;
   }
   return ~less;
+}
+
+// Scalar callers pass Boolean predicates, but consume bit 0 of an integer mask.
+template <unsigned Predicate> uint32_t integer_compare_result(bool less, bool equal) {
+  return integer_compare_result<Predicate, uint32_t>(less, equal);
 }
 
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

@@ -285,7 +285,7 @@ impl MemoryAdvice {
     #[allow(unsafe_code)]
     pub unsafe fn commit_host_range(&self, address: u64, size: u64) -> Result<(), Error> {
         let _operation = self.provider.admit()?;
-        self.check_range(address, size)?;
+        self.check_host_range(address, size)?;
         #[cfg(target_os = "linux")]
         {
             let address = usize::try_from(address)
@@ -321,7 +321,7 @@ impl MemoryAdvice {
         size: u64,
         immediate: bool,
     ) -> Result<(), Error> {
-        self.check_range(address, size)?;
+        self.check_host_range(address, size)?;
         #[cfg(target_os = "linux")]
         {
             let address = usize::try_from(address)
@@ -356,8 +356,6 @@ impl MemoryAdvice {
         self.provider_capabilities()
     }
 
-    // Discard is a retirement operation, so its range validation must remain
-    // available after admission closes.
     fn provider_capabilities(&self) -> Result<AdviceCapabilities, Error> {
         self.check()?;
         route!(&self.provider, driver => driver.advice_capabilities())
@@ -394,6 +392,28 @@ impl MemoryAdvice {
         Ok(())
     }
 
+    // Host backing has only host page constraints. It must work before GPU
+    // activation, and discard remains a retirement operation after admission closes.
+    fn check_host_range(&self, address: u64, size: u64) -> Result<(), Error> {
+        self.check()?;
+        Self::validate_range(address, size, crate::memory::host_page_size()?)
+    }
+
+    fn validate_range(address: u64, size: u64, alignment: u64) -> Result<(), Error> {
+        if address == 0
+            || size == 0
+            || address.checked_add(size).is_none()
+            || address % alignment != 0
+            || size % alignment != 0
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid memory-advice range",
+            ));
+        }
+        Ok(())
+    }
+
     fn check_range(&self, address: u64, size: u64) -> Result<AdviceCapabilities, Error> {
         let caps = self.provider_capabilities()?;
         if !caps.range_alignment.is_power_of_two()
@@ -406,17 +426,7 @@ impl MemoryAdvice {
                 "invalid memory-advice range alignment",
             ));
         }
-        if address == 0
-            || size == 0
-            || address.checked_add(size).is_none()
-            || address % caps.range_alignment != 0
-            || size % caps.range_alignment != 0
-        {
-            return Err(error(
-                ErrorKind::InvalidArgument,
-                "invalid memory-advice range",
-            ));
-        }
+        Self::validate_range(address, size, caps.range_alignment)?;
         Ok(caps)
     }
 
@@ -593,6 +603,40 @@ mod tests {
         session
             .activate(&session.open_endpoint([id; 16]).unwrap())
             .unwrap()
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[allow(unsafe_code)]
+    fn host_backing_does_not_require_an_active_kfd_context() {
+        use crate::os::linux::memory::{Reservation, page_size};
+
+        for lifetime in [
+            DriverContextLifetime::Process,
+            DriverContextLifetime::Session,
+        ] {
+            let session = Session::new(lifetime).unwrap();
+            let service = session.memory_advice().unwrap();
+            assert_eq!(
+                service.capabilities().unwrap().prefetch_completion,
+                PrefetchCompletion::Attempt
+            );
+            let page = page_size().unwrap();
+            let mut reservation =
+                Reservation::new(page, page, (page as u64, isize::MAX as u64), false).unwrap();
+            let address = reservation.address() as u64;
+            // SAFETY: This test exclusively owns the anonymous reservation and
+            // retains it through both host operations; no device was activated.
+            unsafe {
+                service.commit_host_range(address, page as u64).unwrap();
+                (address as *mut u8).write(0xa5);
+                service
+                    .discard_host_range(address, page as u64, true)
+                    .unwrap();
+                assert_eq!((address as *const u8).read(), 0);
+            }
+            reservation.release().unwrap();
+        }
     }
 
     #[test]

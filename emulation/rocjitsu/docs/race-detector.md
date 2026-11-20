@@ -433,7 +433,7 @@ that does not identify a completed event remains conservatively pending. VMCNT
 is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
 The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
+through rocjitsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
 issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
 through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
 `s_sendmsg_rtn_*`, which also counts its returned data (CDNA5 ISA 5.4). On
@@ -689,7 +689,7 @@ ctest --test-dir build -R "RaceDetector|IntervalSet"
 
 To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
-and point the wrapper at the RocJITsu build being tested. Set
+and point the wrapper at the rocjitsu build being tested. Set
 `ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
 `tests/race-detector/race_test_config.json` for gfx950, `configs/gfx1151.json` for
 gfx1151 or `configs/gfx1250_mi455x.json` for gfx1250, using absolute paths from

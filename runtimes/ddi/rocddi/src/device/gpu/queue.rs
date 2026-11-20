@@ -16,7 +16,8 @@ mod scratch;
 mod types;
 pub use super::kernel_queue::*;
 pub use exception::{
-    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, decode_kfd_queue_exception,
+    replace_scratch_owner,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
@@ -142,6 +143,12 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
 
     pub(crate) fn progress(&self) -> Result<(u64, u64), Error> {
         self.inner.progress()
+    }
+
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.inner.core_snapshot()
     }
 
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
@@ -288,6 +295,14 @@ impl<D> RetainedQueue<D> {
         self.queue.map_device(device)
     }
 
+    /// Captures fatal compute state while retaining the dependency bundle.
+    ///
+    /// # Errors
+    /// Returns inactivation or native capture errors.
+    pub fn core_snapshot(&mut self) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.queue.core_snapshot()
+    }
+
     /// Stops native execution while keeping its dependency bundle live.
     ///
     /// # Errors
@@ -426,6 +441,14 @@ pub(crate) fn abandon_unpublished<T, D: 'static>(
 }
 
 impl Queue {
+    /// Permanently inactivates the queue and captures its saved GPU state.
+    ///
+    /// # Errors
+    /// Returns native inactivation, capture, or unsupported-provider errors.
+    pub fn core_snapshot(&mut self) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.inner.core_snapshot()
+    }
+
     /// Copies the ring, index, and doorbell facts captured at creation.
     /// It performs no health poll or progress read. The adapter permits address
     /// use only while a live public queue mapping borrows this native owner.
