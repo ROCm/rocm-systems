@@ -35,6 +35,8 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   in->comm = comm;
   // disable ce temporarily
   in->tuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+  // [RCCL] Across trays AllGather symk runs only through the TDM window, which this path skips.
+  if (raw->func == ncclFuncAllGather && comm->spansTrays) in->tuningMask &= ~NCCL_TUNING_MASK_SYM_KERNELS;
   in->func = raw->func;
   in->redOp = raw->opHost;
   in->devRedOp = raw->opDev.op;

@@ -195,7 +195,8 @@ jobs:
 
       - name: Install MPI
         run: |
-          apt install -y libopenmpi-dev
+          apt-get update
+          apt-get install -y libopenmpi-dev
           echo "✅ MPI Installed!"
 
       - name: Install Latest Nightly ROCm
@@ -254,7 +255,6 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
             -DROCPROFSYS_BUILD_DYNINST=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
-            -DROCPROFSYS_BUILD_LIBIBERTY=ON \
             -DROCPROFSYS_BUILD_CI=ON \
             -DROCPROFSYS_BUILD_EXAMPLES=ON \
             -DROCPROFSYS_BUILD_TESTING=ON \

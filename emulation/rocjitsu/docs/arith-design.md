@@ -7,6 +7,9 @@ CPU-specific SIMD arithmetic.
 
 ## Scope and contract
 
+GETREG/SETREG hardware-register access stays in Rocjitsu’s VM. Its register mapping,
+privilege checks, topology, and execution side effects are outside this arithmetic library.
+
 The library is a collection of C entry points mapping one-to-one to GPU instructions.
 Each aims to reproduce the instruction's arithmetic, synchronously on the calling
 CPU thread. Operation is stateless: operands and controls arrive as arguments,
@@ -74,6 +77,11 @@ The matrices are distributed across the wave, not replicated per lane.
 WMMA ignores EXEC, so the API has no execution-mask parameter.
 The [README example](../lib/arith/README.md#api-example) constructs these operands and decodes the result.
 
+Sparse SWMMAC instead reads the initial accumulator from `d`; its fourth pointer
+operand is `index`, not a separate `c`. See the
+[sparse instruction contracts](../lib/arith/include/rj_arith/detail/rj_arith_wmma.h)
+for operand layouts and metadata selectors.
+
 ### Operands and register storage
 
 Scalar inputs are values; scalar outputs are pointers. Vector operands are
@@ -127,18 +135,36 @@ and guest FP controls.
 | 2 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS` | Require empirical bit-exact arithmetic; no FP status reporting |
 | 3 | `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL` | Require empirical bit-exact arithmetic and FP status reporting |
 | 4–6 | Reserved | Rejected |
-| 7 | Reserved for compatibility | Currently rejected |
+| 7 | `RJ_ARITH_SEMANTICS_COMPATIBILITY` | Instruction-specific policy, outside the ordering |
 
 Loose semantics permit numerical approximations, not wrong operands, missing
-operations, or incorrect integer and comparison results. Modes 2 and 3 reject
-unsupported behavior rather than silently falling back to loose arithmetic.
+operations, or incorrect integer and comparison results. Native floating-point
+arithmetic may overflow intermediate values or use a different accumulation order,
+including returning infinity where the GPU returns a finite value. Loose paths
+need not reorder terms or check operand ranges to prevent these discrepancies.
+Modes 2 and 3 reject unsupported behavior rather than silently falling back to
+loose arithmetic.
 
-### Compatibility mode (planned)
+### Compatibility mode
 
-Once implemented, mode 7 will be a temporary, instruction-specific policy outside the ordered modes.
-Each entry point resolves it before validation or calling another entry point;
-the resolved mode determines both numerical behavior and FP status reporting.
-Rocjitsu's JSON policy setting is planned for the later integration step.
+Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
+Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
+previous behavior. This can retain instruction-specific details beyond the
+other modes, such as rounding FP16 results before applying OMOD.
+FP32 MUL selects numeric-only exact semantics in every configuration. Its
+integration retains Rocjitsu's existing exception classifier for Compatibility;
+explicit mode 3 uses the library's qualified reporting domain instead.
+Compatibility may retain demonstrated hardware-fidelity improvements over the
+previous interpreter; instruction contracts document such exceptions.
+On RDNA4 the simulator also records invalid inputs to FP32 binary arithmetic
+and min/max, overflow of FP32 add/subtract before OMOD, and signaling
+floating-point compares on NaN. Dual FP32 arithmetic slots share the wave’s
+exception flags. Explicit numeric-only modes suppress these additional flags.
+Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
+setting maps directly to these modes and defaults to compatibility. Its string
+values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
+[Instruction coverage](../lib/arith/COVERAGE.md) describes the migrated families.
+Other handlers retain their existing implementations.
 
 ### Guest FP controls
 
@@ -210,8 +236,12 @@ as `std::default_random_engine` and the algorithms used by `std::uniform_int_dis
 Loose-semantics validation uses fuzzy comparisons with empirically calibrated
 `atol` and `rtol` tolerances against independent references:
 `abs(actual - expected) <= atol + rtol * abs(expected)`.
-NaNs match NaNs and infinities must match in sign; masks and preserved storage
-are checked exactly. Bounds live beside the instruction tests or family helpers.
+These bounds apply to the tested input domain, not to arbitrary floating-point
+inputs. Within that domain, NaNs match NaNs and infinities must match in sign.
+Cases requiring GPU-specific cancellation or overflow behavior belong in exact
+tests; loose tests must not impose those guarantees on native arithmetic. Masks
+and preserved storage are checked exactly. Bounds live beside the instruction
+tests or family helpers.
 
 Exact-semantics validation uses golden results or computed references whose
 bit-exact equivalence is established, rather than assumed from mathematical
@@ -235,7 +265,7 @@ sanitizers provide broader validation; ordinary tests need no GPU.
 Each `*_test.cpp` builds as a separate executable, with individual GTest cases
 exposed to CTest. Public headers are compiled independently as C23 and C++17.
 
-## Benchmarking (planned)
+## Benchmarking
 
 No benchmark executable is built at this stage. The following describes its intended interface.
 

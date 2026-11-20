@@ -26,6 +26,8 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <uapi/linux/drm/drm.h>
 RJ_DIAGNOSTIC_POP
 
+#include "rocjitsu/kmd/linux/syscall_compat.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -53,6 +55,7 @@ RJ_DIAGNOSTIC_POP
 #include <sys/mman.h>
 #include <sys/random.h>
 #include <sys/resource.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/sysmacros.h>
@@ -83,17 +86,6 @@ extern "C" __attribute__((visibility("default"))) ssize_t getrandom(void *buffer
 }
 
 extern char **environ;
-
-// close_range(2) landed in Linux 5.9 and glibc 2.34. gcc-toolset-13 on the CI base
-// image builds against an older glibc with no wrapper, so issue the syscall directly.
-// 436 is the number on every architecture ROCm targets.
-#ifndef SYS_close_range
-#ifdef __NR_close_range
-#define SYS_close_range __NR_close_range
-#else
-#define SYS_close_range 436
-#endif
-#endif
 
 namespace {
 
@@ -238,6 +230,19 @@ TEST(InterposerDupTest, ConstructorPreservesDescriptorLimit) {
     ASSERT_TRUE(WIFEXITED(status));
     EXPECT_EQ(WEXITSTATUS(status), 0) << "initial descriptor limit " << limit;
   }
+}
+
+TEST(InterposerDupTest, ConstructorPreparesTopologyBeforeFileLimitDrops) {
+  // Re-exec with LD_PRELOAD so initialization precedes the hard limit drop.
+  // A fork-only child would discard its parent's keeper lease.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ASSERT_EXIT(
+      {
+        const rlimit zero{};
+        uint32_t gpu_id = 0;
+        _exit(setrlimit(RLIMIT_FSIZE, &zero) == 0 && read_gpu_id(gpu_id) && gpu_id != 0 ? 0 : 1);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 TEST(InterposerDupTest, Dup2PreservesHiddenEventBacking) {
@@ -1061,6 +1066,21 @@ void check_kfd_export_flags_survive_duplication(Duplicate duplicate, bool close_
   EXPECT_EQ(close(kfd), 0);
 }
 
+std::string mapping_dump_flags(void *address) {
+  std::ifstream smaps("/proc/self/smaps");
+  std::string line;
+  bool selected = false;
+  while (std::getline(smaps, line)) {
+    unsigned long begin = 0, end = 0;
+    if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+      selected = reinterpret_cast<uintptr_t>(address) >= begin &&
+                 reinterpret_cast<uintptr_t>(address) < end;
+    if (selected && line.starts_with("VmFlags:"))
+      return line + " ";
+  }
+  return {};
+}
+
 } // namespace
 
 TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
@@ -1080,6 +1100,41 @@ TEST(InterposerDrmTest, DeviceInfoReportsActiveCuCount) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+// This test uses an explicit 256-MiB aperture, smaller than physical VRAM.
+TEST(InterposerDrmTest, PartialVramApertureLimitsCpuAccessibleQueries) {
+  constexpr uint64_t kTotalVram = 463856467968ull;
+  constexpr uint64_t kVisibleVram = 256ull << 20;
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+
+  drm_amdgpu_info_vram_gtt vram_gtt{};
+  drm_amdgpu_info query{};
+  query.query = AMDGPU_INFO_VRAM_GTT;
+  query.return_pointer = reinterpret_cast<uint64_t>(&vram_gtt);
+  query.return_size = sizeof(vram_gtt);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
+  EXPECT_EQ(vram_gtt.vram_size, kTotalVram);
+  EXPECT_EQ(vram_gtt.vram_cpu_accessible_size, kVisibleVram);
+
+  drm_amdgpu_memory_info memory{};
+  query.query = AMDGPU_INFO_MEMORY;
+  query.return_pointer = reinterpret_cast<uint64_t>(&memory);
+  query.return_size = sizeof(memory);
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
+  EXPECT_EQ(memory.vram.total_heap_size, kTotalVram);
+  EXPECT_EQ(memory.vram.usable_heap_size, kTotalVram);
+  EXPECT_EQ(memory.vram.max_allocation, kTotalVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.total_heap_size, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.usable_heap_size, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.max_allocation, kVisibleVram);
+  EXPECT_EQ(memory.cpu_accessible_vram.total_heap_size, vram_gtt.vram_cpu_accessible_size);
+
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, OpensWithinCurrentDescriptorLimit) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
@@ -1090,7 +1145,7 @@ TEST(InterposerDrmTest, OpensWithinCurrentDescriptorLimit) {
   RestoreLimit restore{original};
   constexpr rlim_t kSoftNofileLimit = 256;
   struct rlimit limited = original;
-  limited.rlim_cur = std::min(original.rlim_cur, kSoftNofileLimit);
+  limited.rlim_cur = std::min<rlim_t>(original.rlim_cur, kSoftNofileLimit);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
 
   // A render open should use an available descriptor, even when 512 is outside
@@ -1104,6 +1159,13 @@ TEST(InterposerDrmTest, OpensWithinCurrentDescriptorLimit) {
   EXPECT_EQ(close(drm), 0);
   drm_amdgpu_info_device device{};
   EXPECT_TRUE(query_drm_device_info(duplicate, &device));
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4096;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(duplicate, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+  drm_gem_close release{};
+  release.handle = create.out.handle;
+  EXPECT_EQ(ioctl(duplicate, DRM_IOCTL_GEM_CLOSE, &release), 0);
   EXPECT_EQ(close(duplicate), 0);
   EXPECT_EQ(close(kfd), 0);
 }
@@ -1119,7 +1181,7 @@ TEST(InterposerDrmTest, AllocationFailsWhenBackingDescriptorsAreExhausted) {
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &original), 0);
   RestoreLimit restore{original};
   struct rlimit limited = original;
-  limited.rlim_cur = std::min(original.rlim_cur, rlim_t{256});
+  limited.rlim_cur = std::min<rlim_t>(original.rlim_cur, rlim_t{256});
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limited), 0);
   std::vector<int> fillers;
   int fd;
@@ -1146,6 +1208,64 @@ TEST(InterposerDrmTest, AllocationFailsWhenBackingDescriptorsAreExhausted) {
     EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
   }
   EXPECT_EQ(munmap(reserved, 4096), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, MappingFlagsMatchBackingCapabilities) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 2 * page;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+  drm_amdgpu_gem_mmap offset{};
+  offset.in.handle = create.out.handle;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_MMAP, &offset), 0);
+  drm_prime_handle prime{};
+  prime.handle = create.out.handle;
+  prime.flags = DRM_CLOEXEC | DRM_RDWR;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  const char *force_token = std::getenv("RJ_TEST_FORCE_TOKEN_BACKING");
+  const bool token = force_token && std::strcmp(force_token, "1") == 0;
+  for (const bool exported : {false, true}) {
+    SCOPED_TRACE(exported);
+    const int fd = exported ? prime.fd : drm;
+    const off_t mapping_offset = exported ? 0 : static_cast<off_t>(offset.out.addr_ptr);
+    if (token) {
+      for (const unsigned unsupported :
+           {unsigned(MAP_LOCKED), unsigned(MAP_HUGETLB), unsigned(MAP_GROWSDOWN),
+            unsigned(MAP_POPULATE), unsigned(MAP_NORESERVE), unsigned(MAP_STACK), 1u << 31}) {
+        SCOPED_TRACE(unsupported);
+        void *view = mmap(nullptr, page, PROT_READ | PROT_WRITE, MAP_SHARED | unsupported, fd,
+                          mapping_offset);
+        const int error = errno;
+        EXPECT_EQ(view, MAP_FAILED);
+        EXPECT_EQ(error, EINVAL);
+        if (view != MAP_FAILED) {
+          EXPECT_EQ(munmap(view, page), 0);
+        }
+      }
+    } else {
+      void *view = mmap(nullptr, page, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_NORESERVE, fd,
+                        mapping_offset);
+      ASSERT_NE(view, MAP_FAILED);
+      EXPECT_EQ(munmap(view, page), 0);
+    }
+    void *view = mmap(nullptr, page, PROT_READ | PROT_WRITE, MAP_SHARED, fd, mapping_offset);
+    ASSERT_NE(view, MAP_FAILED);
+    auto *word = static_cast<uint32_t *>(view);
+    if (exported) {
+      EXPECT_EQ(*word, 0x12345678u);
+    } else {
+      *word = 0x12345678;
+    }
+    EXPECT_EQ(munmap(view, page), 0);
+  }
+  EXPECT_EQ(close(prime.fd), 0);
+  EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }
 
@@ -1648,6 +1768,208 @@ TEST(InterposerDrmTest, PrimeImportRejectsADescriptorThatIsNotADmabuf) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+// Device pages are captured by ROCr's GPU core policy, while ordinary host
+// mappings remain eligible for the host core. Check descriptor aliases and both
+// libc entry points because libdrm calls mmap64 even on a 64-bit host.
+TEST(InterposerDrmTest, DeviceMappingsFollowGpuCoreDumpPolicyAcrossDescriptorAliases) {
+  int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  int alias = dup(buffer.dmabuf);
+  ASSERT_GE(alias, 0);
+  ASSERT_EQ(close(buffer.dmabuf), 0);
+  buffer.dmabuf = -1;
+
+  for (bool large_file : {false, true}) {
+    void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, alias, 0)
+                              : mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, alias, 0);
+    ASSERT_NE(mapped, MAP_FAILED);
+    EXPECT_NE(mapping_dump_flags(mapped).find(" dd "), std::string::npos);
+    std::ifstream maps("/proc/self/maps");
+    std::string line;
+    bool found = false;
+    while (std::getline(maps, line)) {
+      unsigned long begin = 0, end = 0;
+      if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2 &&
+          reinterpret_cast<uintptr_t>(mapped) >= begin &&
+          reinterpret_cast<uintptr_t>(mapped) < end) {
+        EXPECT_NE(line.find("/dev/dri/renderD"), std::string::npos);
+        found = true;
+      }
+    }
+    EXPECT_TRUE(found);
+    ASSERT_EQ(munmap(mapped, 4096), 0);
+  }
+  int ordinary = make_sized_memfd(4096);
+  ASSERT_GE(ordinary, 0);
+  void *host = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, ordinary, 0);
+  ASSERT_NE(host, MAP_FAILED);
+  EXPECT_FALSE(mapping_dump_flags(host).empty());
+  EXPECT_EQ(mapping_dump_flags(host).find(" dd "), std::string::npos);
+  EXPECT_EQ(munmap(host, 4096), 0);
+  EXPECT_EQ(close(ordinary), 0);
+  EXPECT_EQ(close(alias), 0);
+  buffer.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, DeviceViewRetainsDumpIdentityAfterReleaseAndMove) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  void *mapped = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, buffer.dmabuf, 0);
+  ASSERT_NE(mapped, MAP_FAILED);
+  *static_cast<uint32_t *>(mapped) = 0x12345678;
+  ASSERT_EQ(close(buffer.dmabuf), 0);
+  buffer.dmabuf = -1;
+  buffer.release();
+  ASSERT_EQ(close(kfd), 0);
+  void *target = mmap(nullptr, 4096, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(target, MAP_FAILED);
+  ASSERT_EQ(mremap(mapped, 4096, 4096, MREMAP_MAYMOVE | MREMAP_FIXED, target), target);
+  EXPECT_EQ(*static_cast<uint32_t *>(target), 0x12345678u);
+  for (const char *path : {"/proc/self/maps", "/proc/self/smaps"}) {
+    std::ifstream maps(path);
+    std::string line;
+    bool found = false;
+    while (std::getline(maps, line)) {
+      unsigned long begin = 0, end = 0;
+      if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2 &&
+          reinterpret_cast<uintptr_t>(target) >= begin &&
+          reinterpret_cast<uintptr_t>(target) < end) {
+        EXPECT_NE(line.find("/dev/dri/renderD"), std::string::npos);
+        found = true;
+      }
+    }
+    EXPECT_TRUE(found);
+  }
+  EXPECT_NE(mapping_dump_flags(target).find(" dd "), std::string::npos);
+  EXPECT_EQ(munmap(target, 4096), 0);
+}
+
+TEST(InterposerDrmTest, GemMappingsFollowGpuCoreDumpPolicy) {
+  constexpr rlim_t kTestNofileLimit = 8192;
+  struct rlimit limit {};
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &limit), 0);
+  if (limit.rlim_max < kTestNofileLimit)
+    GTEST_SKIP() << "the driver backing descriptor range is unavailable";
+  RestoreLimit restore{limit};
+  limit.rlim_cur = std::max(limit.rlim_cur, kTestNofileLimit);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &limit), 0);
+
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport buffer;
+  ASSERT_TRUE(buffer.create(kfd, kPublicVram));
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_prime_handle imported{};
+  imported.fd = buffer.dmabuf;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_FD_TO_HANDLE, &imported), 0);
+  drm_amdgpu_gem_mmap offset{};
+  offset.in.handle = imported.handle;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_MMAP, &offset), 0);
+  for (bool large_file : {false, true}) {
+    void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, drm,
+                                       static_cast<off64_t>(offset.out.addr_ptr))
+                              : mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, drm,
+                                     static_cast<off_t>(offset.out.addr_ptr));
+    ASSERT_NE(mapped, MAP_FAILED);
+    EXPECT_NE(mapping_dump_flags(mapped).find(" dd "), std::string::npos);
+    EXPECT_EQ(munmap(mapped, 4096), 0);
+  }
+  drm_gem_close close_bo{};
+  close_bo.handle = imported.handle;
+  EXPECT_EQ(ioctl(drm, DRM_IOCTL_GEM_CLOSE, &close_bo), 0);
+  EXPECT_EQ(close(drm), 0);
+  buffer.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, MappingStillSucceedsAtTheDescriptorLimit) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  const int file = make_sized_memfd(4096);
+  ASSERT_GE(file, 0);
+  const uint32_t marker = 0x12345678;
+  ASSERT_EQ(pwrite(file, &marker, sizeof(marker), 0), static_cast<ssize_t>(sizeof(marker)));
+  struct DescriptorLimitGuard {
+    rlimit original{};
+    std::vector<int> descriptors;
+    ~DescriptorLimitGuard() {
+      setrlimit(RLIMIT_NOFILE, &original);
+      for (int fd : descriptors)
+        syscall(SYS_close, fd);
+    }
+  } guard;
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &guard.original), 0);
+  rlimit bounded = guard.original;
+  bounded.rlim_cur = std::min<rlim_t>(bounded.rlim_cur, 64);
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &bounded), 0);
+  for (;;) {
+    const int extra = static_cast<int>(syscall(SYS_dup, file));
+    if (extra < 0)
+      break;
+    guard.descriptors.push_back(extra);
+  }
+  ASSERT_EQ(errno, EMFILE);
+  void *mapped = mmap(nullptr, 4096, PROT_READ, MAP_SHARED, file, 0);
+  ASSERT_NE(mapped, MAP_FAILED);
+  EXPECT_EQ(*static_cast<const uint32_t *>(mapped), marker);
+  EXPECT_EQ(munmap(mapped, 4096), 0);
+  EXPECT_EQ(close(file), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDrmTest, DumpPolicyRetainsTheMappedFileAcrossDescriptorReuse) {
+  auto arm =
+      reinterpret_cast<void (*)(int, int)>(dlsym(RTLD_DEFAULT, "rj_test_swap_fd_after_mmap"));
+  auto swapped = reinterpret_cast<bool (*)()>(dlsym(RTLD_DEFAULT, "rj_test_mmap_swapped_fd"));
+  ASSERT_NE(arm, nullptr);
+  ASSERT_NE(swapped, nullptr);
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  KfdExport device;
+  ASSERT_TRUE(device.create(kfd, kPublicVram));
+  const int host = make_sized_memfd(4096);
+  ASSERT_GE(host, 0);
+  for (const bool map_device : {false, true}) {
+    for (const bool large_file : {false, true}) {
+      SCOPED_TRACE(map_device);
+      SCOPED_TRACE(large_file);
+      const int original = dup(map_device ? device.dmabuf : host);
+      ASSERT_GE(original, 0);
+      arm(original, map_device ? host : device.dmabuf);
+      void *mapped = large_file ? mmap64(nullptr, 4096, PROT_READ, MAP_SHARED, original, 0)
+                                : mmap(nullptr, 4096, PROT_READ, MAP_SHARED, original, 0);
+      ASSERT_NE(mapped, MAP_FAILED);
+      EXPECT_TRUE(swapped());
+      std::ifstream smaps("/proc/self/smaps");
+      std::string line;
+      bool selected = false, found = false;
+      while (std::getline(smaps, line)) {
+        unsigned long begin = 0, end = 0;
+        if (std::sscanf(line.c_str(), "%lx-%lx", &begin, &end) == 2)
+          selected = reinterpret_cast<uintptr_t>(mapped) >= begin &&
+                     reinterpret_cast<uintptr_t>(mapped) < end;
+        if (selected && line.starts_with("VmFlags:")) {
+          EXPECT_EQ((line + " ").find(" dd ") != std::string::npos, map_device);
+          found = true;
+          break;
+        }
+      }
+      EXPECT_TRUE(found);
+      EXPECT_EQ(munmap(mapped, 4096), 0);
+      EXPECT_EQ(close(original), 0);
+    }
+  }
+  EXPECT_EQ(close(host), 0);
+  device.release();
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDrmTest, KfdExportFlagsSurviveDuplicationBeforeThePrimeImport) {
   const struct {
     const char *name;
@@ -2126,30 +2448,49 @@ TEST(InterposerDrmTest, PrimeHandleToFdReturnsTheBuffer) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerDrmTest, TimestampUsesAdvertisedNanosecondClock) {
+TEST(InterposerDrmTest, TimestampUsesAdvertisedDeviceClock) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  std::ifstream properties("/sys/class/kfd/kfd/topology/nodes/1/properties");
+  std::string key;
+  uint32_t target = 0;
+  while (properties >> key) {
+    if (key == "gfx_target_version") {
+      properties >> target;
+      break;
+    }
+    std::string ignored;
+    properties >> ignored;
+  }
+  ASSERT_NE(target, 0u);
+  const uint32_t clock_khz = target == 90008 || target == 90010                        ? 25'000u
+                             : (target >= 90400 && target <= 90402) || target == 90500 ? 100'000u
+                                                                                       : 1'000'000u;
   drm_amdgpu_info_device device{};
   ASSERT_TRUE(query_drm_device_info(drm, &device));
-  EXPECT_EQ(device.gpu_counter_freq, 1000000u);
+  EXPECT_EQ(device.gpu_counter_freq, clock_khz);
+  const uint64_t ns_per_tick = 1'000'000u / clock_khz;
+  kfd_ioctl_get_clock_counters_args before{}, after{};
+  before.gpu_id = after.gpu_id = gpu_id;
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &before), 0);
   uint64_t timestamp = 0;
   drm_amdgpu_info query{};
   query.query = AMDGPU_INFO_TIMESTAMP;
   query.return_pointer = reinterpret_cast<uint64_t>(&timestamp);
   query.return_size = sizeof(timestamp);
-  const auto before = std::chrono::steady_clock::now();
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_INFO, &query), 0);
-  const auto after = std::chrono::steady_clock::now();
-  EXPECT_GE(
-      timestamp,
-      static_cast<uint64_t>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(before.time_since_epoch()).count()));
-  EXPECT_LE(
-      timestamp,
-      static_cast<uint64_t>(
-          std::chrono::duration_cast<std::chrono::nanoseconds>(after.time_since_epoch()).count()));
+  ASSERT_EQ(ioctl(kfd, AMDKFD_IOC_GET_CLOCK_COUNTERS, &after), 0);
+  for (const auto &sample : {before, after}) {
+    EXPECT_EQ(sample.system_clock_freq, 1'000'000'000u);
+    EXPECT_EQ(sample.cpu_clock_counter, sample.system_clock_counter);
+    EXPECT_EQ(sample.gpu_clock_counter, sample.system_clock_counter / ns_per_tick);
+  }
+  EXPECT_LE(before.gpu_clock_counter, timestamp);
+  EXPECT_LE(timestamp, after.gpu_clock_counter);
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }
@@ -2166,17 +2507,24 @@ protected:
   uint32_t *memory_ = nullptr;
   int private_gem_slot_ = -1;
 
-  void SetUp() override {
+  void SetUp() override { initialize(); }
+
+  void initialize(bool probe_private_descriptors = true) {
     kfd_ = open_kfd();
     ASSERT_GE(kfd_, 0);
     drm_ = open_drm_render();
     ASSERT_GE(drm_, 0);
-    int probe = open("/dev/null", O_RDONLY | O_CLOEXEC);
-    ASSERT_GE(probe, 0);
-    private_gem_slot_ = fcntl(probe, F_DUPFD_CLOEXEC, 4096);
-    ASSERT_GE(private_gem_slot_, 4096);
-    ASSERT_EQ(close(private_gem_slot_), 0);
-    ASSERT_EQ(close(probe), 0);
+    if (probe_private_descriptors) {
+      int probe = open("/dev/null", O_RDONLY | O_CLOEXEC);
+      ASSERT_GE(probe, 0);
+      private_gem_slot_ = fcntl(probe, F_DUPFD_CLOEXEC, 4096);
+      // Most PM4 cases do not need a descriptor above the host NOFILE limit.
+      // The two replacement cases diagnose an unavailable private slot below.
+      if (private_gem_slot_ >= 0) {
+        ASSERT_EQ(close(private_gem_slot_), 0);
+      }
+      ASSERT_EQ(close(probe), 0);
+    }
     drm_amdgpu_gem_create create{};
     create.in.bo_size = 8192;
     create.in.alignment = 4096;
@@ -2219,8 +2567,10 @@ protected:
   }
 
   int submit(uint32_t dwords, bool wait_input, uint64_t *sequence,
-             uint32_t engine = AMDGPU_HW_IP_COMPUTE, uint64_t point = 0) {
+             uint32_t engine = AMDGPU_HW_IP_COMPUTE, uint64_t point = 0, uint32_t fence_handle = 0,
+             uint32_t ib_flags = 0) {
     drm_amdgpu_cs_chunk_ib ib{};
+    ib.flags = ib_flags;
     ib.va_start = kAddress;
     ib.ib_bytes = dwords * 4;
     ib.ip_type = engine;
@@ -2234,7 +2584,7 @@ protected:
     dependency.handle = input_;
     dependency.flags = DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT;
     drm_amdgpu_cs_chunk_fence fence{};
-    fence.handle = bo_;
+    fence.handle = fence_handle ? fence_handle : bo_;
     fence.offset = 4104;
     std::vector<drm_amdgpu_cs_chunk> chunks;
     auto add = [&](uint32_t id, const auto &data) {
@@ -2269,6 +2619,9 @@ protected:
   }
 
   void check_private_descriptors(bool use_dup3) {
+    if (private_gem_slot_ < 0) {
+      GTEST_SKIP() << "Private descriptor replacement requires NOFILE above 4096";
+    }
     memory_[0] = 0xffff1000;
     memory_[1024] = 0x12345678;
     uint64_t sequence = 0;
@@ -2397,6 +2750,19 @@ protected:
     return rc;
   }
 };
+
+TEST_F(InterposerPm4Test, UnsupportedGdsResetLeavesQueueUsable) {
+  memory_[0] = 0xffff1000; // PM4 NOP.
+  uint64_t sequence = 0;
+  EXPECT_EQ(
+      submit(1, false, &sequence, AMDGPU_HW_IP_COMPUTE, 0, 0, AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID),
+      -1);
+  EXPECT_EQ(errno, EINVAL);
+
+  ASSERT_EQ(submit(1, false, &sequence), 0);
+  EXPECT_EQ(sequence, 1u);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
+}
 
 TEST_F(InterposerPm4Test, SubmissionFenceQueryPollsAndWaitsForCompletion) {
   uint64_t busy = 99;
@@ -3572,6 +3938,36 @@ TEST_F(InterposerPm4Test, GridProductOverflowFailsFence) {
   EXPECT_EQ(errno, EIO);
 }
 
+TEST_F(InterposerPm4Test, IndirectBranchFetchesHighVaShader) {
+  constexpr uint64_t page = 0xffff800012345000ull;
+  drm_amdgpu_gem_va va{};
+  va.handle = bo_;
+  va.operation = AMDGPU_VA_OP_MAP;
+  va.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_EXECUTABLE;
+  va.va_address = page;
+  va.offset_in_bo = 4096;
+  va.map_size = 4096;
+  ASSERT_EQ(ioctl(drm_, DRM_AMDGPU_GEM_VA_request(), &va), 0);
+
+  // Enter at page + 512. GETPC, AND and SETPC jump back to ENDPGM at the
+  // start of the page. The GFX9 profiles use wave64 and different opcodes.
+  drm_amdgpu_info_device device{};
+  ASSERT_TRUE(query_drm_device_info(drm_, &device));
+  const bool gfx9 = device.wave_front_size == 64;
+  constexpr uint32_t gfx9_branch[] = {0xbe801c00, 0x8600ff00, 0xfffff000, 0xbe801d00};
+  constexpr uint32_t gfx11_branch[] = {0xbe804700, 0x8b00ff00, 0xfffff000, 0xbe804800};
+  memory_[1024] = gfx9 ? 0xbf810000 : 0xbfb00000;
+  std::memcpy(memory_ + 1152, gfx9 ? gfx9_branch : gfx11_branch, sizeof(gfx9_branch));
+  constexpr uint64_t code = page + 512;
+  const uint32_t packet[] = {
+      0xc0037600,           0x207,      1, 1, 1, 0xc0027600,         0x20c, uint32_t(code >> 8),
+      uint32_t(code >> 40), 0xc0031500, 1, 1, 1, gfx9 ? 1u : 0x8001u};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
+}
+
 TEST_F(InterposerPm4Test, UnmappedShaderFailsFence) {
   const uint64_t code = kAddress + 0x100000;
   const uint32_t packet[] = {
@@ -3609,6 +4005,26 @@ TEST_F(InterposerPm4Test, OversizedLdsFailsFence) {
   ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::milliseconds(500))), -1);
   EXPECT_EQ(errno, EIO);
+}
+
+TEST_F(InterposerPm4Test, FailedDependencyFailsFenceWithoutExecutingCommands) {
+  memory_[0] = 0xc0033700;
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(1, false, &sequence), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
+  ASSERT_EQ(errno, EIO);
+  drm_syncobj_transfer transfer{};
+  transfer.src_handle = output_;
+  transfer.dst_handle = input_;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_TRANSFER, &transfer), 0);
+  const std::array packet{0xc0033700u, 0x100u, uint32_t(kAddress + 4096),
+                          uint32_t((kAddress + 4096) >> 32), 0xdeadbeefu};
+  std::memcpy(memory_, packet.data(), sizeof(packet));
+  ASSERT_EQ(submit(packet.size(), true, &sequence, AMDGPU_HW_IP_GFX), 0);
+  EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), -1);
+  EXPECT_EQ(errno, EIO);
+  EXPECT_EQ(memory_[1024], 0u);
+  EXPECT_EQ(memory_[1026], 0u);
 }
 
 TEST_F(InterposerPm4Test, FailedFenceIsStillAvailable) {
@@ -3770,6 +4186,221 @@ TEST_F(InterposerPm4Test, NestedIndirectBufferReturns) {
   ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
   ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
   EXPECT_EQ(memory_[1024], 0x12345678u);
+}
+
+TEST_F(InterposerPm4Test, SparseReplacementPreservesResidentTail) {
+  constexpr uint64_t base = kAddress + 0x100000;
+  const auto request = DRM_AMDGPU_GEM_VA_request();
+  drm_amdgpu_gem_va update{};
+  update.operation = AMDGPU_VA_OP_MAP;
+  update.flags = AMDGPU_VM_PAGE_PRT;
+  update.va_address = base;
+  update.map_size = 4 * 4096;
+  ASSERT_EQ(ioctl(drm_, request, &update), 0);
+  update.operation = AMDGPU_VA_OP_REPLACE;
+  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
+  update.handle = bo_;
+  update.map_size = 1;
+  EXPECT_EQ(ioctl(drm_, request, &update), -1);
+  EXPECT_EQ(errno, EINVAL);
+  update.map_size = 4096;
+  update.offset_in_bo = 1;
+  EXPECT_EQ(ioctl(drm_, request, &update), -1);
+  EXPECT_EQ(errno, EINVAL);
+  update.offset_in_bo = 0;
+  update.map_size = 8192;
+  ASSERT_EQ(ioctl(drm_, request, &update), 0);
+  update.flags = AMDGPU_VM_PAGE_PRT;
+  update.handle = 0;
+  update.map_size = 4096;
+  ASSERT_EQ(ioctl(drm_, request, &update), 0);
+
+  // Unbinding the first page must preserve the second page's BO offset and PTE.
+  constexpr uint64_t address = base + 6144;
+  const uint32_t packet[] = {0xc0033700, 5u << 8, uint32_t(address), uint32_t(address >> 32),
+                             0x12345678};
+  std::memcpy(memory_, packet, sizeof(packet));
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  EXPECT_EQ(memory_[1536], 0x12345678u);
+  update.operation = AMDGPU_VA_OP_CLEAR;
+  update.flags = 0;
+  update.map_size = 4 * 4096;
+  EXPECT_EQ(ioctl(drm_, request, &update), 0);
+}
+
+class InterposerPm4FileLimitTest : public InterposerPm4Test {
+protected:
+  void SetUp() override {
+    // File-limit checks do not need the private descriptor replacement probe.
+    initialize(false);
+  }
+  void check_large_fence_mapping(bool token);
+};
+
+TEST_F(InterposerPm4FileLimitTest, CompletionSurvivesClosedHandleAndFileLimit) {
+  memory_[0] = 0xffff1000;
+  // A separate fence BO has no GPU VA mapping to initialize its internal view.
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 8192;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+  const uint32_t fence_handle = create.out.handle;
+  drm_amdgpu_gem_mmap mapping{};
+  mapping.in.handle = fence_handle;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_GEM_MMAP, &mapping), 0);
+  auto *fence_view = static_cast<uint8_t *>(
+      mmap(nullptr, 8192, PROT_READ | PROT_WRITE, MAP_SHARED, drm_, mapping.out.addr_ptr));
+  ASSERT_NE(fence_view, MAP_FAILED);
+  rlimit limit{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &limit), 0);
+  limit.rlim_cur = 0;
+  ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &limit), 0);
+  uint64_t sequence = 0;
+  ASSERT_EQ(submit(1, true, &sequence, AMDGPU_HW_IP_COMPUTE, 0, fence_handle), 0);
+  ASSERT_EQ(gem_close(drm_, fence_handle), 0);
+  ASSERT_EQ(gem_close(drm_, bo_), 0);
+  bo_ = 0;
+  drm_syncobj_array signal{};
+  signal.handles = reinterpret_cast<uint64_t>(&input_);
+  signal.count_handles = 1;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_SIGNAL, &signal), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  uint64_t observed = 0;
+  std::memcpy(&observed, fence_view + 4104, sizeof(observed));
+  EXPECT_EQ(munmap(fence_view, 8192), 0);
+  EXPECT_EQ(observed, sequence);
+  rlimit after{};
+  ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &after), 0);
+  EXPECT_EQ(after.rlim_cur, limit.rlim_cur);
+  EXPECT_EQ(after.rlim_max, limit.rlim_max);
+}
+
+void InterposerPm4FileLimitTest::check_large_fence_mapping(bool token) {
+  constexpr uint64_t size = uint64_t{1} << 30;
+  constexpr rlim_t experiment_headroom = 128ULL << 20;
+  const uint64_t page_size = static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+  uint64_t pages = 0;
+  {
+    std::ifstream statm("/proc/self/statm");
+    ASSERT_TRUE(statm >> pages);
+  }
+  rlimit original{};
+  ASSERT_EQ(getrlimit(RLIMIT_AS, &original), 0);
+  const uint64_t virtual_size = pages * page_size;
+  const rlim_t headroom = original.rlim_cur > virtual_size ? original.rlim_cur - virtual_size : 0;
+  if (headroom < experiment_headroom + page_size)
+    GTEST_SKIP() << "inherited RLIMIT_AS needs 128 MiB plus the observer page for the experiment";
+  if (token) {
+    if (headroom < size + 2 * page_size)
+      GTEST_SKIP() << "inherited RLIMIT_AS needs the full token attachment plus observer and "
+                      "fence pages for mapping and retry";
+    // The keeper has its own address space and may have less headroom than us.
+    // Query it through the existing fixture BO before creating the large BO.
+    drm_prime_handle prime{};
+    prime.handle = bo_;
+    prime.flags = DRM_CLOEXEC | DRM_RDWR;
+    ASSERT_EQ(ioctl(drm_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+    ucred peer{};
+    socklen_t peer_size = sizeof(peer);
+    const int result = getsockopt(prime.fd, SOL_SOCKET, SO_PEERCRED, &peer, &peer_size);
+    const int error = errno;
+    ASSERT_EQ(close(prime.fd), 0);
+    ASSERT_EQ(result, 0) << strerror(error);
+    ASSERT_GT(peer.pid, 0);
+    rlimit keeper_limit{};
+    ASSERT_EQ(prlimit(peer.pid, RLIMIT_AS, nullptr, &keeper_limit), 0);
+    uint64_t keeper_pages = 0;
+    {
+      std::ifstream statm("/proc/" + std::to_string(peer.pid) + "/statm");
+      ASSERT_TRUE(statm >> keeper_pages);
+    }
+    const uint64_t keeper_size = keeper_pages * page_size;
+    const rlim_t keeper_headroom =
+        keeper_limit.rlim_cur > keeper_size ? keeper_limit.rlim_cur - keeper_size : 0;
+    if (keeper_headroom < size + 2 * page_size)
+      GTEST_SKIP() << "keeper RLIMIT_AS needs the full token attachment plus allocation records";
+  }
+
+  memory_[0] = 0xffff1000;
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = size;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+  const uint32_t handle = create.out.handle;
+  drm_amdgpu_gem_mmap mapping{};
+  mapping.in.handle = handle;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_GEM_MMAP, &mapping), 0);
+  auto *view = static_cast<uint8_t *>(
+      mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, drm_, mapping.out.addr_ptr + 4096));
+  ASSERT_NE(view, MAP_FAILED);
+  {
+    std::ifstream statm("/proc/self/statm");
+    ASSERT_TRUE(statm >> pages);
+  }
+  rlimit limited = original;
+  limited.rlim_cur = std::min<rlim_t>(original.rlim_cur, pages * page_size + experiment_headroom);
+  ASSERT_EQ(setrlimit(RLIMIT_AS, &limited), 0);
+  uint64_t sequence = 0;
+  const int result = submit(1, true, &sequence, AMDGPU_HW_IP_COMPUTE, 0, handle);
+  const int error = errno;
+  ASSERT_EQ(setrlimit(RLIMIT_AS, &original), 0);
+  if (token) {
+    // shmat needs room for the entire segment before the adapter can retain
+    // just the fence page. Failed submission must remain safe to retry.
+    ASSERT_EQ(result, -1);
+    ASSERT_EQ(error, ENOMEM);
+    ASSERT_EQ(submit(1, true, &sequence, AMDGPU_HW_IP_COMPUTE, 0, handle), 0);
+  } else {
+    ASSERT_EQ(result, 0) << strerror(error);
+  }
+  ASSERT_EQ(gem_close(drm_, handle), 0);
+  drm_syncobj_array signal{};
+  signal.handles = reinterpret_cast<uint64_t>(&input_);
+  signal.count_handles = 1;
+  ASSERT_EQ(ioctl(drm_, DRM_IOCTL_SYNCOBJ_SIGNAL, &signal), 0);
+  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
+  uint64_t observed = 0;
+  std::memcpy(&observed, view + 8, sizeof(observed));
+  EXPECT_EQ(observed, sequence);
+  EXPECT_EQ(munmap(view, 4096), 0);
+}
+
+TEST_F(InterposerPm4FileLimitTest, NativeLargeFenceOnlyBufferNeedsOnePage) {
+  check_large_fence_mapping(false);
+}
+
+TEST_F(InterposerPm4FileLimitTest, TokenLargeFenceOnlyBufferNeedsTemporaryAttachment) {
+  check_large_fence_mapping(true);
+}
+
+TEST(InterposerGemTest, LowAddressMappingHonorsMap32Bit) {
+#ifdef MAP_32BIT
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_amdgpu_gem_create create{};
+  create.in.bo_size = 4 * 1024 * 1024;
+  create.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &create), 0);
+  drm_prime_handle prime{};
+  prime.handle = create.out.handle;
+  prime.flags = DRM_CLOEXEC | DRM_RDWR;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  void *view = mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_32BIT, prime.fd, 0);
+  ASSERT_NE(view, MAP_FAILED);
+  EXPECT_LT(reinterpret_cast<uintptr_t>(view) + 4095, uintptr_t{1} << 31);
+  *static_cast<uint32_t *>(view) = 0x12345678;
+  EXPECT_EQ(munmap(view, 4096), 0);
+  EXPECT_EQ(close(prime.fd), 0);
+  EXPECT_EQ(gem_close(drm, create.out.handle), 0);
+  EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(close(kfd), 0);
+#else
+  GTEST_SKIP() << "MAP_32BIT is unavailable on this architecture";
+#endif
 }
 
 TEST(InterposerDrmTest, PrimaryNodePathHasCharacterDeviceMetadata) {
@@ -4440,7 +5071,7 @@ TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
   // points allocation, regardless of the backend's existing VM reservations.
   struct rlimit limited = original;
   limited.rlim_cur =
-      std::min(original.rlim_cur, virtual_pages * page_size + rlim_t{512} * 1024 * 1024);
+      std::min<rlim_t>(original.rlim_cur, virtual_pages * page_size + rlim_t{512} * 1024 * 1024);
   drm_syncobj_wait wait{};
   wait.handles = 1;
   wait.count_handles = UINT32_MAX;
@@ -5173,7 +5804,8 @@ TEST(InterposerForkTest, ChildRefusesMmap64OnInheritedGpuFd) {
 // (files came out mode 0000) and the "x" exclusive modifier (truncating instead of
 // failing EEXIST).
 void check_child_fopen_modes() {
-  rocjitsu::test::ScopedTempDirectory tmp("rj_fopen_");
+  rocjitsu::test::ScopedTempDirectory tmp;
+  ASSERT_TRUE(tmp.initialize("rj_fopen_"));
   const std::string target = tmp.path() + "/created";
 
   const pid_t child = fork();
@@ -5250,7 +5882,8 @@ TEST(InterposerForkTest, ChildClassifiesGpuEndpointsByIdentityNotName) {
   if (::stat("/dev/kfd", &kfd_st) != 0 || !S_ISCHR(kfd_st.st_mode))
     GTEST_SKIP() << "host has no real /dev/kfd to alias";
 
-  rocjitsu::test::ScopedTempDirectory tmp("rj_alias_");
+  rocjitsu::test::ScopedTempDirectory tmp;
+  ASSERT_TRUE(tmp.initialize("rj_alias_"));
   const std::string aliased = tmp.path() + "/gpu";          // -> /dev/kfd
   const std::string chained = tmp.path() + "/chained";      // -> gpu -> /dev/kfd
   const std::string lookalike = tmp.path() + "/kfd_shaped"; // -> /dev/null
@@ -5686,48 +6319,6 @@ TEST(InterposerGemTest, SparseReservationsPreserveRangesAndFileOwnership) {
   ASSERT_EQ(close(alias), 0);
   ASSERT_EQ(ioctl(foreign, request, &sparse), 0);
   EXPECT_EQ(close(foreign), 0);
-}
-
-TEST_F(InterposerPm4Test, SparseReplacementPreservesResidentTail) {
-  constexpr uint64_t base = kAddress + 0x100000;
-  const auto request = DRM_AMDGPU_GEM_VA_request();
-  drm_amdgpu_gem_va update{};
-  update.operation = AMDGPU_VA_OP_MAP;
-  update.flags = AMDGPU_VM_PAGE_PRT;
-  update.va_address = base;
-  update.map_size = 4 * 4096;
-  ASSERT_EQ(ioctl(drm_, request, &update), 0);
-  update.operation = AMDGPU_VA_OP_REPLACE;
-  update.flags = AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-  update.handle = bo_;
-  update.map_size = 1;
-  EXPECT_EQ(ioctl(drm_, request, &update), -1);
-  EXPECT_EQ(errno, EINVAL);
-  update.map_size = 4096;
-  update.offset_in_bo = 1;
-  EXPECT_EQ(ioctl(drm_, request, &update), -1);
-  EXPECT_EQ(errno, EINVAL);
-  update.offset_in_bo = 0;
-  update.map_size = 8192;
-  ASSERT_EQ(ioctl(drm_, request, &update), 0);
-  update.flags = AMDGPU_VM_PAGE_PRT;
-  update.handle = 0;
-  update.map_size = 4096;
-  ASSERT_EQ(ioctl(drm_, request, &update), 0);
-
-  // Unbinding the first page must preserve the second page's BO offset and PTE.
-  constexpr uint64_t address = base + 6144;
-  const uint32_t packet[] = {0xc0033700, 5u << 8, uint32_t(address), uint32_t(address >> 32),
-                             0x12345678};
-  std::memcpy(memory_, packet, sizeof(packet));
-  uint64_t sequence = 0;
-  ASSERT_EQ(submit(std::size(packet), false, &sequence), 0);
-  ASSERT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(5))), 0);
-  EXPECT_EQ(memory_[1536], 0x12345678u);
-  update.operation = AMDGPU_VA_OP_CLEAR;
-  update.flags = 0;
-  update.map_size = 4 * 4096;
-  EXPECT_EQ(ioctl(drm_, request, &update), 0);
 }
 
 TEST(InterposerGemTest, IndependentDrmFilesRejectOverlappingMappings) {

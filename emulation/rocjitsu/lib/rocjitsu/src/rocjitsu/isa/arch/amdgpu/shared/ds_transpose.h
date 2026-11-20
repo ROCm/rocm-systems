@@ -31,19 +31,6 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-enum class TransposeKind : uint8_t {
-  NONE = 0,
-  TR_B4 = 1,
-  TR_B6 = 2,
-  B64_TR_B8 = 3,
-  TR16_B128 = 4,
-  B64_TR_B16 = 5,
-  WMMA_TR_B8 = 6,
-  CDNA5_DS_TR_B8 = 7,
-  CDNA4_TR_B4 = 8,
-  CDNA4_TR_B6 = 9,
-};
-
 /// @brief CDNA4 MFMA B64 byte-level transpose (B64_TR_B8 only).
 ///
 /// Within each 16-lane group, destination lane `l` byte `n` comes from source
@@ -357,8 +344,7 @@ inline void transpose_b6(std::vector<uint8_t> &response_data, uint32_t num_elems
 
 inline void transpose_response(VectorMemState &d) {
   auto kind = static_cast<TransposeKind>(d.transpose);
-  const bool compact_wave64 =
-      d.tag() == GLOBAL_MEM && d.wf_size == 64 && kind == TransposeKind::TR16_B128;
+  const bool compact_wave64 = d.compact_wave64_global_transpose();
   switch (kind) {
   case TransposeKind::B64_TR_B8:
     transpose_b64_tr_b8(d.response_data, d.num_elems, d.wf_size);
@@ -386,8 +372,11 @@ inline void transpose_response(VectorMemState &d) {
   case TransposeKind::NONE:
     break;
   }
-  if (compact_wave64)
-    d.num_elems /= 2;
+  if (compact_wave64) {
+    if (kind == TransposeKind::TR16_B128)
+      d.num_elems /= 2;
+    d.transpose = 0; // The response now contains the compact destination words.
+  }
 }
 
 } // namespace amdgpu

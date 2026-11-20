@@ -286,6 +286,11 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipEventCreate",
     "hipEventCreateWithFlags",
     "hipEventDestroy",
+    # Elapsed time on a pair that hipExtModuleLaunchKernel marked internally.
+    # Archives from before that side effect was recorded have no hipEventRecord
+    # for the pair; HIP then returns hipErrorInvalidHandle. See
+    # playback_hipEventElapsedTime.
+    "hipEventElapsedTime",
     # Query APIs — capture only logs hipSuccess (event/stream already complete).
     # Replay may reach the same API sooner relative to GPU work; spin on
     # hipErrorNotReady until hipSuccess.  See DESIGN.md § HIP-Specific Polling.
@@ -303,10 +308,12 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     "hipGetSymbolAddress",
     "hipGetSymbolSize",
     # Pinned host allocation — charged to the host budget (--max-host-bytes), a
-    # replaced entry is freed first, and hipFreeHost gives the allocation back
+    # replaced entry is freed first, and hipFreeHost / hipHostFree give the
+    # allocation back
     "hipHostMalloc",
     "hipMallocHost",
     "hipFreeHost",
+    "hipHostFree",
     # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",
@@ -1286,6 +1293,21 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
         Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
         Deref("failIdx", "size_t", 8, direction="out"),
     ],
+    # Same arrays as hipMemcpyBatchAsync, plus the swap partner sizes and the
+    # per-entry waits/signals, whose addr is a recorded device address.
+    "hipExtMemcpyBatchAsync": [
+        Deref("dsts", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("srcs", "void*", 8, count="count", max_count=16, elem_ptr=True),
+        Deref("sizes", "size_t", 8, count="count", max_count=16),
+        Deref("sizesDst", "size_t", 8, count="count", max_count=16),
+        Deref("waits", "hipExtMemcpyWait", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("signals", "hipExtMemcpySignal", 64, count="count", max_count=16,
+              ptr_members=("addr",)),
+        Deref("attrs", "hipExtMemcpyAttributes", 56, count="numAttrs",
+              max_count=16),
+        Deref("attrsIdxs", "size_t", 8, count="numAttrs", max_count=16),
+    ],
     # Each operand is a tagged union of a pointer and an array handle, so
     # which member holds the recorded address depends on the tag beside it —
     # a rewrite no table entry can express.
@@ -2061,8 +2083,14 @@ _HEADER_PREAMBLE = """\
  * taking the first compiler ID and shifting the compiler API IDs up by one.
  * A v8 reader would decode those events as the wrong API.
  * v10: a kernel launch event carries pinned host snapshot records after its
- * arguments (num_snapshots was always 0). A v9 reader would not restore them. */
-#define HRR_VERSION ((uint16_t)10u)
+ * arguments (num_snapshots was always 0). A v9 reader would not restore them.
+ * v11: hipKernelSetCacheConfig was appended to HipDispatchTable, taking the
+ * first compiler ID and shifting the compiler API IDs up by one.
+ * A v10 reader would decode those events as the wrong API.
+ * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v11 reader would decode
+ * those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)12u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -2080,8 +2108,15 @@ typedef struct {
  * the copied rows, packed end to end: width*height*depth bytes, whatever the
  * pitch. Without it, a blob spans the host rect from its base pointer through
  * the last copied byte, or holds the flat width*height*depth bytes from the
- * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
+ * base pointer (3D and driver D2H, hipMemcpy3D H2D).
+ * HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS: hipExtModuleLaunchKernel records
+ * its start and stop events as hipEventRecord events around the launch.
+ * Without it, replay cannot tell a missing marker from a replay that failed to
+ * apply one, so only an archive without the flag may tolerate a
+ * hipEventElapsedTime that returns hipErrorInvalidHandle. No version bump: an
+ * older reader replays the extra hipEventRecord events like any others. */
 #define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
+#define HRR_FILE_FLAG_EXT_LAUNCH_EVENT_MARKERS ((uint16_t)0x0002u)
 
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
@@ -2627,6 +2662,24 @@ CUSTOM_CAPTURE_SHIMS: Dict[str, str] = {
         "  return r;\n"
         "}\n"
     ),
+    # hipStreamEndCapture on an invalidated or unjoined capture fails, yields no
+    # graph, and still ends the capture. Record those failures too, or replay
+    # never ends its own capture and treats every later call as captured.
+    "hipStreamEndCapture": (
+        "// Generated shim (custom: also record the failures that end the capture)\n"
+        "static hipError_t capture_hipStreamEndCapture(hipStream_t stream, hipGraph_t* pGraph) {\n"
+        "  hipError_t r = g_real_table.hipStreamEndCapture_fn(stream, pGraph);\n"
+        "  if (r == hipSuccess || r == hipErrorStreamCaptureInvalidated ||\n"
+        "      r == hipErrorStreamCaptureUnjoined) {\n"
+        "    hrr_args_hipStreamEndCapture a{};\n"
+        "    a.ret         = static_cast<int32_t>(r);\n"
+        "    a.stream = reinterpret_cast<uint64_t>(stream);\n"
+        "    if (pGraph) a.pGraph = reinterpret_cast<uint64_t>(*pGraph);\n"
+        "    hrr_cap::writer::write_event_raw(HRR_API_HIPSTREAMENDCAPTURE, &a.hdr, sizeof(a));\n"
+        "  }\n"
+        "  return r;\n"
+        "}\n"
+    ),
 }
 
 CUSTOM_PLAYBACK_BODIES: Dict[str, str] = {
@@ -2971,7 +3024,6 @@ _HOST_ALLOC_CREATE_APIS = {'hipHostMalloc', 'hipHostAlloc'}
 _ALLOC_FREE_APIS: Dict[str, str] = {
     'hipFree':              'ptr',
     'hipFreeAsync':         'dev_ptr',
-    'hipHostFree':          'ptr',
     'hipIpcCloseMemHandle': 'devPtr',
 }
 
@@ -3112,7 +3164,7 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 # Playback calls the PUBLIC HIP API by name; capture goes through the dispatch
 # table. Those are two different declarations, and they are allowed to diverge:
 # hip_api_trace.hpp is append-only ABI, while hip_runtime_api.h re-declares an
-# API with a new signature under a HIP_FORCE_API_VERSION guard.
+# API with a new signature under a HIP_TARGET_API_VERSION guard.
 #
 # validate_playback_signatures() refuses to generate when the two disagree, so
 # a divergence cannot silently produce a wrong cast. An entry here is the
@@ -3133,6 +3185,7 @@ _POST_CALL_EXTRA: Dict[str, List[str]] = {
 # Add an API here when its first CI build fails to link against the SDK.
 _PLAYBACK_RUNTIME_RESOLVED_APIS = frozenset({
     "hipDeviceFlushGPUDirectRDMAWrites",   # added by #10176
+    "hipExtMemcpyBatchAsync",              # added by #9098
 })
 
 _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
@@ -3141,7 +3194,7 @@ _PLAYBACK_ARG_BRIDGES: Dict[str, Dict[str, object]] = {
     # bridge rebuilds a hipMemLocation from it rather than passing a zeroed
     # struct — the recorded device is preserved on both sides of the guard.
     'hipMemAdvise': {
-        'guard': 'HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
+        'guard': 'HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)',
         'param': 'device',
         'pre': [
             '  hipMemLocation _loc_{name}{{}};',
@@ -3861,7 +3914,7 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 # public API by name. Deriving playback casts from the table is therefore only
 # sound while the two declarations agree, and they are not required to: the
 # table is append-only ABI, while hip_runtime_api.h may re-declare an API with
-# a different signature under a HIP_FORCE_API_VERSION guard (hipMemAdvise gained
+# a different signature under a HIP_TARGET_API_VERSION guard (hipMemAdvise gained
 # a hipMemLocation parameter in HIP 8.0 this way).
 #
 # This pass parses the public header and refuses to generate when a playback
@@ -3872,7 +3925,7 @@ def generate_playback_cpp(entries: List[ApiEntry]) -> str:
 class PublicDecl:
     """One non-template declaration of a public HIP API."""
     types:   Tuple[str, ...]
-    guarded: bool          # inside a HIP_FORCE_API_VERSION / HIP_ABI_IMPL #if
+    guarded: bool          # inside a HIP_TARGET_API_VERSION / HIP_ABI_IMPL #if
     line:    int
 
 

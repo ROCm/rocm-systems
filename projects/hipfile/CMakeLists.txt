@@ -17,7 +17,7 @@ endif()
 # Set the library version in a variable so we can use
 # it in *.in files and avoid version mismatch.
 set(HIPFILE_LIBRARY_MAJOR 0)
-set(HIPFILE_LIBRARY_MINOR 6)
+set(HIPFILE_LIBRARY_MINOR 7)
 set(HIPFILE_LIBRARY_PATCH 0)
 set(HIPFILE_LIBRARY_VERSION "${HIPFILE_LIBRARY_MAJOR}.${HIPFILE_LIBRARY_MINOR}.${HIPFILE_LIBRARY_PATCH}")
 

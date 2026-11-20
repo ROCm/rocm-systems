@@ -82,6 +82,15 @@ extern std::function<ncclResult_t(struct ncclTopoSystem*, int, float*)> g_ncclTo
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int*, float*)> g_ncclTopoGetLocalNetCountByBw;
 // (system, rank, channelId, id, dev): the channel's local NIC. Default picks net device 0.
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_ncclTopoGetLocalNet;
+
+// -------------------------------------------------------------------------
+// Outside the ladder: src/graph/topo.cc:2589, the GIN device query.
+// (comm, localGinDevs, localGinCount) -- writes the caller's array of local GIN
+// device indices and how many it wrote. Only gin_host.cc's ncclGinConnectOnce
+// calls it, so the default is fail-loud like the rest of this file's floor: the
+// one binary that reaches it installs its own.
+// -------------------------------------------------------------------------
+extern std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_ncclTopoGetLocalGinDevs;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
 extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;

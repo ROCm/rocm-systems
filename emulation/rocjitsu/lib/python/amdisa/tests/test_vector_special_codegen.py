@@ -3,6 +3,7 @@
 
 """Tests for vector-special execute code generation."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import hashlib
@@ -169,11 +170,25 @@ def test_mullit_and_trig_preop_preserve_special_fp_rules():
     )
     trig = gen_vector_trig_preop(['vdst'], ['src0', 'src1'], is_vop3=True, has_abs=True)
 
-    assert 's1 == -std::numeric_limits<float>::max()' in mullit
-    assert 's1 == -std::numeric_limits<float>::infinity()' in mullit
-    assert 's2 <= 0.0f || std::isnan(s2)' in mullit
-    assert '(s0 == 0.0f || s1 == 0.0f) ? 0.0f' in mullit
-    assert 'amdgpu::clamp_floating_result(result, wf)' in mullit
+    # ABS/NEG on the raw bits, then the MODE-aware helper, then OMOD and CLAMP
+    # on the result bits. The helper owns input flushing and output rounding.
+    for i in range(3):
+        assert (
+            f'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>('
+            f'amdgpu::RegisterAccess(wf).read_lane(src{i}, lane), {i}, inst_.abs, '
+            'inst_.neg)'
+        ) in mullit
+    assert (
+        'amdgpu::output_modifier_policy<amdgpu::fp_format::F32>'
+        '(wf, inst_.omod, inst_.clamp)'
+    ) in mullit
+    assert (
+        'amdgpu::output_modifier::apply<amdgpu::fp_format::F32>('
+        'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
+        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), '
+        'output_policy.omod != 0), output_policy)'
+    ) in mullit
+    assert 'std::isnan' not in mullit
     assert '0xA2F983u' in trig
     assert 'kTwoOverPiChunks' in trig
     assert 'kChunkBits = 24u' in trig
@@ -315,8 +330,12 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
 
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in add_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_true16
-    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_generic
-    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_true16
+    assert add_generic.endswith(
+        'amdgpu::fp_mode::Arithmetic::ADD, amdgpu::NegatedSource::NONE);'
+    )
+    assert add_true16.endswith(
+        'amdgpu::fp_mode::Arithmetic::ADD, amdgpu::NegatedSource::NONE);'
+    )
     assert 'if (!wf.fp16_ovfl())' not in rcp_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
@@ -366,9 +385,111 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     )
 
 
+@pytest.mark.parametrize('true16', [False, True])
+@pytest.mark.parametrize(('mnemonic', 'negated'), [('sub', 'SRC1'), ('subrev', 'SRC0')])
+def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true16):
+    probe = simd_probe_line(f'v_{mnemonic}_f16_vop3', true16_vop3=true16)
+
+    # SUB/SUBREV share ADD's MODE-aware route, negating the subtrahend after
+    # ABS/NEG; no native-environment gate or host subtraction remains.
+    assert probe == (
+        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
+        f'{str(true16).lower()}, amdgpu::fp_mode::Arithmetic::ADD, '
+        f'amdgpu::NegatedSource::{negated});'
+    )
+
+
+@pytest.mark.parametrize(
+    'template',
+    [
+        'v_add_f32_vop2',
+        'v_sub_f32_vop2',
+        'v_subrev_f32_vop2',
+        'v_mul_f32_vop2',
+        'v_fmac_f32_vop2',
+        'v_fmaak_f32_vop2',
+        'v_fmamk_f32_vop2',
+        'v_mac_f32_vop2',
+        'v_add_f32_vop3',
+        'v_sub_f32_vop3',
+        'v_subrev_f32_vop3',
+        'v_mul_f32_vop3',
+        'v_fma_f32_vop3',
+        'v_fmac_f32_vop3',
+    ],
+)
+def test_f32_mode_aware_probes_share_one_guest_environment_policy(template):
+    probe = simd_probe_line(template)
+
+    # One ungated probe taking a single guest FP environment for the instruction,
+    # with the arithmetic on the unscoped cores instead of scoping each SIMD chunk.
+    assert probe.count('ROCJITSU_TRY_SIMD_') == 1
+    assert probe.lstrip().startswith('ROCJITSU_TRY_SIMD_')
+    assert '_SCOPED(' in probe
+    assert 'native_arithmetic_matches' not in probe
+    assert (
+        'amdgpu::fma_f32_simd_unscoped(' in probe
+        or 'amdgpu::binary_f32_simd_unscoped<' in probe
+    )
+    # The scoped cores must not also scope per chunk.
+    assert 'amdgpu::fma_f32_simd(' not in probe
+    assert 'amdgpu::binary_f32_simd<' not in probe
+
+
+_GENERATED = (
+    Path(__file__).resolve().parents[3]
+    / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+)
+_SCOPED_CORES = (
+    'amdgpu::fma_f32_simd(',
+    'amdgpu::binary_f32_simd<',
+    'amdgpu::binary_f16_simd<',
+)
+_UNSCOPED_CORE = re.compile(r'amdgpu::\w+_simd_unscoped\b')
+_PROBE = re.compile(r'ROCJITSU_TRY_SIMD_\w+\(|try_execute_words_simd<[^>]*>\(')
+# Probes that install one guest FP environment for the whole instruction.
+_INSTRUCTION_SCOPED_PROBE = re.compile(
+    r'ROCJITSU_TRY_SIMD_\w+_SCOPED\('
+    r'|ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32(?:_SELECTORS)?\('
+    r'|try_execute_words_simd<(?:[^,>]+,){4}\s*true>\('
+)
+
+
+def _probe_calls(text: str):
+    """Yield each SIMD probe's opener and its full parenthesized call."""
+    for match in _PROBE.finditer(text):
+        depth, end = 1, match.end()
+        while depth:
+            depth += {'(': 1, ')': -1}.get(text[end], 0)
+            end += 1
+        yield match.group(0), text[match.start() : end]
+
+
+def test_generated_arithmetic_cores_run_under_one_instruction_environment():
+    files = sorted(p for p in _GENERATED.rglob('*') if p.suffix in ('.h', '.cpp'))
+    assert files, f'no generated sources under {_GENERATED}'
+    total = in_scoped_probes = 0
+    for path in files:
+        text = path.read_text()
+        name = path.relative_to(_GENERATED)
+        # Probes own the guest environment, so no route scopes per SIMD chunk.
+        for core in _SCOPED_CORES:
+            assert core not in text, f'{name}: {core} scopes per chunk'
+        total += len(_UNSCOPED_CORE.findall(text))
+        for opener, call in _probe_calls(text):
+            cores = len(_UNSCOPED_CORE.findall(call))
+            if cores:
+                assert _INSTRUCTION_SCOPED_PROBE.fullmatch(
+                    opener
+                ), f'{name}: {opener} runs an unscoped core without an environment'
+                in_scoped_probes += cores
+    assert in_scoped_probes == total > 0
+
+
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
     assert simd_probe_line('v_not_b16_vop3', true16_vop3=True) is None
     assert simd_probe_line('v_cndmask_b16_vop3', true16_vop3=True) is None
+    assert simd_probe_line('v_cndmask_b16_vop3', true16_vop3=False) is None
 
 
 def test_gfx1250_true16_execute_bodies_are_arch_local():

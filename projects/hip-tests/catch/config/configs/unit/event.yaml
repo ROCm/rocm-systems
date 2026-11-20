@@ -57,6 +57,9 @@ event:
   Unit_hipEventIpc_DestroyNonBlocking:
     <<: *level_default
     tags: [ipc, lifecycle]
+  Unit_hipEventIpc_MultipleLiveEvents:
+    <<: *level_default
+    tags: [ipc, lifecycle]
   Unit_hipEventDestroy_Unfinished:
     <<: *level_default
     tags: [lifecycle, P0]

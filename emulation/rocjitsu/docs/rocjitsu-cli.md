@@ -10,7 +10,12 @@ the simulated GPU. It operates in four modes:
 - **Daemon mode**: Spawns a daemon child process that hosts the simulation
   engine, then `LD_PRELOAD` + `execve`s the target. Client processes
   communicate with the daemon via RPC over a Unix domain socket. GPU memory
-  is shared using memfds passed via SCM_RIGHTS.
+  is shared using backing descriptors passed via SCM_RIGHTS. After a
+  successful KFD open, losing this connection terminates the client process,
+  even if its GPU work has finished. An orderly daemon stop or restart also
+  terminates attached clients that are idle or doing only host work. The
+  interposer calls `_Exit(EXIT_FAILURE)`, which skips `atexit` handlers and
+  stdio flushing.
 - **Attach mode**: Launches an application against an already-running daemon.
 - **VFIO-user mode**: Serves each configured local GPU as a PCI function to an
   external VMM through its own AF_UNIX socket. This mode is available only in
@@ -18,6 +23,43 @@ the simulated GPU. It operates in four modes:
 
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
+
+Daemon mode currently rejects dma-buf export with `EOPNOTSUPP`; its RPC protocol
+does not transfer exported descriptors. HIP VMM allocation (`hipMemCreate`)
+depends on that export even with `hipMemHandleTypeNone`, so ROCr may report it
+as out of memory. Use local mode for VMM allocation and its shareable-handle APIs.
+Ordinary daemon `hipMalloc`, copies, and kernel dispatch remain supported.
+
+For HIP IPC between daemon clients (`hipIpcGetMemHandle` and
+`hipIpcOpenMemHandle`), set `HSA_ENABLE_IPC_MODE_LEGACY=1` before launching the
+clients to select the supported legacy KFD IPC path. The current runtime's
+default dma-buf IPC path fails at handle creation in both local and daemon
+mode; switching to local mode does not resolve that limitation.
+
+### Fatal instruction failures
+
+In native KFD/AQL execution, an instruction that the simulator cannot decode or
+execute terminates the simulation engine with a failure result. The affected
+queue cancels its outstanding dispatches without publishing successful kernel
+or barrier completion. When available, the queue owner also receives an
+illegal-instruction exception for a decode failure, or a queue-abort exception
+for a decoded instruction the simulator cannot execute. Runtime acceptance of
+that notification does not recover the simulator. A debugger-owned
+illegal-instruction stop is different: the debugger may repair the instruction
+and resume the wave without terminating the engine.
+
+The daemon hosts one shared simulation engine, not an isolated engine per
+client. A fatal instruction therefore shuts down the daemon and disconnects
+**every connected client**, including clients whose kernels are valid. Each
+interposer diagnoses the lost daemon connection and exits with failure; the
+faulting client's HIP queue-error callback may abort it first. Disconnect
+monitoring also interrupts clients waiting on shared-memory completion signals,
+which cannot complete successfully after engine shutdown.
+
+This policy prevents native clients from hanging or observing success after
+unsupported execution. Queue-error publication alone does not establish that
+the shared engine can safely continue. Recovering one client while preserving
+the others requires a separate queue/process recovery mechanism.
 
 ### The fork boundary
 
@@ -67,16 +109,16 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 
 ```bash
 # Local mode: in-process simulation
-rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Daemon mode: fork daemon + launch app
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 
 # Daemon-only: run server (no app launched)
-rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
+rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 
 # Attach to running daemon
-rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
 rocjitsu --config configs/gfx1250_mi455x.json \
@@ -155,8 +197,8 @@ All messages use a fixed 16-byte header followed by an opcode-specific payload:
 
 ### Opcodes
 
-| Opcode | Direction | Payload | Memfd |
-|--------|-----------|---------|-------|
+| Opcode | Direction | Payload | Backing descriptor |
+|--------|-----------|---------|--------------------|
 | `RPC_HANDSHAKE` | C->D->C | `RpcHandshakeResponse` + topology path | No |
 | `RPC_CLOSE` | C->D->C | None | No |
 | `RPC_MMAP` | C->D->C | `RpcMmapRequest` / `RpcMmapResponse` | Optional |
@@ -173,14 +215,19 @@ client saves and restores original pointers across the RPC round-trip.
 
 ### File Descriptor Passing
 
-Memfds are passed via `sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary
-data. This is the standard Unix mechanism for cross-process file descriptor
+Backing descriptors (memfds or fallback socket tokens) are passed via
+`sendmsg()`/`recvmsg()` with `SCM_RIGHTS` ancillary data.
+This is the standard Unix mechanism for cross-process file descriptor
 sharing (same pattern as QEMU vhost-user and CRIU).
 
-Two RPC operations carry memfds:
+Two RPC response forms carry backing descriptors with different lifetimes:
 
-- `RPC_IOCTL` (ALLOC_MEMORY response) --- allocation backing memfd
-- `RPC_MMAP` (response) --- doorbell and event page memfds
+- `RPC_IOCTL` (`ALLOC_MEMORY` and `IPC_IMPORT_HANDLE` responses): the client
+  stores the allocation or import descriptor until free or driver cleanup.
+- `RPC_MMAP` responses: temporary aliases of allocation, doorbell, or event-page
+  backing. `RemoteDriver::mmap` closes the received alias on every exit, including
+  size-check and mapping failures. If the reply has no descriptor, it borrows
+  the stored allocation or import descriptor and leaves that descriptor open.
 
 ### Thread Safety
 
@@ -190,8 +237,8 @@ a shutdown `eventfd` between daemon timeout=0 polls, avoiding mutex starvation.
 
 ## Memory Sharing (Same-VA Architecture)
 
-Both client and daemon map every memfd at the **same virtual address** using
-MAP_FIXED. GPU VAs are in the GPUVM aperture (`0x1000000000` - `0x3FFFFFFFFFFF`),
+Both client and daemon map shared backing at the **same virtual address** using
+`map_memory_backing` with `MAP_FIXED`. GPU VAs are in the GPUVM aperture (`0x1000000000` - `0x3FFFFFFFFFFF`),
 which doesn't collide with either process's normal address space.
 
 This means `reinterpret_cast<void*>(gpu_va)` works in both processes ---
@@ -208,16 +255,26 @@ Client                                     Daemon
 
 2. ROCR: hsaKmtAllocMemory()
    RemoteDriver::send_ioctl(ALLOC)  ---->  alloc_memory_ioctl()
-                                            memfd_create + ftruncate + fallocate
-                                            MAP_FIXED memfd at VA (proactive)
-                                    <----  response + memfd (SCM_RIGHTS)
+                                            create_memory_backing via rocjitsu-memory
+                                            MAP_FIXED backing at VA (proactive)
+                                    <----  response + backing fd (SCM_RIGHTS)
+   [store fd until free or driver cleanup]
    [USERPTR: mincore+copy, MAP_FIXED]
 
 3. ROCR: fmm_map_to_cpu()
    mmap(drm_fd, MAP_FIXED, offset)
    interposer routes DRM fd     ---->     mmap() -> already mapped, return
-                                    <----  response
+                                    <----  response + temporary backing fd (SCM_RIGHTS)
+   [map backing; close reply fd on every exit]
 ```
+
+The private helper sizes ordinary memfds when its inherited hard file limit
+allows. Larger allocations use System V shared RAM retained by Unix socket
+tokens, which travel through the same `SCM_RIGHTS` path. The mapping and metadata
+adapters support both representations; tokens require those adapters and do not
+support `pread`/`pwrite`. The PCI `VramStore` uses separate file-backed storage.
+See [memory backing](memory-backing.md) for keeper-lifetime and credential
+constraints, the same-UID trust assumption, and shared-memory budgets.
 
 ### Proactive Mapping
 
@@ -228,8 +285,8 @@ pointers before the client's fmm_map_to_cpu RPC arrives.
 ### USERPTR Sharing
 
 For USERPTR allocations (ring buffer, rptr/wptr), the client receives the
-daemon's memfd, copies committed pages via mincore, then MAP_FIXED replaces
-the anonymous pages with the shared memfd. The interposer suppresses
+daemon's backing descriptor, copies committed pages via mincore, then MAP_FIXED
+replaces the anonymous pages with shared backing. The interposer suppresses
 MADV_HUGEPAGE and MADV_DONTFORK on GPUVM addresses to prevent kernel 6.17
 shmem fault failures.
 
@@ -300,7 +357,7 @@ waiters simultaneously.
 
 ### Fd Reservation (DMTCP Pattern)
 
-The driver reserves a contiguous fd range (4000-4255) for internal memfds.
+The driver reserves a contiguous fd range (4000-4255) for internal backing descriptors.
 `claim_fd(real_fd)` moves a real fd into this range via `dup2`. The
 interposer's `close()` checks `owns_reserved_fd(fd)` to protect internal
 fds from ROCR's normal fd lifecycle.
@@ -309,9 +366,9 @@ fds from ROCR's normal fd lifecycle.
 
 ROCR opens and closes many fds during init (topology files, /proc, DRM
 render nodes). Without protection, a transient file's fd number could
-collide with an allocation memfd. The `owned_fds_` set in `SimulatedDriver`
-tracks all internal memfds, and the interposer suppresses close() on
-protected fds.
+collide with an allocation backing descriptor. The `owned_fds_` set in
+`SimulatedKfd` tracks internal backing descriptors, including socket tokens,
+and the interposer suppresses close() on protected fds.
 
 ## Limitations
 

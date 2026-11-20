@@ -79,44 +79,68 @@ __device__ inline void tile_memcpy_rma(
     if (layout == TileLayout::Contiguous) {
       tile_memcpy_contig<Kind, Scope>(
           view.dst_base, view.src_base,
-          view.ext0 * view.ext1 * view.element_size, worker_id);
+          view.ext[0] * view.ext[1] * view.element_size, worker_id);
     } else if (layout == TileLayout::RowContig) {
-      const size_t row_size = view.ext1 * view.element_size;
-      for (size_t i = worker_id; i < view.ext0; i += worker_count) {
-        memcpy_lane<Kind>(view.dst_base + i * view.dst_s0 * view.element_size,
-                          view.src_base + i * view.src_s0 * view.element_size,
+      const size_t row_size = view.ext[1] * view.element_size;
+      for (size_t i = worker_id; i < view.ext[0]; i += worker_count) {
+        memcpy_lane<Kind>(view.dst_base + i * view.dst_s[0] * view.element_size,
+                          view.src_base + i * view.src_s[0] * view.element_size,
                           row_size);
       }
     } else if (layout == TileLayout::ColContig) {
-      const size_t col_size = view.ext0 * view.element_size;
-      for (size_t j = worker_id; j < view.ext1; j += worker_count) {
-        memcpy_lane<Kind>(view.dst_base + j * view.dst_s1 * view.element_size,
-                          view.src_base + j * view.src_s1 * view.element_size,
+      const size_t col_size = view.ext[0] * view.element_size;
+      for (size_t j = worker_id; j < view.ext[1]; j += worker_count) {
+        memcpy_lane<Kind>(view.dst_base + j * view.dst_s[1] * view.element_size,
+                          view.src_base + j * view.src_s[1] * view.element_size,
                           col_size);
       }
     } else {
-      const int total_elements = view.ext0 * view.ext1;
+      const int total_elements = view.ext[0] * view.ext[1];
       for (int idx = worker_id; idx < total_elements; idx += worker_count) {
-        const int i = idx / view.ext1;
-        const int j = idx % view.ext1;
+        const int i = idx / view.ext[1];
+        const int j = idx % view.ext[1];
         memcpy_lane<Kind>(
             view.dst_base +
-                (i * view.dst_s0 + j * view.dst_s1) * view.element_size,
+                (i * view.dst_s[0] + j * view.dst_s[1]) * view.element_size,
             view.src_base +
-                (i * view.src_s0 + j * view.src_s1) * view.element_size,
+                (i * view.src_s[0] + j * view.src_s[1]) * view.element_size,
             view.element_size);
       }
     }
   } else if (view.ndim == 1) {
     if (tile_classify(view) == TileLayout::Contiguous) {
       tile_memcpy_contig<Kind, Scope>(view.dst_base, view.src_base,
-                                      view.ext0 * view.element_size,
+                                      view.ext[0] * view.element_size,
                                       worker_id);
     } else {
-      for (size_t i = worker_id; i < view.ext0; i += worker_count) {
+      for (size_t i = worker_id; i < view.ext[0]; i += worker_count) {
         memcpy_lane<Kind>(
-            view.dst_base + i * view.dst_s0 * view.element_size,
-            view.src_base + i * view.src_s0 * view.element_size,
+            view.dst_base + i * view.dst_s[0] * view.element_size,
+            view.src_base + i * view.src_s[0] * view.element_size,
+            view.element_size);
+      }
+    }
+  } else if (view.ndim > 2 && view.ndim <= TileView::MAX_NDIM) {
+    // N-dimensional (3D/4D): compute total element count then dispatch.
+    size_t total = 1;
+    for (int d = 0; d < view.ndim; d++) total *= view.ext[d];
+
+    if (tile_classify(view) == TileLayout::Contiguous) {
+      tile_memcpy_contig<Kind, Scope>(view.dst_base, view.src_base,
+                                     total * view.element_size, worker_id);
+    } else {
+      // General strided: recover per-dimension coordinates from a flat index.
+      for (size_t idx = worker_id; idx < total; idx += worker_count) {
+        size_t src_off = 0, dst_off = 0, rem = idx;
+        for (int d = view.ndim - 1; d >= 0; d--) {
+          const size_t coord = rem % view.ext[d];
+          rem /= view.ext[d];
+          src_off += coord * view.src_s[d];
+          dst_off += coord * view.dst_s[d];
+        }
+        memcpy_lane<Kind>(
+            view.dst_base + dst_off * view.element_size,
+            view.src_base + src_off * view.element_size,
             view.element_size);
       }
     }

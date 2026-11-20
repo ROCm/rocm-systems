@@ -15,6 +15,13 @@ struct Event {
     info: amdf_gpu_event_info_t,
 }
 
+impl Event {
+    fn require_current_process(&self) -> Result<(), u64> {
+        // SAFETY: A live event borrows its registered device.
+        unsafe { &*self.device }.require_current_process()
+    }
+}
+
 pub(crate) unsafe extern "C" fn create(
     pointer: *mut amdf_device_t,
     info: *const amdf_gpu_event_create_info_t,
@@ -27,8 +34,9 @@ pub(crate) unsafe extern "C" fn create(
             return Err(INVALID);
         }
         let device = object(pointer.cast::<Device>())?;
+        device.require_current_process()?;
         let instance = instance::device_instance(device);
-        if !instance.process_lifetime || instance.process_id != std::process::id() {
+        if !instance.process_lifetime() {
             return Err(UNSUPPORTED);
         }
         let reset_epoch = device.current_reset_epoch();
@@ -39,7 +47,7 @@ pub(crate) unsafe extern "C" fn create(
                 .event_service
                 .lock()
                 .map_err(|_| INTERNAL)?
-                .create(&device.native, &[], SignalEventAddressing::Mapped)
+                .create(&device.native, SignalEventAddressing::Mapped)
                 .map_err(|error| device.native_error_status(&error))
         })();
         let (mut event, mailbox) = match result {
@@ -88,6 +96,7 @@ pub(crate) unsafe extern "C" fn info(
 pub(crate) unsafe extern "C" fn signal(pointer: *mut amdf_gpu_event_t) -> u64 {
     boundary(|| unsafe {
         let event = object(pointer.cast::<Event>())?;
+        event.require_current_process()?;
         if (*event.device).current_reset_epoch() != event.info.reset_epoch {
             return Err(LOST);
         }
@@ -101,21 +110,28 @@ pub(crate) unsafe extern "C" fn signal(pointer: *mut amdf_gpu_event_t) -> u64 {
 pub(crate) unsafe extern "C" fn wait(pointer: *mut amdf_gpu_event_t, timeout: u64) -> u64 {
     boundary(|| unsafe {
         let event = object(pointer.cast::<Event>())?;
+        event.require_current_process()?;
         let device = &*event.device;
         if device.current_reset_epoch() != event.info.reset_epoch {
             return Err(LOST);
+        }
+        if device.event_observation_failed() {
+            return Err(INTERNAL);
         }
         let result = event.native.wait(timeout);
         if device.current_reset_epoch() != event.info.reset_epoch {
             return Err(LOST);
         }
+        if let Err(error) = &result {
+            if error.kind() == rocddi::ErrorKind::DeviceLost {
+                device.observe_loss(event.info.reset_epoch);
+                return Err(LOST);
+            }
+        }
         match result {
             Ok(true) => Ok(()),
+            Ok(false) | Err(_) if device.event_observation_failed() => Err(INTERNAL),
             Ok(false) => Err(DEADLINE),
-            Err(error) if error.kind() == rocddi::ErrorKind::DeviceLost => {
-                device.observe_loss(event.info.reset_epoch);
-                Err(LOST)
-            }
             Err(error) => Err(device.native_error_status(&error)),
         }
     })
@@ -123,6 +139,7 @@ pub(crate) unsafe extern "C" fn wait(pointer: *mut amdf_gpu_event_t, timeout: u6
 
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_gpu_event_t) -> u64 {
     boundary(|| unsafe {
+        object(pointer.cast::<Event>())?.require_current_process()?;
         let event = exclusive(pointer.cast::<Event>())?;
         event
             .native

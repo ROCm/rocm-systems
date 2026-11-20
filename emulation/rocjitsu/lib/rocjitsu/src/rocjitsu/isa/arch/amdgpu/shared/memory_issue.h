@@ -4,6 +4,7 @@
 #ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 #define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_MEMORY_ISSUE_H_
 
+#include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
 
 #include <array>
@@ -24,6 +25,10 @@ enum class MemoryCompletionClass : uint8_t {
   GDS,
   ASYNC_LOAD,
   ASYNC_STORE,
+  /// Tensor DMA transfers, which complete on TENSORCNT in issue order. Tensor
+  /// DMA instructions carry no MemoryIssueInfo, so no instruction metadata uses
+  /// this class yet.
+  TENSOR,
   UNORDERED,
 };
 
@@ -64,21 +69,25 @@ private:
                                 static_cast<uint8_t>(wait_counter_type));
   }
 
-  static_assert(static_cast<uint8_t>(WaitCounterType::ASYNCCNT) < 16);
+  static_assert(static_cast<uint8_t>(WaitCounterType::SAMPLECNT) < 16);
   static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
 };
 
 /// @brief Typed description of an AMDGPU instruction's memory-issue semantics.
 /// @details Most instructions contribute to one wait-counter domain. Generic
-/// FLAT and pre-GFX12 stores can contribute to multiple simultaneous domains.
+/// FLAT can contribute to both VMEM and DS domains; VMEM stores and atomics do
+/// not contribute an EXP obligation on supported targets.
 /// Each obligation carries its own completion-order class because operations
 /// sharing one counter need not form one FIFO, and one instruction's different
 /// counter domains can have different ordering guarantees. Decoded FLAT metadata
 /// lists possible domains; address routing selects the domains actually used.
-/// exec_masked distinguishes ordinary
-/// vector memory operations from scalar memory and the few vector operations
-/// that execute independently of EXEC.
+/// The dynamic race detector requires every attached obligation for whole-event
+/// completion, including destination-register and memory dependencies. This API
+/// does not represent a separate source-register lifetime. The same obligations
+/// drive emulated counter increments and are exposed to execution plugins.
+/// exec_masked distinguishes ordinary vector memory operations from scalar
+/// memory and the few vector operations that execute independently of EXEC.
 ///
 /// This descriptor covers instructions modeled through rocJITsu's scalar,
 /// vector, and local memory pipelines. It is not a complete inventory of every
@@ -93,8 +102,10 @@ struct MemoryIssueInfo {
   }
   [[nodiscard]] bool empty() const { return num_counter_obligations_ == 0; }
 
-  /// Select FLAT's actual memory domains without changing completion ordering
-  /// or independent obligations such as source-register export completion.
+  /// Select FLAT's VMEM and/or DS obligations for the resolved request domains.
+  /// Preserve each selected obligation's counter increment and completion class,
+  /// exec_masked, and any obligations outside those domains. This only filters
+  /// completion requirements; it does not track a separate source-register lifetime.
   [[nodiscard]] MemoryIssueInfo for_flat_memory_domains(bool vmem, bool lds) const {
     MemoryIssueInfo result;
     result.exec_masked = exec_masked;

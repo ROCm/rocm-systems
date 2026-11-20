@@ -232,14 +232,14 @@ if(USE_PROF_API)
   set(PROF_API_LOG "${PROJECT_BINARY_DIR}/hip_prof_gen.log.txt")
   set(PROF_API_NEWHDR "${PROJECT_BINARY_DIR}/new_header.h")
 
-  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import CppHeaderParser"
-                  RESULT_VARIABLE CPP_HEADER_PARSER
+  execute_process(COMMAND ${Python3_EXECUTABLE} -c "import cxxheaderparser"
+                  RESULT_VARIABLE CXX_HEADER_PARSER
                   OUTPUT_QUIET)
 
-  if(NOT ${CPP_HEADER_PARSER} EQUAL 0)
+  if(NOT ${CXX_HEADER_PARSER} EQUAL 0)
     message(FATAL_ERROR "\
-    The \"CppHeaderParser\" Python3 package is not installed. \
-    Please install it using the following command: \"pip3 install CppHeaderParser\".\
+    The \"cxxheaderparser\" Python3 package is not installed. \
+    Please install it using the following command: \"pip3 install cxxheaderparser\".\
   ")
   endif()
 

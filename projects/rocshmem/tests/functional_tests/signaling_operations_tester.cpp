@@ -41,6 +41,10 @@ __global__ void PutmemSignalTest(int loop, int skip, long long int *start_time,
   int wg_id = get_flat_grid_id();
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
+  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0.
+  extern __shared__ uint8_t tdm_lds[];
+  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+
   uint64_t signal = 1;
 
   for (int i = 0; i < loop + skip; i++) {
@@ -214,7 +218,7 @@ void SignalingOperationsTester::resetBuffers([[maybe_unused]] size_t size) {
 
 void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                              size_t size) {
-  size_t shared_bytes = 0;
+  size_t shared_bytes = rocshmem_query_tdm_lds_bytes();
 
   switch (_type) {
     case SignalAddTestType:

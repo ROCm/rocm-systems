@@ -69,7 +69,7 @@ def parse_log(filepath: Path) -> pd.DataFrame | None:
                     "msg_size": int(parts[1]),
                     "num_msgs": int(parts[2]),
                     "latency_us": float(parts[3]),
-                    "bandwidth_gbs": float(parts[4]),
+                    "bandwidth_gibs": float(parts[4]),
                     "msg_rate": float(parts[5]),
                 }
                 rows.append(row)
@@ -149,7 +149,7 @@ def collect_variant_multi(
         size_stats: dict[int, dict] = {}
         for msg_size, grp in grouped:
             lat_vals = grp["latency_us"].values
-            bw_vals = grp["bandwidth_gbs"].values
+            bw_vals = grp["bandwidth_gibs"].values
             lat_clean = _remove_outliers_iqr(lat_vals)
             bw_clean = _remove_outliers_iqr(bw_vals)
 
@@ -158,7 +158,7 @@ def collect_variant_multi(
             lat_lo, lat_hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
 
             lat_med = float(np.median(lat_clean)) if len(lat_clean) else float(grp["latency_us"].median())
-            bw_med = float(np.median(bw_clean)) if len(bw_clean) else float(grp["bandwidth_gbs"].median())
+            bw_med = float(np.median(bw_clean)) if len(bw_clean) else float(grp["bandwidth_gibs"].median())
 
             size_stats[int(msg_size)] = {
                 "n_total": len(lat_vals),
@@ -169,12 +169,12 @@ def collect_variant_multi(
                 "bw_med":  bw_med,
             }
             rows.append({
-                "msg_size":      msg_size,
-                "volume":        grp["volume"].iloc[0],
-                "num_msgs":      grp["num_msgs"].iloc[0],
-                "latency_us":    lat_med,
-                "bandwidth_gbs": bw_med,
-                "msg_rate":      grp["msg_rate"].median(),
+                "msg_size":       msg_size,
+                "volume":         grp["volume"].iloc[0],
+                "num_msgs":       grp["num_msgs"].iloc[0],
+                "latency_us":     lat_med,
+                "bandwidth_gibs": bw_med,
+                "msg_rate":       grp["msg_rate"].median(),
             })
 
         df_agg = pd.DataFrame(rows).sort_values("msg_size").reset_index(drop=True)
@@ -194,14 +194,14 @@ def small_msg_latency(df: pd.DataFrame) -> float:
 
 
 def peak_bandwidth(df: pd.DataFrame) -> float:
-    """Maximum bandwidth (GB/s) across all message sizes."""
-    return df["bandwidth_gbs"].max()
+    """Maximum bandwidth (GiB/s) across all message sizes."""
+    return df["bandwidth_gibs"].max()
 
 
 def bandwidth_auc(df: pd.DataFrame) -> float:
     """Area under the bandwidth curve (trapezoidal, log2 msg_size axis)."""
     x = np.log2(df["msg_size"].values.astype(float))
-    y = df["bandwidth_gbs"].values
+    y = df["bandwidth_gibs"].values
     if len(x) < 2:
         return y[0] if len(y) else 0.0
     _trapz = getattr(np, "trapezoid", getattr(np, "trapz", None))

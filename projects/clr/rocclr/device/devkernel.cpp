@@ -638,6 +638,7 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
   workGroupInfo_.hasFuncMaxDynamicSharedSize_ = false;
   workGroupInfo_.hasFuncPreferredShmemCarveout_ = false;
   workGroupInfo_.groupMemCarveout_ = -1;
+  workGroupInfo_.coarseMemCarveout_ = 0; // preference = None
 }
 
 // ================================================================================================

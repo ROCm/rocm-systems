@@ -1,0 +1,58 @@
+# CTest categories for host-only src/transport/ microtests.
+#
+# Suites start with their source unit's stem. The exceptions are p2p.cc's
+# ConnStepAcquire* and FreshRegistration* suites, its parameterized
+# GuardOperands/ and MappingStages/ instantiations, and
+# net_ib_cast/scheduler.cc's parameterized Colls/ instantiation.
+test_categories:
+  quick: &micro_transport_quick
+    description: "Smoke - host-only src/transport/ micro-tests, sub-second."
+    test_patterns:
+      - "CollNet*"
+      - "Colls/NetIbCastSchedulerCollNameMicrotest.*"
+      - "ConnStepAcquire*"
+      - "FreshRegistration*"
+      - "Generic*"
+      - "GuardOperands/P2pAllocateSkipMarkExport.*"
+      - "MappingStages/P2pImportMapStageFails.*"
+      - "Net*"  # net.cc; also matches the NetIb, NetSocket and NetTelemetry suites
+      - "Nvls*"
+      - "P2p*"
+      - "RmaSocket*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_transport_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_transport_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_transport_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

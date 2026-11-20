@@ -61,7 +61,23 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
       result = dev.iDev()->CreateGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     }
     if (result == Pal::Result::Success) {
-      result = memRef->MakeResident();
+      // Skip MakeResident for peer mappings of pinned host memory (second+ device
+      // mapping of the same system RAM pages). The KMD already mapped the SVM VA
+      // for all GPUs when the first device created the allocation. Calling
+      // MakeResident on the peer creates a redundant WDDM residency entry; VidMm
+      // double-counts the budget across adapters, which halves the usable pinned
+      // host memory limit on multi-GPU systems.
+      // Guards: alwaysResident_ (first device holds CantTrim), peer mapping,
+      // and both this allocation and its owner are host memory.
+      const bool isPeerPinnedHostMem = dev.settings().alwaysResident_ &&
+          (createInfo.pReservedGpuVaOwner != nullptr) &&
+          (createInfo.heaps[0] == Pal::GpuHeapGartCacheable ||
+           createInfo.heaps[0] == Pal::GpuHeapGartUswc) &&
+          (createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartCacheable ||
+           createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartUswc);
+      if (!isPeerPinnedHostMem) {
+        result = memRef->MakeResident();
+      }
     }
     if (result != Pal::Result::Success) {
       memRef->release();
@@ -115,7 +131,17 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   if (memRef != nullptr) {
     result = dev.iDev()->CreateSvmGpuMemory(createInfo, &memRef[1], &memRef->gpuMem_);
     if (result == Pal::Result::Success) {
-      result = memRef->MakeResident();
+      // Skip MakeResident for peer pinned host memory — see comment in the
+      // GpuMemoryCreateInfo overload above for the full rationale.
+      const auto heap0 = memRef->gpuMem_->Desc().heaps[0];
+      const bool isPeerPinnedHostMem = dev.settings().alwaysResident_ &&
+          (createInfo.pReservedGpuVaOwner != nullptr) &&
+          (heap0 == Pal::GpuHeapGartCacheable || heap0 == Pal::GpuHeapGartUswc) &&
+          (createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartCacheable ||
+           createInfo.pReservedGpuVaOwner->Desc().heaps[0] == Pal::GpuHeapGartUswc);
+      if (!isPeerPinnedHostMem) {
+        result = memRef->MakeResident();
+      }
     }
     if (result != Pal::Result::Success) {
       memRef->release();
@@ -895,6 +921,45 @@ bool Resource::CreateInterop(CreateParams* params) {
         return false;
       }
 
+      // Per-plane layout as the driver actually laid the surface out. Opening the shared
+      // resource a second time with UndefinedSwizzledFormat makes PAL infer its native planar
+      // format (YV12/NV12/P010) instead of the single-plane view format above, so
+      // GetSubresourceLayout reports each plane's real offset and row pitch.
+      //
+      // This cannot be derived from the allocation size: a chroma plane padded up to the luma
+      // pitch and a canonical half-pitch plane inside a padded allocation give the same total.
+      // Both layouts exist in the wild, so guessing silently reads the wrong plane.
+      bool havePlaneLayout = false;
+      Pal::SubresLayout planeLayout[3] = {};
+      {
+        Pal::ExternalImageOpenInfo nativeOpenInfo = {};
+        nativeOpenInfo.resourceInfo = openInfo;
+        nativeOpenInfo.swizzledFormat = Pal::UndefinedSwizzledFormat;
+        nativeOpenInfo.usage.shaderRead = true;
+
+        Pal::ImageCreateInfo nativeCreateInfo = {};
+        Pal::IImage* nativeImage = nullptr;
+        GpuMemoryReference* nativeMemRef =
+            GpuMemoryReference::Create(dev(), nativeOpenInfo, &nativeCreateInfo, &nativeImage);
+        if ((nativeMemRef != nullptr) && (nativeImage != nullptr)) {
+          havePlaneLayout = true;
+          for (uint32_t plane = 0; plane < 3; ++plane) {
+            Pal::SubresId subres = {};
+            subres.plane = static_cast<Pal::uint8>(plane);
+            if (Pal::Result::Success !=
+                nativeImage->GetSubresourceLayout(subres, &planeLayout[plane])) {
+              // A 2-plane format (NV12/P010) legitimately has no plane 2; only treat a
+              // missing plane 1 as a failure of the whole query.
+              if (plane < 2) havePlaneLayout = false;
+              break;
+            }
+          }
+        }
+        if (nativeMemRef != nullptr) {
+          nativeMemRef->release();
+        }
+      }
+
       Pal::gpusize viewOffset = 0;
       imgCreateInfo.flags.shareable = false;
       imgCreateInfo.imageType = Pal::ImageType::Tex2d;
@@ -937,17 +1002,22 @@ bool Resource::CreateInterop(CreateParams* params) {
             case 0:
               break;
             case 1:
-              // Y - plane size to the offset
-              // YV12 format. U is 4 times smaller plane than Y
-              viewOffset = 2 * imgCreateInfo.rowPitch * desc().height_;
-              imgCreateInfo.rowPitch >>= 1;
+            case 2: {
+              if (havePlaneLayout) {
+                viewOffset = planeLayout[layer].offset;
+                imgCreateInfo.rowPitch = planeLayout[layer].rowPitch;
+              } else {
+                // Canonical YV12: chroma is half the luma pitch and half its height.
+                // desc().height_ is already the chroma height, so the luma plane is
+                // 2 * lumaPitch * height_ and each chroma plane is lumaPitch * height_ / 2.
+                const Pal::gpusize lumaPitch = imgCreateInfo.rowPitch;
+                const Pal::gpusize lumaSize = 2 * lumaPitch * desc().height_;
+                const Pal::gpusize chromaPlaneSize = lumaPitch * desc().height_ / 2;
+                viewOffset = lumaSize + ((layer == 2) ? chromaPlaneSize : 0);
+                imgCreateInfo.rowPitch = lumaPitch / 2;
+              }
               break;
-            case 2:
-              // Y + U plane sizes to the offest.
-              // U plane is 4 times smaller than Y and U == V
-              viewOffset = 5 * imgCreateInfo.rowPitch * desc().height_ / 2;
-              imgCreateInfo.rowPitch >>= 1;
-              break;
+            }
             default:
               LogError("Unknown Interop View Type");
               return false;

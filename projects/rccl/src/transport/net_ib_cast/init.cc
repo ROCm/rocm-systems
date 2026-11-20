@@ -11,6 +11,9 @@
 #include "net_telemetry.h"
 #include "qp_sharing.h"
 #include "net_ib_cast_inspect.h"
+#include "archinfo.h"
+
+#include <hip/hip_runtime.h>
 
 extern int64_t ncclParamIbCastQpsPerConn();
 RCCL_PARAM(IbCastQpsPerP2p, "IB_QPS_PER_P2P", 0);
@@ -18,6 +21,7 @@ extern int64_t ncclParamIbCastGdrFlushDisable();
 // AMD AINIC
 RCCL_PARAM(IbCastCtsOffloadEnabled, "CTS_OFFLOAD_ENABLED", -1);
 RCCL_PARAM(IbCastP2pDisableCts, "IB_P2P_DISABLE_CTS", 1);
+RCCL_PARAM(IbCastMaxMsgSize, "IB_MAX_MSG_SIZE", -1);
 
 bool IbCastAinicRoce = 0;
 bool IbCastMultiplaneEnable = false;
@@ -382,6 +386,48 @@ ncclResult_t IbCastFinalizeDevices(void) {
 }
 
 extern int64_t IbCastArThreshold;
+
+static bool IbCastGpuIsGfx1250() {
+  int dev = 0;
+  hipDeviceProp_t prop{};
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess) {
+    (void)hipGetLastError();
+    return false;
+  }
+  return IsArchMatch(prop.gcnArchName, "gfx1250");
+}
+
+// A positive RCCL_IB_MAX_MSG_SIZE explicitly sets the cap, overriding the
+// automatic gfx1250 and port limits. When unset or 0, the cap is the smallest
+// of the gfx1250 256 MiB limit and the non-zero port max_msg_sz values. The
+// result is raised to at least 1 MiB and rounded down to
+// IB_WRITE_CHUNK_ALIGNMENT.
+static void IbCastInitMaxPostSendBytes() {
+  constexpr uint32_t kGfx1250Cap = 256u * 1024u * 1024u;
+  constexpr uint32_t kMinCap = 1024u * 1024u;
+  const int64_t requested = rcclParamIbCastMaxMsgSize();
+  IbCastMaxPostSendBytes = UINT32_MAX;
+
+  if (requested > 0) {
+    INFO(NCCL_ENV, "NET/IB: RCCL_IB_MAX_MSG_SIZE set by environment to %lld", (long long)requested);
+    IbCastMaxPostSendBytes = (uint32_t)std::min(requested, (int64_t)UINT32_MAX);
+  } else {
+    if (IbCastGpuIsGfx1250()) {
+      IbCastMaxPostSendBytes = std::min(IbCastMaxPostSendBytes, kGfx1250Cap);
+    }
+    for (int i = 0; i < IbCastNDevs; i++) {
+      uint32_t portMax = IbCastDevs[i].portAttr.max_msg_sz;
+      if (portMax != 0 && portMax < IbCastMaxPostSendBytes) IbCastMaxPostSendBytes = portMax;
+    }
+  }
+  // The floor covers every source, so no data post splits below 1 MiB.
+  IbCastMaxPostSendBytes = std::max(IbCastMaxPostSendBytes, kMinCap);
+  // Round down to the IB_WRITE_CHUNK_ALIGNMENT
+  IbCastMaxPostSendBytes -= IbCastMaxPostSendBytes % IB_WRITE_CHUNK_ALIGNMENT;
+  INFO(NCCL_ENV, "NET/IB: IB-CAST data posts default to %u bytes",
+    IbCastMaxPostSendBytes);
+}
+
 ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallback_t profFunction) {
   // Never NCCLCHECKed; telemetry reports its own failures. See net_telemetry.h.
   if (rcclTelemetryInit() != 0) {
@@ -503,7 +549,10 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                 TRACE(NCCL_NET, "NET/IB: Device %s does not support Data Direct DMA.", devices[d]->name);
               } else {
                 WARN("NET/IB: Error in mlx5dv_get_data_direct_sysfs_path with device %s", devices[d]->name);
-                return res;
+                // No port of this device has been recorded yet, so the context is still ours to close.
+                (void)wrap_ibv_close_device(context);
+                ret = res;
+                goto fail;
               }
             }
           }
@@ -540,7 +589,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
                           ret, fail);
             if (dev == 1) {
               snprintf(IbCastDevs[IbCastNDevs].devName, MAXNAMESIZE, "%s_dma", devices[d]->name);
-              NCCLCHECK(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX));
+              NCCLCHECKGOTO(ncclCalloc(&IbCastDevs[IbCastNDevs].pciPath, PATH_MAX), ret, fail);
               strncpy(IbCastDevs[IbCastNDevs].pciPath, dataDirectDevicePath, PATH_MAX);
               IbCastDevs[IbCastNDevs].capsProvider.mlx5.dataDirect = 1;
             }
@@ -553,7 +602,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             IbCastDevs[IbCastNDevs].mrCache.capacity = 0;
             IbCastDevs[IbCastNDevs].mrCache.population = 0;
             IbCastDevs[IbCastNDevs].mrCache.slots = NULL;
-            NCCLCHECK(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats));
+            NCCLCHECKGOTO(IbCastStatsInit(&IbCastDevs[IbCastNDevs].stats), ret, fail);
 
             IbCastDevs[IbCastNDevs].railId = (userIfId >= 0) ? userIfs[userIfId].rail : -1;
             IbCastDevs[IbCastNDevs].planeId = (userIfId >= 0) ? userIfs[userIfId].plane : -1;
@@ -685,7 +734,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
 
       int64_t udmaPolicy = rcclParamIbCastUDMAPolicy();
-      if (udmaPolicy < (int64_t)ncclIbCastUDMAPolicy::First || udmaPolicy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+      if (!ncclIbCastUDMAPolicyIsValid(udmaPolicy)) {
         WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be %d-%d). Using RCCL_IB_UDMA_POLICY=%d.", udmaPolicy,
              (int)ncclIbCastUDMAPolicy::First, (int)ncclIbCastUDMAPolicy::Last,
              (int)ncclIbCastUDMAPolicy::ChannelAffinity);
@@ -735,6 +784,7 @@ exit:
     }
     IbCastReportMatchingScheme();
   }
+  if (ret == ncclSuccess) IbCastInitMaxPostSendBytes();
   return ret;
 fail:
   if (devices && (ncclSuccess != wrap_ibv_free_device_list(devices))) {

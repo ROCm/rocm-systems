@@ -181,6 +181,12 @@ function(register_all_unit_tests)
     set(TEST_WITH_TWO_PES "IPCImplSimpleCoarseTestFixture/*:IPCImplSimpleFineTestFixture/*:IPCImplTiledFineTestFixture/*:DegenerateTiledFine.*")
     set(TEST_WITH_TWO_PES "${TEST_WITH_TWO_PES}:SdmaSimpleCoarse/*:SdmaSimpleFine/*:SdmaTiledFine/*")
 
+    # TDM tests drive PE 0/PE 1 roles directly and require exactly 2 ranks
+    set(TDM_TEST_FILTER "TdmRawPut/*:TdmRawGet/*:TdmWavePut/*:TdmWaveGet/*:TdmStructPut/*")
+    if(USE_IPC AND USE_TDM)
+        set(TEST_WITH_TWO_PES "${TEST_WITH_TWO_PES}:${TDM_TEST_FILTER}")
+    endif()
+
     # All unit tests (4 ranks) - runs everything EXCEPT the 2-PE specific tests
     # NOTE: Tier labels (quick/standard/comprehensive/full) are now applied
     # via YAML-based categorization in test_categories.yaml
@@ -190,6 +196,15 @@ function(register_all_unit_tests)
         GTEST_FILTER "-${TEST_WITH_TWO_PES}"
         LABELS "ALL;IPC;SDMA"
     )
+
+    if(USE_IPC AND USE_TDM)
+        add_rocshmem_unit_test(
+            NAME tdm_tests
+            RANKS 2
+            GTEST_FILTER "${TDM_TEST_FILTER}"
+            LABELS "TWO_PE;IPC;TDM"
+        )
+    endif()
 
     # Note: 2-rank tests are commented out in driver.sh
     # If needed, uncomment this:

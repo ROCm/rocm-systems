@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
-#include <new>
 #include <utility>
 
 namespace rocjitsu::amdgpu {
@@ -100,10 +99,6 @@ void GpuQueueRegistry::close_all(bool reopen_registration) {
 }
 
 QueueHandle GpuQueueRegistry::allocate_locked(std::shared_ptr<QueueRecord> queue) {
-  if (fail_next_registry_allocation_) {
-    fail_next_registry_allocation_ = false;
-    throw std::bad_alloc();
-  }
   uint32_t slot_index = 0;
   if (free_slots_.empty()) {
     slot_index = static_cast<uint32_t>(slots_.size());
@@ -204,13 +199,7 @@ QueueHandle GpuQueueRegistry::register_queue(const QueueRegistrationRequest &req
   QueueBindingCreateResult bound = request.binding_factory->create_binding(request);
   if (!bound)
     return {};
-  std::shared_ptr<QueueRecord> queue;
-  try {
-    queue = std::make_shared<QueueRecord>(request.identity);
-  } catch (...) {
-    bound.binding.reset();
-    throw;
-  }
+  std::shared_ptr<QueueRecord> queue = std::make_shared<QueueRecord>(request.identity);
   queue->binding = std::move(bound.binding);
 
   QueueHandle handle;

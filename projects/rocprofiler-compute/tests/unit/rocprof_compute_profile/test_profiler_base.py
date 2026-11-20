@@ -3,6 +3,7 @@
 
 import argparse
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -15,6 +16,7 @@ from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
 from rocprof_compute_profile.profiler_base import (
     RocProfCompute_Base,
+    _compute_selected_frameworks,
     _partition_warning_messages,
 )
 from rocprof_compute_profile.profiler_rocprof_v3 import rocprof_v3_profiler
@@ -98,7 +100,6 @@ def test_partition_warning_messages(
 # ---------------------------------------------------------------------------
 # sanitize() with --torch-trace
 # ---------------------------------------------------------------------------
-@pytest.mark.torch_trace
 @pytest.mark.parametrize(
     "remaining, expected_exception, setup",
     [
@@ -347,7 +348,6 @@ def test_attach_library_resolution_with_fallback():
         iteration_multiplexing=None,
         attach_pid=12345,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
         torch_trace=False,
@@ -399,7 +399,6 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         iteration_multiplexing=None,
         attach_pid=None,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
         torch_trace=False,
@@ -430,7 +429,6 @@ def test_rocprofv3_live_attach_uses_sync_output():
         ["/bin/true"],
         attach_pid="12345",
         attach_duration_msec="500",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
     profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
@@ -452,7 +450,6 @@ def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
         kernel_iteration_range=["1", "3:5"],
         output_directory=str(tmp_path),
         rocprofiler_sdk_tool_path="sdk_tool",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
 
@@ -495,7 +492,6 @@ def test_sdk_pc_sampling_options(
         output_directory=str(tmp_path),
         pc_sampling_method=method,
         pc_sampling_interval=1000,
-        kokkos_trace=False,
     )
     args.remaining = "/bin/true"
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -574,6 +570,8 @@ def _make_rpc_args(
     membw_analysis=False,
     experimental=False,
     mode="profile",
+    list_stats=False,
+    output_format="stdout",
 ) -> argparse.Namespace:
     """Build a minimal Namespace for sanitize() unit tests."""
     return argparse.Namespace(
@@ -605,6 +603,12 @@ def _make_rpc_args(
         ml_api_trace=False,
         kernel_iteration_range=None,
         remaining=["--", "./myapp"],
+        list_stats=list_stats,
+        output_format=output_format,
+        torch_operator=None,
+        triton_operator=None,
+        list_torch_operators=False,
+        list_triton_operators=False,
     )
 
 
@@ -744,6 +748,21 @@ def test_sanitize_membw_analysis_injects_block_30(
     assert args.filter_blocks == expected_filter_blocks
 
 
+@pytest.mark.parametrize(
+    "output_format, expect_error",
+    [("stdout", False), ("txt", False), ("csv", True), ("db", True)],
+)
+def test_handle_analyze_args_list_stats_output_format(output_format, expect_error):
+    """--list-stats is rejected with csv and db output."""
+    args = _make_rpc_args(mode="analyze", list_stats=True, output_format=output_format)
+    instance = _make_rpc_with_args(args)
+    if expect_error:
+        with pytest.raises(SystemExit):
+            instance.handle_analyze_args()
+    else:
+        instance.handle_analyze_args()
+
+
 # ---------------------------------------------------------------------------
 # pre_processing(): memory-bandwidth configuration persistence
 # ---------------------------------------------------------------------------
@@ -765,7 +784,6 @@ def test_pre_processing_persists_membw_analysis_config(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace()
     mock_soc.profiling_setup.return_value = effective_filter_blocks
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",
@@ -810,7 +828,6 @@ def test_pre_processing_pmc_power_gating_warning(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
     mock_soc.profiling_setup.return_value = []
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",
@@ -1226,3 +1243,30 @@ def test_run_profiling_native_tool_path(
         assert mocks.profile.called is expect_profile_called
     if expect_error is not None:
         assert mocks.console_error.called is expect_error
+
+
+def test_compute_selected_frameworks_unions_torch_and_triton_flags():
+    both_flags = _compute_selected_frameworks(
+        argparse.Namespace(torch_trace=True, triton_trace=True, ml_api_trace=False)
+    )
+    ml_api = _compute_selected_frameworks(
+        argparse.Namespace(torch_trace=False, triton_trace=False, ml_api_trace=True)
+    )
+    assert both_flags == {"torch", "triton"}
+    assert ml_api == both_flags
+
+
+@pytest.mark.parametrize(
+    "trace_flag",
+    [
+        pytest.param("torch_trace", id="torch"),
+        pytest.param("triton_trace", id="triton"),
+        pytest.param("ml_api_trace", id="ml_api"),
+    ],
+)
+def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path, trace_flag):
+    remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
+    args = _make_sanitize_args(remaining, attach_pid=12345, **{trace_flag: True})
+    profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
+    with pytest.raises(SystemExit):
+        profiler.sanitize()

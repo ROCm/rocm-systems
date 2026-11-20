@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/amdhsa_metadata.h"
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
@@ -555,7 +556,6 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
   std::unordered_map<size_t, std::unordered_set<uint32_t>> referenced_by_symtab;
   for (const Elf64_Shdr &relocs : shdrs) {
     if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
-        relocs.sh_size % sizeof(Elf64_Rela) != 0 ||
         !image_contains_range(image.size(), relocs.sh_offset, relocs.sh_size)) {
       continue;
     }
@@ -570,6 +570,8 @@ build_text_placement_index(uint64_t old_text_size, uint64_t new_text_size,
         !image_contains_range(image.size(), symtab.sh_offset, symtab.sh_size)) {
       continue;
     }
+    // Admission processes complete records before a partial tail. Their symbol
+    // references still require mappings when the text is rewritten.
     const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
     for (size_t i = 0; i < count; ++i) {
       Elf64_Rela rela{};
@@ -1228,7 +1230,7 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
       continue;
     const bool is_rela = relocs.sh_type == SHT_RELA;
     const size_t entsize = is_rela ? sizeof(Elf64_Rela) : sizeof(Elf64_Rel);
-    if (relocs.sh_entsize != entsize || relocs.sh_size % entsize != 0)
+    if (relocs.sh_entsize != entsize)
       continue;
     const RocrRelocationSectionMode section_mode =
         classify_rocr_relocation_section(header, shdrs, relocs);
@@ -1238,6 +1240,8 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
     if (relocs.sh_link >= shdrs.size())
       continue;
     const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
+    // Shared admission permits partial tails; preceding complete records still
+    // carry references that can make a text edit unsafe.
     const size_t count = relocs.sh_size / entsize;
     for (size_t i = 0; i < count; ++i) {
       const uint64_t offset = relocs.sh_offset + i * entsize;
@@ -1286,6 +1290,40 @@ bool CodeObjectPatcher::has_unsupported_relocation_to_text() const {
     }
   }
   return false;
+}
+
+std::vector<uint64_t> CodeObjectPatcher::relative_text_addend_offsets() const {
+  if (text_size_ == 0 || image_.size() < sizeof(Elf64_Ehdr))
+    return {};
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image_.data(), sizeof(header));
+  const std::vector<Elf64_Shdr> sections = section_headers();
+  const std::optional<size_t> text_index =
+      validated_text_section(sections, text_section_index_, text_offset_, text_size_);
+  if (!text_index)
+    return {};
+  const uint64_t text_vaddr = sections[*text_index].sh_addr;
+  std::vector<uint64_t> offsets;
+  for (const Elf64_Shdr &relocs : sections) {
+    if (relocs.sh_type != SHT_RELA || relocs.sh_entsize != sizeof(Elf64_Rela) ||
+        !image_contains_range(image_.size(), relocs.sh_offset, relocs.sh_size))
+      continue;
+    // Match relocation rewriting: inspect complete records even with a partial tail.
+    const size_t count = relocs.sh_size / sizeof(Elf64_Rela);
+    for (size_t index = 0; index < count; ++index) {
+      Elf64_Rela relocation = {};
+      std::memcpy(&relocation, image_.data() + relocs.sh_offset + index * sizeof(Elf64_Rela),
+                  sizeof(relocation));
+      if (elf_reloc_type(relocation.r_info) != R_AMDGPU_RELATIVE64 ||
+          elf_reloc_sym(relocation.r_info) != 0 ||
+          !elf_relocation_place_is_allocated(header, sections, relocs, relocation.r_offset))
+        continue;
+      const uint64_t destination = static_cast<uint64_t>(relocation.r_addend);
+      if (destination >= text_vaddr && destination - text_vaddr < text_size_)
+        offsets.push_back(destination - text_vaddr);
+    }
+  }
+  return offsets;
 }
 
 bool CodeObjectPatcher::replace_text(
@@ -1502,14 +1540,20 @@ bool CodeObjectPatcher::patch_kernel_descriptor(uint64_t file_offset,
   return true;
 }
 
-bool CodeObjectPatcher::set_private_segment_fixed_size(uint64_t descriptor_file_offset,
-                                                       uint32_t bytes) {
-  auto desc = read_kernel_descriptor(image_, descriptor_file_offset);
-  if (!desc)
+bool CodeObjectPatcher::patch_kernel_resources(const KernelDescriptorInfo &kernel,
+                                               const amdhsa::kernel_descriptor_t &descriptor,
+                                               std::optional<uint32_t> sgprs,
+                                               std::optional<uint32_t> vgprs, std::string *error) {
+  if (!image_contains_range(image_.size(), kernel.descriptor_file_offset, sizeof(descriptor))) {
+    if (error != nullptr)
+      *error = "kernel resource descriptor lies outside the image";
     return false;
-
-  desc->private_segment_fixed_size = bytes;
-  return write_kernel_descriptor(image_, descriptor_file_offset, *desc);
+  }
+  const amdhsa::kernel_descriptor_t updated = descriptor;
+  if (amdhsa::update_resource_metadata(image_, kernel, updated, sgprs, vgprs, error).failed())
+    return false;
+  return patch_kernel_descriptor(kernel.descriptor_file_offset,
+                                 {reinterpret_cast<const uint8_t *>(&updated), sizeof(updated)});
 }
 
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,

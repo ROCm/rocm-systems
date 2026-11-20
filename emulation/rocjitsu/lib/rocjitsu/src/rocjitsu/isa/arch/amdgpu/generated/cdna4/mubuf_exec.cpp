@@ -1055,7 +1055,11 @@ void BufferWbl2Mubuf::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void BufferInvMubuf::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_buffer_inv_mubuf(*this, wf);
+  if (!inst_.sc1)
+    return;
+  wf.cu().l1_vector().invalidate_all();
+  if (auto *l2 = wf.cu().l2())
+    l2->invalidate_buffer_scope(inst_.sc0);
 }
 
 void BufferAtomicSwapMubuf::execute_impl(amdgpu::Wavefront &wf) {

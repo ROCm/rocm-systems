@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "util/diagnostic.h"
+
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -117,8 +119,15 @@ public:
   /// @details WritebackInvalidate publishes dirty state before returning. The
   /// returned lease advances the data and instruction epochs only after the
   /// protected access has completed and the lease is destroyed.
-  [[nodiscard]] DeviceCacheMaintenanceLease
-  acquire_cache_maintenance(DeviceCacheOperation operation);
+  /// A missing backing or failed writeback returns failure with a diagnostic.
+  /// Failure releases all acquired locks before diagnostic delivery and does not
+  /// advance either epoch. Failed writeback discards all clean memory-side lines
+  /// while retaining unpublished dirty state for retry.
+  /// The diagnostic sink may query the hierarchy.
+  /// @param emit_error Destination for failure diagnostics.
+  util::FailureOr<DeviceCacheMaintenanceLease>
+  acquire_cache_maintenance(DeviceCacheOperation operation,
+                            util::DiagnosticEmitter emit_error = {});
   /// @brief Return the epoch observed by data caches during ordinary accesses.
   uint64_t current_epoch() const { return data_epoch_.load(std::memory_order_acquire); }
   /// @brief Return the epoch observed by private instruction caches.
@@ -130,6 +139,8 @@ public:
   void register_l2_cache(L2Cache *cache);
   /// @brief Remove an L2 cache before its storage is destroyed.
   void unregister_l2_cache(L2Cache *cache);
+  /// Whether this device topology has more than one registered XCD L2.
+  [[nodiscard]] bool has_multiple_l2_caches() const;
   /// @brief Register a memory-side cache in this device-local domain.
   void register_memory_side_cache(MemorySideCache *cache);
   /// @brief Remove a memory-side cache before its storage is destroyed.

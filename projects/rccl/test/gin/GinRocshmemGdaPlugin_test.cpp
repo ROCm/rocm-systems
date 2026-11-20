@@ -11,6 +11,8 @@
 
 #include "gin_rocshmem_gda_plugin_test_stubs.h"
 
+#include "../common/ScopedEnv.hpp"
+
 #include "gin/gin_host_rocshmem_gda.h"
 #include "comm.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
@@ -76,6 +78,49 @@ class GinRocshmemGdaPluginTest : public ::testing::Test {
     return CopyToHost(static_cast<const ncclGinRocshmemGdaGPUContext*>(devHandle->handle), n);
   }
 };
+
+// AICOMRCCL-3418: GDA stays off unless NCCL_GIN_TYPE=6, or NCCL_GIN_TYPE is unset
+// and RCCL_GIN_TYPE_LIST lists 6.
+TEST_F(GinRocshmemGdaPluginTest, Init_OffByDefault) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
+  EXPECT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(ictx_, nullptr);
+}
+
+TEST_F(GinRocshmemGdaPluginTest, Init_ListedInGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+  ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
+  EXPECT_NE(ictx_, nullptr);
+}
+
+// An empty NCCL_GIN_TYPE is unset, so the list still turns GDA on.
+TEST_F(GinRocshmemGdaPluginTest, Init_EmptyGinTypeAndListed) {
+  ScopedEnv ty("NCCL_GIN_TYPE", "");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+  ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
+  EXPECT_NE(ictx_, nullptr);
+}
+
+TEST_F(GinRocshmemGdaPluginTest, Init_NotListedInGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "2,7");
+  EXPECT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(ictx_, nullptr);
+}
+
+TEST_F(GinRocshmemGdaPluginTest, Init_GinTypeOverridesGinTypes) {
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "2,7");
+  ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
+  EXPECT_NE(ictx_, nullptr);
+
+  ScopedEnv ty("NCCL_GIN_TYPE", "7");
+  ScopedEnv listWithGda("RCCL_GIN_TYPE_LIST", "6,7");
+  void* other = nullptr;
+  EXPECT_EQ(plugin_.init(&other, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(other, nullptr);
+}
 
 TEST_F(GinRocshmemGdaPluginTest, CreateContext_StripesSignalsAndCountersPerContext) {
   constexpr int kRanks = 2, kRank = 1, kContexts = 3, kSignals = 4, kCounters = 2;
@@ -241,6 +286,39 @@ TEST_F(GinRocshmemGdaPluginTest, CreateContext_SignalMrFailureReturnsErrorWithou
   EXPECT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
   EXPECT_EQ(Stubs::GetLiveMrCount(), 0);
   EXPECT_EQ(Stubs::GetLiveHipAllocationCount(), hipAllocsBefore);
+}
+
+// A VA signal is an RDMA atomic into a user window, so the window MR must allow
+// remote atomics (AICOMRCCL-3180).
+TEST_F(GinRocshmemGdaPluginTest, RegMrSym_AllowsRemoteAtomicsForVaSignals) {
+  constexpr int kRanks = 2, kRank = 0;
+  constexpr size_t kBytes = 4096;
+  connect(kRanks, kRank);
+
+  void* buf = nullptr;
+  ASSERT_EQ(hipMalloc(&buf, kBytes), hipSuccess);
+  void* mhandle = nullptr;
+  void* ginHandle = nullptr;
+  ASSERT_EQ(plugin_.regMrSym(coll_, buf, kBytes, NCCL_PTR_CUDA, 0, &mhandle, &ginHandle), ncclSuccess);
+
+  ASSERT_EQ(Stubs::GetRegMrCalls().size(), 1u);
+  const Stubs::RegMrCall mr = Stubs::GetRegMrCalls()[0];
+  EXPECT_EQ(mr.addr, buf);
+  EXPECT_EQ(mr.size, kBytes);
+  EXPECT_EQ(mr.atomic, 1);
+
+  const auto devMh = CopyToHost(static_cast<const ncclGinRocshmemGdaMemHandle*>(ginHandle), 1)[0];
+  EXPECT_EQ(devMh.local_va, reinterpret_cast<uintptr_t>(buf));
+  const auto rkeys = CopyToHost(devMh.rkeys, kRanks);
+  const auto vas = CopyToHost(devMh.remote_vas, kRanks);
+  EXPECT_EQ(rkeys[kRank], mr.rkey);
+  EXPECT_EQ(rkeys[1], Stubs::PeerRkey(1));
+  EXPECT_EQ(vas[kRank], reinterpret_cast<uintptr_t>(buf));
+  EXPECT_EQ(vas[1], Stubs::PeerAddr(1));
+
+  EXPECT_EQ(plugin_.deregMrSym(coll_, mhandle), ncclSuccess);
+  EXPECT_EQ(Stubs::GetLiveMrCount(), 0);
+  EXPECT_EQ(hipFree(buf), hipSuccess);
 }
 
 }  // namespace RcclUnitTesting

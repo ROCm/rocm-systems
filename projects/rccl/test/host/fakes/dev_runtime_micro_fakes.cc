@@ -32,8 +32,9 @@
 
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
+#include "fakes/nccl_device_core_fakes.h"  // ncclTeam* accessors + ResetNcclDeviceCoreFakes()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
-#include "fakes/signature-drift.h"
+#include "signature-drift.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -113,15 +114,6 @@ ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapRecv, bootstrapRecv);
 ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
   return g_devrBootstrapRecv(bs, peer, tag, data, size);
 }
-
-// ---------------------------------------------------------------------------
-// Arg checks / comm readiness.
-// ---------------------------------------------------------------------------
-ncclResult_t PtrCheck(const void*, const char*, const char*) { return ncclSuccess; }
-ncclResult_t CommCheck(struct ncclComm*, const char*, const char*) { return ncclSuccess; }
-// Seam: NCCLCHECK'd on entry to ncclCommWindowRegister_impl, so the
-// not-ready rejection is only reachable by driving it.
-
 
 // ---------------------------------------------------------------------------
 // Public registration API.
@@ -303,11 +295,29 @@ ncclResult_t ncclGetRailedGinType(struct ncclComm*, ncclGinType_t* ginType) {
   if (ginType) *ginType = NCCL_GIN_TYPE_NONE;
   return ncclSuccess;
 }
-ncclResult_t ncclGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*) {
+// Seam: ncclDevrCommCreateInternal latches GIN only after this succeeds.
+static ncclResult_t DefaultGinConnectOnce(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_devrGinConnectOnce = DefaultGinConnectOnce;
+
+ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnectOnce(comm); }
+// Seam: reached only for a devComm that requests a GIN connection.
+// ncclDevrCommCreateInternal calls this after swapping the thread into relaxed
+// stream-capture mode. The default succeeds; a test that needs GIN setup to fail
+// installs its own so the capture-mode restore can be observed.
+static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
+                                           struct ncclDevComm*, uint32_t) {
   return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+    g_devrGinDevCommSetup = DefaultGinDevCommSetup;
+ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
+
+ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
+  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
+}
 ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+void ncclGinDevCommClearFields(struct ncclDevComm*) {}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -419,41 +429,20 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
-// ---------------------------------------------------------------------------
-// Team accessors (host variants).
-// ---------------------------------------------------------------------------
-// Seams rather than fixed returns: ncclTeamRankIsMember/ncclTeamRankToTeam are
-// real inline code that divides by the team's stride, so a zero-initialised
-// ncclTeam_t here would SIGFPE the moment a test reached the symmetric arm of
-// ncclDevrWorldToLsaRank. The defaults describe the contiguous, stride-1 team
-// the comm already says it has; a test that needs a strided or offset team
-// installs its own.
-static ncclTeam_t DefaultTeamWorld(ncclComm_t comm) {
-  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
-  return ncclTeam_t{comm->nRanks, comm->rank, 1};
-}
-std::function<ncclTeam_t(ncclComm_t)> g_devrTeamWorld = DefaultTeamWorld;
-extern "C" ncclTeam_t ncclTeamWorld(ncclComm_t comm) { return g_devrTeamWorld(comm); }
-// ncclTeamRail is in devcomm_fakes.cc.
+// Real body lives in dev_runtime_segments.cc. dev-runtime-test.cc compiles that
+// file as RealDevrCheckRegistrationSupport so this seam stays injectable; the
+// fixture points the hook at the real body.
+static ncclResult_t DefaultCheckRegistrationSupport(void*, size_t, struct ncclComm*, bool, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, size_t, struct ncclComm*, bool, int)> g_devrCheckRegistrationSupport =
+    DefaultCheckRegistrationSupport;
 
-// The CFT teams, read by symMemoryObtain and ncclDevrCommCreateInternal. Same
-// shape as the real host accessors in nccl_device/core.cc, reading the sizes
-// ncclDevrInitOnce already computed, minus their ncclDevrInitOnce call: these
-// are reached from inside that very function's callees, so calling it here
-// would recurse. Stride 1 for the same SIGFPE reason as the world team above.
-static ncclTeam_t DefaultTeamCft(ncclComm_t comm, ncclCftTeamMode_t) {
-  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
-  return ncclTeam_t{comm->devrState.cftSize, comm->devrState.cftSelf, 1};
+ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, struct ncclComm* comm,
+                                              bool hasSysmemSegment, int winFlags) {
+  return g_devrCheckRegistrationSupport(userPtr, userSize, comm, hasSysmemSegment, winFlags);
 }
-std::function<ncclTeam_t(ncclComm_t, ncclCftTeamMode_t)> g_devrTeamCft = DefaultTeamCft;
-ncclTeam_t ncclTeamCft(ncclComm_t comm, ncclCftTeamMode_t mode) { return g_devrTeamCft(comm, mode); }
 
-static ncclTeam_t DefaultTeamCftMultimem(ncclComm_t comm) {
-  if (comm == nullptr) return ncclTeam_t{0, 0, 1};
-  return ncclTeam_t{comm->devrState.cftMcSize, comm->devrState.cftMcSelf, 1};
-}
-std::function<ncclTeam_t(ncclComm_t)> g_devrTeamCftMultimem = DefaultTeamCftMultimem;
-ncclTeam_t ncclTeamCftMultimem(ncclComm_t comm) { return g_devrTeamCftMultimem(comm); }
+// The host-side ncclTeam* accessors live in fakes/nccl_device_core_fakes.cc; this
+// file's Reset chains theirs.
 
 // ---------------------------------------------------------------------------
 // CFT logical endpoints (real in cft_dev_runtime.cc).
@@ -490,16 +479,26 @@ ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct nc
 // ---------------------------------------------------------------------------
 // Barrier requirement builders (host variants).
 // ---------------------------------------------------------------------------
+// ncclDevrCommCreateInternal assigns .next after each builder returns. The
+// fields it then reads off these stack objects are bufferAlign, bufferSize,
+// and the outBufferHandle / outGinSignalStart / outGinCounterStart pointers.
+// Zero them so that walk does not store through an uninitialized pointer.
+static void ZeroDevResourceReq(ncclDevResourceRequirements_t* req) {
+  if (req != nullptr) *req = ncclDevResourceRequirements{};
+}
 extern "C" ncclResult_t ncclLsaBarrierCreateRequirement(ncclTeam_t, int, ncclLsaBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclGinBarrierCreateRequirement(ncclComm_t, ncclTeam_t, int, ncclGinBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCftBarrierHandle_t*,
-                                                        ncclDevResourceRequirements_t*) {
+                                                        ncclDevResourceRequirements_t* req) {
+  ZeroDevResourceReq(req);
   return ncclSuccess;
 }
 
@@ -507,20 +506,22 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
 // this binary, so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
-// Reached only once GIN is activated, which the GIN gate rejects for every
-// comm this binary builds.
-ncclResult_t ncclGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*,
-                                 uint32_t) {
+// The enqueue-rearch job path: collective_stubs.cc reads ncclParamEnqueueRearchEnable
+// through g_loadParam (default 0), so it is reached only when a test sets
+// ENQUEUE_REARCH_ENABLE. The default accepts the job without running or freeing it.
+static ncclResult_t DefaultMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*),
+                                           void (*)(void*), ncclComm_t) {
   return ncclSuccess;
 }
+std::function<ncclResult_t(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*), ncclComm_t)>
+    g_devrMgmtTaskEnqueue = DefaultMgmtTaskEnqueue;
+ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* task, ncclResult_t (*func)(struct ncclAsyncJob*),
+                                 void (*destructor)(void*), ncclComm_t comm) {
+  return g_devrMgmtTaskEnqueue(task, func, destructor, comm);
+}
+ASSERT_HOOK_MATCHES_PROD(g_devrMgmtTaskEnqueue, ncclMgmtTaskEnqueue);
 
-// The enqueue-rearch job path: collective_stubs.cc pins
-// ncclParamEnqueueRearchEnable to 0, so every call site takes the in-group task
-// branch instead and nothing here enqueues a job.
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
-                                 ncclComm_t) {
-  return ncclSuccess;
-}
+#undef ASSERT_HOOK_MATCHES_PROD
 
 // ---------------------------------------------------------------------------
 // Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
@@ -545,6 +546,8 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapAllGather                      = DefaultAllGather;
   g_devrBootstrapSend                           = DefaultBootstrapSend;
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
+  g_devrGinConnectOnce                          = DefaultGinConnectOnce;
+  g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
@@ -559,9 +562,8 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapBarrier                        = DefaultBootstrapBarrier;
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
-  g_devrTeamWorld                               = DefaultTeamWorld;
-  g_devrTeamCft                                 = DefaultTeamCft;
-  g_devrTeamCftMultimem                         = DefaultTeamCftMultimem;
+  g_devrMgmtTaskEnqueue                         = DefaultMgmtTaskEnqueue;
+  ResetNcclDeviceCoreFakes();
   g_devrComputeCftSize                          = DefaultComputeCftSize;
   g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
   g_devrNcclCommRegister                        = DefaultCommRegister;
@@ -570,6 +572,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrAllocAndPopulateSegmentWindows      = DefaultDevrAllocAndPopulateSegmentWindows;
   g_devrVerifySegmentLayouts                = DefaultVerifySegmentLayouts;
   g_devrBuildGinSegmentInfos                = DefaultBuildGinSegmentInfos;
+  g_devrCheckRegistrationSupport            = DefaultCheckRegistrationSupport;
 
   // Not a hook either, but 12 tests assign it directly to steer the
   // POSIX-FD-vs-shareable-handle split in symMemory{Export,ImportAndMap}

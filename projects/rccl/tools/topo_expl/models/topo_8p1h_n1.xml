@@ -3,7 +3,7 @@
  - See LICENSE.txt for license information
  -->
 <system version="2">
-  <cpu numaid="0" affinity="00000000,00000000,ffffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="0" affinity="00000000,00000000,ffffffff,ffffffff" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:19:00.0" class="0x060400" vendor="0x1000" device="0xc010" subsystem_vendor="0x1000" subsystem_device="0xa096" link_speed="16.0 GT/s PCIe" link_width="16">
       <pci busid="0000:25:00.0" class="0x060400" vendor="0x1000" device="0xc010" subsystem_vendor="0x1000" subsystem_device="0xa096" link_speed="16.0 GT/s PCIe" link_width="16">
         <pci busid="0000:27:00.0" class="0x060400" vendor="0x1022" device="0x14c7" subsystem_vendor="0x1022" subsystem_device="0x14c7" link_speed="16.0 GT/s PCIe" link_width="8">
@@ -57,7 +57,7 @@
       </pci>
     </pci>
   </cpu>
-  <cpu numaid="1" affinity="ffffffff,ffffffff,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="143" modelid="49">
+  <cpu numaid="1" affinity="ffffffff,ffffffff,00000000,00000000" arch="x86_64" vendor="AuthenticAMD" familyid="23" modelid="49">
     <pci busid="0000:9c:00.0" class="0x060400" vendor="0x1000" device="0xc010" subsystem_vendor="0x1000" subsystem_device="0xa096" link_speed="16.0 GT/s PCIe" link_width="16">
       <pci busid="0000:a8:00.0" class="0x060400" vendor="0x1000" device="0xc010" subsystem_vendor="0x1000" subsystem_device="0xa096" link_speed="16.0 GT/s PCIe" link_width="16">
         <pci busid="0000:aa:00.0" class="0x060400" vendor="0x1022" device="0x14c7" subsystem_vendor="0x1022" subsystem_device="0x14c7" link_speed="16.0 GT/s PCIe" link_width="8">

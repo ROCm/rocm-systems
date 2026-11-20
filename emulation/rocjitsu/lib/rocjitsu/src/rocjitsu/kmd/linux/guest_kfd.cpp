@@ -1177,7 +1177,7 @@ int GuestKfd::get_clock_counters_ioctl(void *arg) {
   if (args->gpu_id != guest_.gpu_id)
     return forward_ioctl(AMDKFD_IOC_GET_CLOCK_COUNTERS, arg);
 
-  return LinuxKfd::get_clock_counters_ioctl(arg);
+  return fill_get_clock_counters_ioctl(arg, guest_.clock_frequency_mhz());
 }
 
 int GuestKfd::acquire_vm_ioctl(void *arg) {
@@ -1534,7 +1534,9 @@ kfd_process_device_apertures GuestKfd::guest_apertures() const {
     guest_node_id = overlay_->guest_node_id();
   }
   const uint64_t ordinal = std::max<uint32_t>(1, guest_node_id);
-  const uint64_t aperture_stride = 0x10000000000ULL;
+  const auto ip = kmd::decode_gfx_target_version(guest_.gfx_target_version);
+  const uint64_t aperture_stride =
+      ip.major == 10 && (ip.minor == 1 || ip.minor == 3) ? 0 : 0x10000000000ULL;
   kfd_process_device_apertures apertures{};
   apertures.lds_base = 0x1000000000000ULL + ordinal * aperture_stride;
   apertures.lds_limit = apertures.lds_base + 0xFFFFFFFFULL;

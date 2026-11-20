@@ -3,14 +3,14 @@
 
 //! Linux KFD signal-event interoperability.
 
-use crate::device::Device;
 use crate::device::gpu::GpuDevice;
 use crate::device::gpu::queue::QueueErrorEvent;
-use crate::driver;
+use crate::device::{Device, DeviceResources};
+use crate::driver::{self, DeviceDriverState, Driver};
 use crate::memory::Allocation;
 use crate::memory::device::{DeviceAccess, MemoryKind};
 use crate::memory::host::host_page_size;
-use crate::memory::storage::Owned;
+use crate::memory::storage::{Owned, TryPush};
 use crate::session::DriverContextLifetime;
 use crate::{Error, ErrorKind};
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -25,10 +25,12 @@ struct ProcessPage {
     host_address: Option<usize>,
     mappings: EventPageMappings,
     confirmed: bool,
+    /// The offering service retired without proving that KFD installed it.
+    retired_unconfirmed: bool,
 }
 
 struct ProcessPageSlot {
-    process: u32,
+    process: crate::os::ProcessIdentity,
     page: Mutex<ProcessPage>,
 }
 
@@ -37,22 +39,32 @@ struct ProcessPageSlot {
 static PROCESS_PAGE_SLOT: AtomicPtr<ProcessPageSlot> = AtomicPtr::new(std::ptr::null_mut());
 
 #[allow(unsafe_code)]
-fn process_page_slot() -> &'static ProcessPageSlot {
-    let process = std::process::id();
+fn process_page_slot() -> Result<&'static ProcessPageSlot, Error> {
     loop {
         let current = PROCESS_PAGE_SLOT.load(Ordering::Acquire);
         if !current.is_null() {
             // SAFETY: A published slot is never freed or moved.
-            if unsafe { (*current).process == process } {
-                return unsafe { &*current };
+            match unsafe { (*current).process.matches_current_process() } {
+                Ok(true) => return Ok(unsafe { &*current }),
+                Ok(false) => {}
+                Err(source) => {
+                    return Err(crate::os::native_error(
+                        "KFD signal page process identity",
+                        source,
+                    ));
+                }
             }
         }
+        let process = crate::os::ProcessIdentity::capture().map_err(|source| {
+            crate::os::native_error("KFD signal page process identity", source)
+        })?;
         let candidate = Box::into_raw(Box::new(ProcessPageSlot {
             process,
             page: Mutex::new(ProcessPage {
                 host_address: None,
                 mappings: Vec::new(),
                 confirmed: false,
+                retired_unconfirmed: false,
             }),
         }));
         match PROCESS_PAGE_SLOT.compare_exchange(
@@ -61,7 +73,7 @@ fn process_page_slot() -> &'static ProcessPageSlot {
             Ordering::AcqRel,
             Ordering::Acquire,
         ) {
-            Ok(_) => return unsafe { &*candidate },
+            Ok(_) => return Ok(unsafe { &*candidate }),
             Err(_) => unsafe { drop(Box::from_raw(candidate)) },
         }
     }
@@ -84,8 +96,9 @@ impl ProcessSignalEventPageGuard {
     /// Whether a process-lifetime device could currently install or use a page.
     #[must_use]
     fn can_create_for(&self, endpoint_id: [u8; 16]) -> bool {
-        self.0.host_address.is_none()
-            || (self.0.confirmed && self.device_address(endpoint_id).is_some())
+        !self.0.retired_unconfirmed
+            && (self.0.host_address.is_none()
+                || (self.0.confirmed && self.device_address(endpoint_id).is_some()))
     }
 
     fn compatible_mappings(
@@ -93,6 +106,12 @@ impl ProcessSignalEventPageGuard {
         endpoints: impl IntoIterator<Item = [u8; 16]>,
         require_identity: bool,
     ) -> Result<Option<(usize, u64)>, Error> {
+        if self.0.retired_unconfirmed {
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "KFD signal page installation was never confirmed",
+            });
+        }
         let Some(host) = self.0.host_address else {
             return Ok(None);
         };
@@ -123,6 +142,12 @@ impl ProcessSignalEventPageGuard {
         host_address: usize,
         mappings: EventPageMappings,
     ) -> Result<(), Error> {
+        if self.0.retired_unconfirmed {
+            return Err(Error::Operation {
+                kind: ErrorKind::DriverContract,
+                detail: "retired KFD signal page cannot be offered again",
+            });
+        }
         if host_address == 0 || mappings.is_empty() {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -147,6 +172,14 @@ impl ProcessSignalEventPageGuard {
     fn confirm(&mut self) {
         self.0.confirmed = true;
     }
+
+    /// Prevents another frontend from assuming that an offered page was
+    /// installed after its last owner has retired.
+    fn retire_unconfirmed(&mut self) {
+        if !self.0.confirmed {
+            self.0.retired_unconfirmed = true;
+        }
+    }
 }
 
 /// Locks the process KFD page identity across an event creation transaction.
@@ -154,7 +187,7 @@ impl ProcessSignalEventPageGuard {
 /// # Errors
 /// Reports poisoned process state.
 fn lock_process_signal_event_page() -> Result<ProcessSignalEventPageGuard, Error> {
-    process_page_slot()
+    process_page_slot()?
         .page
         .lock()
         .map(ProcessSignalEventPageGuard)
@@ -341,7 +374,7 @@ pub struct SignalEventMailbox {
 /// the shared process-page identity; session services keep a private page.
 pub struct SignalEventService {
     lifetime: DriverContextLifetime,
-    process_id: u32,
+    process: crate::os::ProcessIdentity,
     page: Option<SignalEventPage>,
     confirmed: bool,
 }
@@ -349,24 +382,70 @@ pub struct SignalEventService {
 impl SignalEventService {
     /// Creates an inert service without allocating or installing a page.
     #[must_use]
-    pub fn new(lifetime: DriverContextLifetime) -> Self {
+    pub fn new(session: &crate::session::Session) -> Self {
         Self {
-            lifetime,
-            process_id: std::process::id(),
+            lifetime: session.driver_context_lifetime(),
+            process: session.process_identity(),
             page: None,
             confirmed: false,
         }
     }
 
+    /// Checks whether a session has external driver owners before this
+    /// service releases its internally retained signal page. A Busy result
+    /// leaves the page and event creation state unchanged.
+    ///
+    /// # Errors
+    /// Reports a foreign process, a page from another session, or a live
+    /// external owner of the session or one of its drivers.
+    pub fn preflight_session_destroy(
+        &self,
+        session: &mut crate::session::Session,
+    ) -> Result<(), Error> {
+        self.ensure_process()?;
+        session.preflight_destroy_allowing(
+            self.page.as_ref().and_then(|page| page.allocation.as_ref()),
+        )
+    }
+
     fn ensure_process(&self) -> Result<(), Error> {
-        if self.process_id == std::process::id() {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "KFD signal event service belongs to another process",
+        })
+    }
+
+    /// Install the one KFD page on every GPU this connection can discover.
+    /// A later frontend may activate a different GPU after the first page
+    /// offer, when KFD no longer permits its mapping set to grow.
+    fn event_page_peers(device: &Device) -> Result<Vec<Device>, Error> {
+        let (driver, _) = device.driver_state.linux_kfd()?;
+        let mut peers = Vec::new();
+        driver.enumerate(&mut |endpoint| {
+            if endpoint.gpu().is_none() || endpoint.id == device.endpoint().id {
+                return Ok(());
+            }
+            // A peer unavailable to this frontend must not prevent creation
+            // on the requested GPU. Its later activation will report the
+            // missing page mapping through compatible_mappings.
+            let Ok(state) = driver.activate(&endpoint) else {
+                return Ok(());
+            };
+            let driver_state = DeviceDriverState::LinuxKfd {
+                driver: driver.clone(),
+                state,
+            };
+            let Ok(resources) = DeviceResources::for_activated(&endpoint, &driver_state) else {
+                return Ok(());
+            };
+            peers.try_push(Device {
+                driver_state,
+                endpoint,
+                resources,
+            })?;
             Ok(())
-        } else {
-            Err(Error::Operation {
-                kind: ErrorKind::InvalidArgument,
-                detail: "KFD signal event service belongs to another process",
-            })
-        }
+        })?;
+        Ok(peers)
     }
 
     fn prepare_page(&mut self, device: &Device, peers: &[&Device]) -> Result<(), Error> {
@@ -424,8 +503,9 @@ impl SignalEventService {
         Ok((host, mappings))
     }
 
-    /// Creates an event for `device`. `peers` are every other GPU that must
-    /// access the first page; KFD cannot add them after that page is offered.
+    /// Creates an event for `device`. rocddi discovers every GPU for the
+    /// process KFD connection before the first page is offered, because KFD
+    /// cannot add mappings to an installed signal page.
     /// `addressing` specifies whether the frontend requires equal CPU and GPU
     /// addresses or can publish the distinct GPU mailbox address returned here.
     ///
@@ -435,7 +515,6 @@ impl SignalEventService {
     pub fn create(
         &mut self,
         device: &Device,
-        peers: &[&Device],
         addressing: SignalEventAddressing,
     ) -> Result<(SignalEvent, SignalEventMailbox), Error> {
         self.ensure_process()?;
@@ -448,20 +527,22 @@ impl SignalEventService {
         let existing = process
             .as_ref()
             .map(|guard| {
-                guard.compatible_mappings(
-                    std::iter::once(device.endpoint().id)
-                        .chain(peers.iter().map(|peer| peer.endpoint().id)),
-                    require_identity,
-                )
+                guard.compatible_mappings(std::iter::once(device.endpoint().id), require_identity)
             })
             .transpose()?
             .flatten();
+        let peer_devices = if existing.is_some() {
+            Vec::new()
+        } else {
+            Self::event_page_peers(device)?
+        };
+        let peers = peer_devices.iter().collect::<Vec<_>>();
         let (host, address, install, mappings) = if let Some((host, address)) = existing {
             (host, address, false, Vec::new())
         } else {
             if self.page.is_some() && !self.confirmed {
                 let usable = self.page.as_ref().is_some_and(|page| {
-                    Self::page_mappings(page, device, peers, require_identity).is_ok()
+                    Self::page_mappings(page, device, &peers, require_identity).is_ok()
                 });
                 if !usable && self.page.as_ref().is_some_and(|page| page.attempted) {
                     return Err(Error::Operation {
@@ -474,13 +555,13 @@ impl SignalEventService {
                 }
             }
             if self.page.is_none() {
-                self.prepare_page(device, peers)?;
+                self.prepare_page(device, &peers)?;
             }
             let page = self.page.as_ref().ok_or(Error::Operation {
                 kind: ErrorKind::Internal,
                 detail: "KFD signal page preparation lost its owner",
             })?;
-            let (host, mappings) = Self::page_mappings(page, device, peers, require_identity)?;
+            let (host, mappings) = Self::page_mappings(page, device, &peers, require_identity)?;
             let address = mappings[0].1;
             (host, address, !self.confirmed, mappings)
         };
@@ -551,9 +632,20 @@ impl SignalEventService {
     /// Retains the page for a retry if native transfer fails.
     pub fn release(&mut self) -> Result<bool, Error> {
         self.ensure_process()?;
-        let unresolved = self.page.as_ref().is_some_and(|page| page.attempted) && !self.confirmed;
+        let mut process = if self.lifetime == DriverContextLifetime::Process {
+            Some(lock_process_signal_event_page()?)
+        } else {
+            None
+        };
+        let unresolved = self.page.as_ref().is_some_and(|page| page.attempted)
+            && !process
+                .as_ref()
+                .map_or(self.confirmed, |page| page.0.confirmed);
         if let Some(page) = self.page.as_mut() {
             page.retain_for_process()?;
+        }
+        if unresolved && let Some(process) = process.as_mut() {
+            process.retire_unconfirmed();
         }
         self.page = None;
         Ok(unresolved)
@@ -636,11 +728,19 @@ mod tests {
         host_address: None,
         mappings: Vec::new(),
         confirmed: false,
+        retired_unconfirmed: false,
     });
     static TEST_COMPATIBLE_PAGE: Mutex<ProcessPage> = Mutex::new(ProcessPage {
         host_address: None,
         mappings: Vec::new(),
         confirmed: false,
+        retired_unconfirmed: false,
+    });
+    static TEST_RETIRED_PAGE: Mutex<ProcessPage> = Mutex::new(ProcessPage {
+        host_address: None,
+        mappings: Vec::new(),
+        confirmed: false,
+        retired_unconfirmed: false,
     });
 
     #[test]
@@ -668,6 +768,9 @@ mod tests {
         page.record_offer(0x1000, vec![(first, 0x1000), (second, 0x2000)])
             .unwrap();
         page.confirm();
+        // A second frontend may confirm an earlier owner's offered page.
+        page.retire_unconfirmed();
+        assert!(!page.0.retired_unconfirmed);
         assert_eq!(
             page.compatible_mappings([first], true).unwrap(),
             Some((0x1000, 0x1000))
@@ -678,6 +781,17 @@ mod tests {
         );
         assert!(page.compatible_mappings([second], true).is_err());
         assert!(page.compatible_mappings([first, late], true).is_err());
+    }
+
+    #[test]
+    fn unconfirmed_page_cannot_be_reused_after_its_owner_retires() {
+        let endpoint = [4; 16];
+        let mut page = ProcessSignalEventPageGuard(TEST_RETIRED_PAGE.lock().unwrap());
+        page.record_offer(0x1000, vec![(endpoint, 0x2000)]).unwrap();
+        page.retire_unconfirmed();
+        assert!(!page.can_create_for(endpoint));
+        assert!(page.compatible_mappings([endpoint], false).is_err());
+        assert!(page.record_offer(0x1000, vec![(endpoint, 0x2000)]).is_err());
     }
 
     #[test]

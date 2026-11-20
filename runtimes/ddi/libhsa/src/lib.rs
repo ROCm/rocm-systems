@@ -41,7 +41,6 @@ core::arch::global_asm!(include_str!(concat!(
 mod api_trace;
 mod callback_arg;
 mod ffi;
-mod finalizer;
 mod image_abi;
 mod image_gfx12;
 mod isa;

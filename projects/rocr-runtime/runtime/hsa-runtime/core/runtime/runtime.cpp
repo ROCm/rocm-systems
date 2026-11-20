@@ -44,6 +44,8 @@
 #include <cassert>
 #include <chrono>
 #include <thread>
+#include <condition_variable>
+#include <mutex>
 #include <cstring>
 #include <optional>
 #include <regex>
@@ -123,6 +125,7 @@ extern void _loader_debug_state();
 namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
+bool g_use_yielding_poll;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -990,6 +993,13 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal, hsa_signal_cond
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::WakeAsyncSignalMonitor() {
+  // Notify unconditionally, as SetAsyncSignalHandler() does, so a monitor about to park can't
+  // miss it. Like SetAsyncSignalHandler(), this assumes waiters are gone before teardown.
+  if (!asyncSignals_.empty())
+    hsa_signal_handle((*asyncSignals_)->control.wake)->StoreReleaseAndNotify(1);
+}
+
 hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents, hsa_handle_t handle,
                                  hsa_interop_map_flag_t flags, size_t size_hint, size_t* size,
                                  void** ptr, size_t* metadata_size, const void** metadata) {
@@ -1081,6 +1091,25 @@ hsa_status_t Runtime::InteropUnmap(void* ptr) {
     allocation_map_.erase(ptr);
   }
   return HSA_STATUS_SUCCESS;
+}
+
+void Runtime::MarkReservedAddressSvm(const void* ptr, size_t size) {
+  if (ptr == nullptr || size == 0) return;
+
+  const uint8_t* start = reinterpret_cast<const uint8_t*>(ptr);
+  const uint8_t* end = start + size;
+
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto it = reserved_address_map_.upper_bound(ptr);
+  if (it != reserved_address_map_.begin()) --it;
+
+  for (; it != reserved_address_map_.end(); ++it) {
+    const uint8_t* range_start = reinterpret_cast<const uint8_t*>(it->first);
+    const uint8_t* range_end = range_start + it->second.size;
+    if (range_end <= start) continue;
+    if (range_start >= end) break;
+    it->second.svm_attrib = true;
+  }
 }
 
 /* This should be called memory_lock_ held */
@@ -1190,9 +1219,17 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   /* This is not a mapped address. Check if it is a reserved address range */
   auto addressHandle = VMemoryFindReservedAddressHandle(ptr);
   if (addressHandle) {
-    info->type = HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
-    info->agentBaseAddress = NULL;
+    /*
+     * Reservations that have had hsa_amd_svm_attributes_set applied are backed
+     * by SVM system memory. Bare reservations have no backing.
+     */
+    info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
+                                           : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
+    // The driver query supplies an agent address when it recognizes the
+    // reservation. Until then the agent base stays null. Fill and copy treat a
+    // non-null agent base as a mapped allocation and require an owner.
+    info->agentBaseAddress = nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
@@ -1263,12 +1300,15 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
       /*
-       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
-       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
-       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
-       * and provide additional information from hsaKmtQueryPointerInfo.
+       * An unregistered reservation falls through to the driver query, including
+       * after hsa_amd_svm_attributes_set has changed its type to SVM. That is the
+       * query these NO_REGISTER addresses went through before. A registered
+       * reservation, bare or SVM, is fully described here.
        */
-      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+      const bool query_driver = !retInfo.registered &&
+          (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+           retInfo.type == HSA_EXT_POINTER_TYPE_SVM);
+      if (!query_driver) {
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
@@ -1303,11 +1343,11 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if (described) ptr_driver = driver;
     }
     if (ptr_driver == nullptr) {
-      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
-        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
-         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
-         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
-         * were previously filled with VMemoryPtrInfo.
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+          retInfo.type == HSA_EXT_POINTER_TYPE_SVM) {
+        /* NO_REGISTER reservation. The driver has no object for it, whether or
+         * not hsa_amd_svm_attributes_set has run. Keep the reservation record:
+         * RESERVED_ADDR until attributes are set, SVM afterwards.
          */
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
@@ -2056,6 +2096,111 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+namespace {
+// Nap ceiling (microseconds) for polling while interrupts are available: used by
+// the poll sentinel, and by AsyncEventsLoop when the sentinel thread cannot start.
+constexpr int kInterruptPollNapCeilingUs = 200;
+
+// Watches async signals that have no KFD event (IPC signals, DefaultSignals,
+// or interrupt signals created after the KFD events ran out) while the
+// async-events thread sleeps in the KFD wait on the interrupt-backed signals.
+// When one of them meets its condition it notifies the wake signal, the same
+// way SetAsyncSignalHandler() does, and the async-events thread then rescans
+// and runs the handler as usual. The entries are only read while armed; the
+// async-events thread disarms under the lock before it touches the list again.
+class PollSentinel {
+ public:
+  struct Entry {
+    hsa_signal_t signal;
+    hsa_signal_condition_t cond;
+    hsa_signal_value_t value;
+  };
+
+  explicit PollSentinel(hsa_signal_t wake) : wake_(wake) {}
+
+  ~PollSentinel() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      exit_ = true;
+    }
+    cv_.notify_one();
+    if (thread_.joinable()) thread_.join();
+  }
+
+  // False if the sentinel thread could not be started; the caller then polls.
+  bool Usable() const { return !failed_; }
+
+  bool Arm(std::vector<Entry>& entries) {
+    if (entries.empty()) return true;
+    if (!thread_.joinable()) {
+      try {
+        thread_ = std::thread([this] { Loop(); });
+      } catch (...) {
+        failed_ = true;
+        return false;
+      }
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      entries_.swap(entries);
+      armed_ = true;
+      ++generation_;
+    }
+    cv_.notify_one();
+    return true;
+  }
+
+  void Disarm() {
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      armed_ = false;
+    }
+    cv_.notify_one();
+  }
+
+ private:
+  void Loop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!exit_) {
+      cv_.wait(lock, [this] { return exit_ || armed_; });
+      // Each arming starts the nap at the floor again; the nap waits on the
+      // condition variable so Arm/Disarm cut it short.
+      uint64_t gen = generation_;
+      int nap_us = kPollNapFloorUs;
+      while (armed_ && !exit_) {
+        if (generation_ != gen) {
+          gen = generation_;
+          nap_us = kPollNapFloorUs;
+        }
+        // Held across the scan on purpose: after Disarm() returns, AsyncEventsLoop may
+        // Release() these signals, and Arm() swaps entries_ under the same lock.
+        for (const auto& e : entries_) {
+          if (CheckSignalCondition(hsa_signal_handle(e.signal)->LoadRelaxed(), e.cond, e.value)) {
+            armed_ = false;
+            hsa_signal_handle(wake_)->StoreReleaseAndNotify(1);
+            break;
+          }
+        }
+        if (!armed_) break;
+        cv_.wait_for(lock, std::chrono::microseconds(nap_us),
+                     [this, gen] { return exit_ || !armed_ || generation_ != gen; });
+        nap_us = NextPollNapUs(nap_us, kInterruptPollNapCeilingUs);
+      }
+    }
+  }
+
+  hsa_signal_t wake_;
+  std::mutex mutex_;
+  std::condition_variable cv_;
+  std::vector<Entry> entries_;
+  uint64_t generation_ = 0;
+  bool armed_ = false;
+  bool exit_ = false;
+  bool failed_ = false;
+  std::thread thread_;
+};
+}  // namespace
+
 void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   AsyncEventsInfo* eventsInfo = reinterpret_cast<AsyncEventsInfo*>(_eventsInfo);
 
@@ -2067,6 +2212,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   auto& event_age_map = eventsInfo->events.age_by_event_;
   uint32_t unique_evts = 0;
   auto hsa_signals = reinterpret_cast<hsa_signal_handle*>(&async_events_.signal_[0]);
+  // Signals of the current batch that have no KFD event.
+  std::vector<size_t> poll_only;
+  std::vector<PollSentinel::Entry> sentinel_entries;
+  PollSentinel sentinel(async_events_control_.wake);
 
   auto processEvent = [&](size_t index, hsa_signal_value_t value, bool wait_any) {
     // No error or timeout occured, process the handlers
@@ -2088,9 +2237,9 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   // Prepares a list of events for a wait inside KFD
   auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
-    // If any signal doesn't have an interrupt, then switch to polling
+    // A signal without a KFD event stays out of the KFD wait list; the caller
+    // collects it in poll_only.
     if (hsa_event == nullptr) {
-      unique_evts = 0;
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
@@ -2150,7 +2299,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       if (core::Runtime::runtime_singleton_->flag().wait_any()) {
         index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
                                      &async_events_.cond_[0], &async_events_.value_[0],
-                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false);
+                                     uint64_t(-1), HSA_WAIT_STATE_BLOCKED, value, false,
+                                     /*wake_async_monitor=*/false);
       } else {
         // Skip wake-up signal logic
         index = 1;
@@ -2184,6 +2334,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         }
         bool interrupt_wait = false;
         unique_evts = 0;
+        poll_only.clear();
 
         // Check remaining signals before sleeping.
         for (size_t i = index; i < async_events_.Size(); i++) {
@@ -2205,15 +2356,20 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // If the current signal isn't complete and polling is disabled, then prepare KFD wait for
           // an interrupt
           if (!finish && !polling) {
-            interrupt_wait = PrepareInterrupt(i);
-            // If the interrupt was disabled, then force polling
-            if (!interrupt_wait) {
-              polling = true;
-              finish = false;
-            }
+            if (!PrepareInterrupt(i)) poll_only.push_back(i);
           } else if (unique_evts > 0) {
             unique_evts = 0;
-            interrupt_wait = false;
+          }
+        }
+        // Wait in KFD on the interrupt-backed signals while the poll sentinel
+        // watches the others. If the sentinel thread could not be started, poll
+        // all of them instead.
+        if (!finish && !polling) {
+          if (unique_evts > 0 && (poll_only.empty() || sentinel.Usable())) {
+            interrupt_wait = true;
+          } else if (unique_evts > 0 || !poll_only.empty()) {
+            polling = true;
+            unique_evts = 0;
           }
         }
         // If nothing was complete and an interrupt wait was requested, then call KFD
@@ -2256,7 +2412,16 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
 
             if (!finish) {
-              WaitForInterrupt();
+              sentinel_entries.clear();
+              for (size_t p : poll_only)
+                sentinel_entries.push_back(
+                    {async_events_.signal_[p], async_events_.cond_[p], async_events_.value_[p]});
+              // If the sentinel cannot start, skip the KFD wait; the next pass
+              // sees Usable() == false and polls.
+              if (sentinel.Arm(sentinel_entries)) {
+                WaitForInterrupt();
+                sentinel.Disarm();
+              }
             }
 
             for (size_t e = 0; e < async_events_.Size(); e++) {
@@ -2265,10 +2430,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish && !g_use_interrupt_wait) {
-          // No interrupt-backed event is available for at least one pending
-          // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
-          // that is every signal, since it implements no KFD events at all.
+        } else if (polling && !finish) {
+          // No interrupt-backed event is available for the pending signals --
+          // on the WSL/dxg thunk that is every signal, since it implements no
+          // KFD events at all.
           // Without a sleep this loop monopolizes a CPU core re-scanning the
           // signal values for the whole lifetime of the async-events thread,
           // idle or not; the two async-events threads cost ~2 cores in every
@@ -2279,9 +2444,12 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
-          // single idle wait batch.
+          // single idle wait batch. With interrupts available this branch is only
+          // reached when the poll sentinel thread could not be started, and the
+          // nap is capped at kInterruptPollNapCeilingUs instead of spinning.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
+          poll_nap_us = NextPollNapUs(
+              poll_nap_us, g_use_interrupt_wait ? kInterruptPollNapCeilingUs : kPollNapCeilingUs);
         }
       }
     }
@@ -2779,6 +2947,7 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
+  g_use_yielding_poll = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2813,6 +2982,7 @@ hsa_status_t Runtime::Load() {
 
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
+  g_use_yielding_poll = flag_.enable_yielding_poll();
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -3641,6 +3811,8 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
 
+  MarkReservedAddressSvm(base, len);
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4022,9 +4194,12 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       return status;
     }
 
-    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for
-    // discard
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+    // Managed SVM is reserved with HSA_AMD_VMEM_ADDRESS_NO_REGISTER (registered == false).
+    // After hsa_amd_svm_attributes_set the same reservation is reported as
+    // HSA_EXT_POINTER_TYPE_SVM. Registered VMM reservations stay ineligible.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -4185,7 +4360,11 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
       debug_warning(false && "Retrieving SVM pointer information failed");
       return status;
     }
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered)
+    // Same eligibility as SvmBatchDiscard: unregistered reservations, including those
+    // reported as HSA_EXT_POINTER_TYPE_SVM after hsa_amd_svm_attributes_set.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM))
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -5105,8 +5284,14 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // Look-up any mapped handle that contains this address.
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  mappedHandleIt--;
+  if (reinterpret_cast<const uint8_t*>(va) >=
+      reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;

@@ -265,24 +265,39 @@ constexpr uint32_t calcBlockCount(size_t numThreads, size_t threadsPerBlock, siz
   return y;
 }
 
+// DDA block widths come in 64-thread units: one wave64 or two wave32 waves, so no block ends in a partial wave.
+constexpr uint32_t kDdaThreadGranule = 64;
+
+// Blocks under a grid cap: `capBlocks` when set and lower, else `blocks`.
+inline size_t ddaCapBlocks(size_t blocks, uint32_t capBlocks) {
+  return (capBlocks > 0 && capBlocks < blocks) ? capBlocks : blocks;
+}
+
+// Block width under a grid cap: `capThreads` rounded down to whole granules, floored at one; kernels stride the grid.
+inline uint32_t ddaCapThreads(uint32_t threads, uint32_t capThreads) {
+  if (capThreads == 0 || threads <= capThreads) {
+    return threads;
+  }
+  return std::max(capThreads / kDdaThreadGranule * kDdaThreadGranule, kDdaThreadGranule);
+}
+
 inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, size_t maxBlocks) {
-  constexpr uint32_t kThreadsPerWarp = 64;
   constexpr uint32_t kThreadsPerBlock = 512;
 
   const uint32_t elementsPerThread = 16 / typeSize; // we do 16 Byte load in kernel
 
-  const uint32_t elementsPerWarp = elementsPerThread * kThreadsPerWarp;
+  const uint32_t elementsPerWarp = elementsPerThread * kDdaThreadGranule;
 
   dim3 threads(0, 1, 1);
   dim3 blocks(0, 1, 1);
   if (ddaAlltoAllSingleBlockGrid(count, typeSize)) {
-    threads.x = divRoundUp(count, elementsPerWarp) * kThreadsPerWarp;
+    threads.x = divRoundUp(count, elementsPerWarp) * kDdaThreadGranule;
     blocks.x = 1;
   } else {
     auto warpsRequired = divRoundUp(count, elementsPerWarp);
     blocks.x = calcBlockCount(divRoundUp(count, elementsPerThread), kThreadsPerBlock, maxBlocks);
     auto warpsPerBlock = divRoundUp(warpsRequired, blocks.x);
-    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kThreadsPerWarp);
+    auto threadsPerBlock = std::min<uint32_t>(kThreadsPerBlock, warpsPerBlock * kDdaThreadGranule);
     threads.x = threadsPerBlock;
   }
 
@@ -297,11 +312,12 @@ inline std::pair<dim3, dim3> getGridAndBlockDims(size_t count, int typeSize, siz
 constexpr size_t kDdaLLMaxBytes = (size_t)(32) * 1024 * 1024;
 
 // Scratch is double buffered under a single epoch counter, so a bank is half of
-// it, floored to 16B. Every LL/LL128 tier that derives its slot stride from the
-// bank rather than a fixed constant puts bank 1 at the same byte offset, which
-// is what stops one tier landing on flag words another is still polling.
+// it, floored to 128B so LL128 lines in bank 1 stay 128B-aligned. Every LL/LL128
+// tier that derives its slot stride from the bank rather than a fixed constant
+// puts bank 1 at the same byte offset, which is what stops one tier landing on
+// flag words another is still polling.
 constexpr size_t ddaBankSize(size_t bytes) {
-  return (bytes / 2) / 16 * 16;
+  return (bytes / 2) / 128 * 128;
 }
 
 // Per-rank slot carved out of a bank, counted in whatever unit the protocol
@@ -317,6 +333,44 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   const size_t slotUnits = bankSize / div;
   return (slotUnits / align) * align;
 }
+
+// Grid of peer columns that stays within totalBlockCap: past the cap a column serves
+// several peers (DdaPeerColumns). Each column gets blocksWanted blocks, at most its
+// share of the cap and at least one.
+struct DdaPeerGrid {
+  unsigned cols;
+  unsigned blocksPerCol;
+};
+constexpr DdaPeerGrid ddaPeerGrid(int nPeers, size_t blocksWanted, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap < 1 ? 1 : totalBlockCap;
+  const size_t peers = nPeers < 1 ? 1 : (size_t)nPeers;
+  const size_t cols = peers < cap ? peers : cap;
+  const size_t share = cap / cols;
+  const size_t perCol = blocksWanted < share ? blocksWanted : share;
+  return {(unsigned)cols, perCol < 1 ? 1u : (unsigned)perCol};
+}
+
+// Peers this block's column serves: blockIdx.x, blockIdx.x + gridDim.x, ... below nPeers.
+// Issue every send before the first poll, or two columns can each wait on the other's send.
+struct DdaPeerColumns {
+  struct Iter {
+    int x;
+    int step;
+    __device__ int operator*() const { return x; }
+    __device__ Iter& operator++() {
+      x += step;
+      return *this;
+    }
+    __device__ bool operator!=(const Iter& end) const { return x < end.x; }
+  };
+  int nPeers;
+  __device__ Iter begin() const { return {(int)blockIdx.x, (int)gridDim.x}; }
+  __device__ Iter end() const { return {nPeers, 0}; }
+};
+
+// Peers staged in one pass. A runtime-sized array, or a runtime index into
+// one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLPeerBatch = 8;
 
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
@@ -398,6 +452,161 @@ __device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* sr
   return false;
 }
 
+// Lines one sweep of ddaLLWaitLineFlagsBatched polls at most: a 4- or 8-rank comm's peers fit one sweep.
+constexpr int kDdaLLRecvBatch = 8;
+
+// Sweep size for n lines known at compile time (0 < n <= kDdaLLRecvBatch), else kDdaLLRecvBatch.
+constexpr int ddaLLRecvBatch(int n) {
+  return n > 0 && n <= kDdaLLRecvBatch ? n : kDdaLLRecvBatch;
+}
+
+// Polled lines from which a waiting lane spins on one stale line between sweeps: with many loads per sweep the re-sweep
+// crowds the CU memory path its remote stores also use; with few the extra sweep costs more than it saves.
+constexpr int kDdaLLSpinOneMinLines = 5;
+
+// Payload bytes one LL packet carries; the send buffer is read one packet per thread.
+constexpr int kDdaLLPayloadBytes = 8;
+static_assert(sizeof(LLPacket16) == 2 * kDdaLLPayloadBytes, "an LL line is payload plus one flag per 4B word");
+
+// Bytes one global_prefetch pulls into L2: a 128B cache line.
+constexpr int kDdaLLPrefetchLineBytes = 128;
+
+// Consecutive threads whose packets share a prefetch line; one per group issues it, for any wave size.
+constexpr int kDdaLLPrefetchThreadsPerLine = kDdaLLPrefetchLineBytes / kDdaLLPayloadBytes;
+static_assert((kDdaLLPrefetchThreadsPerLine & (kDdaLLPrefetchThreadsPerLine - 1)) == 0, "thread group is a power of 2");
+
+// L2-prefetches send packets first + k * step (k < count, below limit) before the LL epoch barrier; gfx1250 only.
+__device__ __forceinline__ void ddaLLPrefetchSend(const void* sendbuff, size_t first, size_t step, int count,
+                                                  size_t limit) {
+#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && __has_builtin(__builtin_amdgcn_global_prefetch)
+  if (threadIdx.x % kDdaLLPrefetchThreadsPerLine != 0) {
+    return;
+  }
+  const char* base = reinterpret_cast<const char*>(sendbuff);
+#pragma unroll 1
+  for (int k = 0; k < count && first + (size_t)k * step < limit; ++k) {
+    const char* pkt = base + (first + (size_t)k * step) * kDdaLLPayloadBytes;
+    // th 1 also walks the page tables, so the first post-barrier read of the line does not.
+    __builtin_amdgcn_global_prefetch((const __attribute__((address_space(1))) void*)pkt, 0x11);
+  }
+#else
+  (void)sendbuff;
+  (void)first;
+  (void)step;
+  (void)count;
+  (void)limit;
+#endif
+}
+
+// Spins on the first stale line alone until both its flags land, so a waiting lane keeps one load in flight, not kN.
+// Returns false if aborted.
+template <int kN>
+__device__ __forceinline__ bool ddaLLSpinOneStale(const uint32_t* const (&line)[kN], const bool (&stale)[kN],
+                                                  uint32_t flag, DdaKernelParams params, int& spins) {
+  const uint32_t* wait = line[0];
+  bool found = false;
+#pragma unroll
+  for (int i = 0; i < kN; ++i) {
+    wait = stale[i] && !found ? line[i] : wait;
+    found |= stale[i];
+  }
+  if (!found) {
+    return true;
+  }
+  while (true) {
+    uint32_t d0, f0, d1, f1;
+    ddaLLLoadLineB128(wait, d0, f0, d1, f1);
+    if (f0 == flag && f1 == flag) {
+      return true;
+    }
+    if (params.abortSpinTick(spins)) {
+      return false;
+    }
+  }
+}
+
+// Waits until both flags of every line selected by mask (wave uniform) match. Each sweep issues kN loads before testing
+// any flag, so they share one wait (a load under a per-line branch would wait on its own); a slot outside mask reloads
+// the first selected line, so only selected lines are read. Sweeps repeat until every selected line is fresh, one abort
+// spin tick per sweep; with kDdaLLSpinOneMinLines or more selected lines a waiting lane spins on one stale line between
+// sweeps. A single selected line is polled alone: there is no other load to share its wait, and a sweep would issue kN
+// loads of it. d0/d1 of slots outside mask are overwritten. Returns false if aborted.
+template <int kN>
+__device__ __forceinline__ bool ddaLLWaitLineFlagsBatched(const uint32_t* const (&line)[kN], uint32_t mask,
+                                                          uint32_t flag, DdaKernelParams params, uint32_t (&d0)[kN],
+                                                          uint32_t (&d1)[kN]) {
+  static_assert(kN > 0 && kN <= 32, "one mask bit per line");
+  if (mask == 0) {
+    return true;
+  }
+  const uint32_t* first = line[0];
+#pragma unroll
+  for (int i = kN - 1; i >= 0; --i) {
+    first = ((mask >> i) & 1u) != 0 ? line[i] : first;
+  }
+  if (__builtin_popcount(mask) == 1) {
+    uint32_t w0, f0, w1, f1;
+    const auto* only = reinterpret_cast<const volatile LLPacket16*>(first);
+    const bool ok = ddaLLWaitLineFlags(only, flag, params, w0, f0, w1, f1);
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      d0[i] = w0;
+      d1[i] = w1;
+    }
+    return ok;
+  }
+  const uint32_t* src[kN];
+#pragma unroll
+  for (int i = 0; i < kN; ++i) {
+    src[i] = ((mask >> i) & 1u) != 0 ? line[i] : first;
+  }
+  const bool spinOne = __builtin_popcount(mask) >= kDdaLLSpinOneMinLines;
+  int spins = 0;
+  while (true) {
+    uint32_t f0[kN], f1[kN];
+#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+    asm volatile("" ::: "memory");
+    v4u got[kN];
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      got[i] = __builtin_amdgcn_global_load_b128((v4u_gptr)src[i], RCCL_SYSTEM_SYNCSCOPE);
+    }
+    // Keep every load above this point so the flag tests cannot sink one between them.
+    asm volatile("" ::: "memory");
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      d0[i] = got[i][0];
+      f0[i] = got[i][1];
+      d1[i] = got[i][2];
+      f1[i] = got[i][3];
+    }
+#else
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      ddaLLLoadLineB128(src[i], d0[i], f0[i], d1[i], f1[i]);
+    }
+    // Keep every load above this point so none sinks past the flag tests or out of the loop.
+    asm volatile("" ::: "memory");
+#endif
+    bool stale = false;
+    bool staleLine[kN];
+#pragma unroll
+    for (int i = 0; i < kN; ++i) {
+      staleLine[i] = ((mask >> i) & 1u) != 0 && ((f0[i] != flag) | (f1[i] != flag));
+      stale |= staleLine[i];
+    }
+    if (!stale) {
+      return true;
+    }
+    if (params.abortSpinTick(spins)) {
+      return false;
+    }
+    if (spinOne && !ddaLLSpinOneStale(src, staleLine, flag, params, spins)) {
+      return false;
+    }
+  }
+}
+
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
   uint32_t flag = epochDev[flatBlockId] + inc;
   if (flag == 0u) flag = 2u; // skip 0 sentinel; keep bank parity
@@ -416,6 +625,15 @@ __device__ __forceinline__ void ddaSetLLEpoch(uint32_t* __restrict__ epochDev, i
        e += total * (int)blockDim.x) {
     epochDev[e] = flag;
   }
+}
+
+// Copies `bytes` (a multiple of 16) from src to dst in 16-byte vectors, thread `gtid` of
+// `gstride` threads taking every gstride-th vector, so the whole grid shares the copy.
+__device__ __forceinline__ void ddaGridCopy16B(const void* src, void* dst, size_t bytes, size_t gtid, size_t gstride) {
+  v4u_gptr s4 = (v4u_gptr)src;
+  v4u_gptr d4 = (v4u_gptr)dst;
+  const size_t nVec = bytes >> 4;
+  for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
 }
 
 } // namespace dda::common

@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/sopk.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
 #include <memory>
 
@@ -402,6 +403,11 @@ SCbranchIForkSopk::SCbranchIForkSopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= BRANCH_STACK;
+  flags_ |= PREDICATED_DEF;
+  flags_ |= IGNORES_EXEC;
+  flags_ |= WRITES_EXEC;
 }
 
 namespace detail {
@@ -414,6 +420,16 @@ DecodeResult decodeSCbranchIForkSopk(const MachineInst *opcode,
   return std::make_unique<SCbranchIForkSopk>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchIForkSopk::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
+void SCbranchIForkSopk::implicit_defs(RegisterSet &defs) const {
+  Sopk::implicit_defs(defs);
+  defs.expand(RegisterRef{RegClass::SGPR, 0, 32});
+}
 
 SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
     : Sopk("s_getreg_b32", reinterpret_cast<const OpEncoding *>(inst),

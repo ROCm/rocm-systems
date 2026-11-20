@@ -117,9 +117,7 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
         size_t sample_size =
             (control_ptr[se_index].wptr & wptr_mask) * sqttbuilder->GetWritePtrBlk();
 
-        // Applies to the whole GFX11 family, including the gfx11.5x and gfx11.7x
-        // derived factories.
-        if(pm4_factory->IsGFX11())
+        if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
         {
             sample_size = sample_size - reinterpret_cast<uint64_t>(sample_ptr);
             sample_size &= (1ull << 29) - 1;
@@ -260,6 +258,9 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
                     if(trace_config.perfcounters.size() >= 8)
                         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
                     trace_config.perfcounters.push_back({p->counter_id, p->simd_mask});
+                    break;
+                case AQLPROFILE_ATT_PARAMETER_NAME_EXEC_MASK_TRACE:
+                    trace_config.texec = p->value != 0;
                     break;
                 default:
                     ERR_LOGGING("Bad trace parameter name ({})",

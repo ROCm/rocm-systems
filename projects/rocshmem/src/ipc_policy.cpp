@@ -38,7 +38,7 @@
 namespace rocshmem {
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                                     MPI_Comm thread_comm) {
+                                     MPI_Comm thread_comm, MPI_Comm *shmcomm_out) {
   MPI_Comm shmcomm;
   std::vector<int> ipc_ranks;
 
@@ -186,10 +186,15 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
       mpilib_ftable_.Group_free(&thread_grp);
     }
   }
+
+  if (shmcomm_out != nullptr) {
+    *shmcomm_out = shmcomm;
+  }
 }
 
 __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                                     TcpBootstrap *bootstr) {
+                                     TcpBootstrap *bootstr,
+                                     std::vector<int> *shm_ranks_out) {
   // Check if we should use pod-based detection (for VMM Fabric allocator)
   HIPAllocator *allocator = get_default_allocator();
   bool use_pod_detection = (allocator->get_type() == AllocatorTypeVMMFabric);
@@ -269,6 +274,9 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
   }
 
+  if (shm_ranks_out != nullptr) {
+    *shm_ranks_out = std::move(shm_ranks);
+  }
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
@@ -291,14 +299,20 @@ __host__ void IpcOnImpl::ipcHostStop() {
 
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        MPI_Comm thread_comm) {
-  IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
+  MPI_Comm shmcomm = MPI_COMM_NULL;
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm, &shmcomm);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, 1, MPI_INT, values, 1, MPI_INT, shmcomm);
+  });
 }
 
 __host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
                                        TcpBootstrap *bootstrap) {
-  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank);
+  std::vector<int> shm_ranks;
+  IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap, &shm_ranks);
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](int *values) {
+    bootstrap->groupAllGather(values, sizeof(int), shm_ranks);
+  });
 }
 
 __host__ void IpcSdmaImpl::ipcHostStop() {

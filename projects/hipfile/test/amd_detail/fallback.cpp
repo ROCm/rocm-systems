@@ -124,7 +124,7 @@ struct FallbackIo : public HipFileOpened {
     {
         EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
 
-        expect_buffer_registration(mhip, hipMemoryTypeDevice);
+        expect_buffer_registration(mhip, mcfg, hipMemoryTypeDevice);
         Context<DriverState>::get()->registerBuffer(buffer_data.data(), buffer_data.size(), 0);
         buffer = Context<DriverState>::get()->getRegisteredBuffer(buffer_data.data());
 
@@ -167,7 +167,7 @@ TEST_F(FallbackScoring, ScoreAcceptsIoTargetingDeviceMemory)
 TEST_F(FallbackScoring, ScoreRejectsIoTargetingUnsupportedMemoryType)
 {
     EXPECT_CALL(mcfg, fallback()).WillRepeatedly(Return(true));
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : set_difference(KnownHipMemoryTypes, SupportedFastpathMemoryTypes)) {
         EXPECT_CALL(*mbuffer, getType).WillOnce(Return(memoryType));
         ASSERT_EQ(Fallback().score(mfile, mbuffer, io_size, file_offset, buffer_offset), -1);
     }
@@ -197,7 +197,7 @@ struct FallbackParam : ::testing::TestWithParam<IoType> {
 
         EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
 
-        expect_buffer_registration(mhip, hipMemoryTypeDevice);
+        expect_buffer_registration(mhip, mcfg, hipMemoryTypeDevice);
         void *buf{reinterpret_cast<void *>(0xFEFEFEFE)};
         Context<DriverState>::get()->registerBuffer(buf, 4096, 0);
         buffer = Context<DriverState>::get()->getRegisteredBuffer(buf);
@@ -264,7 +264,7 @@ TEST_P(FallbackParam, FallbackIoThrowsOnNegativeFileOffset)
 
 TEST_P(FallbackParam, FallbackIoTruncatesSizeToMAX_RW_COUNT)
 {
-    expect_buffer_registration(mhip, hipMemoryTypeDevice);
+    expect_buffer_registration(mhip, mcfg, hipMemoryTypeDevice);
     auto buf{reinterpret_cast<void *>(0xABABABAB)};
     Context<DriverState>::get()->registerBuffer(buf, hipFile::getMaxRwCount() + 1, 0);
     auto big_buffer{Context<DriverState>::get()->getRegisteredBuffer(buf)};
@@ -839,6 +839,8 @@ struct FallbackDeviceSwitch : public FallbackIo {
         HipMemAddressRange range{reinterpret_cast<void *>(0x1), UINT64_MAX - 1};
         EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Return(attrs));
         EXPECT_CALL(mhip, hipMemGetAddressRange).WillOnce(testing::Return(range));
+        EXPECT_CALL(mcfg, host()).WillOnce(testing::Return(false));
+
         Context<DriverState>::get()->registerBuffer(other_device_buffer_data.data(),
                                                     other_device_buffer_data.size(), 0);
         other_device_buffer =

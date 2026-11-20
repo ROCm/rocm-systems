@@ -1905,34 +1905,6 @@ rsmi_status_t rsmi_driver_status(rsmi_driver_state_t* state);
 rsmi_status_t rsmi_num_monitor_devices(uint32_t* num_devices);
 
 /**
- *  @brief Get the number of brcm nic devices that have monitor information.
- *
- *  @details The number of devices brcm nic which have monitors is returned. Monitors
- *  are referenced by the index which can be between 0 and @p num_devices - 1.
- *
- *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
- *  successful call, the value num_devices will contain the number of brcm nic monitor
- *  devices.
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- */
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t* num_devices);
-
-/**
- *  @brief Get the number of brcm switch devices that have monitor information.
- *
- *  @details The number of devices brcm switch which have monitors is returned. Monitors
- *  are referenced by the index which can be between 0 and @p num_devices - 1.
- *
- *  @param[inout] num_devices Caller provided pointer to uint32_t. Upon
- *  successful call, the value num_devices will contain the number of brcm switch monitor
- *  devices.
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- */
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t* num_devices);
-
-/**
  *  @brief Get the device id associated with the device with provided device
  *  index.
  *
@@ -2572,8 +2544,6 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t*
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
 rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid);
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid);
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid);
 
 /**
  *  @brief Get the NUMA node associated with a device
@@ -3267,6 +3237,10 @@ rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP
  *  @details Same two-call sizing convention as rsmi_dev_ampp_profiles_get:
  *  if @p fields is nullptr, only *num_fields is filled in.
  *
+ *  A "node_"-prefixed field is node-wide rather than per-GPU, and is only
+ *  returned on the primary GPU of the node (xgmi_physical_id == 0); it is
+ *  silently omitted on any other GPU.
+ *
  *  @param[in] dv_ind a device index
  *  @param[in] profile_name name of the profile (e.g. "profile_2")
  *  @param[inout] num_fields capacity of @p fields on input, count on output
@@ -3302,6 +3276,11 @@ rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profil
 
 /**
  *  @brief Stage/commit field values into a writable custom profile slot.
+ *
+ *  @details A "node_"-prefixed field is node-wide rather than per-GPU, and
+ *  can only be staged/committed from the primary GPU of the node
+ *  (xgmi_physical_id == 0); on any other GPU, @p fields containing such a
+ *  name is rejected with ::RSMI_STATUS_INVALID_ARGS before any sysfs write.
  *
  *  @param[in] dv_ind a device index
  *  @param[in] profile_name name of the profile (e.g. "profile_5")

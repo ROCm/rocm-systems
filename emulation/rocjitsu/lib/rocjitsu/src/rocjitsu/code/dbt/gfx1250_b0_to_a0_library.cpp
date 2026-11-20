@@ -10,8 +10,6 @@
 
 #include <cstdlib>
 #include <cstring>
-#include <exception>
-#include <new>
 #include <string>
 #include <vector>
 
@@ -23,7 +21,6 @@ constexpr char kKindApiInvalidArgument[] = "api-invalid-argument";
 constexpr char kKindInputInvalidCodeObject[] = "input-invalid-code-object";
 constexpr char kKindResultNotDispatchable[] = "result-not-dispatchable";
 constexpr char kKindOutputAllocationFailed[] = "output-allocation-failed";
-constexpr char kKindTranslationOutOfMemory[] = "translation-out-of-memory";
 constexpr char kKindTranslationException[] = "translation-exception";
 constexpr char kKindTranslatorUnsupportedGuestArch[] = "translator-unsupported-guest-arch";
 constexpr char kKindTranslatorKernelDescriptor[] = "translator-kernel-descriptor";
@@ -68,6 +65,8 @@ const char *diagnostic_kind_name(rocjitsu::DiagnosticKind kind) noexcept {
     return kKindTranslatorKernelSkipped;
   case rocjitsu::DiagnosticKind::ResidualRewrite:
     return kKindTranslatorResidualRewrite;
+  case rocjitsu::DiagnosticKind::InternalError:
+    return kKindTranslationException;
   }
   return "unknown";
 }
@@ -147,9 +146,9 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
 
-  info->source_code_object_id = rocjitsu::stable_code_object_id(source_elf, source_size);
+  return [&]() noexcept -> rj_status_t {
+    info->source_code_object_id = rocjitsu::stable_code_object_id(source_elf, source_size);
 
-  try {
     const auto *source_bytes = static_cast<const uint8_t *>(source_elf);
     rocjitsu::AmdGpuCodeObject source(source_bytes, source_size);
     if (!source.is_valid() || source.target_id() != ROCJITSU_CODE_TARGET_GFX1250) {
@@ -175,17 +174,14 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     // see, and it never reaches the caller if reporting is conditional on the
     // object being undispatchable.
     rocjitsu::emit_gfx1250_b0_to_a0_diagnostics(diagnostic_callback, user_data, result.diagnostics);
-    // A translation that ran to completion and produced nothing dispatchable is a
-    // statement about the input, not about this run: repeating it reaches the same
-    // conclusion. Reporting it as such is what lets a caller distinguish it from
-    // the environmental failures below and cache the verdict rather than
-    // rediscovering it. ROCJITSU_STATUS_ERROR is left to mean the translator threw,
-    // which carries no such promise.
-    if (result.elf_bytes.empty() || !result.dispatchable()) {
+    // Internal failures describe this translation attempt; rejected input can be cached.
+    const auto status = rocjitsu::gfx1250_b0_to_a0_translation_status(
+        result.diagnostics, !result.elf_bytes.empty(), result.dispatchable());
+    if (status != ROCJITSU_STATUS_SUCCESS) {
       if (result.diagnostics.empty())
         emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindResultNotDispatchable,
                         "translation produced no dispatchable code object");
-      return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+      return status;
     }
 
     auto *output = static_cast<uint8_t *>(std::malloc(result.elf_bytes.size()));
@@ -199,19 +195,7 @@ rj_gfx1250_b0_to_a0_translate(const void *source_elf, size_t source_size, uint8_
     *translated_elf = output;
     *translated_size = result.elf_bytes.size();
     return ROCJITSU_STATUS_SUCCESS;
-  } catch (const std::bad_alloc &) {
-    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindTranslationOutOfMemory,
-                    "translation ran out of memory");
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (const std::exception &error) {
-    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindTranslationException,
-                    error.what());
-    return ROCJITSU_STATUS_ERROR;
-  } catch (...) {
-    emit_diagnostic(diagnostic_callback, user_data, kSeverityError, kKindTranslationException,
-                    "translation threw an unknown exception");
-    return ROCJITSU_STATUS_ERROR;
-  }
+  }();
 }
 
 void rj_gfx1250_b0_to_a0_free(void *translated_elf) { std::free(translated_elf); }

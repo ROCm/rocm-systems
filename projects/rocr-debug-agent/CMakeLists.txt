@@ -64,7 +64,14 @@ option(ENABLE_TESTS "Enable building Debug Agent tests" ON)
 add_library(rocm-debug-agent SHARED)
 target_sources(
     rocm-debug-agent
-    PRIVATE src/code_object.cpp src/debug_agent.cpp src/logging.cpp
+    PRIVATE
+        src/agent_config.cpp
+        src/agent_dbgapi_logging.cpp
+        src/agent_dbgapi_utils.cpp
+        src/agent_utils.cpp
+        src/code_object.cpp
+        src/debug_agent.cpp
+        src/logging.cpp
 )
 
 set_target_properties(
@@ -162,11 +169,17 @@ find_package(
 
 find_package(Threads REQUIRED)
 
+# The HSA headers describe the API table OnLoad receives from ROCr. The agent does not link the
+# runtime: it works with any runtime that registers its r_debug with the driver (ROCr, CLR/CRUX).
+target_include_directories(
+    rocm-debug-agent
+    PRIVATE $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES>
+)
+
 target_link_libraries(
     rocm-debug-agent
     PRIVATE
         amd-dbgapi
-        hsa-runtime64::hsa-runtime64
         elf::elf
         libdw::libdw
         Threads::Threads

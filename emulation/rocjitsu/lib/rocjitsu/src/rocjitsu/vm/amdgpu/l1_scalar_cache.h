@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_access.h"
 #include "simdojo/components/cache.h"
 
 #include <cstdint>
@@ -57,11 +57,12 @@ public:
   /// restrictions; CC/UC loads bypass resident K$ data and refetch through L2.
   /// Private RAM batching must be enabled only for unobserved functional requests.
   VmAccessOutcome load(uint64_t addr, uint32_t num_dwords, uint32_t *dst, uint32_t vmid = 0,
-                       bool allow_private_batch = false, Mtype instruction_mtype = Mtype::RW);
+                       bool allow_private_batch = false, Mtype instruction_mtype = Mtype::RW,
+                       bool force_l1_bypass = false);
 
   /// @brief Scalar load: read num_bytes contiguous bytes from addr.
   VmAccessOutcome load_bytes(uint64_t addr, uint32_t num_bytes, uint8_t *dst, uint32_t vmid = 0,
-                             Mtype instruction_mtype = Mtype::RW);
+                             Mtype instruction_mtype = Mtype::RW, bool force_l1_bypass = false);
 
   /// @brief Scalar store: write num_dwords contiguous dwords to addr.
   ///

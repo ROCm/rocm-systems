@@ -73,6 +73,7 @@ private:
 class Gfx1251SimulatorInstructionTest : public testing::TestWithParam<Gfx1251E2eCase> {};
 
 TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutput) {
+  util::StringDiagnostic admission_diagnostic;
   using namespace rocjitsu::amdhsa;
 
   const Gfx1251E2eCase &test_case = GetParam();
@@ -172,8 +173,10 @@ TEST_P(Gfx1251SimulatorInstructionTest, DispatchesCodeObjectAndVerifiesExactOutp
   soc->set_plugin_group(std::move(plugin_group));
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)
@@ -273,6 +276,7 @@ INSTANTIATE_TEST_SUITE_P(AllNineInstructions, Gfx1251SimulatorInstructionTest,
                          });
 
 TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
+  util::StringDiagnostic admission_diagnostic;
   using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kCodeObjectBase = 0x100000;
@@ -350,8 +354,10 @@ TEST(Gfx1251SimulatorTest, DispatchesTargetSpecificSetregSemantics) {
   ASSERT_NE(memory, nullptr);
   simdojo::SimulationEngine engine(loaded.engine_config);
   engine.topology().set_root(loaded.take_root());
-  loaded.wire_links(engine.topology());
-  engine.create();
+  ASSERT_TRUE(loaded.wire_links(engine.topology(), admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
+  ASSERT_TRUE(engine.create(admission_diagnostic.emitter()).succeeded())
+      << admission_diagnostic.message();
 
   code_object.load_to_memory(memory, kCodeObjectBase);
   for (uint32_t lane = 0; lane < kWaveSize; ++lane)

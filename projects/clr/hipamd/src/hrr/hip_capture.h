@@ -34,7 +34,7 @@ struct Hash128 {
 // ---------------------------------------------------------------------------
 
 // Check if capture is enabled (HIP_HRR_CAPTURE_OUTPUT env var set and not empty or blank,
-// and the process not started in secure-execution mode)
+// the process not started in secure-execution mode, and the user's consent given)
 bool hip_capture_enabled();
 
 // Return the output directory from the env var

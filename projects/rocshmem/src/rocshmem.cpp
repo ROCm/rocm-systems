@@ -706,6 +706,14 @@ __host__ void rocshmem_query_thread(int *provided) {
   *provided = ROCSHMEM_THREAD_MULTIPLE;
 }
 
+__host__ size_t rocshmem_query_tdm_lds_bytes() {
+#if defined(USE_TDM)
+  return tdm::lds_bytes_for_tile(backend->tdm_resolved_tile_bytes);
+#else
+  return 0;
+#endif
+}
+
 __host__ void rocshmem_global_exit(int status) {
   VERIFY_BACKEND();
   backend->global_exit(status);
@@ -1358,6 +1366,18 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
                                                int pe, hipStream_t stream) {
   RocshmemGetFunctionTable()->putmem_signal_on_stream_fn(dest, source, nelems, sig_addr, signal, sig_op,
                                 pe, stream);
+}
+
+__host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  RocshmemGetFunctionTable()->signal_add_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
+}
+
+__host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                            int pe, hipStream_t stream) {
+  RocshmemGetFunctionTable()->signal_set_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
 }
 
 __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,

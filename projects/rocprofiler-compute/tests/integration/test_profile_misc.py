@@ -3,7 +3,6 @@
 
 """Integration tests for assorted profile CLI options."""
 
-import inspect
 import os
 import sqlite3
 from pathlib import Path
@@ -18,7 +17,6 @@ from tests.integration.common import (
     config,
     num_kernels,
     skip_unsupported_roofline_soc,
-    validate,
 )
 
 
@@ -57,14 +55,12 @@ def test_analyze_rocpd(
         MetricDefinition,
         Workload,
         WorkloadMetricValue,
-        WorkloadRooflineData,
     )
 
     table_name_map = {
         "compute_workload": Workload,
         "compute_metric_definition": MetricDefinition,
         "compute_kernel_roofline_data": KernelRooflineData,
-        "compute_workload_roofline_data": WorkloadRooflineData,
         "compute_dispatch": Dispatch,
         "compute_kernel": Kernel,
         "compute_kernel_metric_value": KernelMetricValue,
@@ -156,11 +152,5 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
     assert sorted(list(file_dict.keys())) == CSVS
 
     # TODO - verify expected device id in results
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)

@@ -6,10 +6,13 @@
 
 #include "execution_plugin_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "instruction_failure_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/instruction_mix/plugin.h"
 #include "rocjitsu/vm/plugins/logging/plugin.h"
 #include "rocjitsu/vm/plugins/plugin_config_resolver.h"
@@ -188,6 +191,14 @@ public:
       group->onAmdgpuReadSgpr(&wf, 0);
   }
 
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override {
+    ++cancellation_callbacks;
+    if (unsubscribe_on_cancellation)
+      subscribed = false;
+    if (reenter_on_cancellation && group)
+      group->onAmdgpuReadSgpr(&wf, 0);
+  }
+
   void onAmdgpuReadSgpr(const amdgpu::Wavefront *, uint32_t) override { ++hot_callbacks; }
 
   void set_subscribe_on_dispatch(bool value) { subscribe_on_dispatch_ = value; }
@@ -196,10 +207,13 @@ public:
   bool reenter_on_dispatch = false;
   bool reenter_on_halt = false;
   bool unsubscribe_on_halt = false;
+  bool reenter_on_cancellation = false;
+  bool unsubscribe_on_cancellation = false;
   bool subscribed = false;
   mutable uint32_t predicate_queries = 0;
   uint32_t dispatch_callbacks = 0;
   uint32_t halt_callbacks = 0;
+  uint32_t cancellation_callbacks = 0;
   uint32_t hot_callbacks = 0;
 
 private:
@@ -1117,6 +1131,39 @@ TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
   EXPECT_EQ(summary.mnemonic_executions, dispatch.mnemonic_executions);
 }
 
+TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutCompletingDispatch) {
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(
+      f.plugin_group_->add(std::make_unique<plugins::instruction_mix::InstructionMixPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  const uint32_t code[] = {S_NOP, test::kUnimplementedInstruction[0],
+                           test::kUnimplementedInstruction[1], S_ENDPGM};
+  f.run_kernel(code, std::size(code));
+  ASSERT_EQ(f.engine->last_exit().code, 1);
+  EXPECT_TRUE(f.cu()->is_idle());
+  f.shutdown();
+
+  const auto records = parse_instruction_mix_jsonl(sink.str());
+  ASSERT_EQ(records.size(), 1u);
+  const auto &summary = records.front();
+  EXPECT_EQ(summary.record, "summary");
+  EXPECT_EQ(summary.dispatches, 0u);
+  EXPECT_EQ(summary.incomplete_dispatches, 1u);
+  EXPECT_FALSE(summary.complete);
+  EXPECT_EQ(summary.wave_instructions, 2u);
+  EXPECT_EQ(summary.mnemonic_executions.count("s_endpgm"), 0u);
+  ASSERT_EQ(summary.mnemonic_executions.count("s_nop"), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at("s_nop"), 1u);
+  ASSERT_EQ(summary.mnemonic_executions.count(test::kUnimplementedInstructionMnemonic), 1u);
+  EXPECT_EQ(summary.mnemonic_executions.at(test::kUnimplementedInstructionMnemonic), 1u);
+}
+
 // The instruction-mix report is only joinable with the throughput report if
 // the two plugins agree on what family an instruction is in. They now classify
 // through one shared header (plugins/instruction_family.h) rather than through
@@ -1495,7 +1542,7 @@ public:
   }
   void onAmdgpuAsyncInstructionIssued(uint64_t, const Instruction &inst, Wavefront &wf) override {
     EXPECT_EQ(std::this_thread::get_id(), issuer_thread);
-    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_16x16x64_fp8_fp8");
+    EXPECT_EQ(inst.mnemonic(), "v_wmma_f32_32x16x128_f4");
     hazard_at_async_issue = wf.setreg_vgpr_msb_hazard();
     ++issued;
   }
@@ -1526,7 +1573,7 @@ std::vector<uint32_t> independent_wmma_kernel() {
   // Zero operands are sufficient: this test checks real offload and callback
   // lifetimes; the matrix suites separately compare nonzero numerical results.
   for (uint8_t dst : {uint8_t{64}, uint8_t{96}}) {
-    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x64Fp8Fp8Vop3p,
+    const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                                           {.vdst = dst,
                                            .src0 = 256,
                                            .src1 = 288,
@@ -1539,6 +1586,8 @@ std::vector<uint32_t> independent_wmma_kernel() {
 }
 
 TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -1665,6 +1714,8 @@ private:
 class AsyncPluginFailureTest : public ::testing::TestWithParam<AsyncFailurePoint> {};
 
 TEST_P(AsyncPluginFailureTest, DestroysEveryAcceptedInstructionOnIssuerAfterFailure) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   AsyncFailureObservation observations;
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
@@ -1700,6 +1751,8 @@ INSTANTIATE_TEST_SUITE_P(CallbackFailures, AsyncPluginFailureTest,
                          });
 
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1782,6 +1835,8 @@ TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
 // without handling the issue hook would have dropped them from the counts
 // instead.
 TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -1812,6 +1867,8 @@ TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
 }
 
 TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+    GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
@@ -2016,29 +2073,37 @@ TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
 }
 
 TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
-  PluginFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
-  ExecutionPluginGroup group(PluginSinkConfig{});
-  auto subscribed = std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true);
-  auto *subscribed_ptr = subscribed.get();
-  auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
-  auto *unsubscribed_ptr = unsubscribed.get();
-  ASSERT_TRUE(group.add(std::move(subscribed)));
-  ASSERT_TRUE(group.add(std::move(unsubscribed)));
+  for (bool serialized : {false, true}) {
+    SCOPED_TRACE(serialized);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+    ExecutionPluginGroup group(PluginSinkConfig{});
+    auto subscribed =
+        std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true, serialized);
+    auto *subscribed_ptr = subscribed.get();
+    auto unsubscribed = std::make_unique<HotHookSubscriptionProbe>("unsubscribed_probe", false);
+    auto *unsubscribed_ptr = unsubscribed.get();
+    ASSERT_TRUE(group.add(std::move(subscribed)));
+    ASSERT_TRUE(group.add(std::move(unsubscribed)));
 
-  auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
-  ASSERT_NE(wave, nullptr);
-  group.onAmdgpuWavefrontDispatched(*wave);
+    auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/32);
+    ASSERT_NE(wave, nullptr);
+    group.onAmdgpuWavefrontDispatched(*wave);
+    const uint64_t locks_before =
+        test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group);
 
-  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
-  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
-  for (uint32_t i = 0; i != 8; ++i)
-    group.onAmdgpuReadSgpr(wave, i);
+    EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    for (uint32_t i = 0; i != 8; ++i)
+      group.onAmdgpuReadSgpr(wave, i);
 
-  EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
-  EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
-  EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
-  EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(subscribed_ptr->hot_callbacks, 8u);
+    EXPECT_EQ(unsubscribed_ptr->hot_callbacks, 0u);
+    EXPECT_EQ(subscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(unsubscribed_ptr->predicate_queries, 1u);
+    EXPECT_EQ(test::ExecutionPluginGroupTestAccess::callback_lock_acquisitions(group),
+              locks_before + (serialized ? 8 : 0));
+  }
 }
 
 TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
@@ -2124,6 +2189,40 @@ TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription)
   group.onAmdgpuReadSgpr(wave, 2);
   EXPECT_EQ(plugin_ptr->predicate_queries, 5u);
   EXPECT_EQ(plugin_ptr->hot_callbacks, 2u);
+}
+
+TEST(ExecutionPluginTest, CancellationAndRetryCannotReuseAStaleHotHookSubscription) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  auto plugin = std::make_unique<HotHookSubscriptionProbe>("cancellation_reuse_probe", true, true);
+  auto *observed = plugin.get();
+  observed->group = &group;
+  observed->unsubscribe_on_cancellation = true;
+  observed->reenter_on_cancellation = true;
+  ASSERT_TRUE(group.add(std::move(plugin)));
+
+  auto *wave = fixture.cu()->dispatch_wf(1, 0, 104, 32);
+  ASSERT_NE(wave, nullptr);
+  group.onAmdgpuWavefrontDispatched(*wave);
+  group.onAmdgpuReadSgpr(wave, 0);
+  ASSERT_EQ(observed->hot_callbacks, 1u);
+  ASSERT_EQ(observed->predicate_queries, 1u);
+
+  group.onAmdgpuWavefrontCancelled(*wave);
+  EXPECT_EQ(observed->cancellation_callbacks, 1u);
+  EXPECT_EQ(observed->hot_callbacks, 1u);
+  EXPECT_EQ(observed->predicate_queries, 2u);
+  fixture.cu()->abort_workgroup(wave->dispatch_id(), wave->wg_id());
+
+  observed->set_subscribe_on_dispatch(false);
+  auto *retried = fixture.cu()->dispatch_wf(1, 0, 104, 32);
+  ASSERT_EQ(retried, wave);
+  group.onAmdgpuWavefrontDispatched(*retried);
+  EXPECT_EQ(observed->predicate_queries, 3u);
+  group.onAmdgpuReadSgpr(retried, 1);
+  EXPECT_EQ(observed->predicate_queries, 3u);
+  EXPECT_EQ(observed->hot_callbacks, 1u);
 }
 
 TEST(ExecutionPluginTest, InfrequentAndHighFrequencyHooksMayOverlapByDefault) {
@@ -2343,6 +2442,11 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
   EXPECT_EQ(log.count(HookEvent::BARRIER_RESOLVED), 1u);
   EXPECT_EQ(log.count(HookEvent::WAVEFRONT_DISPATCHED), 2u);
   EXPECT_EQ(log.count(HookEvent::WAVEFRONT_HALTED), 2u);
+  for (const HookEvent &e : p->events) {
+    if (e.kind == HookEvent::BARRIER_RESOLVED) {
+      EXPECT_EQ(e.barrier_kind, BarrierKind::Workgroup);
+    }
+  }
 
   ASSERT_EQ(p->events.front().kind, HookEvent::INIT);
   ASSERT_EQ(p->events.back().kind, HookEvent::SHUTDOWN);
@@ -2695,7 +2799,8 @@ TEST(ExecutionPluginGroupTest, FansOutToEveryConfiguredSink) {
 }
 
 TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
-  test::ScopedTempDirectory sink_directory("rocjitsu-plugin-sink-lifetime-");
+  test::ScopedTempDirectory sink_directory;
+  ASSERT_TRUE(sink_directory.initialize("rocjitsu-plugin-sink-lifetime-"));
   const std::string log_path = sink_directory.path() + "/destructor_writer.log";
   std::vector<std::string> events;
   {

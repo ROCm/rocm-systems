@@ -14,9 +14,9 @@ rj_add_object_library(rocjitsu_ip_discovery ${RJ_IP_DISCOVERY_SOURCES})
 
 set(RJ_PCI_SOURCES
     register_symbols.cpp
+    gpu_pci_device_spec.cpp
     bar_access_trace.cpp
     scratch_pci_device.cpp
-    gpu_pci_device_spec.cpp
     graphics_block_model.cpp
     register_aperture.cpp
     ip_block_model.cpp

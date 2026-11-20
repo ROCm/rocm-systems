@@ -20,7 +20,9 @@
 /// The ExecutionPluginGroup owns the sink configuration. When a plugin is
 /// added to a group via add(), the group constructs a sink for that plugin
 /// (combining shared sinks like stderr with per-plugin file sinks) and
-/// assigns it. Plugins access their sink via sink().write("message").
+/// assigns it. Loader-created groups defer opening files until onInit(), after
+/// the outgoing group has shut down and been destroyed. File-only candidates
+/// discard output until then. Plugins access their sink via sink().write("message").
 ///
 /// If a plugin is used without a group (unusual), it falls back to a
 /// static StderrSink so output is never silently lost.

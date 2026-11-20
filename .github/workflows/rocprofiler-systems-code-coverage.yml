@@ -156,13 +156,14 @@ jobs:
 
     # git checkout updates the gitlink but leaves the submodule work tree at
     # whatever the baseline build checked out, so sync it explicitly. Otherwise
-    # the PR is measured against the base branch's Dyninst.
+    # the PR is measured against the base branch's Dyninst/timemory.
     - name: Checkout PR Branch
       timeout-minutes: 10
       shell: bash
       run: |
         git checkout ${{ env.PR_SHA }}
         git submodule update --init --recursive projects/rocprofiler-systems/external/dyninst
+        git submodule update --init --recursive projects/rocprofiler-systems/external/timemory
 
     - name: Build
       timeout-minutes: 60

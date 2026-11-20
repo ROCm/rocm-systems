@@ -43,6 +43,7 @@
 #include "fakes/hip_fakes.h"     // g_hipThreadExchangeStreamCaptureMode
 #include "fakes/transport_stubs.h"  // g_ncclTransportP2pSetup
 #include "ScopedHook.h"          // RAII install/restore for controllable seams
+#include "WaitUntil.h"           // bounded poll for what the other thread does
 
 // Route group.cc's NCCL_PARAM sites through g_loadParam instead of the real
 // ncclLoadParam (see param_redirect.h); must precede the unit under test.
@@ -69,8 +70,13 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
 
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before group.cc includes it
 
+// g_microFree lets a test observe which entries a dequeue loop releases.
+#include "fakes/alloc_seam.h"
+
 // Pulls in group.cc's file-static helpers (groupLaunch, asyncJobLaunch, ...); must come last.
 #include GROUP_CC_PATH
+
+#include "fakes/alloc_seam_undef.h"
 
 namespace {
 
@@ -901,19 +907,15 @@ TEST_F(AsyncLaunchTest, DestroyFlagForcesBlockingRegardlessOfConfig) {
   EXPECT_EQ(1, job_.destroyFlag);
 }
 
-// Spins on *job->abortFlag until nonzero or a 5s deadline elapses. Used by the ordering-sensitive
-// TwoOwners case: a job that returns instantly can't distinguish "abortFlag set before the join"
-// from "after". The deadline unwinds a swapped-order mutant (self-reports via ncclSystemError)
-// instead of hanging; the happy path still returns in microseconds.
+// Spins on *job->abortFlag until nonzero or waitUntil's budget elapses. Used by the
+// ordering-sensitive TwoOwners case: a job that returns instantly can't distinguish "abortFlag set
+// before the join" from "after". The budget unwinds a swapped-order mutant (self-reports via
+// ncclSystemError) instead of hanging; the happy path still returns in microseconds.
 ncclResult_t SpinUntilAbortFlagObserved(struct ncclAsyncJob* job) {
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (std::chrono::steady_clock::now() < deadline) {
-    if (job->abortFlag && COMPILER_ATOMIC_LOAD(job->abortFlag, std::memory_order_acquire) != 0) {
-      return ncclSuccess;
-    }
-    std::this_thread::sleep_for(std::chrono::microseconds(200));
-  }
-  return ncclSystemError;
+  const bool observed = waitUntil([job] {
+    return job->abortFlag && COMPILER_ATOMIC_LOAD(job->abortFlag, std::memory_order_acquire) != 0;
+  });
+  return observed ? ncclSuccess : ncclSystemError;
 }
 
 // ncclGroupJobAbort mirrors ncclGroupJobComplete but also raises abortFlag before joining. Both
@@ -1201,16 +1203,20 @@ TEST_F(ArgsGlobalCheckTest, HookFailsOnSecondEntry_StopsDequeuingAndPropagatesTh
   ScopedHook hook(g_ncclArgsGlobalCheck, [&](struct ncclArgsInfo* info) {
     return info == failing ? ncclInternalError : ncclSuccess;
   });
+  std::vector<void*> freed;
+  ScopedHook freeHook(g_microFree, [&](void* p) {
+    freed.push_back(p);
+    ::free(p);
+  });
 
   EXPECT_EQ(ncclInternalError, ncclCommGroupArgsGlobalCheck(&job_.base));
 
   EXPECT_EQ(2, hook.calls);
   ASSERT_FALSE(ncclIntruQueueEmpty(&comm_->argsInfoQueue));
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->argsInfoQueue));
-  // `failing` is deliberately left unfreed here: production's fail: path dequeues without
-  // freeing it (mirrored here), and no test-side check can tell that apart from "already freed
-  // by a future production change" -- guessing wrong there double-frees. Leaks one entry under
-  // ASan, same as ~18 other pre-existing allocations in this binary; not a new gate.
+  // Both dequeued entries, including the failing one, are released; later entries remain queued for cleanup.
+  ASSERT_EQ(2u, freed.size());
+  EXPECT_EQ(static_cast<void*>(failing), freed[1]);
 }
 
 // groupJobUnlinkComms: undoes the comm->groupJob links the non-blocking path published, so a
@@ -1509,12 +1515,18 @@ TEST_F(GroupRegisterSymmetricCeInitTest, CeInitFailurePropagatesAndStopsDequeuin
   ncclIntruQueueEnqueue(&comm_->ceInitTaskQueue, failing);
   ncclIntruQueueEnqueue(&comm_->ceInitTaskQueue, neverReached);
   ScopedHook hook(g_ncclCeInit, [&](struct ncclComm*) { return ncclSystemError; });
+  std::vector<void*> freed;
+  ScopedHook freeHook(g_microFree, [&](void* p) {
+    freed.push_back(p);
+    ::free(p);
+  });
 
   EXPECT_EQ(ncclSystemError, ncclCommGroupRegisterSymmetric(&job_.base));
 
   EXPECT_EQ(1, hook.calls);
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->ceInitTaskQueue));
-  // `failing` leaks (LSan-visible), a production bug: the fail: path dequeues it unfreed, like ArgsGlobalCheckTest's.
+  // The failing task is released; later tasks remain queued for cleanup.
+  EXPECT_EQ(std::vector<void*>({failing}), freed);
 }
 
 // groupCleanup: the fail-path unwind for a group that never launched. Walks groupCommHeadPtr per
@@ -1881,6 +1893,24 @@ TEST_F(GroupRegisterSymmetricTest, StagingSetupFails_PropagatesAndStillClearsThe
 
   EXPECT_EQ(1, staging.calls);
   EXPECT_FALSE(comm_->ceColl.stagingPending);
+}
+
+// Nothing drains commCreateTaskQueue at teardown, so a failure before its loop must release the queued creates
+// and their deep-copied requirements; LSan reports them otherwise.
+TEST_F(GroupRegisterSymmetricTest, EarlyFailure_ReleasesEveryQueuedCommCreate) {
+  for (int i = 0; i < 2; i++) {
+    auto* task = static_cast<struct ncclDevrCommCreateTask*>(calloc(1, sizeof(struct ncclDevrCommCreateTask)));
+    task->reqs = static_cast<struct ncclDevCommRequirements*>(calloc(1, sizeof(struct ncclDevCommRequirements)));
+    task->reqs->resourceRequirementsList =
+      static_cast<struct ncclDevResourceRequirements*>(calloc(1, sizeof(struct ncclDevResourceRequirements)));
+    ncclIntruQueueEnqueue(&comm_->devrState.commCreateTaskQueue, task);
+  }
+  ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+
+  EXPECT_EQ(ncclUnhandledCudaError, ncclCommGroupRegisterSymmetric(&job_.base));
+
+  EXPECT_EQ(1, setDevice.calls);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&comm_->devrState.commCreateTaskQueue));
 }
 
 TEST_F(GroupRegisterSymmetricTest, CeInitQueued_RunsBeforeStagingSetup) {

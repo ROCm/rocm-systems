@@ -63,6 +63,9 @@ Event::~Event() {
 
 // ================================================================================================
 AccumulateCommand::~AccumulateCommand() {
+  for (Command* command : held_commands_) {
+    command->release();
+  }
   // When an external owner (e.g. the graph signal pool) reclaims the signals,
   // do not destroy them here.
   if (!owns_hw_events_) {
@@ -479,12 +482,12 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
     setNumWorkgroups();
   }
 
-  // This optimization will set marker_ts_ but may not submit a batch.
+  // The stop event binds to this kernel's signal, which may not submit a batch.
   if (forceProfiling) {
     profilingInfo_.enabled_ = true;
     profilingInfo_.clear();
     profilingInfo_.correlation_id_ = activity_prof::correlation_id;
-    profilingInfo_.marker_ts_ = true;
+    profilingInfo_.signal_required_ = true;
   }
   kernel_.retain();
 }

@@ -58,7 +58,10 @@ def fake_qemu(
             "elif sys.argv[1:3] == ['-device', 'help']:\n"
             f"    print('name \\\"vfio-user-pci\\\"') if {supports_vfio!r} else None\n"
             "else:\n"
-            "    Path(__file__).with_suffix('.pid').write_text(str(os.getpid()))\n"
+            # The SIGTERM test treats qemu.pid appearing as a readiness notification.
+            "    pending_pid = Path(__file__).with_suffix('.pid.tmp')\n"
+            "    pending_pid.write_text(str(os.getpid()))\n"
+            "    pending_pid.replace(Path(__file__).with_suffix('.pid'))\n"
             "    Path(__file__).with_suffix('.argv.json').write_text("
             "json.dumps(sys.argv[1:]))\n"
             f"    print({output!r}, flush=True)\n"

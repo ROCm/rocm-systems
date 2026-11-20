@@ -11,6 +11,7 @@ on:
     paths:
       - '.github/workflows/**'
       - '.github/scripts/**'
+      - '.github/actions/rccl-resolve-coco-run/**'
   workflow_dispatch:
 
 permissions:
@@ -37,6 +38,7 @@ jobs:
           sparse-checkout: |
             .github/workflows
             .github/scripts
+            .github/actions/rccl-resolve-coco-run
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:

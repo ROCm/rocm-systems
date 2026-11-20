@@ -9,6 +9,8 @@
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/message.h"
 
+#include "util/diagnostic.h"
+
 #include <array>
 #include <condition_variable>
 #include <cstdint>
@@ -87,7 +89,10 @@ public:
   ~MemorySideCache() override;
 
   /// @brief Rebind this cache to a device-local coherence domain before use.
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   const std::shared_ptr<DeviceCacheCoherence> &coherence_domain() const { return coherence_; }
   /// @brief Set the raw VMID-0 backing used by out-of-band maintenance.
   void set_legacy_maintenance_memory(GpuMemory *memory) { legacy_maintenance_memory_ = memory; }
@@ -170,6 +175,7 @@ private:
   [[nodiscard]] VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid,
                                             bool fetch_on_miss = true);
   [[nodiscard]] bool can_fetch_line(uint64_t addr, uint32_t vmid) const;
+  void invalidate_clean_locked();
   [[nodiscard]] VmAccessOutcome flush_dirty_locked();
   [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();
   bool has_legacy_maintenance_backing() const {

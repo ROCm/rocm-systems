@@ -6,9 +6,13 @@
 #
 # GoogleTest (gtest)
 # Threads
+# amd-dbgapi (headers only)
 #
 # Unit tests are pure logic tests with no GPU/HIP runtime dependencies.
 # They can run on any machine without GPU hardware.
+#
+# The sources under test are compiled directly into the test executable.  Only
+# the amd-dbgapi headers are used; libamd-dbgapi is not linked.
 
 cmake_minimum_required(VERSION 3.21)
 
@@ -30,10 +34,41 @@ endif()
 # Find Threads (required by GTest and for pthreads).
 find_package(Threads REQUIRED)
 
+# The amd-dbgapi target is created by the top-level CMakeLists.txt.
+if(NOT TARGET amd-dbgapi)
+    message(
+        FATAL_ERROR
+        "The amd-dbgapi target is missing. "
+        "Configure from the top-level rocr-debug-agent CMakeLists.txt."
+    )
+endif()
+
+# Sources under test.
+set(AGENT_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
+
 # Create unit test executable.
 add_executable(
     rocm-debug-agent-unit-tests
-    test_smoke.cpp
+    test_agent_config.cpp
+    test_agent_dbgapi_utils.cpp
+    test_agent_utils.cpp
+    test_logging.cpp
+    # The rocm-debug-agent library exports only OnLoad and OnUnload (see
+    # src/exportmap), so the sources under test are compiled directly.  The
+    # library's compile definitions are not needed by these modules.
+    ${AGENT_SRC_DIR}/agent_config.cpp
+    ${AGENT_SRC_DIR}/agent_dbgapi_utils.cpp
+    ${AGENT_SRC_DIR}/agent_utils.cpp
+    ${AGENT_SRC_DIR}/logging.cpp
+)
+
+# src/ for the headers under test, amd-dbgapi for the enum types and version
+# macros.
+target_include_directories(
+    rocm-debug-agent-unit-tests
+    PRIVATE
+        ${AGENT_SRC_DIR}
+        $<TARGET_PROPERTY:amd-dbgapi,INTERFACE_INCLUDE_DIRECTORIES>
 )
 
 # Link libraries.
@@ -45,7 +80,7 @@ target_link_libraries(
         Threads::Threads
 )
 
-# C++ standard and compile options (match main library).
+# C++ standard and warning options (match main library).
 set_target_properties(
     rocm-debug-agent-unit-tests
     PROPERTIES

@@ -5784,7 +5784,7 @@ finally:
 
 ### amdsmi_topo_get_link_type
 
-Description: Retrieve the hops and the connection type between 2 GPUs
+Description: Retrieve the hops and the connection type between 2 processors (GPUs or NICs)
 
 Input parameters:
 
@@ -5795,8 +5795,8 @@ Output:  Dictionary with fields:
 
 Field | Description
 ---|---
-`hops` | Number of hops
-`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+`hops` | Number of hops. Not meaningful when either processor is a NIC; it reads `UINT64_MAX` then
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. For a NIC pair it is `AMDSMI_LINK_TYPE_PCIE` (same PCIe switch), `AMDSMI_LINK_TYPE_NUMA` (same NUMA node, different switch), `AMDSMI_LINK_TYPE_XNUMA` (different NUMA nodes) or `AMDSMI_LINK_TYPE_UNKNOWN`. Refer to the example below for more details.
 
 Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 
@@ -5835,6 +5835,10 @@ try:
             print('xgmi')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
             print('not applicable')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NUMA:
+            print('same NUMA node, different PCIe switch (NIC pairs)')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XNUMA:
+            print('different NUMA nodes (NIC pairs)')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
             print('unknown')
 except amdsmi.AmdSmiException as e:
@@ -7216,7 +7220,7 @@ Output: Dictionary with the corresponding fields
 Field | Description
 ---|---
 `bdf` | BDF of the fabric device
-`version` | Fabric info layout that was actually filled: `2` for the nested layout, or `1` if the loaded library predates it and reports the flat layout instead
+`version` | Fabric info structure version
 `accelerator_id` | Accelerator identifier (range 0 to 1023)
 `fabric_type` | Fabric type: `UALOE`, `UALLINK`, or `UNKNOWN`
 `bandwidth` | Station bandwidth share in Mb/s
@@ -7226,16 +7230,9 @@ Field | Description
 `vpod_id` | Virtual PoD identifier
 `vpod_size` | Virtual PoD size
 `local_accelerators` | List of local accelerator IDs
-`local_accelerator_count` | Count of valid entries in `local_accelerators`
-`vpod_active_accelerators` | List of active accelerator IDs; unused slots read `UINT32_MAX` (UNSET), as with `local_accelerators`
+`vpod_active_accelerators` | Active-accelerator bitmap as a list of 32-bit words (bit N set = accelerator ID N is active)
 `addr_mode` | NPA address mode: `SOURCE_ALIASING`, `SOURCE_IDENTIFICATION`, or `UNKNOWN`
 `accel_state` | Accelerator vPoD state: `UNCONFIGURED`, `CONFIGURED`, `READY`, `ACTIVE`, `ERROR`, or `UNKNOWN`
-`station_flags` | DF/station flags
-`num_stations` | Number of stations
-`lane_en_bitmap` | Per-lane enable bitmap as a list of bytes
-`ppod_mask` | `amdsmi_fabric_ppod_field_t` bits actually read into the PPoD fields; a clear bit means that field holds its sentinel
-`vpod_mask` | `amdsmi_fabric_vpod_field_t` bits actually read into the vPoD fields
-`station_mask` | `amdsmi_fabric_df_field_t` bits actually read into the DF/station fields
 
 Exceptions that can be thrown by `amdsmi_get_gpu_fabric_info` function:
 

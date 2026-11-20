@@ -60,7 +60,9 @@ pub(crate) unsafe fn object<'a, T>(p: *const T) -> Result<&'a T, u64> {
 
 pub(crate) unsafe fn exclusive<'a, T>(p: *mut T) -> Result<&'a mut T, u64> {
     output_pointer(p)?;
-    // SAFETY: Mutating operations require exclusive access in the C contract.
+    // SAFETY: Callers use this helper only for destruction after checking that
+    // no child can hold a shared borrow of this object. The C contract also
+    // excludes concurrent direct use of the public handle being destroyed.
     Ok(unsafe { &mut *p })
 }
 
@@ -221,6 +223,7 @@ pub(crate) fn native(error: &rocddi::Error) -> u64 {
     }
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID,
+        rocddi::ErrorKind::NotFound => NOT_FOUND,
         rocddi::ErrorKind::Unsupported => UNSUPPORTED,
         rocddi::ErrorKind::PermissionDenied => u64::from(AMDF_STATUS_CODE_PERMISSION_DENIED),
         rocddi::ErrorKind::ResourceExhausted => EXHAUSTED,

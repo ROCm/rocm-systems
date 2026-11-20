@@ -9,11 +9,13 @@
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/packet_processor.h"
+#include "util/result.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace rocjitsu::amdgpu {
@@ -69,6 +71,8 @@ struct SdmaPacketProcessResult {
   PacketProcessResult packet;
   bool operation_committed = false;
   bool completion_published = false;
+  /// @brief Offending root or indirect packet header, if available, for a malformed result.
+  std::optional<uint32_t> malformed_header = std::nullopt;
 };
 
 /// @brief Result of reading one frontend register for an SDMA poll packet.
@@ -91,7 +95,11 @@ public:
   std::function<VmAccessOutcome(uint32_t data)> deliver_interrupt;
   /// The returned lease spans every direct memory effect. It is released when
   /// execution yields and reacquired before the effect resumes.
-  std::function<SdmaCacheLease(SdmaCacheOperation operation)> acquire_cache_maintenance;
+  /// Failure is terminal and stops before the protected effect. A packet with
+  /// an already committed prefix retires; otherwise retirement is held.
+  /// Either terminal disposition clears the continuation.
+  std::function<util::FailureOr<SdmaCacheLease>(SdmaCacheOperation operation)>
+      acquire_cache_maintenance;
   std::function<uint64_t()> timestamp;
 };
 

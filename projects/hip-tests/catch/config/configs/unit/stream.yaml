@@ -585,3 +585,12 @@ stream:
     disabled:
       reason: "AIRUNTIME-2948 - per-dispatch CU mask requires lower layer changes that need to be merged"
     tags: [cu_mask, P2]
+  Unit_hipStreamImplicitSync_RepeatedLaunchesAfterNullStream:
+    <<: *level_default
+    tags: [synchronization, P1]
+  Unit_hipStreamImplicitSync_InterleavedNullStreamWork:
+    <<: *level_default
+    tags: [synchronization, P1]
+  Unit_hipStreamImplicitSync_MultipleBlockingStreams:
+    <<: *level_default
+    tags: [synchronization, P1]
