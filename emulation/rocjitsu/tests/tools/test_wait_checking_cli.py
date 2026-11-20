@@ -152,7 +152,7 @@ class WaitCheckingCliTest(unittest.TestCase):
 
     def test_rejects_attach_and_external_dbt_config(self):
         for flags, config, message in (
-            (["--attach"], self.source, "cannot be combined with --attach"),
+            (["--attach", "default"], self.source, "cannot be combined with --attach"),
             (
                 [],
                 self.dbt_config,

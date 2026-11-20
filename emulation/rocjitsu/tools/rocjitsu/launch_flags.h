@@ -183,8 +183,14 @@ struct LaunchFlags {
                      {},
                      "Run a daemon, optionally launching an application",
                      ucli::ValueMode::Switch});
-  std::shared_ptr<ucli::BoolFlag> attach = std::make_shared<ucli::BoolFlag>(ucli::FlagInfo{
-      "--attach", {}, "Attach the application to a running daemon", ucli::ValueMode::Switch});
+  std::shared_ptr<rjtools::NonEmptyStringFlag> attach =
+      std::make_shared<rjtools::NonEmptyStringFlag>(
+          ucli::FlagInfo{"--attach",
+                         {},
+                         "Attach the application to a running daemon target",
+                         ucli::ValueMode::Required,
+                         "id_or_path"},
+          "requires an attach target");
   std::shared_ptr<ucli::BoolFlag> fabric_effect_trace = std::make_shared<ucli::BoolFlag>(
       ucli::FlagInfo{"--fabric-effect-trace",
                      {},

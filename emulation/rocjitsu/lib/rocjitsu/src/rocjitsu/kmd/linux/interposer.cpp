@@ -539,8 +539,9 @@ public:
     // Prefer the dir the launcher exported before execvp: every descendant
     // (including grandchildren spawned through wrappers like ctest, whose PID
     // differs from the launcher's) inherits the exact directory holding
-    // config_path/daemon.sock. Fall back to this process's PID-scoped default for
-    // attach mode, where no launcher set the variable.
+    // config_path/daemon.sock. Attach mode uses the same variable to name the
+    // selected daemon runtime directory. Fall back to this process's PID-scoped
+    // default only when no launcher set the variable.
     // Assigned before resolve() (which flips real().ready() true, the gate every
     // interposed entry point checks) so no reader can observe an empty value.
     // Treat an unset OR empty $ROCJITSU_INVOCATION_DIR as "no launcher dir": an

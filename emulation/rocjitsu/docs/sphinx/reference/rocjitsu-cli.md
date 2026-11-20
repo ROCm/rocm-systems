@@ -14,16 +14,18 @@ For details on how KMD emulation and the interposer layer work, see [GPU virtual
 ## Command-line options
 
 ``` text
-rocjitsu --config <config.json> [--daemon|--attach] [--] <app> [args...]
-rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
+rocjitsu [--config <config.json>|--profile <name>] [--daemon] [--] <app> [args...]
+rocjitsu --attach <id_or_path> [--config <config.json>] -- <app> [args...]
+rocjitsu [--config <config.json>|--profile <name>] [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
 ```
 
 | Option | Description |
 | --- | --- |
-| `--config <path>` | Path to the simulation configuration JSON file. Required for all modes. |
-| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. |
+| `--config <path>` | Path to the simulation configuration JSON file. Cannot be combined with `--profile`. |
+| `--profile <name>` | Bundled profile config to run. Defaults to `mi350x` when neither `--config` nor `--profile` is supplied outside attach mode. |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach`. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
-| `--attach` | Attach to a running daemon. The socket path is resolved as described in [Environment variables and socket path resolution](#socket-path-resolution). |
+| `--attach <id_or_path>` | Attach to a running daemon. Use `default` for the current runtime directory, a daemon ID under that runtime directory, a runtime directory path, or a `daemon.sock` path. |
 | `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The socket count must match the selected node's local GPU count, and paths must be distinct. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
 | `--check-vfio-user` | Exit successfully only when the selected binary includes VFIO-user support. |
 | `--help`, `-h` | Print usage information and exit. |
@@ -65,10 +67,14 @@ After a successful KFD open, any daemon disconnect terminates the attached nativ
 ### Attach mode
 
 ``` bash
-rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
+# Attach to the daemon in the current runtime directory
+rocjitsu --attach default -- ./app
+
+# Attach to a daemon by runtime directory while validating an explicit config
+rocjitsu --attach /run/user/$UID/rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
 ```
 
-Connects to an already-running daemon. The socket path is resolved using the environment variables described in [Environment variables and socket path resolution](#socket-path-resolution).
+Connects to an already-running daemon. Attach mode does not create or reconfigure the daemon; the application uses the daemon machine it connects to. `--config` may validate a config for the client launch, but it does not change the running daemon. The target syntax is described in [Environment variables and attach target resolution](#socket-path-resolution).
 
 ### VFIO-user mode
 
@@ -90,22 +96,25 @@ SDMA scheduler, and compute units used by the other front ends. See
 host and guest contract.
 
 (socket-path-resolution)=
-## Environment variables and socket path resolution
+## Environment variables and attach target resolution
 
 ### Environment variables
 
 | Variable | Description |
 | --- | --- |
-| `ROCJITSU_RUNTIME_DIR` | If set, the daemon socket path is `$ROCJITSU_RUNTIME_DIR/daemon.sock`. |
-| `XDG_RUNTIME_DIR` | If `ROCJITSU_RUNTIME_DIR` is not set, the socket path is `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`. |
+| `ROCJITSU_RUNTIME_DIR` | If set, selects the default runtime directory used by `--attach default` and daemon socket fallback. |
+| `XDG_RUNTIME_DIR` | If `ROCJITSU_RUNTIME_DIR` is not set, the default runtime directory is `$XDG_RUNTIME_DIR/rocjitsu`. |
 
-### Socket path resolution order
+### Attach target resolution
 
-When `--attach` is used or when the interposer connects to a daemon, the socket path is resolved in this order:
+When `--attach <id_or_path>` is used, the launcher validates one existing daemon socket before starting the application:
 
-1.  `$ROCJITSU_RUNTIME_DIR/daemon.sock`
-2.  `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`
-3.  `/tmp/rocjitsu-<uid>/daemon.sock` (fallback)
+1.  `default` selects the default runtime directory: `$ROCJITSU_RUNTIME_DIR`, then `$XDG_RUNTIME_DIR/rocjitsu`, then `/tmp/rocjitsu-<uid>`.
+2.  Any other identifier selects a subdirectory under that default runtime directory.
+3.  A path selects that runtime directory directly.
+4.  A path ending in `daemon.sock` selects its parent directory.
+
+The launched application receives the selected runtime directory through `ROCJITSU_INVOCATION_DIR`, so descendants connect to the same daemon. A process using the interposer without a launcher still falls back to the default socket path order above.
 
 For additional environment variables that control simulation plugins, see [Environment variable reference](/reference/environment-variables.md).
 

@@ -9,7 +9,7 @@
 ///   rocjitsu --config foo.json -- ./app           (local mode with explicit config)
 ///   rocjitsu --daemon --config foo.json -- ./app  (daemon mode: fork daemon + launch app)
 ///   rocjitsu --daemon --config foo.json           (daemon-only: run daemon server)
-///   rocjitsu --attach -- ./app                    (attach to a running daemon)
+///   rocjitsu --attach default -- ./app            (attach to a running daemon)
 ///   rocjitsu paths [--json]                       (show config/runtime paths)
 ///
 /// Builds configured with ROCJITSU_ENABLE_VFIO additionally support
@@ -39,7 +39,6 @@
 #include "rocm_visibility.h"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
@@ -237,42 +236,18 @@ std::string ascii_lower(std::string_view text) {
   return out;
 }
 
-struct BuiltinProfile {
+struct ProfileAlias {
   std::string_view name;
   std::string_view config_stem;
 };
 
 constexpr std::string_view kDefaultProfile = "mi350x";
 
-constexpr std::array<BuiltinProfile, 8> kBuiltinProfiles = {{
-    {.name = "gfx1100_w7900", .config_stem = "gfx1100_w7900"},
-    {.name = "gfx1151", .config_stem = "gfx1151"},
-    {.name = "gfx1201_r9700", .config_stem = "gfx1201_r9700"},
-    {.name = "gfx1251_synthetic", .config_stem = "gfx1251_synthetic"},
-    {.name = "gfx90a_mi210_kmd", .config_stem = "gfx90a_mi210_kmd"},
+constexpr ProfileAlias kProfileAliases[] = {
     {.name = "mi300x", .config_stem = "gfx942_cdna3"},
     {.name = "mi350x", .config_stem = "gfx950_mi350x"},
     {.name = "mi450x", .config_stem = "gfx1250_mi455x"},
-}};
-
-std::optional<std::string_view> builtin_profile_config_stem(std::string_view profile) {
-  const std::string normalized = ascii_lower(profile);
-  auto found = std::ranges::find_if(
-      kBuiltinProfiles, [&](const BuiltinProfile &entry) { return entry.name == normalized; });
-  if (found == kBuiltinProfiles.end())
-    return std::nullopt;
-  return found->config_stem;
-}
-
-std::string known_profile_names() {
-  std::string names;
-  for (const BuiltinProfile &profile : kBuiltinProfiles) {
-    if (!names.empty())
-      names += ", ";
-    names += profile.name;
-  }
-  return names;
-}
+};
 
 void append_unique_path(std::vector<std::filesystem::path> &paths, std::filesystem::path path) {
   if (path.empty())
@@ -307,6 +282,73 @@ std::vector<std::filesystem::path> profile_config_search_dirs() {
   return dirs;
 }
 
+void append_unique_string(std::vector<std::string> &values, std::string value) {
+  if (value.empty())
+    return;
+  if (std::ranges::none_of(values, [&](const std::string &existing) { return existing == value; }))
+    values.push_back(std::move(value));
+}
+
+std::optional<std::filesystem::path>
+find_profile_config_stem(std::string_view stem, const std::vector<std::filesystem::path> &dirs) {
+  const std::filesystem::path filename = std::string(stem) + ".json";
+  for (const auto &dir : dirs) {
+    const std::filesystem::path candidate = dir / filename;
+    std::error_code exists_error;
+    if (!std::filesystem::exists(candidate, exists_error) || exists_error)
+      continue;
+    if (std::string canonical = canonical_existing_path(candidate); !canonical.empty())
+      return std::filesystem::path(std::move(canonical));
+    return candidate;
+  }
+  return std::nullopt;
+}
+
+std::vector<std::string> profile_config_stems_for(std::string_view profile) {
+  std::vector<std::string> stems;
+  const std::string normalized = ascii_lower(profile);
+  for (const ProfileAlias &alias : kProfileAliases) {
+    if (alias.name == normalized)
+      append_unique_string(stems, std::string(alias.config_stem));
+  }
+  append_unique_string(stems, normalized);
+  return stems;
+}
+
+std::vector<std::string> known_profile_names(const std::vector<std::filesystem::path> &dirs) {
+  std::vector<std::string> names;
+  for (const auto &dir : dirs) {
+    std::error_code error;
+    std::filesystem::directory_iterator it(dir, error);
+    const std::filesystem::directory_iterator end;
+    for (; !error && it != end; it.increment(error)) {
+      std::error_code status_error;
+      if (!it->is_regular_file(status_error) || status_error)
+        continue;
+      if (it->path().extension() != ".json")
+        continue;
+      append_unique_string(names, ascii_lower(it->path().stem().string()));
+    }
+  }
+
+  for (const ProfileAlias &alias : kProfileAliases) {
+    if (find_profile_config_stem(alias.config_stem, dirs))
+      append_unique_string(names, std::string(alias.name));
+  }
+  std::ranges::sort(names);
+  return names;
+}
+
+std::string join_profile_names(const std::vector<std::string> &names) {
+  std::string joined;
+  for (const std::string &name : names) {
+    if (!joined.empty())
+      joined += ", ";
+    joined += name;
+  }
+  return joined.empty() ? std::string("<none>") : joined;
+}
+
 std::string path_list_for_error(const std::vector<std::filesystem::path> &paths) {
   std::string out;
   for (const auto &path : paths) {
@@ -319,29 +361,54 @@ std::string path_list_for_error(const std::vector<std::filesystem::path> &paths)
 
 std::optional<std::filesystem::path> resolve_profile_config(std::string_view profile,
                                                             std::string &error) {
-  const std::optional<std::string_view> stem = builtin_profile_config_stem(profile);
-  if (!stem) {
-    error = std::format("unknown profile '{}'; known profiles: {}", profile, known_profile_names());
-    return std::nullopt;
-  }
-
-  const std::filesystem::path filename = std::string(*stem) + ".json";
   const std::vector<std::filesystem::path> dirs = profile_config_search_dirs();
-  for (const auto &dir : dirs) {
-    const std::filesystem::path candidate = dir / filename;
-    std::error_code exists_error;
-    if (!std::filesystem::exists(candidate, exists_error) || exists_error)
-      continue;
-    if (std::string canonical = canonical_existing_path(candidate); !canonical.empty())
-      return std::filesystem::path(std::move(canonical));
-    return candidate;
+  for (const std::string &stem : profile_config_stems_for(profile)) {
+    if (std::optional<std::filesystem::path> config = find_profile_config_stem(stem, dirs))
+      return config;
   }
 
-  error = std::format("profile '{}' maps to {}, but that config was not found", profile,
-                      filename.string());
+  error = std::format("unknown profile '{}'; known profiles: {}", profile,
+                      join_profile_names(known_profile_names(dirs)));
   if (!dirs.empty())
     error += std::format("; searched: {}", path_list_for_error(dirs));
   return std::nullopt;
+}
+
+bool looks_like_path(std::string_view text) {
+  return text == "." || text == ".." || text.find('/') != std::string_view::npos;
+}
+
+std::optional<std::filesystem::path> resolve_attach_target(std::string_view target,
+                                                           std::string &error) {
+  std::filesystem::path runtime_dir;
+  if (target == "default") {
+    runtime_dir = rpc_default_runtime_dir();
+  } else {
+    std::filesystem::path selected{std::string(target)};
+    if (!looks_like_path(target)) {
+      runtime_dir = std::filesystem::path(rpc_default_runtime_dir()) / selected;
+    } else if (selected.filename() == "daemon.sock") {
+      runtime_dir = selected.parent_path();
+    } else {
+      runtime_dir = selected;
+    }
+  }
+
+  if (runtime_dir.empty()) {
+    error = "attach target resolves to an empty runtime directory";
+    return std::nullopt;
+  }
+
+  std::filesystem::path socket_path = runtime_dir / "daemon.sock";
+  std::error_code socket_error;
+  if (!std::filesystem::is_socket(socket_path, socket_error) || socket_error) {
+    error = std::format("no daemon socket at {}", socket_path.string());
+    return std::nullopt;
+  }
+
+  if (std::string canonical = canonical_existing_path(runtime_dir); !canonical.empty())
+    runtime_dir = std::filesystem::path(std::move(canonical));
+  return runtime_dir;
 }
 
 void print_paths(bool json) {
@@ -606,7 +673,7 @@ void print_usage(const ucli::Command &command) {
                "  rocjitsu --config foo.json -- ./app\n"
                "  rocjitsu --daemon --config foo.json -- ./app\n"
                "  rocjitsu --daemon --config foo.json\n"
-               "  rocjitsu --attach -- ./app\n"
+               "  rocjitsu --attach default -- ./app\n"
                "  rocjitsu paths --json\n"
                "  rocjitsu --config foo.json --vfio-socket /tmp/gpu.sock\n"
                "  rocjitsu --config foo.json --vfio-socket /tmp/gpu0.sock --vfio-socket "
@@ -688,6 +755,7 @@ int main(int argc, char *argv[]) {
 
   const char *config_path = flags.config->value().empty() ? nullptr : flags.config->value().c_str();
   const std::string profile_name = flags.profile->value();
+  const std::string attach_target_name = flags.attach->value();
   const std::string local_node = flags.node->value();
   auto rejects_known_flag_value = [&](std::string_view option, std::string_view value) -> bool {
     if (value.empty() || !command.find_flag(value))
@@ -699,6 +767,8 @@ int main(int argc, char *argv[]) {
     return 1;
   if (rejects_known_flag_value("--profile", profile_name))
     return 1;
+  if (rejects_known_flag_value("--attach", attach_target_name))
+    return 1;
   std::vector<std::string> vfio_sockets = flags.vfio_socket->values();
   const bool thread_budget_table = flags.thread_budget_table->value();
   config::LaunchOverrides overrides;
@@ -708,7 +778,7 @@ int main(int argc, char *argv[]) {
   const int vfio_ready_fd =
       flags.vfio_ready_fd->value() ? static_cast<int>(*flags.vfio_ready_fd->value()) : -1;
   const bool daemon_mode = flags.daemon->value();
-  const bool attach_mode = flags.attach->value();
+  const bool attach_mode = !attach_target_name.empty();
   const bool fabric_effect_trace = flags.fabric_effect_trace->value();
   const bool has_app = !parsed.value().positional.empty();
 
@@ -999,10 +1069,12 @@ int main(int argc, char *argv[]) {
   application_arguments.push_back(nullptr);
   char **app_argv = application_arguments.data();
 
+  std::optional<std::filesystem::path> attach_runtime_dir;
   if (attach_mode) {
-    auto sock_path = rpc_default_socket_path();
-    if (!std::filesystem::exists(sock_path)) {
-      std::cerr << std::format("rocjitsu: no daemon socket at {}\n", sock_path);
+    std::string attach_error;
+    attach_runtime_dir = resolve_attach_target(attach_target_name, attach_error);
+    if (!attach_runtime_dir) {
+      std::cerr << std::format("rocjitsu: {}\n", attach_error);
       return 1;
     }
   }
@@ -1125,8 +1197,11 @@ int main(int argc, char *argv[]) {
   }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory
-  // holding config_path/daemon.sock. Attach mode creates no such dir.
-  if (!attach_mode) {
+  // holding config_path/daemon.sock. Attach mode points at an existing daemon
+  // runtime directory rather than creating a new one.
+  if (attach_runtime_dir) {
+    launch_environment.set(rocjitsu::kRpcInvocationDirEnv, attach_runtime_dir->string());
+  } else {
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
   }
   if (launched_daemon_pid) {

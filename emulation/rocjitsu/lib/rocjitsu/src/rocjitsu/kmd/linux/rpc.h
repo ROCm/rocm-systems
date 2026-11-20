@@ -349,13 +349,12 @@ inline std::string rpc_default_config_file_path() {
   return rpc_default_runtime_dir() + "/config_path";
 }
 
-/// @brief Environment variable carrying the resolved per-invocation runtime dir.
+/// @brief Environment variable carrying the resolved runtime dir for this launch.
 /// @details The CLI exports this before execvp, so every descendant process
 /// (direct children and grandchildren spawned through wrappers like ctest)
 /// inherits the exact directory holding config_path/daemon.sock without
-/// re-deriving it from its own PID. Absent in attach mode, where the interposer
-/// falls back to its own PID-scoped runtime dir (which does not exist, so
-/// connect_to_daemon then uses the well-known socket).
+/// re-deriving it from its own PID. Daemon launch mode sets a per-invocation
+/// directory. Attach mode sets the selected daemon runtime directory.
 inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
 
 /// @brief Environment variable carrying the PID of the daemon the CLI forked.

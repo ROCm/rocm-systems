@@ -99,7 +99,7 @@ Override for the runtime directory used by daemon socket resolution.
 |---|---|
 | **Default** | None (falls back to `XDG_RUNTIME_DIR`) |
 | **Allowed values** | Any valid directory path |
-| **Effect** | When set, the daemon socket path resolves to `$ROCJITSU_RUNTIME_DIR/daemon.sock`. This takes priority over `XDG_RUNTIME_DIR`. Used by the `--attach` CLI option to locate a running daemon. |
+| **Effect** | When set, the default daemon socket path resolves to `$ROCJITSU_RUNTIME_DIR/daemon.sock`. This takes priority over `XDG_RUNTIME_DIR`. `rocjitsu --attach default` and attach IDs use this runtime directory; explicit attach paths override it. |
 
 ### `XDG_RUNTIME_DIR`
 
