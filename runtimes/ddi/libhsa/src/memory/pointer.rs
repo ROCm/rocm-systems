@@ -28,7 +28,7 @@ pub(crate) fn owned_memory(runtime: &HsaSession, address: usize) -> Option<&Memo
         })
 }
 
-/// Builds HSA pointer metadata for an address known to the runtime.
+/// Builds internal pointer metadata, including placement for copy routing.
 pub(crate) fn pointer_description(
     runtime: &HsaSession,
     address: usize,
@@ -46,6 +46,30 @@ pub(crate) fn pointer_description(
                     .map(|memory| memory.description.clone())
             })
     })
+}
+
+/// Projects pointer metadata to the public allocation-ownership contract.
+pub(crate) fn pointer_info_description(
+    runtime: &HsaSession,
+    address: usize,
+) -> Option<PointerDescription> {
+    let mut description = pointer_description(runtime, address)?;
+    let imported = runtime
+        .memory_state
+        .vmem_mappings
+        .range(..=address)
+        .next_back()
+        .filter(|(_, mapping)| mapping.contains(address))
+        .and_then(|(_, mapping)| runtime.memory_state.vmem_handles.get(&mapping.handle))
+        .is_some_and(VmemHandle::imported);
+    if imported {
+        // Import placement is useful for selecting copy agents, but does not
+        // identify the exporter's owning agent or allocation-pool properties.
+        description.owner = HsaAgent { handle: 0 };
+        description.global_flags = 0;
+        description.alloc_flags = 0;
+    }
+    Some(description)
 }
 
 /// Builds pointer metadata for a virtual memory mapping.

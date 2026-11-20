@@ -922,6 +922,25 @@ pub(crate) struct KfdVirtualHostMapping {
 }
 
 impl KfdVirtualHostMapping {
+    #[allow(unsafe_code)]
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        let reservation = self
+            .reservation
+            .as_ref()
+            .ok_or_else(|| error(ErrorKind::Unsupported, "virtual host map has retired"))?;
+        // SAFETY: The retained reservation owns this mapped CPU/GPU interval.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                reservation.address() as u64,
+                Some(reservation.address()),
+                reservation.usable_size() as u64,
+            )
+        }
+    }
+
     pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
         let Some(reservation) = &mut self.reservation else {
             return Err(error(

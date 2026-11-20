@@ -20,36 +20,75 @@ Result reject_instruction(InputError &error, InputErrorCode code, std::string me
   return Result::failure();
 }
 
-bool admitted_instruction(std::string_view name) {
-  if (name == "s_mul_i32")
+bool admitted_instruction(const Instruction &instruction) {
+  switch (instruction.amdgpu_operation()) {
+  case amdgpu::Operation::S_MUL_I32:
+  case amdgpu::Operation::S_LOAD_DWORD:
+  case amdgpu::Operation::S_LOAD_DWORDX2:
+  case amdgpu::Operation::S_MOV_B64:
+  case amdgpu::Operation::S_AND_SAVEEXEC_B64:
+  case amdgpu::Operation::S_AND_B64:
+  case amdgpu::Operation::S_OR_B64:
+  case amdgpu::Operation::S_DELAY_ALU:
+  case amdgpu::Operation::GLOBAL_STORE_DWORD:
+  case amdgpu::Operation::DS_READ_B32:
+  case amdgpu::Operation::DS_WRITE_B32:
+  case amdgpu::Operation::S_WAIT_KMCNT:
+  case amdgpu::Operation::S_WAIT_STORECNT:
+  case amdgpu::Operation::S_WAIT_DSCNT:
+  case amdgpu::Operation::S_WAIT_LOADCNT_DSCNT:
+  case amdgpu::Operation::S_WAIT_LOADCNT:
+  case amdgpu::Operation::S_WAIT_XCNT:
+  case amdgpu::Operation::S_LOAD_B32:
+  case amdgpu::Operation::S_LOAD_B64:
+  case amdgpu::Operation::S_WAITCNT:
+  case amdgpu::Operation::S_WAITCNT_VSCNT:
+  case amdgpu::Operation::S_MOV_B32:
+  case amdgpu::Operation::S_AND_SAVEEXEC_B32:
+  case amdgpu::Operation::S_AND_B32:
+  case amdgpu::Operation::S_OR_B32:
+  case amdgpu::Operation::S_CMP_EQ_U32:
+  case amdgpu::Operation::S_ADD_U32:
+  case amdgpu::Operation::S_SUB_U32:
+  case amdgpu::Operation::S_ADD_CO_U32:
+  case amdgpu::Operation::S_SUB_CO_U32:
+  case amdgpu::Operation::S_BRANCH:
+  case amdgpu::Operation::S_CBRANCH_SCC0:
+  case amdgpu::Operation::S_CBRANCH_SCC1:
+  case amdgpu::Operation::S_CBRANCH_VCCZ:
+  case amdgpu::Operation::S_CBRANCH_VCCNZ:
+  case amdgpu::Operation::S_CBRANCH_EXECZ:
+  case amdgpu::Operation::S_CBRANCH_EXECNZ:
+  case amdgpu::Operation::S_NOP:
+  case amdgpu::Operation::S_ENDPGM:
+  case amdgpu::Operation::GLOBAL_STORE_B32:
+  case amdgpu::Operation::DS_STORE_B32:
+  case amdgpu::Operation::DS_LOAD_B32:
     return true;
-  constexpr std::array names = {
-      "s_load_dword",       "s_load_dwordx2",
-      "s_mov_b64",          "s_and_saveexec_b64",
-      "s_and_b64",          "s_or_b64",
-      "s_delay_alu",        "v_cmpx_eq_u32_e32",
-      "v_add_u32_e32",      "global_store_dword",
-      "s_wait_kmcnt",       "s_wait_storecnt",
-      "s_wait_dscnt",       "s_wait_loadcnt_dscnt",
-      "s_wait_loadcnt",     "s_wait_xcnt",
-      "v_nop_e32",          "s_load_b32",
-      "s_load_b64",         "s_waitcnt",
-      "s_waitcnt_vscnt",    "s_mov_b32",
-      "s_and_saveexec_b32", "s_and_b32",
-      "s_or_b32",           "s_cmp_eq_u32",
-      "s_add_u32",          "s_sub_u32",
-      "s_add_co_u32",       "s_sub_co_u32",
-      "s_branch",           "s_cbranch_scc0",
-      "s_cbranch_scc1",     "s_cbranch_vccz",
-      "s_cbranch_vccnz",    "s_cbranch_execz",
-      "s_cbranch_execnz",   "s_nop",
-      "s_endpgm",           "v_mov_b32_e32",
-      "v_lshrrev_b32_e32",  "v_lshlrev_b32_e32",
-      "v_add_nc_u32_e32",   "v_and_b32_e32",
-      "v_cmp_eq_u32_e32",   "v_cmp_gt_u32_e32",
-      "global_store_b32",
-  };
-  return std::find(names.begin(), names.end(), name) != names.end();
+  case amdgpu::Operation::V_CMPX_EQ_U32:
+  case amdgpu::Operation::V_ADD_U32:
+  case amdgpu::Operation::V_NOP:
+  case amdgpu::Operation::V_MOV_B32:
+  case amdgpu::Operation::V_LSHRREV_B32:
+  case amdgpu::Operation::V_LSHLREV_B32:
+  case amdgpu::Operation::V_ADD_NC_U32:
+  case amdgpu::Operation::V_AND_B32:
+  case amdgpu::Operation::V_CMP_EQ_U32:
+  case amdgpu::Operation::V_CMP_GT_U32:
+    break;
+  default:
+    return false;
+  }
+
+  // The qualified vector forms use VOP1/VOP2/VOPC rather than VOP3. Their
+  // first word has bit 31 clear; literals and DPP extensions do not change it.
+  // SDWA has the same base format but was never part of this admission set.
+  if (instruction.raw_encoding() == nullptr || instruction.size() < 4 ||
+      (instruction.raw_encoding()[0] & (uint32_t{1} << 31)) != 0)
+    return false;
+  amdgpu::RegisterModifiers modifiers;
+  instruction.amdgpu_register_modifiers(modifiers);
+  return !modifiers.sdwa;
 }
 
 Result reject(InputError &error, std::string message) {
@@ -57,20 +96,33 @@ Result reject(InputError &error, std::string message) {
   return Result::failure();
 }
 
-uint32_t native_lds_width(std::string_view name) {
-  if (name == "ds_load_b32" || name == "ds_store_b32" || name == "ds_read_b32" ||
-      name == "ds_write_b32")
+uint32_t native_lds_width(const Instruction &instruction) {
+  switch (instruction.amdgpu_operation()) {
+  case amdgpu::Operation::DS_LOAD_B32:
+  case amdgpu::Operation::DS_STORE_B32:
+  case amdgpu::Operation::DS_READ_B32:
+  case amdgpu::Operation::DS_WRITE_B32:
     return 4;
-  if (name == "ds_load_u16" || name == "ds_load_i16" || name == "ds_store_b16" ||
-      name == "ds_read_u16" || name == "ds_read_i16" || name == "ds_write_b16")
+  case amdgpu::Operation::DS_LOAD_U16:
+  case amdgpu::Operation::DS_LOAD_I16:
+  case amdgpu::Operation::DS_STORE_B16:
+  case amdgpu::Operation::DS_READ_U16:
+  case amdgpu::Operation::DS_READ_I16:
+  case amdgpu::Operation::DS_WRITE_B16:
     return 2;
-  if (name == "ds_load_b64" || name == "ds_store_b64" || name == "ds_read_b64" ||
-      name == "ds_write_b64")
+  case amdgpu::Operation::DS_LOAD_B64:
+  case amdgpu::Operation::DS_STORE_B64:
+  case amdgpu::Operation::DS_READ_B64:
+  case amdgpu::Operation::DS_WRITE_B64:
     return 8;
-  if (name == "ds_load_b128" || name == "ds_store_b128" || name == "ds_read_b128" ||
-      name == "ds_write_b128")
+  case amdgpu::Operation::DS_LOAD_B128:
+  case amdgpu::Operation::DS_STORE_B128:
+  case amdgpu::Operation::DS_READ_B128:
+  case amdgpu::Operation::DS_WRITE_B128:
     return 16;
-  return 0;
+  default:
+    return 0;
+  }
 }
 
 } // namespace
@@ -99,18 +151,24 @@ Result classify_lds_race_instruction(const Instruction &instruction, rj_code_arc
                                      uint32_t allocated_vgprs,
                                      std::vector<NativeLdsAccess> &accesses, InputError &error) {
   const std::string_view name = instruction.mnemonic();
+  const amdgpu::Operation operation = instruction.amdgpu_operation();
+  const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
   const uint64_t offset = instruction.src_loc();
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (name == "s_barrier_signal" || name == "s_barrier_wait"))
+  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
+                                           operation == amdgpu::Operation::S_BARRIER_WAIT))
     return Result::success(); // The complete original group/CFG is qualified below.
-  if ((instruction.flags() & BARRIER) != 0 || name.find("atomic") != std::string_view::npos ||
+  if ((instruction.flags() & BARRIER) != 0 ||
+      instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic ||
       name.starts_with("s_barrier") || name.starts_with("s_sendmsg"))
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "unmodeled synchronization: " + std::string(name), offset);
-  const uint32_t width = native_lds_width(name);
-  if (name.starts_with("ds_") && width == 0)
+  const uint32_t width = native_lds_width(instruction);
+  if ((addressing == amdgpu::MemoryAddressing::Lds || addressing == amdgpu::MemoryAddressing::Gds ||
+       addressing == amdgpu::MemoryAddressing::DirectLds) &&
+      width == 0)
     return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                               "unsupported LDS form: " + std::string(name), offset);
-  if (width == 0 && !admitted_instruction(name))
+  if (width == 0 && !admitted_instruction(instruction))
     return reject_instruction(error, InputErrorCode::UnsupportedInstruction,
                               "instruction outside MVP: " + std::string(name), offset);
   if (width != 0) {
@@ -120,7 +178,7 @@ Result classify_lds_race_instruction(const Instruction &instruction, rj_code_arc
     if (instruction.size() != 8 || (instruction.raw_encoding()[0] & (1u << gds_bit)) != 0)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess, "non-native LDS form",
                                 offset);
-    const bool read = name.starts_with("ds_load_") || name.starts_with("ds_read_");
+    const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
     const Operand *address = instruction.src_operand(0);
     const Operand *value = read ? instruction.dst_operand(0) : instruction.src_operand(1);
     const std::optional<RegisterRef> address_reg = address->decoded_vgpr();
@@ -152,12 +210,12 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
     std::vector<const Instruction *> instructions;
     for (const Instruction &instruction : block->instructions()) {
       instructions.push_back(&instruction);
-      if (instruction.mnemonic() == "s_barrier_signal" ||
-          instruction.mnemonic() == "s_barrier_wait")
+      if (instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_SIGNAL ||
+          instruction.amdgpu_operation() == amdgpu::Operation::S_BARRIER_WAIT)
         ++members;
     }
     for (size_t index = 0; index < instructions.size(); ++index) {
-      if (instructions[index]->mnemonic() != "s_barrier_signal")
+      if (instructions[index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_SIGNAL)
         continue;
       const uint32_t signal =
           cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN})[0];
@@ -168,7 +226,7 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
       size_t wait_index = index + 1;
       bool intervening_memory_or_barrier = false;
       while (wait_index < instructions.size() &&
-             instructions[wait_index]->mnemonic() != "s_barrier_wait") {
+             instructions[wait_index]->amdgpu_operation() != amdgpu::Operation::S_BARRIER_WAIT) {
         const Instruction &instruction = *instructions[wait_index];
         if (instruction.is_memory_op() || instruction.is_barrier())
           intervening_memory_or_barrier = true;
@@ -272,10 +330,11 @@ Result validate_lds_race_accesses(const InputProgram &program, const PreparedArt
   std::set<uint64_t> access_offsets;
   for (BasicBlock *block : blocks)
     for (const Instruction &instruction : block->instructions()) {
-      const std::string_view name = instruction.mnemonic();
-      if (name == "s_barrier_signal" || name == "s_barrier_wait")
+      const amdgpu::Operation operation = instruction.amdgpu_operation();
+      if (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
+          operation == amdgpu::Operation::S_BARRIER_WAIT)
         barrier_offsets.insert(instruction.src_loc());
-      if (native_lds_width(name) != 0)
+      if (native_lds_width(instruction) != 0)
         access_offsets.insert(instruction.src_loc());
     }
   std::set<uint64_t> expected_barriers;

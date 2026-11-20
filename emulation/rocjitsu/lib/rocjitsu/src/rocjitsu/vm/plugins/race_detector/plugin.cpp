@@ -213,15 +213,17 @@ struct CounterOnlySlot {
   bool is_load;
 };
 
-std::optional<CounterOnlySlot> counter_only_slot(std::string_view mnemonic) {
+std::optional<CounterOnlySlot> counter_only_slot(amdgpu::Operation operation) {
   using amdgpu::MemoryCompletionClass;
   using amdgpu::WaitCounterType;
-  if (mnemonic == "global_inv")
+  if (operation == amdgpu::Operation::GLOBAL_INV)
     return CounterOnlySlot{{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM}, true};
-  if (mnemonic == "global_wb" || mnemonic == "global_wbinv")
+  if (operation == amdgpu::Operation::GLOBAL_WB || operation == amdgpu::Operation::GLOBAL_WBINV)
     return CounterOnlySlot{{WaitCounterType::STORECNT, MemoryCompletionClass::VMEM}, false};
-  if (mnemonic == "ds_permute_b32" || mnemonic == "ds_bpermute_b32" ||
-      mnemonic == "ds_bpermute_fi_b32" || mnemonic == "ds_swizzle_b32" || mnemonic == "ds_nop")
+  if (operation == amdgpu::Operation::DS_PERMUTE_B32 ||
+      operation == amdgpu::Operation::DS_BPERMUTE_B32 ||
+      operation == amdgpu::Operation::DS_BPERMUTE_FI_B32 ||
+      operation == amdgpu::Operation::DS_SWIZZLE_B32 || operation == amdgpu::Operation::DS_NOP)
     return CounterOnlySlot{{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}, true};
   return std::nullopt;
 }
@@ -1526,24 +1528,25 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   s->lds_operand_reads.clear();
   s->image_query.reset();
   const auto arch = wf.cu().arch();
-  const auto name = inst.mnemonic();
+  const auto operation = inst.amdgpu_operation();
   // Inline queries reserve their issue slot before accessing mip/coordinate
   // operands. A successful execution publishes the captured destination lanes.
-  const bool legacy_lod = name == "image_get_lod" && amdgpu::has_ordered_vmem_reads(arch);
+  const bool legacy_lod =
+      operation == amdgpu::Operation::IMAGE_GET_LOD && amdgpu::has_ordered_vmem_reads(arch);
   if (inst.is_memory_wait_producer() && !inst.is_memory_op() &&
-      (name == "image_get_resinfo" || legacy_lod)) {
+      (operation == amdgpu::Operation::IMAGE_GET_RESINFO || legacy_lod)) {
     const auto counter = arch == ROCJITSU_CODE_ARCH_RDNA4 ? amdgpu::WaitCounterType::LOADCNT
                                                           : amdgpu::WaitCounterType::VMCNT;
     if (s->race_state->prepareForCounterIncrement(counter).failed()) {
       report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
       return;
     }
-    s->image_query.emplace(amdgpu::vmem_read_type(arch, name), counter);
+    s->image_query.emplace(amdgpu::vmem_read_type(arch, inst.mnemonic()), counter);
   }
   // Fixed-domain FLAT reserves both slots before reading its address.
   // Other FLAT requests reserve their slots at routing.
-  if (inst.is_memory_op() &&
-      (!name.starts_with("flat_") || amdgpu::flat_issues_both_counter_domains(arch))) {
+  if (inst.is_memory_op() && (inst.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Flat ||
+                              amdgpu::flat_issues_both_counter_domains(arch))) {
     const auto *info = inst.amdgpu_memory_issue_info();
     assert(info && "memory instruction reached the race detector without issue metadata");
     util::Result admitted = util::Result::success();
@@ -1565,7 +1568,7 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   // hold their slot (see counter_only_slot()).
   if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 && inst.is_memory_wait_producer() &&
       !inst.is_memory_op()) {
-    if (const auto slot = counter_only_slot(inst.mnemonic())) {
+    if (const auto slot = counter_only_slot(inst.amdgpu_operation())) {
       const std::span<const amdgpu::MemoryCounterObligation> obligations{&slot->obligation, 1};
       if (s->race_state->prepareForCounterIncrement(slot->obligation.wait_counter_type())
               .failed()) {
@@ -1581,12 +1584,16 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
   // issue metadata. They count on LGKMCNT before GFX12 and on KMcnt on
   // gfx1250 (CDNA5 ISA 5.7.1.5), where S_SENDMSG_RTN_B* adds two tokens, one
   // for the message and one for its returned data (CDNA5 ISA 5.4).
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic.starts_with("s_sendmsg") &&
+  if ((operation == amdgpu::Operation::S_SENDMSG || operation == amdgpu::Operation::S_SENDMSGHALT ||
+       operation == amdgpu::Operation::S_SENDMSG_RTN_B32 ||
+       operation == amdgpu::Operation::S_SENDMSG_RTN_B64) &&
       (arch == ROCJITSU_CODE_ARCH_CDNA5 || counterCapacitiesForArch(arch).lgkmcnt != 0)) {
     const bool cdna5 = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5;
     const auto counter = cdna5 ? amdgpu::WaitCounterType::KMCNT : amdgpu::WaitCounterType::LGKMCNT;
-    const uint8_t increment = cdna5 && mnemonic.starts_with("s_sendmsg_rtn") ? 2 : 1;
+    const uint8_t increment = cdna5 && (operation == amdgpu::Operation::S_SENDMSG_RTN_B32 ||
+                                        operation == amdgpu::Operation::S_SENDMSG_RTN_B64)
+                                  ? 2
+                                  : 1;
     if (s->race_state->prepareForCounterIncrement(counter, increment).failed()) {
       report_plugin_failure(wf, "race detector counter capacity or increment is invalid");
       return;
