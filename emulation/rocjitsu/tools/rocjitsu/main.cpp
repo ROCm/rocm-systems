@@ -827,6 +827,10 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --profile cannot be combined with --attach\n";
     return 1;
   }
+  if (daemon_mode && attach_mode) {
+    std::cerr << "rocjitsu: --daemon cannot be combined with --attach\n";
+    return 1;
+  }
 
   std::string abs_config;
   if (config_path) {

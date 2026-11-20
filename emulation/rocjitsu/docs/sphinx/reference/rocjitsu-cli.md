@@ -17,6 +17,7 @@ For details on how KMD emulation and the interposer layer work, see [GPU virtual
 rocjitsu [--config <config.json>|--profile <name>] [--daemon] [--] <app> [args...]
 rocjitsu --attach <id_or_path> [--config <config.json>] -- <app> [args...]
 rocjitsu [--config <config.json>|--profile <name>] [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
+rocjitsu paths [--json]
 ```
 
 | Option | Description |
@@ -27,7 +28,11 @@ rocjitsu [--config <config.json>|--profile <name>] [--node <id>] --vfio-socket <
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
 | `--attach <id_or_path>` | Attach to a running daemon. Use `default` for the current runtime directory, a daemon ID under that runtime directory, a runtime directory path, or a `daemon.sock` path. |
 | `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The socket count must match the selected node's local GPU count, and paths must be distinct. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
+| `--cpu-thread-budget <n>` | Override the launch's CPU thread budget without rewriting the source config. Not available with `--attach`. |
+| `--wait-checking <off|on|all>` | Override wait-checking for this launch without rewriting the source config. Not available with `--attach`. |
+| `--thread-budget-table` | Print engine and dispatch thread allocations for the selected config, then exit without launching an application. |
 | `--check-vfio-user` | Exit successfully only when the selected binary includes VFIO-user support. |
+| `paths [--json]` | Print the default runtime directory, daemon socket, and config handoff path in text or JSON form. |
 | `--help`, `-h` | Print usage information and exit. |
 | `--version`, `-v` | Print the version string and exit. |
 | `--` | Separator between rocjitsu options and the target application command line. |
@@ -110,9 +115,9 @@ host and guest contract.
 When `--attach <id_or_path>` is used, the launcher validates one existing daemon socket before starting the application:
 
 1.  `default` selects the default runtime directory: `$ROCJITSU_RUNTIME_DIR`, then `$XDG_RUNTIME_DIR/rocjitsu`, then `/tmp/rocjitsu-<uid>`.
-2.  Any other identifier selects a subdirectory under that default runtime directory.
+2.  Any other identifier selects a subdirectory under that default runtime directory. A bare `daemon.sock` is an identifier and resolves to `<runtime>/daemon.sock/daemon.sock`.
 3.  A path selects that runtime directory directly.
-4.  A path ending in `daemon.sock` selects its parent directory.
+4.  A path ending in `daemon.sock` selects its parent directory. Use `--attach ./daemon.sock` to select a socket in the current directory.
 
 The launched application receives the selected runtime directory through `ROCJITSU_INVOCATION_DIR`, so descendants connect to the same daemon. A process using the interposer without a launcher still falls back to the default socket path order above.
 
