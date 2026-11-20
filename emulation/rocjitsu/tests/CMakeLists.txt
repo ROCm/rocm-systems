@@ -275,6 +275,15 @@ add_test(
 )
 
 add_test(
+    NAME RocjitsuDaemonRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--daemon;--attach;default;--;true"
+        "-DTEST_REGEX=--daemon cannot be combined with --attach" -P
+        ${_rj_cli_failure_script}
+)
+
+add_test(
     NAME RocjitsuProfileRejectsMissingValue
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
