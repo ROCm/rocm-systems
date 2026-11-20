@@ -80,12 +80,22 @@ class InterruptSignal : private LocalSignal, public Signal {
     void clear() {
       events_.clear();
       allEventsAllocated = false;
+      overflow_.reset();
+      overflow_tried_ = false;
     }
+    // Event shared by every interrupt signal created after the KFD events ran
+    // out, so those signals still wake KFD waiters instead of forcing polling.
+    // Never returned to the pool.
+    HsaEvent* overflow() const { return overflow_.get(); }
 
    private:
     HybridMutex lock_;
     std::vector<unique_event_ptr> events_;
     bool allEventsAllocated;
+    unique_event_ptr overflow_;
+    // Reservation is tried once: a thunk without KFD events (WSL/dxg) would
+    // otherwise fail it again on every signal creation.
+    bool overflow_tried_ = false;
   };
 
   static HsaEvent* CreateEvent(HSA_EVENTTYPE type, bool manual_reset);

@@ -49,13 +49,21 @@ namespace core {
 
 HsaEvent* InterruptSignal::EventPool::alloc() {
   std::lock_guard<HybridMutex> lock(lock_);
+  // Reserve the overflow event before the first regular one, while KFD still has events.
+  // Only with event age: without it one notification releases one parked thread, and
+  // waiters on different signals sharing the event could miss their wakeup.
+  if (!overflow_tried_) {
+    overflow_tried_ = true;
+    if (Runtime::runtime_singleton_->KfdVersion().supports_event_age)
+      overflow_.reset(InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false));
+  }
   if (events_.empty()) {
     if (!allEventsAllocated) {
       HsaEvent* evt = InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
-      if (evt == nullptr) allEventsAllocated = true;
-      return evt;
+      if (evt != nullptr) return evt;
+      allEventsAllocated = true;
     }
-    return nullptr;
+    return overflow_.get();
   }
   HsaEvent* ret = events_.back().release();
   events_.pop_back();
@@ -110,8 +118,9 @@ void InterruptSignal::AttachEvent(HsaEvent* use_event) {
     event_ = use_event;
     free_event_ = false;
   } else {
-    event_ = Runtime::runtime_singleton_->GetEventPool()->alloc();
-    free_event_ = true;
+    auto* pool = Runtime::runtime_singleton_->GetEventPool();
+    event_ = pool->alloc();
+    free_event_ = (event_ != pool->overflow());
   }
 
   if (event_ != nullptr) {

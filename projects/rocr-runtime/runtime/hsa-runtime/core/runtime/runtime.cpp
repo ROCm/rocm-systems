@@ -2117,8 +2117,10 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     if (!keep) {
       // Drop the removed event's cached age so a future event reusing the same
       // HsaEvent* address does not inherit a stale baseline.
+      // Other signals keep the shared overflow event, so its age stays.
       HsaEvent* removed_event = hsa_signal_handle(async_events_.signal_[index])->EopEvent();
-      if (removed_event != nullptr) event_age_map.erase(removed_event);
+      HsaEvent* overflow = runtime_singleton_->GetEventPool()->overflow();
+      if (removed_event != nullptr && removed_event != overflow) event_age_map.erase(removed_event);
       hsa_signal_handle(async_events_.signal_[index])->Release();
       async_events_.CopyIndex(index, async_events_.Size() - 1);
       async_events_.PopBack();
@@ -2127,6 +2129,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
   };
 
   // Prepares a list of events for a wait inside KFD
+  uint32_t overflow_slot = 0;
   auto PrepareInterrupt = [&](size_t idx) {
     HsaEvent* hsa_event = hsa_signals[idx]->EopEvent();
     // If any signal doesn't have an interrupt, then switch to polling
@@ -2134,6 +2137,11 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       unique_evts = 0;
       return false;
     } else {
+      if (hsa_event == runtime_singleton_->GetEventPool()->overflow()) {
+        // Already in this wait list (the list is rebuilt from slot 0 each pass).
+        if (overflow_slot < unique_evts && hsa_events[overflow_slot] == hsa_event) return true;
+        overflow_slot = unique_evts;
+      }
       if (hsa_events.size() <= unique_evts) {
         hsa_events.resize(unique_evts + 10);
         event_age.resize(unique_evts + 10);
