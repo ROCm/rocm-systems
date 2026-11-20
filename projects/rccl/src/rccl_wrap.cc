@@ -1479,6 +1479,11 @@ int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   return std::min(cap, table->ddaA2aLL128MaxBlocks);
 }
 
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr) return 0;
+  return (int)table->ddaLL128BcTwoShotThreads;
+}
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm) {
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   return table != nullptr ? table->ddaRsLL128Threads : 0;
