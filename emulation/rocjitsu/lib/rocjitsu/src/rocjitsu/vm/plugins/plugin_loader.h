@@ -55,7 +55,8 @@ public:
   /// Failures (missing library, missing exports, bad config) are reported to the
   /// plugin log and skip that plugin without aborting the others. This low-level
   /// entry point is always best-effort; use configure_plugin_group() with
-  /// `"require_all_plugins": true` when every configured plugin is required.
+  /// `"require_all_plugins": true` when every configured plugin is required,
+  /// or `"required_plugins": ["name"]` when only specific entries are required.
   ///
   /// @returns The number of plugins successfully added to @p group.
   static int load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
@@ -73,7 +74,8 @@ public:
   /// plugin listed in `"plugins"` cannot be added. A non-boolean value is
   /// rejected. When all plugins are required, an explicitly present `"plugins"`
   /// value must be an object; omitting `"plugins"` is valid and produces an empty
-  /// group.
+  /// group. The optional top-level `"required_plugins"` array names individual
+  /// entries that must load even when the rest of `"plugins"` stays best-effort.
   ///
   /// @returns A non-null group (empty if the config declares no plugins), or failure
   /// for malformed JSON, a non-object root, invalid admission options, or when a required plugin
