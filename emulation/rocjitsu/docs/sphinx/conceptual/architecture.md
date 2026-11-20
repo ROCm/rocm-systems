@@ -181,7 +181,7 @@ simulated VM or by real hardware through an HSA tools hook.
 
 Translation is exposed through the `rj_code_translate` function in the
 public C API, which takes a source code object and a
-`rj_code_dbt_options_t` specifying the guest and host architectures.
+`rj_code_dbt_options_t` specifying the concrete guest and host targets.
 
 ### Dynamic binary instrumentation
 

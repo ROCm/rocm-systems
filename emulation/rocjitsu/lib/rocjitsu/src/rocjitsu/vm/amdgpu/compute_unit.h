@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
@@ -151,7 +152,7 @@ public:
 
   /// @brief Configuration for a compute unit.
   struct Config {
-    rj_code_arch_t arch; ///< ISA architecture (determines wave size, decoder).
+    rocjitsu::IsaFamily arch; ///< ISA architecture (determines wave size, decoder).
     rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete GPU target.
     uint32_t num_wf_slots; ///< Number of hardware wavefront slots (contexts).
     uint32_t sgprs_per_wf; ///< Scalar GPRs per wavefront (allocation granularity).
@@ -176,7 +177,7 @@ public:
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
-      return arch == ROCJITSU_CODE_ARCH_CDNA5 && xcnt_diagnostics != MemoryWaitDiagnostics::Off;
+      return arch == rocjitsu::IsaFamily::Cdna5 && xcnt_diagnostics != MemoryWaitDiagnostics::Off;
     }
     /// @brief Whether either core memory-result or replay-source checking is enabled.
     bool memory_wait_checks_enabled() const {
@@ -1017,7 +1018,7 @@ public:
     shared_aperture_limit_ = shared_limit;
     private_aperture_base_ = private_base;
     private_aperture_limit_ = private_limit;
-    flat_pointer32_ = arch() == ROCJITSU_CODE_ARCH_RDNA1 && ptr32;
+    flat_pointer32_ = arch() == rocjitsu::IsaFamily::Rdna1 && ptr32;
   }
 
   /// @brief Program the shader aperture register bank selected by a guest VMID.
@@ -1084,7 +1085,7 @@ public:
 
   /// @brief Return the ISA architecture.
   /// @returns Architecture enum value.
-  rj_code_arch_t arch() const { return config_.arch; }
+  rocjitsu::IsaFamily arch() const { return config_.arch; }
 
   /// @brief Return the device tiling identity, or standalone CU defaults.
   ImageAddressConfig image_address_config() const {
@@ -1199,7 +1200,7 @@ public:
   // even when its reserved physical slot has room for additional registers.
   [[nodiscard]] bool valid_operand_vgpr_range(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2)
+    if (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2)
       return wf.vgpr_alloc().contains(base, count);
     return owns_vgpr_range(wf, base, count);
   }
@@ -1208,9 +1209,9 @@ public:
   /// allocated VGPR tuple, even if that tuple fits in the simulator's register slot.
   [[nodiscard]] bool owns_memory_result_range(const Wavefront &wf, uint32_t base,
                                               uint32_t count) const {
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA4 || arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-        arch() == ROCJITSU_CODE_ARCH_RDNA3_5 || arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
-        arch() == ROCJITSU_CODE_ARCH_RDNA2)
+    if (arch() == rocjitsu::IsaFamily::Rdna4 || arch() == rocjitsu::IsaFamily::Rdna3 ||
+        arch() == rocjitsu::IsaFamily::Rdna3_5 || arch() == rocjitsu::IsaFamily::Rdna1 ||
+        arch() == rocjitsu::IsaFamily::Rdna2)
       return &wf.raw_cu() == this && wf.vgpr_alloc().contains(base, count);
     return owns_memory_result_vgprs(wf, base, count);
   }
@@ -1592,13 +1593,14 @@ public:
     // The decoded instruction already selects its ISA execution callback.
     inst->execute(*inst, &wf);
     if (inst->is_memory_op() && inst->data() &&
-        (config_.arch == ROCJITSU_CODE_ARCH_RDNA3 || config_.arch == ROCJITSU_CODE_ARCH_RDNA3_5))
+        (config_.arch == rocjitsu::IsaFamily::Rdna3 ||
+         config_.arch == rocjitsu::IsaFamily::Rdna3_5))
       qualify_gfx11_memory(*inst, wf);
-    if (config_.arch == ROCJITSU_CODE_ARCH_RDNA4 && inst->data())
+    if (config_.arch == rocjitsu::IsaFamily::Rdna4 && inst->data())
       nullify_unallocated_memory_result(*inst, wf);
     if (preserve_scc)
       wf.write_scc(saved_scc);
-    if (inst->data() && config_.arch == ROCJITSU_CODE_ARCH_CDNA4)
+    if (inst->data() && config_.arch == rocjitsu::IsaFamily::Cdna4)
       qualify_cdna4_memory_destination(*inst, wf);
     if (failure_detail && wf.instruction_execution_error_detail())
       *failure_detail = wf.instruction_execution_error_detail();
@@ -1714,7 +1716,7 @@ protected:
                                               uint32_t count) const {
     if (!owns_vgpr_range(wf, base, count))
       return false;
-    if (arch() != ROCJITSU_CODE_ARCH_CDNA4)
+    if (arch() != rocjitsu::IsaFamily::Cdna4)
       return true;
 
     return wf.unified_vgpr_range_is_allocated(base - wf.vgpr_alloc().base, count);
@@ -2161,7 +2163,7 @@ inline bool InstructionComputeUnitView::sram_ecc() const { return raw_cu().sram_
 inline bool InstructionComputeUnitView::setreg_vgpr_msb_fixup() const {
   return raw_cu().setreg_vgpr_msb_fixup();
 }
-inline rj_code_arch_t InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
+inline rocjitsu::IsaFamily InstructionComputeUnitView::arch() const { return raw_cu().arch(); }
 inline uint64_t InstructionComputeUnitView::arithmetic_flags() const {
   return raw_cu().arithmetic_flags();
 }

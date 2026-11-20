@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -49,7 +50,7 @@ constexpr DotCase kDots[] = {
 };
 
 TEST(Rdna4DotDppTest, DecodesHardwareQualifiedForms) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(decoder, nullptr);
   for (const auto &dot : kDots) {
     // LLVM gfx1201 encodings, also executed on physical gfx1201:
@@ -77,7 +78,7 @@ TEST(Rdna4DotDppTest, PermutesSourcesAndPreservesMaskedDestinations) {
       amdgpu::GpuMemory memory("dot_dpp_memory");
       amdgpu::L2Cache l2("dot_dpp_l2");
       amdgpu::ComputeUnitCore::Config cfg{};
-      cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      cfg.arch = rocjitsu::IsaFamily::Rdna4;
       cfg.num_wf_slots = 1;
       cfg.sgprs_per_wf = 106;
       cfg.vgprs_per_wf = 32;
@@ -139,7 +140,7 @@ TEST(Rdna4DotDppTest, FloatingDot4UsesEachOperandFormat) {
   amdgpu::GpuMemory memory("dot4_format_memory");
   amdgpu::L2Cache l2("dot4_format_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.arch = rocjitsu::IsaFamily::Rdna4;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 32;

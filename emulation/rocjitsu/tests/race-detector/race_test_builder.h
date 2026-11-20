@@ -9,6 +9,7 @@
 #pragma once
 
 #include "race_test_instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
@@ -30,7 +31,7 @@ class RaceTestBuilder {
 public:
   RaceTestBuilder(
       int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0),
-      CounterCapacities counterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4))
+      CounterCapacities counterCapacities = counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4))
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
         numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },

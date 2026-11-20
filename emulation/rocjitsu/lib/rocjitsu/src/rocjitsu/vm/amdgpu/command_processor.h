@@ -22,6 +22,7 @@
 /// CP documentation</a>
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_processor.h"
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
@@ -142,7 +143,7 @@ public:
   void set_packed_tid(bool enabled) { packed_tid_ = enabled; }
   bool packed_tid() const { return packed_tid_; }
   /// @brief Configure launch and packet behavior derived from the GPU architecture.
-  void configure_for_arch(rj_code_arch_t arch);
+  void configure_for_arch(rocjitsu::IsaFamily arch);
   void set_shared_dispatch_pool(CpuDispatchPool *pool);
   void set_dispatch_threads(uint32_t threads);
   uint32_t dispatch_threads() const { return dispatch_threads_; }

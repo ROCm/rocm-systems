@@ -7,6 +7,7 @@
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "gws_test_encoding.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -331,8 +332,8 @@ struct VmFixture {
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
                       addr + sizeof(kernel_descriptor_t));
     // These kernels use ordinary VGPRs throughout the allocation.
-    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
-        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4)
+    if (cu()->arch() == rocjitsu::IsaFamily::Cdna2 || cu()->arch() == rocjitsu::IsaFamily::Cdna3 ||
+        cu()->arch() == rocjitsu::IsaFamily::Cdna4)
       set_accum_offset(addr, std::min(vgprs, amdgpu::ACC_VGPR_OFFSET));
     return addr;
   }
@@ -600,7 +601,7 @@ TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFai
 TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesRejectedConfiguration) {
   using Config = amdgpu::ComputeUnitCore::Config;
   const Config valid{
-      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .arch = rocjitsu::IsaFamily::Cdna3,
       .num_wf_slots = 8,
       .sgprs_per_wf = 104,
       .vgprs_per_wf = 256,
@@ -618,9 +619,9 @@ TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesRejectedConfiguration) {
   invalid.vgprs_per_wf = 513;
   cases.push_back({invalid, "effective VGPRs per wavefront exceeds the ISA maximum of 512"});
   invalid = valid;
-  invalid.arch = ROCJITSU_CODE_ARCH_INVALID;
+  invalid.arch = rocjitsu::IsaFamily::Invalid;
   cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
-  invalid.arch = ROCJITSU_CODE_ARCH_RV64I;
+  invalid.arch = rocjitsu::IsaFamily::Rv64i;
   cases.push_back({invalid, "Unsupported architecture for ComputeUnit"});
   invalid = valid;
   invalid.target = static_cast<rj_code_target_id_t>(UINT32_MAX);
@@ -652,7 +653,7 @@ TEST(ComputeUnitConfigTest, FixtureSetupStopsWithRejectedConfigurationDiagnostic
     [&] {
       std::unique_ptr<amdgpu::ComputeUnitCore> compute_unit;
       const amdgpu::ComputeUnitCore::Config config{
-          .arch = ROCJITSU_CODE_ARCH_CDNA3,
+          .arch = rocjitsu::IsaFamily::Cdna3,
           .num_wf_slots = 33,
           .sgprs_per_wf = 104,
           .vgprs_per_wf = 256,
@@ -673,7 +674,7 @@ TEST(ComputeUnitConfigTest, FixtureSetupStopsWithRejectedConfigurationDiagnostic
 
 TEST(ComputeUnitConfigTest, DirectFactoryDiagnosesUnsupportedExecutionMode) {
   const amdgpu::ComputeUnitCore::Config config{
-      .arch = ROCJITSU_CODE_ARCH_CDNA3,
+      .arch = rocjitsu::IsaFamily::Cdna3,
       .num_wf_slots = 8,
       .sgprs_per_wf = 104,
       .vgprs_per_wf = 256,
@@ -693,7 +694,7 @@ TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigE
       .num_compute_units = 1,
       .compute_unit =
           {
-              .arch = ROCJITSU_CODE_ARCH_CDNA3,
+              .arch = rocjitsu::IsaFamily::Cdna3,
               .num_wf_slots = 33,
               .sgprs_per_wf = 104,
               .vgprs_per_wf = 256,
@@ -701,7 +702,7 @@ TEST(ComputeUnitConfigTest, ShaderEngineTranslatesRejectedConfigurationToConfigE
           },
   };
   try {
-    amdgpu::ShaderEngine shader_engine("rejected", config, ROCJITSU_CODE_ARCH_CDNA3, nullptr,
+    amdgpu::ShaderEngine shader_engine("rejected", config, rocjitsu::IsaFamily::Cdna3, nullptr,
                                        nullptr);
     FAIL() << "Expected rejected CU configuration to throw ConfigError";
   } catch (const util::ConfigError &error) {
@@ -713,7 +714,7 @@ TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) 
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   amdgpu::L2Cache l2("l2");
   const amdgpu::ComputeUnitCore::Config config{
-      .arch = ROCJITSU_CODE_ARCH_CDNA5,
+      .arch = rocjitsu::IsaFamily::Cdna5,
       .target = ROCJITSU_CODE_TARGET_GFX1251,
       .num_wf_slots = 8,
       .sgprs_per_wf = 104,
@@ -723,7 +724,7 @@ TEST(ComputeUnitConfigTest, DirectFactoryAcceptsExecutionEnabledConcreteTarget) 
 
   auto compute_unit = amdgpu::ComputeUnitCore::create("cu", config, &memory, &l2);
   ASSERT_NE(compute_unit, nullptr);
-  EXPECT_EQ(compute_unit->arch(), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(compute_unit->arch(), rocjitsu::IsaFamily::Cdna5);
 }
 
 TEST(ComputeUnitConfigTest, VectorCacheInheritsBackingTransactionPolicy) {
@@ -732,7 +733,7 @@ TEST(ComputeUnitConfigTest, VectorCacheInheritsBackingTransactionPolicy) {
     amdgpu::GpuMemory memory("memory", policy);
     amdgpu::L2Cache l2("l2");
     const amdgpu::ComputeUnitCore::Config config{
-        .arch = ROCJITSU_CODE_ARCH_CDNA5,
+        .arch = rocjitsu::IsaFamily::Cdna5,
         .target = ROCJITSU_CODE_TARGET_GFX1250,
         .num_wf_slots = 8,
         .sgprs_per_wf = 104,
@@ -749,7 +750,7 @@ TEST(ComputeUnitConfigTest, DirectFactoryRejectsTargetFromAnotherArchitecture) {
   rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
   amdgpu::L2Cache l2("l2");
   const amdgpu::ComputeUnitCore::Config config{
-      .arch = ROCJITSU_CODE_ARCH_CDNA5,
+      .arch = rocjitsu::IsaFamily::Cdna5,
       .target = ROCJITSU_CODE_TARGET_GFX950,
       .num_wf_slots = 8,
       .sgprs_per_wf = 104,
@@ -922,7 +923,7 @@ TEST(LdsAllocationTest, DispatchUsesTheTargetsAddressableLdsWindow) {
       queue.submit(packet);
       f.engine->run();
       ASSERT_EQ(capture->snapshots().size(), 1u);
-      const uint32_t granule = f.cu()->arch() == ROCJITSU_CODE_ARCH_RDNA2 ? 1024 : 512;
+      const uint32_t granule = f.cu()->arch() == rocjitsu::IsaFamily::Rdna2 ? 1024 : 512;
       EXPECT_EQ(capture->snapshots().front().lds_window_bytes,
                 ((requested + granule - 1) / granule) * granule);
     }
@@ -1019,7 +1020,7 @@ TEST(RdnaDispatchTest, AqlShaderExportsHaveReadyStorageAndHonorFrontendBackpress
         group->onInit();
         const uint8_t target = static_cast<uint8_t>(c.target);
         const auto words =
-            f.cu()->arch() == ROCJITSU_CODE_ARCH_RDNA4
+            f.cu()->arch() == rocjitsu::IsaFamily::Rdna4
                 ? rdna4::build_vexport({.en = 1, .tgt = target, .done = c.done, .vsrc0 = 0})
                 : rdna3::build_exp({.en = 1, .tgt = target, .done = c.done, .vsrc0 = 0});
         constexpr uint32_t endpgm = 0xbfb00000u;
@@ -1173,7 +1174,7 @@ TEST(RdnaDispatchTest, Gfx10SubvectorScratchChecksTheFirstRealAccess) {
             !c.drop_priv &&
             (c.opcode == begin ? c.low || c.high : c.opcode == end && !c.high && c.saved);
         const bool loop_read =
-            c.opcode == end || (c.opcode == begin && f.cu()->arch() == ROCJITSU_CODE_ARCH_RDNA1);
+            c.opcode == end || (c.opcode == begin && f.cu()->arch() == rocjitsu::IsaFamily::Rdna1);
         std::string expected_effects;
         if (c.scratch == reg && loop_read)
           expected_effects += 'r';
@@ -6726,7 +6727,7 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
 
   VmFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2));
-  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_endpgm.succeeded());
   const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t first_kernel = fixture.write_kernel(0x1000, code, sizeof(code));
@@ -6804,7 +6805,7 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
     const uint64_t raw_per_wave = static_cast<uint64_t>(private_bytes) * 32;
     const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
     const uint32_t wavesize_granule =
-        isa_properties(ROCJITSU_CODE_ARCH_CDNA5).compute_tmpring_wavesize_granule;
+        isa_properties(rocjitsu::IsaFamily::Cdna5).compute_tmpring_wavesize_granule;
     const uint32_t provisioned_wavesize = static_cast<uint32_t>(per_wave_stride / wavesize_granule);
     fixture.mem()->write32(kQueueDescriptor + offsetof(amd_queue_t, compute_tmpring_size),
                            1u | (provisioned_wavesize << kWaveSizeFieldShift));
@@ -7444,7 +7445,7 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
                                              /*num_shader_engines=*/2));
   fixture.cp()->set_scratch_wave_divisor(2);
   fixture.cp()->set_scratch_xcc_layout_for_test(kXccId, kXccCount);
-  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_endpgm.succeeded());
   const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t kernel = fixture.write_kernel(0x4000, code, sizeof(code));
@@ -7461,7 +7462,7 @@ TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) 
   const uint64_t alternate_last_used =
       kQueueDescriptor + offsetof(amd_queue_v2_t, scratch_last_used_index) +
       kXccId * sizeof(scratch_last_used_index_xcc_t) + offsetof(scratch_last_used_index_xcc_t, alt);
-  const auto properties = isa_properties(ROCJITSU_CODE_ARCH_CDNA5);
+  const auto properties = isa_properties(rocjitsu::IsaFamily::Cdna5);
   const uint64_t raw_per_wave = static_cast<uint64_t>(kPrivateBytes) * 32;
   const uint64_t per_wave_stride = ((raw_per_wave + 1023) / 1024) * 1024;
   const uint32_t provisioned_wavesize =
@@ -7976,7 +7977,7 @@ TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
   rocjitsu::test::LegacyGpuMemoryFixture mem("cdna4_setpc_ttmp_mem");
   amdgpu::L2Cache l2("cdna4_setpc_ttmp_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  cfg.arch = rocjitsu::IsaFamily::Cdna4;
   cfg.num_wf_slots = 2;
   cfg.sgprs_per_wf = 104;
   cfg.vgprs_per_wf = 16;
@@ -7991,15 +7992,15 @@ TEST(TrapRegisterPcTest, SetpcPrecheckReadsDecodedTtmpPair) {
   constexpr uint64_t kStartPc = 0x1000;
   constexpr uint64_t kTargetPc = kStartPc + 2 * sizeof(uint32_t);
   constexpr uint32_t kTtmp0Selector = 108;
-  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
-  util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_s_endpgm_4 = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_s_endpgm_4.succeeded());
   util::FailureOr<uint32_t> maybe_s_setpc_b64 =
-      build_s_setpc_b64(kTtmp0Selector, ROCJITSU_CODE_ARCH_CDNA4);
+      build_s_setpc_b64(kTtmp0Selector, rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_s_setpc_b64.succeeded());
   util::FailureOr<uint32_t> maybe_s_mov_b32 =
-      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), ROCJITSU_CODE_ARCH_CDNA4);
+      build_s_mov_b32(/*sdst=*/0, scalar_positive_inline_u32(1), rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_s_mov_b32.succeeded());
   const std::array<uint32_t, 4> code = {
       maybe_s_setpc_b64.value(),
@@ -8408,7 +8409,7 @@ TEST(CommandProcessorAqlTest, BlockingBarriersRetireBeforeUnsupportedSuccessorFa
     SCOPED_TRACE(format);
     VmFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 8));
-    util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
     ASSERT_TRUE(maybe_endpgm.succeeded());
     const uint32_t code[] = {maybe_endpgm.value()};
     const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
@@ -8452,7 +8453,7 @@ TEST(CommandProcessorAqlTest, UnsupportedSuccessorDoesNotStrandResidentDispatch)
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   ASSERT_TRUE(group->add(std::move(lifecycle)));
   f.soc_ptr->set_plugin_group(group);
-  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA4);
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna4);
   ASSERT_TRUE(maybe_endpgm.succeeded());
   const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
@@ -8482,7 +8483,7 @@ TEST(CommandProcessorAqlTest, UnsupportedSuccessorDoesNotStrandResidentDispatch)
 TEST(CommandProcessorAqlTest, Pm4IbRetiresBeforeUnsupportedSuccessorFaultsQueue) {
   VmFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize("cdna5", 1, 8));
-  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_endpgm.succeeded());
   const uint32_t code[] = {maybe_endpgm.value()};
   const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code));
@@ -8680,10 +8681,10 @@ TEST(CommandProcessorGwsPlacementTest, RetirementAdmitsPendingProducer) {
     VmFixture f;
     ASSERT_NO_FATAL_FAILURE(f.initialize("cdna3", 1, 3, 64, 104, 256, 1, 100000));
     f.cp()->set_dispatch_threads(threads);
-    const auto p = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaP),
-                                   {.gds = 1});
-    const auto v = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaV),
-                                   {.gds = 1});
+    const auto p = cdna3::build_ds(
+        test::gws_opcode(rocjitsu::IsaFamily::Cdna3, test::GwsOp::kSemaP), {.gds = 1});
+    const auto v = cdna3::build_ds(
+        test::gws_opcode(rocjitsu::IsaFamily::Cdna3, test::GwsOp::kSemaV), {.gds = 1});
     // WG0 retires; WG1/2 wait; WG3 must enter the freed slot and signal both.
     const uint32_t code[] = {
         cdna3::build_sopc(cdna3::kSCmpEqU32Sopc, {.ssrc0 = 2, .ssrc1 = 128})[0],
@@ -8741,7 +8742,7 @@ TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion)
       f.cp()->set_dispatch_threads(dispatch_threads);
 
     const std::array<uint32_t, 2> gws_p = cdna3::build_ds(
-        test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaP), {.gds = 1});
+        test::gws_opcode(rocjitsu::IsaFamily::Cdna3, test::GwsOp::kSemaP), {.gds = 1});
     const uint32_t code[] = {gws_p[0], gws_p[1], cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]};
     const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104,
                                        /*vgprs=*/256, /*user_sgprs=*/2,
@@ -9151,9 +9152,9 @@ TEST(ClusterDispatchTest, Rdna4ExtendedDispatchKeepsOrdinaryTtmpWorkgroupIds) {
   ASSERT_NO_FATAL_FAILURE(f.initialize("rdna4", 1, 8, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128));
   auto *snap = f.capture_halts();
 
-  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_RDNA4);
+  util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_nop.succeeded());
-  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(ROCJITSU_CODE_ARCH_RDNA4);
+  util::FailureOr<uint32_t> maybe_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_endpgm.succeeded());
   const uint32_t code[] = {maybe_nop.value(), maybe_endpgm.value()};
   uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/128);
@@ -12292,7 +12293,7 @@ TEST(AqlDispatchTest, ThrowingIssueHooksReclaimDecodedInstruction) {
     f.soc_ptr->set_plugin_group(group);
     // An indirect branch to zero halts outside execute_instruction().
     const util::FailureOr<uint32_t> maybe_code =
-        hook == ThrowingIssuePlugin::Halt ? build_s_setpc_b64(0, ROCJITSU_CODE_ARCH_CDNA4)
+        hook == ThrowingIssuePlugin::Halt ? build_s_setpc_b64(0, rocjitsu::IsaFamily::Cdna4)
                                           : util::FailureOr<uint32_t>(0xBE800000u);
     ASSERT_TRUE(maybe_code.succeeded());
     const uint32_t code = maybe_code.value();
@@ -13624,12 +13625,12 @@ TEST(AmdgpuVmTest, NativePm4ReportsFailureBeforeVmExit) {
       ASSERT_TRUE(f.cp()->register_drm_queue(std::move(q)));
       constexpr uint64_t code = 0x8000, ib = 0x4000;
       const auto op = cdna3::build_ds(
-          test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,
+          test::gws_opcode(rocjitsu::IsaFamily::Cdna3,
                            initialized ? test::GwsOp::kSemaP : test::GwsOp::kBarrier),
           {.gds = 1});
       size_t offset = 0;
       if (variant == 2) {
-        auto v = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaV),
+        auto v = cdna3::build_ds(test::gws_opcode(rocjitsu::IsaFamily::Cdna3, test::GwsOp::kSemaV),
                                  {.gds = 1});
         f.mem()->write32(code, v[0]);
         f.mem()->write32(code + 4, v[1]);
@@ -13681,10 +13682,10 @@ TEST(AmdgpuVmTest, LaterHostProducerCompletesParkedAqlConsumer) {
       cu->set_functional_quantum(1);
       cu->set_gws_wait_limit(0);
     }
-    const auto p = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaP),
-                                   {.gds = 1});
-    const auto v = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaV),
-                                   {.gds = 1});
+    const auto p = cdna3::build_ds(
+        test::gws_opcode(rocjitsu::IsaFamily::Cdna3, test::GwsOp::kSemaP), {.gds = 1});
+    const auto v = cdna3::build_ds(
+        test::gws_opcode(rocjitsu::IsaFamily::Cdna3, test::GwsOp::kSemaV), {.gds = 1});
     const uint32_t pc[] = {p[0], p[1], SOPP_S_ENDPGM}, vc[] = {v[0], v[1], SOPP_S_ENDPGM};
     auto pk = f.write_kernel(0x1000, pc, sizeof(pc)), vk = f.write_kernel(0x2000, vc, sizeof(vc));
     init_completion_signal(f.mem(), 0x7000);
@@ -13765,7 +13766,7 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
                            12);
         mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), 0x1000);
         auto p = cdna3::build_ds(
-            test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,
+            test::gws_opcode(rocjitsu::IsaFamily::Cdna3,
                              uninitialized ? test::GwsOp::kBarrier : test::GwsOp::kSemaP),
             {.gds = 1});
         mem->write32(0x1000 + sizeof(kd), p[0]);
@@ -13811,7 +13812,7 @@ TEST(AmdgpuVmTest, AqlFailureDoesNotCompleteBarrierSuccessor) {
             return true;
           });
       auto op = cdna3::build_ds(
-          test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,
+          test::gws_opcode(rocjitsu::IsaFamily::Cdna3,
                            uninitialized ? test::GwsOp::kBarrier : test::GwsOp::kSemaP),
           {.gds = 1});
       uint32_t code[] = {op[0], op[1], SOPP_S_ENDPGM};

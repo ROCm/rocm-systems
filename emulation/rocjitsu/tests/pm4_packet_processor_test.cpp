@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -145,7 +146,7 @@ protected:
 
   Pm4PacketProcessorTest() : memory(std::make_shared<FlatMemory>()) {
     address_space = vm.register_translated(1, memory, memory);
-    context.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    context.arch = rocjitsu::IsaFamily::Rdna4;
     context.retry = [this] {
       queue.command_retry_pending = true;
       status = Pm4TestStatus::Blocked;
@@ -275,7 +276,7 @@ TEST_F(Pm4PacketProcessorTest, ShadowLoadRejectsOffsetPastThe48BitAperture) {
 }
 
 class Pm4PredExecTest : public Pm4PacketProcessorTest,
-                        public ::testing::WithParamInterface<rj_code_arch_t> {};
+                        public ::testing::WithParamInterface<rocjitsu::IsaFamily> {};
 
 TEST_P(Pm4PredExecTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {
   context.arch = GetParam();
@@ -344,14 +345,14 @@ TEST_P(Pm4PredExecTest, RejectsPredExecBeyondBufferForSelectedAndMaskedXcc) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, Pm4PredExecTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                           ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4,
+                                           rocjitsu::IsaFamily::Cdna5));
 
 TEST_F(Pm4PacketProcessorTest, RejectsPredExecOnOtherArchitectures) {
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
-        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-        ROCJITSU_CODE_ARCH_RDNA4}) {
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(arch);
     context.arch = arch;
     queue.faulted = false;

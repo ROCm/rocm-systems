@@ -1318,7 +1318,7 @@ inline void execute_v_add_co_u32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_add_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 || wf.cu().arch() == rocjitsu::IsaFamily::Rdna2)
     record_gfx10_add_f16_exceptions(inst, wf);
   if (wf.fp_round_mode_f16_f64() == 0) {
     ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
@@ -1352,7 +1352,7 @@ inline void execute_v_add_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 || wf.cu().arch() == rocjitsu::IsaFamily::Rdna2)
     record_gfx10_add_f16_exceptions(inst, wf);
   ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false, amdgpu::fp_mode::Arithmetic::ADD,
                                           amdgpu::NegatedSource::NONE);
@@ -1389,7 +1389,7 @@ inline void execute_v_add_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
     rdna3_5::record_alu_causes(
         wf, rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Add>(inst, wf, inst.vsrc1));
   ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
@@ -1413,7 +1413,7 @@ inline void execute_v_add_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_add_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
     rdna3_5::record_alu_causes(
         wf, rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Add>(inst, wf, inst.src1));
   ROCJITSU_TRY_SIMD_VOP3_BINARY_FP_SCOPED(float32_t, [&inst, &wf](auto a, auto b) {
@@ -7882,7 +7882,7 @@ inline void execute_v_div_scale_f64_vop3([[maybe_unused]] Inst &inst,
     s2 = amdgpu::source_modifier::apply_to_float(s2, 2, 0u, inst.inst_.neg);
     const amdgpu::DivisionScaleResult<double> scaled =
         amdgpu::div_scale(s0, s1, s2, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(),
-                          wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3);
+                          wf.cu().arch() != rocjitsu::IsaFamily::Rdna3);
     const double result = scaled.value;
     const bool set_vcc = scaled.post_scale;
     if (set_vcc)
@@ -8270,7 +8270,7 @@ inline void execute_v_fma_dx9_zero_f32_vop3([[maybe_unused]] Inst &inst,
 
 template <typename Inst>
 inline void execute_v_fma_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
     rdna3_5::record_alu_causes(
         wf, rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Fma>(inst, wf, inst.src1));
   ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP32_SCOPED([&inst, &wf](auto a, auto b, auto c) {
@@ -12563,7 +12563,7 @@ inline void execute_v_sub_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sub_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
     rdna3_5::record_alu_causes(
         wf, rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Subtract>(inst, wf, inst.vsrc1));
   ROCJITSU_TRY_SIMD_VOP2_BINARY_SCOPED(
@@ -12587,7 +12587,7 @@ inline void execute_v_sub_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_v_sub_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
     rdna3_5::record_alu_causes(
         wf, rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Subtract>(inst, wf, inst.src1));
   ROCJITSU_TRY_SIMD_VOP3_BINARY_FP_SCOPED(float32_t, [&inst, &wf](auto a, auto b) {
@@ -12976,7 +12976,7 @@ inline void execute_v_subrev_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_subrev_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
     rdna3_5::record_alu_causes(
         wf,
         rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::ReverseSubtract>(inst, wf, inst.vsrc1));
@@ -13001,7 +13001,7 @@ inline void execute_v_subrev_f32_vop2([[maybe_unused]] Inst &inst, [[maybe_unuse
 
 template <typename Inst>
 inline void execute_v_subrev_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)
     rdna3_5::record_alu_causes(
         wf, rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::ReverseSubtract>(inst, wf, inst.src1));
   ROCJITSU_TRY_SIMD_VOP3_BINARY_FP_SCOPED(float32_t, [&inst, &wf](auto a, auto b) {

@@ -19862,8 +19862,8 @@ class CodeGenerator:
             }
             if mnemonic in ('v_add_f16_vop2', 'v_add_f16_vop3'):
                 lines.append(
-                    '  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || '
-                    'wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2)'
+                    '  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 || '
+                    'wf.cu().arch() == rocjitsu::IsaFamily::Rdna2)'
                 )
                 lines.append('    record_gfx10_add_f16_exceptions(inst, wf);')
             operation = {
@@ -19874,7 +19874,7 @@ class CodeGenerator:
             }.get(mnemonic.rsplit('_', 1)[0])
             if operation is not None:
                 rhs = 'vsrc1' if mnemonic.endswith('_vop2') else 'src1'
-                lines.append('  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)')
+                lines.append('  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5)')
                 lines.append(
                     '    rdna3_5::record_alu_causes(wf, rdna3_5::arithmetic_flags<'
                     f'rdna3_5::FmaOperation::{operation}>(inst, wf, inst.{rhs}));'
@@ -21837,7 +21837,7 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             + '\n\n'
             'bool Isa::simd_capable_value(OperandType opr_type, int ev) {\n'
             '  return resolved_vgpr_offset(opr_type, ev).has_value() ||\n'
-            f'         is_immediate_type(opr_type) || amdgpu::can_resolve_src_scalar(ev, ROCJITSU_CODE_ARCH_{self.isa_spec.arch_name.upper()});\n'
+            f'         is_immediate_type(opr_type) || amdgpu::can_resolve_src_scalar(ev, rocjitsu::IsaFamily::{self.isa_spec.arch_name.capitalize()});\n'
             '}\n'
             '\n'
             + simd_methods

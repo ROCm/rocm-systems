@@ -638,6 +638,7 @@ add_executable(
     dbi/dbi_log_record_sim_test.cpp
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
+    code/target_api_test.cpp
     code/executable_test.cpp
     code/file_loading_test.cpp
     code/relocation_function_table_test.cpp
@@ -2545,6 +2546,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 
     # Compile as C and link only the shared library's public ABI.
+    add_executable(code_target_c_api_test code/target_api_c_test.c)
+    target_link_libraries(code_target_c_api_test PRIVATE rocjitsu_shared)
+    target_include_directories(
+        code_target_c_api_test
+        PRIVATE ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
+    )
+    set_target_properties(code_target_c_api_test PROPERTIES C_STANDARD 11)
+    rj_configure_target(code_target_c_api_test WARNINGS)
+    add_test(NAME CodeTargetCApi.CClient COMMAND code_target_c_api_test)
+
     add_executable(vm_config_c_api_test vm_config_c_api_test.c)
     target_link_libraries(vm_config_c_api_test PRIVATE rocjitsu_shared)
     if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
@@ -2552,6 +2563,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # instrumented library's vptr checks.
         set_target_properties(
             vm_config_c_api_test
+            code_target_c_api_test
             PROPERTIES LINKER_LANGUAGE CXX
         )
     endif()
@@ -2568,6 +2580,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     # An installed ROCm SDK may provide an older library with the same SONAME.
     set_tests_properties(
+        CodeTargetCApi.CClient
         VmConfigCApi
         PROPERTIES
             ENVIRONMENT_MODIFICATION
