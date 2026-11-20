@@ -199,6 +199,9 @@ TEST(FaultDropBarrier, SourceFactsDoNotRequireDropTargetPolicy) {
     EXPECT_FALSE(facts.value()->blocks.empty());
     FailureOr<std::unique_ptr<Instrumentor>> fork = context.fork_instrumentor(error);
     ASSERT_TRUE(fork.succeeded()) << error.message;
+    TextEditError edit_error;
+    EXPECT_EQ(fork.value()->instruction_boundaries(edit_error), facts.value()->boundaries)
+        << edit_error.message;
     const Instrumentor::ValidationResult validation = fork.value()->validate_points();
     EXPECT_TRUE(validation.errors.empty());
     EXPECT_TRUE(validation.sites.empty());
