@@ -1499,6 +1499,7 @@ void Image::populateImageDescriptor() {
       //@todo - arraySize = height ?!
       imageDescriptor_.geometry = HSA_EXT_IMAGE_GEOMETRY_1DA;
       imageDescriptor_.height = 0;
+      imageDescriptor_.depth = 0;
       imageDescriptor_.array_size = image->getHeight();
       break;
     case CL_MEM_OBJECT_IMAGE2D:
