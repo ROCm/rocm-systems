@@ -1249,6 +1249,26 @@ if(${ENABLE_COVERAGE})
     )
 endif()
 
+# -----------------------------------
+# Manual GPU performance tests
+# -----------------------------------
+# Not listed in tests/test_categories.yaml (quick/standard/full). Enable with
+# -DENABLE_PERFORMANCE_TESTS=ON and run: ctest -L performance
+option(ENABLE_PERFORMANCE_TESTS "Register manual GPU performance tests" OFF)
+message(STATUS "Enable performance tests: ${ENABLE_PERFORMANCE_TESTS}")
+if(ENABLE_PERFORMANCE_TESTS)
+    add_test(
+        NAME test_perf_vcopy_nbody
+        COMMAND
+            ${PYTHON_TEST_COMMAND} tests/performance/run_perf_vcopy_nbody.py --iters 5000
+            ${WORKING_DIR_OPTION}
+    )
+    set_tests_properties(
+        test_perf_vcopy_nbody
+        PROPERTIES LABELS "performance;manual" RESOURCE_GROUPS gpus:1 TIMEOUT 28800
+    )
+endif()
+
 # -------------------
 # Test categorization
 # -------------------
