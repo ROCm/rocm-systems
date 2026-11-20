@@ -34,7 +34,9 @@ pytest                           # Python tests
 - A tool's settings live in a shared `resource/configs/<tool>.cfg`. The scenario points at
   it with a `tool_env` entry `ROCPROFSYS_CONFIG_FILE` (relative to the scenario file, `:`-separated
   list allowed) and lists only what differs, such as `ROCPROFSYS_OUTPUT_PATH`. An env var
-  beats the same key in the file. The profiler aborts on a key in a config file that its build
+  beats the same key in the file, so `bench-scenario` and `bench-snapshot` refuse to start
+  when a variable exported in your shell is also a key in a config file the scenario loads
+  and the scenario does not set it in `tool_env`. The profiler aborts on a key in a config file that its build
   does not know, so a setting that exists only in some builds (for example
   `ROCPROFSYS_USE_MPI`) stays in `tool_env`, where an unknown variable is ignored. Put
   comments on their own line: an inline `#` is not stripped from text config files.

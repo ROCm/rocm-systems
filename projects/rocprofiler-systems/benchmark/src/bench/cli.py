@@ -273,7 +273,9 @@ def scenario_main(argv: Sequence[str] | None = None) -> int:
     docs = []
     for path in args.scenarios:  # validate all first: fail before any long run starts
         try:
-            docs.append(scenario.load(path))
+            doc = scenario.load(path)
+            scenario.check_environment(path, doc, os.environ)
+            docs.append(doc)
         except scenario.ScenarioError as exc:
             print(f"bench-scenario: error: {exc}", file=sys.stderr)
             return 2

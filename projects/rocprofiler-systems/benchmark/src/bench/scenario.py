@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +92,47 @@ def resolve_config_files(env: dict[str, str], base_dir: str) -> dict[str, str]:
         if f
     ]
     return {**env, CONFIG_FILE_KEY: ":".join(files)}
+
+
+def config_keys(path: str) -> set[str]:
+    """Setting names a text config file assigns ('KEY = value' or 'KEY value' lines)."""
+    # ponytail: text config files only; a .json or .xml config file is not parsed
+    lines = (line.strip() for line in Path(path).read_text().splitlines())
+    return {
+        re.split(r"[\s=]", line, maxsplit=1)[0]
+        for line in lines
+        if line and not line.startswith("#")
+    }
+
+
+def shadowed_keys(env: dict[str, str], ambient: Mapping[str, str]) -> list[str]:
+    """Keys of the config files named in env that a variable of ambient would override.
+
+    The profiler applies the environment after its config files, so an exported variable
+    beats the same key in a file. A key the command sets itself (env) is safe: it replaces
+    the exported value. Raises OSError when a config file cannot be read.
+    """
+    files = [f for f in env.get(CONFIG_FILE_KEY, "").split(":") if f]
+    in_files = set().union(*(config_keys(f) for f in files))
+    return sorted((in_files & set(ambient)) - set(env))
+
+
+def check_environment(
+    path: str, scenario: dict[str, Any], ambient: Mapping[str, str]
+) -> None:
+    """Raise ScenarioError when a variable of ambient, the caller's environment, would
+    override a config-file key of a command, or when a config file cannot be read."""
+    base_dir = os.path.dirname(os.path.abspath(path))
+    for name, _command, env in build_commands(scenario, base_dir):
+        try:
+            shadowed = shadowed_keys(env, ambient)
+        except OSError as exc:
+            raise ScenarioError(f"{path}: tool '{name}': config file: {exc}") from exc
+        if shadowed:
+            raise ScenarioError(
+                f"{path}: tool '{name}': unset {', '.join(shadowed)}: an exported "
+                "variable overrides the same key in the tool's config file"
+            )
 
 
 def version_argv(tool: dict[str, Any], base_dir: str) -> list[str]:

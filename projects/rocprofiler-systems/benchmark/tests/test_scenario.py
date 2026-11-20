@@ -1,9 +1,13 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from __future__ import annotations
+
 import json
 import shlex
 import sys
+from pathlib import Path
+from typing import Any
 
 import pytest
 from bench import cli, scenario
@@ -115,6 +119,63 @@ def test_config_file_env_is_resolved_against_scenario_dir():
     assert env["ROCPROFSYS_CONFIG_FILE"] == "/s/cfg/a.cfg:/s/dir/b.cfg:/abs/c.cfg"
 
 
+CONFIG_TEXT = (
+    "# ROCPROFSYS_COMMENTED = 1\nROCPROFSYS_TRACE = false\nROCPROFSYS_PROFILE false\n"
+)
+
+
+def config_env(tmp_path: Path, **tool_env: str) -> dict[str, str]:
+    """Command environment that loads a config file holding CONFIG_TEXT, plus tool_env."""
+    config = tmp_path / "tool.cfg"
+    config.write_text(CONFIG_TEXT)
+    return {"ROCPROFSYS_CONFIG_FILE": str(config), **tool_env}
+
+
+def as_tools(env: dict[str, str]) -> list[dict[str, Any]]:
+    entries = [{"key": key, "value": value} for key, value in env.items()]
+    return [{"name": "v1", "tool": "env", "tool_env": entries}]
+
+
+@pytest.mark.parametrize(
+    "ambient,tool_env,shadowed",
+    [
+        pytest.param(
+            {"ROCPROFSYS_TRACE": "true"},
+            {},
+            ["ROCPROFSYS_TRACE"],
+            id="exported-key-is-in-the-file",
+        ),
+        pytest.param(
+            {"ROCPROFSYS_PROFILE": "true"},
+            {},
+            ["ROCPROFSYS_PROFILE"],
+            id="file-key-without-equals-sign",
+        ),
+        pytest.param(
+            {"ROCPROFSYS_TRACE": "true"},
+            {"ROCPROFSYS_TRACE": "false"},
+            [],
+            id="tool-env-sets-the-key-itself",
+        ),
+        pytest.param(
+            {"ROCPROFSYS_TRACE_PROC_SHELL": "/bin/tp"},
+            {},
+            [],
+            id="exported-key-is-not-in-the-file",
+        ),
+        pytest.param({"ROCPROFSYS_COMMENTED": "1"}, {}, [], id="commented-out-key"),
+    ],
+)
+def test_shadowed_keys_are_file_keys_an_exported_variable_overrides(
+    tmp_path: Path, ambient: dict[str, str], tool_env: dict[str, str], shadowed: list[str]
+) -> None:
+    assert scenario.shadowed_keys(config_env(tmp_path, **tool_env), ambient) == shadowed
+
+
+def test_shadowed_keys_is_empty_without_a_config_file() -> None:
+    assert scenario.shadowed_keys({"T": "1"}, {"ROCPROFSYS_TRACE": "true"}) == []
+
+
 def test_tool_reference_runs_reference_first_and_no_baseline():
     cmds = scenario.build_commands(valid(reference="v2"), "/s")
     assert [c[0] for c in cmds] == ["v2", "v1"]
@@ -183,6 +244,24 @@ def test_end_to_end_tool_reference(tmp_path, capsys):
 def test_invalid_scenario_exit_code_2(tmp_path, capsys):
     assert cli.scenario_main([write(tmp_path, {"tools": []})]) == 2
     assert "bench-scenario: error:" in capsys.readouterr().err
+
+
+def test_exported_variable_shadowing_a_config_key_exits_2_before_any_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ROCPROFSYS_TRACE", "true")
+    path = scenario_file(tmp_path, tools=as_tools(config_env(tmp_path)))
+    assert cli.scenario_main([path]) == 2
+    assert "tool 'v1': unset ROCPROFSYS_TRACE:" in capsys.readouterr().err
+    assert not (tmp_path / "out" / "r.json").exists()
+
+
+def test_unreadable_config_file_exits_2(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tools = as_tools({"ROCPROFSYS_CONFIG_FILE": "missing.cfg"})
+    assert cli.scenario_main([scenario_file(tmp_path, tools=tools)]) == 2
+    assert "tool 'v1': config file:" in capsys.readouterr().err
 
 
 def test_version_argv_defaults_to_tool_dash_dash_version_and_honours_override():
