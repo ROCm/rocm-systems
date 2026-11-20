@@ -17,7 +17,7 @@ sets:
   - 2.1.6: LDS Bank Conflicts
   - 3.4.3: LDS Bandwidth
   - 2.1.5: GL2 Cache Hit Rate
-  - 2.1.7: GL0 Cache Hit Rate (TCP Cache)
+  - 2.1.7: GL0 Hit Rate
 - title: Launch Stats
   set_option: launch_stats
   description: >-
@@ -26,7 +26,7 @@ sets:
   metric:
   - 7.2.0: Grid Size
   - 7.2.1: Workgroup Size
-  - 7.3.0: Dispatched Waves
+  - 7.3.0: Dispatched Wavefronts
   - 7.2.2: VGPRs
   - 7.2.3: SGPRs
   - 7.2.4: LDS Allocation

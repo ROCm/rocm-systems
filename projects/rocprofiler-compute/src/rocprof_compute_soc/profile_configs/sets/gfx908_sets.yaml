@@ -5,21 +5,12 @@ sets:
   metric:
   - 11.2.2: SALU Utilization
   - 11.2.3: VALU Utilization
-- title: Compute Throughput FLOPS
-  set_option: compute_thruput_flops
-  description: Placeholder
-  metric:
-  - 2.1.1: MFMA FLOPs (BF16)
-  - 2.1.2: MFMA FLOPs (F16)
-  - 2.1.3: MFMA FLOPs (F32)
-  - 2.1.4: MFMA FLOPs (F64)
-  - 2.1.5: MFMA IOPs (Int8)
 - title: Memory Throughput
   set_option: mem_thruput
   description: Placeholder
   metric:
-  - 2.1.14: Theoretical LDS Bandwidth
-  - 2.1.15: LDS Bank Conflicts/Access
+  - 2.1.5: Theoretical LDS Bandwidth
+  - 2.1.6: LDS Bank Conflicts per Access
   - 16.1.2: Utilization
   - 17.1.0: Utilization
 - title: Launch Stats
@@ -28,7 +19,7 @@ sets:
   metric:
   - 7.1.0: Grid Size
   - 7.1.1: Workgroup Size
-  - 7.1.2: Total Wavefronts
+  - 7.1.2: Dispatched Wavefronts
   - 7.1.5: VGPRs
   - 7.1.6: AGPRs
   - 7.1.7: SGPRs

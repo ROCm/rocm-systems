@@ -16,11 +16,12 @@ from unittest.mock import MagicMock, patch
 import common
 import pytest
 
-import config
+from rocprof_compute_soc.metric_library.loader import Collectables
 from rocprof_compute_soc.soc_base import (
-    AnalysisConfigMetric,
     OmniSoC_Base,
+    PanelConfigMetric,
 )
+from utils.analysis_views import load_views, views_to_panel_configs
 from utils.counters.allocator import reads_one_pass
 from utils.counters.counter_file import flat_counters_in_perfmon_file
 from utils.mi_gpu_spec import mi_gpu_specs
@@ -31,11 +32,8 @@ from utils.utils_common import (
 )
 from utils.utils_counter_defs import (
     PER_DISPATCH_SUFFIX,
-    Collectables,
     extract_counters_and_variables,
     parse_counters_text,
-    per_dispatch_partner,
-    summed_collectables,
 )
 
 # =============================================================================
@@ -72,44 +70,81 @@ CP_UTIL_METRIC_EXPRESSIONS = [
 # One unique synthetic counter per metric table, so the counter set returned by
 # detect_counters() reveals exactly which tables were selected.
 BASELINE_COUNTER = "SQ_BASELINE_COUNTER"  # table 201, outside block 30
-TABLE_3012_COUNTER = "TCC_BOTTLENECK_COUNTER"  # block 30, table 3012
-TABLE_3013_COUNTER = "TCC_EA_COUNTER"  # block 30, table 3013
-FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
+TABLE_3001_COUNTER = "TCC_BOTTLENECK_COUNTER"  # block 30, table 3001
+TABLE_3002_COUNTER = "TCC_EA_COUNTER"  # block 30, table 3002
+FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3001_COUNTER, TABLE_3002_COUNTER}
+VALUE_HEADER = {"metric": "Metric", "value": "Value"}
+# Views of a baseline panel and of the memory bandwidth analysis panel, and the
+# metrics they show, one per table.
+MEMBW_VIEWS = {
+    200: {
+        "view": "Baseline",
+        "tables": [
+            {
+                "title": "Baseline",
+                "header": VALUE_HEADER,
+                "metrics": [{"metric": "toy.baseline"}],
+            }
+        ],
+    },
+    MEMBW_ANALYSIS_PANEL_ID: {
+        "view": "Memory Bandwidth Analysis",
+        "tables": [
+            {
+                "title": "L2 Bottleneck Detection Indicators",
+                "header": VALUE_HEADER,
+                "metrics": [{"metric": "toy.l2_bottleneck"}],
+            },
+            {
+                "title": "EA Interface",
+                "header": VALUE_HEADER,
+                "metrics": [{"metric": "toy.ea"}],
+            },
+        ],
+    },
+}
+MEMBW_METRICS = {
+    metric_id: {
+        "name": metric_id,
+        "formula": f"SUM({counter})",
+        "unit": "Count",
+        "description": "",
+    }
+    for metric_id, counter in (
+        ("toy.baseline", BASELINE_COUNTER),
+        ("toy.l2_bottleneck", TABLE_3001_COUNTER),
+        ("toy.ea", TABLE_3002_COUNTER),
+    )
+}
 
-# Every counter name outside the expressions is unique, so any leak from a
-# comment, title, description or metric name shows up in the result.
-PROSE_ANALYSIS_CONFIG = """\
-# SQ_COMMENT_COUNTER in a comment
-Panel Config:
-  id: 200
-  title: Speed of Light
-  data source:
-  - metric_table:
-      id: 201
-      title: SQ_TITLE_COUNTER table
-      header:
-        metric: Metric
-        avg: Avg
-        unit: Unit
-      metric:
-        SQ_METRIC_NAME_COUNTER:
-          avg: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM(SQ_BUSY_CYCLES)  # SQ_TRAILING_COUNTER
-          unit: Wavefronts
-  metrics_description:
-    SQ_METRIC_NAME_COUNTER: Uses SQ_DESCRIPTION_COUNTER.
-"""
+# Every counter name outside the formula is unique, so any leak from a title,
+# description or metric name shows up in the result.
+PROSE_VIEW = {
+    "view": "SQ_VIEW_TITLE_COUNTER",
+    "tables": [
+        {
+            "title": "SQ_TITLE_COUNTER table",
+            "header": {"metric": "Metric", "avg": "Avg", "unit": "Unit"},
+            "metrics": [{"metric": "toy.waves"}],
+        }
+    ],
+}
+PROSE_METRICS = {
+    "toy.waves": {
+        "name": "SQ_METRIC_NAME_COUNTER",
+        "formula": "SUM(SQ_LEVEL_WAVES_ACCUM) / SUM(SQ_BUSY_CYCLES)",
+        "unit": "Wavefronts",
+        "description": "Uses SQ_DESCRIPTION_COUNTER.",
+    }
+}
 
-# One arch per analysis config directory (gfx115x parts share one).
+# One arch per metric library arch (the gfx115x parts share one).
 CONFIG_ARCHS = sorted(
     config_arch_members(config_arch)[0]
     for config_arch in {
         canonical_config_arch(arch) for arch in mi_gpu_specs.get_gpu_series_dict()
     }
 )
-
-# Metric keys that take a statistic over the per-dispatch values; the simple-box
-# expr expands into MIN, quartiles and MAX (only simple-box tables have expr)
-PER_DISPATCH_STATISTIC_KEYS = ("min", "max", "std dev", "expr")
 
 
 def offline_soc(
@@ -118,7 +153,7 @@ def offline_soc(
     membw_analysis: bool,
     set_selected: Optional[str] = None,
 ) -> OmniSoC_Base:
-    """OmniSoC_Base that detects counters from the analysis configs without a GPU.
+    """OmniSoC_Base that detects counters from the analysis views without a GPU.
     With one XCD and one L2 bank, each TCC channel template expands to channel 0
     only."""
     args = SimpleNamespace(
@@ -150,54 +185,12 @@ def gfx1250_perfmon_config():
 
 
 @pytest.fixture
-def membw_analysis_soc(tmp_path: Path, monkeypatch) -> OmniSoC_Base:
-    baseline_analysis_config = f"""\
-Panel Config:
-  id: 200
-  data source:
-  - metric_table:
-      id: 201
-      header:
-        metric: Metric
-        value: Value
-      metric:
-        Baseline:
-          value: SUM({BASELINE_COUNTER})
-"""
-    membw_analysis_config = f"""\
-Panel Config:
-  id: 3000
-  data source:
-  - metric_table:
-      id: 3012
-      header:
-        metric: Metric
-        value: Value
-      metric:
-        L2 Bottleneck Detection Indicators:
-          value: SUM({TABLE_3012_COUNTER})
-  - metric_table:
-      id: 3013
-      header:
-        metric: Metric
-        value: Value
-      metric:
-        EA Interface:
-          value: SUM({TABLE_3013_COUNTER})
-"""
-    config_root = tmp_path / "gfx950"
-    config_root.mkdir()
-    (config_root / "0200_baseline.yaml").write_text(
-        baseline_analysis_config,
-        encoding="utf-8",
-    )
-    (config_root / "3000_mem_bw.yaml").write_text(
-        membw_analysis_config,
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(config, "analysis_configs_dir", tmp_path)
-    return offline_soc("gfx950", [], membw_analysis=False)
+def membw_analysis_soc(monkeypatch) -> OmniSoC_Base:
+    """A gfx950 soc whose profile panel configs are those of MEMBW_VIEWS."""
+    soc = offline_soc("gfx950", [], membw_analysis=False)
+    panel_configs = views_to_panel_configs(MEMBW_VIEWS, MEMBW_METRICS, {})
+    monkeypatch.setattr(soc, "_profile_panel_configs", lambda: panel_configs)
+    return soc
 
 
 def _make_soc(perfmon_config, arch="gfx908", num_xcd=1, l2_banks=4):
@@ -227,13 +220,13 @@ def gfx1250_soc(gfx1250_perfmon_config) -> OmniSoC_Base:
 
 
 def patch_cp_util_metric(soc: OmniSoC_Base) -> Any:
-    """Make CP Utilization the only metric in soc's analysis configs."""
+    """Make CP Utilization the only metric in soc's profile panel configs."""
     return patch.object(
         soc,
-        "_iter_arch_analysis_yaml_metrics",
+        "_iter_profile_metrics",
         return_value=iter([
-            AnalysisConfigMetric(
-                "1700",
+            PanelConfigMetric(
+                1700,
                 1701,
                 1,
                 "CP Utilization",
@@ -408,7 +401,7 @@ def test_filter_token_unknown_alias_exits_instead_of_keyerror(monkeypatch):
     )
     with pytest.raises(SystemExit):
         OmniSoC_Base._append_expressions_for_filter_token(
-            _fake_soc_for_filter_token(), "SQ", {}, "/cfg", []
+            _fake_soc_for_filter_token(), "SQ", {}, []
         )
 
 
@@ -418,10 +411,10 @@ def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
         lambda arch: {"lds": "10"},
     )
     expressions: list[str] = []
-    # Alias resolves to block id 10 -> file id "1000", absent from the
-    # empty config dict, so the token is skipped with a warning, not a crash.
+    # Alias resolves to block id 10 -> panel 1000, absent from the empty
+    # panel configs, so the token is skipped with a warning, not a crash.
     OmniSoC_Base._append_expressions_for_filter_token(
-        _fake_soc_for_filter_token(), "lds", {}, "/cfg", expressions
+        _fake_soc_for_filter_token(), "lds", {}, expressions
     )
     assert expressions == []
 
@@ -443,25 +436,25 @@ def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
         pytest.param(
             True,
             [],
-            {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER},
+            {BASELINE_COUNTER, TABLE_3001_COUNTER, TABLE_3002_COUNTER},
             id="flag_on_no_filter_keeps_every_table",
         ),
         pytest.param(
             True,
             ["30"],
-            {TABLE_3012_COUNTER, TABLE_3013_COUNTER},
+            {TABLE_3001_COUNTER, TABLE_3002_COUNTER},
             id="block_30_keeps_both_block_30_tables_and_drops_baseline",
         ),
         pytest.param(
             True,
-            ["30.12"],
-            {TABLE_3012_COUNTER},
-            id="block_30_12_keeps_only_table_3012",
+            ["30.1"],
+            {TABLE_3001_COUNTER},
+            id="block_30_1_keeps_only_table_3001",
         ),
         pytest.param(
             True,
-            ["2", "30.13"],
-            {BASELINE_COUNTER, TABLE_3013_COUNTER},
+            ["2", "30.2"],
+            {BASELINE_COUNTER, TABLE_3002_COUNTER},
             id="ordinary_block_and_membw_table_are_combined",
         ),
     ],
@@ -474,9 +467,9 @@ def test_membw_analysis_counter_selection(
 ) -> None:
     """--membw-analysis admits block 30; --block then narrows within it.
 
-    Each config table in the fixture owns one unique synthetic counter, so the
-    selected fixture counters identify exactly which tables survived. The 30.12
-    and mixed 30.13 cases prove selection is by table id; the mixed case also
+    Each table in the fixture owns one unique synthetic counter, so the
+    selected fixture counters identify exactly which tables survived. The 30.1
+    and mixed 30.2 cases prove selection is by table id; the mixed case also
     proves a memory-bandwidth table composes with an ordinary report block.
     """
     args = membw_analysis_soc.get_args()
@@ -506,12 +499,11 @@ def test_membw_analysis_counter_selection(
 def test_detect_counters_reads_only_metric_expressions(
     membw_analysis_soc: OmniSoC_Base, filter_blocks: list[str]
 ) -> None:
-    """Comments, titles, descriptions and metric names add no counters,
-    whichever way the metric is selected."""
-    config_root = config.analysis_configs_dir / "gfx950"
-    (config_root / "0200_baseline.yaml").write_text(
-        PROSE_ANALYSIS_CONFIG, encoding="utf-8"
-    )
+    """Titles, descriptions and metric names add no counters, whichever way the
+    metric is selected."""
+    membw_analysis_soc._profile_panel_configs()[200] = views_to_panel_configs(
+        {200: PROSE_VIEW}, PROSE_METRICS, {}
+    )[200]
     membw_analysis_soc.get_args().filter_blocks = filter_blocks
 
     counters, _ = membw_analysis_soc.detect_counters()
@@ -525,15 +517,12 @@ def test_detect_counters_reads_only_metric_expressions(
 
 @pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
 def test_panel_counters_add_up_to_full_profile(gpu_arch: str) -> None:
-    """On the shipped configs, the counters of each panel (-b <panel>) add up to
+    """On the shipped views, the counters of each panel (-b <panel>) add up to
     the default profile, and with panel 30 to --membw-analysis."""
-    config_dir = config.analysis_configs_dir
     counters_by_file: dict[str, set[str]] = {}
-    for path in (config_dir / canonical_config_arch(gpu_arch)).glob("*.yaml"):
-        file_id = path.name.split("_")[0]
-        panel = str(int(file_id) // 100)
-        soc = offline_soc(gpu_arch, [panel], membw_analysis=True)
-        counters_by_file[file_id], _ = soc.detect_counters()
+    for panel_id in load_views(gpu_arch):
+        soc = offline_soc(gpu_arch, [str(panel_id // 100)], membw_analysis=True)
+        counters_by_file[f"{panel_id:04d}"], _ = soc.detect_counters()
     membw_file = str(MEMBW_ANALYSIS_PANEL_ID)
 
     default, _ = offline_soc(gpu_arch, [], False).detect_counters()
@@ -580,7 +569,7 @@ def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
     collectables = Collectables.of_arch(gpu_arch)
     spanning = [
         f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}"
-        for metric in soc._iter_arch_analysis_yaml_metrics()
+        for metric in soc._iter_profile_metrics()
         if not reads_one_pass(metric.expressions, collectables, passes)
     ]
     assert spanning == [], (
@@ -590,25 +579,17 @@ def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
 
 
 @pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
-def test_per_dispatch_columns_read_per_dispatch_collectables(gpu_arch: str) -> None:
-    """Min, Max, Std Dev and simple-box expressions read a summed collectable
-    through its <name>_per_dispatch partner, and every partner they name exists."""
+def test_per_dispatch_partners_are_collectables(gpu_arch: str) -> None:
+    """Every <name>_per_dispatch partner a profile metric reads is a collectable;
+    tools/validate_views.py checks that Min, Max, Std Dev and simple-box rows read
+    partners where they need them."""
     collectables = Collectables.of_arch(gpu_arch)
-    summed = summed_collectables(collectables)
     errors = []
-    for metric in offline_soc(gpu_arch, [], True)._iter_arch_analysis_yaml_metrics():
-        location = f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}"
-        for column in PER_DISPATCH_STATISTIC_KEYS:
-            _, names = parse_counters_text(str(metric.metric.get(column, "")))
-            for name in sorted(names & summed):
-                fix = "use" if per_dispatch_partner(name, collectables) else "add"
-                errors.append(
-                    f"{location} {column}: ${name} is summed, "
-                    f"{fix} ${name}{PER_DISPATCH_SUFFIX}"
-                )
+    for metric in offline_soc(gpu_arch, [], True)._iter_profile_metrics():
         _, names = parse_counters_text("\n".join(metric.expressions))
         errors += [
-            f"{location}: ${name} is not a collectable"
+            f"{metric.table_id}.{metric.metric_idx} {metric.metric_name}: ${name} "
+            "is not a collectable"
             for name in sorted(names)
             if name.endswith(PER_DISPATCH_SUFFIX) and name not in collectables
         ]

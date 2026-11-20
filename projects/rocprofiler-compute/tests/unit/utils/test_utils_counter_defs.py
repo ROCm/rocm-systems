@@ -3,60 +3,14 @@
 
 """Unit tests for utils/utils_counter_defs.py."""
 
-import pytest
-
-from utils import utils_counter_defs
+from rocprof_compute_soc.metric_library.loader import Collectables
 from utils.utils_counter_defs import (
-    Collectables,
     extract_counters_and_variables,
     metric_expressions,
 )
 
 MI200_COLLECTABLES = Collectables.of_arch("gfx90a")
 GFX1250_COLLECTABLES = Collectables.of_arch("gfx1250")
-
-# =============================================================================
-# Tests for utils.utils_counter_defs.Collectables
-# =============================================================================
-
-
-@pytest.fixture
-def toy_collectables_dir(monkeypatch, tmp_path):
-    """A collectables directory with no file yet, and an empty cache."""
-    monkeypatch.setattr(utils_counter_defs, "COLLECTABLES_DIR", tmp_path)
-    monkeypatch.setattr(Collectables, "_formulas_by_arch", {})
-    return tmp_path
-
-
-class TestCollectables:
-    """Tests for utils.utils_counter_defs.Collectables."""
-
-    def test_gfx1250_reads_gui_active_from_its_sum(self):
-        assert (
-            GFX1250_COLLECTABLES["GRBM_GUI_ACTIVE_PER_XCD"]
-            == "GRBM_GUI_ACTIVE_sum / $num_xcd"
-        )
-
-    @pytest.mark.parametrize("gpu_arch", ["gfx942", "gfx1151"])
-    def test_other_archs_read_gui_active(self, gpu_arch):
-        assert (
-            Collectables.of_arch(gpu_arch)["GRBM_GUI_ACTIVE_PER_XCD"]
-            == "GRBM_GUI_ACTIVE / $num_xcd"
-        )
-
-    def test_each_collectable_comes_after_those_it_uses(self, toy_collectables_dir):
-        (toy_collectables_dir / "gfx900_collectables.yaml").write_text(
-            "rate: SUM($count) / 2\ncount: TA_BUSY\n", encoding="utf-8"
-        )
-        assert list(Collectables.of_arch("gfx900")) == ["count", "rate"]
-
-    def test_collectables_that_use_each_other_fail(self, toy_collectables_dir):
-        (toy_collectables_dir / "gfx900_collectables.yaml").write_text(
-            "first: $second\nsecond: $first\n", encoding="utf-8"
-        )
-        with pytest.raises(SystemExit):
-            Collectables.of_arch("gfx900")
-
 
 # =============================================================================
 # Tests for utils.utils_counter_defs.extract_counters_and_variables

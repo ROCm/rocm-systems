@@ -12,10 +12,7 @@ adds the panels every arch shows from the workload's CSV files. The panel id com
 from the file name (0300_memory_chart.yaml is panel 300), table and row ids from their
 position (301 is the first table, 3.1.0 its first row).
 
-views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
-analysis_configs/. Analyze reads its panel configs through arch_panel_configs(). Profile
-still reads analysis_configs/, which test_metric_library_sync.py keeps equal in
-structure to the views' panel configs.
+Analyze and profile read the panel configs through arch_panel_configs().
 Standard library and vendored YAML only, because profile imports this module.
 """
 
@@ -242,6 +239,18 @@ def convert_filter_blocks_to_panel_ids(
             console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
         resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
     return resolved
+
+
+def metric_tables_by_id(
+    panel_configs: Dict[int, Dict[str, Any]],
+) -> Dict[int, Dict[str, Any]]:
+    """Return each metric table of an arch's panel configs, by table id."""
+    return {
+        source[METRIC_TABLE]["id"]: source[METRIC_TABLE]
+        for panel_config in panel_configs.values()
+        for source in panel_config["data source"]
+        if METRIC_TABLE in source
+    }
 
 
 def iter_view_rows(
