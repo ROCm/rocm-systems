@@ -171,7 +171,10 @@ public:
             dword4 = PACKET3_WAIT_REG_MEM__MEM_POLL_ADDR_HI(High32(wait_addr));
         }
         else
+        {
+            assert(!(wait_addr >> 18) && "WaitRegMem register address must fit in 18 bits");
             dword3 = PACKET3_WAIT_REG_MEM__REG_POLL_ADDR(wait_addr);
+        }
 
         // build the pm4mec_wait_reg_mem command which has 7 Dwords
         uint32_t pm4mec_wait_reg_mem_cmd[7] = {
