@@ -13,3 +13,5 @@
   `<includedir>/fortran/<compiler>`, the test under `<bindir>/roctx-fortran`.
   The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
   you call.
+  The package sets `roctx_FORTRAN_LIBRARIES`, the target to link (`roc::roctx_fortran`), and
+  `roctx_FORTRAN_INCLUDE_DIRS`, the directory of its `.mod` files.

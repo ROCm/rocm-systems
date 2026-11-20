@@ -116,6 +116,11 @@ if(NOT _roctx_dir STREQUAL _roctx_built_dir)
   endforeach()
 endif()
 
+# The target and the .mod directory, for a project that does not want to spell
+# the target's namespace or that passes the paths to another build system.
+set(roctx_FORTRAN_LIBRARIES roc::roctx_fortran)
+set(roctx_FORTRAN_INCLUDE_DIRS "${_roctx_incdir}/${_roctx_dir}")
+
 set(roctx_FORTRAN_FOUND TRUE)
 
 check_required_components(roctx-fortran)
