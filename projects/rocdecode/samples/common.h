@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #pragma once
 
+#include <cstdint>
 #include "roc_video_dec.h"
 #include "md5.h"
 
@@ -36,7 +37,14 @@ typedef struct ReconfigDumpFileStruct_t {
     bool b_dump_frames_to_file;
     std::string output_file_name;
     void *md5_generator_handle;
+    uint32_t frames_left = UINT32_MAX;  // frames the callback may still output under a -f limit
 } ReconfigDumpFileStruct;
+
+// Frames still allowed under a -f limit of frame_limit (0 means no limit) after frames_done.
+inline uint32_t FramesLeft(uint32_t frame_limit, uint32_t frames_done) {
+    if (frame_limit == 0) return UINT32_MAX;
+    return frames_done < frame_limit ? frame_limit - frames_done : 0;
+}
 
 
 // callback function to flush last frames and save it to file when reconfigure happens
@@ -53,9 +61,16 @@ int ReconfigureFlushCallback(void *p_viddec_obj, uint32_t flush_mode, void *p_us
 
     uint8_t *pframe = nullptr;
     int64_t pts;
+    ReconfigDumpFileStruct *p_dump_file_struct = static_cast<ReconfigDumpFileStruct *>(p_user_struct);
     while ((pframe = viddec->GetFrame(&pts))) {
+        // Every pending frame must be released before the reconfigure, but only those within the
+        // -f limit are output and counted.
+        if (p_dump_file_struct->frames_left == 0) {
+            viddec->ReleaseFrame(pts, true);
+            continue;
+        }
+        p_dump_file_struct->frames_left--;
         if (flush_mode != RECONFIG_FLUSH_MODE_NONE) {
-            ReconfigDumpFileStruct *p_dump_file_struct = static_cast<ReconfigDumpFileStruct *>(p_user_struct);
             if (flush_mode & ReconfigFlushMode::RECONFIG_FLUSH_MODE_DUMP_TO_FILE) {
                 if (p_dump_file_struct->b_dump_frames_to_file) {
                     viddec->SaveFrameToFile(p_dump_file_struct->output_file_name, pframe, surf_info);
