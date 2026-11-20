@@ -28,8 +28,11 @@ endif()
 
 # If GoogleTest not found, fail the build.
 if(NOT GTest_FOUND)
-    message(FATAL_ERROR "GoogleTest not found. Unit tests are enabled but GoogleTest is not available. "
-                        "Install GoogleTest or disable unit tests with -DENABLE_UNIT_TESTS=OFF")
+    message(
+        FATAL_ERROR
+        "GoogleTest not found. Unit tests are enabled but GoogleTest is not available. "
+        "Install GoogleTest or disable unit tests with -DENABLE_UNIT_TESTS=OFF"
+    )
 endif()
 
 # Find Threads (required by GTest and for pthreads).
@@ -75,10 +78,7 @@ target_link_libraries(
 # Same C++ standard and warning options as the library.
 set_target_properties(
     rocm-debug-agent-unit-tests
-    PROPERTIES
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
+    PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF
 )
 
 target_compile_options(
@@ -97,14 +97,11 @@ gtest_discover_tests(rocm-debug-agent-unit-tests)
 # then manually set INSTALL_RPATH.
 set_target_properties(
     rocm-debug-agent-unit-tests
-    PROPERTIES
-        THEROCK_NO_INSTALL_RPATH ON
-        INSTALL_RPATH "$ORIGIN/../../lib"
+    PROPERTIES THEROCK_NO_INSTALL_RPATH ON INSTALL_RPATH "$ORIGIN/../../lib"
 )
 
 # Install alongside existing integration tests.
 install(
     TARGETS rocm-debug-agent-unit-tests
-    RUNTIME DESTINATION tests/rocm-debug-agent
-    COMPONENT tests
+    RUNTIME DESTINATION tests/rocm-debug-agent COMPONENT tests
 )
