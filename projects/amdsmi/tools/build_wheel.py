@@ -24,7 +24,7 @@ Pipeline
 
 Requirements
 ------------
-* cmake, make, gcc/g++, git, python3, pip already installed
+* cmake, make, gcc/g++, clang (or ROCm), git, python3, pip already installed
 * (optional) auditwheel -- pip-installed automatically when --repair is set
 * (optional) /opt/python/cpXX-cpXX interpreters -- present in manylinux images
 

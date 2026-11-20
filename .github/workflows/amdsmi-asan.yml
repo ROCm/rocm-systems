@@ -9,8 +9,10 @@
 #   gpu:  full test suite plus amd-smi CLI sweeps for memory errors and for
 #         leaks on a self-hosted GPU runner.
 #
-# Both jobs build with GCC in the same pinned image, so findings reproduce
-# locally with `docker run` on it.
+# Both jobs build with GCC through the GCC toolchain file, whose ASAN runtime
+# is on the default library path that the tests and the CLI preload need.
+# They use the same pinned image, so findings reproduce locally with
+# `docker run` on it.
 # ---------------------------------------------------------------------------
 
 name: AMDSMI ASAN
@@ -93,6 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/projects/amdsmi/cmake/toolchains/amdsmi-gcc-toolchain.cmake" \
             -DCMAKE_BUILD_TYPE=Debug \
             -DADDRESS_SANITIZER=ON \
             -DBUILD_TESTS=ON \
@@ -166,6 +169,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/projects/amdsmi/cmake/toolchains/amdsmi-gcc-toolchain.cmake" \
             -DCMAKE_BUILD_TYPE=Debug \
             -DADDRESS_SANITIZER=ON \
             -DBUILD_TESTS=ON \
