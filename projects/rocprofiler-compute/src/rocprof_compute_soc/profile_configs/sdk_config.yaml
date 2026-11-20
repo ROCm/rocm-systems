@@ -8339,7 +8339,6 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
-      - gfx90a
       - gfx942
       block: TCC
       event: 26
@@ -8353,7 +8352,6 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
-      - gfx90a
       - gfx942
       block: TCC
       event: 27
@@ -8368,7 +8366,6 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
-      - gfx90a
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ_64B,sum)
@@ -8529,7 +8526,6 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx908
-      - gfx90a
       - gfx942
       - gfx950
       expression: reduce(TCC_EA0_WRREQ,sum)
