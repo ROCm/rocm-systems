@@ -205,8 +205,13 @@ public:
   void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
   void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
-                               BarrierKind kind) override;
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> notified,
+                                     std::span<amdgpu::Wavefront *> armed,
+                                     const BarrierRound &round) override;
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
 
   std::string getSummary() const;
 
@@ -234,6 +239,11 @@ private:
   }
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;
+  }
+  /// The wave's race state, or nullptr for a wave this plugin does not track.
+  /// For hooks that are not filtered by observes_hot_hooks_for_wavefront().
+  WaveRaceState *tracked_race_state(const amdgpu::Wavefront &wf) {
+    return wf.has_plugin_state(slot_index()) ? get_state(wf)->race_state : nullptr;
   }
   void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
 

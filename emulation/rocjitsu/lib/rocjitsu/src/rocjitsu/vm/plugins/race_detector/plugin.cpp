@@ -802,9 +802,13 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32
 }
 
 void RaceDetectorPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-  if (wf.end_reason() != amdgpu::Wavefront::EndReason::None && wf.wait_counters().empty() &&
-      wf.has_plugin_state(slot_index())) {
-    drain_wave_counters(*get_state(wf)->race_state, wf.cu().arch());
+  if (wf.has_plugin_state(slot_index())) {
+    WaveRaceState &race = *get_state(wf)->race_state;
+    if (wf.end_reason() != amdgpu::Wavefront::EndReason::None && wf.wait_counters().empty())
+      drain_wave_counters(race, wf.cu().arch());
+    // A workgroup round this wave has not signalled could not complete until
+    // now, so the next such round releases what the wave completed.
+    race.getDetector()->waveEnded(race.getWaveId());
   }
   release_wave_state(wf);
 }
@@ -1695,21 +1699,83 @@ void RaceDetectorPlugin::onAmdgpuTrapEntered(amdgpu::Wavefront &wf) {
   s->race_state->dispatch(drain);
 }
 
-void RaceDetectorPlugin::onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
-                                                 BarrierKind kind) {
-  if (wavefronts.empty())
+namespace {
+
+BarrierRoundId roundId(const BarrierRound &round) {
+  return {
+      .barrier = round.completion_bit, .namedId = round.named_id, .generation = round.generation};
+}
+
+} // namespace
+
+void RaceDetectorPlugin::onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf,
+                                                 const BarrierRound &round) {
+  // The barrier hooks are not filtered by wave subscription, so a wave this
+  // plugin does not track can reach them.
+  WaveRaceState *race = tracked_race_state(wf);
+  if (!race)
     return;
-  if (kind == BarrierKind::Workgroup) {
-    auto *s = get_state(wavefronts.front());
-    assert(s && s->race_state);
-    s->race_state->getDetector()->flushWorkgroupBarrierEvents();
+  race->getDetector()->barrierSignaled(race->getWaveId(), roundId(round));
+}
+
+void RaceDetectorPlugin::onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> notified,
+                                                       std::span<amdgpu::Wavefront *> armed,
+                                                       const BarrierRound &round) {
+  const bool wholeWorkgroup = round.kind == BarrierKind::Workgroup;
+  // Each notified workgroup's detector hears of the completion, with its
+  // armed waves, which it then awaits. A detector whose waves were all
+  // notified with their bit already set has none to await and closes the
+  // round.
+  if (round.kind != BarrierKind::Cluster) {
+    // Workgroup and named rounds notify the waves of one workgroup, and so of
+    // one detector, which holds at most RaceDetector::kMaxWaves waves.
+    RaceDetector *detector = nullptr;
+    for (auto *wf : notified) {
+      if (WaveRaceState *race = tracked_race_state(*wf)) {
+        detector = race->getDetector();
+        break;
+      }
+    }
+    if (!detector)
+      return;
+    std::array<WaveId, RaceDetector::kMaxWaves> waves;
+    size_t count = 0;
+    for (auto *wf : armed) {
+      WaveRaceState *race = tracked_race_state(*wf);
+      if (!race)
+        continue;
+      assert(detector == race->getDetector());
+      assert(count < waves.size());
+      waves[count++] = race->getWaveId();
+    }
+    detector->barrierRoundCompleted(roundId(round), std::span(waves.data(), count), wholeWorkgroup);
     return;
   }
-  for (auto *wf : wavefronts) {
-    auto *s = get_state(wf);
-    assert(s && s->race_state);
-    s->race_state->flushBarrierPendingEvents();
-  }
+  // A cluster round's members span workgroups, and so detectors. Each detector
+  // orders only its own waves; ordering between workgroups is not modeled.
+  std::vector<std::pair<RaceDetector *, std::vector<WaveId>>> members;
+  const auto entry = [&](RaceDetector *detector) -> std::vector<WaveId> & {
+    auto it = std::ranges::find(members, detector, &decltype(members)::value_type::first);
+    if (it == members.end())
+      it = members.insert(members.end(), {detector, {}});
+    return it->second;
+  };
+  for (auto *wf : notified)
+    if (WaveRaceState *race = tracked_race_state(*wf))
+      entry(race->getDetector());
+  for (auto *wf : armed)
+    if (WaveRaceState *race = tracked_race_state(*wf))
+      entry(race->getDetector()).push_back(race->getWaveId());
+  for (auto &[detector, waves] : members)
+    detector->barrierRoundCompleted(roundId(round), waves, wholeWorkgroup);
+}
+
+void RaceDetectorPlugin::onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf,
+                                                   const BarrierRound &round) {
+  WaveRaceState *race = tracked_race_state(wf);
+  if (!race)
+    return;
+  race->getDetector()->barrierWaitPassed(race->getWaveId(), roundId(round));
 }
 
 } // namespace rocjitsu::plugins::race_detector

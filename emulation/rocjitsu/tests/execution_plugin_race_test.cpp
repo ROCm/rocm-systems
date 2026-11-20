@@ -83,6 +83,22 @@ constexpr InlineImageQuery kInlineImageQueries[]{
     InlineImageQuery::Lod,
 };
 
+/// Report one round of a single-instruction workgroup barrier as the simulator
+/// does: each member signals, the round completes, and each member passes its
+/// wait. Each round closes before the next opens, so rounds can share a
+/// generation.
+void report_workgroup_barrier(ExecutionPluginGroup &group, std::span<Wavefront *> members) {
+  const BarrierRound round{.kind = BarrierKind::Workgroup,
+                           .completion_bit = kWorkgroupBarrierBit,
+                           .named_id = 0,
+                           .generation = 0};
+  for (auto *wave : members)
+    group.onAmdgpuBarrierSignaled(*wave, round);
+  group.onAmdgpuBarrierRoundResolved(members, members, round);
+  for (auto *wave : members)
+    group.onAmdgpuBarrierWaitPassed(*wave, round);
+}
+
 void record_register_probe(ExecutionPluginGroup &plugins, Wavefront &wave) {
   auto decoder = Decoder::create(wave.cu().arch());
   const uint32_t word = S_NOP;
@@ -561,11 +577,14 @@ protected:
   PluginFixture fixture;
   StringSink *sink = nullptr;
   RaceDetectorPlugin *plugin = nullptr;
+  /// Wave slots on the CU; a derived fixture may raise it before SetUp().
+  uint32_t wf_slots = 2;
   std::array<Wavefront *, 2> waves{};
   std::unique_ptr<Decoder> decoder;
+  uint64_t next_workgroup_generation = 0;
 
   void SetUp() override {
-    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna5",
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(wf_slots, "cdna5",
                                                /*wavefront_size=*/32, /*sgprs_per_wf=*/128));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
@@ -621,23 +640,27 @@ protected:
   }
 
   /// Issue a one-lane DS access and report whether it produced a race.
-  bool ds_access(int wave, uint32_t address, bool is_load) {
-    waves[wave]->pc += 16;
+  bool ds_access(Wavefront &wave, uint32_t address, bool is_load) {
+    wave.pc += 16;
     const size_t previous = sink->str().size();
     auto state = std::make_unique<VectorMemState>(LOCAL_MEM);
     state->elem_size = sizeof(uint32_t);
     state->num_elems = 1;
     state->is_load = is_load;
-    state->wf_size = waves[wave]->wf_size();
+    state->wf_size = wave.wf_size();
     state->exec_mask = 1;
     state->lane_mask = 1;
-    state->dst_reg_base = waves[wave]->vgpr_alloc().base;
+    state->dst_reg_base = wave.vgpr_alloc().base;
     state->per_lane_addr[0] = address;
     TestMemoryInstruction inst(std::move(state),
                                {{WaitCounterType::DSCNT, MemoryCompletionClass::LDS}});
-    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, inst, *waves[wave]);
-    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, inst, wave);
+    fixture.plugin_group_->onAmdgpuMemoryAccessRouted({}, inst, wave);
     return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+
+  bool ds_access(int wave, uint32_t address, bool is_load) {
+    return ds_access(*waves[wave], address, is_load);
   }
 
   bool ds_read(int wave, uint32_t address) { return ds_access(wave, address, true); }
@@ -748,7 +771,51 @@ protected:
     execute_wait(*fixture.plugin_group_, *waves[wave], 0xbfc60000u); // s_wait_dscnt 0.
   }
 
-  void barrier() { fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup); }
+  static BarrierRound workgroup_round(uint64_t generation) {
+    return {.kind = BarrierKind::Workgroup,
+            .completion_bit = kWorkgroupBarrierBit,
+            .named_id = 0,
+            .generation = generation};
+  }
+
+  void signal(int wave, const BarrierRound &round) {
+    fixture.plugin_group_->onAmdgpuBarrierSignaled(*waves[wave], round);
+  }
+
+  /// Complete `round` for `members`, reporting it through both completion
+  /// hooks as the simulator does.
+  void complete(const BarrierRound &round, std::span<Wavefront *> members) {
+    fixture.plugin_group_->onAmdgpuBarrierRoundResolved(members, members, round);
+  }
+
+  /// Complete `round`, which notifies `notified` but sets the completion bit
+  /// of `armed` only.
+  void complete(const BarrierRound &round, std::span<Wavefront *> notified,
+                std::span<Wavefront *> armed) {
+    fixture.plugin_group_->onAmdgpuBarrierRoundResolved(notified, armed, round);
+  }
+
+  void wait_passed(int wave, const BarrierRound &round) {
+    fixture.plugin_group_->onAmdgpuBarrierWaitPassed(*waves[wave], round);
+  }
+
+  /// A workgroup barrier whose signal and wait coincide, reported as the
+  /// simulator reports s_barrier.
+  void barrier() {
+    const BarrierRound round = workgroup_round(next_workgroup_generation++);
+    for (int wave = 0; wave < static_cast<int>(waves.size()); ++wave)
+      signal(wave, round);
+    complete(round, waves);
+    for (int wave = 0; wave < static_cast<int>(waves.size()); ++wave)
+      wait_passed(wave, round);
+  }
+
+  /// The detector of the fixture's workgroup.
+  const RaceDetector &detector() const {
+    const auto *state =
+        static_cast<const RaceWavefrontState *>(waves[0]->plugin_state(plugin->slot_index()));
+    return *state->race_state->getDetector();
+  }
 
   /// Wave 0 issues a tensor load at 0x2010 that overwrites bytes wave 1 is
   /// still reading. Returns the race report.
@@ -2517,9 +2584,25 @@ protected:
     waves[1]->end();
   }
 
+  /// Wave 0 alone signals, completes and passes a round of a `kind` barrier.
   void barrier_without_wave_1(BarrierKind kind) {
+    BarrierRound round{.kind = kind};
+    switch (kind) {
+    case BarrierKind::Workgroup:
+      round = workgroup_round(next_workgroup_generation++);
+      break;
+    case BarrierKind::Named:
+      round.completion_bit = kNamedBarrierBit;
+      round.named_id = 1;
+      break;
+    case BarrierKind::Cluster:
+      round.completion_bit = kClusterBarrierBit;
+      break;
+    }
     std::array<Wavefront *, 1> remaining{waves[0]};
-    fixture.plugin_group_->onAmdgpuBarrierResolved(remaining, kind);
+    signal(0, round);
+    complete(round, remaining);
+    wait_passed(0, round);
   }
 };
 
@@ -2563,6 +2646,196 @@ TEST_F(ExitedWaveRaceTest, NamedAndClusterBarriersDoNotRetireCompletedWrite) {
   barrier_without_wave_1(BarrierKind::Named);
   barrier_without_wave_1(BarrierKind::Cluster);
   EXPECT_TRUE(ds_read(0, 64));
+}
+
+// --- Split barriers: a signal releases what its wave completed before it; a
+// --- passed wait acquires the round. ---
+
+/// The report text written since `previous`.
+std::string report_since(const StringSink &sink, size_t previous) {
+  return sink.str().substr(previous);
+}
+
+TEST_F(TensorDmaRaceTest, TensorcntWaitBeforeSignalIsSafe) {
+  const BarrierRound round = workgroup_round(0);
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  wait_tensorcnt(0, 0);
+  signal(0, round);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  EXPECT_FALSE(ds_read(1, 4));
+}
+
+// The load completes after wave 0's signal, so the round never released it.
+TEST_F(TensorDmaRaceTest, TensorcntWaitAfterSignalRacesInAnotherWave) {
+  const BarrierRound round = workgroup_round(0);
+  tensor_load(0, {{.address = 0, .bytes = 16}});
+  signal(0, round);
+  wait_tensorcnt(0, 0);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 4));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=1 lane=0"), std::string::npos) << report;
+}
+
+TEST_F(TensorDmaRaceTest, AsynccntWaitBeforeSignalIsSafe) {
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(dtl_write(0, 4));
+  wait_asynccnt(0, 0);
+  signal(0, round);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  EXPECT_FALSE(ds_read(1, 4));
+}
+
+// The async load to LDS completes after wave 0's signal.
+TEST_F(TensorDmaRaceTest, AsynccntWaitAfterSignalRacesInAnotherWave) {
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(dtl_write(0, 4));
+  signal(0, round);
+  wait_asynccnt(0, 0);
+  signal(1, round);
+  complete(round, waves);
+  wait_passed(1, round);
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 4));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=1 lane=0"), std::string::npos) << report;
+}
+
+// Wave 1 ends after the round completes, without passing its wait; wave 0
+// still acquires the round at its wait, and the round leaves no state behind.
+TEST_F(TensorDmaRaceTest, HaltDuringOpenRoundReleasesState) {
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(ds_write(1, 64));
+  wait_dscnt(1);
+  signal(1, round);
+  signal(0, round);
+  complete(round, waves);
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[1]);
+  wait_passed(0, round);
+  EXPECT_FALSE(ds_read(0, 64));
+  EXPECT_EQ(detector().openBarrierRounds(), 0u);
+  EXPECT_EQ(detector().liveLdsWriteEvents(), 0u);
+}
+
+// The ended wave's write is released into the workgroup round, which wave 0
+// acquires only at its wait.
+TEST_F(ExitedWaveRaceTest, WorkgroupRoundOrdersExitedWriteOnlyAfterWait) {
+  write_and_exit(/*wait=*/true);
+  const BarrierRound round = workgroup_round(0);
+  std::array<Wavefront *, 1> remaining{waves[0]};
+  signal(0, round);
+  complete(round, remaining);
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(0, 64));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=0 lane=0"), std::string::npos) << report;
+  wait_passed(0, round);
+}
+
+// Both waves signal two rounds without waiting. The second round arms no wave,
+// since their completion bits are still set by the first, so the detector
+// closes it at once; the first closes when both have waited.
+TEST_F(TensorDmaRaceTest, RoundThatArmsNoWaveClosesInTheDetector) {
+  const BarrierRound round0 = workgroup_round(0);
+  const BarrierRound round1 = workgroup_round(1);
+  signal(0, round0);
+  signal(1, round0);
+  complete(round0, waves);
+  signal(0, round1);
+  signal(1, round1);
+  EXPECT_EQ(detector().openBarrierRounds(), 2u);
+  complete(round1, waves, /*armed=*/{});
+  EXPECT_EQ(detector().openBarrierRounds(), 1u);
+  wait_passed(0, round0);
+  wait_passed(1, round0);
+  EXPECT_EQ(detector().openBarrierRounds(), 0u);
+}
+
+// The barrier hooks are not filtered by wave subscription. A wave the plugin
+// holds no state for, here one whose workgroup was never reported to it, is
+// skipped, and the round still orders the fixture's waves.
+class UntrackedWaveRaceTest : public TensorDmaRaceTest {
+protected:
+  UntrackedWaveRaceTest() { wf_slots = 3; }
+};
+
+TEST_F(UntrackedWaveRaceTest, BarrierHooksSkipWavesWithoutPluginState) {
+  Wavefront *stranger = fixture.cu()->dispatch_wf(/*wg_id=*/7, /*pc=*/0x100, /*sgprs=*/128,
+                                                  /*vgprs=*/256, /*wf_size=*/32);
+  ASSERT_NE(stranger, nullptr);
+  const BarrierRound round = workgroup_round(0);
+  EXPECT_FALSE(ds_write(0, 64));
+  wait_dscnt(0);
+  signal(0, round);
+  signal(1, round);
+  fixture.plugin_group_->onAmdgpuBarrierSignaled(*stranger, round);
+  std::array<Wavefront *, 3> members{waves[0], waves[1], stranger};
+  complete(round, members);
+  fixture.plugin_group_->onAmdgpuBarrierWaitPassed(*stranger, round);
+  wait_passed(0, round);
+  wait_passed(1, round);
+  EXPECT_FALSE(ds_read(1, 64));
+  EXPECT_EQ(detector().openBarrierRounds(), 0u);
+}
+
+/// Adds a second workgroup of two waves to TensorDmaRaceTest, for cluster
+/// rounds, whose members span workgroups and therefore race detectors.
+class ClusterRoundRaceTest : public TensorDmaRaceTest {
+protected:
+  ClusterRoundRaceTest() { wf_slots = 4; }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(TensorDmaRaceTest::SetUp());
+    for (auto &peer : peers) {
+      peer = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0x100, /*sgprs=*/128, /*vgprs=*/256,
+                                       /*wf_size=*/32);
+      ASSERT_NE(peer, nullptr);
+      peer->set_exec(1);
+    }
+    fixture.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/1, 256, 128,
+                                                       peers);
+  }
+
+  static BarrierRound cluster_round(uint64_t generation) {
+    return {.kind = BarrierKind::Cluster,
+            .completion_bit = kClusterBarrierBit,
+            .named_id = 0,
+            .generation = generation};
+  }
+
+  std::array<Wavefront *, 2> peers{};
+};
+
+// One wave per workgroup signals the cluster round. Each workgroup's detector
+// orders only its own waves, and wave 1, which has not passed its wait, has
+// acquired nothing.
+TEST_F(ClusterRoundRaceTest, ClusterRoundOrdersEachWorkgroupAtItsWaits) {
+  const BarrierRound round = cluster_round(0);
+  EXPECT_FALSE(ds_write(0, 64));
+  wait_dscnt(0);
+  signal(0, round);
+  fixture.plugin_group_->onAmdgpuBarrierSignaled(*peers[0], round);
+  std::array<Wavefront *, 4> members{waves[0], waves[1], peers[0], peers[1]};
+  complete(round, members);
+  wait_passed(0, round);
+  for (auto *peer : peers)
+    fixture.plugin_group_->onAmdgpuBarrierWaitPassed(*peer, round);
+  EXPECT_FALSE(ds_access(*peers[1], 64, /*is_load=*/true));
+  const size_t previous = sink->str().size();
+  EXPECT_TRUE(ds_read(1, 64));
+  const std::string report = report_since(*sink, previous);
+  EXPECT_NE(report.find("type=LDS access=read"), std::string::npos) << report;
+  EXPECT_NE(report.find("wave=1 lane=0"), std::string::npos) << report;
 }
 
 // Run a two-wave CDNA4 kernel: wave 1 writes LDS, optionally waits for the
@@ -3606,16 +3879,29 @@ TEST(RaceDetectorPluginTest, Rdna4InterpolationRetiresItsEmbeddedWaitBeforeReadi
   }
 }
 
+// Wave 0 writes and takes no part in wave 1's barriers. A named round can
+// complete without it and orders nothing it wrote. A workgroup round can
+// complete without it only once it has ended, and then orders its write.
 TEST_F(TensorDmaRaceTest, OnlyWholeWorkgroupBarriersPublishAnAbsentWritersCompletedBytes) {
   EXPECT_FALSE(ds_write(0, 64));
   wait_dscnt(0);
   const auto reader = std::span(waves).subspan(1);
-  fixture.plugin_group_->onAmdgpuBarrierResolved(reader, BarrierKind::Named);
+  const BarrierRound named{.kind = BarrierKind::Named,
+                           .completion_bit = kNamedBarrierBit,
+                           .named_id = 1,
+                           .generation = 0};
+  signal(1, named);
+  complete(named, reader);
+  wait_passed(1, named);
   EXPECT_TRUE(ds_read(1, 64));
 
   EXPECT_FALSE(ds_write(0, 128));
   wait_dscnt(0);
-  fixture.plugin_group_->onAmdgpuBarrierResolved(reader, BarrierKind::Workgroup);
+  fixture.plugin_group_->onAmdgpuWavefrontHalted(*waves[0]);
+  const BarrierRound workgroup = workgroup_round(0);
+  signal(1, workgroup);
+  complete(workgroup, reader);
+  wait_passed(1, workgroup);
   EXPECT_FALSE(ds_read(1, 128));
 }
 
@@ -3736,7 +4022,7 @@ TEST(RaceDetectorPluginTest, SharedFlatStorePublishesAfterItsLdsCounterRetires) 
       if (waited) {
         ASSERT_NO_FATAL_FAILURE(r.issue(0, std::array{split ? 0xbfc60000u : 0xbf89fc07u}));
       }
-      r.fixture.plugin_group_->onAmdgpuBarrierResolved(r.waves, BarrierKind::Workgroup);
+      report_workgroup_barrier(*r.fixture.plugin_group_, r.waves);
       r.set(1, 4, 64);
       ASSERT_NO_FATAL_FAILURE(r.issue(1, std::array{0xd8d80000u, 0x08000004u})); // DS_LOAD_B32
       EXPECT_EQ(r.waves[1]->debug_read_vgpr(8, 0), 11u);
@@ -5856,7 +6142,7 @@ TEST(RaceDetectorPluginTest, DirectLdsReadBlocksOnlyOtherWavesUntilBarrier) {
   ASSERT_NO_FATAL_FAILURE(write(other, 67, 0x204));
   EXPECT_NE(sink.str().find("Race on LDS byte " + std::to_string(base + 67)), std::string::npos);
   const std::string reports = sink.str();
-  f.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+  report_workgroup_barrier(*f.plugin_group_, waves);
   EXPECT_TRUE(race.getBarrierPendingEvents().empty());
   EXPECT_EQ(events.status(EventId{2}), EventStatus::RETIRED);
   ASSERT_NO_FATAL_FAILURE(write(other, 67, 0x208));
@@ -6195,7 +6481,7 @@ TEST(RaceDetectorPluginTest, Cdna1Src2TracksValidSourceReadsAndAtomicDestination
     EXPECT_EQ(state->race_state->getDetector()->events().totalAllocated(), 1);
     if (barrier) {
       execute_wait(*f.plugin_group_, *waves[0], legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA1, 0, 0));
-      f.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+      report_workgroup_barrier(*f.plugin_group_, waves);
     }
     ASSERT_NO_FATAL_FAILURE(issue(sameWave ? 0 : 1, second));
     EXPECT_EQ(state->race_state->getDetector()->events().totalAllocated(), 2);
@@ -6383,7 +6669,7 @@ TEST(RaceDetectorPluginTest, DualOffsetIntervalsPreserveUnionAndInstructionLifet
         PendingWaitCount wait;
         wait.add(WaitCounterType::LGKMCNT, remaining);
         race.dispatch(wait);
-        race.flushBarrierPendingEvents();
+        race.retireReleasedThrough(std::numeric_limits<uint32_t>::max());
         EXPECT_EQ(events.status(EventId{0}), EventStatus::RETIRED);
         EXPECT_EQ(events.status(EventId{1}),
                   remaining ? EventStatus::ACTIVE : EventStatus::RETIRED);
@@ -11056,7 +11342,7 @@ TEST(RaceDetectorPluginTest, Gfx10LdsDirectSourceChecksTheBroadcastBytesWithoutI
           ASSERT_NO_FATAL_FAILURE(issue(wave, std::array{legacy_wait_word(arch, 63, 0)}, 1));
         }
         if (sync == Sync::Barrier || sync == Sync::LgkmBarrier)
-          f.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+          report_workgroup_barrier(*f.plugin_group_, waves);
       };
       if (!read_first) {
         ASSERT_NO_FATAL_FAILURE(write());
@@ -11802,7 +12088,7 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
             issue(0, rdna1::build_sopk(rdna1::kSWaitcntVscnt, {.sdst = 125}), 1));
       }
       if (barrier)
-        f.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+        report_workgroup_barrier(*f.plugin_group_, waves);
       const auto before = sink.str().size();
       ASSERT_NO_FATAL_FAILURE(memory(peer ? 1 : 0, next, 9));
       const bool atomic_pair = (first == Op::FlatAdd && next == Op::DsAdd) ||
@@ -12558,7 +12844,7 @@ TEST(RaceDetectorPluginOutputTest, KeepsProducerBytesAfterWaitAndTraceOverwrite)
   EXPECT_NE(sink.str().find(expected_store + "  ; <-- wave 0\n"
                                              "       Execution trace below is for wave 1.\n"),
             std::string::npos);
-  state->race_state->flushBarrierPendingEvents();
+  state->race_state->retireReleasedThrough(std::numeric_limits<uint32_t>::max());
   EXPECT_TRUE(state->race_state->getDetector()->events().isTrimmable(event));
 }
 
@@ -13037,7 +13323,7 @@ TEST(RaceDetectorPluginOutputTest, LdsWriteExplainsPendingAndCompletedOtherWaveR
           << report;
     }
     auto *state = static_cast<RaceWavefrontState *>(reader->plugin_state(plugin->slot_index()));
-    state->race_state->flushBarrierPendingEvents();
+    state->race_state->retireReleasedThrough(std::numeric_limits<uint32_t>::max());
   }
 }
 
@@ -13586,7 +13872,18 @@ public:
                  legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, vmcnt, lgkmcnt));
   }
 
-  void barrier() { f_.plugin_group_->onAmdgpuBarrierResolved(waves_, BarrierKind::Workgroup); }
+  /// s_barrier, reported as the simulator reports it.
+  void barrier() {
+    const BarrierRound round{.kind = BarrierKind::Workgroup,
+                             .completion_bit = kWorkgroupBarrierBit,
+                             .named_id = 0,
+                             .generation = next_generation_++};
+    for (auto *wave : waves_)
+      f_.plugin_group_->onAmdgpuBarrierSignaled(*wave, round);
+    f_.plugin_group_->onAmdgpuBarrierRoundResolved(waves_, waves_, round);
+    for (auto *wave : waves_)
+      f_.plugin_group_->onAmdgpuBarrierWaitPassed(*wave, round);
+  }
 
 private:
   void execute(Wavefront &wave, std::array<uint32_t, 2> words) {
@@ -13603,6 +13900,7 @@ private:
   Wavefront *producer_ = nullptr;
   Wavefront *peer_ = nullptr;
   std::array<Wavefront *, 2> waves_{};
+  uint64_t next_generation_ = 0;
   std::unique_ptr<Decoder> decoder_ = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   std::vector<std::unique_ptr<Instruction>> instructions_;
 };
@@ -14007,7 +14305,7 @@ TEST(RaceDetectorPluginTest, Cdna1LdsDirectSourceChecksPendingWritesWithoutCreat
       ASSERT_NO_FATAL_FAILURE(write());
       if (order == WriterWaitBarrierReader) {
         wait(*writer);
-        fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+        report_workgroup_barrier(*fixture.plugin_group_, waves);
       }
       ASSERT_NO_FATAL_FAILURE(read());
     } else {
@@ -14015,7 +14313,7 @@ TEST(RaceDetectorPluginTest, Cdna1LdsDirectSourceChecksPendingWritesWithoutCreat
       if (order == ReaderWaitWriter)
         wait(*reader);
       if (order == ReaderBarrierWriter)
-        fixture.plugin_group_->onAmdgpuBarrierResolved(waves, BarrierKind::Workgroup);
+        report_workgroup_barrier(*fixture.plugin_group_, waves);
       ASSERT_NO_FATAL_FAILURE(write());
     }
     const bool barrier = order == ReaderBarrierWriter || order == WriterWaitBarrierReader;
