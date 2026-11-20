@@ -964,11 +964,14 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
     second_status = 0;
   });
 
+  amdgpu::InterruptSubscription packet_owner([](uint32_t, uint32_t) {
+    ADD_FAILURE() << "Software queue exceptions must not use the packet interrupt route";
+  });
   auto register_queue = [&](uint32_t queue_id, uint64_t &exception_status, uint32_t event_id,
-                            const amdgpu::InterruptSink &interrupt_sink) {
+                            const amdgpu::InterruptSink &exception_event_sink) {
     amdgpu::ComputeQueueConfig queue{};
     queue.address_space = address_space;
-    queue.interrupt_sink = interrupt_sink;
+    queue.interrupt_sink = packet_owner.sink();
     queue.process_id = kProcessId;
     queue.queue_id = queue_id;
     queue.ring_base_va = 0x100;
@@ -977,6 +980,7 @@ TEST(CommandProcessorInterruptRoutingTest, QueuesWithTheSameProcessIdKeepDistinc
     queue.write_ptr_va = 0x88;
     queue.exception_status_va = reinterpret_cast<uint64_t>(&exception_status);
     queue.exception_event_id = event_id;
+    queue.exception_event_sink = exception_event_sink;
     (void)sim.cp()->register_queue(std::move(queue));
   };
   register_queue(17, first_status, 17, first_owner.sink());
@@ -1885,6 +1889,7 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   EXPECT_EQ(queue.signal_value(), 4);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // An endpoint that does not resolve YET is worth retrying, and
 // ConstFillUnmappedTailDoesNotAdvance pins that. An endpoint that does not
 // exist is not: the violation has already been reported to the process, and
@@ -1997,6 +2002,8 @@ TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
   munmap(raw, KfdProcess::kPageSize);
 }
 
+#endif
+
 /// @brief A poll on a faulted address must halt rather than spin forever.
 /// @details A poll that cannot read its address is normally right to retry --
 /// waiting for a value to appear is the entire point of the packet. But a
@@ -2044,6 +2051,7 @@ TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
   munmap(raw, KfdProcess::kPageSize);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -2169,6 +2177,8 @@ TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) 
 
   munmap(raw, KfdProcess::kPageSize);
 }
+
+#endif
 
 TEST(Gfx1250SdmaTest, CompactCopyWaitPacketCopies) {
   Gfx1250Sim sim;

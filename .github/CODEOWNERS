@@ -40,7 +40,6 @@
 /.github/workflows/pr-merge-sync-patches-manual.yml                   @ROCm/rocm-systems-reviewers @jayhawk-commits
 /.github/workflows/pr-merge-sync-patches.yml                          @ROCm/rocm-systems-reviewers @jayhawk-commits
 /.github/workflows/pr-org-label.yml                                   @ROCm/rocm-systems-reviewers @jayhawk-commits
-/.github/workflows/update-subtrees.yml                                @ROCm/rocm-systems-reviewers @jayhawk-commits
 
 # Project-specific ownership
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
@@ -87,6 +86,8 @@
 /projects/rocr-runtime/libhsakmt/include/impl                         @dayatsin-amd @cfreeamd @gandryey @chrispaquot
 /projects/rocr-runtime/libhsakmt/include/impl/wddm                    @dayatsin-amd @cfreeamd @gandryey @chrispaquot @fcui-amd @yuliashi-amd
 /projects/rocr-runtime/libhsakmt/src/dxg                              @dayatsin-amd @cfreeamd @gandryey @chrispaquot @fcui-amd @yuliashi-amd
+/projects/rocr-runtime/libhsakmt/src/virtio/                          @cfreeamd @huangrui @HongleiHuang-amd
+/projects/rocr-runtime/libhsakmt/include/hsakmt/hsakmt_virtio.h       @cfreeamd @huangrui @HongleiHuang-amd
 /projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
 /projects/rocr-runtime/runtime/hsa-runtime/core/runtime/trap_handler/*.s	@lancesix @dayatsin-amd @cfreeamd @shwetagkhatri
 /projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd @dayatsin-amd @cfreeamd
@@ -168,7 +169,6 @@
 /projects/rocjpeg/**/*.rst                                            @ROCm/rocjpeg-docs-reviewers
 /projects/rocjpeg/**/.readthedocs.yaml                                @ROCm/rocjpeg-docs-reviewers
 
-/projects/hipfile/CHANGELOG.md                                        @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 /projects/hipfile/**/.readthedocs.yaml                                @ROCm/hipfile-docs-reviewers
 /projects/hipfile/docs/                                               @ROCm/hipfile-docs-reviewers @ROCm/hipfile-reviewers
 

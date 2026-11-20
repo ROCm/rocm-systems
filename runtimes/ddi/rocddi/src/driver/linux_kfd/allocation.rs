@@ -108,6 +108,7 @@ impl LinuxAllocation {
 
     pub(super) fn import_system_dma_buf(
         vm: Shared<DeviceVm>,
+        peers: impl ExactSizeIterator<Item = Shared<DeviceVm>>,
         descriptor: i32,
         source_offset: u64,
         byte_length: u64,
@@ -117,6 +118,7 @@ impl LinuxAllocation {
         let owner = Owned::try_new_uninit()?;
         let imported = DrmImportedSystem::create(
             vm,
+            peers,
             descriptor,
             source_offset,
             byte_length,
@@ -178,6 +180,17 @@ impl LinuxAllocation {
         }
     }
 
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            Self::Kfd(allocation) => allocation.diagnostic_memory(),
+            Self::KfdHostAlias(alias) => alias.diagnostic_memory(),
+            Self::DrmRegisteredHost(allocation) => allocation.diagnostic_memory(),
+            Self::DrmImportedSystem(allocation) => allocation.diagnostic_memory(),
+        }
+    }
+
     pub(super) fn check(&self) -> Result<(), Error> {
         match self {
             Self::Kfd(allocation) => allocation.check(),
@@ -199,12 +212,11 @@ impl LinuxAllocation {
     pub(super) fn set_access(&mut self, devices: &[&Shared<DeviceVm>]) -> Result<(), Error> {
         match self {
             Self::Kfd(allocation) => allocation.set_access(devices),
-            Self::KfdHostAlias(_) | Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => {
-                Err(error(
-                    ErrorKind::Unsupported,
-                    "this allocation cannot change its native device mappings",
-                ))
-            }
+            Self::DrmImportedSystem(allocation) => allocation.set_access(devices),
+            Self::KfdHostAlias(_) | Self::DrmRegisteredHost(_) => Err(error(
+                ErrorKind::Unsupported,
+                "this allocation cannot change its native device mappings",
+            )),
         }
     }
 

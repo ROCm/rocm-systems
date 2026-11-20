@@ -183,6 +183,13 @@ SELECTION_F64 = {
 BINARY_F64 = {
     arch: names | {'V_ADD_F64', 'V_MUL_F64'} for arch, names in SELECTION_F64.items()
 }
+# CDNA legacy selection has its own NaN-priority policy. Only arithmetic shares
+# the existing FP64 entry points until that policy has a dedicated API.
+for _arch in ('cdna3', 'cdna4', 'cdna5'):
+    BINARY_F64[_arch] = {'V_ADD_F64', 'V_MUL_F64'}
+
+CDNA_FP64_ARITHMETIC = {'V_ADD_F64', 'V_MUL_F64', 'V_FMA_F64', 'V_LDEXP_F64'}
+
 BINARY_ARITHMETIC_F32 = {
     'V_LDEXP_F32',
     'V_ADD_F32',
@@ -201,7 +208,7 @@ for _arch in ('cdna3', 'cdna4', 'cdna5'):
     _selection = 'rdna4' if _arch == 'cdna5' else 'rdna3'
     SELECTION_F32[_arch] = SELECTION_F32[_selection]
     SELECTION_F64[_arch] = SELECTION_F64[_selection]
-    BINARY_F64[_arch] = SELECTION_F64[_arch]
+    BINARY_F64[_arch] |= SELECTION_F64[_arch]
 
 CDNA_BINARY_SELECTION = (
     SELECTION_F32['rdna3']
@@ -217,6 +224,14 @@ FMA_F32 = {
     'V_FMAC_DX9_ZERO_F32',
     'V_FMAAK_F32',
     'V_FMAMK_F32',
+}
+
+# CDNA legacy multiplication/selection need their own policy audit. The ordinary
+# fused arithmetic and exponent scaling share the existing guest-mode kernels.
+CDNA_FP32_ARITHMETIC = (BINARY_ARITHMETIC_F32 | FMA_F32) - {
+    'V_MUL_DX9_ZERO_F32',
+    'V_FMA_DX9_ZERO_F32',
+    'V_FMAC_DX9_ZERO_F32',
 }
 
 MIXED_FMA_NAMES = {'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'}
@@ -297,7 +312,17 @@ UNARY_F16 = {
     'V_COS_F16',
 }
 
-FMA_F16 = {'V_FMA_F16', 'V_FMAC_F16', 'V_FMAAK_F16', 'V_FMAMK_F16'}
+# CDNA1/3/4 MAD retains a rounded FP32 intermediate rather than half FMA.
+MAD_F16 = {'V_MAD_F16', 'V_MAD_LEGACY_F16', 'V_MADMK_F16', 'V_MADAK_F16'}
+
+FMA_F16 = {
+    'V_FMA_F16',
+    'V_FMAC_F16',
+    'V_FMAAK_F16',
+    'V_FMAMK_F16',
+    'V_FMA_LEGACY_F16',
+    'V_MAC_F16',
+}
 
 BINARY_F16 = BINARY_ARITHMETIC_F16 | BINARY_SELECTION_F16
 
@@ -399,18 +424,29 @@ def gen_pseudo_scalar(ctx: ExecuteContext) -> str | None:
 # other entries here have no legacy classifier.
 
 
+# CDNA exponent/unary arithmetic inherits the existing numeric models. gfx1250
+# shares gfx12 output policies; gfx942/gfx950 retain MODE-gated OMOD and CLAMP.
 def gen_float_unary32(ctx: ExecuteContext) -> str | None:
     arch = ctx.arch_name
     mnemonic = ctx.inst.name
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in UNARY_F32:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        or mnemonic not in UNARY_F32
+    ):
+        return None
+    if arch.startswith('cdna') and mnemonic != 'V_FREXP_EXP_I32_F32':
         return None
     if len(dst) != 1 or len(src) != 1:
         return None
-    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
-    lines = []
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    )
+    lines = cdna_qualification_guard(arch)
     modifiers = '0'
     if is_vop3:
         lines += [
@@ -439,10 +475,17 @@ def gen_float_unary32(ctx: ExecuteContext) -> str | None:
         if mnemonic in {'V_RCP_IFLAG_F32', 'V_SQRT_F32'}
         else ''
     )
+    helper = 'execute_float_unary32'
+    receiver = 'wf'
+    if arch in ('cdna3', 'cdna4') and not is_vop3:
+        result = 'NONE' if mnemonic.startswith('V_FREXP_EXP_') else 'F32'
+        policy = 'FLUSH_NEAREST' if mnemonic in ('V_LOG_F32', 'V_EXP_F32') else 'MODE'
+        helper = f'execute_cdna_float_unary<amdgpu::sdwa::ResultFormat::{result}, amdgpu::sdwa::OutputPolicy::{policy}>'
+        receiver = '*this, wf'
     lines += [
-        f'  amdgpu::arith::execute_float_unary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::{helper}({receiver}, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {src[0]}, {str(arch == "rdna3").lower()}, /*guest_rounding=*/{str(guest_rounding).lower()}{status_scope});',
+        f'      {dst[0]}, {src[0]}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}, /*guest_rounding=*/{str(guest_rounding).lower()}{status_scope});',
     ]
     return '\n'.join(lines)
 
@@ -458,11 +501,29 @@ def gen_float_unary64(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in UNARY_F64:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        or mnemonic not in UNARY_F64
+    ):
+        return None
+    if arch.startswith('cdna') and mnemonic in {'V_RCP_F64', 'V_RSQ_F64', 'V_SQRT_F64'}:
         return None
     if len(dst) != 1 or len(src) != 1:
         return None
-    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    )
+    if arch in ('cdna3', 'cdna4') and mnemonic in {
+        'V_TRUNC_F64',
+        'V_CEIL_F64',
+        'V_RNDNE_F64',
+        'V_FLOOR_F64',
+        'V_FRACT_F64',
+        'V_FREXP_MANT_F64',
+    }:
+        api += '_gfx942'
     lines = []
     modifiers = '0'
     if is_vop3:
@@ -485,7 +546,7 @@ def gen_float_unary64(ctx: ExecuteContext) -> str | None:
     lines += [
         f'  amdgpu::arith::execute_float_unary64(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {src[0]}, {str(arch == "rdna3").lower()}{integer_result});',
+        f'      {dst[0]}, {src[0]}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}{integer_result});',
     ]
     return '\n'.join(lines)
 
@@ -755,7 +816,7 @@ def gen_conversion32(ctx: ExecuteContext) -> str | None:
         ignored += ' | RJ_ARITH_FP_ROUND_MASK'
     lines = [
         '  const uint64_t flags = amdgpu::arith::float32_flags(',
-        f'      wf, wf.cu().arithmetic_flags(), {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}) & ~({ignored});',
+        f'      wf, wf.cu().arithmetic_flags(), {str(arch in ("cdna2", "rdna3", "cdna3", "cdna4")).lower()}) & ~({ignored});',
     ]
     modifiers = []
     if is_vop3:
@@ -1386,9 +1447,11 @@ def gen_float_binary64(ctx: ExecuteContext) -> str | None:
     if len(dst) != 1 or len(src) != 2:
         return None
     api = 'rj_arith_' + mnemonic.lower()
-    if arch == 'rdna4' and mnemonic in {'V_ADD_F64', 'V_MUL_F64'}:
+    if arch.startswith('cdna') and mnemonic in {'V_ADD_F64', 'V_MUL_F64'}:
+        api += '_gfx1250' if arch == 'cdna5' else '_gfx942'
+    elif arch in ('rdna4', 'cdna5') and mnemonic in {'V_ADD_F64', 'V_MUL_F64'}:
         api += '_gfx12'
-    if arch in ('cdna3', 'cdna4'):
+    if arch in ('cdna3', 'cdna4') and mnemonic in SELECTION_F64[arch] | {'V_LDEXP_F64'}:
         api += '_gfx942'
     lines = (
         [
@@ -1405,7 +1468,7 @@ def gen_float_binary64(ctx: ExecuteContext) -> str | None:
     lines += [
         f'  amdgpu::arith::execute_float_binary64(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()});',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("cdna2", "rdna3", "cdna3", "cdna4")).lower()});',
     ]
     return '\n'.join(lines)
 
@@ -1418,14 +1481,19 @@ def gen_float_fma64(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     if (
-        arch not in ('rdna2', 'rdna3', 'rdna4')
+        arch not in ('rdna2', 'rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
         or mnemonic != 'V_FMA_F64'
         or not is_vop3
     ):
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    api = 'rj_arith_v_fma_f64' + ('_gfx12' if arch == 'rdna4' else '')
+    suffix = (
+        ('_gfx1250' if arch == 'cdna5' else '_gfx942')
+        if arch.startswith('cdna')
+        else ('_gfx12' if arch == 'rdna4' else '')
+    )
+    api = 'rj_arith_v_fma_f64' + suffix
     return '\n'.join(
         [
             '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
@@ -1438,7 +1506,7 @@ def gen_float_fma64(ctx: ExecuteContext) -> str | None:
             '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
             f'  amdgpu::arith::execute_float_ternary64(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
             '      wf.cu().arithmetic_flags(), modifiers,',
-            f'      {dst[0]}, {src[0]}, {src[1]}, {src[2]}, {str(arch != "rdna4").lower()});',
+            f'      {dst[0]}, {src[0]}, {src[1]}, {src[2]}, {str(arch in ("rdna2", "rdna3", "cdna3", "cdna4")).lower()});',
         ]
     )
 
@@ -1449,20 +1517,28 @@ def gen_float64_word(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or not is_vop3:
+    if arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5') or not is_vop3:
+        return None
+    if arch.startswith('cdna') and mnemonic != 'V_LDEXP_F64':
         return None
     if mnemonic not in {'V_LDEXP_F64', 'V_TRIG_PREOP_F64'}:
         return None
     if len(dst) != 1 or len(src) != 2:
         return None
-    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
-    lines = [
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    )
+    if arch in ('cdna3', 'cdna4') and mnemonic == 'V_LDEXP_F64':
+        api += '_gfx942'
+    lines = cdna_qualification_guard(arch) + [
         '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
         '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
         '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
         '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
         f'  amdgpu::arith::execute_float64_word(wf, {wave_api(api, 32)}, {wave_api(api, 64)}, wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch == "rdna3").lower()}, /*ldexp=*/{str(mnemonic == "V_LDEXP_F64").lower()});',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}, /*ldexp=*/{str(mnemonic == "V_LDEXP_F64").lower()});',
     ]
     return '\n'.join(lines)
 
@@ -1476,28 +1552,55 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if (
+    legacy_mul = (arch in ('cdna3', 'cdna4') and mnemonic == 'V_MUL_LEGACY_F32') or (
+        arch == 'cdna5' and mnemonic == 'V_MUL_DX9_ZERO_F32'
+    )
+    if not legacy_mul and (
         arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
         or mnemonic not in BINARY_F32
     ):
         return None
+    if (
+        not legacy_mul
+        and arch.startswith('cdna')
+        and mnemonic not in CDNA_FP32_ARITHMETIC | SELECTION_F32.get(arch, set())
+    ):
+        return None
     if len(dst) != 1 or len(src) != 2:
         return None
-    if mnemonic not in BINARY_ARITHMETIC_F32 | SELECTION_F32[arch]:
-        return None
-    if arch.startswith('cdna') and mnemonic not in SELECTION_F32[arch]:
+    if not legacy_mul and mnemonic not in BINARY_ARITHMETIC_F32 | SELECTION_F32.get(
+        arch, set()
+    ):
         return None
     arithmetic = mnemonic in BINARY_ARITHMETIC_F32
     api = (
         'rj_arith_'
         + mnemonic.lower()
-        + ('_gfx12' if arch == 'rdna4' and arithmetic else '')
+        + (
+            '_gfx1250'
+            if legacy_mul and arch == 'cdna5'
+            else '_gfx12' if arch in ('rdna4', 'cdna5') and arithmetic else ''
+        )
     )
     if arch in ('cdna3', 'cdna4') and mnemonic in SELECTION_F32[arch]:
         api += '_gfx942'
-    if arch == 'cdna5' and mnemonic in ('V_PK_MINIMUM_F16', 'V_PK_MAXIMUM_F16'):
+    if arch == 'cdna5' and mnemonic in SELECTION_F32[arch]:
         api += '_gfx1250'
-    lines = []
+    if arch == 'cdna5' and mnemonic in {
+        'V_ADD_F32',
+        'V_SUB_F32',
+        'V_SUBREV_F32',
+        'V_MUL_F32',
+    }:
+        api = 'rj_arith_' + mnemonic.lower() + '_gfx1250'
+    if arch in ('cdna3', 'cdna4') and mnemonic == 'V_LDEXP_F32':
+        api += '_gfx942'
+    lines = (
+        cdna_qualification_guard(arch)
+        if mnemonic
+        in {'V_ADD_F32', 'V_SUB_F32', 'V_SUBREV_F32', 'V_MUL_F32', 'V_LDEXP_F32'}
+        else []
+    )
     modifiers = '0'
     if is_vop3:
         lines += [
@@ -1518,19 +1621,9 @@ def gen_float_binary32(ctx: ExecuteContext) -> str | None:
         ]
         modifiers = 'modifiers'
     controls = f'/*rdna3=*/{str(arch in ("rdna3", "cdna3", "cdna4")).lower()}, /*compatibility_mul=*/{str(mnemonic == "V_MUL_F32").lower()}'
-    status_kind = ''
-    if arch == 'rdna4':
-        kind = {
-            'V_ADD_F32': 'Add',
-            'V_SUB_F32': 'Sub',
-            'V_SUBREV_F32': 'Subrev',
-            'V_MUL_F32': 'Mul',
-        }.get(mnemonic)
-        if mnemonic in SELECTION_F32['rdna4']:
-            kind = 'Select'
-        if kind:
-            status_kind = f'<::rocjitsu::rdna4::BinaryFpOperation::{kind}>'
-    helper, receiver = f'execute_float_binary32{status_kind}', 'wf'
+    helper, receiver = 'execute_float_binary32', 'wf'
+    if arch in ('cdna3', 'cdna4') and not is_vop3:
+        helper, receiver = 'execute_cdna_binary32', '*this, wf'
     if arch in ('cdna3', 'cdna4') and not is_vop3 and mnemonic in SELECTION_F32[arch]:
         helper, receiver = 'execute_cdna_selection<32>', '*this, wf'
     lines += [
@@ -1549,11 +1642,23 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if not (arch == 'rdna2' and mnemonic in GFX10_LEGACY_FMA) and (
-        arch not in ('rdna3', 'rdna4') or mnemonic not in FMA_F32
+    cdna_dx9 = arch == "cdna5" and mnemonic == "V_FMA_DX9_ZERO_F32"
+    if (
+        not cdna_dx9
+        and not (arch == 'rdna2' and mnemonic in GFX10_LEGACY_FMA)
+        and (
+            arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+            or mnemonic not in FMA_F32
+        )
     ):
         return None
-    if arch == 'rdna4' and mnemonic == 'V_FMAC_DX9_ZERO_F32':
+    if arch in ('rdna4', 'cdna5') and mnemonic == 'V_FMAC_DX9_ZERO_F32':
+        return None
+    if (
+        not cdna_dx9
+        and arch.startswith('cdna')
+        and mnemonic not in CDNA_FP32_ARITHMETIC
+    ):
         return None
     accumulate = mnemonic in ('V_FMAC_F32', 'V_FMAC_DX9_ZERO_F32', 'V_FMAC_LEGACY_F32')
     if len(dst) != 1 or len(src) != (2 if accumulate else 3):
@@ -1563,12 +1668,12 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
     inputs = src + dst if accumulate else src
     dx9 = 'DX9_ZERO' in mnemonic or mnemonic in GFX10_LEGACY_FMA
     api = 'rj_arith_v_fma' + ('_dx9_zero' if dx9 else '') + '_f32'
-    if arch == 'rdna4':
+    if arch in ('rdna4', 'cdna5'):
         api += '_gfx12'
-    lines = []
+    lines = cdna_qualification_guard(arch)
     modifiers = '0'
     if is_vop3:
-        lines = [
+        lines += [
             '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
             '      ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |',
             '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
@@ -1590,7 +1695,7 @@ def gen_float_fma32(ctx: ExecuteContext) -> str | None:
         f'      {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
         f'      {dst[0]}, {", ".join(inputs)},',
-        f'      {str(arch != "rdna4").lower()});',
+        f'      {str(arch in ("rdna2", "rdna3", "cdna3", "cdna4")).lower()});',
     ]
     return '\n'.join(lines)
 
@@ -1604,8 +1709,9 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
     hi_c_expr = ctx.op_sel_hi_2_expr
+    older_radeon = arch in ('rdna1', 'rdna2', 'rdna3_5')
     bf16 = arch == 'cdna5' and mnemonic in MIXED_BF16_NAMES
-    legacy_mad = arch in ('cdna3', 'cdna4') and mnemonic in {
+    legacy_mad = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') and mnemonic in {
         'V_MAD_MIX_F32',
         'V_MAD_MIXLO_F16',
         'V_MAD_MIXHI_F16',
@@ -1613,7 +1719,10 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
     if (
         not bf16
         and not legacy_mad
-        and (arch not in ('rdna3', 'rdna4', 'cdna5') or mnemonic not in MIXED_FMA_NAMES)
+        and (
+            (not older_radeon and arch not in ('rdna3', 'rdna4', 'cdna5'))
+            or mnemonic not in MIXED_FMA_NAMES
+        )
     ):
         return None
     if enc_name != 'ENC_VOP3P' or len(dst) != 1 or len(src) != 3:
@@ -1635,7 +1744,11 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
     api = (
         'rj_arith_'
         + mnemonic.lower()
-        + ('_gfx12' if not bf16 and arch in ('rdna4', 'cdna5') else '')
+        + (
+            '_gfx908'
+            if arch == 'cdna1'
+            else '_gfx12' if not bf16 and arch in ('rdna4', 'cdna5') else ''
+        )
     )
     byte_mask = (
         '0xF'
@@ -1651,15 +1764,51 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
                 f'      {dst[0]}, {", ".join(src)}, {byte_mask});',
             ]
         )
-    return '\n'.join(
-        [
-            '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
-            '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
-            f'  amdgpu::arith::execute_mixed_fma(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
-            '      wf.cu().arithmetic_flags(), modifiers,',
-            f'      {dst[0]}, {", ".join(src)}, narrow_sources, {byte_mask}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}, {str(arch == "cdna5").lower()});',
-        ]
-    )
+    lines = [
+        '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
+        '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
+        f'  amdgpu::arith::execute_mixed_fma(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        '      wf.cu().arithmetic_flags(), modifiers,',
+        f'      {dst[0]}, {", ".join(src)}, narrow_sources, {byte_mask}, {str(older_radeon or arch in ("rdna3", "cdna1", "cdna2", "cdna3", "cdna4")).lower()}, {str(older_radeon or arch == "cdna5").lower()}{", true" if arch == "cdna1" else ""});',
+    ]
+    if older_radeon:
+        lines = (
+            ['  if (!wf.exec()) {', '    return;', '  }']
+            + inherited_half_qualification_guard(arch)
+            + lines
+        )
+    return '\n'.join(lines)
+
+
+def inherited_half_qualification_guard(arch: str) -> list[str]:
+    """Reject strict requests when reuse does not establish target qualification."""
+    if not arch.startswith('cdna') and arch not in ('rdna1', 'rdna2', 'rdna3_5'):
+        return []
+    return unqualified_half_guard()
+
+
+def unqualified_half_guard() -> list[str]:
+    """Reject active strict requests for an inherited, unqualified half model."""
+    return [
+        '  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;',
+        '  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||',
+        '      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {',
+        '    wf.report_instruction_execution_error(',
+        '        amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+        '    return;',
+        '  }',
+    ]
+
+
+def cdna_qualification_guard(arch: str) -> list[str]:
+    """Skip empty EXEC before rejecting unqualified strict CDNA requests."""
+    if not arch.startswith('cdna'):
+        return []
+    return [
+        '  if (!wf.exec()) {',
+        '    return;',
+        '  }',
+    ] + inherited_half_qualification_guard(arch)
 
 
 def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
@@ -1671,11 +1820,14 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
     hi_c_expr = ctx.op_sel_hi_2_expr
+    older = arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
     selection = mnemonic in PACKED_TERNARY_SELECTION
     if selection:
         if arch not in ('cdna4', 'cdna5') or (arch == 'cdna4' and '_NUM_' in mnemonic):
             return None
-    elif arch not in ('rdna3', 'rdna4') or mnemonic not in PACKED_FMA16_NAMES:
+    elif (
+        not older and arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+    ) or mnemonic not in PACKED_FMA16_NAMES:
         return None
     accumulate = mnemonic == 'V_PK_FMAC_F16'
     count = 2 if accumulate else 3
@@ -1694,6 +1846,13 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
                 '((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u)',
                 '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)',
             ]
+        if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+            omod = (
+                'inst_.omod'
+                if 'VOP3' in enc_name
+                else 'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::PK_F16>(*this, wf)'
+            )
+            terms.append(f'(uint64_t({omod}) * RJ_ARITH_ALU_OMOD_2)')
     else:
         low, high = opsel_exprs
         terms = ['(inst_.clamp ? RJ_ARITH_PK_CLAMP : 0u)']
@@ -1729,22 +1888,41 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
         + (' | '.join(replicate) if replicate else '0')
         + ';'
     )
+    if not selection:
+        lines = inherited_half_qualification_guard(arch) + lines
     api = (
         'rj_arith_' + mnemonic.lower()
         if selection
         else 'rj_arith_v_pk_fma' + ('c' if accumulate else '') + '_f16'
     )
-    if arch == 'rdna4':
+    if not selection and arch in ('rdna4', 'cdna5'):
         api += '_gfx12'
+    elif accumulate and arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+        api += '_gfx942'
+    if (
+        accumulate
+        and arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+        and 'VOP3' not in enc_name
+    ):
+        lines += [
+            '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
+            '    amdgpu::arith::execute_packed_fmac_sdwa(*this, wf,',
+            f'        {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'        wf.cu().arithmetic_flags(), modifiers, {dst[0]}, {src[0]}, {src[1]});',
+            '    return;',
+            '  }',
+        ]
     addend = dst[0] if accumulate else src[2]
     lines += [
         f'  amdgpu::arith::execute_packed_fma16<{str(accumulate).lower()}>(wf,',
         f'      {wave_api(api, 32)},',
         f'      {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {addend}, {str(arch in ("rdna3", "cdna4")).lower()},',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {addend}, {str(older or arch in ("rdna3", "cdna3", "cdna4")).lower()},',
         '      narrow_sources, replicate_sources);',
     ]
+    if older:
+        lines = ['  if (!wf.exec()) {', '    return;', '  }'] + lines
     return '\n'.join(lines)
 
 
@@ -1760,7 +1938,11 @@ def gen_packed_binary16(ctx: ExecuteContext) -> str | None:
         or mnemonic not in PACKED_BINARY16_NAMES
     ):
         return None
-    if arch.startswith('cdna') and mnemonic not in CDNA_HALF_SELECTION:
+    if (
+        arch.startswith('cdna')
+        and mnemonic not in CDNA_HALF_SELECTION
+        and mnemonic not in ('V_PK_ADD_F16', 'V_PK_MUL_F16')
+    ):
         return None
     if enc_name != 'ENC_VOP3P' or len(dst) != 1 or len(src) != 2:
         return None
@@ -1784,19 +1966,25 @@ def gen_packed_binary16(ctx: ExecuteContext) -> str | None:
     api = (
         'rj_arith_'
         + mnemonic.lower()
-        + ('_gfx12' if arch == 'rdna4' and arithmetic else '')
+        + ('_gfx12' if arch in ('rdna4', 'cdna5') and arithmetic else '')
     )
-    if arch in ('cdna3', 'cdna4'):
+    if not arithmetic and arch in ('cdna3', 'cdna4'):
         api += '_gfx942'
     if arch == 'cdna5' and mnemonic in ('V_PK_MINIMUM_F16', 'V_PK_MAXIMUM_F16'):
         api += '_gfx1250'
+    if arch in ('cdna3', 'cdna4') and mnemonic == 'V_PK_ADD_F16':
+        api = 'rj_arith_v_pk_add_f16_gfx942'
+    if arch.startswith('cdna') and mnemonic == 'V_PK_MUL_F16':
+        api = 'rj_arith_v_pk_mul_f16_' + ('gfx1250' if arch == 'cdna5' else 'gfx942')
     lines = [
         '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
         '  const unsigned narrow_sources = ' + ' | '.join(narrow) + ';',
         f'  amdgpu::arith::execute_packed_binary16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}, narrow_sources);',
+        f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("cdna2", "rdna3", "cdna3", "cdna4")).lower()}, narrow_sources);',
     ]
+    if arch == 'cdna5' and mnemonic == 'V_PK_ADD_F16':
+        lines = inherited_half_qualification_guard(arch) + lines
     return '\n'.join(lines)
 
 
@@ -1807,7 +1995,20 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
-    if arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4') or len(dst) != 1:
+    if (
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'rdna2',
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+            'cdna3',
+            'cdna4',
+        )
+        or len(dst) != 1
+    ):
         return None
     if mnemonic in DOT4_F32_NAMES:
         if arch != 'rdna4' or enc_name != 'ENC_VOP3P' or len(src) != 3:
@@ -1830,18 +2031,19 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         )
     if mnemonic not in DOT2_F32_NAMES:
         return None
-    cdna = arch in ('cdna3', 'cdna4')
-    cdna_accumulate = mnemonic in ('V_DOT2C_F32_F16', 'V_DOT2C_F32_BF16')
-    if cdna_accumulate and not cdna:
+    # Older CDNA and RDNA2 inherit the same pair-sum-then-add host model.
+    host_model = arch in ('cdna1', 'cdna2', 'rdna2', 'cdna3', 'cdna4')
+    dotc = mnemonic in ('V_DOT2C_F32_F16', 'V_DOT2C_F32_BF16')
+    if dotc and not host_model:
         return None
-    if arch == 'cdna3' and mnemonic.endswith('_BF16'):
+    if arch != 'cdna4' and host_model and mnemonic.endswith('_BF16'):
         return None
-    accumulate = mnemonic == 'V_DOT2ACC_F32_F16' or cdna_accumulate
-    if cdna_accumulate:
+    accumulate = mnemonic == 'V_DOT2ACC_F32_F16' or dotc
+    if dotc:
         if enc_name not in ('ENC_VOP2', 'ENC_VOP3') or len(src) != 2:
             return None
     elif accumulate:
-        if arch != 'rdna3' or enc_name != 'ENC_VOP2' or len(src) != 2:
+        if arch not in ('rdna3', 'rdna3_5') or enc_name != 'ENC_VOP2' or len(src) != 2:
             return None
     elif enc_name != 'ENC_VOP3P' or len(src) != 3:
         return None
@@ -1862,16 +2064,16 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
                 f'((inst_.neg_hi & {1 << index}) ? RJ_ARITH_DOT_NEG_HI_{source} : 0u)',
             ]
     narrow, replicate = [], []
-    for index in range(0 if cdna_accumulate else 1 if accumulate else 2):
+    for index in range(0 if dotc else 1 if accumulate else 2):
         selector = f'inst_.src{index}'
-        if bf16 and not cdna:
+        if bf16 and not host_model:
             broadcast = f'amdgpu::dot2_src_needs_half_replication({selector})'
             replicate.append(f'({broadcast} ? {1 << index}u : 0u)')
             # BF16 broadcasts upper16(FP32). GFX11 integer inline constants
             # also use upper16; GFX12 integer constants instead use low16.
             condition = (
                 broadcast
-                if arch == 'rdna3'
+                if arch in ('rdna3', 'rdna3_5')
                 else f'amdgpu::is_inline_float_src({selector})'
             )
         else:
@@ -1882,13 +2084,19 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         + ('bf16' if bf16 else 'f16')
         + (
             ('_gfx950' if bf16 else '_gfx942')
-            if cdna
+            if host_model
             else '_gfx12' if arch == 'rdna4' else ''
         )
     )
     addend = dst[0] if accumulate else src[2]
+    guard = (
+        ['  if (!wf.exec()) return;'] + inherited_half_qualification_guard(arch)
+        if arch == 'rdna3_5'
+        else []
+    )
     return '\n'.join(
-        [
+        guard
+        + [
             '  const uint64_t modifiers = '
             + (' |\n      '.join(terms) if terms else '0')
             + ';',
@@ -1911,7 +2119,7 @@ def gen_half_dot(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in HALF_DOT_NAMES:
+    if arch not in ('rdna3', 'rdna3_5', 'rdna4') or mnemonic not in HALF_DOT_NAMES:
         return None
     if not is_vop3 or len(dst) != 1 or len(src) != 3:
         return None
@@ -1945,6 +2153,12 @@ def gen_half_dot(ctx: ExecuteContext) -> str | None:
         '      wf.cu().arithmetic_flags(), modifiers,',
         f'      {dst[0]}, {", ".join(src)}, {bf16}, narrow_sources, replicate_sources);',
     ]
+    if arch == 'rdna3_5':
+        lines = (
+            ['  if (!wf.exec()) return;']
+            + inherited_half_qualification_guard(arch)
+            + lines
+        )
     return '\n'.join(lines)
 
 
@@ -1959,7 +2173,10 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
         or mnemonic not in BINARY_F16
     ):
         return None
-    if arch.startswith('cdna') and mnemonic not in CDNA_HALF_SELECTION:
+    if (
+        arch.startswith('cdna')
+        and mnemonic not in CDNA_HALF_SELECTION | BINARY_ARITHMETIC_F16
+    ):
         return None
     if len(dst) != 1 or len(src) != 2:
         return None
@@ -1977,14 +2194,32 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
     api = (
         'rj_arith_'
         + mnemonic.lower()
-        + ('_gfx12' if arch == 'rdna4' and mnemonic in BINARY_ARITHMETIC_F16 else '')
+        + (
+            '_gfx12'
+            if arch in ('rdna4', 'cdna5') and mnemonic in BINARY_ARITHMETIC_F16
+            else ''
+        )
     )
-    if arch in ('cdna3', 'cdna4'):
+    if arch in ('cdna3', 'cdna4') and mnemonic in BINARY_ARITHMETIC_F16:
+        api = 'rj_arith_' + mnemonic.lower() + '_gfx942'
+    if arch == 'cdna5' and mnemonic == 'V_MUL_F16':
+        api = 'rj_arith_v_mul_f16_gfx1250'
+    lines = (
+        inherited_half_qualification_guard(arch)
+        if arch == 'cdna5' and mnemonic == 'V_LDEXP_F16'
+        else []
+    )
+    if arch in ('cdna3', 'cdna4') and mnemonic in CDNA_HALF_SELECTION:
         api += '_gfx942'
-    if arch == 'cdna5' and mnemonic in ('V_PK_MINIMUM_F16', 'V_PK_MAXIMUM_F16'):
-        api += '_gfx1250'
-    lines = []
     modifiers = '0'
+    if arch in ('cdna3', 'cdna4') and not is_vop3 and mnemonic in BINARY_ARITHMETIC_F16:
+        lines += [
+            '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
+            f'    amdgpu::arith::execute_float_binary16_sdwa(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]}, {src[1]}, {str(mnemonic != "V_LDEXP_F16").lower()});',
+            '    return;',
+            '  }',
+        ]
     if is_vop3:
         lines += [
             (
@@ -2029,42 +2264,75 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
         ]
     helper = 'execute_float_binary16'
     receiver = 'wf'
-    if arch in ('cdna3', 'cdna4') and not is_vop3:
+    if arch in ('cdna3', 'cdna4') and not is_vop3 and mnemonic in CDNA_HALF_SELECTION:
         helper = 'execute_cdna_selection<16>'
         receiver = '*this, wf'
     lines += [
         f'  amdgpu::arith::{helper}{status_operation}({receiver}, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
         f'      {dst[0]}, {src[0]}, {src[1]}, {str(arch in ("rdna2", "rdna3", "cdna3", "cdna4")).lower()}'
-        + (
-            ', true'
-            if arch in ('cdna3', 'cdna4')
-            and (is_vop3 or mnemonic in CDNA_HALF_SELECTION)
-            else ''
-        )
+        + (', true' if arch in ('cdna3', 'cdna4') else '')
         + ');',
     ]
     return '\n'.join(lines)
 
 
 def gen_float_fma16(ctx: ExecuteContext) -> str | None:
-    """Emit FP16 FMA, FMAC and literal forms; decline unsupported forms."""
+    """Emit FP16 FMA or CDNA MAD, including accumulating and literal forms."""
     arch = ctx.arch_name
     mnemonic = ctx.inst.name
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in FMA_F16:
+    literal_mad = mnemonic in ('V_MADMK_F16', 'V_MADAK_F16')
+    legacy_mad = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') and mnemonic in MAD_F16
+    legacy_mad |= arch == 'cdna2' and mnemonic == 'V_MAC_F16'
+    if not legacy_mad and (
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'rdna1',
+            'rdna2',
+            'rdna3_5',
+            'rdna3',
+            'rdna4',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+        )
+        or mnemonic not in FMA_F16
+    ):
         return None
-    accumulate = mnemonic == 'V_FMAC_F16'
+    if legacy_mad and mnemonic != 'V_MAC_F16' and is_vop3 == literal_mad:
+        return None
+    if mnemonic in ('V_FMA_LEGACY_F16', 'V_MAC_F16') and arch not in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+    ):
+        return None
+    accumulate = mnemonic in ('V_FMAC_F16', 'V_MAC_F16')
     if len(dst) != 1 or len(src) != (2 if accumulate else 3):
         return None
     # Literal operands already appear in multiplication/addition order. FMAC
     # supplies old D explicitly so output staging cannot discard its addend.
     inputs = src + dst if accumulate else src
-    api = 'rj_arith_v_fma_f16' + ('_gfx12' if arch == 'rdna4' else '')
+    api = 'rj_arith_v_fma_f16' + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    if legacy_mad:
+        api = 'rj_arith_' + (
+            'v_mad_f16' if literal_mad or accumulate else mnemonic.lower()
+        )
+        if arch == 'cdna2':
+            api += '_gfx90a'
     modifiers = '0'
-    lines = []
+    older = arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+    lines = inherited_half_qualification_guard(arch) if not legacy_mad else []
+    if older and not legacy_mad:
+        # Empty decoded EXEC is a no-op; active requests retain qualification checks
+        # even when a staged DPP mask suppresses all destination stores.
+        lines = ['  if (!wf.exec()) return;'] + unqualified_half_guard()
     if is_vop3:
         terms = [
             '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u)',
@@ -2086,14 +2354,24 @@ def gen_float_fma16(ctx: ExecuteContext) -> str | None:
                 '((inst_.neg & 4) ? RJ_ARITH_ALU_NEG_C : 0u)',
             ]
         lines += [
-            '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
+            (
+                '  const uint32_t opsel = 0;'
+                if arch in ('rdna1', 'rdna2') and accumulate
+                else '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);'
+            ),
             '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
         ]
         modifiers = 'modifiers'
     lines += [
         f'  amdgpu::arith::execute_float_ternary16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {", ".join(inputs)}, {str(arch == "rdna3").lower()});',
+        f'      {dst[0]}, {", ".join(inputs)}, {str(arch in ("cdna1", "cdna2", "rdna1", "rdna2", "rdna3_5", "rdna3", "cdna3", "cdna4")).lower()}'
+        + (
+            ', true'
+            if (is_vop3 or legacy_mad) and arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+            else ''
+        )
+        + ');',
     ]
     return '\n'.join(lines)
 
@@ -2104,13 +2382,32 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in ('rdna3', 'rdna4') or mnemonic not in UNARY_F16:
+    if (
+        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        or mnemonic not in UNARY_F16
+    ):
+        return None
+    # Only half-precision exponent extraction uses this CDNA unary path.
+    if arch.startswith('cdna') and mnemonic != 'V_FREXP_EXP_I16_F16':
         return None
     if len(dst) != 1 or len(src) != 1:
         return None
-    api = 'rj_arith_' + mnemonic.lower() + ('_gfx12' if arch == 'rdna4' else '')
+    api = (
+        'rj_arith_'
+        + mnemonic.lower()
+        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+    )
     modifiers = '0'
-    lines = []
+    lines = inherited_half_qualification_guard(arch)
+    old_cdna = arch in ('cdna3', 'cdna4')
+    if old_cdna and not is_vop3:
+        lines += [
+            '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
+            f'    amdgpu::arith::execute_half_exponent_sdwa(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]});',
+            '    return;',
+            '  }',
+        ]
     if is_vop3:
         lines += [
             '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
@@ -2138,7 +2435,7 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     lines += [
         f'  amdgpu::arith::execute_float_unary16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {src[0]}, {str(arch == "rdna3").lower()}, /*guest_rounding=*/{str(guest_rounding).lower()});',
+        f'      {dst[0]}, {src[0]}, {str(arch in ("cdna2", "rdna3", "cdna3", "cdna4")).lower()}, /*guest_rounding=*/{str(guest_rounding).lower()}, /*zero_extend_low=*/{str(old_cdna).lower()});',
     ]
     return '\n'.join(lines)
 
@@ -2190,7 +2487,7 @@ def gen_float_ternary_selection(ctx: ExecuteContext) -> str | None:
         '  const uint64_t modifiers = ' + ' |\n      '.join(terms) + ';',
         f'  amdgpu::arith::execute_float_ternary{width}(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
-        f'      {dst[0]}, {", ".join(src)}, {str(arch in ("rdna3", "cdna3", "cdna4")).lower()}'
+        f'      {dst[0]}, {", ".join(src)}, {str(arch in ("cdna2", "rdna3", "cdna3", "cdna4")).lower()}'
         + (', true' if half and arch in ('cdna3', 'cdna4') else '')
         + ');',
     ]
