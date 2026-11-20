@@ -748,6 +748,7 @@ private:
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
   void cancel_queue_dispatches(const ComputeQueueRecord &queue);
+  void reset_ordered_ids(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void complete_failed_queue(ComputeQueueRecord &queue);
   void drain_pending_queue_failures();
@@ -1025,8 +1026,13 @@ private:
   struct PendingClusterBarrierCompletion {
     uint32_t dispatch_id = 0;
     uint8_t completion_bit = 0;
+    uint64_t generation = 0; ///< The round that completed.
     std::vector<std::pair<ComputeUnitCore *, uint32_t>> peers;
   };
+  /// Complete a cluster round on each peer workgroup and report it to plugins.
+  void
+  complete_cluster_barrier_round(uint32_t dispatch_id, uint8_t completion_bit, uint64_t generation,
+                                 std::span<const std::pair<ComputeUnitCore *, uint32_t>> peers);
   std::vector<PendingClusterBarrierCompletion> pending_cluster_barrier_completions_;
 
   class ClusterWorkgroupPlacement {
@@ -1056,6 +1062,8 @@ private:
     uint32_t member_count = 0;
     std::unordered_set<uint32_t> registered_workgroups;
     std::array<std::unordered_set<uint32_t>, 2> signaled_workgroups;
+    /// The current round of the cluster barrier and cluster trap barrier.
+    std::array<uint64_t, 2> generation{};
   };
   std::unordered_map<uint64_t, ClusterBarrierState> cluster_barriers_;
 

@@ -71,6 +71,7 @@ add_subdirectory(core)
 add_subdirectory(backends)
 add_subdirectory(binary)
 add_subdirectory(logger)
+add_subdirectory(parser)
 
 # ------------------------------------------------------------------------------#
 #

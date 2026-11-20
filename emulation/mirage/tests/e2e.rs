@@ -430,6 +430,64 @@ fn builtin_agents_without_sdma_queue_counts_are_upgraded() {
 }
 
 #[test]
+fn rocjitsu_starts_memory_keeper_without_preloading_mirage() {
+    if skip_without_emulator() {
+        return;
+    }
+    let env = Env::new();
+    env.create_profile("p");
+
+    let out = env
+        .mirage()
+        .env_remove("LD_PRELOAD")
+        .args(["run", "--profile", "p", "--", "/bin/true"])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "mirage exited with {}: {stderr}",
+        out.status
+    );
+    assert!(!stderr.contains("Cannot start memory keeper"), "{stderr}");
+}
+
+#[test]
+fn rocjitsu_loads_race_plugin_from_library_directory() {
+    if skip_without_emulator() {
+        return;
+    }
+    let env = Env::new();
+    env.create_profile("p");
+
+    let out = env
+        .mirage()
+        .env_remove("LD_PRELOAD")
+        .env_remove("LD_LIBRARY_PATH")
+        .args([
+            "run",
+            "--profile",
+            "p",
+            "--plugin",
+            "race",
+            "--",
+            "/bin/true",
+        ])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success(),
+        "mirage exited with {}: {stderr}",
+        out.status
+    );
+    assert!(
+        stderr.contains("ROCJITSU RACE DETECTION SUMMARY"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn run_streams_output_and_propagates_the_exit_code() {
     let env = Env::new();
     if skip_without_emulator() {

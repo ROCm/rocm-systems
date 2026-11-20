@@ -12,10 +12,11 @@ use std::thread;
 pub(crate) mod async_copy;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::copy_svm::*;
 use crate::memory::pointer::*;
 use crate::memory::*;
-use crate::runtime::{boundary, initialized_mut, lock, map_error};
+use crate::status::{boundary, map_error};
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -117,17 +118,17 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
         let Ok(native_count) = u64::try_from(count) else {
             return INVALID_ARGUMENT;
         };
-        let Some(_inflight) = runtime.inflight.enter() else {
+        let Some(_inflight) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         if let Err(status) = runtime.memory_state.retain_copy_borrow(base) {
             return status;
         }
-        let device = runtime.gpus[index].device.clone();
-        let compute =
-            !runtime.sdma_enabled || !device.gpu().is_ok_and(|gpu| gpu.supports_linear_copy());
-        let stop = runtime.operation_stop();
-        let health = runtime.health.clone();
+        let device = runtime.agents.gpus[index].device.clone();
+        let compute = !runtime.config.sdma_enabled
+            || !device.gpu().is_ok_and(|gpu| gpu.supports_linear_copy());
+        let stop = runtime.control.operation_stop();
+        let health = runtime.control.health.clone();
         drop(guard);
 
         let (status, may_be_live) = if compute {
@@ -329,8 +330,8 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
                 reservations.push(Some(base));
             }
         }
-        let stop = runtime.operation_stop();
-        let cleanup = match runtime.inherit_cleanup() {
+        let stop = runtime.control.operation_stop();
+        let cleanup = match runtime.control.inherit_cleanup() {
             Ok(cleanup) => cleanup,
             Err(status) => return status,
         };
@@ -352,20 +353,21 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
         let worker = match thread::Builder::new()
             .name("rocddi-svm-prefetch".into())
             .spawn(move || {
-                let _lease = cleanup.map(crate::runtime::ApiLeaseScope::enter);
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    svm_prefetch_worker(
-                        service,
-                        stop,
-                        &worker_handles[..dependency_len],
-                        address,
-                        size,
-                        location,
-                    )
-                }));
-                release_async_resources(&[], &reservations, false);
-                finish_async_signal(completion, matches!(result, Ok(true)));
-                release_async_resources(&worker_handles, &[], false);
+                crate::admission::ApiLeaseScope::run_optional(cleanup, || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        svm_prefetch_worker(
+                            service,
+                            stop,
+                            &worker_handles[..dependency_len],
+                            address,
+                            size,
+                            location,
+                        )
+                    }));
+                    release_async_resources(&[], &reservations, false);
+                    finish_async_signal(completion, matches!(result, Ok(true)));
+                    release_async_resources(&worker_handles, &[], false);
+                })
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,

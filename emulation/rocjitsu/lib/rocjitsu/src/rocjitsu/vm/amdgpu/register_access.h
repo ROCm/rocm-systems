@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/ordered_count.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "simdojo/components/vector_reg.h"
@@ -1148,14 +1149,19 @@ public:
 
   [[nodiscard]] std::optional<RegisterRef> memory_destination_register(const Instruction &inst,
                                                                        const Operand &op) const {
-    return destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
-                                wavefront().wf_size() == 64 &&
-                                    (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    auto result = destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
+                                       wavefront().wf_size() == 64 &&
+                                           (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    if (result && result->cls == RegClass::VGPR && (inst.flags() & INCLUDES_UNWRITTEN_LAST_VGPR))
+      --result->width;
+    return result;
   }
 
-  /// VGPRs read by a GDS request. GWS reads its argument
+  /// VGPRs read by a GDS request. Ordered counts and GWS read their argument
   /// from the first active lane. A suppressed result disables the request.
   [[nodiscard]] uint64_t gds_source_lanes(const Instruction &inst) const {
+    if (const auto ordered = decoded_ordered_count_lanes(inst, wavefront()))
+      return ordered->contribution;
     if (!vgpr_results_fit_allocation(inst))
       return 0;
     const uint64_t lanes = wavefront().exec();

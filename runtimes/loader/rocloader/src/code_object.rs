@@ -148,8 +148,8 @@ pub enum FloatRoundingMode {
 /// Execution properties interpreted from the supported code-object format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CodeObjectContract {
-    /// Required HSA profile.
-    pub profile: Profile,
+    /// Declared HSA profile, or `None` when the format imposes no requirement.
+    pub profile: Option<Profile>,
     /// Required default floating-point rounding mode.
     pub rounding: FloatRoundingMode,
 }
@@ -164,7 +164,7 @@ impl CodeObjectContract {
             FloatRoundingMode::Default => FloatRoundingMode::Near,
             mode => mode,
         };
-        if self.profile != profile
+        if self.profile.is_some_and(|required| required != profile)
             || (self.rounding != FloatRoundingMode::Default && self.rounding != rounding)
         {
             return Err(Error::IncompatibleTarget);
@@ -201,10 +201,11 @@ impl<'a> CodeObject<'a> {
     /// Returns the execution contract of a modern AMDGPU HSA code object.
     #[must_use]
     pub fn contract(&self) -> CodeObjectContract {
-        // V3 and later use the AMDGPU base-profile ABI. Legacy HSAIL notes and
-        // amd_kernel_code_t are rejected by parse_code_object_layout below.
+        // V3 and later do not declare the legacy HSAIL profile. The executable
+        // may use either profile; the GPU ABI does not impose a BASE-only
+        // executable policy. V1/V2 objects are rejected by the parser below.
         CodeObjectContract {
-            profile: Profile::Base,
+            profile: None,
             rounding: FloatRoundingMode::Near,
         }
     }
@@ -664,29 +665,19 @@ mod tests {
     }
 
     #[test]
-    fn modern_contract_rejects_mismatched_executable_policy() {
+    fn modern_contract_accepts_either_executable_profile() {
         let bytes = modern_object(AMDGPU_MACHINE_GFX1201);
         let contract = CodeObject::parse(&bytes).unwrap().contract();
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Default)
-                .is_ok()
-        );
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Near)
-                .is_ok()
-        );
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Zero)
-                .is_err()
-        );
-        assert!(
-            contract
-                .validate(Profile::Full, FloatRoundingMode::Near)
-                .is_err()
-        );
+        assert_eq!(contract.profile, None);
+        for profile in [Profile::Base, Profile::Full] {
+            assert!(
+                contract
+                    .validate(profile, FloatRoundingMode::Default)
+                    .is_ok()
+            );
+            assert!(contract.validate(profile, FloatRoundingMode::Near).is_ok());
+            assert!(contract.validate(profile, FloatRoundingMode::Zero).is_err());
+        }
     }
 
     #[test]

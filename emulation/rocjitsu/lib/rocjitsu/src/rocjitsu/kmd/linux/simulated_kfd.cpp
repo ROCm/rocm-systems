@@ -330,6 +330,17 @@ SimulatedKfd::begin_gem_va_transaction(uint32_t process_id) {
   return std::make_unique<GemVaTransaction>(std::move(process));
 }
 
+bool SimulatedKfd::supports_pm4_gds_wave_id_reset(uint32_t render_minor) const {
+  const auto ordinal = gpu_ordinal_for_render_minor(render_minor);
+  if (!ordinal)
+    return false;
+  const auto *cp = gpus_[*ordinal].soc->assign_queue_owner_cp(0);
+  if (!cp || cp->compute_units().empty())
+    return false;
+  const auto arch = cp->compute_units().front()->arch();
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
 int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
                              amdgpu::Pm4Submission submission) {
   const auto process = find_process(local_process_id_);
@@ -1850,6 +1861,65 @@ SimulatedKfd::GpuAliasJoin SimulatedKfd::join_gpu_aliases_impl(
   return result;
 }
 
+class SimulatedKfd::LocalIngressCache {
+public:
+  struct Binding {
+    // Expected VM snapshot identity owning the borrowed binding pointers.
+    uint64_t identity = 0;
+    // Process selected by the issuing memory operation.
+    uint32_t process_id = 0;
+    // GPU selected by the issuing memory operation.
+    uint32_t gpu_id = 0;
+    // Distinguishes driver lifetimes without retaining the driver itself.
+    std::weak_ptr<CuIngressAccess> driver;
+    // Borrowed process retained by the expected VM snapshot.
+    const KfdProcess *process = nullptr;
+    // Last validated live snapshot identity for the address space.
+    uint64_t live_identity = 0;
+    // Borrowed device selected from the validated driver binding.
+    const GpuDevice *gpu = nullptr;
+    // Registered address-space generation for this process and GPU.
+    amdgpu::AddressSpaceHandle handle;
+  };
+  struct Alias {
+    // Expected VM snapshot identity.
+    uint64_t identity = 0;
+    // Grant publication under which the bounds were established.
+    uint64_t publication = 0;
+    // First byte of the uniform GPU grant.
+    uint64_t begin = 0;
+    // Exclusive end of the uniform GPU grant.
+    uint64_t end = 0;
+    // Local alias requiring an ingress permit, when present.
+    std::optional<GpuAliasIngressGate::Key> key;
+  };
+  // Most recent validated driver/process/device binding.
+  Binding binding;
+  // Uniform grants indexed by snapshot identity and publication.
+  std::array<Alias, 8> aliases;
+  // Round-robin replacement position in aliases.
+  unsigned next = 0;
+  // Gate anchor shared with outstanding local ingress permits.
+  GpuAliasIngressGate::LocalCache gate;
+};
+
+SimulatedKfd::ScopedIngressCache::ScopedIngressCache()
+    : previous_(std::exchange(scoped_ingress_cache_, &cache_)) {}
+
+SimulatedKfd::ScopedIngressCache::~ScopedIngressCache() { scoped_ingress_cache_ = previous_; }
+
+SimulatedKfd::LocalIngressCache &SimulatedKfd::thread_ingress_cache() {
+  if (scoped_ingress_cache_) {
+    if (!*scoped_ingress_cache_)
+      *scoped_ingress_cache_ = std::make_unique<LocalIngressCache>();
+    return **scoped_ingress_cache_;
+  }
+  thread_local std::unique_ptr<LocalIngressCache> cache;
+  if (!cache)
+    cache = std::make_unique<LocalIngressCache>();
+  return *cache;
+}
+
 std::optional<amdgpu::MemoryIngressAdmission>
 SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
                                           const amdgpu::GpuVmAccess &expected,
@@ -1868,16 +1938,8 @@ SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
 
   // The expected snapshot retains its translator and the process that owns its
   // publication counter. Cache only pointers owned by that exact binding.
-  struct LocalBinding {
-    uint64_t identity = 0;
-    uint32_t process_id = 0, gpu_id = 0;
-    std::weak_ptr<CuIngressAccess> driver;
-    const KfdProcess *process = nullptr;
-    uint64_t live_identity = 0;
-    const GpuDevice *gpu = nullptr;
-    amdgpu::AddressSpaceHandle handle;
-  };
-  static thread_local LocalBinding binding;
+  auto &cache = thread_ingress_cache();
+  auto &binding = cache.binding;
   if (binding.identity != expected.cache_identity() || binding.process_id != process_id ||
       binding.gpu_id != gpu_id || binding.driver.owner_before(cu_ingress_access_) ||
       cu_ingress_access_.owner_before(binding.driver)) {
@@ -1899,12 +1961,8 @@ SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
                live->cache_identity(),    gpu,        handle};
   }
   const auto *process = binding.process;
-  struct LocalAlias {
-    uint64_t identity = 0, publication = 0, begin = 0, end = 0;
-    std::optional<GpuAliasIngressGate::Key> key;
-  };
-  static thread_local std::array<LocalAlias, 8> entries;
-  static thread_local unsigned next = 0;
+  auto &entries = cache.aliases;
+  auto &next = cache.next;
   const auto &publication = process->gpu_grant_publication();
   const auto epoch = publication.load(std::memory_order_acquire);
   if (epoch == UINT64_MAX)
@@ -1945,7 +2003,7 @@ SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
 
   amdgpu::MemoryIngressPermit permit;
   if (it->key) {
-    auto admitted = alias_ingress_gate_->try_acquire_local(*it->key);
+    auto admitted = alias_ingress_gate_->try_acquire_local(*it->key, cache.gate);
     if (!admitted)
       return amdgpu::MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
     permit = std::move(*admitted);
@@ -2781,9 +2839,9 @@ SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode,
     : daemon_mode_(daemon_mode),
       debug_identity_validation_hook_(std::move(debug_identity_validation_hook)),
       debug_session_reaper_([this](std::stop_token stop) { reap_exited_debug_sessions(stop); }) {
-  // Resolve the real libc entry points once, up front and single-threaded, so no
-  // passthrough call site ever triggers a first-time dlsym under a per-process
-  // lock. Idempotent: a no-op if the interposer already resolved the table.
+  // Wait for the complete libc table before entering any per-process lock.
+  // Independent VM constructors may initialize concurrently; the interposer
+  // resolves the same table eagerly when enabled.
   libc_passthrough().resolve();
   cu_ingress_access_->driver = this;
   GpuDevice device;

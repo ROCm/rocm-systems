@@ -6145,6 +6145,26 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
  */
 hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 /**
+ * @brief Gets a HIP array plane from a multiplanar HIP array.
+ *
+ * @note HIP does not implement multiplanar arrays. On AMD devices no array a caller can create
+ * has planes, so well-formed calls always report #hipErrorNotSupported. On NVIDIA devices the
+ * call forwards to cuArrayGetPlane, which succeeds for an array created as multiplanar through
+ * the CUDA driver API.
+ *
+ * @param[out] pPlaneArray - pointer to the returned HIP array that represents a single format
+ * plane of the input HIP array hArray
+ * @param[in] hArray - multiplanar HIP array
+ * @param[in] planeIdx - index of the array plane
+ *
+ * @returns #hipErrorInvalidValue if @p pPlaneArray is nullptr, #hipErrorInvalidHandle if
+ * @p hArray is not a valid array. Otherwise #hipErrorNotSupported on AMD devices, or on NVIDIA
+ * devices #hipSuccess and the requested plane for a multiplanar array.
+ *
+ * @see hipArrayCreate, hipArray3DCreate, hipArrayDestroy
+ */
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
+/**
  *  @brief Copies data between host and device.
  *
  * hipMemcpy2D supports memory matrix copy from the pointed area src to the pointed area dst.
