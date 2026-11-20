@@ -3,10 +3,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from __future__ import annotations
+
 import argparse
 import os
-import sys
 import sqlite3
+import sys
 from pathlib import Path
 
 
@@ -271,8 +273,9 @@ def validate_table(
                     query = validation_query.query.replace("{table_name}", table_name)
                     cursor.execute(query)
                     result = cursor.fetchone()
+                    result_columns = [d[0] for d in cursor.description or ()]
 
-                    if result and "count" in result.keys():
+                    if result and "count" in result_columns:
                         actual_result = result["count"]
                     else:
                         actual_result = result[0] if result else None

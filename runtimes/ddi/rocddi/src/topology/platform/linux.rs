@@ -29,7 +29,7 @@ pub struct KfdDrmEndpointInfo {
 #[must_use]
 pub fn kfd_drm_info(endpoint: &Endpoint) -> Option<KfdDrmEndpointInfo> {
     match &endpoint.selector {
-        crate::driver::EndpointSelector::LinuxKfd(native) => Some(KfdDrmEndpointInfo {
+        crate::driver::EndpointSelector::LinuxKfd { native, .. } => Some(KfdDrmEndpointInfo {
             node_id: native.node,
             gpu_id: native.gpu_id,
             render_minor: native.render_minor,

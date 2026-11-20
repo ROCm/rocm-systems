@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/sopc.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/data_types.h"
@@ -91,115 +92,115 @@ void SCmpLgU64Sopc::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SCmpLtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Lt>(wf, ssrc0, ssrc1);
 }
 
 void SCmpLtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lt_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Lt>(wf, ssrc0, ssrc1);
 }
 
 void SCmpEqF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Eq>(wf, ssrc0, ssrc1);
 }
 
 void SCmpEqF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_eq_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Eq>(wf, ssrc0, ssrc1);
 }
 
 void SCmpLeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Le>(wf, ssrc0, ssrc1);
 }
 
 void SCmpLeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_le_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Le>(wf, ssrc0, ssrc1);
 }
 
 void SCmpGtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Gt>(wf, ssrc0, ssrc1);
 }
 
 void SCmpGtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_gt_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Gt>(wf, ssrc0, ssrc1);
 }
 
 void SCmpLgF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Lg>(wf, ssrc0, ssrc1);
 }
 
 void SCmpLgF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_lg_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Lg>(wf, ssrc0, ssrc1);
 }
 
 void SCmpGeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Ge>(wf, ssrc0, ssrc1);
 }
 
 void SCmpGeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ge_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Ge>(wf, ssrc0, ssrc1);
 }
 
 void SCmpOF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_o_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::O>(wf, ssrc0, ssrc1);
 }
 
 void SCmpOF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_o_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::O>(wf, ssrc0, ssrc1);
 }
 
 void SCmpUF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_u_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::U>(wf, ssrc0, ssrc1);
 }
 
 void SCmpUF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_u_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::U>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNgeF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nge_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Nge>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNgeF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nge_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Nge>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNlgF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlg_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Nlg>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNlgF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlg_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Nlg>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNgtF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ngt_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Ngt>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNgtF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_ngt_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Ngt>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNleF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nle_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Nle>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNleF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nle_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Nle>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNeqF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_neq_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Neq>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNeqF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_neq_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Neq>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNltF32Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlt_f32_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F32, amdgpu::comparison::Nlt>(wf, ssrc0, ssrc1);
 }
 
 void SCmpNltF16Sopc::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_cmp_nlt_f16_sopc(*this, wf);
+  amdgpu::scalar_fp::compare<amdgpu::scalar_fp::F16, amdgpu::comparison::Nlt>(wf, ssrc0, ssrc1);
 }
 
 } // namespace rdna3_5

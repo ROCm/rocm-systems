@@ -5,13 +5,17 @@
 
 use std::ffi::c_void;
 
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+use crate::events::CallbackScope;
 use crate::ffi::HsaQueue;
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
-use crate::runtime::CallbackScope;
 
+/// Tool table slot for scratch-allocation start events.
 const ALLOC_START: usize = 0;
+/// Tool table slot for scratch-allocation end events.
 const ALLOC_END: usize = 1;
+/// Tool table slot for scratch-free start events.
 const FREE_START: usize = 2;
+/// Tool table slot for scratch-free end events.
 const FREE_END: usize = 3;
 
 /// `ROCr` tool event emitted before scratch allocation begins.
@@ -55,18 +59,19 @@ struct ScratchFree {
     flags: i32,
 }
 
+/// Invokes the selected tool event hook when a tool has installed one.
 fn emit(slot: usize, event: *const c_void) {
-    #[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+    #[cfg(all(hsa_tool_dispatch, not(test)))]
     if let Some(callback) = crate::api_trace::scratch_callback(slot) {
-        let _scope = CallbackScope::enter();
         // SAFETY: The stack event has the C layout required by this slot and
         // lives through the synchronous tool callback.
-        let _ = unsafe { callback(event) };
+        let _ = CallbackScope::run(|| unsafe { callback(event) });
     }
-    #[cfg(not(all(target_os = "linux", target_arch = "x86_64", not(test))))]
+    #[cfg(not(all(hsa_tool_dispatch, not(test))))]
     let _ = (slot, event);
 }
 
+/// Reports the start of a scratch allocation for a dispatch.
 pub(crate) fn alloc_start(queue: *const HsaQueue, dispatch_id: u64) {
     let event = ScratchAllocStart {
         kind: 1,
@@ -77,6 +82,7 @@ pub(crate) fn alloc_start(queue: *const HsaQueue, dispatch_id: u64) {
     emit(ALLOC_START, (&raw const event).cast());
 }
 
+/// Reports the size and slot count of a completed scratch allocation.
 pub(crate) fn alloc_end(queue: *const HsaQueue, dispatch_id: u64, size: usize, slots: usize) {
     let event = ScratchAllocEnd {
         kind: 2,
@@ -89,6 +95,7 @@ pub(crate) fn alloc_end(queue: *const HsaQueue, dispatch_id: u64, size: usize, s
     emit(ALLOC_END, (&raw const event).cast());
 }
 
+/// Reports the start of scratch release to an attached tool.
 pub(crate) fn free_start(queue: *const HsaQueue) {
     let event = ScratchFree {
         kind: 3,
@@ -98,6 +105,7 @@ pub(crate) fn free_start(queue: *const HsaQueue) {
     emit(FREE_START, (&raw const event).cast());
 }
 
+/// Reports completion of scratch release to an attached tool.
 pub(crate) fn free_end(queue: *const HsaQueue) {
     let event = ScratchFree {
         kind: 4,

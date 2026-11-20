@@ -46,9 +46,9 @@
 
 // NOTICE: ROCm-SMI is fully deprecated as of ROCm 10.1; only critical bug
 // fixes will be applied. Please switch to AMD-SMI
-// (https://github.com/ROCm/amdsmi) for continued support.
+// (https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi) for continued support.
 #pragma message( \
-    " ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). Please switch to AMD-SMI (https://github.com/ROCm/amdsmi).")
+    " ROCm-SMI is fully deprecated as of ROCm 10.1 (https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html#rocm-smi-transitions-to-amd-smi). Please switch to AMD-SMI (https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi).")
 
 #ifdef __cplusplus
 extern "C" {
@@ -140,6 +140,7 @@ typedef enum {
   RSMI_STATUS_DRM_ERROR,            //!< Error when call libdrm
   RSMI_STATUS_FAIL_LOAD_MODULE,     //!< Fail to load lib
   RSMI_STATUS_FAIL_LOAD_SYMBOL,     //!< Fail to load symbol
+  RSMI_STATUS_DRIVER_NOT_LOADED,    //!< The amdgpu driver is not loaded
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
@@ -1345,6 +1346,8 @@ typedef struct {
  *  to modify how RSMI initializes.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *  @retval ::RSMI_STATUS_DRIVER_NOT_LOADED ROCm/KFD is not present on this system.
+ *  @retval ::RSMI_STATUS_INIT_ERROR initialization failed for other reasons.
  */
 rsmi_status_t rsmi_init(uint64_t init_flags);
 

@@ -2,18 +2,19 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/sampling.hpp"
+#include "common/clocks.hpp"
 #include "common/env_vars.hpp"
+#include "common/spin_mutex.hpp"
 #include "common/units/power.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
-#include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/utility.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
@@ -21,6 +22,7 @@
 #include "library/components/callchain.hpp"
 #include "library/perf.hpp"
 #include "library/pmc/sampler.hpp"
+#include "library/process_sampler.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -35,7 +37,6 @@
 #include <timemory/components/papi/extern.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/papi_vector.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
@@ -62,6 +63,7 @@
 #include <array>
 #include <atomic>
 #include <csignal>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
@@ -77,6 +79,7 @@
 
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
 namespace rocprofsys::sampling
 {
@@ -128,13 +131,6 @@ namespace rocprofsys::sampling
 namespace
 {
 using sampler_allocator_t = sampler_t::allocator_t;
-
-template <typename Category>
-inline std::string
-get_category_track_name(std::uint64_t tid)
-{
-    return std::string(trait::name<Category>::value) + "_" + std::to_string(tid);
-}
 
 std::string
 generate_call_stack_json(const tim::unwind::processed_entry& stack_entry)
@@ -208,22 +204,20 @@ void
 metadata_initialize_thread_info(size_t tid)
 {
     const auto& _thread_info = thread_info::get(tid, SequentTID);
-    if(!_thread_info)
+    if(!_thread_info || !_thread_info->index_data)
     {
         throw std::runtime_error(fmt::format("No valid thread info for tid={}", tid));
     }
-    if(!_thread_info)
-    {
-        return;
-    }
 
-    trace_cache::get_metadata_registry().add_thread_info(
-        { .parent_process_id = getppid(),
-          .process_id        = getpid(),
-          .thread_id = static_cast<size_t>(_thread_info->index_data->system_value),
-          .start     = static_cast<std::uint32_t>(_thread_info->get_start()),
-          .end       = static_cast<std::uint32_t>(_thread_info->get_stop()),
-          .extdata   = "{}" });
+    auto const thread_id = static_cast<size_t>(_thread_info->index_data->system_value);
+    trace_cache::get_metadata_registry().ensure_thread(thread_id, [&] {
+        return trace_cache::info::thread{ .parent_process_id = getppid(),
+                                          .process_id        = getpid(),
+                                          .thread_id         = thread_id,
+                                          .start             = _thread_info->get_start(),
+                                          .end               = _thread_info->get_stop(),
+                                          .extdata           = "{}" };
+    });
 }
 
 void
@@ -246,10 +240,9 @@ metadata_initialize_track(std::int64_t tid)
     const auto& _overflow_track_name =
         get_track_name<category::overflow_sampling>(*_thread_info);
 
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = _timer_track_name, .thread_id = thread_id, .extdata = "{}" });
-    trace_cache::get_metadata_registry().add_track(
-        { .track_name = _overflow_track_name, .thread_id = thread_id, .extdata = "{}" });
+    auto& registry = trace_cache::get_metadata_registry();
+    registry.ensure_track(_timer_track_name, thread_id);
+    registry.ensure_track(_overflow_track_name, thread_id);
 }
 
 // Added
@@ -536,11 +529,11 @@ get_offload_file()
     return _v;
 }
 
-locking::atomic_mutex&
+spin_mutex&
 get_offload_mutex()
 {
-    static auto _v = locking::atomic_mutex{};
-    return _v;
+    static auto s_mutex = spin_mutex{};
+    return s_mutex;
 }
 
 using sampler_bundle_t = sampler_t::bundle_type;
@@ -560,9 +553,9 @@ offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
         std::exit(1);
     }
 
-    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // use spin_mutex since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const  lock  = std::lock_guard{ get_offload_mutex() };
     auto const& _file = get_offload_file();
 
     if(!_file)
@@ -606,9 +599,9 @@ load_offload_buffer(std::int64_t _thread_idx)
         return _data;
     }
 
-    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // use spin_mutex since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const  lock  = std::lock_guard{ get_offload_mutex() };
     auto const& _file = get_offload_file();
     if(!_file)
     {
@@ -751,7 +744,7 @@ configure(bool _setup, std::int64_t _tid)
 
         if(_signal_types->contains(get_sampling_realtime_signal()))
         {
-            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+            _sampler->configure(timer{ get_sampling_realtime_signal(), CLOCK_BOOTTIME,
                                        SIGEV_THREAD_ID, get_sampling_realtime_freq(),
                                        get_sampling_realtime_delay(), _tid,
                                        threading::get_sys_tid() });
@@ -799,7 +792,7 @@ configure(bool _setup, std::int64_t _tid)
             // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
             // freezes the monotonic-to-timeline offset from the first sample.
             _pe.use_clockid = 1;
-            _pe.clockid     = CLOCK_BOOTTIME;
+            _pe.clockid     = clocks::timeline::k_timeline_clock_id;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);
@@ -808,9 +801,17 @@ configure(bool _setup, std::int64_t _tid)
             {
                 LOG_CRITICAL("perf backend for overflow failed to activate: {}",
                              *_perf_open_error);
-                ::rocprofsys::state::process::set(
-                    ::rocprofsys::state::process::Finalized);
-                std::exit(1);
+                // Keep the state below Finalized so the exit hook still runs
+                // rocprofsys_finalize(). During startup nothing else joins the process
+                // sampler, so stop it here: a joinable thread destroyed in exit() calls
+                // std::terminate().
+                _perf_sampler.reset();
+                if(::rocprofsys::state::process::get() !=
+                   ::rocprofsys::state::process::Active)
+                {
+                    ::rocprofsys::process_sampler::sampler::shutdown();
+                }
+                std::exit(EXIT_FAILURE);
             }
 
             _perf_sampler->set_ready_signal(get_sampling_overflow_signal());
@@ -1573,10 +1574,12 @@ post_process_timemory(std::int64_t                               _tid,
 
                 if(_cc && _metrics && _metrics(category::thread_cpu_time{}))
                 {
-                    const double _elapsed_cc = _metrics.get_cpu_timestamp();
+                    const auto elapsed_cpu =
+                        static_cast<double>(_metrics.get_cpu_time().count()) /
+                        static_cast<double>(sampling_cpu_clock::get_unit());
 
-                    _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
-                    _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
+                    _cc->set_value(elapsed_cpu);
+                    _cc->set_accum(elapsed_cpu);
                 }
             }
 
@@ -1812,7 +1815,7 @@ pause()
     }
 
     LOG_DEBUG("Pausing sampling...");
-    pending_pause_ts.store(control::clocks::timeline_ns());
+    pending_pause_ts.store(clocks::timeline::now_ns());
     block_samples();
     set_sampler_timers(timer_state::stopped);
 }
@@ -1831,7 +1834,7 @@ resume()
 
     LOG_DEBUG("Resuming sampling...");
     auto const pause_ts  = pending_pause_ts.exchange(0);
-    auto const resume_ts = control::clocks::timeline_ns();
+    auto const resume_ts = clocks::timeline::now_ns();
     if(pause_ts > 0)
     {
         auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };

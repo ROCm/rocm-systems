@@ -3,7 +3,9 @@ name: amdsmi-review-maintainer
 description: "Maintainer-lens review subagent and pre-flight check. Predicts the comments amd-smi maintainers routinely leave (hardware evidence, root cause vs. workaround, blast radius across ASICs, SUCCESS that hides a failure, tests that pass without the fix, public-contract changes, C++ and Python idioms, docs that disagree with the code, PR hygiene) so they are fixed before review is requested. Use when: maintainer review, pre-flight, preflight, before requesting review, anticipate reviewer comments, reduce review rounds."
 tools: execute/runInTerminal, execute/getTerminalOutput, read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
 model: "Claude Opus 5.5"
-user-invocable: true
+user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Maintainer-Lens Review — amd-smi
@@ -32,10 +34,10 @@ passes:
    of evidence into one EV finding and every PR-text problem into one PR
    finding, so they don't crowd out code findings.
 2. **Code walk** — for every changed function (library and examples), read
-   the whole function, including lines the hunk doesn't touch, and check AP3,
-   BR5, BR6, ST1–ST4, CL1–CL3 and CX1–CX8 (PY1–PY4 in Python) against it (the
-   gates decide what untouched lines yield); look up every new helper in the
-   Helper Index.
+   the whole function, including lines the hunk doesn't touch, and check AP1,
+   AP3, BR5–BR7, ST1–ST4, CL1–CL3 and CX1–CX8 (PY1–PY4 in Python) against it
+   (the gates decide what untouched lines yield); look up every new helper in
+   the Helper Index.
 3. **Test walk** — for every new or changed test, check TS1–TS8, EV4 and CX1.
 
 Show the walk before the findings: a `Walk notes` block with one line per
@@ -44,6 +46,11 @@ changed function and test, listing only what applies:
 - every global or static the function touches (not only those the diff
   changes), and the lock held at each access
 - each early return, and what the caller receives
+- each skip (`continue`, a `return` out of a per-item lambda): every case its
+  condition covers (absent, unreadable, exited), and whether the caller can
+  see each one without logs (ST3)
+- each output field filled on more than one path or from more than one
+  source: whether every assignment gives it one meaning (AP1)
 - callee statuses left unchecked
 - casts or copies between types, and whether a `static_assert` guards them
 - what each parse step reads (`sscanf`, `stoi`, `from_chars`; empty lines)
@@ -51,6 +58,9 @@ changed function and test, listing only what applies:
   a type `auto` could take (CX1, CX2)
 - sibling code with the same pattern, and any hardcoded ASIC name, ID, count
   or version (BR5, BR6)
+- for each check that decides which device or process a result belongs to, or
+  which ones a command acts on: who creates its input, and whether it can come
+  out both ways (BR7)
 - for tests: state changed (device settings, gtest flags, env vars, files),
   and whether it is restored
 - for tests: each assertion that cannot fail, such as an unsigned `>= 0` or an
@@ -66,9 +76,10 @@ inputs yourself, run the same three passes, and return the **Pre-flight
 Report**.
 
 ```bash
-gh pr view <N> --repo ROCm/rocm-systems --json title,body,files,commits,reviews,headRefOid
+gh pr view <N> --repo ROCm/rocm-systems --json title,body,files,commits,reviews,comments,headRefOid
+gh api repos/ROCm/rocm-systems/pulls/<N>/comments --paginate   # inline review comments (PR1)
 gh pr diff <N> --repo ROCm/rocm-systems            # PR, or for a local branch:
-git diff origin/develop...HEAD                     # whole repo, any directory
+git fetch origin develop && git diff origin/develop...HEAD   # whole repo, any directory
 ```
 
 **Ownership.** Formatting and generic naming rules belong to style, coverage
@@ -88,6 +99,9 @@ Scan the diff for these signals first; each one makes its items mandatory.
 | New or reshaped parser for sysfs or gpu_metrics data | RC1; TS3 (name each input the tests miss); CX5 (`sscanf`/`stoi` parsing, empty lines); CX4 (an existing parse helper); TS7; ST1 |
 | New function with several parameters or pointer out-parameters | CX1 |
 | New or changed status return path | ST1, ST2, TS1 |
+| A loop over devices, blocks or handles that skips a member or returns on its status | ST1, ST3 |
+| A check that decides which device or process a result belongs to, or which ones a command acts on | BR7 |
+| A test hook or mock that forces a branch; a stress, churn or retry test | TS1, TS2 |
 | New or changed public entry point (`amdsmi_*`, `rsmi_*`) | AP3, AP7, DC2, TS3 (negative oracle) |
 | Globals, static objects, caches, mutexes or threads in or near the change | CL1–CL3 |
 | Changes who owns or frees objects held in a global or static container | CL1, CL2 |
@@ -97,6 +111,7 @@ Scan the diff for these signals first; each one makes its items mandatory.
 | Python tests or CLI code | AP4, CX8, TS5, TS6, PY1–PY4 |
 | A bug fix | BR5 |
 | Every PR | PR1–PR3, BR4; TS1 when library, CLI or Python code changes |
+| A re-review (the PR already has review comments) | PR1: each earlier comment, part by part |
 
 Gates:
 
@@ -104,10 +119,11 @@ Gates:
   failure on a code regression instead (a bisected commit), ask for the bisect
   evidence, not hardware captures.
 - **ST, CL and CX** apply to new or changed lines. A pure move or rename is not
-  new; code moved into a new function or signature is. Problems in untouched
-  code that the change relies on are 📋 FUTURE WORK, reported as follow-ups
-  (siblings of the bug being fixed are BR5); idioms in untouched code are
-  dropped.
+  new; code moved into a new function or signature is, and so is any other line
+  whose logic the diff rewrites, even to keep its old behavior. Problems in
+  untouched code that the change relies on are 📋 FUTURE WORK, reported as
+  follow-ups (siblings of the bug being fixed are BR5); idioms in untouched code
+  are dropped.
 - **PY** applies to Python diffs; **DC** to docs, comments, `amdsmi.h` and
   `CHANGELOG.md`, or to behavior they describe.
 - A check you cannot run (no GPU, no root, no log, a file you can't open)
@@ -192,6 +208,13 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   flags, the device's own counts). Keep older drivers working when a newer
   interface is missing, and don't expose a field the driver doesn't provide
   yet. A per-ASIC allowlist needs a written reason (PR3).
+- **BR7 Checks that tell cases apart** — For a check that decides which device
+  or process a result belongs to, or which ones a command acts on (a file
+  exists, a field is set, a flag is passed), read its producer: when is it
+  created or set, and for which candidates? One that holds for every candidate
+  selects nothing, and the code acts on all of them: KFD creates a process's
+  per-GPU files for every GPU the process may access once it opens `/dev/kfd`;
+  an option the command parses and then ignores acts on every device.
 
 ### ST — Status codes tell the truth
 
@@ -201,17 +224,28 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   an aggregate (sum over blocks, list over devices) that silently drops a
   failed member, or an input the code silently ignores (an unhandled enum
   value, a discarded parameter, only the first device or array entry filled) is
-  the same bug: handle the input fully or reject it with a status that says so.
-  If telling the cases apart needs a new status or field (ABI), raise it as
-  policy (PR3).
+  the same bug: handle the input fully or reject it with a status that says so;
+  a list of independent entries (processes, per-GPU rows) shows the failed
+  member instead (ST3). There the reverse is a bug too: one member's error that
+  discards the others' results (a `return` inside the per-device loop), even
+  when today every error comes from a read the members share. When a change
+  adds a failure status to a per-member call, check every caller that
+  aggregates it. If telling the cases apart, or showing a failed member next to
+  the others, needs a new status or field (ABI), raise it as policy (PR3).
 - **ST2 Trace the mapping** — Follow cause → errno → rsmi status → amdsmi status
   → CLI text and exit code, and write the chain into the finding.
   `ErrnoToRsmiStatus` maps `EPERM`, `ENOENT` and `ENOTSUP` to `NOT_SUPPORTED`
   (`EACCES` to `PERMISSION`), so a truncated or failed read can surface as "not
   supported". Each errno maps to the status that means it, and no log line
   blames the wrong cause.
-- **ST3 Log every skip** — Skip-and-continue (one bad device in discovery, one
-  unreadable file) logs what was skipped and why: index, BDF, status.
+- **ST3 Log every skip, and show it** — Skip-and-continue (one bad device in
+  discovery, one unreadable file) logs what was skipped and why: index, BDF,
+  status. In the library, logging is off unless `RSMI_LOGGING` is set, so the
+  log alone is silent. Split each skip's condition into its cases: "not there"
+  (the process does not use this GPU) can be a documented rule, but "could not
+  be read" leaves out something the caller asked for (a process, a device, a
+  field), so the result must show it, as a status or a documented N/A (ST1);
+  where that needs a new status or field, raise it as policy (PR3).
 - **ST4 One N/A per field** — In a new field, "not available" is all-ones for
   the field's width (`0xFF` … `UINT64_MAX`), never all-zero (indistinguishable
   from zeroed memory); an existing field keeps the N/A its header documents
@@ -226,12 +260,17 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   changes what a public API returns, name the test that goes red when it is
   deleted; none → add one at the public entry point (`amdsmi_*`/`rsmi_*`), not
   only at an internal stage. Assert the specific status or exit code, not
-  zero/non-zero; a check that only prints cannot fail.
+  zero/non-zero; a check that only prints cannot fail. A test hook that pins a
+  branch (a fake root path that also forces one mode) leaves the other branch
+  to hardware-only tests: name the seam that reaches it, or ask for one.
 - **TS2 Assertions that can fail** — An expected value computed by the code
   under test, a check that is always true (an unsigned `>= 0`, a helper that
   calls the function it checks), or an `ASSERT_*` inside a `void` lambda (it
   returns from the lambda, not the test) proves nothing. Derive expected values
-  independently (a fixture, the spec, a literal).
+  independently (a fixture, the spec, a literal). A stress, churn or retry test
+  asserts that what it provokes happened at least once (a churned process was
+  listed, the retry path ran): without that positive control it passes when
+  nothing was exercised.
 - **TS3 Edges and negatives** — For a text parser, cover each line type the
   producer emits (header, levels, the sleep `S:` line, the current marker):
   absent, alone, empty or whitespace-only, malformed, past the type's range
@@ -277,7 +316,9 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
 - **AP1 Meaning is frozen** — Never change the meaning, units or sign
   convention of an existing field, enum, status or identifier; add a new one
   (removing or renaming one is AP7). Mappings between layers (rsmi → amdsmi
-  enums and statuses) preserve meaning.
+  enums and statuses) preserve meaning. A field has one meaning on every path
+  that fills it: one source's value on some paths and a sum on others is two
+  meanings that callers cannot tell apart (ST4 does the same for N/A).
 - **AP2 Out-parameter contract** — Document array capacity and count, the
   sentinel for unused entries, and pointer lifetime (e.g. valid until the next
   call). Populate every declared field, or document it as N/A for that version.
@@ -406,11 +447,16 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
   bold summary plus one bullet on what changed for users and why it matters,
   without internal mechanics (signal/abort details, enum constants, file
   internals). Changes users can't observe (tests, CI, sanitizer-only fixes)
-  get no entry.
+  get no entry. Entries go under the newest unreleased version; after each
+  develop merge, check that a release cut has not left them in a released
+  section.
 - **DC2 Header precision** — `amdsmi.h` states units, sign convention, required
   permissions, every returned status, ASIC/platform scope and cardinality
   ("exactly one" vs "at most one"), consistently across the header, in its
-  existing `//!<` member-comment form.
+  existing `//!<` member-comment form. The bindings' docs match it: the call's
+  "Possible Library Exceptions" in `docs/reference/amdsmi-py-api.md` list each
+  status the Python wrapper can raise, and the Rust doc comments do not
+  contradict `amdsmi.h`.
 - **DC3 No contradictions, no stale examples** — A comment must not contradict
   itself or the code. After a change, re-grep every example the comments cite.
   Logic duplicated across layers (C++ and Python) says "keep in sync with ..."
@@ -424,14 +470,16 @@ Cite the item ID (e.g. `ST2`) at the start of every finding's first bullet.
 ### PR — Process
 
 - **PR1 Description matches the diff** — Title and body describe the current
-  diff, including after a force-push that dropped parts; re-request review when
-  an approval predates a substantive push, and only after every thread marked
-  resolved is fixed in the pushed code. The description passes the bot's
-  reference gate (`tools/systems_pr_bot/policy.yml`) with any one of: a line
-  that starts with `JIRA ID` or `ISSUE ID` (no bullet or text before it)
-  followed by a key, number or link; or, anywhere, a closing keyword
-  (`Closes #N`), a GitHub issue URL, or a bare `#N` after a space or at a line
-  start. So `JIRA ID: TBD` passes when the body cites `#N` elsewhere.
+  diff, including after a force-push that dropped parts or a develop merge;
+  re-request review when an approval predates a substantive push, and only
+  after every thread marked resolved is fixed in the pushed code. On a
+  re-review, check every earlier review comment, resolved or not, against the
+  head part by part: one part left unfixed is a finding. The description
+  passes the bot's reference gate (`tools/systems_pr_bot/policy.yml`) with any
+  one of: a line that starts with `JIRA ID` or `ISSUE ID` (no bullet or text
+  before it) followed by a key, number or link; or, anywhere, a closing
+  keyword (`Closes #N`), a GitHub issue URL, or a bare `#N` after a space or at
+  a line start. So `JIRA ID: TBD` passes when the body cites `#N` elsewhere.
 - **PR2 Out of scope, on record** — Problems found along the way become a
   follow-up PR or ticket linked in the thread: not silent scope creep, not
   silently dropped.

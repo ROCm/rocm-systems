@@ -183,6 +183,7 @@ class SCbranchCdbgsysSopp : public Sopp {
 public:
   SCbranchCdbgsysSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
 };
 
@@ -190,6 +191,7 @@ class SCbranchCdbguserSopp : public Sopp {
 public:
   SCbranchCdbguserSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
 };
 
@@ -197,6 +199,7 @@ class SCbranchCdbgsysOrUserSopp : public Sopp {
 public:
   SCbranchCdbgsysOrUserSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
 };
 
@@ -204,6 +207,7 @@ class SCbranchCdbgsysAndUserSopp : public Sopp {
 public:
   SCbranchCdbgsysAndUserSopp(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  std::optional<int64_t> branch_offset_bytes() const override;
   Operand simm16;
 };
 
