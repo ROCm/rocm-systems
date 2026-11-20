@@ -23,6 +23,22 @@ ROCSHMEM_FENCE
 **Description:**
 This routine ensures order between messages in this context to follow OpenSHMEM semantics.
 
+ROCSHMEM_THREADFENCE_SYSTEM
+---------------------------
+
+.. cpp:function:: __device__ void rocshmem_threadfence_system()
+.. cpp:function:: __device__ void rocshmem_ctx_threadfence_system(rocshmem_ctx_t ctx)
+
+ :param ctx: Context with which to perform this operation.
+ :returns:   None.
+
+**Description:**
+This routine issues a system-scope memory fence, making the calling thread's
+prior memory operations visible to the host and to peer devices. It orders
+memory accesses but, unlike ``rocshmem_quiet``, does not wait for outstanding
+rocSHMEM operations to complete. Use it when combining rocSHMEM transfers with
+direct load/store access to peer memory obtained from ``rocshmem_ptr``.
+
 ROCSHMEM_QUIET
 --------------
 

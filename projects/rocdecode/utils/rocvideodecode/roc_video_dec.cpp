@@ -764,47 +764,29 @@ int RocVideoDecoder::HandlePictureDisplay(RocdecParserDispInfo *pDispInfo) {
             }
             // Copy luma data
             int dst_pitch = disp_width_ * byte_per_pixel_;
-            uint8_t *p_src_ptr_y = static_cast<uint8_t *>(src_dev_ptr[0]) + (disp_rect_.top + crop_rect_.top) * src_pitch[0] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
-            if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
-                if (src_pitch[0] == dst_pitch) {
-                    int luma_size = src_pitch[0] * coded_height_;
-                    HIP_API_CALL(hipMemcpyDtoDAsync(p_dec_frame_ptr, p_src_ptr_y, luma_size, hip_stream_));
+            hipMemcpyKind copy_kind = (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) ? hipMemcpyDeviceToDevice : hipMemcpyDeviceToHost;
+            // when the src and dst pitches match, the plane is contiguous and a 1D copy can be used; otherwise use 2D copy to copy an ROI
+            auto copy_plane = [&](uint8_t *p_dst, const uint8_t *p_src, uint32_t plane_src_pitch, int height) {
+                if (plane_src_pitch == static_cast<uint32_t>(dst_pitch)) {
+                    HIP_API_CALL(hipMemcpyAsync(p_dst, p_src, static_cast<size_t>(dst_pitch) * height, copy_kind, hip_stream_));
                 } else {
-                    // use 2d copy to copy an ROI
-                    HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame_ptr, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToDevice, hip_stream_));
+                    HIP_API_CALL(hipMemcpy2DAsync(p_dst, dst_pitch, p_src, plane_src_pitch, dst_pitch, height, copy_kind, hip_stream_));
                 }
-            } else
-                HIP_API_CALL(hipMemcpy2DAsync(p_dec_frame_ptr, dst_pitch, p_src_ptr_y, src_pitch[0], dst_pitch, disp_height_, hipMemcpyDeviceToHost, hip_stream_));
+            };
+            uint8_t *p_src_ptr_y = static_cast<uint8_t *>(src_dev_ptr[0]) + (disp_rect_.top + crop_rect_.top) * src_pitch[0] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
+            copy_plane(p_dec_frame_ptr, p_src_ptr_y, src_pitch[0], disp_height_);
 
             // Copy chroma plane ( )
             // rocDec output gives pointer to luma and chroma pointers separated for the decoded frame
             uint8_t *p_frame_uv = p_dec_frame_ptr + dst_pitch * disp_height_;
             uint8_t *p_src_ptr_uv = (num_chroma_planes_ == 1) ? static_cast<uint8_t *>(src_dev_ptr[1]) + ((disp_rect_.top + crop_rect_.top) >> 1) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_ :
             static_cast<uint8_t *>(src_dev_ptr[1]) + (disp_rect_.top + crop_rect_.top) * src_pitch[1] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
-            if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
-                if (src_pitch[1] == dst_pitch) {
-                    int chroma_size = chroma_height_ * dst_pitch;
-                    HIP_API_CALL(hipMemcpyDtoDAsync(p_frame_uv, p_src_ptr_uv, chroma_size, hip_stream_));
-                } else {
-                    // use 2d copy to copy an ROI
-                    HIP_API_CALL(hipMemcpy2DAsync(p_frame_uv, dst_pitch, p_src_ptr_uv, src_pitch[1], dst_pitch, chroma_height_, hipMemcpyDeviceToDevice, hip_stream_));
-                }
-            } else
-                HIP_API_CALL(hipMemcpy2DAsync(p_frame_uv, dst_pitch, p_src_ptr_uv, src_pitch[1], dst_pitch, chroma_height_, hipMemcpyDeviceToHost, hip_stream_));
+            copy_plane(p_frame_uv, p_src_ptr_uv, src_pitch[1], chroma_height_);
 
             if (num_chroma_planes_ == 2) {
                 uint8_t *p_frame_v = p_dec_frame_ptr + dst_pitch * (disp_height_ + chroma_height_);
                 uint8_t *p_src_ptr_v = static_cast<uint8_t *>(src_dev_ptr[2]) + (disp_rect_.top + crop_rect_.top) * src_pitch[2] + (disp_rect_.left + crop_rect_.left) * byte_per_pixel_;
-                if (out_mem_type_ == OUT_SURFACE_MEM_DEV_COPIED) {
-                    if (src_pitch[2] == dst_pitch) {
-                        int chroma_size = chroma_height_ * dst_pitch;
-                        HIP_API_CALL(hipMemcpyDtoDAsync(p_frame_v, p_src_ptr_v, chroma_size, hip_stream_));
-                    } else {
-                        // use 2d copy to copy an ROI
-                        HIP_API_CALL(hipMemcpy2DAsync(p_frame_v, dst_pitch, p_src_ptr_v, src_pitch[2], dst_pitch, chroma_height_, hipMemcpyDeviceToDevice, hip_stream_));
-                    }
-                } else
-                    HIP_API_CALL(hipMemcpy2DAsync(p_frame_v, dst_pitch, p_src_ptr_v, src_pitch[2], dst_pitch, chroma_height_, hipMemcpyDeviceToHost, hip_stream_));
+                copy_plane(p_frame_v, p_src_ptr_v, src_pitch[2], chroma_height_);
             }
 
             HIP_API_CALL(hipStreamSynchronize(hip_stream_));

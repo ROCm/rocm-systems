@@ -480,17 +480,17 @@ impl Drop for KfdKernelQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{memory, sys, sysfs, uapi};
+    use super::super::{connection, memory, sysfs, uapi};
     use super::*;
     use std::fs::File;
     use std::sync::Arc;
 
     #[allow(clippy::unwrap_used)]
     fn scripted_vm() -> Shared<DeviceVm> {
-        let kfd = Shared::new(sys::Kfd::with_hook(
+        let kfd = Shared::new(connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(|call| {
-                if let sys::Call::Wait(args, _) = call {
+                if let connection::Call::Wait(args, _) = call {
                     args.result = uapi::WAIT_TIMEOUT;
                 }
                 Ok(())
@@ -498,6 +498,7 @@ mod tests {
         ))
         .unwrap();
         let node = sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
             host_atomics: false,
             node: 1,
             gpu_id: 42,

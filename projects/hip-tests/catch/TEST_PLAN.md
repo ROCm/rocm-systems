@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 644 | 644 | 0 |
-| **total** | **644** | **644** | **0** |
+| `contract` | 655 | 655 | 0 |
+| **total** | **655** | **655** | **0** |
 
 ## Tier: `contract`
 
@@ -135,7 +135,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Copy3D_HipMemcpy3D_Default_HostDeviceRoundTripsExtent` | hipMemcpy3D | a full-extent H2D then D2H 3D copy round-trips all bytes unchanged |
 | `Contract_Copy3D_HipMemcpy3D_Default_SingleSliceRoundTripsBytes` | hipMemcpy3D | a single-slice (depth=1) H2D then D2H 3D copy round-trips that slice's bytes |
 
-### `device` (11 cases)
+### `device` (21 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -144,6 +144,16 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToAllDevices_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to all-devices scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceFlushGPUDirectRDMAWrites_ToOwner_AcceptedOrUnsupported` | hipDeviceFlushGPUDirectRDMAWrites | a flush to owner scope is accepted or reports unsupported |
 | `Contract_Device_HipDeviceGetAttribute_WarpSize_MatchesProperties` | hipDeviceGetAttribute | hipDeviceAttributeWarpSize matches the warp size from hipGetDeviceProperties |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_IsAlwaysSupported` | hipDeviceGetExecAffinitySupport | CU-count affinity is supported on every AMD device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuCountType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-count query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_CuGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a CU-granularity query reports a boolean flag or unsupported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_MaskGranularity_IsExactlyOneType` | hipDeviceGetExecAffinitySupport | exactly one masking granularity is supported |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NegativeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | a negative device ordinal is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_NullOutPointer_IsRejected` | hipDeviceGetExecAffinitySupport | a null out-pointer is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeDevice_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range device is rejected as an invalid device |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_OutOfRangeType_IsRejected` | hipDeviceGetExecAffinitySupport | an out-of-range type is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_SentinelType_IsRejected` | hipDeviceGetExecAffinitySupport | the type sentinel is rejected as an invalid argument |
+| `Contract_Device_HipDeviceGetExecAffinitySupport_WgpGranularityType_ReportsBooleanFlag` | hipDeviceGetExecAffinitySupport | a WGP-granularity query reports a boolean flag or unsupported |
 | `Contract_Device_HipGetDeviceProperties_GetProperties_SucceedsForCurrentDevice` | hipGetDeviceProperties | succeeds in populating properties for the current device |
 | `Contract_Device_HipGetDeviceProperties_MultiProcessorCount_IsPositive` | hipGetDeviceProperties | reported multiprocessor count is positive |
 | `Contract_Device_HipGetDeviceProperties_Name_IsNonEmpty` | hipGetDeviceProperties | the device name string is non-empty |
@@ -206,7 +216,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ReturnsPositiveWidth_ForFloatChannel` | hipDeviceGetTexture1DLinearMaxWidth | a float-channel descriptor yields a positive max 1D linear texture width |
 | `Contract_DeviceTextureQuery_HipDeviceGetTexture1DLinearMaxWidth_ZeroSizedDescriptor_IsRejected` | hipDeviceGetTexture1DLinearMaxWidth | rejects an all-zero (no channel bits) descriptor with a non-success error |
 
-### `driver_array` (6 cases)
+### `driver_array` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -216,6 +226,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_DriverArray_HipArrayCreate_InvalidArgs_AreRejected` | hipArrayCreate | rejects a null array-out pointer or null descriptor with a non-success error |
 | `Contract_DriverArray_HipArrayGetDescriptor_Default_RoundTripsDimsAndFormat` | hipArrayGetDescriptor | reads back the width, height, format, and channel count the array was created with |
 | `Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected` | hipArrayGetDescriptor | rejects a null descriptor-out pointer or null array handle with a non-success error |
+| `Contract_DriverArray_HipArrayGetPlane_InvalidArgs_AreRejected` | hipArrayGetPlane | rejects a null plane-out pointer or null array handle with a non-success error |
 
 ### `driver_copy3d` (5 cases)
 

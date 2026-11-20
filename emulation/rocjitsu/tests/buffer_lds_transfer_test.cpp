@@ -76,6 +76,58 @@ protected:
   amdgpu::Wavefront *wave_ = nullptr;
 };
 
+TEST_P(BufferLdsTransfer, Cdna2InvalidatePreservesDirtyLocalMemory) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP();
+  constexpr uint64_t address = 0x4000;
+  memory_.write32(address, 1);
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> line{};
+  line[0] = 2;
+  ASSERT_EQ(l2_.writeback_line(address, line.data(), 0, 4, amdgpu::Mtype::RW, wave_->process_id()),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(memory_.read32(address), 1u);
+  const auto words = cdna2::build_mubuf(cdna2::kBufferInvl2);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+  ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
+  EXPECT_EQ(memory_.read32(address), 1u);
+  ASSERT_EQ(l2_.flush_all(), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(memory_.read32(address), 2u);
+}
+
+TEST_P(BufferLdsTransfer, Cdna2StoreLdsUsesM0OffsetAndCapturedActiveLanes) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA2)
+    GTEST_SKIP();
+  const auto missing_lds = cdna2::build_mubuf(cdna2::kBufferStoreLdsDword);
+  EXPECT_TRUE(decoder_->decode_window(missing_lds).failed());
+
+  const auto vector_offset =
+      cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.offen = 1, .lds = 1});
+  auto decoded = decoder_->decode_window(vector_offset);
+  ASSERT_TRUE(decoded.succeeded());
+  ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wave_).failed());
+  EXPECT_EQ(wave_->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+  wave_->clear_instruction_execution_error();
+  wave_->set_m0(8);
+  wave_->set_exec(7);
+  wave_->set_lds_size(20); // Third source word is beyond this workgroup.
+  scalar(0, 0x4000);
+  scalar(1, 4u << 16);
+  scalar(2, 256);
+  scalar(3, 1u << 23); // add TID, linear stride of four bytes
+  for (unsigned i = 0; i < 3; ++i) {
+    wave_->lds().write32(wave_->lds_base() + 12 + 4 * i, 0x11000000u + i);
+    memory_.write32(0x4004 + 4 * i, 0xccccccccu);
+  }
+  ASSERT_NO_FATAL_FAILURE(issue(
+      cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.offset = 4, .lds = 1, .soffset = 128})));
+  cu_->l1_vector().flush_all();
+  l2_.flush_all();
+  EXPECT_EQ(memory_.read32(0x4004), 0x11000000u);
+  EXPECT_EQ(memory_.read32(0x4008), 0x11000001u);
+  EXPECT_EQ(memory_.read32(0x400c), 0xccccccccu);
+}
+
 TEST(BufferLdsTransferDecode, Gfx950RestrictsLdsBitToDocumentedLoadOpcodes) {
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(decoder, nullptr);

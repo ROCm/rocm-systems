@@ -90,8 +90,11 @@ use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
 /// Each session constructs fresh instances from this immutable catalog.
-pub(crate) type DriverFactory =
-    fn(DriverContextLifetime, crate::os::ProcessIdentity) -> Result<DriverInstance, Error>;
+pub(crate) type DriverFactory = fn(
+    DriverContextLifetime,
+    crate::os::ProcessIdentity,
+    crate::session::SessionAdmission,
+) -> Result<DriverInstance, Error>;
 
 pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     #[cfg(all(
@@ -108,9 +111,10 @@ pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
 fn new_linux_kfd(
     lifetime: DriverContextLifetime,
     process: crate::os::ProcessIdentity,
+    admission: crate::session::SessionAdmission,
 ) -> Result<DriverInstance, Error> {
     Ok(DriverInstance::LinuxKfd(Shared::new(
-        KfdDriver::with_context_lifetime(lifetime, process),
+        KfdDriver::with_admission(lifetime, process, admission),
     )?))
 }
 
@@ -155,6 +159,8 @@ pub(crate) trait CachedInfo {
 pub(crate) trait Driver: Send + Sync {
     /// State retained for one endpoint activated through this driver instance.
     type DeviceState: Clone + Send + Sync;
+    /// Session admission shared by every native owner derived from this driver.
+    fn admission(&self) -> &crate::session::SessionAdmission;
     /// Returns the identity stamped into this driver's passive endpoints.
     fn driver_instance(&self) -> DriverInstanceId;
     /// Returns the context policy fixed when this driver was constructed.
@@ -374,6 +380,15 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         permissions: DeviceAccess,
     ) -> Result<(), Error>;
     /// Unmaps one host range, retaining its owner if cleanup fails.
+    /// Borrows a still-mapped CPU interval independently of device health.
+    fn diagnostic_virtual_host_mapping(
+        _mapping: &Self::VirtualHostMapping,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "virtual host diagnostics unavailable",
+        })
+    }
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }
 
@@ -389,6 +404,15 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     fn check(&self) -> Result<(), Error>;
     /// Samples the native read and write positions without retiring work.
     fn progress(&self) -> Result<(u64, u64), Error>;
+    /// Permanently stops and captures native compute diagnostic state.
+    fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "native core capture unavailable",
+        })
+    }
     /// Stops native execution while retaining the queue's backing.
     fn inactivate(&mut self) -> Result<(), Error>;
     /// Changes the native scheduling priority when supported.

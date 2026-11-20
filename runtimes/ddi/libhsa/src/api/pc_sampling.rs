@@ -10,12 +10,14 @@ use rocddi::device::gpu::profiling::{
     PcSamplingConfigurationSet, PcSamplingIntervalUnit, PcSamplingMethod,
 };
 
+use crate::events::CallbackScope;
 use crate::ffi::*;
+use crate::lifecycle::lock;
 use crate::pc_sampling::session::SessionHandle;
 use crate::pc_sampling::{
     CreateArgs, create_session, destroy_session, sampling_error, with_session,
 };
-use crate::runtime::{CallbackScope, boundary, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -40,19 +42,19 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
-            if !runtime.gpus[index].pc_sampling_supported {
+            if !runtime.agents.gpus[index].pc_sampling_supported {
                 return NOT_SUPPORTED;
             }
             if runtime.pc_sampling_state.agent_busy(agent) {
                 return SUCCESS;
             }
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (runtime.gpus[index].device.clone(), token)
+            (runtime.agents.gpus[index].device.clone(), token)
         };
         let configurations = match device
             .gpu()
@@ -61,15 +63,15 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
             Ok(configurations) => configurations,
             Err(error) => return sampling_error(error),
         };
-        let _scope = CallbackScope::enter();
-        for configuration in configurations {
-            let (Ok(minimum_interval), Ok(maximum_interval)) = (
-                usize::try_from(configuration.minimum_interval),
-                usize::try_from(configuration.maximum_interval),
-            ) else {
-                continue;
-            };
-            let record = HsaPcSamplingConfiguration {
+        CallbackScope::run(|| {
+            for configuration in configurations {
+                let (Ok(minimum_interval), Ok(maximum_interval)) = (
+                    usize::try_from(configuration.minimum_interval),
+                    usize::try_from(configuration.maximum_interval),
+                ) else {
+                    continue;
+                };
+                let record = HsaPcSamplingConfiguration {
                 method: match configuration.method {
                     PcSamplingMethod::HostTrap => 0,
                     PcSamplingMethod::Stochastic => 1,
@@ -86,15 +88,16 @@ pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
                     rocddi::device::gpu::profiling::PcSamplingIntervalRestriction::PowerOfTwo => 1,
                 },
             };
-            // SAFETY: The callback is synchronous and the record stays live
-            // through its return. The caller retains callback_data.
-            match unsafe { callback(&raw const record, callback_data) } {
-                SUCCESS => (),
-                INFO_BREAK => return SUCCESS,
-                status => return status,
+                // SAFETY: The callback is synchronous and the record stays live
+                // through its return. The caller retains callback_data.
+                match unsafe { callback(&raw const record, callback_data) } {
+                    SUCCESS => (),
+                    INFO_BREAK => return SUCCESS,
+                    status => return status,
+                }
             }
-        }
-        SUCCESS
+            SUCCESS
+        })
     })
 }
 

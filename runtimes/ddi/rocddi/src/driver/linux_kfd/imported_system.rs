@@ -326,6 +326,38 @@ impl DrmImportedSystem {
         }
     }
 
+    #[allow(unsafe_code)]
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.owner
+            .kfd()
+            .check_process()
+            .map_err(|source| super::native_error("diagnostic host backing", source))?;
+        if self.freeing
+            || self.address.is_none()
+            || self.memory.is_none()
+            || self.host.is_none()
+            || self.mappings.iter().any(|mapping| mapping.retiring)
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "diagnostic backing has retired or is uncertain",
+            ));
+        }
+        let info = self.cached_info();
+        // SAFETY: This borrow retains the host mapping and excludes native
+        // cleanup. Registered callers retain their originally borrowed pages.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                info.device_address,
+                info.host_address,
+                info.size,
+            )
+        }
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.owner.check()?;
         if self.freeing || self.address.is_none() || self.memory.is_none() || self.host.is_none() {
@@ -491,7 +523,7 @@ impl Drop for DrmImportedSystem {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use super::super::{memory, sys};
+    use super::super::{connection, memory};
     use super::*;
     use std::fs::{File, OpenOptions};
     use std::sync::Arc;
@@ -521,10 +553,10 @@ mod tests {
     }
 
     fn fixtures() -> [Shared<DeviceVm>; 2] {
-        let kfd = Shared::new(sys::Kfd::with_hook(
+        let kfd = Shared::new(connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(|call| {
-                if let sys::Call::Wait(args, _) = call {
+                if let connection::Call::Wait(args, _) = call {
                     args.result = uapi::WAIT_TIMEOUT;
                 }
                 Ok(())
@@ -533,6 +565,7 @@ mod tests {
         .unwrap();
         std::array::from_fn(|index| {
             let node = sysfs::KfdNode {
+                debug: sysfs::KfdDebugProperties::default(),
                 host_atomics: false,
                 node: u32::try_from(index).unwrap() + 1,
                 gpu_id: u32::try_from(index).unwrap() + 42,

@@ -50,11 +50,12 @@ void ncclGinAnvilSetInitContext(void*, struct ncclComm*) {}
 ncclGin_t IbCastGinIbGdaki{};
 #endif
 
-// File-scope getNcclGin_v13/v14 pointers in gin.cc take these addresses
+// File-scope getNcclGin_v13/v14/v15 pointers in gin.cc take these addresses
 // even if the load path is --gc-sections'd away. Coverage instrumentation
 // can also keep the rest of gin.cc live, so stub every remaining extern.
 ncclGin_t* getNcclGin_v13(void*) { return nullptr; }
 ncclGin_t* getNcclGin_v14(void*) { return nullptr; }
+ncclGin_t* getNcclGin_v15(void*) { return nullptr; }
 
 int64_t ncclParamGinEnable() { return 1; }
 int64_t ncclParamGinType() { return -1; }

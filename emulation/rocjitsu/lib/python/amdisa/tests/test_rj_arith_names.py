@@ -53,4 +53,4 @@ def test_all_public_instruction_names_follow_the_convention():
         if name.startswith(('rj_arith_s_', 'rj_arith_v_s_')):
             assert not re.search(r'_w(?:32|64)(?:_|$)', name), name
         else:
-            assert re.search(r'_w(?:32|64)(?:_gfx[0-9]+)?$', name), name
+            assert re.search(r'_w(?:32|64)(?:_gfx[0-9]+[a-z]?)?$', name), name
