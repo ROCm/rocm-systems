@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "Reference for the rocJITsu waitcheck hazard analyzer, covering CLI invocation, supported architectures, hazard classes, report format, exit codes, and limitations."
-        "keywords": "rocJITsu, waitcheck, hazard, s_waitcnt, wait counter, AMD, ROCm, GPU, code object, static analysis"
+        "description": "Reference for the rocjitsu waitcheck hazard analyzer, covering CLI invocation, supported architectures, hazard classes, report format, exit codes, and limitations."
+        "keywords": "rocjitsu, waitcheck, hazard, s_waitcnt, wait counter, AMD, ROCm, GPU, code object, static analysis"
 ---
 
 # waitcheck hazard analyzer reference
 
-waitcheck is a static object-code checker for AMDGPU wait hazards, distributed with rocJITsu. It analyzes final HSA code objects and reports missing or too-weak waits in the encoded instruction stream. waitcheck operates at the ISA level: the encoded instructions plus target features are the source of truth.
+waitcheck is a static object-code checker for AMDGPU wait hazards, distributed with rocjitsu. It analyzes final HSA code objects and reports missing or too-weak waits in the encoded instruction stream. waitcheck operates at the ISA level: the encoded instructions plus target features are the source of truth.
 
 For a guided walkthrough, see [Analyze a code object for wait hazards with waitcheck](/tutorials/waitcheck-analyze-code-object.md).
 
@@ -97,7 +97,7 @@ waitcheck supports the following targets:
 -   `gfx1201` (RDNA4)
 -   `gfx1250`
 
-See [Supported GPU architectures](/reference/supported-architectures.md) for the full list of architectures supported by rocJITsu.
+See [Supported GPU architectures](/reference/supported-architectures.md) for the full list of architectures supported by rocjitsu.
 
 ## Hazard classes
 
@@ -159,7 +159,7 @@ HSA_TOOLS_LIB="build/lib/rocjitsu/src/rocjitsu/hooks/librocjitsu_waitcheck_hooks
 
 `HSA_TOOLS_DISABLE_REGISTER=1` selects the environment-driven HSA tools path on ROCR builds that also support rocprofiler registration.
 
-When combining waitcheck with the rocJITsu DBT tool, list waitcheck first so it checks the final translated code:
+When combining waitcheck with the rocjitsu DBT tool, list waitcheck first so it checks the final translated code:
 
 ``` shell
 HSA_TOOLS_DISABLE_REGISTER=1 \
@@ -182,7 +182,7 @@ In dispatch mode, descriptors are indexed at code-object load, mapped to runtime
 ## Known limitations
 
 -   waitcheck validates final encoded programs. It does not rewrite code.
--   The analyzer is only as complete as the ISA metadata available to rocJITsu. Missing implicit operands, instruction-class flags, wait-counter effects, or target predicates can cause false negatives or false positives.
+-   The analyzer is only as complete as the ISA metadata available to rocjitsu. Missing implicit operands, instruction-class flags, wait-counter effects, or target predicates can cause false negatives or false positives.
 -   Hazards whose architectural fix is instruction spacing, `s_nop`, or `s_delay_alu` are separate from wait-counter validation unless they also expose a wait-like dependency.
 -   Relocatable ELF objects (`.o` files) are rejected because they are compiler intermediates rather than final loadable code objects.
 -   Targets outside the supported set listed above are out of scope.
