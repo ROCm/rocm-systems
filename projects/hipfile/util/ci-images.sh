@@ -60,13 +60,9 @@ compute_ci_images() {
                 | .image_name    = ($registry + "/hipfile/ais_ci_" + .platform)
                 | .image         = (.image_name + ":" + $tag + .version_for_tag + .build_suffix)
                 | .cache         = (.image_name + ":latest-rocm" + .version_for_tag + "-cache")
-                | .image_nvidia  = (.image_name + ":" + $tag + .version_for_tag + .build_suffix + "-nvidia")
-                | .cache_nvidia  = (.image_name + ":latest-rocm" + .version_for_tag + "-nvidia-cache")
               ) | {
-                ci_image:              (.image        | ascii_downcase),
-                ci_image_cache:        (.cache        | ascii_downcase),
-                ci_image_nvidia:       (.image_nvidia | ascii_downcase),
-                ci_image_nvidia_cache: (.cache_nvidia | ascii_downcase)
+                ci_image:       (.image | ascii_downcase),
+                ci_image_cache: (.cache | ascii_downcase)
               }
             )
           }
@@ -95,18 +91,18 @@ _assert_eq() {
 _run_tests() {
   local failures=0 bm out
 
-  echo "Test 1: single (ubuntu, 7.2.2) row -> one keyed entry, all 4 URL fields"
+  echo "Test 1: single (ubuntu, 7.2.2) row -> one keyed entry, both URL fields"
   bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}'
   out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
-    '{"ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia-cache"}}' || failures=$((failures+1))
+    '{"ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 2: multiple rows -> one entry per (platform, version)"
   bm='{"include":[{"supported_platforms":"rocky","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"7.13.0"}]}'
   out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
-    '{"rocky-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2-nvidia-cache"},"ubuntu-7.13.0":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0-nvidia-cache"}}' || failures=$((failures+1))
+    '{"rocky-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm7.2.2-cache"},"ubuntu-7.13.0":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.13.0-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 3: changed-dockerfile tag (sanitized ref) flows into ci_image URLs"
@@ -115,7 +111,7 @@ _run_tests() {
   bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"}]}'
   out=$(compute_ci_images "ghcr.io/testorg" "refs-pull-42-merge-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
-    '{"ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:refs-pull-42-merge-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:refs-pull-42-merge-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia-cache"}}' || failures=$((failures+1))
+    '{"ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:refs-pull-42-merge-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 4: uppercase registry/platform are downcased in URLs, but NOT in the map key"
@@ -125,7 +121,7 @@ _run_tests() {
   bm='{"include":[{"supported_platforms":"Ubuntu","rocm_versions":"7.2.2"}]}'
   out=$(compute_ci_images "ghcr.io/TestOrg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
-    '{"Ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-nvidia-cache"}}' || failures=$((failures+1))
+    '{"Ubuntu-7.2.2":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm7.2.2-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 5: empty include -> empty map"
@@ -141,7 +137,7 @@ _run_tests() {
   bm='{"include":[{"supported_platforms":"rocky"}]}'
   out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
-    '{"rocky-":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm-nvidia-cache"}}' || failures=$((failures+1))
+    '{"rocky-":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_rocky:latest-rocm-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 7: nightly version -> hyphenated tag + build-id suffix; cache stays floating"
@@ -150,7 +146,7 @@ _run_tests() {
   bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}'
   out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "20260602-26796279962" "$bm")
   _assert_eq "  output" "$out" \
-    '{"ubuntu-nightly":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-20260602-26796279962","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-20260602-26796279962-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-nvidia-cache"}}' || failures=$((failures+1))
+    '{"ubuntu-nightly":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-20260602-26796279962","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-cache"}}' || failures=$((failures+1))
 
   echo
   echo "Test 8: nightly version, empty build id -> bare -nightly tag (suffix omitted)"
@@ -159,7 +155,7 @@ _run_tests() {
   bm='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}'
   out=$(compute_ci_images "ghcr.io/testorg" "latest-rocm" "" "$bm")
   _assert_eq "  output" "$out" \
-    '{"ubuntu-nightly":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-cache","ci_image_nvidia":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-nvidia","ci_image_nvidia_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-nvidia-cache"}}' || failures=$((failures+1))
+    '{"ubuntu-nightly":{"ci_image":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly","ci_image_cache":"ghcr.io/testorg/hipfile/ais_ci_ubuntu:latest-rocm-nightly-cache"}}' || failures=$((failures+1))
 
   echo
   if [ "${failures}" -eq 0 ]; then

@@ -8,10 +8,6 @@ on:
         description: "Full CI image name & tag"
         required: true
         type: string
-      ci_image_nvidia:
-        description: "Full CI image name & nvidia tag"
-        required: true
-        type: string
       cxx_compiler:
         description: "C++ compiler to use"
         required: true
@@ -58,10 +54,16 @@ jobs:
       # python/tests/main.py is an end-to-end hardware exercise of the bindings, and
       # is platform/compiler/standard independent, so run it once on an AIS
       # runner for a single representative leg rather than fanning it out. This
-      # is the same ubuntu-7.14.0 leg codeql/sanitizers/clang_tidy target.
-      run_hardware_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == '7.14.0' }}
+      # is the same ubuntu-10.2.0 leg codeql/sanitizers/clang_tidy target.
+      run_hardware_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == '10.2.0' }}
 
+  # The system tests run on the self-hosted AIS runners, so they only run on
+  # the production amdclang++ C++20 legs. The clang++, g++, and C++23 legs
+  # exist to check that hipFile builds and passes its unit tests with other
+  # compilers and standards; re-running the storage suites on them would
+  # mostly repeat the same kernel, driver, and filesystem coverage.
   AIS_system_tests:
+    if: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 }}
     needs: [build_and_test]
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
@@ -76,6 +78,7 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
 
   AIS_system_xfs_tests:
+    if: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 }}
     needs: [build_and_test]
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
@@ -90,6 +93,7 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
 
   AIS_system_lvm16_tests:
+    if: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 }}
     needs: [build_and_test]
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
@@ -104,6 +108,7 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
 
   AIS_system_lvm_mirror_tests:
+    if: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 }}
     needs: [build_and_test]
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
@@ -118,6 +123,7 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
 
   AIS_system_mdraid0_tests:
+    if: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 }}
     needs: [build_and_test]
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
@@ -132,6 +138,7 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
 
   AIS_system_nfs_tests:
+    if: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 }}
     needs: [build_and_test]
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
@@ -142,18 +149,5 @@ jobs:
       cxx_compiler: ${{ inputs.cxx_compiler }}
       cxx_standard: ${{ inputs.cxx_standard }}
       mount_label: system_nfs
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
-
-  build_and_test_NVIDIA:
-    # NVIDIA can't build with amdclang++; its meaningful compilers (clang++, g++)
-    # arrive via the cxx_compiler axis, so skip the amdclang++ legs here. Only
-    # run on the default C++20 standard. Only legacy ROCm supports building hipFile
-    # targeted to NVIDIA.
-    if: ${{ startsWith(inputs.rocm_version, '7.2.') && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
-    uses: ./.github/workflows/hipfile-build-nvidia.yml
-    with:
-      ci_image: ${{ inputs.ci_image_nvidia }}
-      cxx_compiler: ${{ inputs.cxx_compiler }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
