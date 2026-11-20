@@ -448,6 +448,11 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     // loops
     if(is_rocm_internal_thread(reinterpret_cast<void*>(func)))
     {
+        // Declared before `creation`, so it is destroyed after it: when ~creation
+        // releases the thread list's creation gate, the state is still Internal.
+        // Otherwise lock tracing can record rocprof-sys's unlock as an application call.
+        auto const thread_state_guard = state::thread::scoped(state::thread::Internal);
+
         auto launch    = std::make_unique<rocm_thread_launch>(func, arg);
         launch->origin = "ROCm runtime thread, " +
                          describe_start_routine(reinterpret_cast<void*>(func));

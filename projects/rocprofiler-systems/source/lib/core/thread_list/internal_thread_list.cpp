@@ -26,8 +26,8 @@ namespace
 {
 constexpr auto k_task_dir = "/proc/self/task";
 
-// Marks the calling thread Internal while it takes one of the list's locks, so the
-// lock calls are not seen by the profiling hooks.
+// Sets the thread state to Internal until the returned guard is destroyed, so the
+// profiling hooks do not record the pthread lock calls made in that time.
 [[nodiscard]] state::thread::scoped_guard
 internal_scope()
 {
@@ -78,8 +78,7 @@ erase_exited(std::unordered_set<pid_t>& tids)
 void
 internal_thread_list::add(pid_t tid)
 {
-    const auto guard    = internal_scope();
-    bool       inserted = false;
+    bool inserted = false;
     {
         const std::lock_guard lock{ m_mutex };
         inserted = m_tids.insert(tid).second;
@@ -93,8 +92,7 @@ internal_thread_list::add(pid_t tid)
 void
 internal_thread_list::remove(pid_t tid)
 {
-    const auto guard   = internal_scope();
-    bool       removed = false;
+    bool removed = false;
     {
         const std::lock_guard lock{ m_mutex };
         removed = m_tids.erase(tid) > 0;
@@ -108,7 +106,6 @@ internal_thread_list::remove(pid_t tid)
 bool
 internal_thread_list::is_excluded(pid_t tid) const
 {
-    const auto            guard = internal_scope();
     const std::lock_guard lock{ m_mutex };
     return m_tids.contains(tid);
 }
@@ -119,7 +116,6 @@ internal_thread_list::prune_exited()
     // The listing is read while m_mutex is held: every entry present was added before
     // the read, so its thread existed then and is in the snapshot unless it exited. A
     // racing add() waits on m_mutex and lands after the prune.
-    const auto         guard = internal_scope();
     std::vector<pid_t> pruned;
     {
         const std::lock_guard lock{ m_mutex };
@@ -134,7 +130,6 @@ internal_thread_list::prune_exited()
 internal_thread_list::creation_scope
 internal_thread_list::begin_creation() const
 {
-    const auto guard = internal_scope();
     return creation_scope{ m_gate };
 }
 
