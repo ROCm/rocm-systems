@@ -1293,3 +1293,46 @@ TEST(GpuUnit, CuidComponentListWorksInAForkedChild) {
   EXPECT_EQ(hung, 0) << hung << " of " << kChildren << " forked children hung";
   EXPECT_EQ(failed, 0) << failed << " of " << kChildren << " forked children failed";
 }
+
+namespace {
+// Used only in the fresh death-test process. Release the reader after fork
+// has started, so its first transaction cannot warm the parent beforehand.
+pthread_barrier_t first_cuid_read;
+void start_first_cuid_read() { pthread_barrier_wait(&first_cuid_read); }
+
+bool can_list_cuids() {
+  uint32_t count = 0;
+  const auto status = amdsmi_get_cuid_components(&count, nullptr);
+  return status == AMDSMI_STATUS_SUCCESS || CuidMissingForNoMachineId(status);
+}
+}  // namespace
+
+TEST(GpuUnit, CuidForkDuringFirstInventoryRead) {
+  if (!kCuidBuiltIn) GTEST_SKIP() << "built without CUID support";
+  // Re-exec: no other test has initialized SMI or touched its CUID gate.
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  EXPECT_EXIT(
+      {
+        alarm(30);
+        const AmdSmiSession session(AMDSMI_INIT_AMD_NICS);
+        if (session.status() != AMDSMI_STATUS_SUCCESS ||
+            pthread_barrier_init(&first_cuid_read, nullptr, 2) != 0 ||
+            pthread_atfork(start_first_cuid_read, nullptr, nullptr) != 0)
+          _exit(1);
+        bool listed = false;
+        std::thread reader([&] {
+          pthread_barrier_wait(&first_cuid_read);
+          listed = can_list_cuids();
+        });
+        const pid_t child = fork();
+        if (child == 0) {
+          alarm(10);
+          _exit(can_list_cuids() ? 0 : 2);
+        }
+        int status = 0;
+        if (child < 0 || waitpid(child, &status, 0) != child) _exit(3);
+        reader.join();
+        _exit(listed && WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : 4);
+      },
+      ::testing::ExitedWithCode(0), "");
+}

@@ -248,6 +248,12 @@ static amdsmi_status_t get_ainic_device_from_handle(amdsmi_processor_handle proc
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
+#ifdef BUILD_CUID
+namespace {
+void initialize_cuid_gate();
+}
+#endif
+
 // Serializes init and shut_down so one thread at a time sets up or tears down the
 // system, and the reference count matches the calls.
 static std::mutex g_init_shut_down_mutex;
@@ -260,6 +266,9 @@ amdsmi_status_t amdsmi_init(uint64_t flags) {
   }
   amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().init(flags);
   if (status == AMDSMI_STATUS_SUCCESS) {
+#ifdef BUILD_CUID
+    initialize_cuid_gate();
+#endif
     amd::smi::amdsmi_library_init_ref_acquire();
   }
   return status;
@@ -1627,38 +1636,58 @@ amdsmi_status_t fill_cuid_component(const amdcuid_id_t& handle,
 // Serialize multi-call CUID transactions. Unlike unlocking an inherited
 // mutex, sem_post is async-signal-safe and does not depend on thread identity.
 sem_t cuid_fork_gate, cuid_inventory_gate;
-const bool cuid_gates_ready =
-    sem_init(&cuid_fork_gate, 0, 1) == 0 && sem_init(&cuid_inventory_gate, 0, 1) == 0;
+// Set once, before amdsmi_init publishes the session. If prepare cannot
+// acquire a gate, the child cannot trust its inherited semaphore counts.
+bool cuid_gate_ready = false;
+thread_local bool fork_admitted = false, fork_drained = false;
 
-void wait_gate(sem_t& gate) {
-  while (sem_wait(&gate) == -1 && errno == EINTR) {
-  }
+bool wait_gate(sem_t& gate) {
+  int rc;
+  do {
+    rc = sem_wait(&gate);
+  } while (rc == -1 && errno == EINTR);
+  return rc == 0;
 }
+
 void prepare_cuid_fork() {
-  // Stop new calls before waiting for the current one. Otherwise a busy
-  // inventory thread can reacquire the semaphore indefinitely ahead of fork.
-  wait_gate(cuid_fork_gate);
-  wait_gate(cuid_inventory_gate);
+  fork_admitted = cuid_gate_ready && wait_gate(cuid_fork_gate);
+  fork_drained = fork_admitted && wait_gate(cuid_inventory_gate);
 }
 void finish_cuid_fork() {
-  sem_post(&cuid_inventory_gate);
-  sem_post(&cuid_fork_gate);
+  if (fork_drained) sem_post(&cuid_inventory_gate);
+  if (fork_admitted) sem_post(&cuid_fork_gate);
+}
+void child_cuid_fork() {
+  if (!fork_drained) cuid_gate_ready = false;
+  finish_cuid_fork();
+}
+
+void initialize_cuid_gate() {
+  static std::once_flag once;
+  std::call_once(once, [] {
+    // libamdcuid initializes mgr (and registers its atfork handlers) in
+    // cuid.cc at load time. Enter that translation unit before registering
+    // ours, even with deferred dynamic initialization. Prepare runs in
+    // reverse registration order, so the outer SMI gate drains first.
+    amdcuid_get_library_version(nullptr, nullptr, nullptr);
+    if (sem_init(&cuid_fork_gate, 0, 1) != 0) return;
+    if (sem_init(&cuid_inventory_gate, 0, 1) == 0) {
+      if (pthread_atfork(prepare_cuid_fork, finish_cuid_fork, child_cuid_fork) == 0) {
+        cuid_gate_ready = true;
+        return;
+      }
+      sem_destroy(&cuid_inventory_gate);
+    }
+    sem_destroy(&cuid_fork_gate);
+  });
 }
 
 class CuidInventoryGuard {
  public:
   CuidInventoryGuard() {
-    // Register on first use, after libamdcuid's startup handler. fork prepare
-    // must take our outer gate before it enters the library's inner lock.
-    if (!cuid_gates_ready) return;
-    static const int registered =
-        pthread_atfork(prepare_cuid_fork, finish_cuid_fork, finish_cuid_fork);
-    held_ = registered == 0;
-    if (held_) {
-      wait_gate(cuid_fork_gate);
-      sem_post(&cuid_fork_gate);
-      wait_gate(cuid_inventory_gate);
-    }
+    if (!cuid_gate_ready || !wait_gate(cuid_fork_gate)) return;
+    sem_post(&cuid_fork_gate);
+    held_ = wait_gate(cuid_inventory_gate);
   }
   ~CuidInventoryGuard() {
     if (held_) sem_post(&cuid_inventory_gate);
