@@ -25,6 +25,7 @@
 
 #include <gtest/gtest.h>
 #include <sys/types.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <xf86drm.h>
@@ -61,8 +62,14 @@ typedef struct _KFDTESTGPU_PARAMETERS
 //  @class KFDBaseComponentTest
 class KFDBaseComponentTest : public testing::Test {
  public:
-    KFDBaseComponentTest(void) { m_MemoryFlags.Value = 0; m_hsakmt_current_ctx = NULL; }
-    ~KFDBaseComponentTest(void) {}
+    KFDBaseComponentTest(void) : m_TestPid(getpid()) { m_MemoryFlags.Value = 0; m_hsakmt_current_ctx = NULL; }
+    /* A forked child that returns into gtest (e.g. from a failed ASSERT)
+     * would go on to run the rest of the suite, so end it with its result.
+     */
+    ~KFDBaseComponentTest(void) {
+        if (getpid() != m_TestPid)
+            exit(HasFailure());
+    }
 
     HSAuint64 GetSysMemSize();
     HSAuint64 GetVramSize(int gpuNode);
@@ -203,6 +210,9 @@ class KFDBaseComponentTest : public testing::Test {
 
         HSAKMT_CALL(hsaKmtSetXNACKMode, m_hsakmt_current_ctx, m_xnack);
     }
+
+ private:
+    const pid_t m_TestPid;
 };
 
 extern KFDBaseComponentTest* g_baseTest;
