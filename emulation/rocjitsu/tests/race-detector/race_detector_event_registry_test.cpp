@@ -119,6 +119,13 @@ TEST(InstructionSnapshotTest, EqualityComparesPcAndEncoding) {
   EXPECT_NE(one_word, InstructionSnapshot(0x10, std::array{0xbf800007u}));
   // A trailing zero word is part of the encoding, not unused storage.
   EXPECT_NE(one_word, InstructionSnapshot(0x10, words));
+  for (const bool preserve_in_trace : {false, true})
+    for (const bool is_nop : {false, true}) {
+      const InstructionSnapshot with_metadata(0x10, std::span(words).first(1), preserve_in_trace,
+                                              is_nop);
+      EXPECT_EQ(one_word, with_metadata);
+      EXPECT_EQ(with_metadata, one_word);
+    }
 }
 
 class RaceEventRegistrationTest : public ::testing::Test {
@@ -132,6 +139,52 @@ protected:
                         1024};
   std::vector<RaceViolation> violations;
 };
+
+TEST(EventRegistry, CompletedLdsHistoryKeepsItsProducerWhileWaitedLoadsAreTrimmed) {
+  for (bool direct_read : {false, true}) {
+    SCOPED_TRACE(direct_read);
+    std::vector<RaceViolation> violations;
+    RaceDetector detector{2,
+                          16,
+                          16,
+                          Dim3d(0),
+                          [&](RaceViolation v) { violations.push_back(v); },
+                          counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA2),
+                          1024};
+    auto &reader = detector.getWaveRaceState(0);
+    if (direct_read)
+      reader.recordLdsOperandRead(kInstruction, 64, 4, 0);
+
+    PendingWaitCount wait;
+    wait.add(WaitCounterType::VMCNT, 0);
+    constexpr int loads = 4 * EventRegistry::kTrimAttemptInterval;
+    for (int i = 0; i != loads; ++i) {
+      reader.registerEvent(kInstruction, MemoryEventType::GLOBAL_TO_VGPR, {0}, 1, 0xf);
+      reader.dispatch(wait);
+    }
+    auto &events = detector.events();
+    EXPECT_LE(events.size(), 3);
+    EXPECT_EQ(events.totalAllocated(), loads + int(direct_read));
+    EXPECT_EQ(events.trimmedCount() + events.size(), events.totalAllocated());
+    detector.validateWrite(65, WaveId{1}, 0, 1);
+    ASSERT_EQ(violations.size(), direct_read ? 1u : 0u);
+    if (direct_read) {
+      const auto id = violations.front().conflictingEvent;
+      ASSERT_TRUE(events.contains(id));
+      EXPECT_EQ(events.waveId(id), WaveId{0});
+      EXPECT_EQ(events.instruction(id), kInstruction);
+      EXPECT_EQ(events.status(id), EventStatus::WAVE_COMPLETE);
+      EXPECT_TRUE(events.ldsIntervals(id).contains(65));
+    }
+    detector.flushWorkgroupBarrierEvents();
+    detector.flushWorkgroupBarrierEvents();
+    detector.validateWrite(65, WaveId{1}, 0, 1);
+    EXPECT_EQ(violations.size(), direct_read ? 1u : 0u);
+    if (direct_read) {
+      EXPECT_FALSE(events.contains(violations.front().conflictingEvent));
+    }
+  }
+}
 
 TEST(EventRegistry, RetainsCapturedInstruction) {
   EventRegistry events;
