@@ -1646,6 +1646,18 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_LL128_ONESHOT_THRESHOLD``
+        | Largest ``ncclAllReduce`` message in bytes that the DDA LL128 tier sends
+          through its one-shot kernel; larger messages take the two-shot when they
+          split into whole 16-byte shards per rank. When unset, the cap is 4 MiB,
+          divided by ``nRanks`` while the peer-parallel kernels are on
+          (``RCCL_DDA_LL128_AR_PEER_PARALLEL``) on architectures whose arch table
+          sets ``ddaArLL128OneShotRankBytes`` (gfx1250 SPX). A message past the
+          scaled cap that the two-shot cannot split stays on the one-shot up to
+          4 MiB.
+      - | Unset: 4 MiB, or 4 MiB / ``nRanks`` on gfx1250 SPX (default).
+        | ``N`` (bytes): One-shot up to ``N`` at every rank count, not scaled.
+
     * - | ``RCCL_DDA_LL128_AG_THREADS``
         | Threads per block for the DDA LL128 ``ncclAllGather`` kernel. When ``0``
           (default), resolved from ``ddaAgLL128Threads`` in the arch table: the
@@ -1664,6 +1676,15 @@ threshold table introduced for gfx1250.
           warp of dynamic LDS. It is off by default. Other architectures are unaffected.
       - | ``0``: Cooperative writer for every launch, no dynamic LDS (default).
         | ``1``: Staged writer from 2 MiB shards on gfx1250 wave32 communicators.
+
+    * - | ``RCCL_DDA_LL128_AR_PEER_PARALLEL``
+        | Selects the DDA LL128 ``ncclAllReduce`` one-shot and two-shot kernels.
+          The peer-parallel kernels give each slice a group of up to 16 warps, one
+          per rank, that split its peers, so the per-slice peer loop shrinks as
+          ``nRanks`` grows. With them, the one-shot cap is rank-scaled (4 MiB /
+          ``nRanks`` on gfx1250 SPX).
+      - | ``1``: Peer-parallel kernels (default).
+        | ``0``: One warp per slice, and the fixed one-shot cap.
 
     * - | ``RCCL_DDA_A2A_PUSH``
         | Selects the ``ncclAllToAll`` kernel on the DDA fabric (VMM) tier. The push

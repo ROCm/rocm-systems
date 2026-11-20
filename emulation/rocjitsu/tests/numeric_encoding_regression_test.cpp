@@ -3,11 +3,19 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -1182,6 +1190,95 @@ TEST_P(OlderHalfFma, QualificationAndInactiveExec) {
       }
     }
   }
+}
+
+class OlderIntegerDotRegression : public NumericEncodingRegression {
+protected:
+  // Encode DOT4 with D aliased to C and ordinary source-half packing.
+  std::array<uint32_t, 2> packed(bool unsigned_inputs, bool clamp) {
+    const auto arch = std::get<0>(GetParam());
+    if (arch == ROCJITSU_CODE_ARCH_CDNA1) {
+      return cdna1::build_vop3p(unsigned_inputs ? cdna1::kVDot4U32U8Vop3p : cdna1::kVDot4I32I8Vop3p,
+                                {.vdst = 4,
+                                 .clamp = uint8_t(clamp),
+                                 .src0 = 256,
+                                 .src1 = 257,
+                                 .src2 = 260,
+                                 .op_sel_hi = 3});
+    }
+    if (arch == ROCJITSU_CODE_ARCH_CDNA2) {
+      return cdna2::build_vop3p(unsigned_inputs ? cdna2::kVDot4U32U8Vop3p : cdna2::kVDot4I32I8Vop3p,
+                                {.vdst = 4,
+                                 .clamp = uint8_t(clamp),
+                                 .src0 = 256,
+                                 .src1 = 257,
+                                 .src2 = 260,
+                                 .op_sel_hi = 3});
+    }
+    if (arch == ROCJITSU_CODE_ARCH_RDNA2) {
+      return rdna2::build_vop3p(unsigned_inputs ? rdna2::kVDot4U32U8Vop3p : rdna2::kVDot4I32I8Vop3p,
+                                {.vdst = 4,
+                                 .clamp = uint8_t(clamp),
+                                 .src0 = 256,
+                                 .src1 = 257,
+                                 .src2 = 260,
+                                 .op_sel_hi = 3});
+    }
+    // In the gfx11-family IU8 encoding, NEG bits select signed factors.
+    return rdna3_5::build_vop3p(unsigned_inputs ? rdna3_5::kVDot4U32U8Vop3p
+                                                : rdna3_5::kVDot4I32Iu8Vop3p,
+                                {.vdst = 4,
+                                 .clamp = uint8_t(clamp),
+                                 .src0 = 256,
+                                 .src1 = 257,
+                                 .src2 = 260,
+                                 .op_sel_hi = 3,
+                                 .neg = uint8_t(unsigned_inputs ? 0 : 3)});
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    Older, OlderIntegerDotRegression,
+    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                                     ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3_5),
+                     testing::Bool()));
+
+TEST_P(OlderIntegerDotRegression, SignedAndUnsignedSaturationWithAliasedAccumulator) {
+  wave_->set_exec(1ULL | (1ULL << (wave_->wf_size() - 1)));
+  wave_->set_trapsts(0x10);
+  for (bool unsigned_inputs : {false, true}) {
+    put(0, unsigned_inputs ? 0xffffffffU : 0x80808080U);
+    put(1, unsigned_inputs ? 0xffffffffU : 0x80808080U);
+    const uint32_t initial = unsigned_inputs ? 0xfffffff0U : 0x7fffffffU;
+    for (bool clamp : {false, true}) {
+      const uint32_t expected = unsigned_inputs ? (clamp ? 0xffffffffU : 0x0003f7f4U)
+                                                : (clamp ? 0x7fffffffU : 0x8000ffffU);
+      check(packed(unsigned_inputs, clamp), expected, initial);
+    }
+  }
+  EXPECT_EQ(wave_->trapsts(), 0x10U);
+}
+
+class OlderAccumulatingIntegerDotRegression : public NumericEncodingRegression {};
+
+INSTANTIATE_TEST_SUITE_P(Older, OlderAccumulatingIntegerDotRegression,
+                         testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1,
+                                                          ROCJITSU_CODE_ARCH_CDNA2,
+                                                          ROCJITSU_CODE_ARCH_RDNA2),
+                                          testing::Bool()));
+
+TEST_P(OlderAccumulatingIntegerDotRegression, DotcWrapsTheOldDestination) {
+  const auto arch = std::get<0>(GetParam());
+  wave_->set_exec(1ULL | (1ULL << (wave_->wf_size() - 1)));
+  put(0, 0x80808080);
+  put(1, 0x80808080);
+  const auto words =
+      arch == ROCJITSU_CODE_ARCH_CDNA1
+          ? cdna1::build_vop2(cdna1::kVDot4cI32I8Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 4})
+      : arch == ROCJITSU_CODE_ARCH_CDNA2
+          ? cdna2::build_vop2(cdna2::kVDot4cI32I8Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 4})
+          : rdna2::build_vop2(rdna2::kVDot4cI32I8Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 4});
+  check({words[0], 0}, 0x8000ffff, 0x7fffffff);
 }
 
 } // namespace
