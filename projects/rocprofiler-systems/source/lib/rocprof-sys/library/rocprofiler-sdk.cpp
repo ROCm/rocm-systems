@@ -1405,9 +1405,12 @@ setup()
 {}
 
 void
-shutdown()
+shutdown(client_registration registration)
 {
-    if(g_tool_data && g_tool_data->client_id && g_tool_data->client_fini)
+    // client_fini makes the SDK finalize and drop this client, after which the process
+    // cannot be attached again.
+    if(registration == client_registration::release && g_tool_data &&
+       g_tool_data->client_id && g_tool_data->client_fini)
     {
         g_tool_data->client_fini(*g_tool_data->client_id);
     }
@@ -1485,7 +1488,7 @@ tool_attach_fini(void* /* tool_data */)
     // Flush any pending region cache entries
     rocprofsys_flush_pending_region_cache_hidden();
 
-    rocprofsys_finalize_hidden();
+    rocprofsys_finalize_attach_session_hidden();
 }
 
 int

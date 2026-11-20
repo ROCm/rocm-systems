@@ -89,6 +89,7 @@ extern "C"
     bool rocprofsys_init_tooling_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_init_hidden(const char*, bool, const char*) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_finalize_hidden(void) ROCPROFSYS_HIDDEN_API;
+    void rocprofsys_finalize_attach_session_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_set_finalization_done_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_reset_for_reattach_hidden(void) ROCPROFSYS_HIDDEN_API;
     void rocprofsys_reset_preload_hidden(void) ROCPROFSYS_HIDDEN_API;
