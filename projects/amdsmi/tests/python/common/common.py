@@ -838,8 +838,10 @@ def run_test_dir(subdir, title, top_level_dir):
     if k_pattern and sys.version_info < (3, 7):
         suite = _filter_suite(
             suite,
-            lambda test_id: test_id.startswith("unittest.loader.")
-            or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"),
+            lambda test_id: (
+                test_id.startswith("unittest.loader.")
+                or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*")
+            ),
         )
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
@@ -1360,7 +1362,7 @@ class Common:
                 else:
                     print(msg)
                 if isinstance(data, dict) or isinstance(data, list):
-                    print(json.dumps(data, sort_keys=False, indent=4), flush=True)
+                    print(json.dumps(data, sort_keys=False, indent=4, default=str), flush=True)
                 else:
                     print(data)
         return

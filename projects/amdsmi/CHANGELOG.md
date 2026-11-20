@@ -8,6 +8,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added CPU read APIs for APB status, XGMI link width, and DF P-state range**, with corresponding Python APIs and `amd-smi metric` flags for AMD EPYC CPUs.
+
 - **Added Power Stabilization support (HAWK dummy-compute insertion and Ramp Management)**.  
   - Query and configure GPU power stabilization and ramp management settings via `amd-smi static --power-stabilization` and `amd-smi set --power-stabilization-configure KEY=VALUE [...]` (or `@<path>` to a JSON file, subject to the same file restrictions as `--ampp-configure @<path>`), on supported bare-metal Linux platforms. When NPM (Node-level Power Management) coordination makes settings node-wide, a write against a non-primary GPU still applies but prints an informational/warning note naming the node's primary GPU.
   - Like `--ampp`, `power_stabilization` is on by default (not opt-in): plain `amd-smi static`, `--all`, and `--json` all gain a `power_stabilization` key for every GPU, reporting "not supported" on platforms without the feature.
