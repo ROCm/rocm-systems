@@ -62,6 +62,8 @@ pub enum QueueParameters {
         producer_mode: QueueProducerMode,
         /// Native packet-ring placement. The caller still owns packet-store
         /// ordering before advancing the write index and ringing the doorbell.
+        /// On a write-combined mapping, drain packet-body stores before
+        /// publishing its header; a later doorbell fence is not sufficient.
         ring_memory: QueueRingMemory,
         /// Allocate native global work synchronization for this queue before
         /// publishing its transport. KFD permits only one such queue per
@@ -135,6 +137,9 @@ pub struct QueueErrorEvent {
 /// protocol must reject acquisition before native publication.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct QueueRequest {
+    /// Placement of queue control and index storage. Local storage requires
+    /// a coherent CPU/GPU connection supporting host atomic operations.
+    pub control_memory: QueueRingMemory,
     /// Requested power-of-two packet-ring capacity in bytes. Native limits are
     /// validated before acquisition; no implicit size rounding is performed.
     pub ring_size_bytes: u64,

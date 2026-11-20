@@ -297,8 +297,6 @@ class TensorDmaTransferElement {
 public:
   uint64_t global_address = 0;
   uint32_t lds_address = 0;
-  std::array<uint8_t, 8> bytes{};
-  std::size_t completed_bytes = 0;
   /// Trailing bytes outside the wave's LDS allocation. Loads drop them; stores
   /// read zero. Both are simulator modeling choices; see append_copy.
   uint8_t lds_dropped_bytes = 0;
@@ -316,6 +314,10 @@ public:
   std::optional<GpuVmAccess> access;
   VmTransferToken transfer_token;
   std::vector<TensorDmaTransferElement> elements;
+  // Payload is in tile order. Stores snapshot LDS at issue, and loads publish to
+  // LDS only after the last global access completes.
+  std::vector<uint8_t> payload;
+  std::size_t completed_bytes = 0; // Within next_element when a transfer suspends.
   std::size_t next_element = 0;
   /// PC of the tensor DMA instruction. A deferred transfer completes after the
   /// wave's PC has advanced past it.
@@ -326,7 +328,7 @@ public:
   bool observation_reported = false;
 };
 
-// Bound one in-flight instruction to roughly 40 MiB of host transfer metadata.
+// Bound the per-instruction transfer metadata and payload allocations.
 inline constexpr uint64_t kMaxMaterializedElements = 1u << 20;
 
 /// @brief Prove that every reachable in-bounds global byte address is representable.
@@ -526,11 +528,35 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t lds_alloc
       .lds_address = lds_bytes ? static_cast<uint32_t>(lds_address) : kInvalidLdsAddress,
       .lds_dropped_bytes = static_cast<uint8_t>(desc.elem_size - lds_bytes),
       .in_bounds = in_bounds};
-  if (state.store_from_lds && in_bounds) {
-    for (uint32_t byte = 0; byte < lds_bytes; ++byte)
-      element.bytes[byte] = wf.lds().read8(element.lds_address + byte);
-  }
   state.elements.push_back(element);
+}
+
+// Copy contiguous LDS runs together, preserving tile order for overlapping
+// iterations. A clipped element copies only its in-range prefix.
+inline void copy_tensor_lds(TensorDmaState &state, Wavefront &wf) {
+  const uint32_t size = state.desc.elem_size;
+  for (size_t i = 0; i < state.elements.size();) {
+    const auto &first = state.elements[i];
+    uint32_t bytes = size - first.lds_dropped_bytes;
+    if (!bytes || (state.store_from_lds && !first.in_bounds)) {
+      ++i;
+      continue;
+    }
+    const size_t start = i++;
+    while (!state.elements[i - 1].lds_dropped_bytes && i < state.elements.size()) {
+      const auto &next = state.elements[i];
+      if (next.lds_dropped_bytes == size || (state.store_from_lds && !next.in_bounds) ||
+          next.lds_address != uint64_t{first.lds_address} + bytes)
+        break;
+      bytes += size - next.lds_dropped_bytes;
+      ++i;
+    }
+    auto *payload = state.payload.data() + start * size;
+    if (state.store_from_lds)
+      std::as_const(wf.lds()).read(first.lds_address, payload, bytes);
+    else
+      wf.lds().write(first.lds_address, payload, bytes);
+  }
 }
 
 template <typename Visitor>
@@ -572,26 +598,28 @@ inline void for_each_dense_tensor_element(const TensorDmaDescriptor &desc,
     // row stride 4, two iterations, increments of 8 global and 4 LDS elements, no padding.
     // The second load/store transferred global words 12/13 to/from LDS words 6/7.
     // For tiles with a locally out-of-bounds row, the model repeats the coordinate checks.
-    for (uint64_t linear = 0; linear < element_count; ++linear) {
-      uint64_t remaining = linear;
-      bool in_bounds = !layout.empty();
-      uint64_t global_element = iteration_offset;
-
-      if (in_bounds) {
-        for (uint32_t dim : dimensions) {
-          const uint32_t tile_dim = desc.tile_dims[dim];
-          const uint32_t coord = static_cast<uint32_t>(remaining % tile_dim);
-          remaining /= tile_dim;
-          if (coord >= desc.tensor_dims[dim]) {
-            in_bounds = false;
-            break;
-          }
-          global_element +=
-              uint64_t{coord} * (dim == 0 ? uint64_t{1} : desc.global_strides[dim - 1]);
+    // Adjacent elements advance along dimension zero. Decode the slower-varying
+    // coordinates once per row, including when the tile extends beyond the tensor.
+    const uint32_t width = desc.tile_dims[0];
+    for (uint64_t row = 0; row < element_count / width; ++row) {
+      uint64_t remaining = row;
+      uint64_t row_base = iteration_offset;
+      bool row_in_bounds = !layout.empty();
+      for (uint32_t dim : dimensions.subspan(1)) {
+        const uint32_t coord = static_cast<uint32_t>(remaining % desc.tile_dims[dim]);
+        remaining /= desc.tile_dims[dim];
+        if (coord >= desc.tensor_dims[dim]) {
+          row_in_bounds = false;
+          break;
         }
+        row_base += uint64_t{coord} * desc.global_strides[dim - 1];
       }
-
-      visit(in_bounds ? global_element : 0, iteration_lds, linear, in_bounds);
+      const uint64_t tile_base = row * width;
+      const uint32_t valid_width = row_in_bounds ? std::min(width, desc.tensor_dims[0]) : 0;
+      for (uint32_t x = 0; x < valid_width; ++x)
+        visit(row_base + x, iteration_lds, tile_base + x, true);
+      for (uint32_t x = valid_width; x < width; ++x)
+        visit(0, iteration_lds, tile_base + x, false);
     }
   }
 }
@@ -640,6 +668,9 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
                 in_bounds);
   };
   for_each_tensor_element(desc, layout, append_element);
+  state.payload.resize(state.elements.size() * desc.elem_size);
+  if (state.store_from_lds)
+    copy_tensor_lds(state, wf);
 
   // A transfer with zero elements makes no global request, so it needs no VM
   // binding either.
@@ -744,6 +775,7 @@ inline void report_completed_tensor_dma(const Instruction &inst, Wavefront &wf,
           static_cast<int64_t>(state.desc.global_strides[0] * state.desc.elem_size),
       .tensor_dim1_stride =
           static_cast<int64_t>(state.desc.global_strides[1] * state.desc.elem_size),
+      .operation = inst.amdgpu_operation(),
   };
   wf.cu().report_tensor_dma_memory_access(access);
 }
@@ -761,7 +793,7 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
   constexpr uint64_t kPageBytes = IdentityAddressSpaceTranslator::kPageSize;
   const auto &first = state.elements[state.next_element];
   if (state.transfer_token.pending() || (!state.access && wf.process_id() != 0) ||
-      !first.in_bounds || first.completed_bytes != 0)
+      !first.in_bounds || state.completed_bytes != 0)
     return 0;
   const size_t size = state.desc.elem_size;
   size_t count = 1;
@@ -769,42 +801,26 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
          (count + 1) * size <= kCopyBufferBytes &&
          (count + 1) * size <= kPageBytes - (first.global_address & (kPageBytes - 1))) {
     const auto &next = state.elements[state.next_element + count];
-    if (!next.in_bounds || next.completed_bytes != 0 ||
-        next.global_address != first.global_address + count * size ||
+    if (!next.in_bounds || next.global_address != first.global_address + count * size ||
         next.lds_address != first.lds_address + count * size)
       break;
     ++count;
   }
   if (count == 1)
     return 0;
-  std::array<std::byte, kCopyBufferBytes> bytes;
-  auto span = std::span(bytes).first(count * size);
-  if (state.store_from_lds) {
-    for (size_t i = 0; i < count; ++i)
-      std::memcpy(bytes.data() + i * size, state.elements[state.next_element + i].bytes.data(),
-                  size);
-  }
+  auto bytes = std::span(state.payload).subspan(state.next_element * size, count * size);
   bool copied;
   if (state.access) {
-    copied = state.store_from_lds ? state.access->try_write_contiguous(first.global_address, span)
-                                  : state.access->try_read_contiguous(first.global_address, span);
-  } else if (state.store_from_lds) {
-    copied = wf.write_gpu_memory(first.global_address,
-                                 {reinterpret_cast<const uint8_t *>(bytes.data()), span.size()}) ==
-             VmAccessOutcome::Complete;
+    copied = state.store_from_lds
+                 ? state.access->try_write_contiguous(first.global_address, std::as_bytes(bytes))
+                 : state.access->try_read_contiguous(first.global_address,
+                                                     std::as_writable_bytes(bytes));
   } else {
-    copied = wf.read_gpu_memory(first.global_address, {reinterpret_cast<uint8_t *>(bytes.data()),
-                                                       span.size()}) == VmAccessOutcome::Complete;
+    copied = (state.store_from_lds
+                  ? wf.write_gpu_memory(first.global_address, bytes)
+                  : wf.read_gpu_memory(first.global_address, bytes)) == VmAccessOutcome::Complete;
   }
-  if (!copied)
-    return 0;
-  for (size_t i = 0; i < count; ++i) {
-    auto &element = state.elements[state.next_element + i];
-    if (!state.store_from_lds)
-      std::memcpy(element.bytes.data(), bytes.data() + i * size, size);
-    element.completed_bytes = size;
-  }
-  return count;
+  return copied ? count : 0;
 }
 
 template <bool Coalesce = true>
@@ -813,8 +829,7 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
     return state.outcome;
 
   if (state.access && !state.transfer_token.pending() && !state.access->info().ready &&
-      state.next_element == 0 &&
-      (state.elements.empty() || state.elements.front().completed_bytes == 0)) {
+      state.next_element == 0 && state.completed_bytes == 0) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
       return state.outcome = VmAccessOutcome::Faulted;
@@ -834,42 +849,29 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
     }
 
     const uint32_t size = state.desc.elem_size;
-    VmAccessOutcome outcome = VmAccessOutcome::Complete;
+    auto bytes = std::span(state.payload).subspan(state.next_element * size, size);
+    VmAccessOutcome outcome;
     if (state.access) {
-      if (state.store_from_lds) {
-        outcome = state.access->write(
-            element.global_address,
-            std::span<const std::byte>(reinterpret_cast<const std::byte *>(element.bytes.data()),
-                                       size),
-            element.completed_bytes, state.transfer_token);
-      } else {
-        outcome = state.access->read(
-            element.global_address,
-            std::span<std::byte>(reinterpret_cast<std::byte *>(element.bytes.data()), size),
-            element.completed_bytes, state.transfer_token);
-      }
-    } else if (state.store_from_lds) {
-      outcome = wf.write_gpu_memory(element.global_address,
-                                    std::span<const uint8_t>(element.bytes).first(size));
+      outcome = state.store_from_lds
+                    ? state.access->write(element.global_address, std::as_bytes(bytes),
+                                          state.completed_bytes, state.transfer_token)
+                    : state.access->read(element.global_address, std::as_writable_bytes(bytes),
+                                         state.completed_bytes, state.transfer_token);
     } else {
-      outcome =
-          wf.read_gpu_memory(element.global_address, std::span<uint8_t>(element.bytes).first(size));
+      outcome = state.store_from_lds ? wf.write_gpu_memory(element.global_address, bytes)
+                                     : wf.read_gpu_memory(element.global_address, bytes);
     }
     if (outcome != VmAccessOutcome::Complete) {
       state.outcome = outcome;
       return outcome;
     }
     ++state.next_element;
+    state.completed_bytes = 0;
   }
 
   if (!state.completion_committed) {
-    if (!state.store_from_lds) {
-      for (const TensorDmaTransferElement &element : state.elements) {
-        const uint32_t lds_bytes = state.desc.elem_size - element.lds_dropped_bytes;
-        for (uint32_t byte = 0; byte < lds_bytes; ++byte)
-          wf.lds().write8(element.lds_address + byte, element.bytes[byte]);
-      }
-    }
+    if (!state.store_from_lds)
+      copy_tensor_lds(state, wf);
     if (state.desc.atomic_barrier)
       arrive_atomic_barrier(state.desc, wf);
     state.completion_committed = true;

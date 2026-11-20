@@ -185,7 +185,7 @@ BufferResource decode_buffer_resource(uint32_t srd0, uint32_t srd1, uint32_t srd
   resource.stride = resource.raw_stride * kStrideMultipliers[resource.stride_scale_encoding];
   resource.swizzle_enabled = ((srd3 >> 28) & 0x1u) != 0;
   resource.oob_select = ((srd3 >> 29) & 0x1u) != 0;
-  resource.type = static_cast<uint8_t>((srd3 >> 30) & 0x3u);
+  resource.type = amdgpu::addr_calc::cdna5_buffer_resource_type(srd3);
   return resource;
 }
 
@@ -330,14 +330,12 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
   // descriptor sourced from TTMPs lives in the trap-temporary file, and
   // read_sgpr() would fetch whatever the allocation holds at that index.
   const uint32_t sb_sel = inst.rsrc;
-  if (!amdgpu::addr_calc::buffer_resource_range_is_backed(wf, sb_sel)) {
+  const auto words = amdgpu::addr_calc::read_buffer_resource(wf, sb_sel);
+  if (!words) {
     amdgpu::reject_vector_memory_access(d);
     return;
   }
-  uint32_t srd0 = amdgpu::read_scalar_selector(wf, sb_sel);
-  uint32_t srd1 = amdgpu::read_scalar_selector(wf, sb_sel + 1);
-  uint32_t srd2 = amdgpu::read_scalar_selector(wf, sb_sel + 2);
-  uint32_t srd3 = amdgpu::read_scalar_selector(wf, sb_sel + 3);
+  const auto [srd0, srd1, srd2, srd3] = *words;
   BufferResource resource = decode_buffer_resource(srd0, srd1, srd2, srd3);
   if (resource.type != 0) {
     // CDNA5 ignores VBUFFER operations whose resource TYPE does not identify
@@ -371,6 +369,31 @@ void mubuf_calculate_addresses(const VbufferMachineInst &inst, amdgpu::Wavefront
     // encodings defensively so their wrapped 45-bit address cannot reach L1.
     d.element_lane_masks.assign(d.num_elems, 0);
     d.lane_mask = 0;
+    return;
+  }
+  // A linear single-element access has one bound for the whole wave. Its
+  // unsigned vector offset and nonnegative IOFFSET fit below the 45-bit wrap.
+  if (d.num_elems == 1 && !resource.swizzle_enabled && !inst.idxen && inst.offen &&
+      (exec == UINT32_MAX || exec == UINT64_MAX)) {
+    const uint64_t bias = uint64_t{soffset_val} + static_cast<uint32_t>(ioff);
+    uint64_t bound = resource.num_records;
+    if (resource.oob_select)
+      bound = std::min<uint64_t>(bound, resource.stride);
+    const unsigned lanes = exec == UINT32_MAX ? 32 : 64;
+    d.lane_mask = 0;
+    if (bias <= bound && d.elem_size <= bound - bias) {
+      const uint64_t maximum = bound - bias - d.elem_size;
+      const uint64_t base = resource.base_address + bias;
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        const uint32_t offset = address_regs.offsets[lane];
+        const bool valid = offset <= maximum;
+        d.per_lane_addr[lane] = valid ? base + offset : 0;
+        d.lane_mask |= uint64_t{valid} << lane;
+      }
+    } else {
+      std::fill_n(d.per_lane_addr.begin(), lanes, uint64_t{0});
+    }
+    d.element_lane_masks.assign(1, d.lane_mask);
     return;
   }
   if (!resource.swizzle_enabled)

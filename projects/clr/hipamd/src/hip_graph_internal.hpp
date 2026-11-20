@@ -37,6 +37,7 @@ class GraphExecClassic;
 class GraphExecSegmented;
 class UserObject;
 class GraphKernelNode;
+class GraphMemAllocNode;
 typedef GraphNode* Node;
 enum class GraphMemcpyNodeKind {
   None,
@@ -253,7 +254,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   GraphNode(hipGraphNodeType type, const char* style = "", const char* shape = "",
             const char* label = "")
       : hipGraphNodeDOTAttribute(style, shape, label),
-        id_(nextID.fetch_add(1, std::memory_order_relaxed)),
+        id_(0),
         type_(type),
         visited_(false),
         parentGraph_(nullptr),
@@ -298,11 +299,11 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   size_t GetKernargSegmentByteSize() const { return kernargSegmentByteSize_; }
   size_t GetKernargSegmentAlignment() const { return kernargSegmentAlignment_; }
 
-  //! Capture packets and accumulate them into a batch if provided.
-  //! |batchMetadataPackets|, when provided, receives the captured metadata-prefetch
-  //! packet for each AQL packet (pointer-parallel to |batchPackets|). Entries are
-  //! nullptr for packets that produced no metadata (e.g. device has no metadata
-  //! ring buffer), so the batch's flat metadata buffer stays index-aligned.
+  //! Capture packets and append them to the provided batch vectors without modifying existing
+  //! entries. Each AQL packet appends one kernel-name entry and, when |batchMetadataPackets| is
+  //! provided, one metadata entry. Metadata entries are nullptr when a packet produced no metadata
+  //! (e.g. the device has no metadata ring buffer), keeping the vectors index-aligned. A successful
+  //! return guarantees that at least one packet was captured.
   virtual hipError_t CaptureAndFormPacket(GraphKernelArgManager* kernArgMgr,
                                   std::vector<uint8_t*>* batchPackets = nullptr,
                                   std::vector<const std::string*>* batchKernelNames = nullptr,
@@ -367,7 +368,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     // Commands are captured and released. Clear them from the object.
     commands_.clear();
 
-    return status;
+    return gpuPackets_.empty() ? hipErrorUnknown : status;
   }
   hip::Stream* GetQueue() const { return stream_; }
 
@@ -388,7 +389,7 @@ class GraphNode : public hipGraphNodeDOTAttribute {
     stream_ = stream;
     return hipSuccess;
   }
-  /// Return node unique ID
+  /// Return the node ID local to its containing graph
   int GetID() const { return id_; }
   /// Returns command for graph node
   virtual std::vector<amd::Command*>& GetCommands() { return commands_; }
@@ -572,7 +573,6 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   int hw_queue_id_ = -1; //! Hardware queue ID on which this node will be executed
   int32_t segment_id_ = -1;  //! Segment ID on which this node will be executed
   int32_t launch_id_ = -1;  //! Launch ID of this node in the entire graph execution sequence
-  static std::atomic<int> nextID;
   Graph* parentGraph_;
   static std::unordered_set<GraphNode*> nodeSet_;
   static amd::Monitor nodeSetLock_;
@@ -1057,6 +1057,7 @@ class Graph {
   std::unordered_map<UserObject*, int> graphUserObj_;
   unsigned int id_;
   static std::atomic<int> nextID;
+  unsigned int nextNodeID_ = 0;
   uint32_t memalloc_nodes_ = 0;  //!< Count of unreleased Memalloc nodes
   std::vector<Node> roots_;      //!< Root nodes, used in parallel launches
   std::vector<Node> leafs_;      //!< The list of leaf nodes on every parallel stream
@@ -1179,10 +1180,10 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
   //! descending through child graphs. Returns an empty result if the node is not
   //! part of the graph this exec was instantiated from.
   ResolvedExecNode ResolveClonedNode(Node node);
-  
-  std::vector<Node>& GetNodes() { return topoOrder_; }
+
+  const std::vector<Node>& GetNodes() const { return topoOrder_; }
   uint64_t GetFlags() const { return flags_; }
-  bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  bool TopologicalOrder();
 
   virtual hipError_t Init() = 0;
   virtual hipError_t Run(hip::Stream* stream) = 0;
@@ -1199,6 +1200,8 @@ class GraphExecBase : public amd::ReferenceCountedObject, public Graph {
  protected:
   uint64_t flags_ = 0;
   bool repeatLaunch_ = false;
+  //! MemAlloc nodes of topoOrder_, in order. Filled by TopologicalOrder() at Init time.
+  std::vector<GraphMemAllocNode*> memAllocNodes_;
   //! parallel streams per device
   std::unordered_map<int, std::vector<hip::Stream*>> parallel_streams_;
   //! Extra capture-device stream created on first cross-device launch, covering
@@ -1351,6 +1354,10 @@ class GraphExecSegmented : public GraphExecBase {
     std::vector<uint32_t> filteredValidPacketFullHeaders;
     std::vector<uint8_t> filteredFlatMetadataData;
     bool filteredCacheValid = false;
+    // Slot of each dispatchPackets entry in the filtered buffers, or kNotFiltered when its
+    // node is disabled. Built by rebuildFilteredLists.
+    static constexpr size_t kNotFiltered = ~size_t{0};
+    std::vector<size_t> filteredIndex;
 
     // Node tracking
     struct NodeRange {
@@ -1379,7 +1386,21 @@ class GraphExecSegmented : public GraphExecBase {
     // it has no remaining dependency, or its first kernel carries the one dependency in its
     // ext-dispatch dep_signal. Later packets keep the barrier bit.
     bool firstPacketUnordered = false;
+    // A patch_list entry whose packet is in dispatchPackets or is fallbackDepBarrier, and the
+    // last known index of that packet in dispatchPackets (kNoSlot when it has none). The patch
+    // functions below only touch these entries.
+    struct OwnedPatch {
+      size_t patch;
+      size_t slot;
+    };
+    static constexpr size_t kNoSlot = ~size_t{0};
+    std::vector<OwnedPatch> ownedPatches;
     PacketBatch() {}
+    // Index in dispatchPackets of |owned|'s packet. Uses the cached slot when it still holds
+    // the packet; otherwise searches the batch and re-caches. Callers handle fallbackDepBarrier,
+    // which has no slot. A packet that is not in the batch is a broken patch, and the search
+    // asserts.
+    size_t findAndCachePacketSlot(OwnedPatch& owned, const uint8_t* packet);
     // O(1) enable/disable operations - just update state
     void setEnabled(GraphNode* node, bool enabled);
     // Rebuild cached filtered lists if cache is stale.
@@ -1401,6 +1422,16 @@ class GraphExecSegmented : public GraphExecBase {
                                          amd::AlignedVector64<uint8_t>& flatData,
                                          std::vector<uint32_t>& fullHeaders,
                                          std::vector<uint8_t>& flatMetadata);
+    // Write one packet and its metadata into existing flat-buffer slots, in the same layout
+    // appendPacketToFlatBuffer produces.
+    static void writePacketToFlatSlot(const uint8_t* pkt_raw, const uint8_t* metadata_raw,
+                                      uint8_t* dst, uint32_t* fullHeader, uint8_t* metadataDst);
+    // Rewrite flat-buffer slot |idx| in place from dispatchPackets[idx]. Requires the flat
+    // buffers to already hold one slot per dispatchPackets entry.
+    void rewriteFlatSlot(size_t idx);
+    // Rewrite the filtered-buffer slot holding dispatchPackets[idx] in place. Requires a valid
+    // filtered cache; does nothing when the packet's node is disabled.
+    void rewriteFilteredSlot(size_t idx);
     // Stamp the four packet headers of a 256-byte metadata slot with
     // HSA_PACKET_TYPE_INVALID (type=1) so the CP metadata-prefetch engine skips it.
     static void invalidateMetadataSlot(uint8_t* slot);
@@ -1421,6 +1452,8 @@ class GraphExecSegmented : public GraphExecBase {
   //! Batches of accumulated packets and kernel names for batch dispatch optimization
   //! Map from segment ID to SegmentBatch for O(1) lookup
   std::unordered_map<int, SegmentBatch> segmentBatches_;
+  //! Packet batch holding each captured node. Rebuilt by CaptureAndFormPacketsForGraph.
+  std::unordered_map<GraphNode*, PacketBatch*> nodeToPacketBatch_;
   bool batchAQLPacketUpdates_ = false;
   bool reuseKernargSlots_ = false;
   std::vector<PacketBatch*> updatedPacketBatches_;

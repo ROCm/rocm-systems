@@ -26,6 +26,12 @@ Before tracing or profiling your HIP application using ``rocprofv3``, build it u
    cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
    cmake --build <build-directory> --target all --parallel <N>
 
+Process creation
+----------------
+
+Profiling a child that continues after ``fork()`` without ``exec()`` is unsupported. Use
+``fork()`` followed by ``exec()`` or a spawn operation to profile a new child process.
+
 .. _gpu-performance-level:
 
 Setting GPU performance level for PMC profiling
@@ -1196,7 +1202,7 @@ The preceding command collects both counter groups in a single run of ``<applica
 
    - JSON counter records include a ``replay_pass`` field. CSV ``counter_collection.csv`` does **not** add a ``Replay_Pass`` column; passes of a dispatch share ``Dispatch_Id`` and are distinguished by ``Counter_Name``.
 
-   - Only coarse-grained device allocations (and module-scope ``__device__`` / ``__constant__`` variables) are restored. Unified, managed, and ``hipMallocAsync`` memory are not. Snapshot is a full in-memory copy; dirty-page hashing is not implemented in this version.
+   - Only tracked coarse-grained device allocations and HSA-visible module-scope ``__device__`` / ``__constant__`` variables are restored; internal or static state not exposed as symbols is not restored. Argument-memory checks are best effort. Detected unsupported memory or failed required replay checks cause the dispatch to run once without replay. Snapshot is a full in-memory copy; dirty-page hashing is not implemented. See :ref:`using-kernel-replay` for limitations.
 
    - HIP graph launches are not replayed (warn once, run once).
 

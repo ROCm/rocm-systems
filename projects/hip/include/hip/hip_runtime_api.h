@@ -657,6 +657,16 @@ typedef enum hipDeviceAttribute_t {
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
 
+/**
+ * @brief Execution affinity types, mirroring CUDA's CUexecAffinityType.
+ */
+typedef enum hipExecAffinityType {
+  hipExecAffinityTypeCUCount = 0,     ///< Compute-unit count affinity (== CU_EXEC_AFFINITY_TYPE_SM_COUNT); always supported
+  hipExecAffinityTypeMax,             ///< Sentinel (== CU_EXEC_AFFINITY_TYPE_MAX)
+  hipExtExecAffinityTypeGranularityCU = 0x1000,   ///< Per-CU CU-mask granularity. Valid only on Rocm device.
+  hipExtExecAffinityTypeGranularityWGP = 0x1001,  ///< Per-WGP CU-mask granularity. Valid only on Rocm device.
+} hipExecAffinityType;
+
 // Flags that can be used with hipGetProcAddress.
 /** Default flag. Equivalent to HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM if compiled with
  *  -fgpu-default-stream=per-thread flag or HIP_API_PER_THREAD_DEFAULT_STREAM macro is
@@ -2263,6 +2273,27 @@ typedef struct hipArrayMemoryRequirements {
 } hipArrayMemoryRequirements;
 
 /**
+ * Indicates that the layered sparse HIP array or HIP mipmapped array has a single mip tail region
+ * for all layers.
+ */
+#define hipArraySparsePropertiesSingleMipTail 0x1
+
+/**
+ * Sparse HIP array and HIP mipmapped array properties.
+ */
+typedef struct hipArraySparseProperties {
+  struct {
+    unsigned int width;   ///< Width of sparse tile in elements
+    unsigned int height;  ///< Height of sparse tile in elements
+    unsigned int depth;   ///< Depth of sparse tile in elements
+  } tileExtent;
+  unsigned int miptailFirstLevel;  ///< First mip level at which the mip tail begins
+  unsigned long long miptailSize;  ///< Total size of the mip tail
+  unsigned int flags;  ///< Zero or ::hipArraySparsePropertiesSingleMipTail
+  unsigned int reserved[4];  ///< Reserved for future use, must be zero now
+} hipArraySparseProperties;
+
+/**
  * Requested handle type for address range.
  */
 typedef enum hipMemRangeHandleType {
@@ -2573,6 +2604,28 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceI
  */
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target,
                                              enum hipFlushGPUDirectRDMAWritesScope scope);
+/**
+ * @brief Returns whether the device supports an execution affinity type, and the
+ * device's CU-masking granularity.
+ *
+ * For #hipExecAffinityTypeCUCount, @p pi is always set to 1.
+ *
+ * For #hipExtExecAffinityTypeGranularityCU and #hipExtExecAffinityTypeGranularityWGP,
+ * @p pi reports the granularity the runtime will actually apply to a CU mask on this
+ * device, so exactly one of the two is reported as supported and the other as
+ * unsupported. This is an effective runtime property rather than a fixed hardware one:
+ * WGP granularity is used on gfx10 through gfx12.4 and is controlled by the
+ * GPU_ENABLE_WGP_MODE environment variable, which defaults to 1. Setting
+ * GPU_ENABLE_WGP_MODE=0 makes those devices report CU granularity instead. gfx9 and
+ * gfx12.5 and later always report CU granularity, regardless of that variable.
+ *
+ * @param [out] pi   Set to 1 if @p type is supported, 0 otherwise.
+ * @param [in]  type The ::hipExecAffinityType to query.
+ * @param [in]  dev  The device ordinal to query.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice
+ */
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev);
 /**
  * @brief Returns the default memory pool of the specified device
  *
@@ -6092,6 +6145,26 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
  */
 hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
 /**
+ * @brief Gets a HIP array plane from a multiplanar HIP array.
+ *
+ * @note HIP does not implement multiplanar arrays. On AMD devices no array a caller can create
+ * has planes, so well-formed calls always report #hipErrorNotSupported. On NVIDIA devices the
+ * call forwards to cuArrayGetPlane, which succeeds for an array created as multiplanar through
+ * the CUDA driver API.
+ *
+ * @param[out] pPlaneArray - pointer to the returned HIP array that represents a single format
+ * plane of the input HIP array hArray
+ * @param[in] hArray - multiplanar HIP array
+ * @param[in] planeIdx - index of the array plane
+ *
+ * @returns #hipErrorInvalidValue if @p pPlaneArray is nullptr, #hipErrorInvalidHandle if
+ * @p hArray is not a valid array. Otherwise #hipErrorNotSupported on AMD devices, or on NVIDIA
+ * devices #hipSuccess and the requested plane for a multiplanar array.
+ *
+ * @see hipArrayCreate, hipArray3DCreate, hipArrayDestroy
+ */
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
+/**
  *  @brief Copies data between host and device.
  *
  * hipMemcpy2D supports memory matrix copy from the pointed area src to the pointed area dst.
@@ -6572,6 +6645,20 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dp
  */
 hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap, hipDevice_t device);
+
+/**
+ * @brief Returns the layout properties of a sparse HIP array.
+ *
+ * @param [out] sparseProperties - Pointer to hipArraySparseProperties
+ * @param [in] array - HIP array to get the sparse properties of
+ *
+ * @returns #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorNotSupported
+ *
+ * @note Sparse HIP arrays are not currently supported on AMD devices;
+ * This function always reports #hipErrorNotSupported for well-formed arguments.
+ */
+hipError_t hipArrayGetSparseProperties(hipArraySparseProperties* sparseProperties,
+                                       hipArray_t array);
 // doxygen end Memory
 /**
  * @}
@@ -9010,6 +9097,9 @@ int hipGetStreamDeviceId(hipStream_t stream);
  *  @defgroup Graph Graph Management
  *  @{
  *  This section describes the graph management types & functions of HIP runtime API.
+ *
+ *  @note hipGraph_t objects are not thread-safe. It is the user's responsibility to ensure that
+ *  multiple threads do not concurrently access the same hipGraph_t.
  */
 
 /**
@@ -9271,6 +9361,54 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
  *
  */
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
+
+/**
+ * @brief Returns the local node ID of a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] nodeId - Returns the node ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the node ID of @p node in @p nodeId. The value matches the node ID reported by
+ * #hipGraphDebugDotPrint. The local node ID and graph ID together uniquely identify the node.
+ *
+ */
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
+
+/**
+ * @brief Returns an ID used by tools to identify a graph node.
+ *
+ * @param [in] node - Node to query.
+ * @param [out] toolsId - Returns the ID used by tools.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ */
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
+
+/**
+ * @brief Returns the ID of a graph.
+ *
+ * @param [in] graph - Graph to query.
+ * @param [out] graphId - Returns the graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graph in @p graphId. The value matches the graph ID reported by
+ * #hipGraphDebugDotPrint.
+ *
+ */
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
+
+/**
+ * @brief Returns the ID of an executable graph.
+ *
+ * @param [in] graphExec - Executable graph to query.
+ * @param [out] graphId - Returns the executable graph ID.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Returns the ID of @p graphExec in @p graphId.
+ *
+ */
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
 
 /**
  * @brief Remove a node from the graph.

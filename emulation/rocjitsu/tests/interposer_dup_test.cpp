@@ -15,6 +15,7 @@
 /// tracking that lives in the interposer.
 
 #include "scoped_temp.h"
+#include "syscall_error_filter.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -293,6 +294,49 @@ TEST(InterposerDupTest, TrackedMunmapFailureUsesLibcErrno) {
   kfd_ioctl_free_memory_of_gpu_args free_args{};
   free_args.handle = allocation.handle;
   EXPECT_EQ(ioctl(kfd, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
+TEST(InterposerDupTest, ClientMunmapClearsOnlyReplacedSvmPolicy) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  const long page_size = sysconf(_SC_PAGESIZE);
+  ASSERT_GT(page_size, 0);
+  const auto page = static_cast<size_t>(page_size);
+  auto *base = static_cast<std::byte *>(
+      mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(base, MAP_FAILED);
+
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  const unsigned long request =
+      (AMDKFD_IOC_SVM & ~(_IOC_SIZEMASK << _IOC_SIZESHIFT)) | (buffer.size() << _IOC_SIZESHIFT);
+  svm->start_addr = reinterpret_cast<uintptr_t>(base);
+  svm->size = 2 * page;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 1;
+  svm->attrs[0] = {KFD_IOCTL_SVM_ATTR_NO_ACCESS, gpu_id};
+  ASSERT_EQ(ioctl(kfd, request, svm), 0);
+  const auto expect_access = [&](std::byte *address, uint32_t expected) {
+    svm->start_addr = reinterpret_cast<uintptr_t>(address);
+    svm->size = page;
+    svm->op = KFD_IOCTL_SVM_OP_GET_ATTR;
+    svm->attrs[0] = {KFD_IOCTL_SVM_ATTR_ACCESS, gpu_id};
+    ASSERT_EQ(ioctl(kfd, request, svm), 0);
+    EXPECT_EQ(svm->attrs[0].type, expected);
+  };
+  expect_access(base, KFD_IOCTL_SVM_ATTR_NO_ACCESS);
+  ASSERT_EQ(munmap(base, 1), 0);
+  ASSERT_EQ(mmap(base, page, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0),
+            base);
+  expect_access(base, KFD_IOCTL_SVM_ATTR_ACCESS);
+  expect_access(base + page, KFD_IOCTL_SVM_ATTR_NO_ACCESS);
+  EXPECT_EQ(munmap(base, 2 * page), 0);
   EXPECT_EQ(close(kfd), 0);
 }
 
@@ -889,6 +933,59 @@ TEST(InterposerDupTest, FcntlDupfdKeepsKfdRouting) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+// The memory keeper takes its lease with OFD locks, which go through the
+// interposed fcntl with a pointer argument. Take a write lock on a temporary
+// file, check that F_OFD_GETLK reports the conflict from a second open of the
+// same file, then release the lock. This catches a dropped vararg pointer
+// without starting the keeper.
+TEST(InterposerDupTest, FcntlOfdLocksReachTheRealFileTable) {
+  rocjitsu::test::ScopedTempFile lock_file;
+  ASSERT_TRUE(lock_file.initialize("rocjitsu_ofd_lock"));
+
+  int first = open(lock_file.path().c_str(), O_RDWR | O_CLOEXEC);
+  ASSERT_GE(first, 0);
+  int second = open(lock_file.path().c_str(), O_RDWR | O_CLOEXEC);
+  ASSERT_GE(second, 0);
+
+  struct flock lease {};
+  lease.l_type = F_WRLCK;
+  lease.l_whence = SEEK_SET;
+  lease.l_start = 0;
+  lease.l_len = 0;
+  ASSERT_EQ(fcntl(first, F_OFD_SETLK, &lease), 0) << std::strerror(errno);
+
+  // The lock is open-file-description scoped: a second open of the same path
+  // must observe the conflict. F_OFD_GETLK reports the conflicting lock with
+  // l_pid set to -1, since an OFD lock is not tied to a process id.
+  struct flock conflict {};
+  conflict.l_type = F_WRLCK;
+  conflict.l_whence = SEEK_SET;
+  conflict.l_start = 0;
+  conflict.l_len = 0;
+  ASSERT_EQ(fcntl(second, F_OFD_GETLK, &conflict), 0) << std::strerror(errno);
+  EXPECT_EQ(conflict.l_type, F_WRLCK);
+  EXPECT_EQ(conflict.l_pid, -1);
+
+  // Unlock through the waiting variant; nothing conflicts, so it returns at
+  // once and a third probe no longer reports the lock.
+  struct flock release {};
+  release.l_type = F_UNLCK;
+  release.l_whence = SEEK_SET;
+  release.l_start = 0;
+  release.l_len = 0;
+  ASSERT_EQ(fcntl(first, F_OFD_SETLKW, &release), 0) << std::strerror(errno);
+  struct flock clear {};
+  clear.l_type = F_WRLCK;
+  clear.l_whence = SEEK_SET;
+  clear.l_start = 0;
+  clear.l_len = 0;
+  ASSERT_EQ(fcntl(second, F_OFD_GETLK, &clear), 0) << std::strerror(errno);
+  EXPECT_EQ(clear.l_type, F_UNLCK);
+
+  EXPECT_EQ(close(second), 0);
+  EXPECT_EQ(close(first), 0);
+}
+
 // dup2 that OVERWRITES the primary KFD fd number must invalidate the old primary
 // identity: after dup2(other, kfd) the kfd number now names 'other', so KFD
 // ioctls on it must NOT be routed to the (now-replaced) KFD backend, and closing
@@ -1335,12 +1432,13 @@ int open_drm_render() {
     return -1;
   }
 
-  const std::string fd_path = "/proc/self/fd/" + std::to_string(fd);
-  std::array<char, 128> target{};
-  const ssize_t length = readlink(fd_path.c_str(), target.data(), target.size());
-  constexpr char kSyntheticDrmFd[] = "/memfd:rocjitsu_drm (deleted)";
-  if (length != sizeof(kSyntheticDrmFd) - 1 ||
-      std::memcmp(target.data(), kSyntheticDrmFd, sizeof(kSyntheticDrmFd) - 1) != 0) {
+  // The interposer reports a character device backed by an unlinked regular
+  // file. The raw stat prevents test ioctls from reaching a physical device.
+  struct stat backing {
+  }, reported{};
+  if (syscall(SYS_fstat, fd, &backing) != 0 || !S_ISREG(backing.st_mode) || backing.st_nlink != 0 ||
+      fstat(fd, &reported) != 0 || !S_ISCHR(reported.st_mode) ||
+      reported.st_rdev != makedev(226, minor)) {
     close(fd);
     errno = ENODEV;
     return -1;
@@ -2390,6 +2488,10 @@ TEST(InterposerDrmTest, DeviceViewRetainsDumpIdentityAfterReleaseAndMove) {
   ASSERT_NE(target, MAP_FAILED);
   ASSERT_EQ(mremap(mapped, 4096, 4096, MREMAP_MAYMOVE | MREMAP_FIXED, target), target);
   EXPECT_EQ(*static_cast<uint32_t *>(target), 0x12345678u);
+  // The token variant also exercises proc snapshots when memfd_create is unavailable.
+  const char *token = std::getenv("RJ_TEST_FORCE_TOKEN_BACKING");
+  if (token && std::strcmp(token, "1") == 0)
+    rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
   for (const char *path : {"/proc/self/maps", "/proc/self/smaps"}) {
     std::ifstream maps(path);
     std::string line;
@@ -5382,6 +5484,19 @@ TEST(InterposerDrmTest, CanonicalSysfsPathsRetainSimulatedDevice) {
   EXPECT_STREQ(resolved, "/");
   EXPECT_EQ(realpath("/sys/dev/char/226:999999/device/uevent", resolved), nullptr);
   EXPECT_EQ(errno, ENOENT);
+  close(kfd);
+}
+
+TEST(InterposerDrmTest, MissingMemfdRoutesRenderNodeIoctls) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  rocjitsu::test::set_syscall_error(SYS_memfd_create, ENOSYS);
+  const int drm = open_drm_render();
+  ASSERT_GE(drm, 0);
+  drm_amdgpu_info_device device{};
+  EXPECT_TRUE(query_drm_device_info(drm, &device));
+  EXPECT_GT(device.cu_active_number, 0u);
+  close(drm);
   close(kfd);
 }
 

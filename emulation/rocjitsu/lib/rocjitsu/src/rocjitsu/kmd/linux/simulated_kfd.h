@@ -53,6 +53,7 @@ class VirtualMachine;
 
 namespace amdgpu {
 class ComputeUnitCore;
+class KfdInterruptTestAccess;
 class KfdPreparedProviderTestAccess;
 class Wavefront;
 } // namespace amdgpu
@@ -198,7 +199,28 @@ private:
 /// overloads so each client thread identifies itself by connection, not by
 /// shared mutable state.
 class SimulatedKfd : public LinuxKfd {
+  class LocalIngressCache;
+  // Borrowed host-command owner; trivial TLS does not retain the library.
+  inline static thread_local std::unique_ptr<LocalIngressCache> *scoped_ingress_cache_ = nullptr;
+  static LocalIngressCache &thread_ingress_cache();
+
 public:
+  /// @brief Bound host-thread ingress caches to the current command.
+  /// @details Simulation workers retain their caches outside this scope.
+  class ScopedIngressCache {
+  public:
+    ScopedIngressCache();
+    ~ScopedIngressCache();
+    ScopedIngressCache(const ScopedIngressCache &) = delete;
+    ScopedIngressCache &operator=(const ScopedIngressCache &) = delete;
+
+  private:
+    // Allocated only when this command enters the local memory fast path.
+    std::unique_ptr<LocalIngressCache> cache_;
+    // Borrowed enclosing scope, restored before releasing the current cache.
+    std::unique_ptr<LocalIngressCache> *previous_;
+  };
+
   /// Minimum backing descriptor requested when the process limit permits it.
   /// Shared with the interposer so its early table growth covers this range.
   static constexpr int kBackingFdMin = 4096;
@@ -527,6 +549,8 @@ public:
   /// requested allocation flags. mapping_flags_for_handle encodes that policy as
   /// COHERENT for the interposer's GEM_VA path.
   static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags, bool shared = false);
+  /// Whether the selected render node executes the GFX10 ordered-append reset ABI.
+  [[nodiscard]] bool supports_pm4_gds_wave_id_reset(uint32_t render_minor) const;
   /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
   int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
   /// Cancel accepted work and release the queue owned by one DRM context/ring.
@@ -740,8 +764,12 @@ public:
     uint32_t gpu_id = 0;
     /// Legacy KFD binding factory layered over the frontend-neutral VM service.
     std::unique_ptr<amdgpu::LegacyGpuVmAdapter> legacy_vm;
-    /// One revocable route owned by this frontend and carried only by its queues.
+    /// SDMA and SQ interrupts require a marked event mailbox on every GPU.
     amdgpu::InterruptSubscription interrupt_subscription;
+    /// CP completions follow the GC version's named-event mailbox rule.
+    amdgpu::InterruptSubscription cp_interrupt_subscription;
+    /// Software queue exceptions signal runtime events without GPU mailboxes.
+    amdgpu::InterruptSubscription exception_event_subscription;
     bool cps_initialized = false;
     /// Whether the "no CWSR layout for this architecture" warning has been
     /// logged for this GPU. The check now runs per faulting access rather than
@@ -778,6 +806,7 @@ private:
       const std::shared_ptr<PrivateGttCopySourceGate> &gate) noexcept;
 
   friend class VirtualMachine;
+  friend class amdgpu::KfdInterruptTestAccess;
   friend class amdgpu::KfdPreparedProviderTestAccess;
 
   using CacheWritebackResolver =

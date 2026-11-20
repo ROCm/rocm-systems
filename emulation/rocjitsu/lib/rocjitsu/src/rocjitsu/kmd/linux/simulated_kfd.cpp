@@ -330,6 +330,17 @@ SimulatedKfd::begin_gem_va_transaction(uint32_t process_id) {
   return std::make_unique<GemVaTransaction>(std::move(process));
 }
 
+bool SimulatedKfd::supports_pm4_gds_wave_id_reset(uint32_t render_minor) const {
+  const auto ordinal = gpu_ordinal_for_render_minor(render_minor);
+  if (!ordinal)
+    return false;
+  const auto *cp = gpus_[*ordinal].soc->assign_queue_owner_cp(0);
+  if (!cp || cp->compute_units().empty())
+    return false;
+  const auto arch = cp->compute_units().front()->arch();
+  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+}
+
 int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
                              amdgpu::Pm4Submission submission) {
   const auto process = find_process(local_process_id_);
@@ -1115,35 +1126,12 @@ int pidfd_is_exited(int pidfd) {
   return rc == 1 && (pfd.revents & (POLLIN | POLLHUP)) ? 1 : 0;
 }
 
-/// @brief Report whether the process behind @p procfd has exited but not been
-/// reaped.
-///
-/// @details A pidfd stays readable for a zombie, so pidfd_is_exited() cannot
-/// tell a live debuggee from one that has already run to completion. The state
-/// character in /proc/<pid>/stat can. It sits after the last ')' because the
-/// comm field is parenthesised and may itself contain spaces and parentheses.
-///
-/// @retval 1 The target is a zombie (Z) or dead (X).
-/// @retval 0 The target is still running.
-/// @retval <0 Negative errno; the state could not be determined.
 int procfd_is_zombie(int procfd) {
-  // Passthrough, not ::openat/::read/::close: these run inside driver ioctls that
-  // the interposer dispatched, so a bare ::close() here would re-enter the
-  // interposer's own close() hook mid-dispatch. See PassthroughFdTraits.
+  // Pin stat through the existing proc directory, never by a recycled PID.
   UniqueDriverFd stat_fd(libc_passthrough().openat(procfd, "stat", O_RDONLY | O_CLOEXEC, 0));
-  if (stat_fd.get() < 0)
-    return errno == ENOENT ? 1 : -errno;
-  char buffer[4096];
-  const ssize_t bytes = libc_passthrough().read(stat_fd.get(), buffer, sizeof(buffer) - 1);
-  const int read_error = errno;
-  stat_fd.reset();
-  if (bytes < 0)
-    return -read_error;
-  buffer[bytes] = '\0';
-  const char *name_end = std::strrchr(buffer, ')');
-  if (name_end == nullptr || name_end[1] != ' ' || name_end[2] == '\0')
-    return -EIO;
-  return name_end[2] == 'Z' || name_end[2] == 'X';
+  if (!stat_fd)
+    return errno == ENOENT || errno == ESRCH ? 1 : -errno;
+  return proc_stat_is_exited(stat_fd.get());
 }
 
 int pin_process_identity(pid_t pid, UniqueDriverFd &pidfd, UniqueDriverFd &procfd) {
@@ -1873,6 +1861,65 @@ SimulatedKfd::GpuAliasJoin SimulatedKfd::join_gpu_aliases_impl(
   return result;
 }
 
+class SimulatedKfd::LocalIngressCache {
+public:
+  struct Binding {
+    // Expected VM snapshot identity owning the borrowed binding pointers.
+    uint64_t identity = 0;
+    // Process selected by the issuing memory operation.
+    uint32_t process_id = 0;
+    // GPU selected by the issuing memory operation.
+    uint32_t gpu_id = 0;
+    // Distinguishes driver lifetimes without retaining the driver itself.
+    std::weak_ptr<CuIngressAccess> driver;
+    // Borrowed process retained by the expected VM snapshot.
+    const KfdProcess *process = nullptr;
+    // Last validated live snapshot identity for the address space.
+    uint64_t live_identity = 0;
+    // Borrowed device selected from the validated driver binding.
+    const GpuDevice *gpu = nullptr;
+    // Registered address-space generation for this process and GPU.
+    amdgpu::AddressSpaceHandle handle;
+  };
+  struct Alias {
+    // Expected VM snapshot identity.
+    uint64_t identity = 0;
+    // Grant publication under which the bounds were established.
+    uint64_t publication = 0;
+    // First byte of the uniform GPU grant.
+    uint64_t begin = 0;
+    // Exclusive end of the uniform GPU grant.
+    uint64_t end = 0;
+    // Local alias requiring an ingress permit, when present.
+    std::optional<GpuAliasIngressGate::Key> key;
+  };
+  // Most recent validated driver/process/device binding.
+  Binding binding;
+  // Uniform grants indexed by snapshot identity and publication.
+  std::array<Alias, 8> aliases;
+  // Round-robin replacement position in aliases.
+  unsigned next = 0;
+  // Gate anchor shared with outstanding local ingress permits.
+  GpuAliasIngressGate::LocalCache gate;
+};
+
+SimulatedKfd::ScopedIngressCache::ScopedIngressCache()
+    : previous_(std::exchange(scoped_ingress_cache_, &cache_)) {}
+
+SimulatedKfd::ScopedIngressCache::~ScopedIngressCache() { scoped_ingress_cache_ = previous_; }
+
+SimulatedKfd::LocalIngressCache &SimulatedKfd::thread_ingress_cache() {
+  if (scoped_ingress_cache_) {
+    if (!*scoped_ingress_cache_)
+      *scoped_ingress_cache_ = std::make_unique<LocalIngressCache>();
+    return **scoped_ingress_cache_;
+  }
+  thread_local std::unique_ptr<LocalIngressCache> cache;
+  if (!cache)
+    cache = std::make_unique<LocalIngressCache>();
+  return *cache;
+}
+
 std::optional<amdgpu::MemoryIngressAdmission>
 SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
                                           const amdgpu::GpuVmAccess &expected,
@@ -1891,16 +1938,8 @@ SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
 
   // The expected snapshot retains its translator and the process that owns its
   // publication counter. Cache only pointers owned by that exact binding.
-  struct LocalBinding {
-    uint64_t identity = 0;
-    uint32_t process_id = 0, gpu_id = 0;
-    std::weak_ptr<CuIngressAccess> driver;
-    const KfdProcess *process = nullptr;
-    uint64_t live_identity = 0;
-    const GpuDevice *gpu = nullptr;
-    amdgpu::AddressSpaceHandle handle;
-  };
-  static thread_local LocalBinding binding;
+  auto &cache = thread_ingress_cache();
+  auto &binding = cache.binding;
   if (binding.identity != expected.cache_identity() || binding.process_id != process_id ||
       binding.gpu_id != gpu_id || binding.driver.owner_before(cu_ingress_access_) ||
       cu_ingress_access_.owner_before(binding.driver)) {
@@ -1922,12 +1961,8 @@ SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
                live->cache_identity(),    gpu,        handle};
   }
   const auto *process = binding.process;
-  struct LocalAlias {
-    uint64_t identity = 0, publication = 0, begin = 0, end = 0;
-    std::optional<GpuAliasIngressGate::Key> key;
-  };
-  static thread_local std::array<LocalAlias, 8> entries;
-  static thread_local unsigned next = 0;
+  auto &entries = cache.aliases;
+  auto &next = cache.next;
   const auto &publication = process->gpu_grant_publication();
   const auto epoch = publication.load(std::memory_order_acquire);
   if (epoch == UINT64_MAX)
@@ -1968,7 +2003,7 @@ SimulatedKfd::try_local_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id,
 
   amdgpu::MemoryIngressPermit permit;
   if (it->key) {
-    auto admitted = alias_ingress_gate_->try_acquire_local(*it->key);
+    auto admitted = alias_ingress_gate_->try_acquire_local(*it->key, cache.gate);
     if (!admitted)
       return amdgpu::MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
     permit = std::move(*admitted);
@@ -2804,9 +2839,9 @@ SimulatedKfd::SimulatedKfd(SoC &soc, bool daemon_mode,
     : daemon_mode_(daemon_mode),
       debug_identity_validation_hook_(std::move(debug_identity_validation_hook)),
       debug_session_reaper_([this](std::stop_token stop) { reap_exited_debug_sessions(stop); }) {
-  // Resolve the real libc entry points once, up front and single-threaded, so no
-  // passthrough call site ever triggers a first-time dlsym under a per-process
-  // lock. Idempotent: a no-op if the interposer already resolved the table.
+  // Wait for the complete libc table before entering any per-process lock.
+  // Independent VM constructors may initialize concurrently; the interposer
+  // resolves the same table eagerly when enabled.
   libc_passthrough().resolve();
   cu_ingress_access_->driver = this;
   GpuDevice device;
@@ -2863,8 +2898,11 @@ SimulatedKfd::~SimulatedKfd() {
   }
   // CPs may outlive this frontend. Revoke callback admission and drain any
   // callback already executing before touching the state captured by them.
-  for (GpuDevice &gpu : gpus_)
+  for (GpuDevice &gpu : gpus_) {
     gpu.interrupt_subscription.reset();
+    gpu.cp_interrupt_subscription.reset();
+    gpu.exception_event_subscription.reset();
+  }
 
   debug_session_reaper_.request_stop();
   debug_session_reaper_.join();
@@ -3201,24 +3239,58 @@ void SimulatedKfd::init_command_processors_locked() {
     // SH_MEM_BASES bank through Wavefront::set_process_id.
     const kfd_process_device_apertures ap = gpu_apertures(static_cast<uint32_t>(i));
     g.soc->set_apertures(ap.lds_base, ap.lds_limit, ap.scratch_base, ap.scratch_limit);
-    g.interrupt_subscription =
+    const auto subscribe_interrupts = [this](bool signal_mailbox_updated) {
+      return amdgpu::InterruptSubscription(
+          [this, signal_mailbox_updated](uint32_t process_id, uint32_t event_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.deliver(process_id, event_id);
+              return;
+            }
+            std::lock_guard<std::mutex> ilk(interrupt_mutex_);
+            const std::unordered_map<uint32_t, EventState *>::iterator event =
+                event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end()) {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=true");
+              event->second->signal_interrupt(event_id, signal_mailbox_updated);
+            } else {
+              util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
+                               " found=false");
+            }
+          },
+          {},
+          [this](uint32_t process_id) {
+            if (const auto override = interrupt_override_for_testing_.sink()) {
+              override.notify_idle(process_id);
+              return;
+            }
+            std::lock_guard<std::mutex> lock(interrupt_mutex_);
+            const auto event = event_dispatch_.find(process_id);
+            if (event != event_dispatch_.end())
+              event->second->notify_idle();
+          });
+    };
+    g.exception_event_subscription =
         amdgpu::InterruptSubscription([this](uint32_t process_id, uint32_t event_id) {
           if (const auto override = interrupt_override_for_testing_.sink()) {
             override.deliver(process_id, event_id);
             return;
           }
-          std::lock_guard<std::mutex> ilk(interrupt_mutex_);
-          const std::unordered_map<uint32_t, EventState *>::iterator event =
-              event_dispatch_.find(process_id);
+          std::lock_guard<std::mutex> lock(interrupt_mutex_);
+          const auto event = event_dispatch_.find(process_id);
           if (event != event_dispatch_.end()) {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=true");
-            event->second->signal_interrupt(event_id);
-          } else {
-            util::Logger::cp("INTERRUPT_ROUTE: pid=", process_id, " event_id=", event_id,
-                             " found=false");
+            kfd_ioctl_set_event_args args{};
+            args.event_id = event_id;
+            static_cast<void>(event->second->set_event(&args));
           }
         });
+    // SDMA and SQ always require marked mailboxes. Only GC 12.1 CP completions
+    // can signal directly by ID, so compute queues retain a distinct route.
+    g.interrupt_subscription = subscribe_interrupts(true);
+    g.cp_interrupt_subscription =
+        subscribe_interrupts(i >= gpu_infos_.size() || kmd::gc_ip_version_for_gfx_target_version(
+                                                           gpu_infos_[i].gfx_target_version) !=
+                                                           kmd::make_gc_ip_version(12, 1, 0));
     g.soc->for_each_cp([this, i](amdgpu::CommandProcessor *cp) {
       // Tests register synthetic queues directly with these CPs without the
       // KFD queue ABI. Only those queues use these backing hooks;
@@ -5359,12 +5431,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
         return MAP_FAILED;
       }
       ptr = client_mapping.get();
-      if (flags & MAP_FIXED) {
-        clear_host_svm_policy_after_change_locked(proc, reinterpret_cast<uint64_t>(ptr), length,
-                                                  &va_transaction);
-        if (on_host_vma_change)
-          on_host_vma_change();
-      }
+      if ((flags & MAP_FIXED) && on_host_vma_change)
+        on_host_vma_change();
       if (ranges_overlap(ptr, length, monitor_ptr, length)) {
         discard_new_fd();
         errno = EINVAL;
@@ -5397,9 +5465,30 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
           errno = EINVAL;
           return MAP_FAILED;
         }
+        // Retire the replaced host view and claim the new doorbell in one
+        // publication. A failed mmap keeps the prior denials and retry state.
+        // Live allocation CPU views were excluded before the host replacement.
+        auto previous_retired_ranges = proc.retired_gpu_ranges_;
+        auto previous_retired_views = proc.retired_identity_views_;
+        auto previous_svm_denials = proc.svm_denied_ranges_;
+        auto previous_svm_access = proc.svm_access_ranges_;
+        try {
+          if (flags & MAP_FIXED) {
+            const auto range = *rounded_host_vma_range(reinterpret_cast<uint64_t>(ptr), length);
+            (void)proc.clear_host_svm_policy_locked(range.first, range.second);
+          }
+          proc.claim_gpu_range_locked(reinterpret_cast<uint64_t>(ptr), length);
+          proc.publish_gpu_grants_locked(va_transaction);
+        } catch (...) {
+          proc.retired_gpu_ranges_.swap(previous_retired_ranges);
+          proc.retired_identity_views_.swap(previous_retired_views);
+          proc.svm_denied_ranges_.swap(previous_svm_denials);
+          proc.svm_access_ranges_.swap(previous_svm_access);
+          throw;
+        }
       } catch (const std::bad_alloc &) {
-        // map_pages may have installed a prefix before an allocation failed.
-        // Retain its CPU backing and the canonical memfd for close to clean up.
+        // PTE installation or grant publication may fail after PTEs were added.
+        // Retain their CPU backing and the canonical memfd for close to clean up.
         map_error = ENOMEM;
       } catch (...) {
         map_error = EIO;
@@ -6195,33 +6284,15 @@ int SimulatedKfd::dispatch_munmap(KfdProcess &proc, void *addr, size_t length,
     if (it == proc.allocations_.end()) {
       const auto retired =
           std::ranges::find_if(proc.retired_identity_views_, [&](const auto &view) {
-            return view.gpu_va == reinterpret_cast<uintptr_t>(addr) && view.mapped_bytes == length;
+            return view.gpu_va < end && start < view.gpu_va + view.mapped_bytes;
           });
       if (retired == proc.retired_identity_views_.end())
         return -ENOENT;
       if (safe_munmap(addr, length) != 0)
         return -errno;
+      clear_host_svm_policy_after_change_locked(proc, start, *unmapped_span);
       if (on_host_vma_change)
         on_host_vma_change();
-      // FREE denied the old BO while its caller-owned fixed CPU view remained
-      // mapped. Once that view is gone, a future host allocation may reuse the
-      // address as ordinary identity memory. A failed publication keeps denial.
-      try {
-        auto previous = proc.retired_gpu_ranges_;
-        auto previous_denials = proc.svm_denied_ranges_;
-        auto previous_access = proc.svm_access_ranges_;
-        try {
-          proc.claim_gpu_range_locked(retired->gpu_va, retired->mapped_bytes);
-          proc.publish_gpu_grants_locked();
-          proc.retired_identity_views_.erase(retired);
-        } catch (...) {
-          proc.retired_gpu_ranges_.swap(previous);
-          proc.svm_denied_ranges_.swap(previous_denials);
-          proc.svm_access_ranges_.swap(previous_access);
-        }
-      } catch (...) {
-        // Leave the tombstone published if its rollback snapshot cannot be made.
-      }
       return 0;
     }
     const auto &alloc = it->second;
@@ -6962,6 +7033,7 @@ int SimulatedKfd::free_memory_ioctl(
     // The final grant publication can allocate. Preserve the descriptor and
     // tombstones until that publication succeeds, then retire IPC and backing.
     auto prior_retired_ranges = proc.retired_gpu_ranges_;
+    const size_t prior_retired_view_count = proc.retired_identity_views_.size();
     try {
       if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR) {
         // A separate GPU VA has no host VMA whose removal can clear its
@@ -6973,7 +7045,30 @@ int SimulatedKfd::free_memory_ioctl(
       } else {
         proc.retire_gpu_range_locked(alloc.gpu_va, alloc.size);
       }
+      const uint32_t kind =
+          alloc.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
+                         KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
+      if (!daemon_mode_ && alloc.user_va && !alloc.imported &&
+          (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT)) {
+        // Host changes may have split the primary view into client fragments.
+        // Retain only their overlap with this BO's GPU VA, before publication
+        // can commit the FREE and discard the allocation's mapping records.
+        const auto retain_identity_view = [&](void *pointer, size_t size, HostMappingKind mapping) {
+          if (!pointer ||
+              (mapping != HostMappingKind::Caller && mapping != HostMappingKind::CallerMapped))
+            return;
+          const uint64_t address = reinterpret_cast<uintptr_t>(pointer);
+          const uint64_t start = std::max(address, alloc.gpu_va);
+          const uint64_t end = std::min(address + size, alloc.gpu_va + alloc.size);
+          if (start < end)
+            proc.retired_identity_views_.push_back({start, end - start});
+        };
+        retain_identity_view(alloc.host_ptr, alloc.host_mapping_size, alloc.host_mapping_kind);
+        for (const auto &view : alloc.client_views)
+          retain_identity_view(view.ptr, view.size, view.kind);
+      }
     } catch (...) {
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -6985,6 +7080,7 @@ int SimulatedKfd::free_memory_ioctl(
       proc.publish_gpu_grants_locked(*va_transaction);
     } catch (...) {
       proc.allocations_.insert(std::move(retired));
+      proc.retired_identity_views_.resize(prior_retired_view_count);
       proc.retired_gpu_ranges_.swap(prior_retired_ranges);
       throw;
     }
@@ -7002,30 +7098,6 @@ int SimulatedKfd::free_memory_ioctl(
           dmabuf_it != proc.imported_dmabufs_.end()) {
         proc.fd_to_import_handle_.erase(dmabuf_it->second.fd);
         proc.imported_dmabufs_.erase(dmabuf_it);
-      }
-    }
-    const uint32_t kind =
-        freed.flags & (KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_GTT |
-                       KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
-    const bool primary_fixed_identity_view =
-        freed.host_ptr && freed.host_mapping_caller_reserved() &&
-        reinterpret_cast<uintptr_t>(freed.host_ptr) == freed.gpu_va &&
-        (!freed.host_mapping_created_by_driver() || freed.host_mapping_size == freed.size);
-    const bool client_fixed_identity_view =
-        std::ranges::any_of(freed.client_views, [&](const auto &view) {
-          return (view.kind == KfdProcess::GpuAllocation::HostMappingKind::Caller ||
-                  view.kind == KfdProcess::GpuAllocation::HostMappingKind::CallerMapped) &&
-                 reinterpret_cast<uintptr_t>(view.ptr) == freed.gpu_va && view.size == freed.size;
-        });
-    const bool retired_fixed_identity_view =
-        !daemon_mode_ && freed.user_va && !freed.imported && !freed.backing_owner &&
-        (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM || kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) &&
-        (primary_fixed_identity_view || client_fixed_identity_view);
-    if (retired_fixed_identity_view) {
-      try {
-        proc.retired_identity_views_.push_back({freed.gpu_va, freed.size});
-      } catch (const std::bad_alloc &) {
-        // Keep the freed VA denied if its later CPU unmap cannot be tracked.
       }
     }
     release_allocation_mappings(proc, freed);
@@ -7721,7 +7793,8 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
     }
 
     queue_request.identity = {.address_space = gs.address_space,
-                              .interrupt_sink = gpu->interrupt_subscription.sink(),
+                              .interrupt_sink = is_sdma ? gpu->interrupt_subscription.sink()
+                                                        : gpu->cp_interrupt_subscription.sink(),
                               .process_id = proc.process_id(),
                               .queue_id = queue_id};
     queue_request.ring = {.base_address = args->ring_base_address,
@@ -7846,6 +7919,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
                   sizeof(exception_event));
       queue_request.exception_status_address = exception_status;
       queue_request.exception_event_id = static_cast<uint32_t>(exception_event);
+      queue_request.exception_event_sink = gpu->exception_event_subscription.sink();
     }
     if (is_sdma && !daemon_mode_) {
       auto *wptr = reinterpret_cast<uint64_t *>(args->write_pointer_address);
@@ -8220,9 +8294,9 @@ int SimulatedKfd::destroy_queue_ioctl(KfdProcess &proc, void *arg) {
     (void)gpus_[queue->gpu_ordinal].soc->queue_registry().unregister_queue(
         queue->queue_handle, amdgpu::QueueCloseMode::ForceCancel);
   }
-  // Real CP sends EOP interrupt when queue is deactivated; KFD broadcasts to
-  // all type-0 events. This wakes ROCR's signal threads blocked on queue events.
-  proc.event_state_.signal_interrupt(0);
+  // Preserve the simulator's queue-deactivation wake without treating a
+  // hardware event context of zero as a broadcast.
+  proc.event_state_.notify_idle();
   return 0;
 }
 

@@ -13,6 +13,42 @@
   (`AnvilLib::connectRemotePeer`, `getRemotePeerQueue`, `disconnectRemotePeer`). They are keyed
   by a caller-supplied peer key, so they never share a queue with a peer on the same host, and
   each goes on the usable engine carrying the fewest of this process's queues.
+* Merged the TDM (Tensor Data Mover) LDS-staged IPC copy path with a new, non-TDM async
+  LDS-staged copy backend (sized `global_load_async_to_lds_b32`/
+  `global_store_async_from_lds_b32`-class instructions) into a single mechanism. Both
+  backends are gfx1250-only; every other architecture is unaffected.
+  * New primary build option `USE_LDS_STAGE` (selects the async backend on gfx1250).
+    `USE_TDM` selects the TDM backend specifically and is independent of
+    `USE_LDS_STAGE`: setting `USE_TDM=ON` alone is enough to build and use the
+    TDM path.
+  * Public API renamed: `rocshmem_set_tdm_lds()` -> `rocshmem_set_lds_stage()`,
+    `rocshmem_query_tdm_lds_bytes()` -> `rocshmem_query_lds_stage_bytes()`.
+  * Env vars renamed: `ROCSHMEM_TDM_TILE_BYTES`/`ROCSHMEM_TDM_PUT_THRESHOLD`/
+    `ROCSHMEM_TDM_GET_THRESHOLD` -> `ROCSHMEM_LDS_STAGE_TILE_BYTES`/
+    `ROCSHMEM_LDS_STAGE_PUT_THRESHOLD`/`ROCSHMEM_LDS_STAGE_GET_THRESHOLD`.
+* Type Support:
+    * `half`, `bfloat16`, `int8`, `int16`, `int32`, `int64`,
+      `uint8`, `uint16`, `uint32`, `uint64`, `size_t`, `ptrdiff_t`:
+        * RMA:
+             * `rocshmem_{ctx_}<TYPE>_{put,get,p,g}{_nbi}{_wave}{_wg}`
+        * RMA with signal:
+             * `rocshmem_{ctx_}<TYPE>_put_signal{_nbi}{_wave}{_wg}`
+        * Point-to-point synchronization:
+             * `rocshmem_{ctx_}<TYPE>_{wait_until,test}{_all,_any,_some}{_vector}`
+        * Collectives:
+             * `rocshmem_{ctx_}<TYPE>_{broadcast,fcollect,alltoall}{_wave}{_wg}`
+             * `rocshmem_{ctx_}<TYPE>_alltoallv_wg`
+             * `rocshmem_{ctx_}<TYPE>_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}`
+                * Note: `rocshmem_{ctx_}bfloat16_{and,or,xor,min,max,sum,prod}_reduce{_scatter}{_wave}{_wg}` are unsupported on ROCm versions 10.0, 10.1, and 10.2
+* Add `-types` argument to functional test, to specify type coverage. Allows `full` `minimal` 
+  or custom list `<type_1>:<type_2>:...`
+    * `full` exercises all types that an API support
+    * `minimal` tests a minimal set of types, made for quick rocshmem functionality testing
+    * CTest: every config of a typed functional test also gets a `<name>_typesfull` entry that
+      runs with `-types full`. `quick`/`standard` tiers run the minimal set, `comprehensive`/`full`
+      tiers run the `_typesfull` entries instead (each config runs once per tier).
+    * CTest: set `ROCSHMEM_TEST_TYPES=<minimal|full|type_1:type_2:...>` to pass `-types` to tests
+      that do not already fix their type coverage.
 
 ### Resolved issues
 * Fixed `rocshmem_fence` on the RO backend taking a host proxy round trip from every calling thread.
@@ -26,6 +62,10 @@
   The `amo_add`, `amo_fadd`, `amo_inc`, `amo_finc` and
   `putmem_signal_on_stream` functional tests now run on RO.
 
+### Deprecated
+* Deprecated `rocshmem_set_tdm_lds()` and `rocshmem_query_tdm_lds_bytes()`.
+  Use `rocshmem_set_lds_stage()` and `rocshmem_query_lds_stage_bytes()` instead.
+
 ### Changed
 * SDMA transport is now built by default when IPC is enabled (`USE_SDMA` defaults to `ON`
   when `USE_IPC=ON`). SDMA is disabled at runtime by default; set
@@ -38,6 +78,10 @@
   within HSA's preferred copy-engine mask, chosen per channel, instead of the lowest one.
   MI450 reports every engine as preferred, so all such queues went on engine 0 and could
   exceed its KFD queue limit. A single-engine mask selects the same engine as before.
+* Doubled the internal `ROCSHMEM_ALLTOALL_SYNC_SIZE` (and derived `ROCSHMEM_FCOLLECT_SYNC_SIZE`)
+  pSync allocation, from `BARRIER_SYNC_SIZE + 1` to `2 * BARRIER_SYNC_SIZE + 1`, to back the
+  double-buffered alltoall/fcollect thread-puts fast path. This changes the size of internal
+  pSync buffers; rocSHMEM has no stable binary ABI, so this does not require a version bump.
 
 ## rocSHMEM 3.8.0 for ROCm 10.2
 

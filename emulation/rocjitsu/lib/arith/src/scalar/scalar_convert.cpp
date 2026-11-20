@@ -15,6 +15,7 @@
 #include "conversion/conversion32.h"
 #include "conversion/float_conversion.h"
 #include "rj_arith/detail/rj_arith_scalar.h"
+#include "scalar/fp_status.h"
 
 #include <stdint.h>
 
@@ -121,6 +122,67 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) 
   return RJ_ARITH_SUCCESS;
 }
 
+// Reproduce the inherited gfx12 scalar conversion causes, without host FP-state changes.
+// Packed RTZ conversion deliberately leaves FP status unchanged on gfx12.
+template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uint32_t result) {
+  using namespace rocjitsu::arith;
+  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+  if constexpr (Op == Convert::PackedHalfRtz) {
+    return 0;
+  } else if constexpr (Op == Convert::SignedToFloat || Op == Convert::UnsignedToFloat) {
+    const double exact = Op == Convert::SignedToFloat ? double(int32_t(a)) : double(a);
+    return scalar_result_causes<false>(exact, result, rounding);
+  } else {
+    constexpr bool half = Op == Convert::HalfToFloat || Op == Convert::HighHalfToFloat;
+    constexpr uint32_t normal = half ? 0x400 : 0x800000;
+    constexpr uint32_t sign = half ? 0x8000 : 0x80000000;
+    if constexpr (Op == Convert::HighHalfToFloat) {
+      a >>= 16;
+    }
+    a &= sign | (sign - 1);
+    uint32_t causes = scalar_input_causes<half>(a, flags);
+    if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && (a & (sign - 1)) < normal) {
+      a &= sign;
+    }
+    const double exact = scalar_fp_value<half>(a);
+    if constexpr (Op == Convert::FloatToSigned || Op == Convert::FloatToUnsigned) {
+      constexpr double low = Op == Convert::FloatToSigned ? -0x1p31 : 0;
+      constexpr double high = Op == Convert::FloatToSigned ? 0x1p31 - 1 : 0x1p32 - 1;
+      if (!__builtin_isfinite(exact) || exact < low || __builtin_trunc(exact) > high) {
+        return RJ_ARITH_EXCEPTION_INVALID;
+      }
+    } else if (__builtin_isfinite(exact)) {
+      causes |= scalar_result_causes<!half>(exact, result, rounding);
+    }
+    return causes;
+  }
+}
+
+// Compatibility preserves scalar conversion status; explicit reporting support is unchanged.
+template <Convert Op>
+int run_policy(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t b,
+               uint32_t *status) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  int error = run<Op>(flags, uint32_t(mode), d, a, b);
+  if constexpr (Op != Convert::PackedHalfRtz) {
+    if (!error && compatibility) {
+      *status |= conversion_causes<Op>(flags, a, *d);
+    }
+  }
+  return error;
+}
+
 // gfx1250 scalar conversions retain legacy NaN payloads and do not report FP status.
 // Compatibility ignores guest denormal flushing; FP16 overflow saturation remains effective.
 template <Convert Op>
@@ -146,153 +208,64 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_f32_i32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::SignedToFloat>(flags, instruction_flags, d, a);
+                           uint32_t *excp_flag_user) {
+  return run_policy<Convert::SignedToFloat>(flags, instruction_flags, d, a, 0, excp_flag_user);
 }
 
 // Convert U32 to F32.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_f32_u32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::UnsignedToFloat>(flags, instruction_flags, d, a);
+                           uint32_t *excp_flag_user) {
+  return run_policy<Convert::UnsignedToFloat>(flags, instruction_flags, d, a, 0, excp_flag_user);
 }
 
 // Convert F32 to I32.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_i32_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::FloatToSigned>(flags, instruction_flags, d, a);
+                           uint32_t *excp_flag_user) {
+  return run_policy<Convert::FloatToSigned>(flags, instruction_flags, d, a, 0, excp_flag_user);
 }
 
 // Convert F32 to U32.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_u32_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::FloatToUnsigned>(flags, instruction_flags, d, a);
+                           uint32_t *excp_flag_user) {
+  return run_policy<Convert::FloatToUnsigned>(flags, instruction_flags, d, a, 0, excp_flag_user);
 }
 
 // Convert F32 to F16.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_f16_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::FloatToHalf>(flags, instruction_flags, d, a);
+                           uint32_t *excp_flag_user) {
+  return run_policy<Convert::FloatToHalf>(flags, instruction_flags, d, a, 0, excp_flag_user);
 }
 
 // Convert F16 to F32.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_f32_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                           [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::HalfToFloat>(flags, instruction_flags, d, a);
+                           uint32_t *excp_flag_user) {
+  return run_policy<Convert::HalfToFloat>(flags, instruction_flags, d, a, 0, excp_flag_user);
 }
 
 // Convert F16 to F32.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_hi_f32_f16(uint64_t flags, uint64_t instruction_flags, uint32_t *d, uint32_t a,
-                              [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::HighHalfToFloat>(flags, instruction_flags, d, a);
+                              uint32_t *excp_flag_user) {
+  return run_policy<Convert::HighHalfToFloat>(flags, instruction_flags, d, a, 0, excp_flag_user);
 }
 
 // Convert F32 to F16 and pack results with packed elements, round-to-zero conversion.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
 int rj_arith_s_cvt_pk_rtz_f16_f32(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
-                                  uint32_t a, uint32_t b,
-                                  [[maybe_unused]] uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
-  if (rocjitsu::arith::reports_fp_status(flags)) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
-  }
-  if (instruction_flags >> 32) {
-    return RJ_ARITH_ERROR_INVALID_FLAGS;
-  }
-  return run<Convert::PackedHalfRtz>(flags, instruction_flags, d, a, b);
+                                  uint32_t a, uint32_t b, uint32_t *excp_flag_user) {
+  return run_policy<Convert::PackedHalfRtz>(flags, instruction_flags, d, a, b, excp_flag_user);
 }
 
 // Convert gfx1250 scalar operands; FP status is unused and strict modes unsupported.

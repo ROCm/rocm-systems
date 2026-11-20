@@ -517,6 +517,34 @@ HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_ResetMemHighAttr) {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Test hipMemPoolSetAttribute while a stream is capturing. The API is allowed
+ * in relaxed capture mode and must return hipErrorStreamCaptureUnsupported in the
+ * global and thread-local capture modes.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolSetGetAttribute.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolSetAttribute_Capture) {
+  int device_id = 0;
+  HIP_CHECK(hipSetDevice(device_id));
+  checkMempoolSupported(device_id)
+  MemPoolGuard mempool(MemPools::created, device_id);
+  std::uint64_t threshold = kPageSize;
+
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(
+      hipMemPoolSetAttribute(mempool.mempool(), hipMemPoolAttrReleaseThreshold, &threshold),
+      capture_err);
+  END_CAPTURE_SYNC(capture_err);
+}
+
+/**
  * End doxygen group hipMemPoolSetAttribute.
  * @}
  */
@@ -925,4 +953,32 @@ HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_CheckDefaultValues) {
     REQUIRE(true == checkDefaultAttributeValues(hipMemPoolReuseAllowOpportunistic, dev));
     REQUIRE(true == checkDefaultAttributeValues(hipMemPoolReuseAllowInternalDependencies, dev));
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Test hipMemPoolGetAttribute while a stream is capturing. The API is allowed
+ * in relaxed capture mode and must return hipErrorStreamCaptureUnsupported in the
+ * global and thread-local capture modes.
+ * ------------------------
+ *    - catch\unit\memory\hipMemPoolSetGetAttribute.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+HIP_TEST_CASE(Unit_hipMemPoolGetAttribute_Capture) {
+  int device_id = 0;
+  HIP_CHECK(hipSetDevice(device_id));
+  checkMempoolSupported(device_id)
+  MemPoolGuard mempool(MemPools::created, device_id);
+  std::uint64_t value = 0;
+
+  hipError_t capture_err = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_err, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(
+      hipMemPoolGetAttribute(mempool.mempool(), hipMemPoolAttrReleaseThreshold, &value),
+      capture_err);
+  END_CAPTURE_SYNC(capture_err);
 }

@@ -366,14 +366,14 @@ TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
   // LLVM: llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s and
   // llvm/test/MC/AMDGPU/gfx1251_asm_wmma_w32.s.
   constexpr GoldenEncoding kGfx1251Instructions[] = {
-      {"v_pk_fma_f64", {0xCC3B4004u, 0x1C421908u}},
-      {"v_pk_mul_f64", {0xCC3C4004u, 0x1A021908u}},
-      {"v_pk_add_f64", {0xCC4B4004u, 0x1A021908u}},
-      {"v_pk_add_nc_u64", {0xCC4C4004u, 0x1A021908u}},
-      {"v_pk_sub_nc_u64", {0xCC4D4004u, 0x1A021908u}},
-      {"v_pk_max_num_f64", {0xCC4E4004u, 0x1A021908u}},
-      {"v_pk_min_num_f64", {0xCC4F4004u, 0x1A021908u}},
-      {"v_pk_lshl_add_u64", {0xCC7E4004u, 0x1C421908u}},
+      {"v_pk_fma_f64", {0xCC3B0004u, 0x04421908u}},
+      {"v_pk_mul_f64", {0xCC3C0004u, 0x02021908u}},
+      {"v_pk_add_f64", {0xCC4B0004u, 0x02021908u}},
+      {"v_pk_add_nc_u64", {0xCC4C0004u, 0x02021908u}},
+      {"v_pk_sub_nc_u64", {0xCC4D0004u, 0x02021908u}},
+      {"v_pk_max_num_f64", {0xCC4E0004u, 0x02021908u}},
+      {"v_pk_min_num_f64", {0xCC4F0004u, 0x02021908u}},
+      {"v_pk_lshl_add_u64", {0xCC7E0004u, 0x04421908u}},
       {"v_wmma_f64_16x16x4_f64", {0xCC5B0008u, 0x1C220900u}},
   };
 
@@ -403,14 +403,14 @@ TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
   // Public LLVM gfx1251_asm_vop3p.s golden encodings exercise the
   // VOP3P_INST_LITERAL identifier added alongside each packed operation.
   constexpr GoldenEncoding kLiteralInstructions[] = {
-      {"v_pk_fma_f64", {0xCC3B4004u, 0x1C4210FFu, 0x40594000u}},
-      {"v_pk_mul_f64", {0xCC3C4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_add_f64", {0xCC4B4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_add_nc_u64", {0xCC4C4004u, 0x1A0210FFu, 0x00000065u}},
-      {"v_pk_sub_nc_u64", {0xCC4D4004u, 0x1A0210FFu, 0x00000065u}},
-      {"v_pk_max_num_f64", {0xCC4E4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_min_num_f64", {0xCC4F4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_lshl_add_u64", {0xCC7E4004u, 0x1C4210FFu, 0x00000065u}},
+      {"v_pk_fma_f64", {0xCC3B0004u, 0x044210FFu, 0x40594000u}},
+      {"v_pk_mul_f64", {0xCC3C0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_add_f64", {0xCC4B0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_add_nc_u64", {0xCC4C0004u, 0x020210FFu, 0x00000065u}},
+      {"v_pk_sub_nc_u64", {0xCC4D0004u, 0x020210FFu, 0x00000065u}},
+      {"v_pk_max_num_f64", {0xCC4E0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_min_num_f64", {0xCC4F0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_lshl_add_u64", {0xCC7E0004u, 0x044210FFu, 0x00000065u}},
   };
 
   auto gfx1250 = Decoder::create(default_isa_target_registry(), "gfx1250");
@@ -430,7 +430,7 @@ TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
 TEST(Gfx1250DecodeTest, Gfx1251PackedU32LiteralReplicatesBothLanes) {
   // LLVM gfx1251_asm_vop3p.s:
   // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]
-  constexpr std::array<uint32_t, 3> kWords{0xCC7E4004u, 0x1C41FF08u, 0x00000065u};
+  constexpr std::array<uint32_t, 3> kWords{0xCC7E0004u, 0x0441FF08u, 0x00000065u};
   auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
   ASSERT_NE(gfx1251, nullptr);
 
@@ -442,6 +442,43 @@ TEST(Gfx1250DecodeTest, Gfx1251PackedU32LiteralReplicatesBothLanes) {
   EXPECT_EQ(packed_shift->encoding_value(), 0x65);
   EXPECT_FALSE(packed_shift->literal64_value().has_value());
   EXPECT_EQ(decoded->disassemble(), "v_pk_lshl_add_u64 v[4:7], v[8:11], 0x65, v[16:19]");
+}
+
+TEST(Gfx1250DecodeTest, Gfx1251PackedAddDisassemblesBothLlvmEncodings) {
+  auto decoder = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(decoder, nullptr);
+  // LLVM changed the unused op_sel_hi bits from 111 to 000 in October 2026.
+  constexpr std::array<std::array<uint32_t, 2>, 2> kEncodings{{
+      {0xCC4B0104u, 0x22021908u},
+      {0xCC4B4104u, 0x3A021908u},
+  }};
+  for (const auto &words : kEncodings) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->disassemble(),
+              "v_pk_add_f64 v[4:7], v[8:11], v[12:15] neg_lo:[1,0] neg_hi:[1,0]");
+  }
+}
+
+TEST(Gfx1250DecodeTest, Gfx1251WmmaF64DisassemblesMatrixReuse) {
+  auto decoder = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(decoder, nullptr);
+  // LLVM orders matrix reuse hints before negation when they appear together.
+  struct Case {
+    const char *modifiers;
+    std::array<uint32_t, 2> words;
+  };
+  constexpr Case kCases[] = {
+      {"matrix_a_reuse", {0xCC5B2008u, 0x1C220900u}},
+      {"matrix_b_reuse", {0xCC5B4008u, 0x1C220900u}},
+      {"matrix_a_reuse matrix_b_reuse neg_lo:[1,0,1] neg_hi:[0,0,1]", {0xCC5B6408u, 0xBC220900u}},
+  };
+  for (const auto &[modifiers, words] : kCases) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->disassemble(),
+              std::string("v_wmma_f64_16x16x4_f64 v[8:23], v[0:3], v[4:7], v[8:23] ") + modifiers);
+  }
 }
 
 TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {

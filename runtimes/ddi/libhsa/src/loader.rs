@@ -16,21 +16,15 @@ use std::ffi::{CStr, c_char, c_void};
 use std::sync::Arc;
 
 use rocddi::memory::device::MemoryKind;
-#[cfg(test)]
-use rocelf::Layout as ElfLayout;
-#[cfg(test)]
-use rocelf::LoadSegment;
-#[cfg(test)]
-use rocelf::constants::*;
-#[cfg(test)]
-use rocelf::read_u64;
 use rocloader::{
     CodeObject as LoaderCodeObject, Definition, Scope, SymbolKind, SymbolLinkage, SymbolTableOrder,
     Target, VariableAllocation, VariableSegment,
 };
 
 use crate::ffi::*;
-use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
+use crate::lifecycle::{initialized_mut, lock};
+use crate::session::HsaSession;
+use crate::status::{boundary, map_error};
 
 mod traversal;
 use traversal::ExecutableTraversalGate;
@@ -102,7 +96,7 @@ impl Reader {
 }
 
 /// Parsed code-object metadata cached independently of any executable load.
-pub(crate) struct CodeObject {
+pub(crate) struct CodeObjectRecord {
     /// Immutable ELF bytes shared with readers and executable loads.
     pub(crate) bytes: Arc<[u8]>,
     /// Symbol name to public handle mapping.
@@ -169,13 +163,21 @@ pub(crate) struct LoadedMetadata {
 type LoadedObject = rocloader::LoadedObject<LoadedMetadata>;
 
 /// HSA profile and rounding policy around the reusable executable owner.
-pub(crate) struct Executable {
+pub(crate) struct ExecutableRecord {
     /// HSA profile selected at creation.
     pub(crate) profile: u32,
     /// Default floating-point rounding mode.
     pub(crate) default_rounding: u32,
+    /// Stable native debugger maps; unlinked before any image owner drops.
+    pub(crate) debugger: crate::debugger::ExecutableDebugInfo,
     /// Loader-owned images and scoped symbol index.
     pub(crate) core: rocloader::Executable<LoadedMetadata>,
+}
+
+impl Drop for ExecutableRecord {
+    fn drop(&mut self) {
+        self.debugger.unpublish();
+    }
 }
 
 /// Resolves a complete range in a loaded executable to its CPU mapping.
@@ -195,14 +197,23 @@ pub(crate) fn loaded_host_range(
     Ok(None)
 }
 
-#[cfg(test)]
-/// Converts test load segments through the production loader mapping.
-fn loaded_segments(
-    loads: &[LoadSegment],
-    device_base: u64,
-    virtual_base: u64,
-) -> Result<Vec<rocloader::LoadedSegment>, Status> {
-    rocloader::loaded_segments(loads, device_base, virtual_base).map_err(map_loader_error)
+/// Resolves a loaded range for read-only inspection, including staged images.
+pub(crate) fn loaded_query_host_range(
+    loader: &LoaderState,
+    address: usize,
+) -> Result<Option<usize>, Status> {
+    for executable in loader.executables.values() {
+        for object in executable.core.loaded() {
+            if let Some(host) = object
+                .image
+                .query_host_range(address as u64, 1)
+                .map_err(map_loader_error)?
+            {
+                return Ok(Some(host));
+            }
+        }
+    }
+    Ok(None)
 }
 
 /// Maps an HSA symbol handle to its loader-owned executable and agent scope.
@@ -216,13 +227,13 @@ pub(crate) struct SymbolReference {
 /// HSA handles around code objects and rocloader-owned executables.
 pub(crate) struct LoaderState {
     /// Parsed code objects indexed by public handle.
-    pub(crate) code_objects: HashMap<u64, CodeObject>,
+    pub(crate) code_objects: HashMap<u64, CodeObjectRecord>,
     /// Code-object symbols indexed by public handle.
     pub(crate) code_symbols: HashMap<u64, CodeSymbol>,
     /// Caller-supplied code-object readers.
     pub(crate) readers: HashMap<u64, Reader>,
     /// Executable owners indexed by public handle.
-    pub(crate) executables: HashMap<u64, Executable>,
+    pub(crate) executables: HashMap<u64, ExecutableRecord>,
     /// Symbols published from loaded executables.
     pub(crate) symbols: HashMap<u64, SymbolReference>,
 }
@@ -240,12 +251,20 @@ impl LoaderState {
     }
 
     /// Drops HSA symbol handles before their executable and reader owners.
+    /// The caller must first establish `can_release()`.
     pub(crate) fn clear(&mut self) {
         self.symbols.clear();
         self.executables.clear();
         self.readers.clear();
         self.code_symbols.clear();
         self.code_objects.clear();
+    }
+
+    /// Whether all executable publication work has conclusively retired.
+    pub(crate) fn can_release(&self) -> bool {
+        self.executables
+            .values()
+            .all(|executable| executable.core.can_release())
     }
 
     /// Registers a caller-owned code-object reader snapshot.
@@ -263,11 +282,11 @@ pub(crate) mod code_object;
 pub(crate) mod executable;
 pub(crate) mod query;
 
-use code_object::map_loader_error;
+pub(crate) use code_object::map_loader_error;
 
-#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
+#[cfg(any(test, not(hsa_tool_dispatch)))]
 /// Returns the loader extension functions in public ABI table order.
-pub(crate) fn loader_extension_table() -> [usize; 7] {
+pub(crate) fn loader_extension_table() -> [usize; 9] {
     [
         crate::api::loader::query::hsa_ven_amd_loader_query_host_address as *const () as usize,
         crate::api::loader::query::hsa_ven_amd_loader_query_segment_descriptors as *const () as usize,
@@ -277,6 +296,8 @@ pub(crate) fn loader_extension_table() -> [usize; 7] {
         crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size as *const ()
             as usize,
         crate::api::loader::query::hsa_ven_amd_loader_iterate_executables as *const () as usize,
+        crate::api::loader::query::hsa_ven_amd_loader_code_object_reader_get_load_size as *const () as usize,
+        crate::api::loader::executable::state::hsa_ven_amd_loader_executable_load_agent_code_object_at_address as *const () as usize,
     ]
 }
 

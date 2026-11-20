@@ -25,11 +25,15 @@ add_library(
     conversion/conversion64.cpp
     conversion/fp8_conversion.cpp
     conversion/fp8_narrow.cpp
+    conversion/scaled_narrow.cpp
+    conversion/wide_scaled_narrow.cpp
     conversion/integer_conversion.cpp
     conversion/normalized.cpp
     conversion/pack.cpp
     conversion/nibble_pack.cpp
     conversion/packed_conversion.cpp
+    conversion/scaled_widen.cpp
+    conversion/wide_scaled_widen.cpp
     compare/class.cpp
     compare/constant_compare.cpp
     compare/float_compare.cpp
@@ -48,12 +52,15 @@ add_library(
     fp/div_scale.cpp
     fp/fp64.cpp
     fp/frexp_exp.cpp
+    fp/half_mad.cpp
     fp/half_binary.cpp
     fp/half_exponent.cpp
     fp/half_fma.cpp
     fp/half_minmax.cpp
     fp/ldexp.cpp
+    fp/legacy_mul.cpp
     fp/minmax.cpp
+    fp/mixed_fma_gfx908.cpp
     fp/mixed_mad.cpp
     fp/mixed_bf16.cpp
     fp/packed_bf16.cpp
@@ -74,6 +81,8 @@ add_library(
     integer/bitfield.cpp
     integer/boolean.cpp
     integer/carry.cpp
+    integer/integer64.cpp
+    integer/byte_shift.cpp
     integer/integer16.cpp
     integer/integer16_ternary.cpp
     integer/integer_add.cpp

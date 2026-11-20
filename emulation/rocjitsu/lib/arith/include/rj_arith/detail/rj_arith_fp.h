@@ -36,6 +36,31 @@ int rj_arith_v_fma_mixhi_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t i
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c,
                                   uint32_t *excp_flag_user);
+// Inherited CDNA legacy multiply: source ABS/NEG and MODE input flushing,
+// positive zero if either input is zero, guest-rounded FP32 multiplication,
+// then post-round output flushing, OMOD and CLAMP. One VGPR per operand.
+// gfx942/gfx950 gate OMOD under IEEE or preserved output denormals, and honor
+// DX10_CLAMP_OFF. gfx1250 always applies OMOD and clamps NaNs to zero.
+// Loose, allow-Loose and Compatibility support this model; strict exact modes
+// are unsupported. FP status is unchanged. The separate gfx1250 API preserves
+// this inherited policy without changing the gfx12 exact tininess/NaN model.
+int rj_arith_v_mul_legacy_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_mul_legacy_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_mul_dx9_zero_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *excp_flag_user);
+
+int rj_arith_v_mul_dx9_zero_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *excp_flag_user);
 
 // Fused division post-scaling: compute A*B+C and apply a power-of-two scale
 // before the single guest rounding (RJ_ARITH_FP_ROUND_MASK). A set lane bit in condition (the
@@ -108,6 +133,10 @@ int rj_arith_v_div_fmas_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // Division pre-scaling. A must equal B (denominator) or C (numerator) after
 // source NEG modifiers. Writes the pre-scaled value to D and the per-lane
 // post-scaling condition to condition (the wave32 SDST operand).
+// Any other A matches gfx1201/gfx1100 too: scaling it down has no gradual underflow.
+// Below the denormal window (normalized exponent < 0 for FP32, < -11 for FP64) D is the
+// overflow value; inside it, FP32 truncates, FP64 keeps guest rounding, flushed outputs are
+// signed zero, and an active OMOD turns the denormal into +0.
 // Supports source NEG, OMOD and CLAMP; ABS is not encoded by these instructions.
 // Condition bits for inactive lanes are cleared. Even zero EXEC writes zero to
 // condition, so that pointer must always be writable; VGPR pointers may then be
@@ -356,6 +385,9 @@ int rj_arith_v_fma_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
 int rj_arith_v_fma_dx9_zero_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *const *d, const uint32_t *const *a,
                                     const uint32_t *const *b, const uint32_t *const *c);
+// gfx1250 shares this DX9 FMA policy: mandatory input/output flushing, guest
+// rounding, positive-zero products and gfx12 NaN/OMOD rules. Compatibility
+// retains rocjitsu's inherited model; no separate gfx1250 capture is claimed.
 int rj_arith_v_fma_dx9_zero_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                           uint64_t instruction_flags, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
@@ -507,8 +539,54 @@ int rj_arith_v_pk_fma_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
                                     const uint32_t *const *b, const uint32_t *const *c,
                                     uint32_t *excp_flag_user);
 
-// Packed FP16 FMAC: component-wise A * B + D. Its e32 encoding has no
-// modifiers or selectors; instruction_flags must be zero.
+// Half MAD retains the inherited FP32 intermediate, then nearest FP16 narrowing.
+// Supports ALU ABS/NEG, half selectors, OMOD and CLAMP. Guest rounding applies
+// to OMOD overflow; input/output flushing only gates OMOD. FP status is unused.
+// Loose and Compatibility are available; strict bit-exact semantics are unsupported.
+int rj_arith_v_mad_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_mad_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_mad_legacy_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+int rj_arith_v_mad_legacy_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+
+// Gfx90a MAD/MAC: one VGPR per operand, selected halves, ABS/NEG, OMOD and CLAMP.
+// Compatibility rounds the product and sum separately to FP16, always flushing
+// denormals at both steps. Guest rounding, IEEE-dependent NaN quieting and FP16_OVFL
+// apply to each step; OMOD eligibility follows the original guest denormal controls.
+// Loose uses the FP32-intermediate MAD model above. Neither path is empirically
+// qualified: strict semantics are rejected, and FP status is left unchanged.
+int rj_arith_v_mad_f16_w32_gfx90a(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+
+int rj_arith_v_mad_f16_w64_gfx90a(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  uint32_t *trapsts);
+
+int rj_arith_v_mad_legacy_f16_w32_gfx90a(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_mad_legacy_f16_w64_gfx90a(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a, const uint32_t *const *b,
+                                         const uint32_t *const *c, uint32_t *trapsts);
+
+// Packed FP16 FMAC: component-wise A * B + D. Promoted encodings support
+// RJ_ARITH_ALU_ABS_A/B, NEG_A/B and CLAMP, applied to both halves.
+// Half selectors and modifiers on the implicit D input are unsupported.
 // Supports RJ_ARITH_FP16_OVFL and the same loose/exact semantics as packed FMA.
 int rj_arith_v_pk_fmac_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
@@ -522,6 +600,19 @@ int rj_arith_v_pk_fmac_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
 int rj_arith_v_pk_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user);
+
+// gfx942/gfx950 packed FMAC supports Loose, allow-Loose and Compatibility;
+// strict empirical modes are unsupported. It additionally supports RJ_ARITH_ALU_OMOD_*;
+// scaling is disabled by IEEE mode or output-denormal preservation.
+// Compatibility retains the inherited packed rounding and NaN behavior.
+int rj_arith_v_pk_fmac_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_pk_fmac_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
 
 // Packed FP16 binary arithmetic: supports RJ_ARITH_PK_* negation and half selectors
 // for A/B, plus RJ_ARITH_PK_CLAMP and RJ_ARITH_FP16_OVFL. Flags for C are invalid. Each
@@ -588,10 +679,12 @@ int rj_arith_v_pk_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 // gfx12 MUL supports FP status for nearest-even rounding, preserved denormals
 // and no OMOD/CLAMP: INVALID, INPUT_DENORM, OVERFLOW, UNDERFLOW and INEXACT.
 // Exact subnormal products report INPUT_DENORM without UNDERFLOW. Other guest
-// controls and RDNA3 reporting return UNSUPPORTED_FP_STATUS. Compatibility uses
-// numeric-only exact semantics for MUL in every configuration. Rocjitsu retains
-// its existing MUL status classifier when integrating Compatibility mode.
-// Other binary operations do not support mode 3 FP status reporting.
+// controls and RDNA3 reporting return UNSUPPORTED_FP_STATUS. Compatibility retains
+// the inherited numerical model and native-nearest MUL exception classifier,
+// independently of strict reporting qualification. gfx12 ADD/SUB/SUBREV also
+// accumulate inherited input/invalid and pre-OMOD overflow causes. Compatibility
+// requires valid status storage for these instructions; modes 0–2 leave it unused.
+// Other binary operations do not support explicit mode 3 FP status reporting.
 int rj_arith_v_add_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            uint32_t *trapsts);
@@ -1454,7 +1547,10 @@ int rj_arith_v_pk_max_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instr
 // priority, payload/quieting, or the sign of zero.
 // Guest input flushing applies before selection;
 // output flushing is ignored except as required by OMOD. RJ_ARITH_FP_IEEE_MODE is
-// accepted without changing RDNA4's selection or OMOD rules.
+// accepted without changing RDNA4's selection or OMOD rules. Compatibility requires
+// valid status storage and accumulates gfx12 input classification (including a
+// preserved subnormal paired with a nonfinite input). Explicit mode 3 is unsupported.
+// The _gfx1250 variants retain the same numeric selection without reporting causes.
 int rj_arith_v_min_num_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b, uint32_t *excp_flag_user);
@@ -1707,6 +1803,46 @@ int rj_arith_v_maximum_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t inst
                                uint32_t *const *d, const uint32_t *const *a,
                                const uint32_t *const *b, uint32_t *excp_flag_user);
 
+// gfx908 MAD MIX uses guest-controlled FP32 FMA before optional FP16 narrowing.
+// Each operand is one VGPR. MIX_F16_A/B/C selects FP16, HIGH_A/B/C its half;
+// otherwise the source is FP32. Half inputs are preserved; FP32 inputs and the
+// FP32 intermediate follow common denormal/IEEE/rounding flags. Half outputs
+// use FP_ROUND_INTERMEDIATE_F32_MASK for that intermediate and FP_ROUND_MASK
+// plus FP16_OVFL for final narrowing, without half-output flushing. CLAMP acts
+// between the two stages and accepts DX10_CLAMP_OFF. Half NaNs are quieted.
+// ABS/NEG, selected-half preservation, overlap and EXEC are supported. Strict
+// empirical semantics are unavailable; Compatibility reuses the inherited
+// numeric model without FP status reporting. Loose may simplify roundings.
+int rj_arith_v_mad_mix_f32_w32_gfx908(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_mad_mix_f32_w64_gfx908(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_mad_mixlo_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_mad_mixlo_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_mad_mixhi_f16_w32_gfx908(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_mad_mixhi_f16_w64_gfx908(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts);
+
 // Mixed MAD on gfx942/gfx950. Each operand occupies one VGPR, selected per
 // source as FP32 or FP16. Retains an FP32 fused intermediate before optional
 // guest-rounded half narrowing; CLAMP precedes narrowing. Denormal controls and
@@ -1805,6 +1941,459 @@ int rj_arith_v_pk_min_num_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_pk_max_num_bf16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *const *d, const uint32_t *const *a,
                                    const uint32_t *const *b, uint32_t *excp_flag_user);
+// CDNA FP64 FMA variants: every vector operand occupies two VGPRs (low/high).
+// FMAC reads D as the accumulator and accepts A/B ABS/NEG, OMOD and CLAMP.
+// FMAMK computes A*literal+B; FMAAK computes A*B+literal. Literals are raw FP64
+// encodings and accept no instruction modifiers. Aliasing and guest rounding
+// follow FMA_F64. Compatibility preserves inherited arithmetic; strict empirical
+// semantics and FP-status reporting remain unsupported.
+int rj_arith_v_fmac_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *state);
+int rj_arith_v_fmac_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *state);
+int rj_arith_v_fmac_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *state);
+int rj_arith_v_fmamk_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a, uint64_t literal,
+                                     const uint32_t *const *b, uint32_t *state);
+int rj_arith_v_fmaak_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint64_t literal, uint32_t *state);
+
+// CDNA FP64 arithmetic retains inherited quieting. MUL uses exponent-step OMOD;
+// FMA/FMAC flush the rounded core, round OMOD, then canonicalize tiny scaled results.
+int rj_arith_v_mul_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_mul_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user);
+int rj_arith_v_mul_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_mul_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user);
+int rj_arith_v_fma_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_fma_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *excp_flag_user);
+int rj_arith_v_fma_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, const uint32_t *const *c,
+                                  [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_fma_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   [[maybe_unused]] uint32_t *excp_flag_user);
+
+// CDNA FP64 ADD retains MUL's exponent-step OMOD and inherited NaN quieting.
+int rj_arith_v_add_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_add_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user);
+int rj_arith_v_add_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_add_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b,
+                                   [[maybe_unused]] uint32_t *excp_flag_user);
+// CDNA3/4 legacy MIN/MAX select B when both sources are NaN, except that IEEE
+// mode prioritizes and quiets signaling NaNs in source order. Other controls
+// match the unsuffixed legacy selection APIs. FP status reporting is unsupported.
+int rj_arith_v_min_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_min_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_max_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_max_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_min_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_min_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_max_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+int rj_arith_v_max_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+
+// CDNA3/4 ternary selection uses second-NaN priority; MED3 equates signed zeros
+// when matching the largest source. Other controls follow the binary selections.
+int rj_arith_v_min3_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_min3_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_max3_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_max3_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_med3_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_med3_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+// CDNA4 propagating ternary selection uses the inherited IEEE/denormal OMOD gate
+// and DX10 clamp policy. If that gate enables OMOD scaling, mode 2 returns
+// RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS without changing the destination; Compatibility applies
+// the inherited scaling. FP status reporting is currently unsupported.
+int rj_arith_v_minimum3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_minimum3_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_maximum3_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_maximum3_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_min3_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_min3_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_max3_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_max3_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_med3_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+int rj_arith_v_med3_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts);
+
+// CDNA3/4 legacy FP16 selection prefers B when both operands are NaNs.
+// Ordinary forms select source/destination halves; packed forms select both halves.
+int rj_arith_v_min_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_min_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_max_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_max_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_min_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_min_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_max_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_max_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+
+// Packed ternary selection: independent halfword selectors and sign modifiers.
+// Propagating forms canonicalize NaNs; Compatibility honors output flushing.
+// Mode 2 and numeric forms preserve selected denormals. Propagating forms reject
+// selected NaN inputs in mode 2 on gfx950/gfx1250 pending qualification. CLAMP uses
+// DX10_CLAMP_OFF. FP status is unsupported.
+int rj_arith_v_pk_minimum3_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+int rj_arith_v_pk_minimum3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+int rj_arith_v_pk_maximum3_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+int rj_arith_v_pk_maximum3_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+int rj_arith_v_pk_min3_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+int rj_arith_v_pk_min3_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+int rj_arith_v_pk_max3_num_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+int rj_arith_v_pk_max3_num_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *fp_status);
+
+// gfx1250 packed selection retains canonical NaNs and output flushing in Compatibility.
+// Mode 2 rejects selected NaN inputs without changing the destination pending qualification.
+int rj_arith_v_pk_minimum_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          uint32_t *excp_flag_user);
+int rj_arith_v_pk_minimum_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          uint32_t *excp_flag_user);
+int rj_arith_v_pk_maximum_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          uint32_t *excp_flag_user);
+int rj_arith_v_pk_maximum_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a, const uint32_t *const *b,
+                                          uint32_t *excp_flag_user);
+
+// CDNA Compatibility binary FP16 arithmetic flushes after destination rounding.
+// gfx942 ordinary forms also accept RJ_ARITH_ALU_SDWA to scale before rounding,
+// retaining the inherited SDWA order. Other forms retain ordinary OMOD ordering.
+// Loose uses the shared approximation; strict empirical semantics are unsupported.
+// Operands are one VGPR each; EXEC and selected destination halves are preserved.
+// FP status pointers are unused.
+int rj_arith_v_add_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_add_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_sub_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_subrev_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_mul_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+int rj_arith_v_pk_mul_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+
+// CDNA3/4 packed FP16 ADD shares arithmetic, but not gfx1100 exact qualification.
+// Supports Loose, allow-Loose, and Compatibility; strict empirical modes are unsupported.
+int rj_arith_v_pk_add_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_pk_add_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     const uint32_t *const *b, uint32_t *trapsts);
+
+// gfx1250 ordinary MUL rounds to FP16 before output tininess checks.
+int rj_arith_v_mul_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_mul_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *trapsts);
+
+// CDNA LDEXP retains inherited NaN quieting with IEEE clear.
+// Supports Loose, allow-Loose, and Compatibility; strict empirical modes are unsupported.
+int rj_arith_v_ldexp_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts);
+int rj_arith_v_ldexp_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, uint32_t *trapsts);
+// CDNA unary FP64 retains inherited quieting, independent of the gfx11 IEEE rule.
+// These gfx942 forms also serve gfx950; Compatibility uses Loose numerical semantics.
+int rj_arith_v_trunc_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_trunc_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ceil_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ceil_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_rndne_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_rndne_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_floor_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_floor_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_fract_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_fract_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_frexp_mant_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                         uint64_t instruction_flags, uint32_t *const *d,
+                                         const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts);
+
+// CDNA LDEXP retains inherited NaN quieting and guest rounding; gfx942 also serves gfx950.
+// Compatibility/allow-Loose are supported; explicit exact modes remain unqualified.
+int rj_arith_v_ldexp_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+int rj_arith_v_ldexp_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts);
+
+// gfx1250 ADD/SUB/SUBREV produce no FP status in Compatibility; MUL retains the
+// inherited input-denormal/range causes over EXEC, without gfx12 INVALID causes.
+// Strict numeric and FP-status modes remain unqualified. Other arithmetic/modifier
+// and overlap contracts match the corresponding gfx12 forms.
+int rj_arith_v_add_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_add_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_sub_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_sub_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_subrev_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *excp_flag_user);
+int rj_arith_v_subrev_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *excp_flag_user);
+
+int rj_arith_v_mul_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+int rj_arith_v_mul_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user);
+
+// gfx1250 FP32 selection shares numeric rules with the unsuffixed instructions,
+// but Compatibility produces no FP status. Explicit mode 3 is unsupported.
+int rj_arith_v_min_num_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_min_num_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_max_num_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_max_num_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_minimum_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_minimum_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_maximum_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
+int rj_arith_v_maximum_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       uint32_t *excp_flag_user);
 
 #ifdef __cplusplus
 } // extern "C"

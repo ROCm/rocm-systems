@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
+#include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "util/host_target.h"
 #include "util/simd.h"
 #include "util/simd_test_hooks.h"
@@ -358,6 +359,69 @@ TEST(ExecutionPluginTest, SignalingCompareReadsOnlySelectedInputs) {
         EXPECT_EQ(reads[1].physical_reg, vb + 1);
         EXPECT_EQ(reads[1].lane_mask, 1u);
         EXPECT_EQ(reads[1].byte_mask, 3u);
+      }
+    }
+    wave->halt();
+  }
+}
+
+TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+    Wave32PluginFixture f(arch);
+    ASSERT_TRUE(f.cu);
+    auto *plugin = f.attach_ordering_plugin();
+    auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(arch);
+    wave->set_m0(64);
+    const uint32_t base = wave->vgpr_alloc().base;
+    for (uint64_t active : {0u, 3u, 0x14u}) {
+      wave->set_exec(active);
+      for (bool gds : {false, true}) {
+        SCOPED_TRACE(testing::Message() << arch << " active=" << active << " gds=" << gds);
+        // DS_ADD_RTN_U32 v8, v2, v3.
+        const std::array words{0xd8800000u | (uint32_t{gds} << 17), 0x08000302u};
+        auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        const uint64_t expected = gds ? active & -active : active;
+        EXPECT_EQ(amdgpu::MemoryWaitScoreboard::result_lanes(*inst.value(), *wave), expected);
+        auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+        scoreboard.clear();
+        f.cu->track_memory_wait(*inst.value(), *wave);
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::Ds), gds || active ? 1u : 0u);
+        for (const auto &event : scoreboard.events())
+          EXPECT_EQ(event.lanes, expected);
+        scoreboard.clear();
+        plugin->events.clear();
+        ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
+        const auto *data = inst.value()->data_as<amdgpu::VectorMemState>();
+        ASSERT_NE(data, nullptr);
+        EXPECT_EQ(data->lane_mask, expected);
+        EXPECT_EQ(wave->exec(), active);
+        uint64_t reads[2]{};
+        for (const auto &event : vgpr_read_events(*plugin)) {
+          ASSERT_LT(event.physical_reg - base - 2, 2u);
+          reads[event.physical_reg - base - 2] |= event.lane_mask;
+        }
+        EXPECT_EQ(reads[0], expected);
+        EXPECT_EQ(reads[1], expected);
+      }
+      for (unsigned opcode : {61u, 62u}) { // DS_CONSUME and DS_APPEND broadcast.
+        const std::array words{0xd8020000u | (opcode << 18), 0x08000000u};
+        auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        EXPECT_EQ(amdgpu::MemoryWaitScoreboard::result_lanes(*inst.value(), *wave), active);
+        auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+        scoreboard.clear();
+        f.cu->track_memory_wait(*inst.value(), *wave);
+        EXPECT_EQ(scoreboard.outstanding(amdgpu::WaitCounterKind::Ds), 1u);
+        for (const auto &event : scoreboard.events())
+          EXPECT_EQ(event.lanes, active);
+        scoreboard.clear();
+        ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
+        const auto *data = inst.value()->data_as<amdgpu::VectorMemState>();
+        ASSERT_NE(data, nullptr);
+        EXPECT_EQ(data->lane_mask, active);
       }
     }
     wave->halt();
@@ -990,6 +1054,50 @@ TEST(ExecutionPluginTest, UniformDppCompareSourceWaitsOnlyWhenALaneReadsIt) {
   }
 }
 
+TEST(ExecutionPluginTest, StreamoutDoesNotAcquireDataForUnallocatedReturnTuple) {
+  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(f.cu, nullptr);
+  auto *observer = f.attach_ordering_plugin();
+  auto *wave = f.cu->dispatch_wf(0, 0x100, 104, 32, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(0xa);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  auto &state = wave->ensure_memory_wait_scoreboard();
+  for (uint32_t opcode : {0xd9ea0000u, 0xd9ee0000u}) { // ds_add/sub_gs_reg_rtn
+    for (const auto &[dst, offset] : {std::pair{30u, 32u}, {31u, 0u}, {31u, 32u}}) {
+      const bool fits = dst + (offset == 32 ? 2 : 1) <= 32;
+      const std::array words{opcode | offset, (dst << 24) | 0x300u};
+      auto decoded = decoder->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      auto &inst = *decoded.value();
+      SCOPED_TRACE(inst.disassemble());
+      for (uint64_t pending_lane : {2u, 8u}) {
+        unsigned reports = 0;
+        state.clear();
+        state.bind(0x200, &reports,
+                   [](void *ctx, const auto &) { ++*static_cast<unsigned *>(ctx); });
+        constexpr auto counter = WaitCounterKind::Load;
+        state.add(
+            {state.issue(counter), 0x100, pending_lane, {RegClass::VGPR, 3, 1}, counter, 0xf});
+        state.check_instruction(inst, *wave);
+        EXPECT_EQ(reports, unsigned(fits && pending_lane == 2));
+      }
+      state.clear();
+      observer->events.clear();
+      ASSERT_TRUE(f.cu->execute_instruction(&inst, *wave).succeeded());
+      uint64_t source_lanes = 0;
+      for (const auto &read : vgpr_read_events(*observer)) {
+        EXPECT_EQ(read.physical_reg, wave->vgpr_alloc().base + 3);
+        source_lanes |= read.lane_mask;
+      }
+      EXPECT_EQ(source_lanes, fits ? 2u : 0u);
+      EXPECT_EQ(MemoryWaitScoreboard::result_lanes(inst, *wave), source_lanes);
+      EXPECT_EQ(wave->exec(), 0xau);
+    }
+  }
+  wave->halt();
+}
+
 TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
   if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
@@ -1330,8 +1438,11 @@ TEST(ExecutionPluginTest, Rdna2F16TernaryPreservesDestinationWithoutObservingAnE
         amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
         const bool fma = opcode == rdna2::kVFmaF16Vop3;
-        EXPECT_TRUE(tracker.only_tracked_path_executed(
-            fma ? amdgpu::SimdFastPath::VOP3_FMA_FP16 : amdgpu::SimdFastPath::VOP3_TERNARY_FP16));
+        // FMA now uses library dispatch, whose CPU-level paths are tested in lib/arith.
+        // The remaining DIV_FIXUP path still uses the VM's legacy SIMD tracker.
+        if (!fma) {
+          EXPECT_TRUE(tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16));
+        }
 
         std::array<uint64_t, 3> read_lanes{};
         for (const auto &read : vgpr_read_events(*plugin)) {
@@ -3200,23 +3311,8 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
     delete inst;
 
     const auto reads = vgpr_read_events(*plugin);
-    if constexpr (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS) {
-      // The Clang/AVX-512 workaround executes F64 one lane at a time, so
-      // require both halves of every source once per active lane.
-      ASSERT_EQ(reads.size(), 6u * std::popcount(kPartialExecMask));
-      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-        const uint64_t lane_mask = uint64_t{1} << lane;
-        if (!(kPartialExecMask & lane_mask))
-          continue;
-        std::vector<HookEvent> lane_reads;
-        for (const auto &read : reads)
-          if (read.lane_mask == lane_mask)
-            lane_reads.push_back(read);
-        expect_vgpr_read_set(lane_reads, vb, {0, 1, 2, 3, 4, 5}, lane_mask);
-      }
-    } else {
-      expect_vgpr_read_set(reads, vb, {0, 1, 2, 3, 4, 5}, kPartialExecMask);
-    }
+    // rj-arith acquires whole register views independently of stdx SIMD masks.
+    expect_vgpr_read_set(reads, vb, {0, 1, 2, 3, 4, 5}, kPartialExecMask);
   }
 }
 
@@ -3469,169 +3565,119 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
   EXPECT_EQ(actual_regs, expected_regs);
 }
 
-TEST(ExecutionPluginTest, WmmaReadObservationUsesWave32RegisterSet) {
+TEST(ExecutionPluginTest, WmmaF32UsesRegionReads) {
+  ForceScalarOverride force_simd(false);
   Wave32PluginFixture f;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto *plugin = f.attach_ordering_plugin();
-  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *cu = f.cu.get();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
   ASSERT_EQ(wf->wf_size(), 32u);
 
   const uint32_t vb = wf->vgpr_alloc().base;
-  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+  for (uint32_t reg = 0; reg < 64; ++reg)
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
 
-  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
-      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32, amdgpu::ACC_FROM_VGPR,
-      wf->wf_size());
+  ASSERT_NO_FATAL_FAILURE(mma_test::execute(
+      *cu, *wf,
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x4F32Vop3p,
+                         {.vdst = DST, .src0 = 256 + S0, .src1 = 256 + S1, .src2 = 256 + ACC})));
+
+  expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
+                       {S0 + 0, S0 + 1, S1 + 0, S1 + 1, ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4,
+                        ACC + 5, ACC + 6, ACC + 7},
+                       0xFFFF'FFFFu);
+}
+
+TEST(ExecutionPluginTest, WmmaF16PreservesObservedReadWriteOrder) {
+  ForceScalarOverride force_simd(false);
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
+  for (bool inline_c : {false, true}) {
+    for (uint32_t input : {0x3c00'3c00u, 0x7e11'7c33u}) {
+      Wave32PluginFixture f;
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
+      auto *cu = f.cu.get();
+      auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+      ASSERT_NE(wf, nullptr);
+      const uint32_t vb = wf->vgpr_alloc().base;
+      for (uint32_t reg = 0; reg < 8; ++reg)
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          cu->write_vgpr(vb + S0 + reg, lane, input);
+          cu->write_vgpr(vb + S1 + reg, lane, 0x3c00'3c00u);
+          cu->write_vgpr(vb + ACC + reg, lane, 0x3f80'0000u);
+        }
+      auto *plugin = f.attach_ordering_plugin();
+      ASSERT_NO_FATAL_FAILURE(
+          mma_test::execute(*cu, *wf,
+                            cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32F16Vop3p,
+                                               {.vdst = ACC,
+                                                .src0 = 256 + S0,
+                                                .src1 = 256 + S1,
+                                                .src2 = uint16_t(inline_c ? 128 : 256 + ACC)})));
+      std::vector<uint32_t> expected_reads, expected_writes;
+      for (uint32_t reg = 0; reg < 8; ++reg) {
+        expected_reads.insert(expected_reads.end(), {S0 + reg, S1 + reg});
+        if (!inline_c) {
+          expected_reads.push_back(ACC + reg);
+        }
+        expected_writes.push_back(ACC + reg);
+      }
+      expect_vgpr_read_set(vgpr_read_events(*plugin), vb, expected_reads, 0xFFFF'FFFFu);
+      expect_vgpr_read_set(vgpr_write_events(*plugin), vb, expected_writes, 0xFFFF'FFFFu);
+      size_t last_read = 0, first_write = plugin->events.size();
+      for (size_t i = 0; i < plugin->events.size(); ++i) {
+        if (plugin->events[i].kind == HookEvent::READ_VGPR)
+          last_read = i;
+        if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+          first_write = std::min(first_write, i);
+      }
+      EXPECT_LT(last_read, first_write);
+    }
+  }
+}
+
+TEST(ExecutionPluginTest, WmmaBf16F32ReadsBeforePackedWrites) {
+  ForceScalarOverride force_simd(false);
+  Wave32PluginFixture f;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  auto *plugin = f.attach_ordering_plugin();
+  auto *cu = f.cu.get();
+  auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(wf, nullptr);
+  ASSERT_EQ(wf->wf_size(), 32u);
+
+  const uint32_t vb = wf->vgpr_alloc().base;
+  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
+  for (uint32_t reg = 0; reg < 56; ++reg)
+    for (uint32_t lane = 0; lane < 32; ++lane)
+      cu->write_vgpr(vb + reg, lane, 0);
+  plugin->events.clear();
+
+  ASSERT_NO_FATAL_FAILURE(mma_test::execute(
+      *cu, *wf,
+      cdna5::build_vop3p(cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
+                         {.vdst = DST, .src0 = 256 + S0, .src1 = 256 + S1, .src2 = 256 + ACC})));
 
   expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
                        {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
                         S1 + 0,  S1 + 1,  S1 + 2,  S1 + 3,  S1 + 4,  S1 + 5,  S1 + 6,  S1 + 7,
                         ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4, ACC + 5, ACC + 6, ACC + 7},
                        0xFFFF'FFFFu);
-}
-
-TEST(ExecutionPluginTest, WmmaReadObservationSkipsConstantAccumulator) {
-  Wave32PluginFixture f;
-  ASSERT_FALSE(::testing::Test::HasFatalFailure());
-  auto *plugin = f.attach_ordering_plugin();
-  auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
-  ASSERT_NE(wf, nullptr);
-  ASSERT_EQ(wf->wf_size(), 32u);
-
-  const uint32_t vb = wf->vgpr_alloc().base;
-  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
-
-  amdgpu::observe_wmma_fast_path_reads</*M=*/16, /*N=*/16, /*K=*/32>(
-      *f.cu, vb + S0, vb + S1, vb + ACC, /*data_bits=*/16, /*acc_bits=*/32,
-      /*const_acc=*/0, wf->wf_size());
-
-  expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
-                       {S0 + 0, S0 + 1, S0 + 2, S0 + 3, S0 + 4, S0 + 5, S0 + 6, S0 + 7, S1 + 0,
-                        S1 + 1, S1 + 2, S1 + 3, S1 + 4, S1 + 5, S1 + 6, S1 + 7},
+  expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {DST + 0, DST + 1, DST + 2, DST + 3},
                        0xFFFF'FFFFu);
-}
 
-TEST(ExecutionPluginTest, WmmaF32NativeWidthFastPathUsesRegionReads) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "stdx SIMD is unavailable";
-  } else {
-    constexpr uint32_t M = 16, N = 16, K = 4;
-    constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-    if (!amdgpu::mma_f32_native_width_supported(N, width))
-      GTEST_SKIP() << "f32 WMMA shape is not divisible by the native SIMD width";
-
-    ForceScalarOverride force_simd(false);
-    Wave32PluginFixture f;
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    auto *plugin = f.attach_ordering_plugin();
-    auto *cu = f.cu.get();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
-    ASSERT_NE(wf, nullptr);
-    ASSERT_EQ(wf->wf_size(), 32u);
-
-    const uint32_t vb = wf->vgpr_alloc().base;
-    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
-    for (uint32_t reg = 0; reg < 64; ++reg)
-      for (uint32_t lane = 0; lane < 32; ++lane)
-        cu->write_vgpr(vb + reg, lane, 0x3f80'0000u);
-
-    amdgpu::exec_wmma_f32_f32_spec<M, N, K>(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
-                                            amdgpu::ACC_FROM_VGPR);
-
-    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
-                         {S0 + 0, S0 + 1, S1 + 0, S1 + 1, ACC + 0, ACC + 1, ACC + 2, ACC + 3,
-                          ACC + 4, ACC + 5, ACC + 6, ACC + 7},
-                         0xFFFF'FFFFu);
+  size_t last_read = 0;
+  size_t first_write = plugin->events.size();
+  for (size_t i = 0; i < plugin->events.size(); ++i) {
+    if (plugin->events[i].kind == HookEvent::READ_VGPR)
+      last_read = i;
+    if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
+      first_write = std::min(first_write, i);
   }
-}
-
-TEST(ExecutionPluginTest, WmmaF16NativeWidthPreservesObservedReadWriteOrder) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "stdx SIMD is unavailable";
-  }
-  ForceScalarOverride force_simd(false);
-  constexpr uint32_t S0 = 0, S1 = 16, ACC = 32;
-  for (uint32_t input : {0x3c00'3c00u, 0x7e11'7c33u}) {
-    Wave32PluginFixture f;
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    auto *cu = f.cu.get();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
-    ASSERT_NE(wf, nullptr);
-    const uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t reg = 0; reg < 8; ++reg)
-      for (uint32_t lane = 0; lane < 32; ++lane) {
-        cu->write_vgpr(vb + S0 + reg, lane, input);
-        cu->write_vgpr(vb + S1 + reg, lane, 0x3c00'3c00u);
-        cu->write_vgpr(vb + ACC + reg, lane, 0x3f80'0000u);
-      }
-    auto *plugin = f.attach_ordering_plugin();
-    // Use the same CU view instantiated by generated instruction execution.
-    amdgpu::InstructionComputeUnitView view(*cu, *wf);
-    amdgpu::exec_wmma_f32_16x16x32_f16(view, vb + ACC, vb + S0, vb + S1, vb + ACC);
-    std::vector<uint32_t> expected_reads, expected_writes;
-    for (uint32_t reg = 0; reg < 8; ++reg) {
-      expected_reads.insert(expected_reads.end(), {S0 + reg, S1 + reg, ACC + reg});
-      expected_writes.push_back(ACC + reg);
-    }
-    expect_vgpr_read_set(vgpr_read_events(*plugin), vb, expected_reads, 0xFFFF'FFFFu);
-    expect_vgpr_read_set(vgpr_write_events(*plugin), vb, expected_writes, 0xFFFF'FFFFu);
-    size_t last_read = 0, first_write = plugin->events.size();
-    for (size_t i = 0; i < plugin->events.size(); ++i) {
-      if (plugin->events[i].kind == HookEvent::READ_VGPR)
-        last_read = i;
-      if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
-        first_write = std::min(first_write, i);
-    }
-    EXPECT_LT(last_read, first_write);
-  }
-}
-
-TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
-  if constexpr (!util::has_stdx_simd) {
-    GTEST_SKIP() << "stdx SIMD is unavailable";
-  } else {
-    if (util::native<float>::size() != 16)
-      GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
-
-    ForceScalarOverride force_simd(false);
-    Wave32PluginFixture f;
-    ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    auto *plugin = f.attach_ordering_plugin();
-    auto *cu = f.cu.get();
-    auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
-    ASSERT_NE(wf, nullptr);
-    ASSERT_EQ(wf->wf_size(), 32u);
-
-    const uint32_t vb = wf->vgpr_alloc().base;
-    constexpr uint32_t S0 = 0, S1 = 16, ACC = 32, DST = 48;
-    for (uint32_t reg = 0; reg < 56; ++reg)
-      for (uint32_t lane = 0; lane < 32; ++lane)
-        cu->write_vgpr(vb + reg, lane, 0);
-    plugin->events.clear();
-
-    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, vb + DST, vb + S0, vb + S1, vb + ACC,
-                                            amdgpu::ACC_FROM_VGPR,
-                                            /*c_modifier=*/0);
-
-    expect_vgpr_read_set(vgpr_read_events(*plugin), vb,
-                         {S0 + 0,  S0 + 1,  S0 + 2,  S0 + 3,  S0 + 4,  S0 + 5,  S0 + 6,  S0 + 7,
-                          S1 + 0,  S1 + 1,  S1 + 2,  S1 + 3,  S1 + 4,  S1 + 5,  S1 + 6,  S1 + 7,
-                          ACC + 0, ACC + 1, ACC + 2, ACC + 3, ACC + 4, ACC + 5, ACC + 6, ACC + 7},
-                         0xFFFF'FFFFu);
-    expect_vgpr_read_set(vgpr_write_events(*plugin), vb, {DST + 0, DST + 1, DST + 2, DST + 3},
-                         0xFFFF'FFFFu);
-
-    size_t last_read = 0;
-    size_t first_write = plugin->events.size();
-    for (size_t i = 0; i < plugin->events.size(); ++i) {
-      if (plugin->events[i].kind == HookEvent::READ_VGPR)
-        last_read = i;
-      if (plugin->events[i].kind == HookEvent::WRITE_VGPR)
-        first_write = std::min(first_write, i);
-    }
-    ASSERT_LT(last_read, first_write);
-  }
+  ASSERT_LT(last_read, first_write);
 }
 
 TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
