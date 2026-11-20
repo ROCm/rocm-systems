@@ -324,6 +324,35 @@ std::vector<uint8_t> FloatRankOrderFold(const std::vector<std::vector<uint8_t>>&
   return reduced;
 }
 
+// bf16 messages of small integers (0..7): every partial sum of up to 36 ranks stays an integer below 256, which
+// bf16 holds exactly, so the result is the integer sum whatever the fold order.
+std::vector<std::vector<uint8_t>> Bf16IntMessages(int nRanks, size_t bytes) {
+  std::vector<std::vector<uint8_t>> send((size_t)nRanks, std::vector<uint8_t>(bytes));
+  for (int r = 0; r < nRanks; ++r) {
+    for (size_t i = 0; i < bytes / sizeof(bf16); ++i) {
+      const bf16 v = __float2bfloat16((float)((r * 3 + (int)i) % 8));
+      std::memcpy(&send[(size_t)r][i * sizeof(bf16)], &v, sizeof(bf16));
+    }
+  }
+  return send;
+}
+
+// The integer sum of the bf16 messages, as bf16.
+std::vector<uint8_t> Bf16Sum(const std::vector<std::vector<uint8_t>>& send) {
+  std::vector<uint8_t> sum(send[0].size());
+  for (size_t i = 0; i < sum.size() / sizeof(bf16); ++i) {
+    float acc = 0.0f;
+    for (const std::vector<uint8_t>& msg : send) {
+      bf16 v;
+      std::memcpy(&v, &msg[i * sizeof(bf16)], sizeof(bf16));
+      acc += __bfloat162float(v);
+    }
+    const bf16 out = __float2bfloat16(acc);
+    std::memcpy(&sum[i * sizeof(bf16)], &out, sizeof(bf16));
+  }
+  return sum;
+}
+
 // The trace line of c.
 std::string Describe(const Case& c) {
   return std::string(name(c.kind)) + ", " + std::to_string(c.nRanks) + " ranks, self " +
@@ -338,11 +367,17 @@ const Case kCases[] = {
   {Kind::kOneShot, 3, 0, 0, 1, 256, kWholeBytes},     // two 3-warp groups and two leftover warps
   {Kind::kOneShot, 8, 5, 8, 3, 512, kPartialBytes},   // two 8-warp groups a block
   {Kind::kOneShot, 16, 9, 0, 2, 512, kPartialBytes},  // one 16-warp group, a warp per rank
+  {Kind::kOneShot, 2, 1, 0, 2, 512, kPartialBytes},   // eight 2-warp groups a block
+  {Kind::kOneShot, 24, 17, 0, 2, 512, kPartialBytes}, // 16-warp groups fold in rounds of 16 and 8
+  {Kind::kOneShot, 33, 32, 0, 2, 512, kPartialBytes}, // rounds of 16, 16 and 1, self alone in the last
   {Kind::kTwoShot, 4, 1, 4, 2, 512, kPartialBytes},
   {Kind::kTwoShot, 3, 2, 0, 2, 512, kPartialBytes},   // the leftover warp still takes phase 1 and 3 items
   {Kind::kTwoShot, 3, 0, 0, 1, 256, kWholeBytes},
   {Kind::kTwoShot, 8, 5, 8, 3, 512, kPartialBytes},
   {Kind::kTwoShot, 16, 9, 0, 2, 512, kPartialBytes},
+  {Kind::kTwoShot, 2, 1, 0, 2, 512, kPartialBytes},
+  {Kind::kTwoShot, 24, 17, 0, 2, 512, kPartialBytes},
+  {Kind::kTwoShot, 33, 5, 0, 2, 512, kPartialBytes},
 };
 
 }  // namespace
@@ -367,6 +402,19 @@ TEST_F(DdaAllReduceFabricLL128PeerPar, InPlaceMatchesTheRankOrderFold) {
     const auto send = FloatMessages(c.nRanks, messageBytes(c));
     setUp(c, send, FloatRankOrderFold(send));
     expectRankOrderFold<float>(/*inPlace=*/true);
+  }
+}
+
+// bf16 folds each 4B half of a word as two bf16 values, unrolled (8 ranks) and in rounds (33 ranks).
+TEST_F(DdaAllReduceFabricLL128PeerPar, Bf16MatchesTheExactSum) {
+  for (const Case& c : {Case{Kind::kOneShot, 8, 5, 8, 3, 512, kPartialBytes},
+                        Case{Kind::kOneShot, 33, 32, 0, 2, 512, kPartialBytes},
+                        Case{Kind::kTwoShot, 8, 5, 8, 3, 512, kPartialBytes},
+                        Case{Kind::kTwoShot, 33, 5, 0, 2, 512, kPartialBytes}}) {
+    SCOPED_TRACE(Describe(c));
+    const auto send = Bf16IntMessages(c.nRanks, messageBytes(c));
+    setUp(c, send, Bf16Sum(send));
+    expectRankOrderFold<bf16>();
   }
 }
 
