@@ -12,7 +12,7 @@ include_guard(GLOBAL)
 option(HIPFILE_USE_IWYU "Run include-what-you-use when compiling" OFF)
 
 if(HIPFILE_USE_IWYU)
-    find_program(IWYU_EXE NAMES include-what-you-use REQUIRED)
+    find_program(HIPFILE_IWYU_EXE NAMES include-what-you-use REQUIRED)
 
     # GoogleTest/GoogleMock expose their public API through umbrella headers
     # (gtest/gtest.h, gmock/gmock.h) but define symbols in private sub-headers.
@@ -27,7 +27,7 @@ if(HIPFILE_USE_IWYU)
         "${CMAKE_CURRENT_LIST_DIR}/iwyu-gtest.imp"
         "${CMAKE_CURRENT_LIST_DIR}/iwyu-libc.imp")
 
-    set(IWYU_COMMAND "${IWYU_EXE}")
+    set(IWYU_COMMAND "${HIPFILE_IWYU_EXE}")
     foreach(mapping IN LISTS IWYU_MAPPINGS)
         if(NOT EXISTS "${mapping}")
             message(FATAL_ERROR "IWYU mapping file not found: ${mapping}")

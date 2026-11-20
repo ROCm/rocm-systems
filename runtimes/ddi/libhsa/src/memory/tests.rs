@@ -917,3 +917,160 @@ fn topology_link_types_use_the_hsa_amd_encoding() {
     assert_eq!(hsa_link_type(MemoryLinkType::Xgmi), 4);
     assert_eq!(hsa_link_type(MemoryLinkType::Unknown), 0);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires a qualified GPU and KFD runtime; run in isolation"]
+fn imported_vmem_pointer_info_preserves_automatic_copy_routing() {
+    use crate::api::signal::{core::*, wait::*};
+    use std::os::fd::{FromRawFd, OwnedFd};
+
+    assert_eq!(crate::hsa_init(), SUCCESS);
+    let gpu = HsaAgent {
+        handle: GPU_AGENT_BASE,
+    };
+    let pool = crate::agent::Agents::gpu_pool(0, GpuPoolKind::Coarse);
+    let size = 64 * 1024;
+    let pattern = 0x5a37_c901;
+    let mut original = HsaAmdVmemAllocHandle { handle: 0 };
+    let mut source_handle = HsaAmdVmemAllocHandle { handle: 0 };
+    let mut imported = HsaAmdVmemAllocHandle { handle: 0 };
+    let mut source = std::ptr::null_mut();
+    let mut destination = std::ptr::null_mut();
+    let mut fd = -1;
+    let mut completion = HsaSignal { handle: 0 };
+    // SAFETY: Outputs are writable, returned mappings and signal are retained
+    // until the copy completes. On a failure, the runtime retains all native
+    // operands until this isolated test process exits.
+    unsafe {
+        assert_eq!(
+            hsa_amd_vmem_handle_create(pool, size, MEMORY_TYPE_NONE, 0, &raw mut original),
+            SUCCESS
+        );
+        assert_eq!(
+            hsa_amd_vmem_handle_create(pool, size, MEMORY_TYPE_NONE, 0, &raw mut source_handle),
+            SUCCESS
+        );
+        assert_eq!(
+            hsa_amd_vmem_export_shareable_handle(&raw mut fd, original, 0),
+            SUCCESS
+        );
+        let fd_owner = OwnedFd::from_raw_fd(fd);
+        assert_eq!(
+            hsa_amd_vmem_import_shareable_handle(fd, &raw mut imported),
+            SUCCESS
+        );
+        drop(fd_owner);
+        for (address, handle) in [(&mut source, source_handle), (&mut destination, imported)] {
+            assert_eq!(hsa_amd_vmem_address_reserve(address, size, 0, 0), SUCCESS);
+            assert_eq!(hsa_amd_vmem_map(*address, size, 0, handle, 0), SUCCESS);
+            let access = HsaAmdMemoryAccessDesc {
+                agent_handle: gpu,
+                permissions: ACCESS_PERMISSION_RW,
+            };
+            assert_eq!(
+                hsa_amd_vmem_set_access(*address, size, &raw const access, 1),
+                SUCCESS
+            );
+        }
+        for (address, expected_owner) in [(source, gpu.handle), (destination, 0)] {
+            // All-zero pointer-info storage is a valid initialized ABI record.
+            let mut info: HsaAmdPointerInfo = std::mem::zeroed();
+            info.size = size_of::<HsaAmdPointerInfo>() as u32;
+            assert_eq!(
+                hsa_amd_pointer_info(
+                    address,
+                    &raw mut info,
+                    None,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut()
+                ),
+                SUCCESS
+            );
+            assert_eq!(info.agent_owner.handle, expected_owner);
+            if expected_owner == 0 {
+                assert_eq!(info.global_flags, 0);
+                assert_eq!(info.alloc_flags, 0);
+            }
+        }
+        {
+            let guard = lock().unwrap();
+            let runtime = guard.as_ref().unwrap();
+            let route = resolve_sync_gpu_copy(
+                runtime,
+                destination as usize,
+                source as usize,
+                size,
+                Err(INVALID_ALLOCATION),
+                Err(INVALID_ALLOCATION),
+            )
+            .unwrap();
+            assert!(matches!(route.route, SyncGpuCopyRoute::Direct { .. }));
+        }
+        assert_eq!(hsa_amd_memory_fill(source, pattern, size / 4), SUCCESS);
+        assert_eq!(
+            hsa_signal_create(1, 0, std::ptr::null(), &raw mut completion),
+            SUCCESS
+        );
+        assert_eq!(
+            hsa_amd_memory_async_copy(
+                destination,
+                HsaAgent { handle: 0 },
+                source,
+                HsaAgent { handle: 0 },
+                size,
+                0,
+                std::ptr::null(),
+                completion
+            ),
+            SUCCESS
+        );
+        let frequency = rocddi::host::clock::info().frequency_hz;
+        assert_eq!(
+            hsa_signal_wait_scacquire(
+                completion,
+                SIGNAL_CONDITION_EQ,
+                0,
+                frequency * 5,
+                WAIT_STATE_BLOCKED
+            ),
+            0
+        );
+        let host_access = HsaAmdMemoryAccessDesc {
+            agent_handle: HsaAgent { handle: CPU_AGENT },
+            permissions: ACCESS_PERMISSION_RO,
+        };
+        assert_eq!(
+            hsa_amd_vmem_set_access(destination, size, &raw const host_access, 1),
+            SUCCESS
+        );
+        let mut info: HsaAmdPointerInfo = std::mem::zeroed();
+        info.size = size_of::<HsaAmdPointerInfo>() as u32;
+        assert_eq!(
+            hsa_amd_pointer_info(
+                destination,
+                &raw mut info,
+                None,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            ),
+            SUCCESS
+        );
+        assert_eq!(info.host_base_address, destination);
+        assert_eq!(info.alloc_flags, 0);
+        assert!(
+            std::slice::from_raw_parts(destination.cast::<u32>(), size / 4)
+                .iter()
+                .all(|&value| value == pattern)
+        );
+        assert_eq!(hsa_signal_destroy(completion), SUCCESS);
+        for address in [source, destination] {
+            assert_eq!(hsa_amd_vmem_unmap(address, size), SUCCESS);
+            assert_eq!(hsa_amd_vmem_address_free(address, size), SUCCESS);
+        }
+        for handle in [source_handle, imported, original] {
+            assert_eq!(hsa_amd_vmem_handle_release(handle), SUCCESS);
+        }
+    }
+    assert_eq!(crate::hsa_shut_down(), SUCCESS);
+}
