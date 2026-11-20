@@ -5136,24 +5136,87 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
   return status;
 }
 
+// rocm_smi's records have 64-byte names, shorter than those of amdsmi_name_value_t. Copies them
+// into a new array of amdsmi_name_value_t, which the caller releases with free().
+static amdsmi_status_t copy_rsmi_name_values(const rsmi_name_value_t* rsmi_pairs, uint32_t count,
+                                             amdsmi_name_value_t** pairs) {
+  static_assert(sizeof(amdsmi_name_value_t::name) > sizeof(rsmi_name_value_t::name),
+                "a copied name must keep its terminator");
+  // Never NULL on success: the Rust binding builds a slice from it even when count is 0.
+  auto* out = static_cast<amdsmi_name_value_t*>(
+      calloc(std::max<uint32_t>(count, 1), sizeof(amdsmi_name_value_t)));
+  if (out == nullptr) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+  for (uint32_t i = 0; i < count; ++i) {
+    // Only the name itself: in the records rocm_smi grows with realloc(), the bytes after the
+    // terminator are uninitialized.
+    std::memcpy(out[i].name, rsmi_pairs[i].name,
+                strnlen(rsmi_pairs[i].name, sizeof(rsmi_pairs[i].name)));
+    out[i].value = rsmi_pairs[i].value;
+  }
+  *pairs = out;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(amdsmi_processor_handle processor_handle,
                                                amdsmi_name_value_t** pm_metrics,
                                                uint32_t* num_of_metrics) {
+  if (num_of_metrics != nullptr) {
+    *num_of_metrics = 0;  // Stays 0 unless the call succeeds.
+  }
   AMDSMI_CHECK_INIT();
+  // A NULL array with a count to fill in is invalid. A NULL count goes on to rocm_smi, which
+  // reports whether the device supports the call.
+  if (pm_metrics == nullptr && num_of_metrics != nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
 
-  return rsmi_wrapper(rsmi_dev_pm_metrics_info_get, processor_handle, 0,
-                      reinterpret_cast<rsmi_name_value_t**>(pm_metrics), num_of_metrics);
+  // rocm_smi's parser can fail after allocating the array and counting part of it, so its
+  // count goes to a local and its array is freed on every path.
+  rsmi_name_value_t* rsmi_metrics = nullptr;
+  uint32_t count = 0;
+  auto status = rsmi_wrapper(rsmi_dev_pm_metrics_info_get, processor_handle, 0, &rsmi_metrics,
+                             num_of_metrics != nullptr ? &count : nullptr);
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    status = copy_rsmi_name_values(rsmi_metrics, count, pm_metrics);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      *num_of_metrics = count;  // Not NULL here: rocm_smi fails a NULL count.
+    }
+  }
+  free(rsmi_metrics);
+  return status;
 }
 
 amdsmi_status_t amdsmi_get_gpu_reg_table_info(amdsmi_processor_handle processor_handle,
                                               amdsmi_reg_type_t reg_type,
                                               amdsmi_name_value_t** reg_metrics,
                                               uint32_t* num_of_metrics) {
+  if (num_of_metrics != nullptr) {
+    *num_of_metrics = 0;  // Stays 0 unless the call succeeds.
+  }
   AMDSMI_CHECK_INIT();
+  // A NULL array with a count to fill in is invalid. A NULL count goes on to rocm_smi, which
+  // reports whether the device supports the call.
+  if (reg_metrics == nullptr && num_of_metrics != nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
 
-  return rsmi_wrapper(rsmi_dev_reg_table_info_get, processor_handle, 0,
-                      static_cast<rsmi_reg_type_t>(reg_type),
-                      reinterpret_cast<rsmi_name_value_t**>(reg_metrics), num_of_metrics);
+  // rocm_smi's parser can fail after allocating the array and counting part of it, so its
+  // count goes to a local and its array is freed on every path.
+  rsmi_name_value_t* rsmi_metrics = nullptr;
+  uint32_t count = 0;
+  auto status = rsmi_wrapper(rsmi_dev_reg_table_info_get, processor_handle, 0,
+                             static_cast<rsmi_reg_type_t>(reg_type), &rsmi_metrics,
+                             num_of_metrics != nullptr ? &count : nullptr);
+  if (status == AMDSMI_STATUS_SUCCESS) {
+    status = copy_rsmi_name_values(rsmi_metrics, count, reg_metrics);
+    if (status == AMDSMI_STATUS_SUCCESS) {
+      *num_of_metrics = count;  // Not NULL here: rocm_smi fails a NULL count.
+    }
+  }
+  free(rsmi_metrics);
+  return status;
 }
 
 void amdsmi_free_name_value_pairs(void* p) {

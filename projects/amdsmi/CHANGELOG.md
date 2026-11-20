@@ -46,6 +46,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
+- **Fixed wrong names and values from `amdsmi_get_gpu_pm_metrics_info()` and `amdsmi_get_gpu_reg_table_info()` in C and Rust**.  
+  - Callers read wrong names and values and could read past the end of the returned array. The Python module reads the corrected records, so upgrade it together with the library. The functions also return `AMDSMI_STATUS_INVAL` instead of crashing when the array pointer is NULL but the count pointer is not.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added

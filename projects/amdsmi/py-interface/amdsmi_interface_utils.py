@@ -184,34 +184,20 @@ def _format_bad_page_info(bad_page_info, bad_page_count: ctypes.c_uint32) -> Lis
     return table_records
 
 
-class _RsmiNameValue(ctypes.Structure):
-    """Record layout behind the PM metrics and register table APIs.
-
-    amdsmi_get_gpu_pm_metrics_info() and amdsmi_get_gpu_reg_table_info()
-    return rocm_smi's rsmi_name_value_t array unchanged: a 64-byte name and a
-    uint64 value (72 bytes per record), not the 264-byte amdsmi_name_value_t
-    declared in amdsmi.h.
-    """
-
-    _fields_ = [("name", ctypes.c_char * 64), ("value", ctypes.c_uint64)]
-
-
 def _get_name_value(num, data) -> List[Dict[str, int]]:
     """
     Extracts a list of name-value pairs from a ctypes array buffer.
 
     Parameters:
         num (ctypes.c_uint32): Number of elements in the array.
-        data: Pointer to the array returned by the library; see
-            `_RsmiNameValue` for the record layout.
+        data: POINTER(amdsmi_name_value_t) to the array returned by the library.
 
     Returns:
         List[Dict[str, int]]: A list of dictionaries, each with keys 'name' (str)
             and 'value' (int) extracted from the buffer.
     """
-    records = ctypes.cast(data, ctypes.POINTER(_RsmiNameValue))
     return [
-        {"name": records[i].name.decode("utf-8", errors="replace"), "value": records[i].value}
+        {"name": data[i].name.decode("utf-8", errors="replace"), "value": data[i].value}
         for i in range(num.value)
     ]
 
