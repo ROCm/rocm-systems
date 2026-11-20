@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -438,6 +439,79 @@ TEST(GpuUnit, PidNamespaceListsLeaveOutAProcessThatHidepidDenies) {
                     "unprivileged caller";
   }
   EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+}
+
+// A mock /proc whose self/ns/pid links to `target`, or is missing when it is
+// empty, as the library reads the PID namespace.
+class MockPidNamespaceLink {
+ public:
+  explicit MockPidNamespaceLink(const std::string& target) {
+    std::filesystem::create_directories(proc_.root() + "/self/ns");
+    Relink(target);
+    amd::smi::SetProcPathRootForTesting(proc_.root().c_str());
+  }
+  ~MockPidNamespaceLink() { amd::smi::SetProcPathRootForTesting(nullptr); }
+
+  MockPidNamespaceLink(const MockPidNamespaceLink&) = delete;
+  MockPidNamespaceLink& operator=(const MockPidNamespaceLink&) = delete;
+
+  void Relink(const std::string& target) {
+    const std::string link = proc_.root() + "/self/ns/pid";
+    std::filesystem::remove(link);
+    if (!target.empty()) std::filesystem::create_symlink(target, link);
+  }
+
+ private:
+  FakeSysfsTree proc_;
+};
+
+// /proc/self/ns/pid of the initial PID namespace, made from the kernel's
+// PROC_PID_INIT_INO (include/linux/proc_ns.h) as the kernel prints it, so that a
+// wrong copy of it in the library fails.
+std::string InitialPidNamespace() { return "pid:[" + std::to_string(0xEFFFFFFCU) + "]"; }
+
+// Another PID namespace's /proc/self/ns/pid.
+constexpr char kOtherPidNamespace[] = "pid:[4026532001]";
+
+TEST(GpuUnit, PidNamespaceOfTheInitialInodeIsTheHosts) {
+  MockPidNamespaceLink link(InitialPidNamespace());
+  EXPECT_FALSE(amd::smi::IsKfdPidNamespaced());
+}
+
+TEST(GpuUnit, PidNamespaceOfAnotherInodeIsAnotherOne) {
+  // Another inode, and a name that starts with the initial namespace's.
+  for (const std::string& target : {std::string(kOtherPidNamespace), InitialPidNamespace() + "0"}) {
+    MockPidNamespaceLink link(target);
+    EXPECT_TRUE(amd::smi::IsKfdPidNamespaced()) << target;
+  }
+}
+
+TEST(GpuUnit, PidNamespaceThatCannotBeReadIsAnotherOne) {
+  MockPidNamespaceLink link("");
+  EXPECT_TRUE(amd::smi::IsKfdPidNamespaced());
+}
+
+TEST(GpuUnit, PidNamespaceOfThisProcessIsReadFromProc) {
+  // Without a test /proc, the answer is this process's /proc/self/ns/pid, in
+  // whichever namespace the tests run. Only in the host's namespace does reading
+  // the wrong path change the answer: elsewhere both are "another namespace".
+  const std::string link = std::filesystem::read_symlink("/proc/self/ns/pid").string();
+  EXPECT_EQ(amd::smi::IsKfdPidNamespaced(), link != InitialPidNamespace()) << link;
+}
+
+TEST(GpuUnit, PidNamespaceIsReadAgainInAForkedChild) {
+  MockPidNamespaceLink link(InitialPidNamespace());
+  ASSERT_FALSE(amd::smi::IsKfdPidNamespaced());
+  // As after unshare(CLONE_NEWPID): this process keeps the namespace it read, and
+  // a child it forks is in the new one.
+  link.Relink(kOtherPidNamespace);
+  EXPECT_FALSE(amd::smi::IsKfdPidNamespaced());
+  const pid_t child = fork();
+  ASSERT_GE(child, 0);
+  if (child == 0) _exit(amd::smi::IsKfdPidNamespaced() ? 0 : 1);
+  int status = 0;
+  ASSERT_EQ(waitpid(child, &status, 0), child);
+  EXPECT_TRUE(WIFEXITED(status) && WEXITSTATUS(status) == 0) << "status " << status;
 }
 
 }  // namespace

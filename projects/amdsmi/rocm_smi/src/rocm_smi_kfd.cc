@@ -62,27 +62,28 @@ static const char* ProcPathRoot() {
 }
 static const char* kKFDVramPrefix = "vram_";
 
-// Whether this process runs in a PID namespace other than the initial one, by
-// whose PIDs KFD names its process directories. In another, as in a container
-// that does not share the host's, such a directory can be another process's,
-// so processes are read from this namespace's /proc instead. A
-// /proc/self/ns/pid that cannot be read counts as another namespace.
-static bool IsKfdPidNamespaced() {
-  // A mock /proc (SetProcPathRootForTesting()) is such a namespace's view; a mock
-  // KFD tree alone (SetKFDProcPathRootForTesting()) is named by this process's PIDs.
-  if (g_proc_path_root_override.load() != nullptr) return true;
-  if (g_kfd_proc_path_root_override.load() != nullptr) return false;
+// The PID namespace read last, kept per PID: a child forked after
+// unshare(CLONE_NEWPID) is in a new one. (pid << 1) | namespaced; 0 when unset.
+static std::atomic<uint64_t> g_pid_namespace_cache{0};
+
+bool IsKfdPidNamespaced() {
+  // A mock KFD tree alone (SetKFDProcPathRootForTesting()) is named by this
+  // process's PIDs. A mock /proc is read as the real one is.
+  if (g_proc_path_root_override.load() == nullptr &&
+      g_kfd_proc_path_root_override.load() != nullptr) {
+    return false;
+  }
   // The initial PID namespace has a fixed inode number (PROC_PID_INIT_INO).
   constexpr char kInitPidNamespace[] = "pid:[4026531836]";
   constexpr size_t kInitLen = sizeof(kInitPidNamespace) - 1;
-  // Kept per PID: a child forked after unshare(CLONE_NEWPID) is in a new one.
-  static std::atomic<uint64_t> cached{0};  // (pid << 1) | namespaced; 0 when unset
   const auto self = static_cast<uint64_t>(getpid());
-  const uint64_t entry = cached.load(std::memory_order_relaxed);
+  const uint64_t entry = g_pid_namespace_cache.load(std::memory_order_relaxed);
   if ((entry >> 1) == self) return (entry & 1) != 0;
 
+  // One byte more than the initial namespace's name, to tell a longer name apart.
   char pid_ns[kInitLen + 1] = {};
-  const ssize_t len = readlink("/proc/self/ns/pid", pid_ns, sizeof(pid_ns));
+  const std::string link = std::string(ProcPathRoot()) + "/self/ns/pid";
+  const ssize_t len = readlink(link.c_str(), pid_ns, sizeof(pid_ns));
   const bool namespaced =
       len != static_cast<ssize_t>(kInitLen) || memcmp(pid_ns, kInitPidNamespace, kInitLen) != 0;
   if (namespaced) {
@@ -91,7 +92,7 @@ static bool IsKfdPidNamespaced() {
        << "from /proc, without their KFD statistics";
     LOG_INFO(ss);
   }
-  cached.store((self << 1) | (namespaced ? 1 : 0), std::memory_order_relaxed);
+  g_pid_namespace_cache.store((self << 1) | (namespaced ? 1 : 0), std::memory_order_relaxed);
   return namespaced;
 }
 
@@ -731,7 +732,11 @@ void SetKFDProcPathRootForTesting(const char* path) {
   index.valid = false;
 }
 
-void SetProcPathRootForTesting(const char* path) { g_proc_path_root_override.store(path); }
+void SetProcPathRootForTesting(const char* path) {
+  g_proc_path_root_override.store(path);
+  // The namespace was read from the previous /proc.
+  g_pid_namespace_cache.store(0, std::memory_order_relaxed);
+}
 
 // Rebuilds the index from the root `names` listed at `listed_at`, unless it
 // already holds a later listing. The caller holds index->mtx.

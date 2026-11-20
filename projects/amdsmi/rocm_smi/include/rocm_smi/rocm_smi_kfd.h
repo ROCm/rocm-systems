@@ -112,11 +112,19 @@ const char* KFDProcPathRoot();
 // are named by this process's PIDs; nullptr restores the real one.
 void SetKFDProcPathRootForTesting(const char* path);
 
-// Test-only hook to read processes from a mock /proc tree (its devices file and
-// each <pid>/fd, <pid>/maps), as from a PID namespace other than the initial one;
-// nullptr restores /proc. `path` is not copied: it and the tree must outlive the
-// hook.
+// Test-only hook to read processes from a mock /proc tree (its devices file,
+// self/ns/pid and each <pid>/fd, <pid>/maps); nullptr restores /proc. Without a
+// self/ns/pid that names the initial PID namespace, the tree is read as from
+// another one. `path` is not copied: it and the tree must outlive the hook.
 void SetProcPathRootForTesting(const char* path);
+
+// Whether this process runs in a PID namespace other than the initial one, by
+// whose PIDs KFD names its process directories, as <proc root>/self/ns/pid says;
+// read once per process. In another, as in a container that does not share the
+// host's, such a directory can be another process's, so processes are read from
+// this namespace's /proc instead. A self/ns/pid that cannot be read counts as
+// another namespace.
+bool IsKfdPidNamespaced();
 
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_count);
 int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
