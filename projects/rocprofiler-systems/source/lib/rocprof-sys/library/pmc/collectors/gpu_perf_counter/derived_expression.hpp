@@ -297,7 +297,8 @@ private:
         auto const name = read_identifier();
         if(name == "accumulate")
         {
-            fail("accumulate() is not supported");
+            fail("accumulate() is not supported: it is an SQ counter collection mode "
+                 "the SDK applies only inside its own derived counter");
         }
         if(name == "reduce")
         {
@@ -317,7 +318,8 @@ private:
         auto const name = read_identifier();
         if(name == "accumulate")
         {
-            fail("accumulate() is not supported");
+            fail("accumulate() is not supported: it is an SQ counter collection mode "
+                 "the SDK applies only inside its own derived counter");
         }
         const auto& meta = lookup(name);
         if(meta.is_derived)
