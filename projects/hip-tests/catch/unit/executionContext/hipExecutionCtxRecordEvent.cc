@@ -395,12 +395,16 @@ HIP_TEST_CASE(Unit_hipExecutionCtxRecordEvent_ElapsedTime_MultiStream) {
 
   float ms = -1.0f;
   HIP_CHECK(hipEventElapsedTime(&ms, start, stop));
+  INFO("GPU elapsed time: " << ms << " ms; host interval: " << walltime_ms << " ms");
   REQUIRE(ms > 0.0f);
   REQUIRE(std::isfinite(ms));
   // If the fan-in marker truly waits on every ctx stream, the GPU elapsed
   // time should track wall-time closely. A 0.5x floor leaves slack for
   // kernel-launch overhead and scheduler variance on busy hosts.
   REQUIRE(static_cast<double>(ms) >= 0.5 * walltime_ms);
+  // Both event records and stop completion are inside the measured host interval.
+  // Allow 1 ms for device/host clock correlation and timestamp resolution.
+  REQUIRE(static_cast<double>(ms) <= walltime_ms + 1.0);
 
   for (int i = 0; i < kNumStreams; ++i) {
     HIP_CHECK(hipFree(d_a[i]));
