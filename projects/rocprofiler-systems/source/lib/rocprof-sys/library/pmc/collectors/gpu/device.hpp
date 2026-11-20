@@ -85,111 +85,167 @@ public:
         return *m_bdf;
     }
 
-    [[nodiscard]] metrics get_metrics([[maybe_unused]] const enabled_metrics& enabled_cfg,
-                                      [[maybe_unused]] std::uint64_t          timestamp)
+    [[nodiscard]] metrics get_metrics(const enabled_metrics&         enabled_cfg,
+                                      [[maybe_unused]] std::uint64_t timestamp)
     {
         metrics gpu_metrics{};
 
         try
         {
-            auto raw = m_backend->get_metrics();
-
-            if(m_supported_metrics.bits.current_socket_power)
-            {
-                gpu_metrics.current_socket_power = raw.current_socket_power;
-            }
-            if(m_supported_metrics.bits.average_socket_power)
-            {
-                gpu_metrics.average_socket_power = raw.average_socket_power;
-            }
-            if(m_supported_metrics.bits.gfx_activity)
-            {
-                gpu_metrics.gfx_activity = raw.gfx_activity;
-            }
-            if(m_supported_metrics.bits.umc_activity)
-            {
-                gpu_metrics.umc_activity = raw.umc_activity;
-            }
-            if(m_supported_metrics.bits.mm_activity)
-            {
-                gpu_metrics.mm_activity = raw.mm_activity;
-            }
-
-            if(m_supported_metrics.bits.vcn_busy)
-            {
-                for(size_t i = 0; i < raw.xcp_stats.size(); ++i)
-                {
-                    gpu_metrics.xcp_stats[i].vcn_busy = raw.xcp_stats[i].vcn_busy;
-                }
-            }
-            if(m_supported_metrics.bits.vcn_activity)
-            {
-                gpu_metrics.vcn_activity = raw.vcn_activity;
-            }
-            if(m_supported_metrics.bits.jpeg_busy)
-            {
-                for(size_t i = 0; i < raw.xcp_stats.size(); ++i)
-                {
-                    gpu_metrics.xcp_stats[i].jpeg_busy = raw.xcp_stats[i].jpeg_busy;
-                }
-            }
-            if(m_supported_metrics.bits.jpeg_activity)
-            {
-                gpu_metrics.jpeg_activity = raw.jpeg_activity;
-            }
-
-            if(m_supported_metrics.bits.xgmi)
-            {
-                populate_if_supported(gpu_metrics.xgmi.link.width, raw.xgmi.link.width);
-                populate_if_supported(gpu_metrics.xgmi.link.speed, raw.xgmi.link.speed);
-                for(size_t i = 0; i < MAX_NUM_XGMI_LINKS; ++i)
-                {
-                    populate_if_supported(gpu_metrics.xgmi.data_acc.read[i],
-                                          raw.xgmi.data_acc.read[i]);
-                    populate_if_supported(gpu_metrics.xgmi.data_acc.write[i],
-                                          raw.xgmi.data_acc.write[i]);
-                }
-            }
-            if(m_supported_metrics.bits.pcie)
-            {
-                populate_if_supported(gpu_metrics.pcie.link.width, raw.pcie.link.width);
-                populate_if_supported(gpu_metrics.pcie.link.speed, raw.pcie.link.speed);
-                populate_if_supported(gpu_metrics.pcie.bandwidth.acc,
-                                      raw.pcie.bandwidth.acc);
-                populate_if_supported(gpu_metrics.pcie.bandwidth.inst,
-                                      raw.pcie.bandwidth.inst);
-            }
-
-            if(m_supported_metrics.bits.gfx_clock)
-            {
-                gpu_metrics.gfx_clock_mhz = raw.gfx_clock_mhz;
-            }
-            if(m_supported_metrics.bits.mem_clock)
-            {
-                gpu_metrics.mem_clock_mhz = raw.mem_clock_mhz;
-            }
+            const auto raw = m_backend->get_metrics();
+            copy_power_metrics(gpu_metrics, raw, enabled_cfg);
+            copy_activity_metrics(gpu_metrics, raw, enabled_cfg);
+            copy_clock_metrics(gpu_metrics, raw, enabled_cfg);
+            copy_codec_metrics(gpu_metrics, raw, enabled_cfg);
+            copy_link_metrics(gpu_metrics, raw, enabled_cfg);
         } catch(const std::runtime_error& e)
         {
             LOG_DEBUG("GPU device [{}] metrics query failed: {}", m_index, e.what());
             return gpu_metrics;
         }
 
-        if(m_supported_metrics.bits.memory_usage)
+        copy_memory_usage(gpu_metrics, enabled_cfg);
+        copy_temperature(gpu_metrics, enabled_cfg);
+        collect_sdma_metrics(enabled_cfg, timestamp, gpu_metrics);
+        return gpu_metrics;
+    }
+
+private:
+    [[nodiscard]] static bool metric_requested(const bool enabled, const bool supported)
+    {
+        return enabled && supported;
+    }
+
+    void copy_power_metrics(metrics& gpu_metrics, const metrics& raw,
+                            const enabled_metrics& enabled_cfg) const
+    {
+        if(metric_requested(enabled_cfg.bits.current_socket_power,
+                            m_supported_metrics.bits.current_socket_power))
         {
-            try
+            gpu_metrics.current_socket_power = raw.current_socket_power;
+        }
+        if(metric_requested(enabled_cfg.bits.average_socket_power,
+                            m_supported_metrics.bits.average_socket_power))
+        {
+            gpu_metrics.average_socket_power = raw.average_socket_power;
+        }
+    }
+
+    void copy_activity_metrics(metrics& gpu_metrics, const metrics& raw,
+                               const enabled_metrics& enabled_cfg) const
+    {
+        if(metric_requested(enabled_cfg.bits.gfx_activity,
+                            m_supported_metrics.bits.gfx_activity))
+        {
+            gpu_metrics.gfx_activity = raw.gfx_activity;
+        }
+        if(metric_requested(enabled_cfg.bits.umc_activity,
+                            m_supported_metrics.bits.umc_activity))
+        {
+            gpu_metrics.umc_activity = raw.umc_activity;
+        }
+        if(metric_requested(enabled_cfg.bits.mm_activity,
+                            m_supported_metrics.bits.mm_activity))
+        {
+            gpu_metrics.mm_activity = raw.mm_activity;
+        }
+    }
+
+    void copy_clock_metrics(metrics& gpu_metrics, const metrics& raw,
+                            const enabled_metrics& enabled_cfg) const
+    {
+        if(metric_requested(enabled_cfg.bits.gfx_clock,
+                            m_supported_metrics.bits.gfx_clock))
+        {
+            gpu_metrics.gfx_clock_mhz = raw.gfx_clock_mhz;
+        }
+        if(metric_requested(enabled_cfg.bits.mem_clock,
+                            m_supported_metrics.bits.mem_clock))
+        {
+            gpu_metrics.mem_clock_mhz = raw.mem_clock_mhz;
+        }
+    }
+
+    void copy_codec_metrics(metrics& gpu_metrics, const metrics& raw,
+                            const enabled_metrics& enabled_cfg) const
+    {
+        if(metric_requested(enabled_cfg.bits.vcn_busy, m_supported_metrics.bits.vcn_busy))
+        {
+            for(size_t xcp_index = 0; xcp_index < raw.xcp_stats.size(); ++xcp_index)
             {
-                gpu_metrics.memory_usage = m_backend->get_memory_usage();
-            } catch(const std::runtime_error& e)
-            {
-                LOG_DEBUG("GPU device [{}] memory query failed: {}", m_index, e.what());
+                gpu_metrics.xcp_stats[xcp_index].vcn_busy =
+                    raw.xcp_stats[xcp_index].vcn_busy;
             }
         }
+        if(metric_requested(enabled_cfg.bits.vcn_activity,
+                            m_supported_metrics.bits.vcn_activity))
+        {
+            gpu_metrics.vcn_activity = raw.vcn_activity;
+        }
+        if(metric_requested(enabled_cfg.bits.jpeg_busy,
+                            m_supported_metrics.bits.jpeg_busy))
+        {
+            for(size_t xcp_index = 0; xcp_index < raw.xcp_stats.size(); ++xcp_index)
+            {
+                gpu_metrics.xcp_stats[xcp_index].jpeg_busy =
+                    raw.xcp_stats[xcp_index].jpeg_busy;
+            }
+        }
+        if(metric_requested(enabled_cfg.bits.jpeg_activity,
+                            m_supported_metrics.bits.jpeg_activity))
+        {
+            gpu_metrics.jpeg_activity = raw.jpeg_activity;
+        }
+    }
 
-        // At most one SMI temperature read per sample: prefer hotspot when it is both
-        // supported and enabled; otherwise read edge when enabled (so edge-only configs
-        // still work when the device exposes both sensors).
-        if(enabled_cfg.bits.hotspot_temperature &&
-           m_supported_metrics.bits.hotspot_temperature)
+    void copy_link_metrics(metrics& gpu_metrics, const metrics& raw,
+                           const enabled_metrics& enabled_cfg) const
+    {
+        if(metric_requested(enabled_cfg.bits.xgmi, m_supported_metrics.bits.xgmi))
+        {
+            populate_if_supported(gpu_metrics.xgmi.link.width, raw.xgmi.link.width);
+            populate_if_supported(gpu_metrics.xgmi.link.speed, raw.xgmi.link.speed);
+            for(size_t link_index = 0; link_index < MAX_NUM_XGMI_LINKS; ++link_index)
+            {
+                populate_if_supported(gpu_metrics.xgmi.data_acc.read[link_index],
+                                      raw.xgmi.data_acc.read[link_index]);
+                populate_if_supported(gpu_metrics.xgmi.data_acc.write[link_index],
+                                      raw.xgmi.data_acc.write[link_index]);
+            }
+        }
+        if(metric_requested(enabled_cfg.bits.pcie, m_supported_metrics.bits.pcie))
+        {
+            populate_if_supported(gpu_metrics.pcie.link.width, raw.pcie.link.width);
+            populate_if_supported(gpu_metrics.pcie.link.speed, raw.pcie.link.speed);
+            populate_if_supported(gpu_metrics.pcie.bandwidth.acc, raw.pcie.bandwidth.acc);
+            populate_if_supported(gpu_metrics.pcie.bandwidth.inst,
+                                  raw.pcie.bandwidth.inst);
+        }
+    }
+
+    void copy_memory_usage(metrics& gpu_metrics, const enabled_metrics& enabled_cfg) const
+    {
+        if(!metric_requested(enabled_cfg.bits.memory_usage,
+                             m_supported_metrics.bits.memory_usage))
+        {
+            return;
+        }
+        try
+        {
+            gpu_metrics.memory_usage = m_backend->get_memory_usage();
+        } catch(const std::runtime_error& e)
+        {
+            LOG_DEBUG("GPU device [{}] memory query failed: {}", m_index, e.what());
+        }
+    }
+
+    // At most one SMI temperature read per sample: prefer hotspot when it is both
+    // supported and enabled; otherwise read edge when enabled (so edge-only configs
+    // still work when the device exposes both sensors).
+    void copy_temperature(metrics& gpu_metrics, const enabled_metrics& enabled_cfg) const
+    {
+        if(metric_requested(enabled_cfg.bits.hotspot_temperature,
+                            m_supported_metrics.bits.hotspot_temperature))
         {
             try
             {
@@ -199,26 +255,23 @@ public:
                 LOG_DEBUG("GPU device [{}] hotspot temperature query failed: {}", m_index,
                           e.what());
             }
+            return;
         }
-        else if(enabled_cfg.bits.edge_temperature &&
-                m_supported_metrics.bits.edge_temperature)
+        if(!metric_requested(enabled_cfg.bits.edge_temperature,
+                             m_supported_metrics.bits.edge_temperature))
         {
-            try
-            {
-                gpu_metrics.edge_temperature = m_backend->get_edge_temperature();
-            } catch(const std::runtime_error& e)
-            {
-                LOG_DEBUG("GPU device [{}] edge temperature query failed: {}", m_index,
-                          e.what());
-            }
+            return;
         }
-
-        collect_sdma_metrics(enabled_cfg, timestamp, gpu_metrics);
-
-        return gpu_metrics;
+        try
+        {
+            gpu_metrics.edge_temperature = m_backend->get_edge_temperature();
+        } catch(const std::runtime_error& e)
+        {
+            LOG_DEBUG("GPU device [{}] edge temperature query failed: {}", m_index,
+                      e.what());
+        }
     }
 
-private:
     void initialize_device_info()
     {
         m_device_name = "GPU" + std::to_string(m_index);
