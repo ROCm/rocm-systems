@@ -180,7 +180,7 @@ def write_otf2(importData, config):
                     )
                     pipe_id_attribute = archive.definitions.attribute(
                         name="pipe_id",
-                        description="hardware pipe the kernel ran on; -1 if unknown",
+                        description="hardware pipe the kernel ran on; absent if unknown",
                         type=Type.INT32,
                     )
                     hip_event_attributes = {perfetto_category: "hip_event"}
@@ -216,7 +216,8 @@ def write_otf2(importData, config):
                     kernel_pipe_attributes = {}
 
                     def get_kernel_attributes(pipe_id):
-                        if pipe_id is None:
+                        # -1 is ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE: the pipe is unknown
+                        if pipe_id is None or pipe_id == -1:
                             return kernel_attributes
                         if pipe_id not in kernel_pipe_attributes:
                             kernel_pipe_attributes[pipe_id] = {

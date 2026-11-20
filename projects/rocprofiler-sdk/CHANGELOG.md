@@ -24,7 +24,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **rocprofv3 (CLI):**
 
-- rocpd schema bumped to 3.1.1 with a `pipe_id` column on `rocpd_kernel_dispatch` and the `kernels` data view (-1 if unknown). The rocpd CSV, Perfetto, and OTF2 conversions report it for databases of schema 3.1.1 or later.
+- rocpd schema bumped to 3.1.1 with a `pipe_id` column on `rocpd_kernel_dispatch` and the `kernels` data view (-1 if unknown). The rocpd CSV, Perfetto, and OTF2 conversions report it for databases of schema 3.1.1 or later; Perfetto and OTF2 leave it out when the pipe is unknown.
 
 ### Changed
 

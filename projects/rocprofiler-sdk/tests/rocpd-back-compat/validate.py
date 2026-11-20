@@ -45,7 +45,8 @@ Key invariants verified:
                      columns from 3.1.0.
   * Perfetto — .pftrace exists and is non-empty for every schema.
   * CSV / Perfetto / OTF2 — kernel dispatch pipe_id absent for schemas < 3.1.1;
-            present (with the -1 default) for the latest schema.
+            present for the latest schema: on every CSV row (-1 when unknown), and in
+            Perfetto and OTF2 only for dispatches whose pipe is known.
   * OTF2 — "HIP Graph Launch" locations absent for pre-latest schemas;
             present for the latest schema (requires the ``otf2`` package).
 
@@ -632,15 +633,18 @@ def test_pftrace_for_schema_3_1_1_changes_absent(output_root, old_schema):
 def test_pftrace_for_schema_3_1_1_changes_present(output_root, latest_schema):
     """Schema 3.1.1 additions must be present for the latest schema.
 
-    Verifies that kernel dispatch slices carry pipe_id, including the -1 (unknown) default.
+    Verifies that only kernel dispatch slices with a known pipe carry pipe_id, and that the
+    dispatch whose pipe is unknown stays in the trace without it.
     """
     pytest.importorskip("perfetto", reason="perfetto package not installed")
     pftrace = output_root / latest_schema / "pftrace" / "out_results.pftrace"
     assert pftrace.exists(), f".pftrace not found for schema {latest_schema}: {pftrace}"
-    _, pipe_ids = _pftrace_kernel_pipe_ids(pftrace)
+    num_kernels, pipe_ids = _pftrace_kernel_pipe_ids(pftrace)
+    assert (
+        num_kernels == 2
+    ), f"expected 2 kernel dispatch slices in .pftrace for schema {latest_schema}: {num_kernels}"
     assert pipe_ids == [
-        -1,
-        2,
+        2
     ], f"unexpected pipe_id values in .pftrace for schema {latest_schema}: {pipe_ids}"
 
 
@@ -743,17 +747,20 @@ def test_otf2_for_schema_3_1_1_changes_absent(output_root, old_schema):
 def test_otf2_for_schema_3_1_1_changes_present(output_root, latest_schema):
     """Schema 3.1.1 additions must be present for the latest schema.
 
-    Verifies that kernel dispatch regions carry pipe_id, including the -1 (unknown) default.
+    Verifies that only kernel dispatch regions with a known pipe carry pipe_id, and that the
+    dispatch whose pipe is unknown stays in the trace without it.
     """
     pytest.importorskip("otf2", reason="otf2 package not installed")
     otf2_path = output_root / latest_schema / "otf2" / "out_results.otf2"
     assert (
         otf2_path.exists()
     ), f"OTF2 output not found for schema {latest_schema}: {otf2_path}"
-    _, pipe_ids = _otf2_kernel_pipe_ids(otf2_path)
+    num_kernels, pipe_ids = _otf2_kernel_pipe_ids(otf2_path)
+    assert (
+        num_kernels == 2
+    ), f"expected 2 kernel dispatch regions in OTF2 for schema {latest_schema}: {num_kernels}"
     assert pipe_ids == [
-        -1,
-        2,
+        2
     ], f"unexpected pipe_id values in OTF2 for schema {latest_schema}: {pipe_ids}"
 
 
