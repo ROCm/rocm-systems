@@ -287,6 +287,9 @@ int kfd_rule(const std::string& device, const std::string& pci_root, const std::
   const int minor = render_minor_of(device);
   if (minor <= 0) return -1;
   KfdPartition partition;
+  // KFD and the PCI attributes below have no shared generation counter. A
+  // concurrent mode change can invalidate even a self-consistent partial view;
+  // callers must enumerate again after repartitioning finishes.
   if (!kfd_partition(kfd_snapshot(kfd_nodes), minor, partition)) return -1;
   const std::string name = device.substr(device.find_last_of('/') + 1);
   if (pci_bdf(name) && name != partition.parent_bdf) return -1;
