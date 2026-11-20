@@ -44,6 +44,7 @@ constexpr auto ShaderdataRecord = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADER
 constexpr uint32_t Enter = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER;
 constexpr uint32_t Exit = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS;
 constexpr uint32_t NewWave = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE;
+constexpr uint32_t Invalid = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INVALID;
 constexpr uint8_t Priv = 1u << ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_PRIV;
 constexpr uint8_t Imm = 1u << ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_IMM;
 
@@ -394,10 +395,16 @@ TEST_F(MarkerStreamTest, AnUnresolvedOlderGenerationDoesNotHideANewerOneAtTraceE
     stitcher.processShaderdata(shaderdata(20, 4));
     stitcher.finishMarkers();
 
-    ASSERT_EQ(capture.markers.size(), 1u);
-    EXPECT_EQ(capture.markers[0].shaderdata.time, 20);
-    EXPECT_EQ(capture.markers[0].kernel_entry.code_object_id, 7u);
-    EXPECT_EQ(capture.markers[0].marker_flags, NewWave);
+    ASSERT_EQ(capture.markers.size(), 2u);
+    const auto& unresolved = capture.markers[0];
+    EXPECT_EQ(unresolved.shaderdata.time, 10);
+    EXPECT_EQ(unresolved.marker_flags, Invalid | NewWave);
+    EXPECT_EQ(unresolved.payload_dropped, 1u);
+    EXPECT_EQ(unresolved.kernel_entry.address, 0u);
+    EXPECT_EQ(unresolved.kernel_entry.code_object_id, 0u);
+    EXPECT_EQ(capture.markers[1].shaderdata.time, 20);
+    EXPECT_EQ(capture.markers[1].kernel_entry.code_object_id, 7u);
+    EXPECT_EQ(capture.markers[1].marker_flags, NewWave);
 }
 
 TEST_F(MarkerStreamTest, PacketLossEmitsPartialPayloadAndRequiresANewGeneration)
@@ -409,44 +416,52 @@ TEST_F(MarkerStreamTest, PacketLossEmitsPartialPayloadAndRequiresANewGeneration)
     stitcher.processShaderdata(shaderdata(11, 123));
     stitcher.markerPacketLoss();
     stitcher.processShaderdata(shaderdata(12, 8));
+    stitcher.processShaderdata(shaderdata(13, 8));
     stitcher.markerWaveStart(0, 0, 0, kernel);
     stitcher.processShaderdata(shaderdata(20, 8));
     stitcher.finishMarkers();
 
-    ASSERT_EQ(capture.markers.size(), 2u);
+    ASSERT_EQ(capture.markers.size(), 3u);
     const auto& partial = capture.markers[0];
-    const auto& recovered = capture.markers[1];
+    const auto& lost = capture.markers[1];
+    const auto& recovered = capture.markers[2];
     EXPECT_EQ(partial.marker_flags, NewWave);
     ASSERT_EQ(partial.payload_count, 1u);
     EXPECT_EQ(partial.payload_dropped, 2u);
     EXPECT_EQ(partial.payload[0], 123u);
+    EXPECT_EQ(lost.shaderdata.time, 12);
+    EXPECT_EQ(lost.marker_flags, Invalid);
+    EXPECT_EQ(lost.payload_dropped, 2u);
+    EXPECT_EQ(lost.kernel_entry.code_object_id, 7u);
+    EXPECT_EQ(lost.name, nullptr);
+    EXPECT_EQ(lost.marker_id, 0u);
     EXPECT_EQ(recovered.shaderdata.time, 20);
     EXPECT_EQ(recovered.marker_flags, NewWave);
 }
 
-TEST_F(MarkerStreamTest, PayloadDeclarationsAreFramedUpToTheBatchLimit)
+TEST_F(MarkerStreamTest, PayloadsLargerThanABatchAreFramed)
 {
-    service->add(7, "P:1:largest\nR:1:extra_payload_count=65536\nP:2:oversized\nR:2:extra_payload_count=65537\n");
+    service->add(7, "P:1:batch\nR:1:extra_payload_count=65536\nP:2:larger\nR:2:extra_payload_count=65537\nP:3:point\n");
     Stitcher stitcher(service, captureMarkers, &capture, markerFilter());
     stitcher.markerWaveStart(0, 0, 0, kernel);
     stitcher.processShaderdata(shaderdata(10, 4));
     for (uint32_t word = 0; word < 65536; ++word) stitcher.processShaderdata(shaderdata(11, word));
-    stitcher.markerWaveStart(1, 0, 0, kernel);
-    stitcher.processShaderdata(shaderdata(20, 8, 1));
-    stitcher.processShaderdata(shaderdata(21, 2u << 2, 1));
+    stitcher.processShaderdata(shaderdata(20, 8));
+    for (uint32_t word = 0; word < 65537; ++word) stitcher.processShaderdata(shaderdata(21, word + 1));
+    stitcher.processShaderdata(shaderdata(30, 3u << 2));
     stitcher.finishMarkers();
 
-    ASSERT_EQ(capture.markers.size(), 2u);
-    const auto& largest = capture.markers[0];
-    EXPECT_EQ(largest.marker_flags, NewWave);
-    ASSERT_EQ(largest.payload_count, 65536u);
-    EXPECT_EQ(largest.payload[65535], 65535u);
-    // Later words cannot be framed, so the wave stops after the header.
-    const auto& oversized = capture.markers[1];
-    EXPECT_EQ(oversized.shaderdata.time, 20);
-    EXPECT_EQ(oversized.marker_flags, NewWave);
-    EXPECT_EQ(oversized.payload_count, 0u);
-    EXPECT_EQ(oversized.payload_dropped, 65537u);
+    ASSERT_EQ(capture.markers.size(), 3u);
+    const auto& batch = capture.markers[0];
+    ASSERT_EQ(batch.payload_count, 65536u);
+    EXPECT_EQ(batch.payload[65535], 65535u);
+    const auto& larger = capture.markers[1];
+    EXPECT_EQ(larger.shaderdata.time, 20);
+    ASSERT_EQ(larger.payload_count, 65537u);
+    EXPECT_EQ(larger.payload_dropped, 0u);
+    EXPECT_EQ(larger.payload[0], 1u);
+    EXPECT_EQ(larger.payload[65536], 65537u);
+    EXPECT_EQ(capture.markers[2].marker_id, 3u);
 }
 
 TEST_F(MarkerStreamTest, SlotReuseFinishesTheOldPartialPayload)
@@ -483,13 +498,16 @@ TEST_F(MarkerStreamTest, FinishReportsAnEmptyTruncationAndResetsWaveState)
     EXPECT_EQ(capture.markers[0].payload_dropped, 2u);
     EXPECT_EQ(capture.markers[0].payload, nullptr);
 
+    // The finished wave cannot receive more words.
     stitcher.processShaderdata(shaderdata(11, 8));
     stitcher.markerWaveStart(0, 0, 0, kernel);
     stitcher.processShaderdata(shaderdata(20, 8));
     stitcher.finishMarkers();
-    ASSERT_EQ(capture.markers.size(), 2u);
-    EXPECT_EQ(capture.markers[1].shaderdata.time, 20);
-    EXPECT_EQ(capture.markers[1].marker_flags, NewWave);
+    ASSERT_EQ(capture.markers.size(), 3u);
+    EXPECT_EQ(capture.markers[1].shaderdata.time, 11);
+    EXPECT_EQ(capture.markers[1].marker_flags, Invalid | NewWave);
+    EXPECT_EQ(capture.markers[2].shaderdata.time, 20);
+    EXPECT_EQ(capture.markers[2].marker_flags, NewWave);
 }
 
 TEST_F(MarkerStreamTest, PackedHeadersRetainRawWordsAndDecodeBareExits)
@@ -635,9 +653,13 @@ TEST_F(MarkerStreamTest, InvalidWaveCoordinatesDoNotCorruptValidSlots)
     stitcher.processShaderdata(shaderdata(20, 4));
     stitcher.finishMarkers();
 
-    ASSERT_EQ(capture.markers.size(), 1u);
-    EXPECT_EQ(capture.markers[0].shaderdata.time, 20);
-    EXPECT_EQ(capture.markers[0].marker_id, 1u);
+    ASSERT_EQ(capture.markers.size(), 2u);
+    EXPECT_EQ(capture.markers[0].shaderdata.time, 10);
+    EXPECT_EQ(capture.markers[0].shaderdata.simd, 255u);
+    EXPECT_EQ(capture.markers[0].marker_flags, Invalid | NewWave);
+    EXPECT_EQ(capture.markers[0].payload_dropped, 1u);
+    EXPECT_EQ(capture.markers[1].shaderdata.time, 20);
+    EXPECT_EQ(capture.markers[1].marker_id, 1u);
 }
 
 TEST_F(MarkerStreamTest, HugeDeclaredPayloadDoesNotPreventDecodingTheNextWave)
@@ -856,10 +878,13 @@ TEST_F(MarkerStreamTest, PacketLossKeepsEndedWavesAwaitingAttribution)
     stitcher.processShaderdata(shaderdata(30, 1u << 2));
     stitcher.flushMarkers();
 
-    ASSERT_EQ(capture.markers.size(), 2u);
+    // The lost word is reported after the older wave, in slot order.
+    ASSERT_EQ(capture.markers.size(), 3u);
     EXPECT_EQ(capture.markers[0].shaderdata.time, 10);
     EXPECT_EQ(capture.markers[0].kernel_entry.code_object_id, 7u);
-    EXPECT_EQ(capture.markers[1].shaderdata.time, 30);
+    EXPECT_EQ(capture.markers[1].shaderdata.time, 20);
+    EXPECT_EQ(capture.markers[1].marker_flags, Invalid | NewWave);
+    EXPECT_EQ(capture.markers[2].shaderdata.time, 30);
 }
 
 TEST_F(MarkerStreamTest, RepeatedRestoreKeepsTheResumedWave)
@@ -889,12 +914,6 @@ TEST_F(MarkerStreamTest, PayloadDroppedCountsEveryMissingDeclaredWord)
     stitcher.processShaderdata(shaderdata(10, 6));
     stitcher.processShaderdata(shaderdata(11, 0xAu));
     stitcher.processShaderdata(shaderdata(12, 1));
-    // An enter that overflows the scope depth cannot frame its payload.
-    for (uint32_t depth = 0; depth <= 4096; ++depth)
-    {
-        stitcher.processShaderdata(shaderdata(100 + 2 * depth, 6));
-        stitcher.processShaderdata(shaderdata(101 + 2 * depth, depth));
-    }
     stitcher.finishMarkers();
 
     const auto* bare_exit = capture.atTime(12);
@@ -903,15 +922,27 @@ TEST_F(MarkerStreamTest, PayloadDroppedCountsEveryMissingDeclaredWord)
     EXPECT_EQ(bare_exit->marker_id, 1u);
     EXPECT_EQ(bare_exit->payload_count, 0u);
     EXPECT_EQ(bare_exit->payload_dropped, 0u);
-    const auto* overflow = capture.atTime(100 + 2 * 4096);
-    ASSERT_NE(overflow, nullptr);
-    EXPECT_EQ(overflow->marker_flags, Enter);
-    EXPECT_EQ(overflow->payload_count, 0u);
-    EXPECT_EQ(overflow->payload_dropped, 1u);
-    EXPECT_EQ(capture.markers.size(), 2u + 4096u + 1u);
+    EXPECT_EQ(capture.markers.size(), 2u);
 }
 
-TEST_F(MarkerStreamTest, InfoReportsOnlyDataDroppedWithoutARecord)
+TEST_F(MarkerStreamTest, DeepScopesAreNotLimited)
+{
+    service->add(7, "U:1:outer\nU:2:inner\n");
+    Stitcher stitcher(service, captureMarkers, &capture, markerFilter());
+    stitcher.markerWaveStart(0, 0, 0, kernel);
+    stitcher.processShaderdata(shaderdata(1, 6));
+    constexpr int64_t Depth = 100000;
+    for (int64_t depth = 0; depth < Depth; ++depth) stitcher.processShaderdata(shaderdata(10 + depth, 10));
+    for (int64_t depth = 0; depth <= Depth; ++depth) stitcher.processShaderdata(shaderdata(10 + Depth + depth, 1));
+    stitcher.finishMarkers();
+
+    ASSERT_EQ(capture.markers.size(), 2u + 2u * Depth);
+    EXPECT_STREQ(capture.markers[Depth + 1].name, "inner");
+    EXPECT_STREQ(capture.markers.back().name, "outer");
+    EXPECT_EQ(capture.markers.back().marker_flags, Exit);
+}
+
+TEST_F(MarkerStreamTest, UndecodableWordsAreReportedByAnInvalidMarker)
 {
     struct Sink
     {
@@ -928,7 +959,7 @@ TEST_F(MarkerStreamTest, InfoReportsOnlyDataDroppedWithoutARecord)
     RecordFilter filter = markerFilter();
     filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO, true);
 
-    // A truncated payload is reported by its record alone.
+    // Neither truncated payloads nor undecodable words emit INFO records.
     Sink truncated;
     {
         Stitcher stitcher(service, collect, &truncated, filter);
@@ -940,16 +971,33 @@ TEST_F(MarkerStreamTest, InfoReportsOnlyDataDroppedWithoutARecord)
     EXPECT_EQ(truncated.capture.markers[0].payload_dropped, 2u);
     EXPECT_EQ(truncated.infos, 0u);
 
-    // Data of a wave whose code object never resolves has no record to carry it.
     Sink unattributed;
     {
         Stitcher stitcher(service, collect, &unattributed, filter);
+        // The code object of this wave never resolves.
         stitcher.markerWaveStart(0, 0, 0, {0x200, 0});
         stitcher.processShaderdata(shaderdata(10, 4));
+        stitcher.processShaderdata(shaderdata(11, 4));
+        // This wave started before the trace.
+        stitcher.processShaderdata(shaderdata(20, 4, 3));
         stitcher.finishMarkers();
     }
-    EXPECT_TRUE(unattributed.capture.markers.empty());
-    EXPECT_EQ(unattributed.infos, 1u);
+    EXPECT_EQ(unattributed.infos, 0u);
+    ASSERT_EQ(unattributed.capture.markers.size(), 2u);
+    for (const auto& marker : unattributed.capture.markers)
+    {
+        EXPECT_EQ(marker.marker_flags, Invalid | NewWave);
+        EXPECT_EQ(marker.kernel_entry.code_object_id, 0u);
+        EXPECT_EQ(marker.name, nullptr);
+        EXPECT_EQ(marker.payload_count, 0u);
+    }
+    const auto* unresolved = unattributed.capture.atTime(10);
+    ASSERT_NE(unresolved, nullptr);
+    EXPECT_EQ(unresolved->payload_dropped, 2u);
+    const auto* untraced_start = unattributed.capture.atTime(20);
+    ASSERT_NE(untraced_start, nullptr);
+    EXPECT_EQ(untraced_start->shaderdata.cu, 3u);
+    EXPECT_EQ(untraced_start->payload_dropped, 1u);
 }
 
 TEST_F(MarkerStreamTest, PacketLossOfASavedWaveDoesNotDeferAFreshWave)
@@ -971,7 +1019,7 @@ TEST_F(MarkerStreamTest, PacketLossOfASavedWaveDoesNotDeferAFreshWave)
     EXPECT_EQ(capture.markers[1].marker_flags, NewWave);
 }
 
-TEST_F(MarkerStreamTest, OversizedLatePayloadInASavedWaveDoesNotDeferAFreshWave)
+TEST_F(MarkerStreamTest, HugeLatePayloadInASavedWaveIsTruncatedAtTheEnd)
 {
     service->add(7, "U:1:scope\nP:2:oversized\nR:2:extra_payload_count=4294967295\nP:3:point\n");
     Stitcher stitcher(service, captureMarkers, &capture, markerFilter());
@@ -981,14 +1029,14 @@ TEST_F(MarkerStreamTest, OversizedLatePayloadInASavedWaveDoesNotDeferAFreshWave)
     stitcher.processShaderdata(shaderdata(11, 8));
     stitcher.markerWaveStart(0, 0, 0, kernel);
     stitcher.processShaderdata(shaderdata(20, 12));
-    stitcher.flushMarkers();
+    stitcher.finishMarkers();
 
     const auto* next_wave = capture.atTime(20);
     ASSERT_NE(next_wave, nullptr);
     EXPECT_EQ(next_wave->marker_flags, NewWave);
     EXPECT_EQ(next_wave->marker_id, 3u);
-    const auto* rejected = capture.atTime(11);
-    ASSERT_NE(rejected, nullptr);
-    EXPECT_GT(rejected->payload_dropped, 0u);
+    const auto* truncated = capture.atTime(11);
+    ASSERT_NE(truncated, nullptr);
+    EXPECT_EQ(truncated->payload_dropped, std::numeric_limits<uint32_t>::max());
 }
 } // namespace

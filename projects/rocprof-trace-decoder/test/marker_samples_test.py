@@ -77,6 +77,18 @@ class MarkerSamplesTest(unittest.TestCase):
         self.assertEqual(events[0]["tid"], events[1]["tid"])
         self.assertEqual(events[1]["ts"], 20)
 
+    def test_invalid_marker_closes_the_waves_scopes(self):
+        records = [
+            marker(10, 1, "outer", MarkerFlags.ENTER | MarkerFlags.NEW_WAVE),
+            replace(marker(30, 0, None, MarkerFlags.INVALID), payload_dropped=4),
+            marker(50, 2, "next", MarkerFlags.ENTER | MarkerFlags.NEW_WAVE),
+            marker(60, 2, "next", MarkerFlags.EXIT_PREVIOUS),
+        ]
+        self.assertEqual(folded_stacks(records), {"outer": 20, "next": 10})
+        events = trace_events(records)
+        self.assertEqual([event["ph"] for event in events], ["B", "E", "i", "B", "E"])
+        self.assertEqual(events[1]["ts"], 30)
+
     def test_marker_samples_use_public_timestamp(self):
         record = marker(91, 1, "scope", MarkerFlags.ENTER)
         self.assertEqual(marker_time(record), 91)

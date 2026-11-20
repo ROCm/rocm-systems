@@ -47,7 +47,6 @@ typedef enum rocprofiler_thread_trace_decoder_info_t
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE,
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE,
-    ROCPROFILER_THREAD_TRACE_DECODER_INFO_MARKER_INCOMPLETE, ///< Marker data was dropped without a MARKER record.
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST
 } rocprofiler_thread_trace_decoder_info_t;
 
@@ -254,7 +253,8 @@ typedef enum rocprofiler_thread_trace_decoder_marker_flags_t
     ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS = 0x1,
     ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER = 0x2,
     ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE = 0x4,
-    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_LAST = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE
+    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INVALID = 0x8,
+    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_LAST = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INVALID
 } rocprofiler_thread_trace_decoder_marker_flags_t;
 
 /**
@@ -268,6 +268,12 @@ typedef enum rocprofiler_thread_trace_decoder_marker_flags_t
  * its slot: reset scope state there. EXIT_PREVIOUS and ENTER together mean pop
  * then push; with neither flag set, the marker is a point. A bare exit names
  * the scope it closes, or has marker_id zero if no scope was open.
+ *
+ * INVALID reports shaderdata words of a wave that could not be decoded, for
+ * example after packet loss or when the wave's code object is unknown. It is
+ * the last marker of its wave: close the open scopes there. shaderdata is the
+ * first such word, payload_dropped counts the words, and kernel_entry is zero
+ * if the code object is unknown. It has no name, ID or payload.
  *
  * shaderdata.time is the marker timestamp, in the shader clock of the trace's
  * shader engine. Original timestamps and per-word flags of every token are
@@ -285,7 +291,7 @@ typedef struct rocprofiler_thread_trace_decoder_marker_t
     uint32_t marker_kind;     ///< rocprofiler_thread_trace_decoder_marker_kind_t.
     uint32_t marker_flags;    ///< bitmask of rocprofiler_thread_trace_decoder_marker_flags_t.
     uint32_t payload_count;   ///< Payload words received.
-    uint32_t payload_dropped; ///< Declared payload words that were lost (truncated trace or packet loss).
+    uint32_t payload_dropped; ///< Declared payload words that were lost, or undecodable words if INVALID.
     uint32_t reserved;
 } rocprofiler_thread_trace_decoder_marker_t;
 

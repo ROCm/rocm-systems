@@ -114,7 +114,10 @@ Important dataclasses include:
 
 `shaderdata.time` is the marker timestamp, in the shader clock of the trace's
 shader engine. `payload_dropped` counts declared payload words that were lost;
-protocol consumers should skip blocks where it is nonzero. Reset scope state at `MarkerFlags.NEW_WAVE` and preserve callback order
+protocol consumers should skip blocks where it is nonzero. A marker with
+`MarkerFlags.INVALID` reports `payload_dropped` undecodable shaderdata words of
+its wave, starting at `shaderdata`; it is the wave's last marker, so close its
+open scopes there. Reset scope state at `MarkerFlags.NEW_WAVE` and preserve callback order
 within each reported wave slot. The hardware coordinates and this flag do not
 establish stable wave identity across context save and restore (CWSR). Keep
 records from separate traces in separate groups when building scope stacks.

@@ -666,6 +666,14 @@ selects its funcmap, and emits marker callbacks. The scope samples reset state
 at `NEW_WAVE`; the reported hardware coordinates and this flag do not establish
 stable wave identity across context save and restore (CWSR).
 
+Shaderdata that cannot be decoded is never dropped silently. Words after a
+packet loss, words of a wave whose code object is unknown, and words of a wave
+whose start was not traced are reported by one marker with the `INVALID` flag.
+It is the last marker of its wave, so consumers close open scopes at its
+`shaderdata.time`, the time of the first undecodable word. `payload_dropped`
+counts the words, `kernel_entry` is zero when the code object is unknown, and
+the marker has no name, ID or payload.
+
 ```python
 from rocprof_trace_decoder import Decoder, RecordType
 
@@ -986,7 +994,8 @@ which is a byte offset into LDS (source lane ID * 4). These intrinsics are
 Address trace blocks are represented by one decoded marker with a contiguous
 array of raw `uint32_t` payload words. `payload_count` is the received length;
 `payload_dropped` counts declared words that were lost, so a nonzero value
-indicates a truncated block.
+indicates a truncated block. Declared payload sizes are not limited by the
+decoder.
 
 Because SQTT hardware captures `s_ttracedata` from all active waves into a
 single time-ordered buffer, records from concurrent waves are interleaved.

@@ -27,8 +27,9 @@ into the decoder so marker funcmaps are available during rolling trace parsing.
 Each `Marker` contains one header and its attached `payload` words. The scope
 samples reset their state at
 `NEW_WAVE`; the reported hardware coordinates do not establish stable wave
-identity across context save and restore (CWSR). The address example skips blocks
-with a nonzero `payload_dropped`.
+identity across context save and restore (CWSR). They close a wave's scopes at
+an `INVALID` marker, which reports shaderdata that could not be decoded. The
+address example skips blocks with a nonzero `payload_dropped`.
 Scope and point times use the marker timestamp in `shaderdata.time`.
 Payload words are plain unsigned 32-bit integers. Subscribe to the separate
 `SHADERDATA` record stream for original arrival timestamps and per-word flags.

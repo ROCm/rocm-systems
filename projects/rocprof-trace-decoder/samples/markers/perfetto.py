@@ -37,10 +37,14 @@ def trace_events(markers, args=None, clock_rate_ghz: float | None = None) -> lis
         key = (base["pid"], base["tid"])
         last_base[key] = base
         depth = depths.get(key, 0)
-        if marker.marker_flags & MarkerFlags.NEW_WAVE:
+        if marker.marker_flags & (MarkerFlags.NEW_WAVE | MarkerFlags.INVALID):
             for _ in range(depth):
                 events.append({**base, "ph": "E"})
             depth = 0
+        if marker.marker_flags & MarkerFlags.INVALID:
+            events.append({**base, "ph": "i", "s": "t", "name": "invalid marker data"})
+            depths[key] = 0
+            continue
         if marker.marker_flags & MarkerFlags.EXIT_PREVIOUS:
             if depth:
                 events.append({**base, "ph": "E"})

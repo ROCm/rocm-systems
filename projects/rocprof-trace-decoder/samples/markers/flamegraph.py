@@ -39,6 +39,9 @@ def folded_stacks(markers, args=None) -> dict[str, int]:
         if stack and time > previous:
             folded[";".join(stack)] += time - previous
 
+        if marker.marker_flags & MarkerFlags.INVALID:
+            # The rest of the wave could not be decoded.
+            stack = []
         if marker.marker_flags & MarkerFlags.EXIT_PREVIOUS and stack:
             stack.pop()
         if marker.marker_flags & MarkerFlags.ENTER:

@@ -38,14 +38,8 @@ using Marker = rocprofiler_thread_trace_decoder_marker_t;
 namespace
 {
 constexpr auto MarkerRecord = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER;
-constexpr size_t MaxPendingWords = 1u << 20;
-constexpr size_t MaxDeferredGenerations = 4096;
-constexpr size_t MaxScopeDepth = 4096;
 constexpr size_t BatchRecords = 4096;
 constexpr size_t BatchPayloadWords = 65536;
-// A larger declaration cannot come from the producer and would need its own
-// delivery path; treat it as unframeable.
-constexpr size_t MaxPayloadWords = BatchPayloadWords;
 constexpr size_t Simds = 4;
 constexpr size_t WaveSlots = 16;
 
@@ -129,6 +123,8 @@ class MarkerStream
         std::vector<Info> scopes;
         std::vector<att_shader_data_t> pending;
         Marker header{};
+        att_shader_data_t first_lost{}; ///< First word that could not be decoded.
+        uint32_t lost = 0;
     };
 
     struct Slot
@@ -186,12 +182,7 @@ public:
     {
         auto* slot = getSlot(cu, simd, wave);
         if (!slot || !slot->current.started) return;
-        if (slot->saved)
-        {
-            finish(*slot->saved);
-            if (!slot->saved->pending.empty()) warn();
-            release(*slot->saved);
-        }
+        if (slot->saved) release(*slot->saved);
         slot->saved_predecessors = slot->restored ? slot->current_predecessors : slot->retired.size();
         slot->saved = std::move(slot->current);
         slot->current = {};
@@ -220,25 +211,23 @@ public:
     void shaderdata(const att_shader_data_t& record)
     {
         if (record.flags & (1u << ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_PRIV)) return;
-        auto* slot = getSlot(record.cu, record.simd, record.wave_id);
-        if (!slot) return;
+        auto* slot = getSlot(record.cu, record.simd, record.wave_id, true);
+        if (!slot)
+        {
+            Generation orphan;
+            lose(orphan, record);
+            release(orphan);
+            return;
+        }
         // Late shaderdata still belongs to the saved wave until another wave
         // starts using the slot.
         auto& generation = !slot->current.started && slot->saved ? *slot->saved : slot->current;
-        if (!generation.started || !generation.reliable) return;
-        if (generation.kernel_entry.code_object_id == 0 || generation.deferred)
-        {
-            if (pending_count == MaxPendingWords)
-            {
-                invalidate(generation);
-                warn();
-                return;
-            }
+        if (!generation.started || !generation.reliable)
+            lose(generation, record);
+        else if (generation.kernel_entry.code_object_id == 0 || generation.deferred)
             generation.pending.push_back(record);
-            ++pending_count;
-            return;
-        }
-        decode(generation, record);
+        else
+            decode(generation, record);
     }
 
     void resolveAll(CSRegisterHandler& handler)
@@ -260,7 +249,6 @@ public:
                 slot.current.deferred = false;
                 if (slot.saved)
                 {
-                    invalidate(*slot.saved);
                     release(*slot.saved);
                     slot.saved.reset();
                 }
@@ -280,8 +268,6 @@ public:
             [&](Slot& slot)
             {
                 drain(slot, true);
-                finish(slot.current);
-                if (!slot.current.pending.empty()) warn();
                 release(slot.current);
             }
         );
@@ -320,28 +306,47 @@ private:
                 for (size_t i = 0; i < Simds * WaveSlots; ++i) fn(unit[i]);
     }
 
-    /// Reports marker data dropped without any MARKER record to carry it.
-    /// Truncated payloads are reported by the record's payload_dropped, and
-    /// packet loss by the parser's DATA_LOST.
-    void warn()
+    void lose(Generation& generation, const att_shader_data_t& first, size_t count = 1)
     {
-        if (calibrating || warning_reported) return;
-        warning_reported = true;
-        auto info = ROCPROFILER_THREAD_TRACE_DECODER_INFO_MARKER_INCOMPLETE;
-        records.emit(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO, info);
+        if (generation.lost == 0) generation.first_lost = first;
+        generation.lost += static_cast<uint32_t>(count);
     }
 
+    /// Words still waiting for attribution can no longer be decoded.
+    void losePending(Generation& generation)
+    {
+        if (generation.pending.empty()) return;
+        lose(generation, generation.pending.front(), generation.pending.size());
+        std::vector<att_shader_data_t>().swap(generation.pending);
+    }
+
+    /// Ends a generation. One INVALID marker, its last record, reports the
+    /// words that could not be decoded.
     void release(Generation& generation)
     {
-        pending_count -= generation.pending.size();
+        finish(generation);
+        losePending(generation);
+        if (generation.lost)
+        {
+            const bool known = generation.kernel_entry.code_object_id != 0;
+            Marker marker{
+                .size = sizeof(Marker),
+                .shaderdata = generation.first_lost,
+                .kernel_entry = known ? generation.kernel_entry : pcinfo_t{},
+                .marker_flags = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INVALID,
+                .payload_dropped = generation.lost,
+            };
+            if (generation.first_marker) marker.marker_flags |= ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE;
+            emit(marker, {});
+        }
         generation = {};
     }
 
+    /// Stops decoding a generation; its later words are lost.
     void invalidate(Generation& generation)
     {
         finish(generation);
-        pending_count -= generation.pending.size();
-        std::vector<att_shader_data_t>().swap(generation.pending);
+        losePending(generation);
         std::vector<uint32_t>().swap(generation.payload);
         std::vector<Info>().swap(generation.scopes);
         generation.reliable = false;
@@ -350,18 +355,14 @@ private:
     void retire(Slot& slot)
     {
         auto& generation = slot.current;
-        if (generation.pending.empty() || retired_count == MaxDeferredGenerations)
-        {
-            if (!generation.pending.empty()) warn();
-            finish(generation);
+        // Anything left to emit waits behind older generations of the slot.
+        if (generation.pending.empty() && (generation.lost == 0 || slot.retired.empty()))
             release(generation);
-        }
         else
         {
             auto position = slot.restored ? slot.retired.begin() + slot.current_predecessors : slot.retired.end();
             slot.retired.insert(position, std::move(generation));
             generation = {};
-            ++retired_count;
         }
         slot.restored = false;
         slot.current_predecessors = 0;
@@ -378,7 +379,6 @@ private:
         if (generation.kernel_entry.code_object_id == 0 || !generation.reliable || generation.pending.empty()) return;
         auto pending = std::move(generation.pending);
         generation.pending.clear();
-        pending_count -= pending.size();
         for (const auto& record : pending) decode(generation, record);
     }
 
@@ -391,12 +391,9 @@ private:
             resolve(generation);
             if (generation.kernel_entry.code_object_id == 0 && generation.reliable && !final) break;
             replay(generation);
-            finish(generation);
-            if (!generation.pending.empty()) warn();
             release(generation);
         }
         slot.retired.erase(slot.retired.begin(), slot.retired.begin() + consumed);
-        retired_count -= consumed;
         return consumed;
     }
 
@@ -416,8 +413,6 @@ private:
             if (slot.saved_predecessors == 0) replay(*slot.saved);
             slot.current.deferred = true;
             if (!final) return;
-            finish(*slot.saved);
-            if (!slot.saved->pending.empty()) warn();
             release(*slot.saved);
             slot.saved.reset();
         }
@@ -427,8 +422,6 @@ private:
             slot.current.deferred = slot.current_predecessors != 0;
             if (!slot.current.deferred) replay(slot.current);
             if (!final) return;
-            finish(slot.current);
-            if (!slot.current.pending.empty()) warn();
             release(slot.current);
             slot.restored = false;
         }
@@ -441,7 +434,6 @@ private:
     // name lookup, scope, and resource-limit handling needed only for headers.
     void decode(Generation& generation, const att_shader_data_t& source)
     {
-        if (!generation.reliable) return;
         if (generation.payload_expected == 0)
         {
             decodeHeader(generation, source);
@@ -511,27 +503,13 @@ private:
         const uint32_t count = bare_exit ? 0 : info.payload_count;
         if ((calibrating || !clocks.empty()) && known && !constant_header && count == 0)
             correctClock(marker, map.encoding);
-        // The wave's following words cannot be framed: drop the rest of it.
-        auto unframeable = [&]()
-        {
-            marker.payload_dropped = count;
-            emit(marker, {});
-            invalidate(generation);
-            warn();
-        };
-        if (flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER)
-        {
-            if (generation.scopes.size() == MaxScopeDepth) return unframeable();
-            generation.scopes.push_back(info);
-        }
+        if (flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER) generation.scopes.push_back(info);
 
         if (count == 0)
         {
             emit(marker, {});
             return;
         }
-        if (count > MaxPayloadWords) return unframeable();
-        if (!calibrating) generation.payload.reserve(count);
         generation.header = marker;
         generation.payload_expected = count;
     }
@@ -578,14 +556,15 @@ private:
     {
         if (calibrating || records.status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         marker.payload_count = static_cast<uint32_t>(payload.size());
-        // Payloads never exceed BatchPayloadWords, so the reserved pool never
-        // reallocates and earlier payload pointers stay valid until the flush.
-        if (marker_records.size() == BatchRecords || payload_words.size() + payload.size() > BatchPayloadWords) flush();
+        // The pool only grows past its capacity while empty, so earlier payload
+        // pointers stay valid until the flush.
+        if (marker_records.size() == BatchRecords || payload_words.size() + payload.size() > payload_words.capacity())
+            flush();
         marker_records.push_back(marker);
         if (!payload.empty())
         {
-            marker_records.back().payload = payload_words.data() + payload_words.size();
             payload_words.insert(payload_words.end(), payload.begin(), payload.end());
+            marker_records.back().payload = payload_words.data() + payload_words.size() - payload.size();
         }
     }
 
@@ -597,10 +576,7 @@ private:
     std::unordered_map<uint64_t, ClockDomain> clocks;
     std::vector<Marker> marker_records;
     std::vector<uint32_t> payload_words;
-    size_t pending_count = 0;
-    size_t retired_count = 0;
     bool calibrating = false;
-    bool warning_reported = false;
 };
 
 Stitcher::Stitcher(

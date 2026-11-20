@@ -35,6 +35,8 @@ def main() -> int:
                 flags.append("exit")
             if marker.marker_flags & MarkerFlags.ENTER:
                 flags.append("enter")
+            if marker.marker_flags & MarkerFlags.INVALID:
+                flags.append("invalid")
             if marker.payload_dropped:
                 flags.append(f"dropped={marker.payload_dropped}")
             kind = (

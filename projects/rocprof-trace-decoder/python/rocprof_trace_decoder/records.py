@@ -48,8 +48,7 @@ class DecoderInfo(IntEnum):
     DATA_LOST = 1
     STITCH_INCOMPLETE = 2
     WAVE_INCOMPLETE = 3
-    MARKER_INCOMPLETE = 4
-    LAST = 5
+    LAST = 4
 
 
 class WaveStateType(IntEnum):
@@ -135,7 +134,8 @@ class MarkerFlags(IntFlag):
     EXIT_PREVIOUS = 0x1
     ENTER = 0x2
     NEW_WAVE = 0x4
-    LAST = 0x4
+    INVALID = 0x8
+    LAST = 0x8
 
 
 class RecordType(IntEnum):
@@ -243,7 +243,9 @@ class Marker:
     """One decoded marker with its raw payload words.
 
     ``name`` is ``None`` when the code object does not declare the marker.
-    ``payload_dropped`` counts declared payload words that were lost.
+    ``payload_dropped`` counts declared payload words that were lost. An
+    ``INVALID`` marker instead reports ``payload_dropped`` undecodable words of
+    its wave, starting at ``shaderdata``; it is the wave's last marker.
     """
 
     shaderdata: ShaderData

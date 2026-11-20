@@ -565,8 +565,6 @@ ROCPROF_TRACE_DECODER_API const char* rocprof_trace_decoder_get_info_string(rocp
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,         datalost   },
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE, stitch     },
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE,   incomplete },
-        {ROCPROFILER_THREAD_TRACE_DECODER_INFO_MARKER_INCOMPLETE,
-         "Marker data is incomplete or could not be attributed."             },
         {ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST,              "INFO_LAST"},
     };
 

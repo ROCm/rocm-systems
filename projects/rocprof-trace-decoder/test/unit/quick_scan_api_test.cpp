@@ -1198,10 +1198,14 @@ TEST(MarkerApiTest, EveryPacketLossStopsAPayloadEvenWhileALossIsPending)
         ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
     );
 
-    ASSERT_EQ(sink.markers.size(), 1u);
+    ASSERT_EQ(sink.markers.size(), 2u);
     EXPECT_EQ(sink.markers[0].id, 2u);
     EXPECT_EQ(sink.markers[0].payload_dropped, 129u);
     EXPECT_EQ(sink.markers[0].payload, std::vector<uint32_t>{0});
+    // The words after the second loss are reported, not joined.
+    EXPECT_EQ(sink.markers[1].flags, ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INVALID);
+    EXPECT_EQ(sink.markers[1].payload_dropped, 129u);
+    EXPECT_TRUE(sink.markers[1].payload.empty());
 }
 
 TEST(MarkerApiTest, RawShaderdataDoesNotDependOnMarkerDecoding)
