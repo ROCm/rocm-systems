@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Tests KFDNode::get_cache_entries() and the legacy get_cache_info() against a
-// mock KFD topology (via SetKFDNodesPathRootForTesting()). KFD publishes one
+// mock KFD topology (via the KfdNodesPathRoot test hook). KFD publishes one
 // caches/<idx> record per cache instance. get_cache_entries() folds consecutive
 // records into one entry per cache kind (level, type, size, line size) no matter
 // how CU harvesting varies the sharing between instances; get_cache_info() keeps
@@ -11,53 +11,18 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_kfd.h"
+#include "test_fixture_utils.h"
 
 namespace {
-
-// Creates a unique directory on construction, recursively removes it on destruction.
-class ScopedTempDir {
- public:
-  ScopedTempDir() {
-    std::string tmpl = (std::filesystem::temp_directory_path() / "kfd_cache_test_XXXXXX").string();
-    std::vector<char> buf(tmpl.begin(), tmpl.end());
-    buf.push_back('\0');
-    if (char* result = mkdtemp(buf.data())) {
-      path_ = result;
-    }
-  }
-  ~ScopedTempDir() {
-    if (!path_.empty()) {
-      std::error_code ec;
-      std::filesystem::remove_all(path_, ec);
-    }
-  }
-  const std::filesystem::path& path() const { return path_; }
-
- private:
-  std::filesystem::path path_;
-};
-
-// Points KFDNodesPathRoot() at a mock topology on construction, restores the real
-// path on destruction.
-class ScopedKfdRootOverride {
- public:
-  explicit ScopedKfdRootOverride(const std::string& path) : path_(path) {
-    amd::smi::SetKFDNodesPathRootForTesting(path_.c_str());
-  }
-  ~ScopedKfdRootOverride() { amd::smi::SetKFDNodesPathRootForTesting(nullptr); }
-
- private:
-  std::string path_;
-};
 
 // KFD cache "type" bits.
 constexpr uint32_t kData = 0x1;
@@ -140,11 +105,13 @@ void ExpectEntries(const std::vector<amd::smi::KFDCacheEntry>& entries,
 // range; the legacy fixed-size form still reports one entry per sharing count,
 // and merges the vector L1D with the unpaired scalar L1D of the same size.
 TEST(GpuUnit, KfdCacheInfoGroupsInstancesByCacheKind) {
-  ScopedTempDir root;
-  ASSERT_FALSE(root.path().empty());
-  ScopedKfdRootOverride kfd_root_override(root.path().string());
+  FakeSysfsTree root;
+  ASSERT_FALSE(root.root().empty());
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          root.root());
 
-  WriteGpuNodeWithCaches(root.path(), 2,
+  WriteGpuNodeWithCaches(root.root(), 2,
                          {
                              {1, kData | kHsaCu, 16, 1},  // vector L1D, per CU
                              {1, kData | kHsaCu, 16, 1},
@@ -198,16 +165,18 @@ TEST(GpuUnit, KfdCacheInfoGroupsInstancesByCacheKind) {
 // legacy struct has entries. get_cache_entries() still folds them into a single
 // entry; the fixed-size get_cache_info() keeps failing as released.
 TEST(GpuUnit, KfdCacheInfoSharingVarietyDoesNotExhaustEntries) {
-  ScopedTempDir root;
-  ASSERT_FALSE(root.path().empty());
-  ScopedKfdRootOverride kfd_root_override(root.path().string());
+  FakeSysfsTree root;
+  ASSERT_FALSE(root.root().empty());
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          root.root());
 
   std::vector<CacheRecord> caches;
   for (uint32_t cu_shared = 1; cu_shared <= RSMI_MAX_CACHE_TYPES + 2; cu_shared++) {
     caches.push_back({1, kData | kHsaCu, 256, cu_shared});
   }
   caches.push_back({2, kData | kHsaCu, 4096, 30});
-  WriteGpuNodeWithCaches(root.path(), 3, caches);
+  WriteGpuNodeWithCaches(root.root(), 3, caches);
 
   amd::smi::KFDNode node(3);
   ASSERT_EQ(node.Initialize(), 0);
@@ -228,9 +197,11 @@ TEST(GpuUnit, KfdCacheInfoSharingVarietyDoesNotExhaustEntries) {
 // returns all of them, while the fixed-size get_cache_info() still refuses
 // rather than silently dropping kinds.
 TEST(GpuUnit, KfdCacheEntriesHaveNoCountLimit) {
-  ScopedTempDir root;
-  ASSERT_FALSE(root.path().empty());
-  ScopedKfdRootOverride kfd_root_override(root.path().string());
+  FakeSysfsTree root;
+  ASSERT_FALSE(root.root().empty());
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          root.root());
 
   constexpr uint32_t kKinds = RSMI_MAX_CACHE_TYPES + 3;
   std::vector<CacheRecord> caches;
@@ -241,7 +212,7 @@ TEST(GpuUnit, KfdCacheEntriesHaveNoCountLimit) {
     caches.push_back({1, kData | kHsaCu, size_kb, 1});
     expected.push_back({1, kData | kHsaCu, size_kb, 128, 1, 2, 2});
   }
-  WriteGpuNodeWithCaches(root.path(), 4, caches);
+  WriteGpuNodeWithCaches(root.root(), 4, caches);
 
   amd::smi::KFDNode node(4);
   ASSERT_EQ(node.Initialize(), 0);
@@ -260,11 +231,13 @@ TEST(GpuUnit, KfdCacheEntriesHaveNoCountLimit) {
 // the entry right before them, and only if the line size also matches, so the
 // two stay separate whether or not another kind sits between them.
 TEST(GpuUnit, KfdCacheInfoKeepsSameSizeKindsSeparate) {
-  ScopedTempDir root;
-  ASSERT_FALSE(root.path().empty());
-  ScopedKfdRootOverride kfd_root_override(root.path().string());
+  FakeSysfsTree root;
+  ASSERT_FALSE(root.root().empty());
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          root.root());
 
-  WriteGpuNodeWithCaches(root.path(), 1,
+  WriteGpuNodeWithCaches(root.root(), 1,
                          {
                              {1, kData | kHsaCu, 16, 1, 128},  // vector L1D
                              {1, kData | kHsaCu, 16, 1, 128},
@@ -272,7 +245,7 @@ TEST(GpuUnit, KfdCacheInfoKeepsSameSizeKindsSeparate) {
                              {1, kData | kHsaCu, 16, 2, 64},  // scalar L1D
                              {1, kData | kHsaCu, 16, 2, 64},
                          });
-  WriteGpuNodeWithCaches(root.path(), 2,
+  WriteGpuNodeWithCaches(root.root(), 2,
                          {
                              {1, kData | kHsaCu, 16, 1, 128},  // vector L1D
                              {1, kData | kHsaCu, 16, 2, 64},   // scalar L1D, no L1I between
