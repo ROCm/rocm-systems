@@ -247,7 +247,7 @@ enum class DdaRsIpcStaging {
 };
 
 inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize) {
-  if (recvcount * static_cast<size_t>(typeSize) <= kDdaRsIpcKernelCopyMaxBytes) {
+  if (recvcount * static_cast<size_t>(typeSize) < kDdaRsIpcKernelCopyMaxBytes) {
     return DdaRsIpcStaging::InKernel;
   }
   return DdaRsIpcStaging::HostPreCopy;
