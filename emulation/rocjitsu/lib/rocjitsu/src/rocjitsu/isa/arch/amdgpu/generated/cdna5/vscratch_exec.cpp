@@ -210,7 +210,8 @@ void ScratchStoreB32Vscratch::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);
   d->store_data.resize(wf.wf_size() * 4);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -229,7 +230,8 @@ void ScratchStoreB64Vscratch::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 2, exec);
   d->store_data.resize(wf.wf_size() * 8);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -248,7 +250,8 @@ void ScratchStoreB96Vscratch::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 3, exec);
   d->store_data.resize(wf.wf_size() * 12);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 
@@ -267,7 +270,8 @@ void ScratchStoreB128Vscratch::execute_impl(amdgpu::Wavefront &wf) {
       *Isa::resolved_vgpr_offset(wf, vsrc.opr_type_, vsrc.encoding_value_, vsrc.vgpr_msb_role());
   auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 4, exec);
   d->store_data.resize(wf.wf_size() * 16);
-  data.copy_dwords_lane_major(d->store_data, exec);
+  if (data.copy_dwords_lane_major(d->store_data, exec).failed())
+    return;
   set_data(std::move(d));
 }
 

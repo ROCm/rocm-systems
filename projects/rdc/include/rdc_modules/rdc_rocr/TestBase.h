@@ -93,13 +93,13 @@ class TestBase : public RdcRocrBase {
   // What a check does just before it makes a packet ready: an error ROCr reported earlier
   // suspended the queue, so the dispatch would never complete, and that error is this GPU's
   // failure before the doorbell; the hint above is read here too, while nothing is dispatched.
-  void before_doorbell(const QueueStatus* status);
+  void before_doorbell(CheckQueue* queue);
 
   // The wait for a dispatch, which ends on an error of its queue as well, and the wait for a
   // memory copy, which runs on ROCr's own path and so ends only on its own signal. Each waits
   // in hints until the signal is below 1, until the signal reports a failure of its own, which
   // is this GPU's failure, or until the deadline passes, which abandons the work.
-  void wait_for_kernel(hsa_signal_t signal, const QueueStatus* status);
+  void wait_for_kernel(hsa_signal_t signal, CheckQueue* queue);
   void wait_for_copy(hsa_signal_t signal);
 
  protected:

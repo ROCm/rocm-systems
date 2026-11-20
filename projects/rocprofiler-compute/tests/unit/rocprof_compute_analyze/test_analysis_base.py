@@ -7,6 +7,7 @@ import argparse
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import common
 import pandas as pd
@@ -34,7 +35,7 @@ def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -
 
     # The mock records instead of exiting, so sanitize runs on to a later error.
     with pytest.raises(SystemExit):
-        OmniAnalyze_Base(argparse.Namespace(tui=False, path=paths), {}).sanitize()
+        OmniAnalyze_Base(argparse.Namespace(path=paths), {}).sanitize()
 
     assert "last two components" in mock_error.call_args.args[1]
 
@@ -114,7 +115,7 @@ def test_pre_processing_stdout_creates_no_file(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("specs_correction", [None, "num_xcd:4"])
+@pytest.mark.parametrize("specs_correction", [None, ["num_xcd:4"]])
 def test_initalize_runs_corrects_specs_only_when_asked(
     tmp_path, monkeypatch, specs_correction
 ) -> None:
@@ -136,7 +137,6 @@ def test_initalize_runs_corrects_specs_only_when_asked(
             normal_unit="per_kernel",
             list_stats=False,
             filter_metrics=None,
-            config_dir=str(tmp_path),
             gpu_kernel=None,
         ),
         {},
@@ -150,8 +150,6 @@ def test_initalize_runs_corrects_specs_only_when_asked(
 
     expected_num_xcd = "4" if specs_correction else 8
     assert workload.sys_info["num_xcd"].item() == expected_num_xcd
-    # initalize_runs reads ip_blocks off sys_info straight after the correction.
-    assert workload.avail_ips == sysinfo["ip_blocks"].split("|")
 
 
 # =============================================================================
@@ -176,3 +174,26 @@ def test_membw_analysis_collected(profiling_config, expected) -> None:
 def test_membw_analysis_collected_without_config_attribute() -> None:
     inst = OmniAnalyze_Base.__new__(OmniAnalyze_Base)
     assert inst.membw_analysis_collected() is False
+
+
+def test_sanitize_errors_when_workload_profiled_with_kernel_multiplexing(
+    tmp_path, monkeypatch
+):
+    workload = tmp_path / "app" / "MI300"
+    workload.mkdir(parents=True)
+    (workload / "profiling_config.yaml").write_text(
+        "iteration_multiplexing: kernel\n", encoding="utf-8"
+    )
+    mock_error = common.patch_console(
+        monkeypatch, MODULE, "error", error=Mock(side_effect=SystemExit(1))
+    )["error"]
+    with pytest.raises(SystemExit):
+        OmniAnalyze_Base(
+            argparse.Namespace(tui=False, path=[[str(workload)]]), {}
+        ).sanitize()
+    assert mock_error.call_args.args == (
+        "analysis",
+        'This workload was profiled with "--iteration-multiplexing kernel", '
+        "which is no longer supported. "
+        'Profile it again with "--iteration-multiplexing".',
+    )

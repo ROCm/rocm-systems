@@ -21,9 +21,9 @@
 #include "library/thread_info.hpp"
 
 #include <nlohmann/json_fwd.hpp>
-#include <profiler-hub/reader.hpp>
-#include <profiler-hub/reader_types.hpp>
-#include <profiler-hub/storage.hpp>
+#include <profiler-hub/cpp/reader.hpp>
+#include <profiler-hub/cpp/reader_types.hpp>
+#include <profiler-hub/cpp/storage.hpp>
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -350,6 +350,19 @@ expect_stored_json_matches(const std::string& stored, const std::string& expecte
     ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, k_max_json_length);
     EXPECT_EQ(nlohmann::json::parse(stored), nlohmann::json::parse(expected));
 }
+
+// rocpd_processor_t adds "output_path" and "output_file" to the process extdata;
+// compare everything else verbatim.
+void
+expect_stored_process_extdata_matches(const std::string& stored,
+                                      const std::string& expected)
+{
+    ASSERT_TRUE(nlohmann::json::accept(stored)) << stored.substr(0, k_max_json_length);
+    auto stored_json = nlohmann::json::parse(stored);
+    stored_json.erase("output_path");
+    stored_json.erase("output_file");
+    EXPECT_EQ(stored_json, nlohmann::json::parse(expected));
+}
 }  // namespace
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -363,14 +376,15 @@ expect_stored_json_matches(const std::string& stored, const std::string& expecte
 class rocpd_write_read_test_interface : public ::testing::Test
 {
 protected:
-    static constexpr size_t k_node_id       = 1;
-    static constexpr size_t k_pid           = 200;
-    static constexpr size_t k_ppid          = 100;
-    static constexpr size_t k_thread_id     = 300;
-    static constexpr size_t k_queue_id      = 10;
-    static constexpr size_t k_stream_id     = 20;
-    static constexpr size_t k_process_start = 1000;
-    static constexpr size_t k_process_end   = 9000;
+    static constexpr size_t k_node_id   = 1;
+    static constexpr size_t k_pid       = 200;
+    static constexpr size_t k_ppid      = 100;
+    static constexpr size_t k_thread_id = 300;
+    static constexpr size_t k_queue_id  = 10;
+    static constexpr size_t k_stream_id = 20;
+    // Above UINT32_MAX, so 32-bit truncation is caught.
+    static constexpr size_t k_process_start = 1'000'000'000'001'000;
+    static constexpr size_t k_process_end   = 1'000'000'000'009'000;
 
     void SetUp() override
     {
@@ -389,9 +403,7 @@ protected:
     static void add_process_scoped_track(
         const std::shared_ptr<metadata_registry>& metadata, const std::string& track_name)
     {
-        metadata->add_track(track{ .track_name = track_name,
-                                   .thread_id  = std::nullopt,
-                                   .extdata    = std::string{} });
+        metadata->ensure_track(track_name, std::nullopt, std::string{});
     }
 
     static void seed_gpu_smi_pmc_row(const std::shared_ptr<metadata_registry>& metadata,
@@ -1048,7 +1060,7 @@ protected:
         thread_info.thread_id         = k_thread_id;
         thread_info.start             = k_process_start;
         thread_info.end               = k_process_end;
-        metadata->add_thread_info(thread_info);
+        metadata->ensure_thread(thread_info.thread_id, [&] { return thread_info; });
     }
 
     static void seed_nic_pmc_catalog(const std::shared_ptr<metadata_registry>& metadata)
@@ -1585,13 +1597,122 @@ TEST_F(rocpd_write_read_test_interface, info_extdata_is_valid_json)
     // Validate: profiler_hub::reader_t read-back matches inserted values.
     const auto processes = m_reader->get_all_processes();
     ASSERT_EQ(processes.size(), 1U);
-    expect_stored_json_matches(processes[0]->extdata, process_extdata);
+    expect_stored_process_extdata_matches(processes[0]->extdata, process_extdata);
     expect_stored_json_matches(processes[0]->environment, process_environment);
 
     const auto agents = m_reader->get_all_agents();
     ASSERT_EQ(agents.size(), 1U);
     expect_stored_json_matches(agents[0]->extdata, gpu.agent_info);
     expect_gpu_agent_mi210();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_contains_output_path_and_file)
+{
+    // Prepare: default metadata leaves process extdata empty.
+    run_processor_and_open_reader({});
+
+    // Validate: output location of the database is recorded in process extdata.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata));
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+
+    ASSERT_TRUE(extdata.contains("output_path")) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_file")) << extdata.dump();
+    ASSERT_TRUE(extdata["output_path"].is_string()) << extdata.dump();
+    ASSERT_TRUE(extdata["output_file"].is_string()) << extdata.dump();
+
+    const std::filesystem::path output_path{ extdata["output_path"].get<std::string>() };
+    const auto                  output_file = extdata["output_file"].get<std::string>();
+    const std::filesystem::path db_path{ m_db_path };
+
+    EXPECT_TRUE(output_path.is_absolute()) << output_path;
+    EXPECT_TRUE(std::filesystem::equivalent(output_path, db_path.parent_path()))
+        << output_path;
+    EXPECT_EQ(output_file, db_path.filename().string());
+    EXPECT_TRUE(std::filesystem::equivalent(output_path / output_file, db_path))
+        << (output_path / output_file);
+}
+
+namespace
+{
+// Asserts that `extdata` is an object whose output_path/output_file name `db_path`.
+void
+expect_extdata_names_database(const nlohmann::json& extdata, const std::string& db_path)
+{
+    ASSERT_TRUE(extdata.is_object()) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_path")) << extdata.dump();
+    ASSERT_TRUE(extdata.contains("output_file")) << extdata.dump();
+
+    const std::filesystem::path db_file{ db_path };
+    EXPECT_EQ(extdata["output_file"].get<std::string>(), db_file.filename().string());
+    EXPECT_TRUE(std::filesystem::equivalent(
+        std::filesystem::path{ extdata["output_path"].get<std::string>() },
+        db_file.parent_path()))
+        << extdata.dump();
+}
+}  // namespace
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_malformed_json_is_replaced)
+{
+    // Prepare: process extdata is not parseable JSON.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = "{not json";
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: finalization does not throw and the output location is recorded.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.size(), 2U) << extdata.dump();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_non_object_json_is_replaced)
+{
+    // Prepare: process extdata is valid JSON, but an array rather than an object.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = "[1, 2, 3]";
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: the array is replaced by an object holding the output location.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.size(), 2U) << extdata.dump();
+}
+
+TEST_F(rocpd_write_read_test_interface, process_extdata_stale_output_keys_are_overwritten)
+{
+    // Prepare: producer-set output keys that disagree with the real database location,
+    // alongside an unrelated key that must survive.
+    run_processor_and_open_reader({},
+                                  [](const std::shared_ptr<metadata_registry>& metadata) {
+                                      auto proc    = metadata->get_process_info();
+                                      proc.extdata = nlohmann::json{
+                                          { "output_path", "/stale/dir" },
+                                          { "output_file", "stale.db" },
+                                          { "keep", "me" }
+                                      }.dump();
+                                      metadata->set_process(proc);
+                                  });
+
+    // Validate: the processor's values win; unrelated keys are preserved.
+    const auto processes = m_reader->get_all_processes();
+    ASSERT_EQ(processes.size(), 1U);
+    ASSERT_TRUE(nlohmann::json::accept(processes[0]->extdata)) << processes[0]->extdata;
+    const auto extdata = nlohmann::json::parse(processes[0]->extdata);
+    expect_extdata_names_database(extdata, m_db_path);
+    EXPECT_EQ(extdata.value("keep", ""), "me") << extdata.dump();
 }
 
 // ---------------------------------------------------------------------------
@@ -1753,9 +1874,7 @@ TEST_F(rocpd_write_read_test_interface, handle_backtrace_region_pathway)
     run_processor_and_open_reader(
         {},
         [](const std::shared_ptr<metadata_registry>& metadata) {
-            metadata->add_track(track{ .track_name = "Sampling [CPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("Sampling [CPU 0]", k_thread_id, std::string{});
         },
         [](rocpd_processor_t& processor) {
             const backtrace_region_sample bts{
@@ -1829,9 +1948,7 @@ TEST_F(rocpd_write_read_test_interface, handle_pmc_event_with_sample_pathway)
                                      .name        = "SQ_WAVES",
                                      .target_arch = "GPU",
                                      .description = "Shader wavefronts" }));
-            metadata->add_track(track{ .track_name = "SQ_WAVES [GPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("SQ_WAVES [GPU 0]", k_thread_id, std::string{});
         },
         [](rocpd_processor_t& processor) {
             constexpr std::uint64_t     k_timestamp = 10000;
@@ -1941,9 +2058,7 @@ TEST_F(rocpd_write_read_test_interface, handle_gpu_perf_counter_sample_pathway)
                                      .target_arch = "GPU",
                                      .description = "Shader wavefronts" }));
             // gpu_perf_counter handle() emits process-scoped tracks (no thread_id).
-            metadata->add_track(track{ .track_name = k_track_name,
-                                       .thread_id  = std::nullopt,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track(k_track_name, std::nullopt, std::string{});
             gpu_perf_counter_name_entry name_entry{};
             name_entry.counter_id    = k_counter_id;
             name_entry.pmc_info_name = k_pmc_name;
@@ -1990,54 +2105,79 @@ TEST_F(rocpd_write_read_test_interface, handle_gpu_perf_counter_sample_empty_ent
 // handle(cpu_pmc_sample): process-level + per-core PMC inserts
 // ---------------------------------------------------------------------------
 
+// Regression test for per-core values dropped as
+//   "CPU PMC sample skipped: PMC info not registered for name=cpu_frequency"
+// (same for cpu_load)
 TEST_F(rocpd_write_read_test_interface, handle_cpu_pmc_sample_pathway)
 {
     // Prepare: seed metadata/agents/samples and run rocpd_processor_t (opens reader).
-    const auto cpu = managed_cpu_agent();
+    const auto                     cpu        = managed_cpu_agent();
+    const std::vector<std::string> core_names = { "cpu_frequency [0] Core [0]",
+                                                  "cpu_frequency [0] Core [1]",
+                                                  "cpu_load [0] Core [0]",
+                                                  "cpu_load [0] Core [1]" };
+    std::string                    handle_output;
     run_processor_and_open_reader(
         { cpu },
-        [](const std::shared_ptr<metadata_registry>& metadata) {
+        [&](const std::shared_ptr<metadata_registry>& metadata) {
             metadata->add_pmc_info(make_agent_pmc_row({ .type = agent_type::cpu,
                                                         .name = "process_physical_memory",
                                                         .target_arch = "CPU" }));
-            metadata->add_pmc_info(make_agent_pmc_row({ .type        = agent_type::cpu,
-                                                        .name        = "cpu_frequency",
-                                                        .target_arch = "CPU" }));
             add_process_scoped_track(metadata, "process_physical_memory");
-            add_process_scoped_track(metadata, "cpu_frequency [0] Core [0]");
-            add_process_scoped_track(metadata, "cpu_frequency [0] Core [1]");
+            for(const auto& core_name : core_names)
+            {
+                metadata->add_pmc_info(make_agent_pmc_row({ .type = agent_type::cpu,
+                                                            .name = core_name.c_str(),
+                                                            .target_arch = "CPU" }));
+                add_process_scoped_track(metadata, core_name);
+            }
         },
-        [](rocpd_processor_t& processor) {
+        [&](rocpd_processor_t& processor) {
             constexpr double        k_page_rss_mib   = 256.5;
             constexpr double        k_bytes_per_mib  = 1024.0 * 1024.0;
             constexpr float         k_core0_freq_mhz = 3200.0f;
             constexpr float         k_core1_freq_mhz = 3100.0f;
+            constexpr double        k_core0_load_pct = 12.5;
+            constexpr double        k_core1_load_pct = 87.5;
             constexpr std::uint64_t k_timestamp      = 13000;
             rocprofsys::pmc::collectors::cpu::enabled_metrics enabled{};
             enabled.bits.page_rss  = 1;
             enabled.bits.frequency = 1;
+            enabled.bits.load      = 1;
             rocprofsys::pmc::collectors::cpu::process_metrics proc{};
             proc.page_rss = static_cast<std::int64_t>(k_page_rss_mib * k_bytes_per_mib);
             const std::vector<rocprofsys::pmc::collectors::cpu::per_cpu_metrics> cores{
-                { .cpu_id = 0, .frequency = k_core0_freq_mhz, .load = 0.0 },
-                { .cpu_id = 1, .frequency = k_core1_freq_mhz, .load = 0.0 },
+                { .cpu_id = 0, .frequency = k_core0_freq_mhz, .load = k_core0_load_pct },
+                { .cpu_id = 1, .frequency = k_core1_freq_mhz, .load = k_core1_load_pct },
             };
             auto freqs = rocprofsys::pmc::collectors::cpu::serialize_frequencies(cores);
-            const cpu_pmc_sample sample{ enabled,          0, k_timestamp, proc,
-                                         std::move(freqs), {} };
+            auto loads = rocprofsys::pmc::collectors::cpu::serialize_loads(cores);
+            const cpu_pmc_sample sample{ enabled,          0,
+                                         k_timestamp,      proc,
+                                         std::move(freqs), std::move(loads) };
+            ::testing::internal::CaptureStdout();
+            ::testing::internal::CaptureStderr();
             processor.handle(sample);
+            handle_output = ::testing::internal::GetCapturedStdout() +
+                            ::testing::internal::GetCapturedStderr();
         });
 
+    EXPECT_EQ(handle_output.find("PMC info not registered"), std::string::npos)
+        << handle_output;
+
     const auto pmc_infos = m_reader->get_all_pmc_info();
-    ASSERT_EQ(pmc_infos.size(), 2U);
+    ASSERT_EQ(pmc_infos.size(), 5U);
     expect_named_pmc_arch(pmc_infos, { .name                = "process_physical_memory",
                                        .expected_arch       = "CPU",
                                        .expected_agent_type = "CPU",
                                        .expected_symbol = "process_physical_memory" });
-    expect_named_pmc_arch(pmc_infos, { .name                = "cpu_frequency",
-                                       .expected_arch       = "CPU",
-                                       .expected_agent_type = "CPU",
-                                       .expected_symbol     = "cpu_frequency" });
+    for(const auto& core_name : core_names)
+    {
+        expect_named_pmc_arch(pmc_infos, { .name                = core_name.c_str(),
+                                           .expected_arch       = "CPU",
+                                           .expected_agent_type = "CPU",
+                                           .expected_symbol     = core_name.c_str() });
+    }
 
     expect_readback_agent_fields({ .agent_type   = "CPU",
                                    .name         = "CPU0",
@@ -2045,8 +2185,9 @@ TEST_F(rocpd_write_read_test_interface, handle_cpu_pmc_sample_pathway)
                                    .vendor_name  = "AMD",
                                    .product_name = "EPYC 7763" });
 
-    expect_reader_has_tracks({ "process_physical_memory", "cpu_frequency [0] Core [0]",
-                               "cpu_frequency [0] Core [1]" });
+    auto expected_tracks = core_names;
+    expected_tracks.emplace_back("process_physical_memory");
+    expect_reader_has_tracks(expected_tracks);
 }
 
 // ---------------------------------------------------------------------------
@@ -2076,9 +2217,7 @@ TEST_F(rocpd_write_read_test_interface, handle_kfd_sample_pathway)
                                      .name        = "kfd_page_fault",
                                      .target_arch = "GPU",
                                      .description = "KFD page fault counter" }));
-            metadata->add_track(track{ .track_name = "KFD Events [GPU 0]",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("KFD Events [GPU 0]", k_thread_id, std::string{});
         },
         [&](rocpd_processor_t& processor) {
             const kfd_sample sample{ k_thread_id,
@@ -2402,9 +2541,7 @@ TEST_F(rocpd_write_read_test_interface, multiple_event_types_in_single_db)
         [](const std::shared_ptr<metadata_registry>& metadata) {
             seed_gpu_queue_stream(metadata);
             seed_kernel_symbol(metadata, 1, "test_kernel");
-            metadata->add_track(track{ .track_name = "Sampling",
-                                       .thread_id  = k_thread_id,
-                                       .extdata    = std::string{} });
+            metadata->ensure_track("Sampling", k_thread_id, std::string{});
         },
         [&timestamps](rocpd_processor_t& processor) {
             insert_multiple_event_type_samples(processor, timestamps);

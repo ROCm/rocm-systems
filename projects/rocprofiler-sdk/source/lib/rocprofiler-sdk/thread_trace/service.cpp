@@ -90,6 +90,9 @@ build_pack_from_array(parameter_pack&                             pack,
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
                 pack.no_detail_simd = param.value != 0;
                 break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_EXEC_MASK_TRACE:
+                pack.exec_mask_trace = param.value != 0;
+                break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE:
             {
                 switch(param.value)
@@ -112,10 +115,6 @@ build_pack_from_array(parameter_pack&                             pack,
             }
             case ROCPROFILER_THREAD_TRACE_PARAMETER_NUM_BUFFERS:
             {
-                // CPU staging buffer count. 0 (default) and 1 = single buffer (sync path).
-                // 2 is reserved/invalid. Values >= 3 select the async producer/consumer
-                // pipeline; the producer reserves one slot and consumers share the rest.
-                // Bounded by the bitmask width in triple_buffer_shared_data_t.
                 uint64_t n = (param.value == 0) ? 1 : param.value;
                 if(n == 2) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
                 if(n > rocprofiler::thread_trace::triple_buffer_shared_data_t::MAX_SLOTS)
@@ -127,6 +126,10 @@ build_pack_from_array(parameter_pack&                             pack,
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
+    if(pack.exec_mask_trace && agent->gfx_target_version / 10000 < 12)
+        return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
+    if(pack.exec_mask_trace && pack.no_detail_simd)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -213,10 +216,6 @@ rocprofiler_configure_device_thread_trace_service(
 
     if(pack.num_buffers > 1)
     {
-        // For now, only one SE is allowed in multi-buffer mode. Check mask is power of two.
-        if((pack.shader_engine_mask & (pack.shader_engine_mask - 1)) != 0)
-            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
         // Multi-buffer mode requires specific AQLProfile symbols that may not be available
         auto* aqlprofile_dl = rocprofiler::thread_trace::get_aqlprofile_dl();
         if(!aqlprofile_dl || !aqlprofile_dl->valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;

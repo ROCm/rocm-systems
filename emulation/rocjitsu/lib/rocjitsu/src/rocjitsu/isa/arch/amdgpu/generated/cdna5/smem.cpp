@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/smem.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include <memory>
@@ -39,6 +40,8 @@ SLoadB32Smem::SLoadB32Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -73,6 +76,8 @@ SLoadB64Smem::SLoadB64Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -107,6 +112,8 @@ SLoadB128Smem::SLoadB128Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -141,6 +148,8 @@ SLoadB256Smem::SLoadB256Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B256);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -175,6 +184,8 @@ SLoadB512Smem::SLoadB512Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B512);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -209,6 +220,8 @@ SLoadB96Smem::SLoadB96Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -240,6 +253,8 @@ SLoadI8Smem::SLoadI8Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -271,6 +286,8 @@ SLoadU8Smem::SLoadU8Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -302,6 +319,8 @@ SLoadI16Smem::SLoadI16Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -333,6 +352,8 @@ SLoadU16Smem::SLoadU16Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -366,6 +387,8 @@ SBufferLoadB32Smem::SBufferLoadB32Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -403,6 +426,8 @@ SBufferLoadB64Smem::SBufferLoadB64Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -440,6 +465,8 @@ SBufferLoadB128Smem::SBufferLoadB128Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -477,6 +504,8 @@ SBufferLoadB256Smem::SBufferLoadB256Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B256);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -514,6 +543,8 @@ SBufferLoadB512Smem::SBufferLoadB512Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B512);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -551,6 +582,8 @@ SBufferLoadB96Smem::SBufferLoadB96Smem(const MachineInst *inst)
                                        amdgpu::MemoryCompletionClass::UNORDERED, 2}},
       false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -585,6 +618,8 @@ SBufferLoadI8Smem::SBufferLoadI8Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -619,6 +654,8 @@ SBufferLoadU8Smem::SBufferLoadU8Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -653,6 +690,8 @@ SBufferLoadI16Smem::SBufferLoadI16Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -687,6 +726,8 @@ SBufferLoadU16Smem::SBufferLoadU16Smem(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -706,6 +747,8 @@ SDcacheInvSmem::SDcacheInvSmem(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_DCACHE_INV);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Cache);
 }
 
 namespace detail {
@@ -730,6 +773,8 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
 }
 
 namespace detail {
@@ -754,6 +799,8 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE_BUFFER);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
 }
 
 namespace detail {
@@ -781,6 +828,8 @@ SPrefetchInstSmem::SPrefetchInstSmem(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_PREFETCH_INST);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Prefetch);
 }
 
 namespace detail {
@@ -806,6 +855,9 @@ SPrefetchInstPcRelSmem::SPrefetchInstPcRelSmem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_PREFETCH_INST_PC_REL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Prefetch);
+  flags_ |= READS_PC;
 }
 
 namespace detail {
@@ -833,6 +885,8 @@ SPrefetchDataSmem::SPrefetchDataSmem(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_PREFETCH_DATA);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Prefetch);
 }
 
 namespace detail {
@@ -860,6 +914,8 @@ SBufferPrefetchDataSmem::SBufferPrefetchDataSmem(const MachineInst *inst)
   num_src_ = 4;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_BUFFER_PREFETCH_DATA);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Prefetch);
 }
 
 namespace detail {
@@ -885,6 +941,9 @@ SPrefetchDataPcRelSmem::SPrefetchDataPcRelSmem(const MachineInst *inst)
   num_src_ = 3;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_PREFETCH_DATA_PC_REL);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Prefetch);
+  flags_ |= READS_PC;
 }
 
 namespace detail {

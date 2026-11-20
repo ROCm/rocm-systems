@@ -45,6 +45,13 @@ namespace amd::smi {
 rsmi_status_t parse_ampp_writable_slot_mask(const std::string& trimmed_line,
                                             std::vector<uint32_t>* out_slots);
 
+// True if |name| is a "node_"-prefixed field -- node-wide/shared across every
+// GPU on the board rather than per-GPU (see is_primary_gpu() in
+// rocm_smi_ampp.cc, which gates visibility/writability of these fields on
+// non-primary GPUs). Pure string comparison, exposed the same way as
+// parse_ampp_writable_slot_mask above so it can be unit-tested directly.
+bool is_node_scoped_field(const std::string& name);
+
 }  // namespace amd::smi
 
 #endif  // ROCM_SMI_INCLUDE_ROCM_SMI_ROCM_SMI_AMPP_H_

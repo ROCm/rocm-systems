@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <atomic>
 #include <cerrno>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -66,6 +67,12 @@ inline void log_release_failure(const char* call, hsa_status_t status) {
 void abandon_gpu(uint32_t entity);
 std::vector<uint32_t> abandoned_gpus(void);
 
+// What a check of a GPU in the record is told. The other GPUs of its run are skipped with a text
+// that names every GPU in the record.
+constexpr char kChecksStopped[] =
+    "An earlier check could not stop its work on this GPU; the ROCr checks are disabled until "
+    "the process running them restarts.";
+
 class ReleaseContext {
  public:
   ReleaseContext(uint32_t entity, GpuOutcome* outcome) : entity_(entity), outcome_(outcome) {}
@@ -96,6 +103,9 @@ class ReleaseContext {
 
   // Where a sub-test's own sentences go, which is null only where no outcome was given.
   GpuOutcome* outcome() const { return outcome_; }
+
+  // The GPU's entity id, which the module looks its queue up by in the record.
+  uint32_t entity() const { return entity_; }
 
  private:
   uint32_t entity_ = 0;  // the GPU's entity id, which names it in the record and in the log
@@ -290,32 +300,61 @@ class FileDescriptorHolder {
   int descriptor_ = -1;
 };
 
-// The reference to ROCr that a check holds while it looks at its GPUs, so that ROCr is loaded
-// once for the check rather than once per test object, and so that nothing it leaves behind can
-// take ROCr's count to zero in the middle of a run. ROCr counts these references, so another
-// module of the process that holds one, as the profiler module does from its first profiler
-// field, keeps ROCr loaded across checks.
-class RocrReference {
- public:
-  RocrReference() : status_(hsa_init()) {}
-  RocrReference(const RocrReference&) = delete;
-  RocrReference& operator=(const RocrReference&) = delete;
-  ~RocrReference() {
-    if (status_ != HSA_STATUS_SUCCESS) {
-      // No reference was taken: an unpaired release would end the references other modules hold.
-      return;
-    }
-    const hsa_status_t err = hsa_shut_down();
-    if (err != HSA_STATUS_SUCCESS) {
-      log_release_failure("hsa_shut_down", err);
-    }
-  }
+// The module's reference to ROCr, taken by the first run that needs ROCr and held until
+// rdc_diag_destroy(): rocprofiler-sdk, which rdcd always loads, does not support a ROCr reload,
+// so ROCr is not unloaded between two checks, and the test objects' own references only move
+// its count. A failed hsa_init() is answered as it is and holds nothing, so the next run tries
+// again.
+hsa_status_t hold_rocr(void);
 
-  // What hsa_init() answered: the rest of the run is this GPU's failure when it failed.
-  hsa_status_t status() const { return status_; }
+// What rdc_diag_destroy() releases once no run is in flight: each GPU's queue and its status
+// block, then the module's reference to ROCr. The queue of a GPU whose work a check could not
+// stop is kept with its block, as is one that hsa_queue_destroy() fails on, which records its
+// GPU; while a GPU is recorded, ROCr stays loaded, as the test object that abandoned the work
+// keeps its own reference.
+void release_rocr(void);
+
+// The queue of one GPU, which the module makes at the GPU's first check and holds until
+// rdc_diag_destroy(). It is defined where the module keeps it.
+struct HeldQueue;
+
+// A check's use of its GPU's queue. The module makes one queue per GPU and lends it to each check
+// of that GPU in turn: rocprofiler-sdk never destroys a queue it intercepted, so a queue per check
+// would leave a queue and its memory behind at each run until ROCr refuses to create another. A
+// check that finds the queue lent to another one waits for it. The queue is destroyed as the
+// check ends, before anything else the check made is released, when work may still be on it or
+// when ROCr reported an error of it, which suspends it; the GPU's next check then makes another,
+// as it does for a queue whose error ROCr reported after its check ended.
+// The queue of work that could not be stopped is left as it is, with its block.
+class CheckQueue {
+ public:
+  explicit CheckQueue(ReleaseContext* context) : context_(context) {}
+  CheckQueue(const CheckQueue&) = delete;
+  CheckQueue& operator=(const CheckQueue&) = delete;
+  ~CheckQueue();
+
+  // Lends this check its GPU's queue, made the first time with the packets a check needs, at
+  // most the agent's largest queue, and with an error callback and a status block of its own:
+  // ROCr reports an error of a queue, an invalid packet or scratch it cannot allocate, only
+  // through that callback. It answers what hsa_queue_create() answered, and
+  // HSA_STATUS_ERROR_NOT_INITIALIZED when the module holds no reference to ROCr; a failed query
+  // of the agent's largest queue throws, naming hsa_agent_get_info() and its status.
+  hsa_status_t acquire(hsa_agent_t agent);
+
+  // The queue and its status block, once acquire() succeeded.
+  hsa_queue_t* queue() const;
+  const QueueStatus* status() const;
+
+  // A packet is about to be put on the queue, and the work on the queue completed: a queue that
+  // is left with work on it is destroyed as the check ends rather than lent again.
+  void dispatched() { busy_ = true; }
+  void completed() { busy_ = false; }
 
  private:
-  hsa_status_t status_ = HSA_STATUS_ERROR;
+  ReleaseContext* context_ = nullptr;
+  HeldQueue* held_ = nullptr;
+  std::unique_lock<std::mutex> lent_;  // the GPU's queue, lent to this check until it ends
+  bool busy_ = false;
 };
 
 }  // namespace rdc

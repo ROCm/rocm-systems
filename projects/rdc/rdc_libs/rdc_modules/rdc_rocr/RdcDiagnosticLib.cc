@@ -22,6 +22,8 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <vector>
 
@@ -65,35 +67,33 @@ constexpr char kUnknownError[] = "An unknown error stopped the check.";
 // ROCr could not be loaded for this run, which leaves no GPU to check.
 constexpr char kRocrNotLoaded[] = "Fail to call hsa_init().";
 
-// What a GPU an earlier check could not stop its work on is told. The other GPUs of such a run
-// are skipped with the text below, which names every GPU in the record.
-constexpr char kChecksStopped[] =
-    "An earlier check could not stop its work on this GPU; the ROCr checks are disabled until "
-    "the process running them restarts.";
-
 // What the check says when it could not put its results together.
 constexpr char kCheckStopped[] = "The check could not finish.";
 
-// The reference to ROCr the run holds while it checks its GPUs, so that ROCr is loaded once for
-// the check rather than once per test object, and so that nothing a test object leaves behind can
-// take ROCr's count to zero in the middle of a run. It is taken before the run's first HSA call,
-// which is the first agent lookup, and released when the check returns, on every path out of it.
-// A load that failed is the failure of every GPU of the run that needs HSA, with no further call:
-// ROCr repeats its whole load at each try, which costs seconds on a host where it cannot load at
-// all, and the next run tries again. The count is the process's, so in a daemon whose profiler
-// module holds a reference of its own ROCr stays loaded between checks.
+// The module's reference to ROCr as a run takes it: before the run's first HSA call, which is the
+// first agent lookup, and only once. The module then holds it until rdc_diag_destroy(), so ROCr
+// is loaded once for every check of the process: rocprofiler-sdk, which rdcd always loads, does
+// not support a ROCr reload. A load that failed is the failure of every GPU of the run that needs
+// HSA, with no further call: ROCr repeats its whole load at each try, which costs seconds on a
+// host where it cannot load at all, and the next run tries again.
 class RunReference {
  public:
   hsa_status_t acquire() {
-    if (reference_ == nullptr) {
-      reference_.reset(new amd::rdc::RocrReference());
+    if (!tried_) {
+      tried_ = true;
+      status_ = amd::rdc::hold_rocr();
     }
-    return reference_->status();
+    return status_;
   }
 
  private:
-  std::unique_ptr<amd::rdc::RocrReference> reference_;
+  bool tried_ = false;
+  hsa_status_t status_ = HSA_STATUS_ERROR;
 };
+
+// Runs take this shared, so that two of them go on side by side, and rdc_diag_destroy() takes it
+// exclusive, so that what the module holds is released with no check in flight.
+std::shared_mutex s_run_mutex;
 
 // The outcome and the sentence the exception being handled gives a GPU.
 void add_current_exception(GpuOutcome* outcome) {
@@ -176,7 +176,7 @@ void run_gpu(rdc_diag_test_cases_t test_case, uint32_t entity, RunReference* roc
   if (!disabled.empty()) {
     const bool recorded = std::find(disabled.begin(), disabled.end(), entity) != disabled.end();
     outcome->add(recorded ? RDC_DIAG_RESULT_FAIL : RDC_DIAG_RESULT_SKIP,
-                 recorded ? std::string(kChecksStopped) : disabled_text(disabled));
+                 recorded ? std::string(amd::rdc::kChecksStopped) : disabled_text(disabled));
     return;
   }
 
@@ -202,7 +202,16 @@ void run_gpu(rdc_diag_test_cases_t test_case, uint32_t entity, RunReference* roc
 
 rdc_status_t rdc_diag_init(uint64_t) { return RDC_ST_OK; }
 
-rdc_status_t rdc_diag_destroy() { return RDC_ST_OK; }
+rdc_status_t rdc_diag_destroy() {
+  // The GPUs' queues and the module's reference to ROCr, once every run has returned.
+  std::unique_lock<std::shared_mutex> lock(s_run_mutex);
+  try {
+    amd::rdc::release_rocr();
+  } catch (...) {
+    return RDC_ST_UNKNOWN_ERROR;
+  }
+  return RDC_ST_OK;
+}
 
 rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
                                        uint32_t* test_case_count) {
@@ -246,8 +255,10 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
 
   const char* const passed =
       test_case == RDC_DIAG_COMPUTE_QUEUE ? kComputeQueuePassed : kSysMemPassed;
-  // One reference to ROCr for the whole check, released when this function returns, whichever
-  // path it takes: with it held, no test object's hsa_shut_down() takes ROCr's count to zero.
+  // The run goes on beside others and keeps rdc_diag_destroy() waiting until it returns. The
+  // module's reference to ROCr is taken at the run's first GPU that needs it: with it held, no
+  // test object's hsa_shut_down() takes ROCr's count to zero.
+  std::shared_lock<std::shared_mutex> running(s_run_mutex);
   RunReference rocr;
   try {
     DiagText info;

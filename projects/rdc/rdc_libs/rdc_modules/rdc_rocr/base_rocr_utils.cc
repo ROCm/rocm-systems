@@ -34,7 +34,9 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <atomic>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -500,18 +502,154 @@ std::vector<uint32_t> abandoned_gpus(void) {
   return entities;
 }
 
-hsa_status_t create_check_queue(hsa_agent_t agent, QueueStatusHolder* status, QueueHolder* queue) {
-  // The block is this queue's own and is made before it, so that the callback has somewhere to
-  // write from the moment ROCr can call it.
-  status->reset(new QueueStatus(HSA_STATUS_SUCCESS));
+// The queue of one GPU. The check it is lent to holds its mutex, and only that check changes the
+// queue and its block, apart from release_rocr(), which runs with no check in flight.
+struct HeldQueue {
+  std::mutex lent;
+  hsa_queue_t* queue = nullptr;   // none until the GPU's first check, or after a check destroyed it
+  QueueStatus* status = nullptr;  // the queue's status block, made just before it
+  uint32_t entity = 0;            // the GPU's entity id, which release_rocr() looks up
+};
 
+namespace {
+
+// The module's reference to ROCr and the GPUs' queues by agent handle, which the mutex guards. An
+// entry stays where it is until release_rocr(), so a check can use it without that mutex.
+std::mutex s_rocr_mutex;
+bool s_rocr_held = false;
+std::map<uint64_t, std::unique_ptr<HeldQueue>> s_held_queues;
+
+}  // namespace
+
+hsa_status_t hold_rocr(void) {
+  std::lock_guard<std::mutex> lock(s_rocr_mutex);
+  if (s_rocr_held) {
+    return HSA_STATUS_SUCCESS;
+  }
+  const hsa_status_t status = hsa_init();
+  s_rocr_held = status == HSA_STATUS_SUCCESS;
+  return status;
+}
+
+void release_rocr(void) {
+  std::lock_guard<std::mutex> lock(s_rocr_mutex);
+  if (!s_rocr_held) {
+    return;
+  }
+
+  const std::vector<uint32_t> abandoned = abandoned_gpus();
+  for (const auto& entry : s_held_queues) {
+    HeldQueue& held = *entry.second;
+    if (held.queue == nullptr ||
+        std::find(abandoned.begin(), abandoned.end(), held.entity) != abandoned.end()) {
+      // No queue, or one whose work could not be stopped, which keeps its block.
+      continue;
+    }
+    const hsa_status_t err = hsa_queue_destroy(held.queue);
+    if (err != HSA_STATUS_SUCCESS) {
+      // The queue may still run what was put on it: its block stays allocated for its callback.
+      log_release_failure("hsa_queue_destroy", err);
+      abandon_gpu(held.entity);
+      continue;
+    }
+    delete held.status;
+    held.queue = nullptr;
+    held.status = nullptr;
+  }
+
+  if (!abandoned_gpus().empty()) {
+    RDC_LOG(RDC_ERROR, "ROCr stays loaded: the ROCr checks could not stop their work on a GPU.");
+    return;
+  }
+  s_held_queues.clear();
+  s_rocr_held = false;
+  const hsa_status_t err = hsa_shut_down();
+  if (err != HSA_STATUS_SUCCESS) {
+    log_release_failure("hsa_shut_down", err);
+  }
+}
+
+hsa_status_t CheckQueue::acquire(hsa_agent_t agent) {
+  HeldQueue* held = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(s_rocr_mutex);
+    if (!s_rocr_held) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+    std::unique_ptr<HeldQueue>& slot = s_held_queues[agent.handle];
+    if (slot == nullptr) {
+      slot.reset(new HeldQueue());
+    }
+    held = slot.get();
+  }
+
+  // A check of the same GPU in another run has the queue until it ends.
+  lent_ = std::unique_lock<std::mutex>(held->lent);
+
+  // The check that had the queue before this one could not stop its work on it, so the GPU is
+  // in the record: nothing is put on that queue again.
+  const std::vector<uint32_t> recorded = abandoned_gpus();
+  if (std::find(recorded.begin(), recorded.end(), context_->entity()) != recorded.end()) {
+    throw_failure(kChecksStopped);
+  }
+  held_ = held;
+  held->entity = context_->entity();
+  if (held->queue != nullptr &&
+      held->status->load(std::memory_order_acquire) != HSA_STATUS_SUCCESS) {
+    // ROCr reported an error of the queue after the GPU's last check ended, which suspended it:
+    // it is destroyed as a check destroys a queue that reported an error, and replaced below. A
+    // destroy that fails abandons the GPU, which is then in the record.
+    {
+      QueueStatusHolder status(context_);
+      status.reset(held->status);
+      QueueHolder queue(context_);
+      queue.reset(held->queue);
+      held->queue = nullptr;
+      held->status = nullptr;
+    }
+    if (context_->abandoned()) {
+      throw_failure(kChecksStopped);
+    }
+  }
+  if (held->queue != nullptr) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // The block is the queue's own and is made before it, so that the callback has somewhere to
+  // write from the moment ROCr can call it.
+  std::unique_ptr<QueueStatus> status(new QueueStatus(HSA_STATUS_SUCCESS));
   hsa_queue_t* made = nullptr;
   const hsa_status_t err = hsa_queue_create(agent, get_queue_packets(agent), HSA_QUEUE_TYPE_MULTI,
-                                            queue_error_reported, status->get(), 0, 0, &made);
+                                            queue_error_reported, status.get(), 0, 0, &made);
   if (err == HSA_STATUS_SUCCESS) {
-    queue->reset(made);
+    held->queue = made;
+    held->status = status.release();
   }
   return err;
+}
+
+hsa_queue_t* CheckQueue::queue() const { return held_ == nullptr ? nullptr : held_->queue; }
+
+const QueueStatus* CheckQueue::status() const { return held_ == nullptr ? nullptr : held_->status; }
+
+CheckQueue::~CheckQueue() {
+  if (held_ == nullptr || held_->queue == nullptr || context_->abandoned()) {
+    // No queue was lent, or the work on it could not be stopped: it is left as it is.
+    return;
+  }
+  if (!busy_ && held_->status->load(std::memory_order_acquire) == HSA_STATUS_SUCCESS) {
+    return;  // idle and sound: the GPU's next check gets it
+  }
+
+  // Work may still be on the queue, or ROCr suspended it: it is destroyed now, before anything
+  // that work can touch is released, and its block just after it. A destroy that fails abandons
+  // the rest, so the block stays allocated for the callback.
+  QueueStatusHolder status(context_);
+  status.reset(held_->status);
+  QueueHolder queue(context_);
+  queue.reset(held_->queue);
+  held_->queue = nullptr;
+  held_->status = nullptr;
 }
 
 }  // namespace rdc

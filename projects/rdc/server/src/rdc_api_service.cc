@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <new>
 #include <string>
 
+#include "common/rdc_fields_supported.h"
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc.pb.h"
 #include "rdc/rdc.h"
@@ -44,6 +45,13 @@ namespace amd {
 namespace rdc {
 
 std::map<uint32_t, RdcAPIServiceImpl::policy_thread_context*> RdcAPIServiceImpl::policy_threads_;
+std::mutex RdcAPIServiceImpl::policy_threads_mutex_;
+
+RdcAPIServiceImpl::policy_thread_context* RdcAPIServiceImpl::find_policy_thread(uint32_t group_id) {
+  std::lock_guard<std::mutex> guard(policy_threads_mutex_);
+  auto it = policy_threads_.find(group_id);
+  return (it != policy_threads_.end()) ? it->second : nullptr;
+}
 
 RdcAPIServiceImpl::RdcAPIServiceImpl() : rdc_handle_(nullptr) {}
 
@@ -64,10 +72,18 @@ rdc_status_t RdcAPIServiceImpl::Initialize(uint64_t rdcd_init_flags) {
 
 void RdcAPIServiceImpl::Shutdown() {
   // exit policy threads
+  std::lock_guard<std::mutex> guard(policy_threads_mutex_);
   for (auto it : policy_threads_) {
-    policy_thread_context* ctx = it.second;
-    ctx->start = false;
+    stop_policy_stream(it.second);
   }
+}
+
+// Ends a RegisterPolicy stream now, not at its next 1 s wakeup.
+void RdcAPIServiceImpl::stop_policy_stream(policy_thread_context* ctx) {
+  pthread_mutex_lock(&ctx->mutex);
+  ctx->start = false;
+  pthread_cond_broadcast(&ctx->cond);
+  pthread_mutex_unlock(&ctx->mutex);
 }
 
 RdcAPIServiceImpl::~RdcAPIServiceImpl() {
@@ -272,6 +288,11 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   rdc_field_grp_t field_group_id;
   rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
   for (int i = 0; i < request_count; i++) {
+    // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
+    if (!amd::rdc::is_field_id_valid(request->field_ids(i))) {
+      reply->set_status(RDC_ST_NOT_SUPPORTED);
+      return ::grpc::Status::OK;
+    }
     field_ids[i] = static_cast<rdc_field_t>(request->field_ids(i));
   }
   rdc_status_t result =
@@ -295,6 +316,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_status_t result = rdc_group_field_add_field(rdc_handle_, request->field_group_id(),
                                                   static_cast<rdc_field_t>(request->field_id()));
   reply->set_status(result);
@@ -364,6 +389,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_field_value value;
   rdc_status_t result = rdc_field_get_latest_value(
       rdc_handle_, request->gpu_index(), static_cast<rdc_field_t>(request->field_id()), &value);
@@ -395,6 +424,10 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  if (!amd::rdc::is_field_id_valid(request->field_id())) {
+    reply->set_status(RDC_ST_NOT_SUPPORTED);
+    return ::grpc::Status::OK;
+  }
   rdc_field_value value;
   uint64_t next_timestamp;
   rdc_status_t result = rdc_field_get_value_since(
@@ -928,12 +961,11 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     return 1;
   }
 
-  auto it = policy_threads_.find(userData->group_id);
-  if (it != policy_threads_.end()) {
-    policy_thread_context* ctx = it->second;
-
+  policy_thread_context* ctx = find_policy_thread(userData->group_id);
+  if (ctx) {
     pthread_mutex_lock(&ctx->mutex);
     ctx->response = *userData;
+    ctx->pending = true;
     pthread_cond_signal(&ctx->cond);
     pthread_mutex_unlock(&ctx->mutex);
   }
@@ -948,22 +980,28 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
   if (!writer || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
-  auto it = policy_threads_.find(request->group_id());
-  if (it == policy_threads_.end()) {
-    policy_thread_context* data = new policy_thread_context;
-    data->mutex = PTHREAD_MUTEX_INITIALIZER;
-    data->cond = PTHREAD_COND_INITIALIZER;
-    data->start = true;
-    policy_threads_.insert(std::make_pair(request->group_id(), data));
+  {
+    std::lock_guard<std::mutex> guard(policy_threads_mutex_);
+    auto it = policy_threads_.find(request->group_id());
+    if (it == policy_threads_.end()) {
+      policy_thread_context* data = new policy_thread_context;
+      pthread_mutex_init(&data->mutex, nullptr);
+      pthread_cond_init(&data->cond, nullptr);
+      data->start = true;
+      policy_threads_.insert(std::make_pair(request->group_id(), data));
+    }
   }
 
   auto updater = std::async(std::launch::async, [this, request, writer]() {
     rdc_status_t result = rdc_policy_register(rdc_handle_, request->group_id(), PolicyCallback);
     if (result == RDC_ST_OK) {
-      auto it = policy_threads_.find(request->group_id());
-      if (it != policy_threads_.end()) {
-        policy_thread_context* ctx = it->second;
+      policy_thread_context* ctx = find_policy_thread(request->group_id());
+      if (ctx) {
+        // Start without a notification left from an earlier stream.
+        pthread_mutex_lock(&ctx->mutex);
+        ctx->pending = false;
         ctx->start = true;
+        pthread_mutex_unlock(&ctx->mutex);
         while (ctx->start) {
           struct timespec ts;
           clock_gettime(CLOCK_REALTIME, &ts);
@@ -971,26 +1009,32 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
           ts.tv_sec += 1;
 
           pthread_mutex_lock(&ctx->mutex);
-          int rc = pthread_cond_timedwait(&ctx->cond, &ctx->mutex, &ts);  // wait for the callback
-          if (rc == ETIMEDOUT) {
-            // timeout;
-          } else if (rc == 0) {
-            // reply
+          int rc = 0;
+          while (!ctx->pending && ctx->start && rc == 0) {
+            rc = pthread_cond_timedwait(&ctx->cond, &ctx->mutex, &ts);  // wait for the callback
+          }
+          bool send = ctx->pending && ctx->start;
+          ctx->pending = false;
+          // ctx->response is unset until PolicyCallback() runs.
+          rdc_policy_callback_response_t response = {};
+          if (send) response = ctx->response;
+          pthread_mutex_unlock(&ctx->mutex);
+
+          // Write without the lock: a slow client must not block RDC's policy thread.
+          if (send) {
             ::rdc::RegisterPolicyResponse reply;
             reply.set_status(RDC_ST_OK);
-            reply.set_version(ctx->response.version);
-            reply.set_group_id(ctx->response.group_id);
-            reply.set_value(ctx->response.value);
+            reply.set_version(response.version);
+            reply.set_group_id(response.group_id);
+            reply.set_value(response.value);
 
             ::rdc::PolicyCondition* cond = reply.mutable_condition();
-            cond->set_type(static_cast<::rdc::PolicyCondition_Type>(ctx->response.condition.type));
-            cond->set_value(ctx->response.condition.value);
-            reply.set_gpu_index(ctx->response.gpu_index);
-            reply.set_reset_triggered(ctx->response.reset_triggered != 0);
+            cond->set_type(static_cast<::rdc::PolicyCondition_Type>(response.condition.type));
+            cond->set_value(response.condition.value);
+            reply.set_gpu_index(response.gpu_index);
+            reply.set_reset_triggered(response.reset_triggered != 0);
             writer->Write(reply);
           }
-
-          pthread_mutex_unlock(&ctx->mutex);
         }
       }
     }
@@ -1009,10 +1053,9 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
 
   rdc_status_t result = rdc_policy_unregister(rdc_handle_, request->group_id());
   if (result == RDC_ST_OK) {
-    auto it = policy_threads_.find(request->group_id());
-    if (it != policy_threads_.end()) {
-      policy_thread_context* ctx = it->second;
-      ctx->start = false;
+    policy_thread_context* ctx = find_policy_thread(request->group_id());
+    if (ctx) {
+      stop_policy_stream(ctx);
     }
   }
   return ::grpc::Status::OK;

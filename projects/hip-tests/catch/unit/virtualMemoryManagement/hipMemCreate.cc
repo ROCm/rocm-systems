@@ -514,6 +514,7 @@ HIP_TEST_CASE(Unit_hipMemCreate_Capture) {
   constexpr int kDeviceId = 0;
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, kDeviceId));
+  checkVMMSupported(device);
 
   hipMemAllocationProp allocation_prop{};
   allocation_prop.type = hipMemAllocationTypePinned;
