@@ -22,7 +22,6 @@
 #include <sstream>
 
 #include "cuid_util.h"
-#include "gim_util.h"
 #include "pci_util.h"
 
 namespace {
@@ -535,8 +534,7 @@ std::string CuidGpu::normalize_render_node(const std::string& device_path) {
 }
 
 amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
-  // Track BDFs we've already added so the GIM enumeration below doesn't
-  // create duplicates of GPUs that are also visible via /sys/class/drm.
+  // The DRM and PCI scans can find the same GPU.
   std::set<std::string> seen_bdfs;
   std::set<std::string> seen_nodes;
 
@@ -644,9 +642,7 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std::string& input_path,
-                                          cuid::gim::GimClient* gim_client,
-                                          const std::string& gim_bdf) {
+amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std::string& input_path) {
   if (!gpu_info) return AMDCUID_STATUS_INVALID_ARGUMENT;
   CuidGpuRoute route;
   const auto resolved = resolve_path(input_path, route);
@@ -654,15 +650,12 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
     if (resolved != AMDCUID_STATUS_SUCCESS) return resolved;
     return discover_partition(gpu_info, route.node);
   }
-  if (resolved == AMDCUID_STATUS_UNSUPPORTED && !gim_client) return resolved;
-  if (resolved != AMDCUID_STATUS_SUCCESS && resolved != AMDCUID_STATUS_FILE_NOT_FOUND &&
-      resolved != AMDCUID_STATUS_UNSUPPORTED)
+  if (resolved != AMDCUID_STATUS_SUCCESS && resolved != AMDCUID_STATUS_FILE_NOT_FOUND)
     return resolved;
   const std::string device_path = resolved == AMDCUID_STATUS_SUCCESS ? route.device : input_path;
   amdcuid_gpu_info info = {};
   std::string bdf =
       resolved == AMDCUID_STATUS_SUCCESS ? route.bdf : CuidUtilities::readlink_bdf(device_path);
-  if (bdf.empty()) bdf = gim_bdf;
 
   info.header.fields.gpu.unit_id = 0;
   info.host_vf =
@@ -671,7 +664,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
   // No PCI configuration space under a card whose unit_id is 0 means a spatial
   // partition rather than a whole GPU.
   std::string config_file = device_path + "/config";
-  if (resolved != AMDCUID_STATUS_SUCCESS && gim_bdf.empty() &&
+  if (resolved != AMDCUID_STATUS_SUCCESS &&
       access(config_file.c_str(), F_OK) == -1 && info.header.fields.gpu.unit_id == 0) {
     return discover_partition(gpu_info, device_path);
   }
@@ -684,7 +677,7 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
   uint16_t pci_class_integer = 0;
   const amdcuid_status_t class_status =
       CuidUtilities::read_pci_class(device_path, bdf, pci_class_integer);
-  if (class_status != AMDCUID_STATUS_SUCCESS && !gim_client) return class_status;
+  if (class_status != AMDCUID_STATUS_SUCCESS) return class_status;
   info.header.fields.gpu.pci_class = pci_class_integer;
 
   if (!own_unit_id_is_zero(device_path)) return AMDCUID_STATUS_INVALID_FORMAT;
@@ -696,38 +689,6 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
   info.bdf = bdf;
   info.render_node = full_device_node;
 
-  // For GIM SR-IOV hosts, query the GIM SMI ioctl interface for every GIM
-  // device. When PCI device files are not exposed to userspace this fills the
-  // core identifiers (vendor/device/revision). It also captures the ASIC
-  // serial for AMDCUID_QUERY_HARDWARE_FINGERPRINT: the SR-IOV PF has no sysfs
-  // unique_id or usable PCI config space.
-  const bool needs_gim_fallback = !info.bdf.empty() && gim_client != nullptr;
-  if (needs_gim_fallback) {
-    cuid::gim::GimAsicInfo asic;
-    if (gim_client->get_asic_info_for_bdf(info.bdf, asic) == AMDCUID_STATUS_SUCCESS) {
-      if (identity_status != AMDCUID_STATUS_SUCCESS) {
-        if (asic.vendor_id > UINT16_MAX || asic.device_id > UINT16_MAX || asic.rev_id > UINT8_MAX)
-          return AMDCUID_STATUS_INVALID_FORMAT;
-        info.header.fields.gpu.vendor_id = static_cast<uint16_t>(asic.vendor_id);
-        info.header.fields.gpu.device_id = static_cast<uint16_t>(asic.device_id);
-        info.header.fields.gpu.revision_id = static_cast<uint8_t>(asic.rev_id);
-        identity_status = AMDCUID_STATUS_SUCCESS;
-      }
-      // GIM ASIC info omits pci_class; default to the PCI display-controller
-      // class so GIM-only GPUs do not report an all-zero class.
-      if (info.header.fields.gpu.pci_class == 0) {
-        info.header.fields.gpu.pci_class = 0x0300;
-      }
-      // GIM-only devices expose no sysfs unique_id or PCI config space, so
-      // carry the ASIC serial as the hardware fingerprint source.
-      uint64_t parsed_serial = 0;
-      if (cuid::gim::GimClient::parse_asic_serial(asic.asic_serial, parsed_serial)) {
-        info.gim_fingerprint = parsed_serial;
-        info.gim_fingerprint_valid = true;
-      }
-    }
-  }
-
   if (identity_status != AMDCUID_STATUS_SUCCESS) return identity_status;
   if (info.header.fields.gpu.vendor_id != kAmdGpuVendorId) {
     LOG(DEBUG, "not an AMD GPU: " << device_path);
@@ -735,12 +696,10 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
   }
   // Only a display or accelerator function bound to amdgpu or gim is a GPU
   // component; an unbound or vfio-pci one is not, also when looked up.
-  if (!needs_gim_fallback) {
-    const std::string driver = pci_driver(device_path);
-    if (!gpu_class(info.header.fields.gpu.pci_class) || (driver != "amdgpu" && driver != "gim")) {
-      LOG(DEBUG, "not a GPU component: " << device_path << " (driver '" << driver << "')");
-      return AMDCUID_STATUS_UNSUPPORTED;
-    }
+  const std::string driver = pci_driver(device_path);
+  if (!gpu_class(info.header.fields.gpu.pci_class) || (driver != "amdgpu" && driver != "gim")) {
+    LOG(DEBUG, "not a GPU component: " << device_path << " (driver '" << driver << "')");
+    return AMDCUID_STATUS_UNSUPPORTED;
   }
 
   *gpu_info = info;
@@ -883,13 +842,6 @@ amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
   // For DRM render nodes the PCI attributes live at "<render_node>/device";
   // for GIM-only PCI directories they live directly under render_node.
   const bool render_node_is_pci_dir = m_info.render_node.find("/sys/bus/pci/devices/") == 0;
-
-  // GIM-only devices have no sysfs unique_id or PCI config space; use the
-  // ASIC serial captured during discovery as the fingerprint.
-  if (render_node_is_pci_dir && m_info.gim_fingerprint_valid) {
-    fingerprint = m_info.gim_fingerprint;
-    return CuidUtilities::validate_fingerprint(fingerprint);
-  }
 
   const std::string device_attr_prefix =
       render_node_is_pci_dir ? m_info.render_node : (m_info.render_node + "/device");
