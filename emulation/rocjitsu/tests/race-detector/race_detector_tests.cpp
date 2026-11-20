@@ -3843,6 +3843,92 @@ TEST(RaceDetector, BarrierCell_TensorArriveHandsOffItsTransferAndEarlierOnes) {
   EXPECT_EQ(b.raceCount(), 0);
 }
 
+// A tensor arrival's update of its cell lasts as long as the transfer, so an
+// unordered write of the cell after the arrival races with it.
+TEST(RaceDetector, BarrierCell_TensorArrivalRacesWithALaterWriteOfTheCell) {
+  RaceTestBuilder b = cellBuilder();
+  tensorLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell, kBarrierCellBytes);
+  expectOneLdsRace(b, /*wave=*/1, kCell, /*isWrite=*/true);
+  EXPECT_TRUE(b.violations().front().conflictsWithBarrierArrive);
+  EXPECT_FALSE(b.violations().front().conflictsWithSrc2Read);
+}
+
+// The write is of the cell's high dword only.
+TEST(RaceDetector, BarrierCell_TensorArrivalCoversTheWholeCell) {
+  RaceTestBuilder b = cellBuilder();
+  tensorLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell + 4, /*bytes=*/4);
+  expectOneLdsRace(b, /*wave=*/1, kCell + 4, /*isWrite=*/true);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell + kBarrierCellBytes, /*bytes=*/4);
+  EXPECT_EQ(b.raceCount(), 1);
+}
+
+// The transfer is handed off to a wave that reads the cell once the phase
+// completes, and its arrival with it.
+TEST(RaceDetector, BarrierCell_TensorArrivalIsHandedOffWithItsTransfer) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  tensorLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
+  b.checkLdsWrite(/*wave=*/2, /*lane=*/0, kCell, kBarrierCellBytes);
+  expectOneLdsRace(b, /*wave=*/2, kCell, /*isWrite=*/true);
+  pollCell(b, 1);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell, kBarrierCellBytes);
+  EXPECT_EQ(b.raceCount(), 1);
+}
+
+// A transfer that touches no LDS bytes is handed off for its arrival's cell.
+TEST(RaceDetector, BarrierCell_TensorArrivalOfATransferWithNoLdsBytesIsHandedOff) {
+  RaceTestBuilder b = cellBuilder();
+  b.tensorLoadToLds(0, {});
+  b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell, kBarrierCellBytes);
+  expectOneLdsRace(b, /*wave=*/1, kCell, /*isWrite=*/true);
+  pollCell(b, 1);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell, kBarrierCellBytes);
+  EXPECT_EQ(b.raceCount(), 1);
+}
+
+// An atomic of the cell's width cannot interleave with the arrival; any other
+// write of the cell can.
+TEST(RaceDetector, BarrierCell_TensorArrivalExemptsAnAtomicOfTheCellsWidth) {
+  RaceTestBuilder b = cellBuilder();
+  tensorLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
+  IntervalSet cell;
+  cell.append(kCell, kCell + kBarrierCellBytes);
+  cell.finalize();
+  const RaceDetector &detector = b.detector();
+  const MemoryOrderClass order = MemoryOrderClass::LDS;
+  EXPECT_FALSE(detector.mayConflict(cell, WaveId{1}, /*isWrite=*/true, order, kBarrierCellBytes));
+  EXPECT_TRUE(detector.mayConflict(cell, WaveId{1}, /*isWrite=*/true, order, /*atomicBytes=*/4));
+  EXPECT_TRUE(detector.mayConflict(cell, WaveId{1}, /*isWrite=*/true, order));
+  EXPECT_FALSE(detector.mayConflict(cell, WaveId{1}, /*isWrite=*/false, order));
+  detector.validateWrite(kCell, WaveId{1}, /*lane=*/0, kBarrierCellBytes, order, kBarrierCellBytes);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
+// The cell leaves the checks when the transfer retires: the wave waits for the
+// transfer and a barrier orders it for the other wave.
+TEST(RaceDetector, BarrierCell_TensorArrivalRetiresWithItsTransfer) {
+  RaceTestBuilder b = cellBuilder();
+  tensorLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
+  IntervalSet cell;
+  cell.append(kCell, kCell + kBarrierCellBytes);
+  cell.finalize();
+  const MemoryOrderClass order = MemoryOrderClass::LDS;
+  b.waitTensorcnt(0, 0);
+  EXPECT_FALSE(b.detector().mayConflict(cell, WaveId{0}, /*isWrite=*/true, order));
+  EXPECT_TRUE(b.detector().mayConflict(cell, WaveId{1}, /*isWrite=*/true, order));
+  b.barrier();
+  EXPECT_FALSE(b.detector().mayConflict(cell, WaveId{1}, /*isWrite=*/true, order));
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell, kBarrierCellBytes);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
 TEST(RaceDetector, BarrierCell_TensorArriveDoesNotHandOffPendingAsyncLoad) {
   RaceTestBuilder b = cellBuilder();
   asyncLoad(b, 0, kX);

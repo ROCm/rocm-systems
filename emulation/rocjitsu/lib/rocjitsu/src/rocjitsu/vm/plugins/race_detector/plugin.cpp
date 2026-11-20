@@ -562,7 +562,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     throw std::invalid_argument("race report has an unsupported architecture");
   const EventId event = v.conflictingEvent;
   const bool conflicting_read =
-      v.sourceInstruction || v.conflictsWithSrc2Read ||
+      v.sourceInstruction || v.conflictsWithSrc2Read || v.conflictsWithBarrierArrive ||
       (v.space == RaceViolation::Space::VGPR && isFromVgpr(events.type(event))) ||
       (v.space == RaceViolation::Space::LDS && events.readsLds(event));
   const char *hazard = !v.isWrite         ? "read-after-write (RAW)"
@@ -602,8 +602,9 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   }
   const int owner = events.waveId(event).value;
   oss << "  Conflict: "
-      << (v.conflictsWithSrc2Read ? "read of LDS source operand"
-                                  : event_description(events, event, v.space));
+      << (v.conflictsWithSrc2Read        ? "read of LDS source operand"
+          : v.conflictsWithBarrierArrive ? "arrival at an LDS barrier cell"
+                                         : event_description(events, event, v.space));
   oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
       << ".\n";
   const bool flat_lds = v.space == RaceViolation::Space::LDS && events.usesFlatLds(event);
@@ -1436,6 +1437,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
                                                  const amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
+  s->tensor_transfer = {};
   // The hook fires in the tensor instruction's own step, before the transfer's
   // global requests and LDS writes, as onAmdgpuMemoryAccessRouted() does for
   // other memory instructions.
@@ -1494,7 +1496,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // established.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-  rs->registerLdsRangeEvent(
+  s->tensor_transfer = rs->registerLdsRangeEvent(
       instruction, issue.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
       ranges, obligations, memoryOrder);
 }
@@ -1534,11 +1536,18 @@ void RaceDetectorPlugin::onAmdgpuLdsBarrierArrived(
   // transfer's arrival is checked here, against non-atomic writes of the cell:
   // the ISA does not order it with the wave's DS instructions (CDNA5 ISA
   // 10.11.1), so as a conservative rule that includes the wave's own pending
-  // writes. It registers no event of its own; the transfer holds the TENSORcnt
-  // slot. A transfer has no lanes, so a violation reports lane -1.
-  if (kind == BarrierCellArrival::Tensor)
+  // writes. A transfer has no lanes, so a violation reports lane -1.
+  // The arrival's atomic update of the cell is then attached to the transfer's
+  // event, so a later write of the cell that the transfer is not ordered before
+  // races with it. The transfer holds the one TENSORcnt slot for both. A
+  // transfer that touches no LDS bytes can have no event; its arrival is then
+  // checked only here.
+  if (kind == BarrierCellArrival::Tensor) {
     detector->validateRead(static_cast<int>(arrival.cell_address), waveId, /*lane=*/-1,
                            kBarrierCellBytes, MemoryOrderClass::UNORDERED, kBarrierCellBytes);
+    if (const EventId transfer = std::exchange(s->tensor_transfer, {}); transfer.isValid())
+      detector->attachBarrierArrive(transfer, arrival.cell_address);
+  }
   detector->barrierCellArrived(waveId, arrival.cell_address, kind, arrival.phase_completed);
 }
 

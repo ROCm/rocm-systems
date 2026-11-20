@@ -409,6 +409,7 @@ public:
   }
 
   void markLdsSourceReads(EventId id) { get(id).hasLdsSourceReads = true; }
+  bool hasLdsSourceReads(EventId id) const { return get(id).hasLdsSourceReads; }
 
   // -- Test helpers --
 
