@@ -15,20 +15,18 @@
 //! activation have distinct ownership and native side effects. API frontends
 //! supply their own ABI validation, public ownership, and policy.
 #![deny(missing_docs)]
+// No Windows device provider is installed yet. Compile shared resource
+// algorithms even when their only production instantiations are absent.
+#![cfg_attr(windows, allow(dead_code))]
 pub mod device;
-mod driver;
+pub mod driver;
 mod error;
-#[cfg(target_os = "linux")]
-mod event;
-pub mod gpu;
-pub mod host_storage;
-mod kernel_queue;
+pub mod host;
 pub mod memory;
-mod profiling;
-mod queue;
+mod os;
 pub mod session;
 pub mod topology;
-pub use error::{Error, ErrorKind};
+pub use error::{Error, ErrorKind, NativeStatus, NativeStatusDomain};
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test_support;

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import smtplib
 import sys
 import urllib.request
@@ -35,8 +36,6 @@ def override_bundled_rccl(rccl_lib_dir: Path) -> None:
     the bundled library files so the wheel's own load path resolves to
     the CI-built version.
     """
-    import shutil
-
     ci_rccl = rccl_lib_dir.resolve() / "librccl.so"
     if not ci_rccl.exists():
         raise FileNotFoundError(
@@ -88,16 +87,16 @@ def override_bundled_hip_runtime(artifact_lib_dir: Path) -> None:
     runtime that loads code objects matches the compiler that produced
     them.  TheRock's libamdhip64.so is already present in the artifact
     directory from the core-hip_lib fetch.
-    """
-    import shutil
 
+    Failure is fatal: skipping this leaves the pip HIP runtime in place,
+    which both aborts on RCCL's device code and breaks the pairing with
+    override_bundled_hsa_runtime().
+    """
     ci_hip = artifact_lib_dir.resolve() / "libamdhip64.so"
     if not ci_hip.exists():
-        log.warning(
-            "TheRock libamdhip64.so not found at %s — skipping HIP runtime override",
-            ci_hip,
+        raise FileNotFoundError(
+            f"TheRock libamdhip64.so not found at {ci_hip} — check artifact fetch"
         )
-        return
     ci_size = ci_hip.stat().st_size
     log.info("TheRock HIP runtime: %s (%d bytes)", ci_hip, ci_size)
 
@@ -125,12 +124,66 @@ def override_bundled_hip_runtime(artifact_lib_dir: Path) -> None:
         replaced += 1
 
     if replaced == 0:
-        log.warning(
-            "No bundled libamdhip64.so found — HIP runtime override skipped"
+        log.error(
+            "No bundled libamdhip64.so found to replace — tests would run "
+            "against the pip HIP runtime"
         )
+        sys.exit(1)
     else:
         log.info(
             "Replaced %d bundled libamdhip64.so file(s) with TheRock version",
+            replaced,
+        )
+
+
+def override_bundled_hsa_runtime(artifact_lib_dir: Path) -> None:
+    """Replace pip-bundled libhsa-runtime64.so with TheRock's version.
+
+    The CI-built libamdhip64.so is built against develop-HEAD ROCr headers,
+    so it may reference hsa_amd_* symbols the older pip-pinned ROCr does not
+    export, failing the first dlopen with "undefined symbol: ..., ROCR_1".
+    HIP and ROCr must therefore be replaced as a pair.  Must be called with
+    override_bundled_hip_runtime(), which is likewise fatal on failure.
+    """
+    ci_hsa = artifact_lib_dir.resolve() / "libhsa-runtime64.so"
+    if not ci_hsa.exists():
+        raise FileNotFoundError(
+            f"TheRock libhsa-runtime64.so not found at {ci_hsa} — check artifact fetch"
+        )
+    log.info("TheRock ROCr runtime: %s (%d bytes)", ci_hsa, ci_hsa.stat().st_size)
+
+    bundled = []
+    for d in find_pip_sdk_lib_dirs():
+        bundled.extend(
+            f for f in d.glob("libhsa-runtime64.so*") if ".pip-original" not in f.name
+        )
+    if not bundled:
+        bundled = [
+            f for f in Path(sys.prefix).rglob("libhsa-runtime64.so*")
+            if ".pip-original" not in f.name
+        ]
+
+    replaced = 0
+    for target in bundled:
+        if target.is_symlink():
+            continue
+        backup = target.with_suffix(target.suffix + ".pip-original")
+        if not backup.exists():
+            shutil.copy2(str(target), str(backup))
+            log.info("Backed up original: %s", backup)
+        shutil.copy2(str(ci_hsa), str(target))
+        log.info("Replaced %s (%d bytes)", target, target.stat().st_size)
+        replaced += 1
+
+    if replaced == 0:
+        log.error(
+            "No bundled libhsa-runtime64.so found to replace — the CI-built HIP "
+            "runtime would be left to load against pip's ROCr"
+        )
+        sys.exit(1)
+    else:
+        log.info(
+            "Replaced %d bundled libhsa-runtime64.so file(s) with TheRock version",
             replaced,
         )
 
@@ -154,8 +207,6 @@ def setup_kpack_device_code(artifact_dir: Path) -> None:
     By replacing in-place, each library's embedded search paths resolve
     to the correct archive without cross-contamination.
     """
-    import shutil
-
     ci_kpacks = sorted(f for f in artifact_dir.rglob("*.kpack") if f.is_file())
     if not ci_kpacks:
         log.info("No .kpack files in %s — device code may be embedded", artifact_dir)

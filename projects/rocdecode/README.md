@@ -98,18 +98,21 @@ SDK, the following standalone rocDecode packages are also available:
 | Package | apt name (Debian/Ubuntu) | dnf/zypper name (RHEL/SLES) | Contents |
 |---------|--------------------------|-----------------------------|----------|
 | Runtime | `amdrocm-decode` | `amdrocm-decode` | Runtime library |
-| Development | `amdrocm-decode-dev` | `amdrocm-decode-devel` | Library, headers, and CMake helper modules (`share/rocdecode/cmake/`) |
-| Test | `amdrocm-decode-test` | `amdrocm-decode-test` | CTest verification, utility sources (`utils/`), samples, and test media |
+| Development | `amdrocm-decode-dev` | `amdrocm-decode-devel` | Library, headers, CMake helper modules (`share/rocdecode/cmake/`), utility sources (`share/rocdecode/utils/`), and samples (`share/rocdecode/samples/`) |
+| Test | `amdrocm-decode-test` | `amdrocm-decode-test` | CTest verification project, test scripts, and test media (`share/rocdecode/video/`, `frames/`) |
 
 > [!IMPORTANT]
-> The rocDecode library, headers, and the CMake helper modules
-> (`/opt/rocm/share/rocdecode/cmake/`) come with a standard ROCm Core SDK install
-> and the development package. However, the `utils/` utility sources, the
-> `samples/` sources, and the test media under `/opt/rocm/share/rocdecode/` do
-> **not** ship with the Core SDK or the development package. These are required to
-> build applications against rocDecode and to build or run the samples and CTests,
-> and are provided by the `amdrocm-decode-test` package. Install it if you build
-> against rocDecode (for example, when building rocAL):
+> The rocDecode library, headers, the CMake helper modules
+> (`/opt/rocm/share/rocdecode/cmake/`), the `utils/` utility sources, and the
+> `samples/` sources all ship with the development package
+> (`amdrocm-decode-dev` / `amdrocm-decode-devel`) and a standard ROCm Core SDK
+> install. These provide what you need to build applications against rocDecode
+> (for example, rocAL) and to build the samples.
+>
+> The CTest project, test scripts, and bundled test media (`video/` and
+> `frames/` under `/opt/rocm/share/rocdecode/`) ship in the
+> `amdrocm-decode-test` package. Install it to run the CTests or to run the
+> samples against the bundled media:
 >
 >   ```shell
 >   # Debian / Ubuntu
@@ -170,12 +173,12 @@ cmake --install . --config Release
 
   **Windows:**
 
-  Before running tests or samples, add the rocDecode, VA-API, and FFmpeg DLL directories to your PATH
+  Before running tests or samples, add the rocDecode and FFmpeg DLL directories to your PATH
   so that executables can locate the required DLLs at runtime. `ROCM_PATH` must stay set as well, so
   that libva can locate the VA-API driver:
 
   ```bat
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   ctest -C Release
   ```
 
@@ -196,22 +199,25 @@ After installation, the following files are available:
 * Libraries in `/opt/rocm/lib`
 * Header files in `/opt/rocm/include/rocdecode`
 * CMake helper modules in `/opt/rocm/share/rocdecode/cmake`
-* Utility sources, samples, and test media in `/opt/rocm/share/rocdecode` (from the test package)
+* Utility sources and samples in `/opt/rocm/share/rocdecode` (from the development package)
+* Test media in `/opt/rocm/share/rocdecode/video` and `/opt/rocm/share/rocdecode/frames` (from the test package)
 * Documents in `/opt/rocm/share/doc/rocdecode`
 
   > [!NOTE]
-  > The `utils/` and `samples/` sources and the test media under
-  > `/opt/rocm/share/rocdecode/` are provided by the `amdrocm-decode-test` package
-  > (the CMake helper modules in `share/rocdecode/cmake/` ship with the development
-  > package). Install `amdrocm-decode-test` (see [Install](#install)) if you build
-  > against rocDecode or run the samples and CTests.
+  > The `utils/` and `samples/` sources and the CMake helper modules in
+  > `share/rocdecode/cmake/` ship with the development package. The CTest
+  > project, test scripts, and bundled test media (`video/`, `frames/`) under
+  > `/opt/rocm/share/rocdecode/` are provided by the `amdrocm-decode-test`
+  > package. Install `amdrocm-decode-test` (see [Install](#install)) to run the
+  > CTests or to run the samples against the bundled media.
 
 If you obtain rocDecode from [TheRock](https://github.com/ROCm/TheRock)'s generic
-(`.tar.zst`) artifacts instead of distribution packages, the `utils/`, `samples/`,
-and test media under `share/rocdecode/` ship in the `rocdecode-test` artifact (for
-example, `rocdecode_test_generic`) rather than `rocdecode-dev`. Install it with
-TheRock's `install_rocm_from_artifacts.py` helper by adding `--tests` together with
-`--rocdecode`:
+(`.tar.zst`) artifacts instead of distribution packages, the `utils/` and
+`samples/` sources under `share/rocdecode/` ship in the `rocdecode-dev` artifact
+(for example, `rocdecode_dev_generic`). The CTest project, test scripts, and
+bundled test media ship in the `rocdecode-test` artifact (for example,
+`rocdecode_test_generic`). Add `--tests` alongside `--rocdecode` with TheRock's
+`install_rocm_from_artifacts.py` helper to install that artifact:
 
   ```shell
   python build_tools/install_rocm_from_artifacts.py \
@@ -247,7 +253,7 @@ guide for other options.
   ```bat
   set ROCM_PATH=<path-to-rocm-installation>
   set FFMPEG_ROOT=<path-to-ffmpeg>
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-sample && cd rocdecode-sample
   cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecode"
   cmake --build . --config Release
@@ -282,7 +288,7 @@ guide for other options.
   ```bat
   set ROCM_PATH=<path-to-rocm-installation>
   set FFMPEG_ROOT=<path-to-ffmpeg>
-  set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%FFMPEG_ROOT%\bin;%PATH%
+  set PATH=%ROCM_PATH%\bin;%FFMPEG_ROOT%\bin;%PATH%
   mkdir rocdecode-test && cd rocdecode-test
   cmake "%ROCM_PATH%\share\rocdecode\test"
   cmake --build . --config Release

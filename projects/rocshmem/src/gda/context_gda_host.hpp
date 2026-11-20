@@ -62,6 +62,15 @@ class GDAHostContext : public Context {
 
   __host__ void getmem_nbi(void *dest, const void *source, size_t nelems, int pe);
 
+  __host__ void putmem_signal(void *dest, const void *source, size_t nelems,
+                              uint64_t *sig_addr, uint64_t signal, int sig_op,
+                              int pe);
+
+  __host__ uint64_t signal_fetch(const uint64_t *sig_addr);
+
+  __host__ void signal_wait_until(uint64_t *sig_addr, int cmp,
+                                  uint64_t cmp_value);
+
   template <typename T>
   __host__ void amo_add(void *dst, T value, int pe);
 
@@ -110,6 +119,12 @@ class GDAHostContext : public Context {
                                         size_t nelems, uint64_t *sig_addr,
                                         uint64_t signal, int sig_op, int pe,
                                         hipStream_t stream);
+
+  __host__ void signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
+
+  __host__ void signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
+                                     int pe, hipStream_t stream);
 
   __host__ void signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                             uint64_t cmp_value,

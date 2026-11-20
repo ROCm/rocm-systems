@@ -499,7 +499,7 @@ static ncclResult_t ncclNdInitDevices() {
     INFO(NCCL_NET,
          "NET/ND : Device [%d] %s addr=%s interface=%s pciPath=%s "
          "flags=0x%x speed=%d maxComms=%d maxMrs=%d maxInline=%lu",
-         dev->device, dev->devName, ncclSocketToString(&dev->addr, addrLine),
+         dev->device, dev->devName, ncclSocketToString(&dev->addr, addrLine, sizeof(addrLine)),
          interfaceAlias[0] ? interfaceAlias : "unknown", dev->pciPath[0] ? dev->pciPath : "unknown",
          dev->adapterInfo.AdapterFlags, dev->speed, dev->maxComms, dev->maxMrs, dev->adapterInfo.MaxInlineDataSize);
 
@@ -726,6 +726,6 @@ ncclResult_t ncclNdFinalizeDevices(void) {
 
 // Release one plugin context and drop its shared device-state reference.
 ncclResult_t ncclNdFinalize(void* ctx) {
-  if (ctx) free(ctx);
+  free(ctx);
   return ncclNdFinalizeDevices();
 }

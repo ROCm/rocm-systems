@@ -93,6 +93,7 @@ if(HIP_PLATFORM MATCHES "amd")
       hipMemPtrGetInfo.cc
       hipPointerGetAttributes.cc
       hipExtMallocWithFlags.cc
+      hipExtMemcpyBatchAsync.cc
       hipMallocMngdMultiThread.cc
       hipMemVmm.cc
       hipArray.cc
@@ -138,6 +139,17 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX)
   add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
   target_link_libraries(hipMemAdviseTstAlignedAllocMem hip::host hip::device)
+
+  # Helper spawned by Unit_hipHostRegister_SharedLockDeviceSubset to exercise
+  # hipHostRegister's multi-device shared-lock path under a restricted
+  # HIP_VISIBLE_DEVICES subset (see hipHostRegister.cc).
+  set_source_files_properties(hipHostRegisterSharedLockSubset_Exe.cc PROPERTIES LANGUAGE HIP)
+  add_executable(hipHostRegisterSharedLockSubset_Exe EXCLUDE_FROM_ALL
+    hipHostRegisterSharedLockSubset_Exe.cc)
+  set_target_properties(hipHostRegisterSharedLockSubset_Exe PROPERTIES LINKER_LANGUAGE HIP)
+  add_dependencies(MemoryTest1 hipHostRegisterSharedLockSubset_Exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterSharedLockSubset_Exe)
+  target_link_libraries(hipHostRegisterSharedLockSubset_Exe hip::host hip::device)
 endif()
 
 set(TEST_SRC
@@ -163,6 +175,7 @@ set(TEST_SRC
     hipMemset2DAsyncMultiThreadAndKernel.cc
     hipMemcpyDtoD.cc
     hipMemcpyDtoDAsync.cc
+    hipMemcpyLargeD2D.cc
     hipHostMalloc.cc
     hipMemcpy_EdgeCases.cc
     hipMemcpy_derivatives.cc
@@ -175,6 +188,7 @@ set(TEST_SRC
     hipMalloc3D.cc
     hipMalloc3DArray.cc
     hipArray3DCreate.cc
+    hipArrayMaxExtentCopy.cc
     hipDrvMemcpy3D.cc
     hipDrvMemcpy3D_old.cc
     hipDrvMemcpy3DAsync.cc
@@ -204,13 +218,15 @@ set(TEST_SRC
     hipHostAlloc.cc
     hipMemSetMemPool.cc
     hipMemGetMemPool.cc
-    hipMemGetDefaultMemPool.cc)
+    hipMemGetDefaultMemPool.cc
+    hipArrayGetSparseProperties.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
       ${TEST_SRC}
       # Test below currently doesn't work on NVIDIA, will update based on ticket response
       hipDrvMemcpy2DUnaligned.cc
+      hipArrayGetPlane.cc
       # Below 3 tests should be compiled for NVIDIA as well after EXSWHTEC-349 is addressed
       hipArrayGetInfo.cc
       hipArrayGetDescriptor.cc

@@ -12,13 +12,19 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 namespace rocjitsu {
 
 class AmdGpuCodeObject;
+class Instruction;
 struct ResolvedProbeSymbol;
+
+/// @brief Whether a CDNA5 instruction may need software-managed VALU spacing.
+/// @details Includes scaled matrix families without MATRIX_REGISTER_ACCESSES.
+[[nodiscard]] bool may_require_cdna5_valu_spacing(const Instruction &inst);
 
 /// @brief The return-link rule a verified probe body conforms to.
 ///
@@ -54,25 +60,37 @@ inline constexpr uint8_t kMaxProbeArgVgprs = 16;
 /// @brief Where the trampoline gets an argument dword it hands the probe.
 ///
 /// @details Each source names one dword. The framework must be able to produce
-/// the value at the site (invariant 1), so this is a closed set, not an operand
-/// the caller can point anywhere.
+/// the value at the site, so this is a closed set, not an operand the caller
+/// can point anywhere.
 ///
-/// The EXEC sources read the anchor mask out of the dead SGPR pair the envelope
+/// The EXEC sources read the observation mask (after the anchor for AfterInst)
+/// out of the dead SGPR pair the envelope
 /// saved it into, not out of `exec`: argument writes run under a forced full
 /// mask, so by then `exec` no longer holds the value the guest had. Passing one
 /// therefore requires a site that saves EXEC, which every argument-passing site
 /// already does.
+///
+/// The log-buffer sources read the framework's persistent entry-storage SGPR
+/// pair, which the kernel-entry prologue loaded out of the rocjitsu kernarg
+/// wrapper.
 enum class ProbeArgSource {
-  Immediate,    ///< A build-time constant carried in ProbeArgValue::immediate.
-  AnchorExecLo, ///< Low dword of the EXEC mask the guest had at the anchor.
-  AnchorExecHi, ///< High dword of that mask. Wave64 only.
+  Immediate,      ///< A build-time constant carried in ProbeArgValue::immediate.
+  AnchorExecLo,   ///< Low dword of EXEC at the selected observation point.
+  AnchorExecHi,   ///< High dword of that mask. Wave64 only.
+  LogBufferPtrLo, ///< Low dword of the pointer in the entry-storage pair.
+  LogBufferPtrHi, ///< High dword of that pointer.
+  AnchorVgpr,     ///< Guest VGPR value at the selected observation point.
+  EntryVgprLane0, ///< Lane zero of a VGPR, captured once at dispatch entry.
+  EntrySgpr,      ///< Original guest SGPR, captured after wrapper restoration.
+  EntryTtmp,      ///< Original guest trap-temporary register, indexed from zero.
 };
 
 /// @brief One argument dword: where it comes from, and its value when that is a
 ///        build-time constant.
 struct ProbeArgValue {
   ProbeArgSource source = ProbeArgSource::Immediate;
-  uint32_t immediate = 0; ///< Read only when source is Immediate.
+  uint32_t immediate = 0;      ///< Read only when source is Immediate.
+  uint16_t register_index = 0; ///< Register index for a register-sourced argument.
 
   constexpr bool operator==(const ProbeArgValue &) const = default;
 };
@@ -85,9 +103,53 @@ struct ProbeArgValue {
   return ProbeArgValue{.source = ProbeArgSource::Immediate, .immediate = imm};
 }
 
+/// @brief Capture a guest VGPR before any argument destination is overwritten.
+[[nodiscard]] inline constexpr ProbeArgValue probe_arg_vgpr(uint16_t index) {
+  return ProbeArgValue{.source = ProbeArgSource::AnchorVgpr, .register_index = index};
+}
+
+/// @brief Registers an observation requires in addition to the guest's own uses.
+/// @details Callers must validate indices against the kernel's ordinary VGPR
+/// allocation before using the set for resource planning.
+[[nodiscard]] inline RegisterSet probe_argument_registers(std::span<const ProbeArgValue> args) {
+  RegisterSet registers;
+  for (const ProbeArgValue &arg : args)
+    if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index < 256)
+      registers.expand(RegisterRef{RegClass::VGPR, arg.register_index, 1});
+  return registers;
+}
+
 /// @brief Does @p source read the saved anchor EXEC pair?
 [[nodiscard]] inline constexpr bool reads_anchor_exec(ProbeArgSource source) {
   return source == ProbeArgSource::AnchorExecLo || source == ProbeArgSource::AnchorExecHi;
+}
+
+/// @brief The register class captured at guest entry, or nullopt for other sources.
+[[nodiscard]] inline constexpr std::optional<RegClass> entry_register_class(ProbeArgSource source) {
+  switch (source) {
+  case ProbeArgSource::EntrySgpr:
+    return RegClass::SGPR;
+  case ProbeArgSource::EntryTtmp:
+    return RegClass::TTMP;
+  case ProbeArgSource::EntryVgprLane0:
+    return RegClass::VGPR;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Whether entry-TTMP capture supports @p arch without trap-handler privilege.
+/// @details RDNA4 and CDNA5 permit user reads of TTMP0-15. Keep the supported
+/// set explicit: CDNA4 reads return zero, and an unclassified target must not
+/// silently expose unavailable entry inputs.
+[[nodiscard]] inline constexpr bool supports_entry_ttmp_capture(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+}
+
+/// @brief Does @p source read the framework's persistent entry-storage pair?
+[[nodiscard]] inline constexpr bool reads_entry_storage(ProbeArgSource source) {
+  return source == ProbeArgSource::LogBufferPtrLo || source == ProbeArgSource::LogBufferPtrHi ||
+         entry_register_class(source).has_value();
 }
 
 /// @brief Is @p source one of the values ProbeArgSource declares?
@@ -102,6 +164,12 @@ struct ProbeArgValue {
   case ProbeArgSource::Immediate:
   case ProbeArgSource::AnchorExecLo:
   case ProbeArgSource::AnchorExecHi:
+  case ProbeArgSource::LogBufferPtrLo:
+  case ProbeArgSource::LogBufferPtrHi:
+  case ProbeArgSource::AnchorVgpr:
+  case ProbeArgSource::EntryVgprLane0:
+  case ProbeArgSource::EntrySgpr:
+  case ProbeArgSource::EntryTtmp:
     return true;
   }
   return false;
@@ -199,8 +267,8 @@ struct ProbeCallable {
   /// Where the framework sources each argument dword, one entry per
   /// abi.num_arg_vgprs. Declared by the caller, like the count the ABI came
   /// from: a body that reads v0 cannot say whether it wants a constant or the
-  /// anchor EXEC mask. Only the *values* behind an Immediate slot vary per
-  /// site.
+  /// anchor EXEC mask. Immediate values and the guest register selected by an
+  /// AnchorVgpr slot can vary per site; the source kinds describe the shared body.
   std::vector<ProbeArgSource> arg_sources;
 
   /// Run the body with every lane enabled rather than under the mask the guest
@@ -226,11 +294,18 @@ struct ProbeCallable {
 /// Verification is intentionally conservative (fail-closed). The body must:
 ///   - copy in-bounds out of the code object image,
 ///   - have no relocation applied anywhere inside it,
-///   - decode cleanly as a sequence of 4- or 8-byte @p arch instructions that
-///     exactly tiles the body (no partial trailing word),
+///   - decode cleanly as a sequence of @p arch instructions that exactly tiles
+///     the body (no instruction running past its end),
 ///   - contain no call (s_swappc_b64 / s_call_b64) and no explicit scratch
 ///     access (FLAT scratch_* / SMEM s_scratch_*); note private access via FLAT
-///     addressing is not statically detectable here and is not rejected, and
+///     addressing, or via a buffer instruction given a scratch resource
+///     descriptor, is not statically detectable here and is not rejected,
+///   - contain no CDNA1-4 instruction that may enable VSKIP, which suppresses
+///     the vector instructions used to restore VGPRs and SGPRs after the call,
+///   - contain no MFMA/SMFMAC, or CDNA5 matrix/transcendental instruction:
+///     completion before state restoration is not yet proven, even with padding,
+///   - contain no RDNA4 image instruction (VIMAGE / VSAMPLE), whose decoded
+///     operands do not name every register it reads and writes, and
 ///   - end in `s_setpc_b64 s[30:31]`.
 ///
 /// On success the returned ProbeCallable carries the ABI derived from

@@ -54,7 +54,8 @@ class NullDevice : public amd::Device {
   );
 
   //! Instantiate a new virtual device
-  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr) {
+  virtual device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = nullptr,
+                                                     bool cooperative = false) {
     return nullptr;
   }
 
@@ -63,7 +64,8 @@ class NullDevice : public amd::Device {
                                          amd::option::Options* options = nullptr);
 
   //! Just returns NULL for the dummy device
-  virtual device::Memory* createMemory(amd::Memory& owner) const { return nullptr; }
+  virtual device::Memory* createMemory(
+      amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const { return nullptr; }
   //! Just returns NULL for the dummy device
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const { return nullptr; }
   //! Sampler object allocation
@@ -144,6 +146,12 @@ class NullDevice : public amd::Device {
   virtual bool GetMemAccess(void* va_addr, VmmAccess* access_flags_ptr) const { return true; }
 
   virtual bool ValidateMemAccess(amd::Memory& mem, bool read_write) const { return true; }
+
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override {
+    ShouldNotReachHere();
+    return false;
+  }
 
   virtual bool ExportShareableVMMHandle(amd::Memory& amd_mem_obj, int flags,
                                         void* shareableHandle) {
@@ -385,11 +393,13 @@ class Device : public NullDevice {
   virtual ~Device();
 
   //! Instantiate a new virtual device
-  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = NULL);
+  device::VirtualDevice* createVirtualDevice(amd::CommandQueue* queue = NULL,
+                                             bool cooperative = false);
 
   //! Memory allocation
-  virtual device::Memory* createMemory(amd::Memory& owner  //!< abstraction layer memory object
-  ) const;
+  virtual device::Memory* createMemory(
+      amd::Memory& owner,  //!< abstraction layer memory object
+      amd::Memory::ErrorCode* errorCode) const;
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const;
   //! Sampler object allocation
   virtual bool createSampler(const amd::Sampler& owner,  //!< abstraction layer sampler object
@@ -528,6 +538,9 @@ class Device : public NullDevice {
 
   VirtualGPU* xferQueue() const { return xferQueue_; }
 
+  [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                       const void* src) const override;
+
   //! Retrieves the internal format from the OCL format
   Pal::ChNumFormat getPalFormat(const amd::Image::Format& format,  //! OCL image format
                                 Pal::ChannelMapping* channel) const;
@@ -550,7 +563,8 @@ class Device : public NullDevice {
                      const uint* addressMode,              //!< Address modes in X, Y and Z
                      uint32_t mipFilter = CL_FILTER_NONE,  //!< Mip filter
                      float minLod = 0.f,                   //!< Min level of detail
-                     float maxLod = CL_MAXFLOAT            //!< Max level of detail
+                     float maxLod = CL_MAXFLOAT,           //!< Max level of detail
+                     uint32_t maxAnisotropy = 0            //!< Max anisotropy, 0/1 = isotropic
   ) const;
 
   //! host memory alloc
@@ -603,6 +617,9 @@ class Device : public NullDevice {
 
   //! Allow access for peer device
   bool deviceAllowAccess(void* dst) const;
+
+  //! Latches a GPU error if PAL reports the device as faulted or lost
+  void CheckExecutionState() const;
 
   //! Returns a handle to the capture manager (RGP or UberTrace)
   ICaptureMgr* captureMgr() const { return captureMgr_; }

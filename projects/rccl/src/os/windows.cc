@@ -23,9 +23,9 @@
 
 #include <windows.h>
 #include "os.h"
+#include "compiler.h"
 #include "crypt.h"
 #include <cstring>
-#include <cstdbool>
 #include "socket.h"
 #include "utils.h"
 #include "checks.h"
@@ -36,7 +36,6 @@
 #include <chrono>
 #include <thread>
 #include <new>
-#include <nmmintrin.h>
 #include <cstdint>
 #include <setupapi.h>
 #include <cfgmgr32.h>
@@ -319,20 +318,21 @@ static ncclResult_t socketConnectCheck(struct ncclSocket* sock, int errCode, con
       if (sock->errorRetries++ == ncclParamRetryCnt()) {
         sock->state = ncclSocketStateError;
         WARN("%s: connect to %s returned %s, exceeded error retry count after %d attempts", funcName,
-             ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode), sock->errorRetries);
+             ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries);
         return ncclRemoteError;
       }
       unsigned int sleepTime = sock->errorRetries * ncclParamRetryTimeOut();
       INFO(NCCL_NET | NCCL_INIT, "%s: connect to %s returned %s, retrying (%d/%ld) after sleep for %u msec", funcName,
-           ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode), sock->errorRetries, ncclParamRetryCnt(),
-           sleepTime);
+           ncclSocketToString(&sock->addr, line, sizeof(line)), getWSAErrorMessage(errCode), sock->errorRetries,
+           ncclParamRetryCnt(), sleepTime);
       std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
     }
     NCCLCHECK(ncclOsSocketResetFd(sock)); /* in case of failure in connect, socket state is unspecified */
     sock->state = ncclSocketStateConnecting;
   } else {
     sock->state = ncclSocketStateError;
-    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line), getWSAErrorMessage(errCode));
+    WARN("%s: connect to %s failed : %s", funcName, ncclSocketToString(&sock->addr, line, sizeof(line)),
+         getWSAErrorMessage(errCode));
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -359,7 +359,7 @@ ncclResult_t ncclOsSocketPollConnect(struct ncclSocket* sock) {
     return ncclSuccess;
   } else if (ret < 0) {
     int wsaError = WSAGetLastError();
-    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line),
+    WARN("ncclOsSocketPollConnect to %s failed with error %s", ncclSocketToString(&sock->addr, line, sizeof(line)),
          getWSAErrorMessage(wsaError));
     return ncclSystemError;
   }
@@ -403,8 +403,8 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* sock, void* ptr,
       // WSAEINTR means interrupted by signal
       if (wsaError != WSAEWOULDBLOCK && wsaError != WSAEINPROGRESS && wsaError != WSAEINTR) {
         WARN("ncclOsSocketProgressOpt: Call to %s %s failed : %d (%s)",
-             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line), wsaError,
-             getWSAErrorMessage(wsaError));
+             (op == NCCL_SOCKET_RECV ? "recv from" : "send to"), ncclSocketToString(&sock->addr, line, sizeof(line)),
+             wsaError, getWSAErrorMessage(wsaError));
         return ncclRemoteError;
       } else {
         bytes = 0;
@@ -488,7 +488,7 @@ ncclResult_t ncclOsFindInterfaces(const char* prefixList, char* names, union ncc
       WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, adapterName, MAX_IF_NAME_SIZE, NULL, NULL);
 
       TRACE(NCCL_INIT | NCCL_NET, "Found interface %s:%s", adapterName,
-            ncclSocketToString((union ncclSocketAddress*)unicast->Address.lpSockaddr, line));
+            ncclSocketToString((union ncclSocketAddress*)unicast->Address.lpSockaddr, line, sizeof(line)));
 
       // Check against user specified interfaces
       if (!(matchIfList(adapterName, -1, userIfs, nUserIfs, searchExact) ^ searchNot)) {
@@ -658,7 +658,7 @@ ncclResult_t ncclFindInterfaceMatchSubnet(char* ifName, union ncclSocketAddress*
       WideCharToMultiByte(CP_UTF8, 0, adapter->FriendlyName, -1, ifName, ifNameMaxSize, NULL, NULL);
 
       TRACE(NCCL_INIT | NCCL_NET, "NET : Found interface %s:%s in the same subnet as remote address %s", ifName,
-            ncclSocketToString(localAddr, line), ncclSocketToString(remoteAddr, line_a));
+            ncclSocketToString(localAddr, line, sizeof(line)), ncclSocketToString(remoteAddr, line_a, sizeof(line_a)));
       *found = 1;
     }
   }
@@ -717,7 +717,7 @@ void ncclOsCpuZero(ncclAffinity& affinity) {
 int ncclOsCpuCount(const ncclAffinity& affinity) {
   int count = 0;
   for (int group = 0; group < NCCL_WINDOWS_PROCESSOR_GROUP_COUNT; group++) {
-    count += _mm_popcnt_u64((unsigned long long)affinity.masks[group]);
+    count += COMPILER_POPCOUNT64((unsigned long long)affinity.masks[group]);
   }
   return count;
 }
@@ -865,6 +865,17 @@ void ncclOsShmHandleInit(ncclShmDescriptor shmDesc, char* shmPath, size_t shmSiz
   }
 }
 
+static ncclResult_t ncclOsShmPathSubstituteRandomLetters(char* suffix) {
+  static const char randomChars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  unsigned char randBytes[sizeof("XXXXXX") - 1];
+
+  NCCLCHECK(getRandomData(randBytes, sizeof(randBytes)));
+  for (int i = 0; i < (int)sizeof(randBytes); i++) {
+    suffix[i] = randomChars[randBytes[i] % (sizeof(randomChars) - 1)];
+  }
+  return ncclSuccess;
+}
+
 ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, void** shmPtr, void** devShmPtr,
                            int refcount, struct ncclShmHandleInternal** handle) {
   HANDLE hMapFile = NULL;
@@ -885,23 +896,45 @@ ncclResult_t ncclOsShmOpen(char* shmPath, size_t shmPathSize, size_t shmSize, vo
               fail);
 
   if (create) {
-    if (shmPath[0] == '\0') {
-      // Generate unique shared memory name using process ID and timestamp
-      uint64_t timestamp = clockNano();
-      snprintf(shmPath, shmPathSize, "Local\\nccl-shm-%llu-%llu", (unsigned long long)GetCurrentProcessId(),
-               (unsigned long long)timestamp);
+    bool randomPath = (shmPath[0] == '\0');
+    if (randomPath) {
+      if (shmPathSize < sizeof("Local\\nccl-shm-XXXXXX")) {
+        WARN("Error: shared memory path buffer too small, need %zu bytes but got %zu", sizeof("Local\\nccl-shm-XXXXXX"),
+             shmPathSize);
+        ret = ncclInvalidArgument;
+        goto fail;
+      }
+      snprintf(shmPath, shmPathSize, "Local\\nccl-shm-XXXXXX");
     }
 
-    // Create file mapping object
-    hMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE,    // use paging file
-                                  NULL,                    // default security
-                                  PAGE_READWRITE,          // read/write access
-                                  (DWORD)((realShmSize >> 32) & 0xFFFFFFFF),  // high-order DWORD of size
-                                  (DWORD)(realShmSize & 0xFFFFFFFF),          // low-order DWORD of size
-                                  shmPath);                // name of mapping object
+    for (int attempt = 0; attempt < (randomPath ? 128 : 1); attempt++) {
+      if (randomPath) {
+        NCCLCHECKGOTO(ncclOsShmPathSubstituteRandomLetters(shmPath + sizeof("Local\\nccl-shm-") - 1), ret, fail);
+      }
+
+      SetLastError(ERROR_SUCCESS);
+      hMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE,    // use paging file
+                                    NULL,                    // default security
+                                    PAGE_READWRITE,          // read/write access
+                                    (DWORD)((realShmSize >> 32) & 0xFFFFFFFF),  // high-order DWORD of size
+                                    (DWORD)(realShmSize & 0xFFFFFFFF),          // low-order DWORD of size
+                                    shmPath);                // name of mapping object
+      DWORD createError = GetLastError();
+      if (hMapFile == NULL) {
+        WARN("Error: failed to create shared memory mapping %s, error code: %lu", shmPath, createError);
+        ret = ncclSystemError;
+        goto fail;
+      }
+      if (!randomPath || createError != ERROR_ALREADY_EXISTS) {
+        break;
+      }
+
+      CloseHandle(hMapFile);
+      hMapFile = NULL;
+    }
 
     if (hMapFile == NULL) {
-      WARN("Error: failed to create shared memory mapping %s, error code: %lu", shmPath, GetLastError());
+      WARN("Error: failed to create unique shared memory mapping %s", shmPath);
       ret = ncclSystemError;
       goto fail;
     }

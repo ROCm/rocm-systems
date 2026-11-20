@@ -2,12 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/tracing.hpp"
+#include "common/clocks.hpp"
 #include "common/env_vars.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
-#include "core/perfetto/emitter.hpp"
-#include "core/perfetto/engine.hpp"
 #include "core/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -167,7 +165,7 @@ record_thread_start_time()
 {
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        thread_info::set_start(control::clocks::timeline_ns(),
+        thread_info::set_start(clocks::timeline::now_ns(),
                                get_mode() != state::process::Mode::sampling);
     });
 }

@@ -617,6 +617,7 @@ struct HipFileIoParam : public TestWithParam<IoType> {
     const void                      *unreg_bufptr{reinterpret_cast<void *>(0xFACEFEED)};
     shared_ptr<StrictMock<MBackend>> mbackend{make_shared<StrictMock<MBackend>>()};
     vector<shared_ptr<Backend>>      mbackends{mbackend};
+    vector<hipMemoryType>            unsupported_memory_types;
 
     HipFileIoParam()
     {
@@ -632,6 +633,9 @@ struct HipFileIoParam : public TestWithParam<IoType> {
             expect_buffer_registration(mhip, hipMemoryTypeDevice);
             Context<DriverState>::get()->registerBuffer(bufptr, buflen, 0);
         }
+
+        vector supported_memory_types = set_union(SupportedFastpathMemoryTypes, SupportedHostMemoryTypes);
+        unsupported_memory_types      = set_difference(KnownHipMemoryTypes, supported_memory_types);
     }
 };
 
@@ -639,12 +643,12 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipPointerGetAttributesError)
 {
     StrictMock<MHip> mhip;
     EXPECT_CALL(mhip, hipPointerGetAttributes).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, mbackends), -hipErrorUnknown);
+    ASSERT_EQ(hipFileIo(GetParam(), file_handle, unreg_bufptr, 0, 0, 0, mbackends), -hipFileHipDriverError);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesUnsupportedHipMemoryType)
 {
-    for (const auto memoryType : UnsupportedHipMemoryTypes) {
+    for (const auto memoryType : unsupported_memory_types) {
         StrictMock<MHip>      mhip;
         hipPointerAttribute_t attrs{};
         attrs.type = memoryType;
@@ -673,7 +677,7 @@ TEST_P(HipFileIoParam, HipFileIoHandlesHipRuntimeError)
 {
     EXPECT_CALL(*mbackend, score).WillOnce(Return(1));
     EXPECT_CALL(*mbackend, io).WillOnce(Throw(Hip::RuntimeError(hipErrorUnknown)));
-    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -hipErrorUnknown);
+    ASSERT_EQ(hipFileIo(GetParam(), file_handle, bufptr, buflen, 0, 0, mbackends), -hipFileHipDriverError);
 }
 
 TEST_P(HipFileIoParam, HipFileIoHandlesInvalidArgumentError)

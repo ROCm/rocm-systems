@@ -94,9 +94,8 @@ def capture_active():
             and fs.st_nlink == 1 and line == instance)
 ```
 
-Neither the directory nor its `events.bin` is enough: both stay when the
-writer refuses an archive, or fails to resume one with the same pid, and
-capture is then off. The runtime creates the marker when capture starts, which
+Neither the directory nor its `events.bin` is enough: both can stay when the
+writer refuses an archive, and capture is then off. The runtime creates the marker when capture starts, which
 may be after your producer loads, so re-check rather than deciding once at
 import time.
 
@@ -171,8 +170,17 @@ file.
 ## Reference producers
 
 - [`pytorch/hrr_torch_regions.py`](pytorch/hrr_torch_regions.py) — the PyTorch
-  caching allocator, via `torch.cuda.memory._snapshot()`. Auto-loads through
-  `PYTHONPATH` and needs no change to the application.
+  caching allocator, via `torch.cuda.memory._snapshot()`. It is opt-in, because
+  it turns on PyTorch's allocator history. Call `hrr_torch_regions.start()`, or
+  import it from a `sitecustomize.py` on `PYTHONPATH` and set
+  `HRR_REGIONS_AUTOSTART=1`, which needs no change to the application.
+
+  | Variable | Default | Purpose |
+  |---|---|---|
+  | `HRR_REGIONS_AUTOSTART` | off | Any value other than empty or `0` starts the producer when it is imported |
+  | `HRR_REGIONS_MAX_ENTRIES` | 100000 | Depth of PyTorch's allocator history ring, per device. It must exceed the allocations and frees between two polls, or some are lost |
+  | `HRR_REGIONS_INTERVAL_S` | 2.0 | Seconds between polls |
+  | `HRR_REGIONS_VERBOSE` | off | Any value other than empty or `0` logs the producer's progress to stderr |
 
 ## Notes
 

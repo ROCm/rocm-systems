@@ -144,32 +144,42 @@ static inline abce_hsa_queue_api_t abce_hsa_queue_api_direct(void) {
 typedef struct abce_hsa_ring_options_t {
   size_t min_submission_size;
   bool align64;
-  // The CPU's stores into the ring buffer pass through the GPU's HDP: a ring in
-  // device memory (HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF) the CPU fills
-  // through a PCIe BAR. False for a ring in host memory, and for one in device
-  // memory behind a CPU-GPU xGMI link, which has no HDP.
-  bool host_writes_through_hdp;
-  abce_shared_ring_control_t* shared_control;
   abce_ring_commit_wait_fn_t commit_wait;
   void* commit_wait_user_data;
+  // Drive the queue through its hardware words (HSA_AMD_QUEUE_INFO_READ_POINTER,
+  // WRITE_POINTER and DOORBELL_ID) with plain stores instead of runtime calls.
+  // Only where the runtime's own doorbell is a plain store (not DXG or DTIF).
+  bool direct_queue_words;
+  // Optional ring writer; see abce_ring_config_t::write. Required for a ring in
+  // device memory, which the CPU writes through a write-combined BAR.
+  abce_ring_write_fn_t write;
+  void* write_user_data;
+  // See abce_ring_config_t::readback_before_doorbell. For a ring in device
+  // memory, take it from HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH.
+  bool readback_before_doorbell;
 } abce_hsa_ring_options_t;
 
 static inline void abce_hsa_ring_options_initialize(abce_hsa_ring_options_t* out_options) {
   memset(out_options, 0, sizeof(*out_options));
 }
 
-// Non-owning adapter from a public SDMA hsa_queue_t to an ABCE ring.
+// Non-owning adapter from a public SDMA hsa_queue_t to an ABCE ring the host
+// alone submits to.
 //
-// The queue must remain alive until all submissions are complete and the adapter
-// is no longer registered with an orchestrator. Host/device sharing is supported
-// only when both views use the same abce_shared_ring_control_t. The adapter
-// itself must remain at a stable address because the ring callbacks use it as
-// their context.
+// The ring buffer is in host memory by default (the hsa_amd_queue_create
+// default). A ring in device memory takes a writer (abce_hsa_ring_options_t::write)
+// that stores whole lines through the BAR and, where
+// HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH reports, readback_before_doorbell:
+// unlike an AQL packet processor, which waits for a valid header, the SDMA engine
+// runs whatever precedes the write index, so the lines must have landed before
+// the doorbell, which reaches the engine by another path. The queue must remain
+// alive until all submissions are complete and the adapter is no longer
+// registered with an orchestrator. The adapter itself must remain at a stable
+// address because the ring callbacks use it as their context.
 typedef struct abce_hsa_queue_ring_t {
   hsa_queue_t* queue;
   abce_hsa_queue_api_t api;
   uint32_t engine_id;
-  bool host_writes_through_hdp;
   abce_ring_t ring;
 } abce_hsa_queue_ring_t;
 
@@ -187,23 +197,25 @@ static inline void abce_hsa_queue_ring_publish_write_index(void* user_data,
                                                            uint64_t new_write_index) {
   abce_hsa_queue_ring_t* adapter = (abce_hsa_queue_ring_t*)user_data;
   // SdmaQueue::StoreRelease stores the canonical write pointer and rings the
-  // KFD doorbell behind release ordering only, which on x86 leaves the packet
-  // stores in a VRAM ring unordered against the doorbell.
-  abce_ring_host_store_fence();
-  if (adapter->host_writes_through_hdp) {
-    // HDP can still hold the packet stores when the doorbell, which does not
-    // pass through it, reaches the engine: it then fetches the ring's old
-    // contents. A read cannot complete ahead of the posted writes before it,
-    // and on x86 the doorbell store cannot pass the read, so reading back the
-    // frame's last dword lands the frame first. It is the readback CLR uses for
-    // kernel arguments in device memory.
-    const uint64_t last_dword_offset =
-        abce_ring_wrap(new_write_index - sizeof(uint32_t), adapter->queue->size);
-    (void)*(const volatile uint32_t*)((const char*)adapter->queue->base_address +
-                                      last_dword_offset);
-  }
+  // KFD doorbell behind release ordering only. That orders the host-memory
+  // ring's write-back stores ahead of the doorbell; the non-temporal stores a
+  // large memcpy or memset may issue are fenced before publish, by
+  // abce_ring_release or once per batch by abce_copy_orchestrator_submit.
   adapter->api.signal_store_release(adapter->queue->doorbell_signal,
                                     (hsa_signal_value_t)new_write_index);
+}
+
+// Publication for direct_queue_words: the stores SdmaQueue::RingDoorbell makes,
+// without the runtime calls in front of them. The engine can read the write
+// pointer once the doorbell lands, so a weakly ordered host needs the hardware
+// fence between the two stores.
+static inline void abce_hsa_queue_ring_publish_direct(void* user_data, volatile uint64_t* write_ptr,
+                                                      volatile uint64_t* doorbell,
+                                                      uint64_t new_write_index) {
+  (void)user_data;
+  *write_ptr = new_write_index;
+  abce_host_fence_release();
+  *doorbell = new_write_index;
 }
 
 // Initializes the adapter over |queue|. |options| may be null for the defaults.
@@ -233,24 +245,45 @@ static inline hsa_status_t abce_hsa_queue_ring_initialize(
   if (queue->base_address == NULL || !abce_is_power_of_two(ring_size))
     return HSA_STATUS_ERROR_INVALID_QUEUE;
 
-  out_adapter->queue = queue;
-  out_adapter->api = *api;
-  out_adapter->engine_id = resolved_engine_id;
-  out_adapter->host_writes_through_hdp = options->host_writes_through_hdp;
-
   abce_ring_config_t config;
   memset(&config, 0, sizeof(config));
   config.base = (char*)queue->base_address;
   config.size = ring_size;
-  config.queue_ops.load_read_index = abce_hsa_queue_ring_load_read_index;
-  config.queue_ops.load_write_index = abce_hsa_queue_ring_load_write_index;
-  config.queue_ops.publish_write_index = abce_hsa_queue_ring_publish_write_index;
-  config.queue_ops.user_data = out_adapter;
-  config.shared_control = options->shared_control;
+  if (options->direct_queue_words) {
+    uint64_t read_ptr = 0;
+    uint64_t write_ptr = 0;
+    uint64_t doorbell = 0;
+    if (api->queue_get_info(queue, HSA_AMD_QUEUE_INFO_READ_POINTER, &read_ptr) !=
+            HSA_STATUS_SUCCESS ||
+        api->queue_get_info(queue, HSA_AMD_QUEUE_INFO_WRITE_POINTER, &write_ptr) !=
+            HSA_STATUS_SUCCESS ||
+        api->queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &doorbell) !=
+            HSA_STATUS_SUCCESS ||
+        read_ptr == 0 || write_ptr == 0 || doorbell == 0) {
+      return HSA_STATUS_ERROR_INVALID_QUEUE;
+    }
+    config.read_ptr = (volatile uint64_t*)(uintptr_t)read_ptr;
+    config.write_ptr = (volatile uint64_t*)(uintptr_t)write_ptr;
+    config.doorbell = (volatile uint64_t*)(uintptr_t)doorbell;
+    config.publish = abce_hsa_queue_ring_publish_direct;
+  } else {
+    config.queue_ops.load_read_index = abce_hsa_queue_ring_load_read_index;
+    config.queue_ops.load_write_index = abce_hsa_queue_ring_load_write_index;
+    config.queue_ops.publish_write_index = abce_hsa_queue_ring_publish_write_index;
+    config.queue_ops.user_data = out_adapter;
+  }
   config.min_submission_size = options->min_submission_size;
   config.align64 = options->align64;
   config.commit_wait = options->commit_wait;
   config.commit_wait_user_data = options->commit_wait_user_data;
+  config.write = options->write;
+  config.write_user_data = options->write_user_data;
+  config.readback_before_doorbell = options->readback_before_doorbell;
+  // The adapter reads as initialized once queue is set, so set it only after every query that
+  // can fail. The ring's queue callbacks read these fields, so they precede ring initialization.
+  out_adapter->queue = queue;
+  out_adapter->api = *api;
+  out_adapter->engine_id = resolved_engine_id;
   abce_ring_initialize(&config, NULL, NULL, &out_adapter->ring);
   return HSA_STATUS_SUCCESS;
 }

@@ -1,0 +1,4 @@
+IONIC_1.0 {
+  global:
+    ionic_dv_pd_set_udma_mask;
+};

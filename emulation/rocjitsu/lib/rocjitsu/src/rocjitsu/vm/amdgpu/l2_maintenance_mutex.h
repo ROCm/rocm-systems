@@ -18,7 +18,7 @@
 /// TSan annotations expose one shared/exclusive lock without changing the atomic
 /// protocol. Device maintenance nests multiple L2 locks beneath coordinator
 /// locks; annotating every counter would exhaust TSan's held-lock tracker.
-/// Wakeup ordering is documented at release_reader().
+/// Wakeup ordering is documented at release_reader() and reopen_admission().
 
 #pragma once
 
@@ -191,7 +191,10 @@ private:
   }
 
   void reopen_admission() {
-    writer_pending_.store(0, std::memory_order_release);
+    // Release suffices under the C++ wait/notify rules. Use seq_cst to order the
+    // gate reset before notify_all's waiter-count check in libstdc++ versions
+    // affected by GCC PR127757, which can otherwise lose the wakeup.
+    writer_pending_.store(0, std::memory_order_seq_cst);
     writer_pending_.notify_all();
     writers_.unlock();
   }
@@ -200,6 +203,8 @@ private:
     // The decrement and gate check join the same sequentially consistent order
     // as writer admission and scanning. If a writer observed this reader, its
     // closed gate is visible here, so the last reader cannot miss its wakeup.
+    // The RMW also orders the decrement before notify_one's waiter-count check;
+    // see the library compatibility requirement in reopen_admission().
     if (counter.fetch_sub(1, std::memory_order_seq_cst) == 1 &&
         writer_pending_.load(std::memory_order_seq_cst))
       counter.notify_one();

@@ -77,6 +77,7 @@ enum gpu_id_t
     GFX10_GPU_ID,    // generic Gfx10 id
     GFX11_GPU_ID,    // generic Gfx11 id
     GFX115X_GPU_ID,  // Gfx11.5x id
+    GFX117X_GPU_ID,  // Gfx11.7x id
     GFX12_GPU_ID,    // generic Gfx12 id
     MI450_GPU_ID,    // Mi450 GPU id
 };
@@ -149,6 +150,8 @@ public:
     bool IsConcurrent() const { return concurrent_mode_; }
     // Is getting SPM data using driver public API?
     bool SpmKfdMode() const { return spm_kfd_mode_; }
+    bool SpmSq32BitEnabled() const { return spm_sq_enable_32bit_; }
+    bool SpmSqEvenLaneEnabled() const { return spm_sq_enable_even_lane_; }
 
     // Return PM4 command builder
     pm4_builder::CmdBuilder* GetCmdBuilder() const { return cmd_builder_; }
@@ -297,7 +300,9 @@ protected:
     // Concurrent mode
     static bool concurrent_create_mode_;
     static bool spm_kfd_mode_;
-    bool        concurrent_mode_ = false;
+    bool        concurrent_mode_         = false;
+    bool        spm_sq_enable_32bit_     = true;
+    bool        spm_sq_enable_even_lane_ = true;
 
 private:
     // PM4 factory instance map type
@@ -325,6 +330,8 @@ private:
     static Pm4Factory* Gfx11Create(const AgentInfo* agent_info);
     // Create GFX11.5 factory
     static Pm4Factory* Gfx115xCreate(const AgentInfo* agent_info);
+    // Create GFX11.7 factory
+    static Pm4Factory* Gfx117xCreate(const AgentInfo* agent_info);
     // Create GFX12 generic factory
     static Pm4Factory* Gfx12Create(const AgentInfo* agent_info);
     // Create MI100 factory
@@ -337,6 +344,24 @@ private:
     static Pm4Factory* Mi350Create(const AgentInfo* agent_info);
     // Create MI450 factory
     static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
+
+    void InitSpmSqPolicy()
+    {
+        const bool is_gfx12xx = gpu_id_ == GFX12_GPU_ID || gpu_id_ == MI450_GPU_ID;
+
+        spm_sq_enable_32bit_     = !is_gfx12xx;
+        spm_sq_enable_even_lane_ = !is_gfx12xx;
+
+        auto spm_enable_sq_32bit =
+            rocprofiler::common::get_env_optional("AQLPROFILE_SPM_ENABLE_SQ_32BIT");
+        if(spm_enable_sq_32bit && !spm_enable_sq_32bit->empty())
+            spm_sq_enable_32bit_ = spm_enable_sq_32bit->front() != '0';
+
+        auto spm_enable_sq_even_lane =
+            rocprofiler::common::get_env_optional("AQLPROFILE_SPM_ENABLE_SQ_EVEN_LANE");
+        if(spm_enable_sq_even_lane && !spm_enable_sq_even_lane->empty())
+            spm_sq_enable_even_lane_ = spm_enable_sq_even_lane->front() != '0';
+    }
 
     static bool CheckConcurrent(const profile_t* profile);
 
@@ -377,6 +402,8 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
             case GFX11_GPU_ID: it->second = Gfx11Create(agent_info); break;
             // Create Gfx11.5 factory
             case GFX115X_GPU_ID: it->second = Gfx115xCreate(agent_info); break;
+            // Create Gfx11.7 factory
+            case GFX117X_GPU_ID: it->second = Gfx117xCreate(agent_info); break;
             case GFX12_GPU_ID: it->second = Gfx12Create(agent_info); break;
             // Create MI100 generic factory
             case MI100_GPU_ID: it->second = Mi100Create(agent_info); break;
@@ -390,6 +417,8 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
 
     if(it->second == nullptr) throw aql_profile_exc_msg("Pm4Factory::Create() failed");
     it->second->gpu_id_ = gpu_id;
+    it->second->InitSpmSqPolicy();
+
     return it->second;
 }
 
@@ -469,20 +498,19 @@ inline gpu_id_t
 Pm4Factory::GetGpuId(std::string_view gfx_ip)
 {
     // More specific GPU IDs must come before less specific IDs.
-    std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {
-        {"gfx908", MI100_GPU_ID},
-        {"gfx90a", MI200_GPU_ID},
-        {"gfx900", GFX9_GPU_ID},
-        {"gfx902", GFX9_GPU_ID},
-        {"gfx906", GFX9_GPU_ID},
-        {"gfx94", MI300_GPU_ID},
-        {"gfx95", MI350_GPU_ID},
-        {"gfx10", GFX10_GPU_ID},
-        {"gfx115", GFX115X_GPU_ID},
-        {"gfx11", GFX11_GPU_ID},
-        {"gfx125", MI450_GPU_ID},
-        {"gfx12", GFX12_GPU_ID},
-    };
+    std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {{"gfx908", MI100_GPU_ID},
+                                                               {"gfx90a", MI200_GPU_ID},
+                                                               {"gfx900", GFX9_GPU_ID},
+                                                               {"gfx902", GFX9_GPU_ID},
+                                                               {"gfx906", GFX9_GPU_ID},
+                                                               {"gfx94", MI300_GPU_ID},
+                                                               {"gfx95", MI350_GPU_ID},
+                                                               {"gfx10", GFX10_GPU_ID},
+                                                               {"gfx115", GFX115X_GPU_ID},
+                                                               {"gfx117", GFX117X_GPU_ID},
+                                                               {"gfx11", GFX11_GPU_ID},
+                                                               {"gfx125", MI450_GPU_ID},
+                                                               {"gfx12", GFX12_GPU_ID}};
 
     for(const auto& [name, id] : gfxip_map)
     {

@@ -26,6 +26,8 @@ int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENAB
 // bodies for NCCL_PARAM macros in this TU). Without this fake, MicroInit
 // fails to link: undefined symbol referenced from initTransportsRank.
 int64_t ncclParamP2pLL128Enable() { return g_loadParam("P2P_LL128_ENABLE", -1); }
+// Same for NCCL_PARAM(TreeCompact, ...) in graph/connect.cc, read by the cross-rank consensus check.
+int64_t ncclParamTreeCompact() { return g_loadParam("TREE_COMPACT", 0); }
 int64_t ncclParamRasDiagnostics() { return g_loadParam("RUN_RAS_DIAGNOSTICS", 0); }
 int64_t ncclParamDiagnostics() { return g_loadParam("RUN_DIAGNOSTICS", 0); }
 // src/ras/ras.cc (NCCL 2.32): init.cc gates the progress-counter monitor on RAS being enabled.
@@ -39,6 +41,19 @@ ncclResult_t ncclGpuCftSupport(struct ncclComm*, int* gpuCftSupport, bool* gpuCf
   *gpuCftCountedSupport = false;
   return ncclSuccess;
 }
+
+// src/cft_dev_runtime.cc (NCCL 2.32.6): fillInfo records the CUDA clique ids. Without CUDA >= 13.4 the
+// production body reports UINT32_MAX for both, which is the only HIP behaviour.
+ncclResult_t ncclGpuGetCliqueIds(int /*dev*/, uint32_t* unicastId, uint32_t* multicastId) {
+  *unicastId = UINT32_MAX;
+  *multicastId = UINT32_MAX;
+  return ncclSuccess;
+}
+
+// src/misc/rocmwrap.cc: fillInfo (NCCL 2.32.6) ANDs cuMemSupport with this. Not compiled into MicroInit;
+// tests set g_cuMemHostEnable to exercise the cuMemHostSupport bit.
+int g_cuMemHostEnable = 0;
+int ncclCuMemHostEnable() { return g_cuMemHostEnable; }
 
 // src/ras/progress_monitor.cc (NCCL 2.32). NCCL_PROGRESS_COUNTERS defaults to 0, so the suites here never
 // start a monitor; Destroy runs on every comm teardown and must succeed.
@@ -82,6 +97,11 @@ void InstallCommAllocSuccess() {
 void InstallDevCommSetupSuccess() {
   InstallCommAllocSuccess();
   g_hipAsyncOpsResult = hipSuccess;
+  g_hipMemGetAddressRange = [](hipDeviceptr_t* base, std::size_t* size, hipDeviceptr_t ptr) {
+    if (base) *base = ptr;
+    if (size) *size = 0;
+    return hipSuccess;
+  };
 }
 
 void ResetInitFakes() {
@@ -97,7 +117,9 @@ void ResetInitFakes() {
   ResetMemManagerFakes();
   ResetNcclFakes();
   ResetNcclStubs();
+  ResetChannelFakes();
   ResetOsFakes();
+  ResetRcclArchThresholdsFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();
   ResetRocmWrapFakes();
@@ -105,8 +127,11 @@ void ResetInitFakes() {
   ResetRocshmemFakes();
 #endif
   ResetStrongStreamStubs();
+  ResetSearchFakes();
   ResetTopoStubs();
   ResetTransportStubs();
+  ResetTransportNetIbFakes();
   ResetTuningFakes();
+  g_cuMemHostEnable = 0;
   g_ncclNetInitResult = ncclSuccess;
 }

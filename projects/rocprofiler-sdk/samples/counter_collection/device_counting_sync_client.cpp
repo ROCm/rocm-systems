@@ -85,6 +85,9 @@ public:
     static std::vector<std::pair<rocprofiler_counter_record_dimension_info_t, size_t>>
     get_record_dimensions(const rocprofiler_counter_record_t& rec);
 
+    // Create the profile for a set of counters, which sample_counter_values reuses.
+    rocprofiler_status_t create_profile(const std::vector<std::string>& counters);
+
     // Sample the counter values for a set of counters, returns the records in the out parameter.
     rocprofiler_status_t sample_counter_values(const std::vector<std::string>&            counters,
                                                std::vector<rocprofiler_counter_record_t>& out,
@@ -204,42 +207,47 @@ counter_sampler::get_record_dimensions(const rocprofiler_counter_record_t& rec)
 }
 
 rocprofiler_status_t
+counter_sampler::create_profile(const std::vector<std::string>& counters)
+{
+    if(cached_profiles_.count(counters) > 0) return ROCPROFILER_STATUS_SUCCESS;
+
+    size_t                                expected_size = 0;
+    rocprofiler_counter_config_id_t       profile       = {};
+    std::vector<rocprofiler_counter_id_t> gpu_counters;
+    auto                                  roc_counters = get_supported_counters(agent_);
+    for(const auto& counter : counters)
+    {
+        auto it = roc_counters.find(counter);
+        if(it == roc_counters.end())
+        {
+            std::cerr << "Counter " << counter << " not found\n";
+            continue;
+        }
+        gpu_counters.push_back(it->second);
+        expected_size += get_counter_size(it->second);
+    }
+    // A partial profile would silently drop a requested counter, so treat any missing
+    // counter as unavailable.
+    if(gpu_counters.size() < counters.size()) return ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS;
+    ROCPROFILER_CALL(rocprofiler_create_counter_config(
+                         agent_, gpu_counters.data(), gpu_counters.size(), &profile),
+                     "Could not create profile");
+    cached_profiles_.emplace(counters, profile);
+    profile_sizes_.emplace(profile.handle, expected_size);
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
 counter_sampler::sample_counter_values(const std::vector<std::string>&            counters,
                                        std::vector<rocprofiler_counter_record_t>& out,
                                        rocprofiler_user_data_t                    user_data)
 {
-    auto profile_cached = cached_profiles_.find(counters);
-    if(profile_cached == cached_profiles_.end())
+    if(auto status = create_profile(counters); status != ROCPROFILER_STATUS_SUCCESS)
     {
-        size_t                                expected_size = 0;
-        rocprofiler_counter_config_id_t       profile       = {};
-        std::vector<rocprofiler_counter_id_t> gpu_counters;
-        auto                                  roc_counters = get_supported_counters(agent_);
-        for(const auto& counter : counters)
-        {
-            auto it = roc_counters.find(counter);
-            if(it == roc_counters.end())
-            {
-                std::cerr << "Counter " << counter << " not found\n";
-                continue;
-            }
-            gpu_counters.push_back(it->second);
-            expected_size += get_counter_size(it->second);
-        }
-        // A partial profile would silently drop a requested counter, so treat any missing
-        // counter as unavailable.
-        if(gpu_counters.size() < counters.size())
-        {
-            out.clear();
-            return ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS;
-        }
-        ROCPROFILER_CALL(rocprofiler_create_counter_config(
-                             agent_, gpu_counters.data(), gpu_counters.size(), &profile),
-                         "Could not create profile");
-        cached_profiles_.emplace(counters, profile);
-        profile_sizes_.emplace(profile.handle, expected_size);
-        profile_cached = cached_profiles_.find(counters);
+        out.clear();
+        return status;
     }
+    auto profile_cached = cached_profiles_.find(counters);
     try
     {
         out.resize(profile_sizes_.at(profile_cached->second.handle));
@@ -362,8 +370,11 @@ counter_sampler::get_counter_dimensions(rocprofiler_counter_id_t counter)
     ROCPROFILER_CALL(rocprofiler_query_counter_info(
                          counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
                      "Could not query info for counter");
-    return std::vector<rocprofiler_counter_record_dimension_info_t>{
-        *info.dimensions, *info.dimensions + info.dimensions_count};
+    auto dims = std::vector<rocprofiler_counter_record_dimension_info_t>{};
+    dims.reserve(info.dimensions_count);
+    for(uint64_t i = 0; i < info.dimensions_count; ++i)
+        dims.emplace_back(*info.dimensions[i]);
+    return dims;
 }
 
 std::atomic<bool>&
@@ -380,10 +391,18 @@ is_terminal_status(rocprofiler_status_t status)
            status == ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 }
 
-rocprofiler_client_finalize_t    finalize       = nullptr;
-rocprofiler_client_id_t*         client_id      = nullptr;
-std::shared_ptr<counter_sampler> sampler        = {};
-std::thread*                     sampler_thread = nullptr;
+rocprofiler_client_finalize_t    finalize         = nullptr;
+rocprofiler_client_id_t*         client_id        = nullptr;
+std::shared_ptr<counter_sampler> sampler          = {};
+std::thread*                     sampler_thread   = nullptr;
+const std::vector<std::string>   sampled_counters = {"SQ_WAVES", "GRBM_COUNT"};
+
+void
+stop_sampler_thread()
+{
+    exit_toggle().store(true);
+    if(sampler_thread && sampler_thread->joinable()) sampler_thread->join();
+}
 }  // namespace
 
 int
@@ -392,10 +411,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     finalize            = fini_func;
     auto* output_stream = static_cast<std::ostream*>(user_data);
     if(!output_stream) throw std::runtime_error{"nullptr to output stream"};
-
-    std::atexit([]() {
-        if(client_id) finalize(*client_id);
-    });
 
     // Get the agents available on the device
     auto agents = counter_sampler::get_available_agents();
@@ -408,6 +423,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // Use the first agent found
     sampler = std::make_shared<counter_sampler>(agents[0].id);
 
+    // Before atexit, so the statics this creates outlive the handler.
+    sampler->create_profile(sampled_counters);
+
+    std::atexit([]() {
+        // Stop sampling before rocprofiler-sdk finalizes the services the thread uses.
+        stop_sampler_thread();
+        if(client_id) finalize(*client_id);
+    });
+
     sampler_thread = new std::thread{[output_stream]() {
         // An exception escaping this thread would terminate the profiled application.
         try
@@ -417,8 +441,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             std::vector<rocprofiler_counter_record_t> records;
             while(sampler && exit_toggle().load() == false)
             {
-                auto status = sampler->sample_counter_values(
-                    {"SQ_WAVES", "GRBM_COUNT"}, records, {.value = count});
+                auto status =
+                    sampler->sample_counter_values(sampled_counters, records, {.value = count});
                 if(exit_toggle().load()) break;
                 if(status == ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED ||
                    status == ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR ||
@@ -475,8 +499,7 @@ tool_fini(void* user_data)
 
     client_id = nullptr;
 
-    exit_toggle().store(true);
-    if(sampler_thread && sampler_thread->joinable()) sampler_thread->join();
+    stop_sampler_thread();
     if(sampler)
     {
         sampler->stop();

@@ -35,6 +35,30 @@ TEST(WaitcntTranslator, DecodeVmcnt15Lgkm0) {
   EXPECT_EQ(values.expcnt, 0);
 }
 
+TEST(WaitcntTranslator, DecodeSplitVmBitsAndIgnoreReservedBits) {
+  struct Case {
+    uint16_t simm16;
+    WaitcntValues expected;
+  };
+  // Pin the GFX9 layout independently of the shared helper. Its result orders
+  // EXP before LGKM, whereas WaitcntValues orders LGKM before EXP.
+  const Case cases[] = {
+      {0x4000, {.vmcnt = 16, .lgkmcnt = 0, .expcnt = 0}},
+      {0x8000, {.vmcnt = 32, .lgkmcnt = 0, .expcnt = 0}},
+      {0x41a5, {.vmcnt = 21, .lgkmcnt = 1, .expcnt = 2}},
+      {0xc978, {.vmcnt = 56, .lgkmcnt = 9, .expcnt = 7}},
+      {0x3080, {.vmcnt = 0, .lgkmcnt = 0, .expcnt = 0}}, // Bits 7, 12 and 13 are reserved on GFX9.
+      {0xffff, {.vmcnt = 63, .lgkmcnt = 15, .expcnt = 7}},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(c.simm16);
+    const auto values = decode_waitcnt_gfx9(c.simm16);
+    EXPECT_EQ(values.vmcnt, c.expected.vmcnt);
+    EXPECT_EQ(values.lgkmcnt, c.expected.lgkmcnt);
+    EXPECT_EQ(values.expcnt, c.expected.expcnt);
+  }
+}
+
 TEST(WaitcntTranslator, EncodeAllZeroProducesMultipleWords) {
   // vmcnt=0 splits into loadcnt(0) + storecnt/dscnt(0,0); lgkmcnt=0 also feeds
   // dscnt and emits kmcnt(0); expcnt=0 emits expcnt(0). The encoding is

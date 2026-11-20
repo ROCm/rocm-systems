@@ -1612,6 +1612,29 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_vmem_handle_info_t* info;
     } hsa_amd_vmem_get_vmem_info;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+    struct
+    {
+        rocprofiler_hsa_api_no_args no_args;
+    } hsa_amd_enable_high_precision_timestamps;
+#    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x17
+    struct
+    {
+        uint32_t                  count;
+        const hsa_signal_value_t* initial_values;
+        uint32_t                  num_consumers;
+        const hsa_agent_t*        consumers;
+        uint64_t                  attributes;
+        hsa_amd_memory_pool_t     pool;
+        hsa_amd_signal_batch_t*   batch;
+        hsa_signal_t*             signals;
+    } hsa_amd_signal_batch_create;
+    struct
+    {
+        hsa_amd_signal_batch_t batch;
+    } hsa_amd_signal_batch_destroy;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

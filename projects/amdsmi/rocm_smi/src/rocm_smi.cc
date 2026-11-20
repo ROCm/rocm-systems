@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -20,7 +21,6 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -30,6 +30,7 @@
 #include "rocm_smi/rocm_smi_board_temp.h"
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi_counters.h"
+#include "rocm_smi/rocm_smi_cpu_link.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
@@ -456,15 +457,14 @@ rsmi_status_t rsmi_init(uint64_t flags) {
       smi.Initialize(flags);
     } catch (const amd::smi::rsmi_exception& e) {
       smi.Cleanup();
-      if (e.error_code() == RSMI_INITIALIZATION_ERROR &&
-          !strcmp(e.what(), "Failed to initialize rocm_smi library (KFD node discovery).")) {
+      if (e.error_code() == RSMI_STATUS_DRIVER_NOT_LOADED) {
         // This system does not actually have ROCM drivers set up
         // We were probably just called through dependency, just report the
         // error and log without complaining loudly.
         std::ostringstream ss;
         ss << "Exception caught: " << e.what() << ".";
         LOG_INFO(ss);
-        return RSMI_STATUS_NOT_SUPPORTED;
+        return RSMI_STATUS_DRIVER_NOT_LOADED;
       }
       throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
     } catch (...) {
@@ -488,28 +488,6 @@ rsmi_status_t rsmi_shut_down(void) {
 
   if (smi.ref_count() == 0) {
     return RSMI_STATUS_INIT_ERROR;
-  }
-
-  // Release any device mutexes that are being held
-#if DEBUG
-  int ret = 0;
-#endif
-  for (uint32_t i = 0; i < smi.devices().size(); ++i) {
-#if DEBUG
-    ret = pthread_mutex_unlock(smi.devices()[i]->mutex());
-    if (ret != EPERM) {  // We expect to get EPERM if the lock has already
-                         // been released
-      if (ret == 0) {
-        std::cout << "WARNING: Unlocked monitor_devices lock; "
-                  << "it should have already been unlocked." << std::endl;
-      } else {
-        std::cout << "WARNING: pthread_mutex_unlock() returned " << ret << " for device " << i
-                  << " in rsmi_shut_down()" << std::endl;
-      }
-    }
-#else
-    (void)pthread_mutex_unlock(smi.devices()[i]->mutex());
-#endif
   }
 
   (void)smi.ref_count_dec();
@@ -553,32 +531,6 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t* num_devices) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   *num_devices = static_cast<uint32_t>(smi.devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_nic_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.nic_devices().size());
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_num_switch_monitor_devices(uint32_t* num_devices) {
-  TRY assert(num_devices != nullptr);
-  if (num_devices == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  *num_devices = static_cast<uint32_t>(smi.switch_devices().size());
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -830,40 +782,6 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
   CATCH
 }
 
-rsmi_status_t rsmi_nic_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_NIC_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
-rsmi_status_t rsmi_switch_dev_pci_id_get(uint32_t dv_ind, uint64_t* bdfid) {
-  TRY std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
-  LOG_TRACE(ss);
-
-  GET_SWITCH_DEV_FROM_INDX
-
-  uint64_t domain = 0;
-  *bdfid = amd::smi::bdfid_from_domain(dev->bdfid(), domain);
-
-  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-     << ", reporting RSMI_STATUS_SUCCESS";
-  LOG_TRACE(ss);
-  return RSMI_STATUS_SUCCESS;
-  CATCH
-}
-
 rsmi_status_t rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t* numa_node) {
   TRY rsmi_status_t ret;
 
@@ -899,8 +817,11 @@ static rsmi_status_t get_id(uint32_t dv_ind, amd::smi::DevInfoTypes typ, uint16_
     return ret;
   }
 
+  // amdgpu prints xgmi_physical_id in decimal ("%u\n"); every other id read here is hex.
+  const int base = (typ == amd::smi::kDevXGMIPhysicalID) ? 10 : 16;
+
   errno = 0;
-  val_u64 = strtoul(val_str.c_str(), nullptr, 16);
+  val_u64 = strtoul(val_str.c_str(), nullptr, base);
   assert(errno == 0);
   if (errno != 0) {
     return amd::smi::ErrnoToRsmiStatus(errno);
@@ -2085,19 +2006,35 @@ rsmi_status_t rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t blo
   CATCH
 }
 
-static std::string bitfield_to_freq_string(uint64_t bitf, uint32_t num_supported) {
-  std::string bf_str;
-  std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
-
+// Build the space-separated DPM-level string for pp_dpm_* from a bitmask: bit N
+// selects level N (e.g. 0b101 -> "0 2 "). Bits above the highest settable level
+// are dropped before writing so an out-of-range level never gets requested.
+// The deep-sleep level ('S') is counted in num_supported but is not writable,
+// so it is excluded from the settable range. Throws RSMI_STATUS_UNEXPECTED_DATA
+// if the device reports zero settable levels (this should not happen on any
+// supported ASIC), or RSMI_STATUS_INVALID_ARGS if the mask selects no
+// settable level.
+static std::string bitfield_to_freq_string(uint64_t bitf, uint32_t num_supported,
+                                           bool has_deep_sleep = false) {
   if (num_supported > RSMI_MAX_NUM_FREQUENCIES) {
     throw amd::smi::rsmi_exception(RSMI_STATUS_INVALID_ARGS, __FUNCTION__);
   }
 
-  for (uint32_t i = 0; i < num_supported; ++i) {
+  uint32_t settable = (has_deep_sleep && num_supported > 0) ? num_supported - 1 : num_supported;
+  if (settable == 0) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+  }
+
+  std::string bf_str;
+  std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
+  for (uint32_t i = 0; i < settable; ++i) {
     if (bs[i]) {
       bf_str += std::to_string(i);
       bf_str += " ";
     }
+  }
+  if (bf_str.empty()) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_INVALID_ARGS, __FUNCTION__);
   }
   return bf_str;
 }
@@ -2125,6 +2062,18 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  assert(dv_ind < smi.devices().size());
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
+  assert(dev != nullptr);
+
+  std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
+  bool read_only = false;
+  // Dont try to set on pp_dpm* files that are read only
+  if (amd::smi::isReadOnlyForAll(sysfs_path, &read_only) == 0 && read_only) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2136,46 +2085,26 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
-  // Deep sleep entry (index 0 in pp_dpm_sclk marked with 'S') is not a real
-  // DPM level; subtract it from the valid count so the bitmask only covers
-  // actual DPM levels.  Bitmask bit i maps to sysfs DPM level i, which
-  // corresponds to freqs.frequency[i] when has_deep_sleep is false, or
-  // freqs.frequency[i+1] when has_deep_sleep is true.
-  if (freqs.num_supported > 0) {
-    uint32_t max_levels = freqs.num_supported;
-    if (freqs.has_deep_sleep) {
-      max_levels--;
-    }
-    uint64_t valid_mask = (max_levels > 0) ? (1ULL << max_levels) - 1 : 0;
-    if (freq_bitmask == 0 || (freq_bitmask & ~valid_mask)) {
-      return RSMI_STATUS_INVALID_ARGS;
-    }
+  // Logged before bitfield_to_freq_string()/perf-level-set so this context is
+  // captured even if a later step fails or throws (e.g. no settable level).
+  std::string clock_name = kClkStateMap.find(clk_type)->second;
+  ss << __PRETTY_FUNCTION__ << " | Requested clock frequency set for device " << dv_ind << "for "
+     << clock_name << "\n : mask=0x" << std::hex << freq_bitmask << std::dec
+     << ", num_supported=" << freqs.num_supported
+     << ", deep_sleep=" << (freqs.has_deep_sleep ? "Y" : "N") << ", current=" << freqs.current
+     << " | freqs[0.." << freqs.num_supported << "):";
+  for (uint32_t fi = 0; fi < freqs.num_supported && fi < RSMI_MAX_NUM_FREQUENCIES; ++fi) {
+    ss << " [" << fi << "]=" << freqs.frequency[fi];
   }
+  LOG_DEBUG(ss);
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
-  // assert below is not true
-  assert(dv_ind < smi.devices().size());
-
-  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
-  assert(dev != nullptr);
-
-  // If the sysfs node is read-only, force DPM level is not supported
-  std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
-  bool read_only = false;
-  int ro_ret = amd::smi::isReadOnlyForAll(sysfs_path, &read_only);
-  if (ro_ret != 0) {
-    return amd::smi::ErrnoToRsmiStatus(ro_ret);
-  }
-  if (read_only) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  // bitfield_to_freq_string iterates [0, num_supported), but the validation
-  // above already guarantees no bits are set beyond the valid DPM range, so
-  // the extra iteration over the deep sleep index (if present) is harmless.
-  std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
+  // The deep-sleep pseudo-level ('S') is counted in freqs.num_supported but is
+  // not a writable pp_dpm_* label, so it is excluded from the settable range.
+  std::string freq_enable_str =
+      bitfield_to_freq_string(freq_bitmask, freqs.num_supported, freqs.has_deep_sleep);
+  ss << __PRETTY_FUNCTION__ << " | About to try writing clock frequency mask for device " << dv_ind
+     << " for " << clock_name << ": freq_enable_str=|" << freq_enable_str << "|";
+  LOG_DEBUG(ss);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2184,14 +2113,10 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
 
   rsmi_status_t status;
   status = amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
-
-  if (status == RSMI_STATUS_PERMISSION) {
-    bool post_read_only = false;
-    amd::smi::isReadOnlyForAll(sysfs_path, &post_read_only);
-    if (post_read_only) {
-      return RSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
+  ss << __PRETTY_FUNCTION__ << " | Wrote clock frequency mask for device " << dv_ind << " for "
+     << clock_name << ": freq_enable_str=|" << freq_enable_str << "|"
+     << "; returned: " << amd::smi::getRSMIStatusString(status, false);
+  LOG_DEBUG(ss);
 
   return status;
 
@@ -3863,19 +3788,8 @@ rsmi_status_t rsmi_dev_fan_speed_get(uint32_t dv_ind, uint32_t sensor_ind, int64
 
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), hwmon pwm1 does not reflect the actual fan speed.
-  // Read the FAN_MINIMUM_PWM value from the gpu_od sysfs instead.
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t current_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanCurrentPwm(fan_ctrl_path, &current_pwm);
-    if (parse_ret == 0) {
-      *speed = static_cast<int64_t>(current_pwm);
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // hwmon pwm1 is the running fan duty cycle. The gpu_od fan_minimum_pwm node is
+  // only a user-set curve floor (0 by default), so it must not be read here.
   ret = get_dev_mon_value(amd::smi::kMonFanSpeed, dv_ind, sensor_ind, speed);
 
   return ret;
@@ -4020,20 +3934,8 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind,
   CHK_SUPPORT_SUBVAR_ONLY(max_speed, sensor_ind)
   DEVICE_MUTEX
 
-  // On gpu_od GPUs (Navi3x+), the effective max fan speed is the OD_RANGE
-  // maximum from fan_minimum_pwm, not the hwmon pwm1_max (which is always 255).
-  std::string fan_ctrl_path = dev->get_gpu_od_fan_min_pwm_path();
-  if (amd::smi::FileExists(fan_ctrl_path.c_str())) {
-    uint64_t od_min_pwm = 0;
-    uint64_t od_max_pwm = 0;
-    int parse_ret = amd::smi::ParseGpuOdFanRange(fan_ctrl_path, &od_min_pwm, &od_max_pwm);
-    if (parse_ret == 0) {
-      *max_speed = od_max_pwm;
-      return RSMI_STATUS_SUCCESS;
-    }
-  }
-
-  // Legacy hwmon path
+  // Pair with rsmi_dev_fan_speed_get: the running duty cycle comes from hwmon
+  // pwm1, so its max must be hwmon pwm1_max, not the gpu_od OD_RANGE limit.
   ret = get_dev_mon_value(amd::smi::kMonMaxFanSpeed, dv_ind, sensor_ind,
                           reinterpret_cast<int64_t*>(max_speed));
 
@@ -5882,6 +5784,43 @@ rsmi_status_t rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst, 
   CATCH
 }
 
+rsmi_status_t rsmi_topo_get_cpu_links(uint32_t dv_ind, uint32_t* num_links,
+                                      rsmi_cpu_link_t* links) {
+  TRY
+
+      GET_DEV_AND_KFDNODE_FROM_INDX
+
+      if (num_links == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::vector<amd::smi::GpuCpuLink> cpu_links;
+  if (amd::smi::DiscoverGpuCpuLinks(kfd_node->node_index(), &cpu_links) != 0) {
+    return RSMI_STATUS_FILE_ERROR;
+  }
+
+  uint32_t capacity = *num_links;
+  *num_links = static_cast<uint32_t>(cpu_links.size());
+  for (uint32_t i = 0; i < cpu_links.size() && links != nullptr && i < capacity; i++) {
+    links[i] = rsmi_cpu_link_t{};
+    links[i].numa_node_id = cpu_links[i].numa_node_id;
+    switch (cpu_links[i].type) {
+      case amd::smi::IOLINK_TYPE_XGMI:
+        links[i].type = RSMI_IOLINK_TYPE_XGMI;
+        break;
+      case amd::smi::IOLINK_TYPE_PCIEXPRESS:
+        links[i].type = RSMI_IOLINK_TYPE_PCIEXPRESS;
+        break;
+      default:
+        links[i].type = RSMI_IOLINK_TYPE_UNDEFINED;
+        break;
+    }
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
 rsmi_status_t rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst, bool* accessible) {
   TRY
 
@@ -6836,7 +6775,6 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   std::string newMemoryPartition = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
   std::string currentMemoryPartition;
 
-  // do nothing if memory_partition is the current mode
   rsmi_status_t ret_get = get_memory_partition(dv_ind, currentMemoryPartition);
   // we can try to set, even if we get unexpected data
   if (ret_get != RSMI_STATUS_SUCCESS && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
@@ -6850,19 +6788,8 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
     LOG_ERROR(ss);
     return ret_get;
   }
-  rsmi_memory_partition_type_t currRSMIMemoryPartition =
-      mapStringToMemoryPartitionTypes.at(currentMemoryPartition);
-  if (currRSMIMemoryPartition == memory_partition) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success - no change, current memory partition was already requested"
-       << " setting"
-       << " | Device #: " << dv_ind
-       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Data: " << newMemoryPartition
-       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
-    LOG_TRACE(ss);
-    return RSMI_STATUS_SUCCESS;
-  }
+  const bool is_current_mode =
+      mapStringToMemoryPartitionTypes.at(currentMemoryPartition) == memory_partition;
 
   // is this an available mode to set to?
   std::string memory_capabilities_str = "unknown";
@@ -6901,12 +6828,30 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   }
 
   GET_DEV_FROM_INDX
+  // Write the current mode too: it cancels a different mode requested earlier,
+  // which would otherwise apply at the next driver reload.
   int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newMemoryPartition);
   rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
+  // Single-mode GPUs expose the file without write bits, so nothing can be pending
+  // there; a read-only mount (EROFS) keeps the write bits and is reported.
+  struct stat attr = {};
+  if (is_current_mode && status == RSMI_STATUS_PERMISSION &&
+      stat(dev->get_sys_file_path_by_type(amd::smi::kDevMemoryPartition).c_str(), &attr) == 0 &&
+      (attr.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) == 0) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Success - requested mode is already current; write returned "
+       << getRSMIStatusString(status, false) << " | Device #: " << dv_ind
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Data: " << newMemoryPartition
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
+    LOG_INFO(ss);
+    return RSMI_STATUS_SUCCESS;
+  }
   if (status != RSMI_STATUS_SUCCESS) {
     if (status == RSMI_STATUS_PERMISSION) {
-      status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
+      // Root was checked above, so the driver or a read-only /sys refused the write.
+      status = RSMI_STATUS_NOT_SUPPORTED;
     }
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "

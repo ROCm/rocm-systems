@@ -201,6 +201,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand addr;
   Operand data0;
   Operand data1;
@@ -213,6 +217,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand addr;
   Operand data0;
@@ -323,9 +331,6 @@ class DsWriteAddtidB32Ds : public Ds {
 public:
   DsWriteAddtidB32Ds(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
-    amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
-  }
   Operand data0;
   Operand dsmem;
   Operand m0;
@@ -556,6 +561,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -570,6 +579,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand vdst;
   Operand addr;
@@ -958,6 +971,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand addr;
   Operand data0;
   Operand data1;
@@ -970,6 +987,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand addr;
   Operand data0;
@@ -1341,6 +1362,10 @@ public:
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
   }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
+  }
   Operand vdst;
   Operand addr;
   Operand data0;
@@ -1355,6 +1380,10 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     amdgpu::ds_wordwise_register_modifiers(*this, modifiers);
+  }
+  bool uses_data1() const { return inst_.offset0 != inst_.offset1; }
+  bool tracks_explicit_source(uint8_t index) const override {
+    return src_operand(index) != &data1 || uses_data1();
   }
   Operand vdst;
   Operand addr;

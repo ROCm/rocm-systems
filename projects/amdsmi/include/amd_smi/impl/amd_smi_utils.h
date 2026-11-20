@@ -39,11 +39,17 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
 amdsmi_status_t smi_amdgpu_get_bad_page_threshold(amd::smi::AMDSmiGPUDevice* device,
                                                   uint32_t* threshold);
 amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device);
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt);
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
+// True when KFD reports the GPU's link to the CPU as xGMI: the GPU has no PCIe host link, and
+// the PCIe link in its config space is emulated. False otherwise, including when the lookup fails.
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device);
+// PLX temperature is carried in gpu_metrics rather than hwmon. Reports
+// NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
+// no such sensor), otherwise writes *temperature.
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature);
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name);
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device,
@@ -54,9 +60,7 @@ std::string smi_amdgpu_split_string(std::string str, char delim);
 std::vector<std::string> split_string(const std::string& line, char delim);
 std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus);
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name);
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name);
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data);
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name);
 
 amdsmi_status_t smi_clear_char_and_reinitialize(char buffer[], uint32_t len, std::string newString);
 
@@ -309,28 +313,12 @@ const char* smi_amdgpu_pp_dpm_filename_for_clk_type(amdsmi_clk_type_t clk_type);
  */
 void init_asic_info_defaults(amdsmi_asic_info_t* info);
 
-inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
-
-auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
-                                      std::string_view package_version, amdsmi_driver_info_t* info)
-    -> amdsmi_status_t;
-
 /**
- *  @brief Select the DKMS package built for a running kernel.
+ *  @brief Format a DRM driver date such as ``20150101`` as ``2015/01/01 00:00``.
  *
- *  @details Reads ``kernel-<release>-<machine>`` under @p dkms_root, then
- *  validates only that PACKAGE_VERSION directory through the dkms.conf behind
- *  its source symlink. Does not scan sibling packages.
- *
- *  @param[in] dkms_root Directory that contains kernel-* symlinks (for example
- *             /var/lib/dkms/amdgpu).
- *  @param[in] release Kernel release from uname, such as 6.8.0-124-generic.
- *  @param[in] machine Hardware name from uname, such as x86_64.
- *  @param[out] active_version Cleared on entry. Set to PACKAGE_VERSION when
- *              the kernel symlink points at a validated package.
+ *  Returns an empty string (N/A) for ``0``, which kernels without a DRM driver
+ *  date report.
  */
-auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
-                                        std::string_view machine, std::string* active_version)
-    -> amdsmi_status_t;
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

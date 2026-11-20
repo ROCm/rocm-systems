@@ -453,6 +453,12 @@ ring or **fans out** across many:
   serializes exactly as many bytes as 8 × 64 KiB, so a 256 KiB/copy window let an 8 × 256 KiB
   batch (2 MiB total) serialize onto one ring at 51.6 µs where fan-out finished in 32.3 µs — the
   one size at which ABCE lost to the stock blit path.
+- gfx125+ never picks back-to-back on its own. Its fused copies each carry their own signal, so
+  copies sharing a ring complete one after another. On MI455 (2–4 ranks, a distinct source per
+  copy, 4–128 KiB per copy) back-to-back took 12.7–14.0, 19.5–20.5 and 24.0–25.8 µs for 2, 3 and
+  4 copies, against 10.4–11.1, 11.2–12.2 and 12.4–12.9 µs fanned out; stock ROCr, which keeps
+  16–64 KiB batches on one engine, took 14.9–16.0 µs there at 3 and 4 copies.
+  `ABCE_LINEAR_BATCH_MODE_FORCE_BACK_TO_BACK` still applies.
 - Fan-out is parallel-first: every legal ring takes a copy before any ring takes a second, and
   only when copies outnumber rings do the extras prefer their affinity ring. Very large copies
   (≥ 1 GiB) instead group `ABCE_MAX_COPIES_PER_ENGINE` copies per ring.
@@ -490,6 +496,14 @@ down to the completion value and never put anything illegal in it.
 **Direct fused completion** — a single-frame gfx125+ batch with no post-copy work needs no
 epilogue at all; the fused copy packet's own SIGNAL reaches the completion value. A 4 KiB H2D
 copy is then `HDP_FLUSH` + `COPY_LINEAR_WAITSIGNAL`, 72 bytes total.
+
+The fused packet's WAIT block takes over a dependency the same way. When a single-frame gfx125+
+batch's prologue would hold nothing but dependency polls, the first pending dependency moves into
+the first body's WAIT and only the others stay as polls, matching ROCr's fused copy. A dependent
+4 KiB copy without the HDP flush (HIP) is one 76-byte `COPY_LINEAR_WAITSIGNAL` instead of
+`POLL_MEM_64` + `COPY_LINEAR_WAITSIGNAL`. A prologue with a timestamp, an HDP flush or a GCR keeps
+every poll, since that work must follow the dependency, and so does a fan-out, whose coordinator
+releases the start gate only once the dependency is met.
 
 **Gate-free fused fan-out** — when every body is a fused packet and the coordinator has no
 ordering work, all frames start immediately and every frame signals, including the coordinator.
@@ -624,8 +638,10 @@ cannot: which engine, how many engines, and which direction across the fabric.
 
 The SDMA packet processor consumes a ring strictly in order and does not tolerate the write
 index moving out of reservation order. `abce_ring_t` is therefore single-consumer,
-multi-producer, with the protocol in `abce_ring_core.h` shared verbatim with the (not yet
-landed) device ring. The core takes its read-index and publish steps as function pointers bundled
+multi-producer, with the protocol in `abce_ring_core.h` shared verbatim with the device ring
+(`abce_ring_device.h`). A ring's producers are all on one side — host threads, or the waves of the
+one device that owns a device ring — so the host and kernels never submit to the same ring, and a
+device ring's cursors live in device memory at agent scope. The core takes its read-index and publish steps as function pointers bundled
 with one context pointer (`abce_ring_producer_t` for the reserve side, `abce_ring_publisher_t` for
 the commit side) where the C++ version took them as template parameters instantiated on lambdas:
 
@@ -633,9 +649,56 @@ the commit side) where the C++ version took them as template parameters instanti
    disjoint regions with no lock. The region is zeroed, which both satisfies the builders'
    zeroed-buffer contract and turns any unused pad tail into NOPs.
 2. **Write** — the caller fills the region.
-3. **`abce_ring_release()`** — spin until the commit cursor reaches this reservation's start, then
-   advance the hardware write pointer and ring the doorbell, then release the next producer. The
-   doorbell is thus monotone even when producers finish writing out of order.
+3. **`abce_ring_release()`** — order the caller's writes to the region ahead of the doorbell (a
+   store fence, or a readback for a ring with `readback_before_doorbell`), spin until the commit
+   cursor reaches this reservation's start, then advance the hardware write pointer and ring the
+   doorbell, then release the next producer. The doorbell is thus monotone even when producers
+   finish writing out of order.
+
+On device, publish and the commit hand-off use store waits, not release fences: the ring is
+uncached and the queue words are written through, so no L2 writeback is needed. The caller
+releases the buffers a copy names.
+
+A producer may keep the engine read index it last loaded (`abce_ring_control_t::cached_read_index`)
+and read the engine's own word only when that value says the ring is full; the read index only
+grows, so a stale value can understate free space but never overstate it. The device ring does
+this, because the queue's read pointer is in system memory and reading it costs a kernel about a
+microsecond, a quarter of a submit. The host ring does too: the engine keeps writing that word, so
+the host's copy of its cache line is usually stale, and through the HSA adapter each load is also
+two runtime calls.
+
+On the host, submit issues one store fence after copying every frame and before the first
+doorbell, rather than one per doorbell, and then publishes each frame without the fence
+`abce_ring_release()` would add. A fence waits for the previous ring's uncached doorbell store to
+drain, so fencing per doorbell serialized a fan-out's submissions. Publication itself only orders
+the write pointer ahead of the doorbell, with a release fence between the two stores as ROCr's
+`SdmaQueue::RingDoorbell` does.
+
+A ring in device memory is reached through a write-combined BAR, where zeroing a region and then
+copying into it writes every byte twice in partial lines. Such a ring sets
+`abce_ring_config_t::write` (through `abce_hsa_ring_options_t::write` for the HSA adapter) with
+`align64`: acquire then leaves the region alone and submit, padding and cancel each write a
+region once, in whole lines, through the hook, which also orders its own stores (MOVDIR64B
+closes the WC buffer). `abce_hsa_ring_options_t::direct_queue_words` drives the queue through its
+read pointer, write pointer and doorbell words instead of runtime calls, where the runtime's
+doorbell is a plain store. On MI455 a device ring cut the engine-side time of a 16 KiB
+four-destination multicast from 7.6 to 7.2 µs and of a 2 MiB fan-out from 12.4 to 10.8 µs; the
+two 64-byte BAR lines per small frame cost the host about as much as the first saves.
+
+Stores through a BAR can still be in flight when a doorbell, which reaches the engine by another
+path, arrives. An AQL packet processor tolerates that because it waits for a valid header; an
+SDMA engine runs whatever precedes the write index. On MI300X a device ring without a readback
+occasionally ran stale bytes (NOPs, so the copy was skipped and its signal never completed; after
+a wrap they could be old packets), and a fenced coordination store into a device-memory signal
+reached it after the engines read it. So where `HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH` reports
+that the agent's memory is reached over PCIe, a device ring also sets `readback_before_doorbell`,
+and a client whose completion signal lives in device memory sets
+`abce_signal_ref_t::host_store_readback`: submit then reads back the last byte of the ring lines
+and of the coordination word it stored, once per submission, before any doorbell. Wrap padding,
+cancel and a standalone `abce_ring_release()` read back their own region the same way. A host
+that reaches the GPU's memory over xGMI needs neither.
+A read cannot pass earlier stores to the same device, so one covers every ring of the device; the
+signal can be in another GPU's memory, so it is read back on its own.
 
 A payload that would straddle the physical ring end is handled by reserving and publishing the
 wrap tail as a *separate* NOP region, then retrying the payload at offset zero. Keeping the
@@ -643,6 +706,17 @@ padding separate means any payload smaller than the ring can still make progress
 drains, even when padding plus payload exceeds the ring size. Verified on a 256-byte ring: a
 200-byte reservation at offset 0, then a 100-byte reservation lands at monotonic 256 (offset 0)
 after a 56-byte NOP pad, leaving the doorbell at 356.
+
+The device ring folds the padding into the payload's reservation instead (`publish_padding` left
+null): the tail becomes counted NOPs and the payload is written at offset zero, all under one publish.
+That saves a second turn on the commit cursor, at the cost of a frame being at most half the ring.
+
+Device producers still publish in turn. Publishing in batches instead (each producer marks its frame
+written and leaves; whoever is at the head publishes every written frame with one doorbell) was
+measured on MI300X: it raised a lone submit from 2.5 to 4 us and lost throughput with hundreds of
+concurrent producers, because marking, claiming and walking the marks are device-memory round
+trips. What does pay is fewer publishes: lanes of a wave on one ring share one reservation and one
+publish, and a route can hand out several rings.
 
 Attaching to an already-in-use queue seeds the cursors from the queue's current write pointer,
 so the first acquire cannot hand out bytes the engine still owns.
@@ -676,7 +750,7 @@ Read once at first use, decimal or `0x` hex, so thresholds can be swept without 
 
 | Variable | Default | Effect |
 |---|---|---|
-| `ABCE_LINEAR_B2B_MAX_TOTAL` | 512 KiB | batch total at or below which a batch stays back-to-back on one ring |
+| `ABCE_LINEAR_B2B_MAX_TOTAL` | 512 KiB | batch total at or below which a batch stays back-to-back on one ring (pre-gfx125 only) |
 | `ABCE_BROADCAST_MAX` | 16 KiB | size below which pre-gfx125+ multicast uses broadcast packets |
 
 ## 11. Verified behavior
@@ -696,6 +770,7 @@ gfx942:  4x 1 MiB H2D              4 frames        : coordinator HDP_FLUSH ATOMI
 gfx942:  multicast 4 KiB, 4 dsts   1 frame, 128 B : HDP_FLUSH COPY_LINEAR_BROADCAST x2 ATOMIC
 gfx1250: single 4 KiB H2D fused    1 frame,  72 B : HDP_FLUSH COPY_LINEAR_WAITSIGNAL
 gfx1250: multicast 4 KiB, 4 dsts   1 frame,  96 B : HDP_FLUSH COPY_LINEAR_MULTICAST_WAITSIGNAL
+gfx1250: 4 KiB H2D after a dep     1 frame,  76 B : COPY_LINEAR_WAITSIGNAL (WAIT on the dep)
 ```
 
 The decoder landing exactly on each frame's end byte is itself the check that sizing and
@@ -737,26 +812,21 @@ descriptor leaves the `reserved3` coordination word intact.
 
 ## 12. Known gaps
 
-- **No tests in tree.** There is no CMake target either: `runtimes/api-headers` exports none yet,
-  so a consumer adds this directory to its include path and builds as C11, or C++17 for
-  `abce_cxx.h`. Everything verified for this draft was throwaway. Given the library is pure logic over plain memory, a
-  GPU-free unit suite (emit a frame, walk it with `abce_decode.h`, assert the packet sequence
-  and byte count) is both cheap and the main argument for the design; it should land with or
-  before any integration.
-- **`abce_device.h` does not exist, and the device annotations are gone.** The reserve/commit core
-  is still written to be shared with a device producer — its atomics and backoff select
-  `__hip_atomic_*` / `s_sleep` under device compilation — but the C conversion dropped the
-  `ABCE_HD` (`__host__ __device__`) annotations the C++ headers put on the builders and the ring
-  core, and the comments no longer name a device header. So the sharing is now a property of how
-  the code is written rather than something the headers declare; a device-side producer landing
-  later has to put the annotations back.
+- **Tests are GPU-free only.** `tests/abce` (see its `TEST_PLAN.md`) covers packet fields,
+  validation, the ring protocol, golden frames and per-ISA sizing/submit invariants; build it with
+  `-DABCE_BUILD_TESTS=ON`. The device header, the HSA wrapper and hardware round-trips are still
+  untested.
+- **The device header works without annotations.** The C conversion dropped the `ABCE_HD`
+  (`__host__ __device__`) annotations; `abce_device.h` instead wraps itself and the ABCE headers
+  it includes in `#pragma clang force_cuda_host_device`. A HIP translation unit therefore has to
+  include it before any other ABCE header, or the functions stay host-only.
 - **Windows is further away than it was.** Three things in the public header chain are not MSVC
   constructs. The KFD sysfs reader is at least gated behind `ABCE_HAS_KFD_TOPOLOGY` (Linux-only,
   since it walks `/sys/class/kfd` with `opendir`) and bit counting falls back to a portable loop
   off GCC/Clang, but: `abce_host.h` includes `<pthread.h>` unconditionally for the per-thread
   packet scratch's key and destructor; `abce_ring_core.h` includes `<sched.h>` for the host
   spin-wait's `sched_yield()`, where the C++ version used `std::this_thread::yield()`; and there
-  are thirteen uses of the GCC/Clang `__atomic_*` builtins — eight in `abce_ring_core.h`, four in
+  are fourteen uses of the GCC/Clang `__atomic_*` builtins — nine in `abce_ring_core.h`, four in
   `abce_host.h` (the cached environment knobs, arming the coordination word, stamping the
   execution descriptor) and one in `abce_ring_host.h` (the release fence before the doorbell) —
   which Clang accepts on Windows but MSVC does not. Closing that needs a decision, not a

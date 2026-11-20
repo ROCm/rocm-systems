@@ -4,7 +4,10 @@
 
 """CLI leaf test: set command."""
 
-import common.common as common
+import os
+import shutil
+import tempfile
+
 from common.common import amdsmi
 
 from cli.base import TestCliBase
@@ -25,51 +28,45 @@ class TestSet(TestCliBase):
         msg = f"{self.tab}### amd-smi set"
         self.common.print(msg)
 
-        # Get current settings
-        power_profile = {}
-        for index, gpu in enumerate(self.common.processors):
-            try:
-                power_profile[index] = amdsmi.amdsmi_get_gpu_power_profile_presets(gpu, 0)
-            except amdsmi.AmdSmiLibraryException:
-                power_profile[index] = None
-
         cmds = self.CreateCmds(
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
         # Registered before the sweep: RunCmds raises on the first failure, and a
         # sweep that aborts partway is exactly when the GPU is left mid-change.
-        self.addCleanup(self._restore_starting_values, power_profile)
+        self.addCleanup(self._restore_starting_values)
         self.RunCmds(cmds)
 
         return
 
-    def _restore_starting_values(self, power_profile):
+    def _restore_starting_values(self):
         """Put the values the sweep changed back to what setUpClass recorded."""
         cmds = []
         for index, gpu in enumerate(self.common.processors):
-            # Validate max fan speed is sensible; gpu_od GPUs must report <= 100
+            # max fan speed is the hwmon pwm1_max ceiling on every interface
             fan_max = self.metric_data["gpu_data"][index]["fan"]["max"]
             if fan_max != "N/A":
                 self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
-                # Detect gpu_od interface via sysfs for this GPU
-                gpu_bdf = self.list_data[index]["bdf"]
-                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
-                if has_gpu_od:
-                    self.assertLessEqual(
-                        fan_max, 100, f"GPU {index}: gpu_od max fan speed must be <= 100"
-                    )
-                else:
-                    self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
+                self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
 
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
+            # A readable fan speed does not imply the fan can be controlled.
             fan_speed = self.metric_data["gpu_data"][index]["fan"]["speed"]
             if fan_speed != "N/A":
-                cmds.append((f"amd-smi reset --fans --gpu {index}", self.PASS))
+                cmds.append(
+                    (
+                        f"amd-smi reset --fans --gpu {index}",
+                        [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED],
+                    )
+                )
 
             # set --profile defaults
-            if power_profile[index]:
-                profile = _strip_prefix(power_profile[index]["current"], "AMDSMI_PWR_PROF_PRST_")
-                cmds.append((f"amd-smi set --profile {profile} --gpu {index}", self.PASS))
+            # Read from the static baseline: the library is shut down once setup
+            # ends, so querying it here fails and the restore was skipped.
+            profile = self.static_data["gpu_data"][index].get("profile")
+            if isinstance(profile, dict) and profile["current"] in profile["available_profiles"]:
+                cmds.append(
+                    (f"amd-smi set --profile {profile['current']} --gpu {index}", self.PASS)
+                )
 
             # set --perf-determinism defaults
             clock_sys = self.static_data["gpu_data"][index]["clock"]["sys"]
@@ -126,13 +123,13 @@ class TestSet(TestCliBase):
             # set --soc-pstate defaults
             soc_pstate = self.static_data["gpu_data"][index]["soc_pstate"]
             if soc_pstate != "N/A":
-                current = int(soc_pstate["current"])
+                current = int(soc_pstate["current_id"])
                 cmds.append((f"amd-smi set --soc-pstate {current} --gpu {index}", self.PASS))
 
             # set --xgmi-plpd defaults
             xgmi_plpd = self.static_data["gpu_data"][index]["xgmi_plpd"]
             if xgmi_plpd != "N/A":
-                current = int(xgmi_plpd["current"])
+                current = int(xgmi_plpd["current_id"])
                 cmds.append((f"amd-smi set --xgmi-plpd {current} --gpu {index}", self.PASS))
 
             # set --ptl-status defaults
@@ -200,5 +197,215 @@ class TestSet(TestCliBase):
 
         self.common.print("Restore Starting Values")
         self.RunCmds(cmds)
+
+        return
+
+    def test_power_stabilization_configure(self):
+        """Test set --power-stabilization-configure (write path, gpu 0)."""
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi set --power-stabilization-configure"
+        self.common.print(msg)
+
+        ps_baseline = self.static_data["gpu_data"][0]["power_stabilization"]
+        if ps_baseline == "N/A":
+            self.skipTest("Power Stabilization not supported on gpu 0")
+
+        # Negative paths: malformed input is rejected before any sysfs write.
+        cmds = [
+            ("amd-smi set --gpu 0 --power-stabilization-configure invalidkey=1", self.FAIL),
+            ("amd-smi set --gpu 0 --power-stabilization-configure host_control=1", self.FAIL),
+        ]
+        self.RunCmds(cmds)
+
+        # Missing "=" must produce a clean argparse-style error, not an
+        # uncaught traceback.
+        cmd = "amd-smi set --gpu 0 --power-stabilization-configure enable"
+        (rc, std_out, std_err) = self.util.RunCmdSync(cmd)
+        self.assertNotEqual(rc, self.PASS, f"Command '{cmd}' unexpectedly succeeded")
+        combined_output = f"{std_out}\n{std_err}".lower()
+        self.assertIn(
+            "invalid key=value pair",
+            combined_output,
+            f"Command '{cmd}' did not produce the expected clean error message; "
+            f"got: {combined_output}",
+        )
+        self.assertNotIn(
+            "traceback",
+            combined_output,
+            f"Command '{cmd}' crashed with an uncaught traceback instead of a clean error",
+        )
+
+        # Missing / empty / invalid JSON file, via @<path>.
+        tmp_dir = tempfile.mkdtemp(prefix="amdsmi_ps_configure_")
+        try:
+            missing_path = os.path.join(tmp_dir, "missing.json")
+            empty_path = os.path.join(tmp_dir, "empty.json")
+            with open(empty_path, "w"):
+                pass
+            invalid_path = os.path.join(tmp_dir, "invalid.json")
+            with open(invalid_path, "w") as fout:
+                fout.write("not json")
+
+            cmds = [
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{missing_path}", self.FAIL),
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{empty_path}", self.FAIL),
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{invalid_path}", self.FAIL),
+            ]
+            self.RunCmds(cmds)
+
+            # Positive path: KEY=VALUE tokens (comma- and space-separated),
+            # insertion_priority by name, then an @<path> round-trip of the
+            # exact `static --json` dump (host_control is read-only and must
+            # be silently skipped).
+            cmds = [
+                (
+                    "amd-smi set --gpu 0 --power-stabilization-configure enable=1,power_floor=55",
+                    self.PASS,
+                ),
+                (
+                    "amd-smi set --gpu 0 --power-stabilization-configure "
+                    "insertion_priority=GUARANTEED ramp_enable=1",
+                    self.PASS,
+                ),
+            ]
+            self.RunCmds(cmds)
+
+            dump_path = os.path.join(tmp_dir, "dump.json")
+            cmd = "amd-smi static --gpu 0 --power-stabilization --json"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+            # Write the full 'gpu_data' dump as-is: set resolves the GPU 0
+            # entry by matching its integer "gpu" id, same as --ampp-configure.
+            with open(dump_path, "w") as fout:
+                fout.write(data)
+
+            cmds = [
+                (f"amd-smi set --gpu 0 --power-stabilization-configure @{dump_path}", self.PASS)
+            ]
+            self.RunCmds(cmds)
+        finally:
+            # Restore the shared mock sysfs fixture to its starting values.
+            # The read-path dump uses stative names (enabled/ramp_enabled);
+            # the setter's KEY=VALUE keys are the param_id operation names
+            # (enable/ramp_enable). host_control_enabled has no param_id
+            # (read-only), so it is never set.
+            read_to_write_key = {"enabled": "enable", "ramp_enabled": "ramp_enable"}
+
+            def _token_value(value):
+                # Unit-bearing fields come back from `--json` as
+                # unit_format()'s {"value": ..., "unit": ...} shape; unwrap
+                # to the bare value before building the KEY=VALUE token.
+                if isinstance(value, dict) and "value" in value:
+                    value = value["value"]
+                return int(value) if isinstance(value, bool) else value
+
+            restore_tokens = ",".join(
+                f"{read_to_write_key.get(key, key)}={_token_value(value)}"
+                for key, value in ps_baseline.items()
+                if key != "host_control_enabled"
+            )
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure {restore_tokens}",
+                        self.PASS,
+                    )
+                ]
+            )
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+        return
+
+    def test_power_stabilization_configure_case_sensitive_path(self):
+        """End-to-end regression test for the '@<path>' case-preservation bug.
+
+        The CLI's argv-lowercasing pass must leave an `@<path>` value from
+        --power-stabilization-configure untouched in *both* legal spellings:
+        the space-separated form (`--power-stabilization-configure @path`)
+        and the `=` form (`--power-stabilization-configure=@path`) -- only
+        the flag name itself may be lowercased. Uses a deterministic
+        mixed-case directory and filename rather than tempfile.mkdtemp's
+        random suffix (which draws from ascii_letters, so any uppercase
+        coverage there is accidental, not a guard): a regression that
+        lowercases the path turns into a file-not-found FAIL here, since the
+        lowercased path does not exist on this case-sensitive filesystem.
+
+        This exercises the real CLI binary end-to-end, but self-skips below
+        when the GPU does not report Power Stabilization support -- i.e. on
+        every hardware-free CI runner. The guard that is actually
+        CI-reachable regardless of hardware is
+        tests/python/unit/system/test_cli_argv_case_normalization.py, which
+        unit-tests amdsmi_cli.normalize_argv() directly with no GPU
+        dependency. Keep both: this one additionally proves the fix holds
+        through the real argparse/dispatch path on real hardware.
+        """
+        self.common.print_func_name("")
+        msg = f"{self.tab}### amd-smi set --power-stabilization-configure (case-sensitive @<path>)"
+        self.common.print(msg)
+
+        ps_baseline = self.static_data["gpu_data"][0]["power_stabilization"]
+        if ps_baseline == "N/A":
+            self.skipTest("Power Stabilization not supported on gpu 0")
+
+        tmp_dir = tempfile.mkdtemp(prefix="amdsmi_ps_configure_case_")
+        try:
+            cmd = "amd-smi static --gpu 0 --power-stabilization --json"
+            (rc, data, std_err) = self.util.RunCmdSync(cmd)
+            self.assertEqual(rc, self.PASS, f"Command '{cmd}' failed with rc={rc}")
+
+            mixed_case_dir = os.path.join(tmp_dir, "PS_Config")
+            os.makedirs(mixed_case_dir)
+            mixed_case_path = os.path.join(mixed_case_dir, "Dump.json")
+            with open(mixed_case_path, "w") as fout:
+                fout.write(data)
+
+            # Space-separated form: "--power-stabilization-configure @<path>".
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure @{mixed_case_path}",
+                        self.PASS,
+                    )
+                ]
+            )
+
+            # "=" form: "--power-stabilization-configure=@<path>". argparse
+            # only accepts a single token after "=" for a nargs="+" flag, so
+            # this is the only shape that spelling supports.
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure=@{mixed_case_path}",
+                        self.PASS,
+                    )
+                ]
+            )
+        finally:
+            # Restore the shared mock sysfs fixture to its starting values,
+            # same idiom as test_power_stabilization_configure above.
+            read_to_write_key = {"enabled": "enable", "ramp_enabled": "ramp_enable"}
+
+            def _token_value(value):
+                # Unit-bearing fields come back from `--json` as
+                # unit_format()'s {"value": ..., "unit": ...} shape; unwrap
+                # to the bare value before building the KEY=VALUE token.
+                if isinstance(value, dict) and "value" in value:
+                    value = value["value"]
+                return int(value) if isinstance(value, bool) else value
+
+            restore_tokens = ",".join(
+                f"{read_to_write_key.get(key, key)}={_token_value(value)}"
+                for key, value in ps_baseline.items()
+                if key != "host_control_enabled"
+            )
+            self.RunCmds(
+                [
+                    (
+                        f"amd-smi set --gpu 0 --power-stabilization-configure {restore_tokens}",
+                        self.PASS,
+                    )
+                ]
+            )
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
         return

@@ -213,8 +213,9 @@ ncclResult_t rasMsgHandleCollReq(struct rasMsg* msg, struct rasSocket* sock) {
   char line[SOCKET_NAME_MAXLEN + 1];
 
   INFO(NCCL_RAS, "RAS handling collReq from %s (root %s:%" PRIu64 ", timeout %gs, type %d)",
-       ncclSocketToString(&sock->sock.addr, rasLine), ncclSocketToString(&msg->collReq.rootAddr, line),
-       msg->collReq.rootId, (double)msg->collReq.timeout / CLOCK_UNITS_PER_SEC, msg->collReq.type);
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)),
+       ncclSocketToString(&msg->collReq.rootAddr, line, sizeof(line)), msg->collReq.rootId,
+       (double)msg->collReq.timeout / CLOCK_UNITS_PER_SEC, msg->collReq.type);
   if (sock->conn == nullptr) {
     INFO(NCCL_RAS, "RAS socket lacks a connection: status %d -- internal error?", sock->status);
     return ncclInternalError;
@@ -336,8 +337,9 @@ ncclResult_t rasMsgHandleCollResp(struct rasMsg* msg, struct rasSocket* sock) {
   char line[SOCKET_NAME_MAXLEN + 1];
 
   INFO(NCCL_RAS, "RAS handling collResp from %s (root %s:%" PRIu64 ", nPeers %d, nData %d, nLegTimeouts %d)",
-       ncclSocketToString(&sock->sock.addr, rasLine), ncclSocketToString(&msg->collResp.rootAddr, line),
-       msg->collResp.rootId, msg->collResp.nPeers, msg->collResp.nData, msg->collResp.nLegTimeouts);
+       ncclSocketToString(&sock->sock.addr, rasLine, sizeof(rasLine)),
+       ncclSocketToString(&msg->collResp.rootAddr, line, sizeof(line)), msg->collResp.rootId, msg->collResp.nPeers,
+       msg->collResp.nData, msg->collResp.nLegTimeouts);
 
   for (coll = rasCollectivesHead; coll; coll = coll->next) {
     if (memcmp(&msg->collResp.rootAddr, &coll->rootAddr, sizeof(msg->collResp.rootAddr)) == 0 &&
@@ -390,7 +392,8 @@ void rasCollsPurgeConn(struct rasConnection* conn) {
     char line[SOCKET_NAME_MAXLEN + 1];
     if (coll->fromConn == conn) {
       INFO(NCCL_RAS, "RAS purging collective %s:%" PRIu64 " because it comes from %s",
-           ncclSocketToString(&coll->rootAddr, line), coll->rootId, ncclSocketToString(&conn->addr, rasLine));
+           ncclSocketToString(&coll->rootAddr, line, sizeof(line)), coll->rootId,
+           ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)));
       rasCollFree(coll);
     } else {
       for (int i = 0; i < coll->nFwdSent; i++) {
@@ -401,8 +404,9 @@ void rasCollsPurgeConn(struct rasConnection* conn) {
           INFO(NCCL_RAS,
                "RAS not waiting for response from %s to collective %s:%" PRIu64 " "
                "(nFwdSent %d, nFwdRecv %d, nLegTimeouts %d)",
-               ncclSocketToString(&conn->addr, rasLine), ncclSocketToString(&coll->rootAddr, line), coll->rootId,
-               coll->nFwdSent, coll->nFwdRecv, coll->nLegTimeouts);
+               ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
+               ncclSocketToString(&coll->rootAddr, line, sizeof(line)), coll->rootId, coll->nFwdSent, coll->nFwdRecv,
+               coll->nLegTimeouts);
           if (coll->nFwdSent == coll->nFwdRecv) (void)rasCollReadyResp(coll);
           break;
         }
@@ -460,7 +464,7 @@ void rasCollsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
         // We've exceeded the leg timeout.  For all outstanding responses, check their connections.
         if (!coll->timeoutWarned) {
           INFO(NCCL_RAS, "RAS collective %s:%" PRIu64 " timeout warning (%gs) -- %d responses missing",
-               ncclSocketToString(&coll->rootAddr, rasLine), coll->rootId,
+               ncclSocketToString(&coll->rootAddr, rasLine, sizeof(rasLine)), coll->rootId,
                (double)(now - coll->startTime) / CLOCK_UNITS_PER_SEC, coll->nFwdSent - coll->nFwdRecv);
           coll->timeoutWarned = true;
         }
@@ -478,8 +482,9 @@ void rasCollsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
             INFO(NCCL_RAS,
                  "RAS not waiting for response from %s to collective %s:%" PRIu64 " "
                  "(nFwdSent %d, nFwdRecv %d, nLegTimeouts %d)",
-                 ncclSocketToString(&conn->addr, rasLine), ncclSocketToString(&coll->rootAddr, line), coll->rootId,
-                 coll->nFwdSent, coll->nFwdRecv, coll->nLegTimeouts);
+                 ncclSocketToString(&conn->addr, rasLine, sizeof(rasLine)),
+                 ncclSocketToString(&coll->rootAddr, line, sizeof(line)), coll->rootId, coll->nFwdSent, coll->nFwdRecv,
+                 coll->nLegTimeouts);
             coll->fwdConns[i] = nullptr;
             coll->nFwdRecv++;
             coll->nLegTimeouts++;
@@ -495,7 +500,7 @@ void rasCollsHandleTimeouts(int64_t now, int64_t* nextWakeup) {
             // We've exceeded even the longer timeout, which is unexpected.  Try to return whatever we have (though
             // the originator of the collective, if it's not us, may have timed out already anyway).
             INFO(NCCL_RAS, "RAS collective %s:%" PRIu64 " timeout error (%gs) -- giving up on %d missing responses",
-                 ncclSocketToString(&coll->rootAddr, rasLine), coll->rootId,
+                 ncclSocketToString(&coll->rootAddr, rasLine, sizeof(rasLine)), coll->rootId,
                  (double)(now - coll->startTime) / CLOCK_UNITS_PER_SEC, coll->nFwdSent - coll->nFwdRecv);
             coll->nLegTimeouts += coll->nFwdSent - coll->nFwdRecv;
             coll->nFwdRecv = coll->nFwdSent;
@@ -571,11 +576,29 @@ static ncclResult_t rasCollConnsInit(struct rasCollRequest** pReq, size_t* pReqL
 static ncclResult_t rasCollConnsMerge(struct rasCollective* coll, struct rasMsg* msg) {
   struct rasCollConns* collData;
   struct rasCollConns* msgData;
+  int avail; // Payload bytes available after the fixed part of rasCollConns.
   int dataOffset = rasMsgLength(RAS_MSG_COLLRESP) + msg->collResp.nPeers * sizeof(*msg->collResp.peers);
   ALIGN_SIZE(dataOffset, alignof(int64_t));
 
   msgData = (struct rasCollConns*)(((char*)msg) + dataOffset);
   collData = (struct rasCollConns*)coll->data;
+
+  // nData is the authority for how much of the payload was actually received, so it has to cover the fixed
+  // part before any field of it may be read.
+  avail = msg->collResp.nData - (int)sizeof(*msgData);
+  if (avail < 0) {
+    WARN("RAS received a COLLRESP message with truncated connection data (%d bytes)", msg->collResp.nData);
+    return ncclRemoteError;
+  }
+
+  // The count inside the payload comes from the peer, and it sizes both the merged buffer and the copy
+  // below, so it must fit within what the peer actually sent.
+  if (msgData->nNegativeMins < 0 ||
+      (int64_t)msgData->nNegativeMins * sizeof(*msgData->negativeMins) > avail) {
+    WARN("RAS received a COLLRESP message with an invalid negative minimums count (%d for %d bytes of data)",
+         msgData->nNegativeMins, msg->collResp.nData);
+    return ncclRemoteError;
+  }
 
   // Merge the stats.
   if (collData->travelTimeMin > msgData->travelTimeMin) collData->travelTimeMin = msgData->travelTimeMin;
@@ -804,6 +827,43 @@ fail:
   goto ret;
 }
 
+// Verifies that the peer-supplied comm records of a RAS_COLL_COMMS payload stay within the nData bytes the
+// peer actually sent.  The merge below sizes its copies from these counts, so a count that is negative or
+// that overruns the payload has to be rejected before it is used.  nPeers is the peer count the same message
+// carries; the ranks' peerIdx values index that array (after the merge shifts them by coll->nPeers), and the
+// client code indexes arrays of that size with them, so they are range-checked here as well.
+static ncclResult_t rasCollCommsCheck(const struct rasCollComms* data, int nData, int nPeers) {
+  int offset = offsetof(struct rasCollComms, comms);
+
+  if (nData < offset || data->nComms < 0) return ncclRemoteError;
+
+  for (int commIdx = 0; commIdx < data->nComms; commIdx++) {
+    const struct rasCollComms::comm* comm;
+    int64_t commBytes;
+
+    if (nData - offset < (int)sizeof(*comm)) return ncclRemoteError;
+    comm = (const struct rasCollComms::comm*)(((const char*)data) + offset);
+    if (comm->nRanks < 0 || comm->nMissingRanks < 0) return ncclRemoteError;
+    // commNRanks is what the merge clamps a rank count to, and it ends up in the merged buffer that the
+    // reporting code iterates, so hold the peer to the invariant the struct documents.  The sum is widened
+    // because both counts are the peer's and each can reach INT_MAX, which overflows an int addition before
+    // the commBytes check below gets a chance to reject them.
+    if (comm->commNRanks < (int64_t)comm->nRanks + comm->nMissingRanks) return ncclRemoteError;
+
+    commBytes = (int64_t)sizeof(*comm) + (int64_t)comm->nRanks * sizeof(*comm->ranks) +
+                (int64_t)comm->nMissingRanks * sizeof(struct rasCollCommsMissingRank);
+    if (commBytes > nData - offset) return ncclRemoteError;
+
+    // Only safe to walk the ranks now that commBytes has confirmed they are all within the payload.
+    for (int rankIdx = 0; rankIdx < comm->nRanks; rankIdx++)
+      if (comm->ranks[rankIdx].peerIdx < 0 || comm->ranks[rankIdx].peerIdx >= nPeers) return ncclRemoteError;
+
+    offset += (int)commBytes;
+  }
+
+  return ncclSuccess;
+}
+
 // Merges incoming collective RAS_COLL_COMMS response message into the local accumulated data.
 static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg* msg) {
   struct rasCollComms* collData; // Data previously stored (locally) by our process.
@@ -815,6 +875,11 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
 
   msgData = (struct rasCollComms*)(((char*)msg) + dataOffset);
   collData = (struct rasCollComms*)coll->data;
+
+  if (rasCollCommsCheck(msgData, msg->collResp.nData, msg->collResp.nPeers) != ncclSuccess) {
+    WARN("RAS received a COLLRESP message with malformed communicator data (%d bytes)", msg->collResp.nData);
+    return ncclRemoteError;
+  }
 
   if (msgData->nComms > 0) {
     struct rasCollComms* newData = nullptr; // Destination buffer for the merged data.
@@ -852,7 +917,8 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
                                           msgComm->nMissingRanks * sizeof(struct rasCollCommsMissingRank) -
                                           (char*)msgData >
                                         msg->collResp.nData) {
-        // Should never happen.
+        // Should never happen: rasCollCommsCheck has already walked exactly this chain and rejected the
+        // message if any record overran nData.  Kept as a belt-and-braces guard on the loop's own arithmetic.
         INFO(NCCL_RAS, "RAS overflow of msgData: msgIdx %d, nComms %d, nData %d, needs %td -- internal error?", msgIdx,
              msgData->nComms, msg->collResp.nData,
              (char*)(msgComm + 1) + msgComm->nRanks * sizeof(*msgComm->ranks) +
@@ -889,8 +955,12 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
         } else {
           newComm->nRanks = collComm->nRanks + msgComm->nRanks;
         }
-        // Merge the ranks.
-        for (int newRankIdx = 0, collRankIdx = 0, msgRankIdx = 0;
+        // Merge the ranks.  newRankIdx outlives the loop: the loop can write fewer ranks than the count
+        // above anticipates (a duplicate rank consumes two inputs for one output, and the skips below bail
+        // out early), and a count that overstates what was written would break the
+        // commNRanks >= nRanks + nMissingRanks invariant for the next hop, which rejects the whole response.
+        int newRankIdx = 0;
+        for (int collRankIdx = 0, msgRankIdx = 0;
              collRankIdx < collComm->nRanks || msgRankIdx < msgComm->nRanks; newRankIdx++) {
           int cmpRank;
           if (newRankIdx == newComm->commNRanks) break; // Short of failing, the best we can do is skip...
@@ -944,6 +1014,7 @@ static ncclResult_t rasCollCommsMerge(struct rasCollective* coll, struct rasMsg*
             } // if (collComm->nMissingRanks > 0)
           } // if (cmpRank > 0)
         } // for (newRankIdx)
+        newComm->nRanks = newRankIdx;
         if (collComm->nMissingRanks > 0) {
           // Copy the missingRanks to newComm, skipping over any no longer needed entries.
           struct rasCollCommsMissingRank* collMissingRanks;

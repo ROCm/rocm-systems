@@ -144,6 +144,6 @@ To verify the build, build and run a sample from the installed location:
    mkdir rocdecode-sample && cd rocdecode-sample
    cmake "%ROCM_PATH%\share\rocdecode\samples\videoDecodeRaw"
    cmake --build . --config Release
-   set PATH=%ROCM_PATH%\bin;%ROCM_PATH%\lib\rocm_sysdeps\bin;%PATH%
+   set PATH=%ROCM_PATH%\bin;%PATH%
    Release\videodecoderaw.exe -i "%ROCM_PATH%\share\rocdecode\video\AMD_driving_virtual_20-H265.265"
 

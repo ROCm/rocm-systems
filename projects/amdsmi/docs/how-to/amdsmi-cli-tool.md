@@ -45,7 +45,7 @@ When run with `--help`, it reports the available subcommands:
 ~$ amd-smi --help
 usage: amd-smi [-h] [--rocm-smi]  ...
 
-AMD System Management Interface | Version: 27.0.0 | ROCm version: 7.14.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 27.3.0 | ROCm version: 10.3.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -81,7 +81,7 @@ amd-smi --rocm-smi
 ```
 
 ```{note}
-For command-specific help, use `amd-smi [command] --help` for see more detailed
+For command-specific help, use `amd-smi [command] --help` to see more detailed
 usage information. See [Commands](#cmds).
 
 For more detailed version information, use `amd-smi version`.
@@ -90,7 +90,17 @@ To display GPU information in the legacy ROCm-SMI format, use `amd-smi --rocm-sm
 See [ROCm-SMI compatibility mode](#cli-ex-rocm-smi).
 ```
 
-Environment variables:
+### Selecting devices
+
+`--gpu`, `--cpu`, `--core`, and `--nic` accept space-separated or repeated
+selections without duplicates, preserving first-selected order (`--gpu 2 --gpu all`
+reports GPU 2 first). Comma-separated lists such as `--gpu=0,1` aren't supported.
+Repeating an option adds devices rather than narrowing an earlier selection, so
+`--gpu all --gpu 0` selects every GPU, including for `set` and `reset`.
+In `amd-smi set`, one value applies to every selected device; run separate commands
+for different values.
+
+### Environment variables
 
 You can set one or more variables in front of any `amd-smi` invocation. For example:
 
@@ -114,7 +124,27 @@ details for usage.
 (cmd-list)=
 ### amd-smi list
 
-Lists GPU information.
+Lists GPU information, including the CUID and its provenance.
+
+`--gpu 2 --gpu all` keeps GPU 2 first; `--gpu 2 all` uses device enumeration order.
+
+#### CUID identity and compatibility
+
+The `uuid` field (human-readable/JSON) and `gpu_uuid` column (CSV) report the
+legacy GPU UUID, or `N/A`; they never contain a CUID. The CUID fields below
+follow all existing list fields, including those selected by `--enumeration`.
+
+Field | Meaning
+---|---
+`cuid` | Derived CUID, or `N/A`; never contains a legacy UUID
+`source` | `DRIVER`, `LIBRARY`, or `UNKNOWN`, from the CUID API
+`auxiliary` | Boolean `true`/`false` in JSON, `True`/`False` in CSV, or the string `unknown`; unknown is not false
+`cuid_metadata_status` | `available`, `partial`, `unsupported` (the library predates the call), `not_supported` (no CUID for this handle; the other CUID fields read `N/A`), `invalid_value`, or `amdsmi_error_<numeric status>`; preserves metadata failures even when an identifier remains available
+
+If the CUID info API fails, the CUID-only API is tried, so a metadata failure
+alone does not hide a readable CUID.
+
+`list` never reports the primary CUID.
 
 ```{note}
 `amd-smi list -e` is useful for mapping physical-to-logical GPU IDs.
@@ -170,11 +200,29 @@ Command Modifiers:
 Gets static information about the specified GPU. See the [sample
 output](#cli-ex-static) for `amd-smi static`.
 
+`amd-smi static --cuid` adds a per-GPU `cuid` block with `derived_cuid`,
+`primary_cuid`, `component_type`, `auxiliary`, `source`, `identifier_kind`
+and `cuid_metadata_status`. `identifier_kind` is `cuid` when `derived_cuid`
+holds a CUID and `unknown` otherwise; the other fields have the semantics
+described under [`amd-smi list`](#cmd-list). It does not fall back to a legacy
+UUID. `primary_cuid` is `N/A (not requested)` unless `--cuid-primary` is given.
+
+On a GPU in SPX the handle reports the whole GPU's CUID. In DPX and above,
+on a partition-capable GPU such as an MI300-series GPU, each GPU handle is a
+compute partition and reports that partition's own CUID, never the whole
+GPU's. A partition whose UnitID cannot be determined, for example because KFD
+is not loaded, reads `N/A` with `cuid_metadata_status` `not_supported`.
+
+For every component on the node, not only GPUs, use
+[`amd-smi node --cuid`](#cmd-node).
+
 ```shell-session
 ~$ amd-smi static --help
-usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
-                      [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
-                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
+usage: amd-smi static [-h] [-a] [-b] [-I] [-d] [-v] [-c] [-B] [-R] [-r] [-C [CLOCK ...]]
+                      [-Y] [-y] [-p] [-m] [-A] [-l] [-P] [-x] [-o] [-u]
+                      [-S] [-s] [-i] [-g GPU [GPU ...]
+                      | -U CPU [CPU ...]] [--json | --csv] [--file FILE] [--overwrite]
+                      [--append] [--loglevel LEVEL]
 
 If no GPU is specified, returns static information for all GPUs on the system.
 If no static argument is provided, all static information will be displayed.
@@ -183,7 +231,7 @@ Static Arguments:
   -h, --help               show this help message and exit
   -a, --asic               All asic information
   -b, --bus                All bus information
-  -I, --ifwi               All video bios\IFWI information (if available)
+  -I, --ifwi               All video bios/IFWI information (if available)
   -d, --driver             Displays driver version
   -v, --vram               All vram information
   -c, --cache              All cache information
@@ -191,13 +239,33 @@ Static Arguments:
   -R, --process-isolation  The process isolation status
   -r, --ras                Displays RAS features information;
                                 Sudo may be required for some features
+  -Y, --cuid               Component Unified ID: the derived CUID, its component type, whether it is a
+                           temporary (auxiliary) identifier, and which layer answered.
+                           Not part of the default `amd-smi static` output; ask for it.
+                           The primary CUID is not shown by default either: its payload embeds the raw
+                           serial number. Add --cuid-primary, as root, to include it.
+  -y, --cuid-primary       Include the primary CUID in the CUID output, implying --cuid. Requires
+                           privilege, and prints a value that embeds the device serial number. Do not
+                           paste it into a bug report.
   -C, --clock [CLOCK ...]  Show one or more valid clock frequency levels. Available options:
                                 SYS, DF, DCEF, SOC, MEM, VCLK0, VCLK1, DCLK0, DCLK1, ALL
-  -p, --partition          Partition information
+  -p, --partition          Partition information:
+                                No longer available in default output.
+                                Argument is required to display.
+                                Ex. `amd-smi static -p` or use
+                                `amd-smi partition -c -m`/`sudo amd-smi partition -a`
+  -m, --mem-carveout       Display VRAM carveout memory options and current setting.
+                                Only supported on some APUs.
+  -A, --ampp               Display AMPP (amdsmi power profile) recipe table: per-profile
+                                version/active/writable/configured state and per-field
+                                name/unit/value/min/max.
   -l, --limit              All limit metric values (i.e. power and thermal limits)
   -P, --soc-pstate         The available soc pstate policy
   -x, --xgmi-plpd          The available XGMI per-link power down policy
+  -o, --profile            Display current and available power profiles
   -u, --numa               All numa node information
+  -S, --power-stabilization
+                                Power Stabilization status (HAWK dummy-compute insertion and Ramp Management)
 
 CPU Arguments:
   -s, --smu                All SMU FW information
@@ -218,11 +286,13 @@ Device Arguments:
                              all | Selects all devices
 
 Command Modifiers:
-  --json                       Displays output in JSON format (human readable by default).
-  --csv                        Displays output in CSV format (human readable by default).
-  --file FILE                  Saves output into a file on the provided path (stdout by default).
-  --loglevel LEVEL             Set the logging level from the possible choices:
-                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+  --json                   Displays output in JSON format
+  --csv                    Displays output in CSV format
+  --file FILE              Saves output into a file on the provided path
+  --overwrite              Overwrite the file
+  --append                 Append to the file
+  --loglevel LEVEL         Set the logging level from the possible choices:
+                               DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
 (cmd-firmware)=
@@ -471,6 +541,29 @@ section that is only partly suppressed is still filtered, so `amd-smi metric
 nothing and `amd-smi metric --partition` filters exactly like plain `amd-smi
 metric`.
 
+#### NIC metrics
+
+`amd-smi metric --nic` reports NICs instead of GPUs. A bare `--nic` selects every NIC, or pass an
+ID, BDF or UUID. Each NIC shows a `TYPE` field (`AINIC`, `UALoE` or the vendor name, `N/A` when
+the type is unknown) next to its health state and port split.
+
+| Argument | Output |
+|---|---|
+| `--port [idx]` | Standard per-port counters. A bare `--port` shows every port. |
+| `--port [idx] --extended` | The catalogued vendor counters as well. `--extended` requires `--port`. |
+| `--rdma [idx]` | RDMA hardware counters per RDMA port. The index counts the NIC's RDMA ports from 0, across its RDMA devices. `static --nic` lists them. |
+| `--sensors` | Every temperature, voltage and power sensor of the NIC with its limits and alarm flags. |
+
+```shell-session
+~$ sudo amd-smi metric --nic 0 --port 0 --extended
+~$ sudo amd-smi metric --nic 0 --rdma --json
+~$ sudo amd-smi metric --nic 0 --sensors
+```
+
+`--port`, `--rdma` and `--sensors` are rejected without `--nic`. With `--nic`, the GPU and CPU
+metric arguments and the watch arguments (`--watch`, `--watch_time`, `--iterations`) are rejected
+too, because the NIC path prints once and never reads them.
+
 (cmd-process)=
 ### amd-smi process
 
@@ -668,6 +761,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--cpu-floor-limit FLOOR_LIMIT] [--cpu-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--core-floor-limit FLOOR_LIMIT] [--core-msr-floor-limit MSR_FLOOR_LIMIT]
                    [--cpu-dimm-sb-reg DIMM_ADDR LID REG_OFFSET REG_SPACE WRITE_DATA] [--cpu-sdps-limit SDPS_LIMIT]
+                   [-A PROFILE_NAME] [--ampp-configure PROFILE_NAME [KEY=VALUE ...]]
 
 If no GPU is specified, will select all GPUs on the system.
 A set argument must be provided; Multiple set arguments are accepted.
@@ -687,8 +781,10 @@ Set Arguments:
                                               Set one of the following the accelerator TYPE or profile INDEX:
                                                 N/A.
                                                 Use `sudo amd-smi partition --accelerator` to find acceptable values.
-  -M, --memory-partition PARTITION            Set one of the following the memory partition modes:
+  -M, --memory-partition PARTITION            Set one of the following memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
+                                                The mode applies at the next driver reload.
+                                                Setting the current mode cancels a pending change.
   -a, --compute-partition-mem-alloc-mode MODE Set compute partition memory allocation mode (requires sudo):
                                                 CAPPING - each XCP is capped to an even share of partition memory
                                                 ALL     - each XCP may use the full partition memory
@@ -706,12 +802,34 @@ Set Arguments:
   -R, --process-isolation STATUS              Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.
   --ptl-status STATUS                         Enable or disable the PTL on a GPU processor: 0 for disable and 1 for enable
   --ptl-format FRMT1,FRMT2                    Set the PTL format on a GPU processor. For example, --ptl-format I8,F32
+  -A, --ampp-activate PROFILE_NAME            Activate an AMPP (amdsmi power profile) by name.
+                                                Use `amd-smi static --ampp` to see available profiles.
+  --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]
+                                               Configure an AMPP (amdsmi power profile) custom slot by staging one or
+                                                more KEY=VALUE fields, then committing them.
+                                                Use `amd-smi static --ampp` to see writable profiles and field names.
+                                                Example: --ampp-configure profile_2 PPT0_Limit=300
+                                                Alternatively, pass @<path> to restore every writable profile found
+                                                in a JSON file (as produced by `amd-smi static --ampp --json`).
+                                                Example: --ampp-configure @profiles.json
   --node-balancing-mode {POWER_BALANCING,FREQUENCY_BALANCING}
                                                 Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.
                                                 This is a system-wide setting, not per-GPU.
   -n, --node-power-limit WATTS                Set the node-level (NPM) power limit in watts.
                                                 This is a node-wide setting, not per-GPU.
                                                 Max node power limit: 6000 W
+  -s, --power-stabilization-configure KEY=VALUE [KEY=VALUE ...] | @PATH
+                                                Configure Power Stabilization (HAWK dummy-compute insertion and Ramp Management).
+                                                Accepts one or more space/comma-separated KEY=VALUE pairs (enable, power_floor,
+                                                delay, insertion_priority, ramp_enable, ramp_max_ramp_up_rate,
+                                                ramp_max_ramp_down_rate, ramp_min_time_at_power_floor, ramp_stop_delay), or a
+                                                single @<path> argument pointing to a JSON file matching the
+                                                `static --power-stabilization --json` output.
+                                                enable/ramp_enable accept on/off/true/false/1/0; insertion_priority accepts a
+                                                name (OPPORTUNISTIC, GUARANTEED, DYNAMIC) or its integer value; the rest,
+                                                including ramp_max_ramp_up_rate/ramp_max_ramp_down_rate, are integers.
+                                                Example: enable=on power_floor=70 insertion_priority=GUARANTEED ramp_max_ramp_up_rate=5
+                                                Each key is applied in order; processing stops at the first failure.
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                                      Set power limit for the given socket. Input parameter is power limit value.
@@ -774,6 +892,9 @@ Command Modifiers:
 Reset options for specified devices.
 
 ```{warning}
+
+* Repeated GPU options combine: `amd-smi reset --gpureset -g all -g 0`
+  resets every GPU, not just GPU 0. Remove `-g all` to target only GPU 0.
 
 * On systems with XGMI/Infinity Fabric (for example, AMD Instinct MI Series), resetting one
   GPU resets all GPUs in the same XGMI hive. Use `amd-smi xgmi` or `amd-smi topology` to find the XGMI link connected GPUs or check `/sys/class/drm/card*/device/xgmi_info/xgmi_hive_id` to identify GPUs having the same hive id, before issuing a reset.
@@ -1045,7 +1166,7 @@ not supported.
 
 ```shell-session
 ~$ amd-smi fabric --help
-usage: amd-smi fabric [-h] [-t] [-i] [-g GPU [GPU ...]] [--json | --csv]
+usage: amd-smi fabric [-h] [-t] [-T] [-g GPU [GPU ...]] [--json | --csv]
                       [--file FILE] [--loglevel LEVEL]
 
 If no GPU is specified, returns information for all GPUs on the system.
@@ -1053,8 +1174,8 @@ If no fabric argument is provided, all fabric information will be displayed.
 
 Fabric arguments:
   -h, --help               show this help message and exit
-  -t, --topology           Display fabric topology data (counters per category, instance, and item)
-  -i, --info               Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -t, --topology           Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)
+  -T, --telemetry          Display fabric telemetry data (counters per category, instance, and item)
 
 Device Arguments:
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
@@ -1072,15 +1193,17 @@ Command Modifiers:
                              DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+(cmd-node)=
+
 ### amd-smi node
 
 Gets power and baseboard information for the node. Returns information for
 node 0 (OAM_ID 0) on the system. If no node argument is provided, all node
-information will be displayed.
+information except CUIDs will be displayed.
 
 ```shell-session
 ~$ amd-smi node --help
-usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [--json | --csv] [--file FILE]
+usage: amd-smi node [-h] [-p] [-b] [-G] [-T] [-Y] [-y] [--json | --csv] [--file FILE]
                      [--loglevel LEVEL]
 
 Node arguments:
@@ -1089,6 +1212,9 @@ Node arguments:
   -b, --base-board-temps        Displays baseboard temperatures
   -G, --gtt                     Displays GTT (shared GPU memory) size
   -T, --tray                    Displays compute tray type and accelerator count
+  -Y, --cuid                    Lists the CUID of every component on the node: the platform, CPU
+                                packages, GPUs, NPUs and NICs. Every CUID is temporary.
+  -y, --cuid-primary            Include each component's primary CUID, implying --cuid. Requires root.
 
 Command Modifiers:
   --json                        Displays output in JSON format (human readable by default).
@@ -1110,8 +1236,16 @@ NODE:
 ```
 
 On systems without UALoE hardware/session, `amdsmi_get_tray_info()` returns
-`AMDSMI_STATUS_NOT_SUPPORTED` and the `TRAY:` block (and the `tray`/
-`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`) is omitted entirely.
+`AMDSMI_STATUS_NOT_SUPPORTED`, and both fields report `N/A` (also under the
+`tray`/`max_acc_per_tray`/`tray_type` keys in `--json`/`--csv`):
+
+```shell-session
+~$ amd-smi node --tray
+NODE:
+    TRAY:
+        MAX_ACC_PER_TRAY: N/A
+        TRAY_TYPE: N/A
+```
 
 `amd-smi node --power-management` includes `BALANCING_MODE`, the NPM
 balancing mode (`POWER_BALANCING`, the default, or `FREQUENCY_BALANCING`).
@@ -1126,6 +1260,50 @@ independent of current NPM enablement. `amd-smi set --node-balancing-mode`
 returns `AMDSMI_STATUS_SETTING_UNAVAILABLE` with a message naming the
 requested mode if it is absent from this set, distinct from
 `AMDSMI_STATUS_NOT_SUPPORTED`'s "NPM is disabled on this node" message.
+
+`amd-smi node --cuid` lists every component that has a CUID, whether or not
+amd-smi manages it: the platform, each CPU package, each AMD GPU, each NPU,
+and each NIC function. Components are named by type and position (`CPU 0`, `GPU 1`);
+`GPU n` here counts CUID components, not amd-smi GPU indexes, so match on
+`bdf`. Each has `derived_cuid`, `primary_cuid`, `source`, `auxiliary`, `bdf`
+and `device_path`. Every CUID is temporary (`AUXILIARY: True`), and each GPU
+partition in DPX and above is listed beside its GPU. A NIC's UnitID is its
+PCI function number, so two functions of one card have distinct CUIDs even
+where they report one serial number. `--csv` gives one row per component.
+
+```shell-session
+~$ sudo amd-smi node --cuid
+NODE:
+    CUID:
+        PLATFORM:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: N/A
+            DEVICE_PATH: N/A
+        CPU 0:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: N/A
+            DEVICE_PATH: /sys/devices/system/cpu/cpu0
+        GPU 0:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: 0000:03:00.0
+            DEVICE_PATH: /sys/class/drm/renderD129
+        NIC 0:
+            DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+            PRIMARY_CUID: N/A (not requested)
+            SOURCE: LIBRARY
+            AUXILIARY: True
+            BDF: 0000:69:00.0
+            DEVICE_PATH: /sys/class/net/eno1
+```
 
 ## Interpreting the output
 
@@ -1143,9 +1321,9 @@ information, GPU status, and running processes.
 ```bash
 ~$ amd-smi
 +------------------------------------------------------------------------------+
-| AMD-SMI            27.0.0                                                    |
-| amdgpu Version:    6.19.14.31400000-2370381                                  |
-| ROCm Version:      7.14.0                                                    |
+| AMD-SMI            27.3.0                                                    |
+| amdgpu Version:    6.19.4                                                    |
+| ROCm Version:      10.3.0                                                    |
 | Platform:          Linux Baremetal                                           |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
@@ -1319,7 +1497,7 @@ GPU: 0
         PTL_FORMAT: N/A
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.19.14.31400000-2370381
+        VERSION: 6.19.4
         OS_KERNEL_VERSION: 5.15.0-generic
     BOARD:
         MODEL_NUMBER: N/A
@@ -1766,3 +1944,185 @@ the fwupd prerequisite above.
 
 This is expected on platforms with no carveout interface. Use `amd-smi node --gtt` /
 `amd-smi set --gtt` to tune shared GPU memory on those platforms instead.
+
+## AMPP: power profile activation and configuration
+
+`amd-smi static --ampp` / `amd-smi set --ampp-activate PROFILE_NAME` /
+`amd-smi set --ampp-configure PROFILE_NAME KEY=VALUE ...` let users inspect,
+activate, and (for writable custom slots) configure AMPP (amdsmi power
+profile) recipes -- predefined power/performance settings exposed by the
+driver under the kernel UAPI sysfs tree
+`/sys/class/drm/<device>/device/app_modes/` (not libdrm). Profiles, fields,
+and units are all dynamically enumerated at runtime; amd-smi does not assume
+a fixed profile count or field set. This is unrelated to the legacy
+`amd-smi set --profile` (power profile preset-mask) command.
+
+`amd-smi static --ampp` displays the tree-wide `app_modes/profile_abi`
+version once, followed by a `PROFILE`/`ACTIVE`/`WRITABLE`/`CONFIGURED` block
+per profile. Configured profiles also list a `FIELDS` block with each
+field's name, unit, current value, and (when published by the driver)
+guidance-only min/max bounds.
+
+```shell-session
+~$ amd-smi static --gpu 0 --ampp
+GPU: 0
+    AMPP:
+        VERSION: 1.0
+        PROFILE: profile_0
+            ACTIVE: true
+            WRITABLE: false
+            CONFIGURED: true
+            FIELDS:
+                PPT0_LIMIT: 500 W (min=100, max=700)
+                MAXGFXCLKFREQ: 2100 MHz (min=500, max=2200)
+                BOOSTMODE: 1 -
+        PROFILE: profile_6
+            ACTIVE: false
+            WRITABLE: true
+            CONFIGURED: false
+```
+
+```shell-session
+~$ sudo amd-smi set --ampp-activate profile_2
+```
+
+```shell-session
+~$ sudo amd-smi set --ampp-configure profile_5 PPT0_Limit=300
+```
+
+`--ampp-configure` also accepts `@<path>` in place of `PROFILE_NAME
+KEY=VALUE ...`, restoring every writable profile with staged fields found in
+a JSON file for the current GPU in one call. The file must be shaped like
+`amd-smi static --ampp --json`'s output: a top-level `"gpu_data"` list of
+per-GPU objects, each identified by an integer `"gpu"` index and containing
+an `"ampp"."profiles"` list. The path must be a regular file (not a symlink,
+so not `/dev/stdin`) no larger than 1 MiB.
+
+```shell-session
+~$ sudo amd-smi static --ampp --json --file profiles.json
+~$ sudo amd-smi set --gpu 0 --ampp-configure @profiles.json
+```
+
+Profiles are restored one at a time and independently: a failure on one
+profile (for example, a malformed `fields` entry, or the driver rejecting a
+value) is reported per-profile and does not stop the remaining profiles in
+the file from being applied, nor roll back ones already applied. The one
+exception is a permission error (not run with `sudo`), which aborts the
+whole `--ampp-configure @<path>` call immediately instead of continuing to
+the remaining profiles.
+
+### Prerequisites
+
+- Requires a driver build that publishes `app_modes/` under
+  `/sys/class/drm/<device>/device/`; on ASICs/VBIOS combinations that do not
+  publish it, `amd-smi static --ampp` reports
+  `N/A (AMPP is not supported on this ASIC/VBIOS)`.
+- `amd-smi set --ampp-activate` / `--ampp-configure` require root/`CAP_SYS_ADMIN`.
+- `--ampp-configure` may only target a slot listed in
+  `app_modes/config/writable_slot_mask`; use `amd-smi static --ampp` first to
+  find writable profiles and their field names.
+
+## Power Stabilization: HAWK insertion and Ramp Management
+
+`amd-smi static --power-stabilization` / `amd-smi set
+--power-stabilization-configure KEY=VALUE ...` let users inspect and
+configure Power Stabilization -- HAWK dummy-compute insertion plus Ramp
+Management -- settings exposed by the driver under the kernel UAPI sysfs
+tree `/sys/class/drm/<device>/device/power_stabilization/` (not libdrm).
+
+```shell-session
+~$ amd-smi static --gpu 0 --power-stabilization
+GPU: 0
+    POWER_STABILIZATION:
+        HOST_CONTROL_ENABLED: False
+        ENABLED: True
+        POWER_FLOOR: 20 %
+        DELAY: 50 ms
+        INSERTION_PRIORITY: GUARANTEED
+        RAMP_ENABLED: True
+        RAMP_MAX_RAMP_UP_RATE: 10 %PL/sec
+        RAMP_MAX_RAMP_DOWN_RATE: 15 %PL/sec
+        RAMP_MIN_TIME_AT_POWER_FLOOR: 5 sec
+        RAMP_STOP_DELAY: 2 sec
+```
+
+```shell-session
+~$ sudo amd-smi set --gpu 0 --power-stabilization-configure enable=1,power_floor=25
+```
+
+`--power-stabilization-configure` also accepts `@<path>` in place of `KEY=VALUE
+...`, restoring every settable field from an `amd-smi static
+--power-stabilization --json`-shaped file's entry for the current GPU in one
+call. As with `--ampp-configure @<path>`, the file must be a regular file (not
+a symlink, so not `/dev/stdin`) no larger than 1 MiB:
+
+```shell-session
+~$ sudo amd-smi static --gpu 0 --power-stabilization --json --file ps.json
+~$ sudo amd-smi set --gpu 0 --power-stabilization-configure @ps.json
+```
+
+KEY | Accepted values
+---|---
+`enable` | `0`/`1`, `on`/`off`, `true`/`false`
+`power_floor` | Integer, % of power limit (0-100)
+`delay` | Integer, milliseconds
+`insertion_priority` | `OPPORTUNISTIC`, `GUARANTEED`, `DYNAMIC` (by name), or the integer value
+`ramp_enable` | `0`/`1`, `on`/`off`, `true`/`false`
+`ramp_max_ramp_up_rate` | Integer, %PL/sec (100 disables ramp-up management)
+`ramp_max_ramp_down_rate` | Integer, %PL/sec (100 disables ramp-down management)
+`ramp_min_time_at_power_floor` | Integer, seconds
+`ramp_stop_delay` | Integer, seconds
+
+`host_control` is read-only and has no settable KEY; it is not one of the
+nine keys above.
+
+Parameters are applied one at a time, in the order given, and the driver
+performs no rollback: a failure on any `KEY=VALUE` pair stops the whole
+`--power-stabilization-configure` call immediately, leaving parameters
+applied before the failure in place and parameters after it untouched.
+
+`host_control` is handled asymmetrically between the two forms: the inline
+`KEY=VALUE` form rejects a `host_control=...` token outright (it is
+read-only), while the `@<path>` replay form -- built to round-trip a `static
+--json` dump, which always includes `host_control_enabled` -- silently skips
+that one field instead of failing the whole file.
+
+The `@<path>` form also emits an extra summary line the inline form does not,
+for example `Applied 9/9 parameters from 'ps.json'`, so an automated caller
+can tell a partial restore from a complete one without counting the
+per-field lines itself.
+
+### NPM coordination
+
+When NPM (Node-level Power Management) coordination is active on a node,
+every Power Stabilization / Ramp Management parameter becomes node-wide
+rather than per-GPU. `amd-smi set --power-stabilization-configure` still
+takes a plain `--gpu N` -- writing against a non-primary GPU is not
+rejected, since the caller may want the value to take effect once NPM is no
+longer active for that GPU. Instead, the CLI prints a note alongside the
+normal per-field result: an informational note when `--gpu` already targets
+the node's primary GPU (OAM ID 0), or a warning naming the equivalent
+primary-GPU command otherwise.
+
+```shell-session
+~$ sudo amd-smi set --gpu 0 --power-stabilization-configure power_floor=25
+GPU: 0
+POWER_STABILIZATION_CONFIGURE: [INFO] NPM is enabled; this setting applies node-wide, not just to this GPU.
+POWER_STABILIZATION_CONFIGURE: power_floor=25: success
+```
+
+```shell-session
+~$ sudo amd-smi set --gpu 5 --power-stabilization-configure power_floor=25
+GPU: 5
+POWER_STABILIZATION_CONFIGURE: [WARNING] power_stabilization is node-wide while NPM is enabled; this write only reflects this GPU's own node state. To configure the node, use its primary GPU instead: 'amd-smi set --gpu 0 --power-stabilization-configure power_floor=25'
+POWER_STABILIZATION_CONFIGURE: power_floor=25: success
+```
+
+The primary GPU is resolved once at CLI startup from whichever device first
+yields a node handle, the same assumption `--node-power-limit`/
+`--node-balancing-mode` make.
+
+### Prerequisites
+
+- Bare-metal Linux only; not available on multi-VF devices.
+- `amd-smi set --power-stabilization-configure` requires root/`CAP_SYS_ADMIN`.

@@ -45,9 +45,12 @@ endif()
 
 option(PROFILE "Enable statistics and timing support" OFF)
 option(USE_RO "Enable RO conduit" OFF)
+option(USE_HOST_VERBS "Enable host-side verbs networking layer (src/net)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
 option(USE_GDA "Enable GDA conduit" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})
+option(USE_LDS_STAGE "Enable LDS-staged async IPC copy on gfx1250, using the portable async global<->LDS backend" OFF)
+option(USE_TDM "Enable TDM (Tensor Data Mover) specifically for LDS-staged IPC transfers on gfx1250." OFF)
 option(USE_THREADS "Enable workgroup threads to share network queues" OFF)
 option(USE_WF_COAL "Enable wavefront message coalescing" OFF)
 option(USE_FUNC_CALL "Force compiler to use function calls on library API" OFF)
@@ -62,6 +65,34 @@ option(BUILD_EXAMPLES "Build the examples" OFF)
 option(BUILD_UNIT_TESTS "Build the unit tests (Requires MPI)" OFF)
 option(BUILD_TESTS_ONLY "Build only tests. Used to link against rocSHMEM in a ROCm Release" OFF)
 option(BUILD_TOOLS "Build binary tools (e.g., rocshmem_info)" ON)
+
+# Limit this control to final native executable device links. The HIP-wide
+# HIP_CLANG_NUM_PARALLEL_JOBS control also changes compilation options.
+set(ROCSHMEM_NATIVE_LINK_JOBS "31" CACHE STRING
+    "Number of parallel jobs for final executable device links (maps to --offload-jobs)")
+if(NOT ROCSHMEM_NATIVE_LINK_JOBS MATCHES "^[1-9][0-9]*$")
+  message(FATAL_ERROR "ROCSHMEM_NATIVE_LINK_JOBS must be a positive integer")
+endif()
+
+function(_rocshmem_set_native_link_jobs target)
+  if(NOT ROCSHMEM_NATIVE_LINK_JOBS GREATER 1)
+    return()
+  endif()
+  if(NOT HIP_CLANG_SUPPORTS_PARALLEL_JOBS)
+    message(WARNING
+      "HIP --offload-jobs is unavailable; linking ${target} with one device-link job")
+    return()
+  endif()
+  if(DEFINED HIP_CLANG_NUM_PARALLEL_JOBS AND HIP_CLANG_NUM_PARALLEL_JOBS GREATER 1)
+    message(WARNING
+      "HIP_CLANG_NUM_PARALLEL_JOBS already sets --offload-jobs; "
+      "skipping ROCSHMEM_NATIVE_LINK_JOBS for ${target}")
+    return()
+  endif()
+  target_link_options(${target} PRIVATE
+    "--offload-jobs=${ROCSHMEM_NATIVE_LINK_JOBS}")
+endfunction()
+
 option(BUILD_CTESTS "Register tests with CTest for tier-based execution" ON)
 
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
@@ -92,6 +123,13 @@ endif()
 option(GDA_MUX "Build provider multiplexer with runtime dispatch to hardware-specific provider"
        ${GDA_MUX_DEFAULT})
 
+# Gate the QueuePair device provider dispatch on __constant__ constmem. Always ON
+# for rocSHMEM's own build; consumers that embed only the GDA QueuePair headers
+# (e.g. RCCL's GIN path) set it OFF so device dispatch reads a per-instance
+# provider member instead, carrying no __constant__ global. Internal, not a
+# user-facing option — do not expose in ccmake.
+set(USE_CONSTMEM ON CACHE INTERNAL "QueuePair device dispatch reads __constant__ constmem (internal)")
+
 if(USE_GDA)
   if(GDA_PROVIDER_COUNT EQUAL 0)
     message(WARNING "GDA support requested, but no GDA provider enabled - disabling GDA")
@@ -113,7 +151,7 @@ set_property(CACHE USE_EXTERNAL_MPI PROPERTY STRINGS AUTO ON OFF)
 include(${CMAKE_SOURCE_DIR}/cmake/setup_project.cmake)
 
 ## Setup VERSION
-set(VERSION_STRING 3.8.0)
+set(VERSION_STRING 3.9.0)
 message(STATUS "rocSHMEM Version: " "${VERSION_STRING}")
 
 project(rocshmem VERSION ${VERSION_STRING} LANGUAGES CXX)
@@ -424,6 +462,10 @@ if (NOT BUILD_TESTS_ONLY)
     if(NOT rocprofiler-register_FOUND)
       message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
     endif()
+    # Set before configure_file so #cmakedefine picks it up in rocshmem_config.h
+    if(TARGET rocprofiler-register::rocprofiler-register)
+      set(ROCSHMEM_ROCPROFILER_REGISTER 1)
+    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
@@ -552,6 +594,8 @@ if (NOT BUILD_TESTS_ONLY)
     )
   endif()
 
+  # ROCSHMEM_ROCPROFILER_REGISTER comes from rocshmem_config.h (#cmakedefine, set above). Defining
+  # it here as well redefines it in every source that includes that header (-Wmacro-redefined).
   if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
     target_link_libraries(${PROJECT_NAME}
                           PRIVATE rocprofiler-register::rocprofiler-register)
@@ -661,6 +705,23 @@ if (NOT BUILD_TESTS_ONLY)
     string(REPLACE
       "find_dependency(NUMA)"
       "string(REGEX REPLACE \"/lib/cmake/hip$\" \"\" _rocshmem_rocm_root \"\${hip_DIR}\")\nlist(APPEND CMAKE_PREFIX_PATH \"\${_rocshmem_rocm_root}/lib/rocm_sysdeps\")\nunset(_rocshmem_rocm_root)\nfind_dependency(NUMA)\nlist(REMOVE_AT CMAKE_PREFIX_PATH -1)"
+      _config_content "${_config_content}")
+    file(WRITE "${_config_out}" "${_config_content}")
+    unset(_config_out)
+    unset(_config_content)
+  endif()
+  # The in-build fixup above (strip /libc.so and the frozen CI -L/__w/ path,
+  # prepend the real libdrm search dir) only mutates hsakmt::hsakmt in our build
+  # tree.  Consumers re-run find_dependency(hsakmt) and reload the pristine,
+  # still-broken hsakmtTargets.cmake, so re-apply the same fixup in the generated
+  # config.  rocm_sysdeps is located relative to the consumer's hip_DIR so the
+  # path stays correct after relocation.
+  if(USE_SDMA AND TARGET hsakmt::hsakmt)
+    set(_config_out "${CMAKE_CURRENT_BINARY_DIR}/rocshmem-config.cmake")
+    file(READ "${_config_out}" _config_content)
+    string(REPLACE
+      "find_dependency(hsakmt)"
+      "find_dependency(hsakmt)\nif(TARGET hsakmt::hsakmt)\n  get_target_property(_rocshmem_hsakmt_libs hsakmt::hsakmt INTERFACE_LINK_LIBRARIES)\n  if(_rocshmem_hsakmt_libs)\n    list(FILTER _rocshmem_hsakmt_libs EXCLUDE REGEX \"(/libc\\\\.so|/__w/)\")\n    string(REGEX REPLACE \"/lib/cmake/hip$\" \"\" _rocshmem_rocm_root \"\${hip_DIR}\")\n    if(EXISTS \"\${_rocshmem_rocm_root}/lib/rocm_sysdeps/lib\")\n      list(PREPEND _rocshmem_hsakmt_libs \"-L\${_rocshmem_rocm_root}/lib/rocm_sysdeps/lib\")\n    endif()\n    unset(_rocshmem_rocm_root)\n    set_target_properties(hsakmt::hsakmt PROPERTIES INTERFACE_LINK_LIBRARIES \"\${_rocshmem_hsakmt_libs}\")\n  endif()\n  unset(_rocshmem_hsakmt_libs)\nendif()"
       _config_content "${_config_content}")
     file(WRITE "${_config_out}" "${_config_content}")
     unset(_config_out)

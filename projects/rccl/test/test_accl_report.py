@@ -9,16 +9,20 @@ import pytest
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "plugins", "profiler", "accl")
 )
-from accl_report import parse_jsonl, fmt_size  # noqa: E402
+from accl_report import (  # noqa: E402
+    parse_jsonl, fmt_size, parse_summaries, load_summaries,
+    print_drop_warnings, reject_legacy_summaries,
+)
 
 
-def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0):
+def _make_record(sn, rank=0, n_ranks=8, exec_us=100.0,
+                 msg_size=1048576, coll="AllReduce"):
     return json.dumps({
         "header": {"rank": rank, "n_ranks": n_ranks},
         "coll_perf": {
-            "coll": "AllReduce",
+            "coll": coll,
             "coll_sn": sn,
-            "coll_msg_size_bytes": 1048576,
+            "coll_msg_size_bytes": msg_size,
             "coll_algo": "Ring",
             "coll_proto": "Simple",
             "coll_n_channels": 4,
@@ -38,6 +42,96 @@ def _write_jsonl(lines):
     f.write("\n".join(lines) + "\n")
     f.close()
     return f.name
+
+
+# --- summary parsing and the INCOMPLETE banner ----------------------------
+# print_drop_warnings is the reporter half of the loss-visibility path: it is
+# what turns a counter the plugin wrote into something a user sees.
+
+
+def _summary(**kw):
+    s = {"dropped_collectives": 0, "leaked_collectives": 0,
+         "inflight_collectives": 0, "dropped_proxy_ops": 0,
+         "dropped_proxy_steps": 0, "overflow_proxy_ops": 0,
+         "stale_proxy_steps": 0, "outstanding_proxy_ops": 0,
+         "outstanding_proxy_steps": 0, "write_error": False,
+         "coll_pool_size": 256, "complete": True}
+    s.update(kw)
+    return s
+
+
+def _write_summary_file(summary):
+    path = _write_jsonl([_make_record(sn=0), json.dumps({"summary": summary})])
+    return path
+
+
+def test_proxy_only_loss_warns(capsys):
+    path = _write_summary_file(
+        _summary(dropped_proxy_ops=7, complete=False))
+    try:
+        summaries = load_summaries(path)
+        assert len(summaries) == 1
+        print_drop_warnings(summaries)
+        err = capsys.readouterr().err
+        assert "INCOMPLETE" in err
+        assert "7 proxy ops dropped" in err
+        assert "coll_pool_size=256" in err
+    finally:
+        os.unlink(path)
+
+
+def test_clean_summary_is_silent(capsys):
+    path = _write_summary_file(_summary())
+    try:
+        print_drop_warnings(load_summaries(path))
+        assert capsys.readouterr().err == ""
+    finally:
+        os.unlink(path)
+
+
+def test_missing_summary_warns(capsys):
+    path = _write_jsonl([_make_record(sn=0)])
+    try:
+        assert parse_summaries(path) == []
+        print_drop_warnings([])
+        assert "no profiler summary" in capsys.readouterr().err
+    finally:
+        os.unlink(path)
+
+
+def test_old_format_summary_renders_question_mark(capsys):
+    """A pre-rename file has no coll_pool_size; the banner must degrade, not
+    raise."""
+    old = {"dropped_collectives": 3, "leaked_collectives": 0, "pool_size": 256}
+    path = _write_summary_file(old)
+    try:
+        print_drop_warnings(load_summaries(path))
+        err = capsys.readouterr().err
+        assert "coll_pool_size=?" in err
+    finally:
+        os.unlink(path)
+
+
+def test_write_error_alone_warns(capsys):
+    """ENOSPC leaves every counter at 0; write_error is the only cause shown."""
+    path = _write_summary_file(_summary(write_error=True, complete=False))
+    try:
+        print_drop_warnings(load_summaries(path))
+        err = capsys.readouterr().err
+        assert "INCOMPLETE" in err and "write_error=True" in err
+    finally:
+        os.unlink(path)
+
+
+def test_compare_refuses_pre_rename_baseline(capsys):
+    """proxy_* changed divisor at the rename, so an old baseline would show a
+    2x regression that is not one."""
+    with pytest.raises(SystemExit):
+        reject_legacy_summaries(
+            [{"dropped_collectives": 0, "pool_size": 256}], "baseline")
+    assert "pre-rename" in capsys.readouterr().err
+    # A current summary passes through.
+    reject_legacy_summaries([_summary()], "baseline")
 
 
 def test_warmup_does_not_multiply_by_nranks():
@@ -106,3 +200,101 @@ def test_fmt_size_fractional():
 def test_fmt_size_small():
     assert fmt_size(0) == "0B"
     assert fmt_size(1) == "1B"
+
+
+# --- warmup is per (rank, coll, msg_size), not per run --------------------
+# coll_sn is comm->seqNumber[func]: monotonic across the whole run per
+# function. A bare `sn < warmup` threshold therefore only trims the first
+# message size of a sweep; every later size keeps its own warmup iterations.
+
+
+def _sweep(sizes, warm, timed, rank=0, coll="AllReduce", sn0=0):
+    """One rank's sweep: `warm` slow + `timed` fast iterations per size."""
+    lines, sn = [], sn0
+    for size in sizes:
+        for i in range(warm + timed):
+            lines.append(_make_record(
+                sn=sn, rank=rank, coll=coll, msg_size=size,
+                exec_us=300.0 if i < warm else 100.0))
+            sn += 1
+    return lines
+
+
+def test_warmup_dropped_for_every_message_size():
+    sizes = [1024, 4096, 16384, 65536]
+    path = _write_jsonl(_sweep(sizes, warm=5, timed=20))
+    try:
+        records = parse_jsonl(path, warmup=5)
+        assert len(records) == len(sizes) * 20
+        for size in sizes:
+            kept = [r for r in records if r.msg_size == size]
+            assert len(kept) == 20, f"{size}B kept {len(kept)}, expected 20"
+            # 300us marks a warmup iteration; none may survive.
+            assert all(r.exec_time_us == 100.0 for r in kept), \
+                f"{size}B still contains warmup iterations"
+    finally:
+        os.unlink(path)
+
+
+def test_warmup_groups_are_per_rank():
+    """Each rank runs its own warmup, so N must be dropped per rank, not once
+    globally. Rank 1's counter is offset here because nothing aligns the two
+    sequences when per-rank files are concatenated."""
+    lines = _sweep([1024], warm=3, timed=4, rank=0, sn0=0)
+    lines += _sweep([1024], warm=3, timed=4, rank=1, sn0=100)
+    path = _write_jsonl(lines)
+    try:
+        records = parse_jsonl(path, warmup=3)
+        assert len(records) == 8
+        for rank in (0, 1):
+            kept = [r for r in records if r.rank == rank]
+            assert len(kept) == 4, f"rank {rank} kept {len(kept)}, expected 4"
+            assert all(r.exec_time_us == 100.0 for r in kept)
+    finally:
+        os.unlink(path)
+
+
+def test_warmup_groups_are_per_collective():
+    """seqNumber is per function, so AllReduce and Broadcast are independent
+    sequences; each needs its own warmup dropped at each size."""
+    sizes = [1024, 4096]
+    lines = _sweep(sizes, warm=2, timed=3, coll="AllReduce")
+    lines += _sweep(sizes, warm=2, timed=3, coll="Broadcast")
+    path = _write_jsonl(lines)
+    try:
+        records = parse_jsonl(path, warmup=2)
+        assert len(records) == 2 * len(sizes) * 3
+        for coll in ("AllReduce", "Broadcast"):
+            for size in sizes:
+                kept = [r for r in records
+                        if r.coll == coll and r.msg_size == size]
+                assert len(kept) == 3, f"{coll} {size}B kept {len(kept)}"
+                assert all(r.exec_time_us == 100.0 for r in kept)
+    finally:
+        os.unlink(path)
+
+
+def test_warmup_selects_lowest_sn_not_file_order():
+    """Records may land out of order; "first N" must mean lowest coll_sn."""
+    order = [4, 0, 3, 1, 2]
+    path = _write_jsonl([_make_record(sn=sn) for sn in order])
+    try:
+        records = parse_jsonl(path, warmup=2)
+        assert sorted(r.sn for r in records) == [2, 3, 4]
+    finally:
+        os.unlink(path)
+
+
+def test_short_group_is_dropped_with_warning(capsys):
+    """A size with fewer records than warmup vanishes — say so on stderr."""
+    lines = _sweep([1024], warm=5, timed=20)
+    lines += [_make_record(sn=999, msg_size=2048)]
+    path = _write_jsonl(lines)
+    try:
+        records = parse_jsonl(path, warmup=5)
+        assert all(r.msg_size == 1024 for r in records)
+        assert len(records) == 20
+        err = capsys.readouterr().err
+        assert "WARNING" in err and "2K" in err
+    finally:
+        os.unlink(path)

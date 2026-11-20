@@ -10,6 +10,8 @@
 #include "util/amdgpu_rsq.h"
 #include "util/amdgpu_sqrt.h"
 #include "util/bit.h"
+#include "util/host_target.h"
+#include "util/simd_control.h"
 
 #include <bit>
 #include <bitset>
@@ -21,27 +23,12 @@
 #include <string_view>
 #include <type_traits>
 
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
 #include <experimental/simd>
 #endif
 
-#if defined(__AVX512F__)
+#if RJ_HOST_HAS_AVX512F
 #include <immintrin.h>
-#endif
-
-// clang + libstdc++ <experimental/simd> on AVX-512 has produced incorrect
-// native 64-bit mask behavior on sanitizer CI hosts. Keep the default
-// workaround local to that stack, but leave it overrideable so fixed toolchains
-// can force vector coverage with -DUTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS=0.
-#ifdef UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE 1
-#else
-#define UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS_USER_OVERRIDE 0
-#if defined(__clang__) && defined(__GLIBCXX__) && defined(__AVX512F__)
-#define UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS 1
-#else
-#define UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS 0
-#endif
 #endif
 
 namespace util {
@@ -81,63 +68,9 @@ template <typename Float> inline Float rndne_scalar(Float value) {
 /// gate SIMD fast paths via `if constexpr (util::has_stdx_simd)` so the
 /// branch and all downstream calls compile out when the header is
 /// absent (e.g. older libstdc++).
-inline constexpr bool has_stdx_simd =
-#if __has_include(<experimental/simd>)
-    true;
-#else
-    false;
-#endif
+inline constexpr bool has_stdx_simd = RJ_HOST_HAS_STDX_SIMD;
 
-namespace detail {
-
-inline bool init_force_scalar() {
-  const char *e = std::getenv("RJ_FORCE_SCALAR");
-  if (e == nullptr) {
-    return false;
-  }
-  const std::string_view v(e);
-  return !v.empty() && v != "0";
-}
-
-/// Force-scalar gate, initialized ONCE from the `RJ_FORCE_SCALAR` env var at
-/// image load (dynamic init) and read with a plain load thereafter -- no
-/// per-call guard byte. An `inline` variable so the definition lives in this
-/// header and `util` stays header-only. Mutable so the test-only seam
-/// (util/simd_test_hooks.h) can override it; production code never writes it.
-///
-/// THERE IS ONE INSTANCE PER LINKED MODULE, NOT ONE PER PROCESS. rocjitsu builds
-/// with hidden visibility (`CMAKE_CXX_VISIBILITY_PRESET hidden` in the top-level
-/// CMakeLists.txt, plus `-fvisibility=hidden` in cmake/rj_add_object_library.cmake),
-/// so this variable gets local binding in every module that links it: it is
-/// never a dynamic symbol, and librocjitsu.so, librocjitsu_hooks.so, each plugin
-/// module, the hotswap DSOs and every test executable carry a private copy.
-/// Env-var control is unaffected -- each copy parses `RJ_FORCE_SCALAR`
-/// independently at its own load -- but a write through the test seam reaches
-/// ONLY the copy in the caller's module. Making the gate genuinely process-wide
-/// would require a deliberate default-visibility attribute here (or a single
-/// state owner all modules call into); that is an explicit decision, not
-/// something to acquire by accident.
-///
-/// Safe as a dynamic-init global because force_scalar() is only ever read at
-/// runtime instruction-execute, never during another TU's static construction.
-inline bool g_force_scalar = init_force_scalar();
-
-} // namespace detail
-
-/// Switch that callers check before taking the SIMD fast path. Read ONCE from
-/// the `RJ_FORCE_SCALAR` env var at image load (unset/empty/"0" => false, any
-/// other value => true). Production code never writes it; a test-only seam
-/// (util/simd_test_hooks.h) may override it so a single test can drive both the
-/// scalar and SIMD execute paths and compare.
-///
-/// There is one instance per linked module, not one per process -- see
-/// detail::g_force_scalar for why. `RJ_FORCE_SCALAR` therefore applies uniformly
-/// (each module parses it at its own load), while a test-seam override applies
-/// only within the caller's module. e2e runs force the scalar codepath by
-/// setting the env var before launch, without recompiling.
-inline bool force_scalar() { return detail::g_force_scalar; }
-
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
 namespace stdx = std::experimental;
 
 template <class T> using native = stdx::native_simd<T>;
@@ -151,7 +84,7 @@ template <class T> constexpr std::size_t native_width_v = native<T>::size();
 /// layer; other targets use the portable TS operation.
 [[gnu::always_inline]] inline native<float> native_fma(native<float> a, native<float> b,
                                                        native<float> c) {
-#if defined(__AVX512F__)
+#if RJ_HOST_HAS_AVX512F
   static_assert(native<float>::size() == 16);
   return std::bit_cast<native<float>>(_mm512_fmadd_ps(
       std::bit_cast<__m512>(a), std::bit_cast<__m512>(b), std::bit_cast<__m512>(c)));
@@ -168,7 +101,7 @@ template <class Mask> [[gnu::always_inline]] inline uint64_t simd_mask_to_bits(c
   constexpr std::size_t W = Mask::size();
   static_assert(W <= 64);
   constexpr bool broken_native64_width =
-      UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
+      RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
   if constexpr (!broken_native64_width && requires { mask.__to_bitset().to_ullong(); }) {
     return static_cast<uint64_t>(mask.__to_bitset().to_ullong());
   } else {
@@ -189,7 +122,7 @@ template <class Simd>
   constexpr std::size_t W = Simd::size();
   static_assert(W <= 64);
   constexpr bool broken_native64_width =
-      UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
+      RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && W == native<uint64_t>::size();
   if constexpr (!broken_native64_width && requires { Mask::__from_bitset(std::bitset<W>(bits)); }) {
     return Mask::__from_bitset(std::bitset<W>(bits));
   } else {
@@ -207,7 +140,7 @@ template <class Simd>
 [[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
   using U = native<uint32_t>;
   static_assert(U::size() <= 32);
-#if defined(__AVX512F__)
+#if RJ_HOST_HAS_AVX512F
   static_assert(U::size() == 16);
   return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
 #else
@@ -262,7 +195,7 @@ template <class T> void masked_store_narrow(uint32_t *, narrow32<T>, uint64_t) {
 /// no-`<experimental/simd>` fallback native<uint64_t>::size() is 1.
 inline constexpr std::size_t native_width64 = native<uint64_t>::size();
 
-#if __has_include(<experimental/simd>)
+#if RJ_HOST_HAS_STDX_SIMD
 template <class T, class Fn> native<T> map_native64_scalar(native<T> v, Fn fn) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   constexpr std::size_t W = native<T>::size();
@@ -855,28 +788,28 @@ template <typename Float> inline native<Float> rndne_bits_simd(native<Float> val
 inline native<float> rndne_simd(native<float> a) { return rndne_bits_simd(a); }
 
 inline native<double> trunc_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   return map_native64_scalar<double>(a, [](double x) { return std::trunc(x); });
 #else
   return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::trunc(x); });
 #endif
 }
 inline native<double> ceil_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   return map_native64_scalar<double>(a, [](double x) { return std::ceil(x); });
 #else
   return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::ceil(x); });
 #endif
 }
 inline native<double> floor_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   return map_native64_scalar<double>(a, [](double x) { return std::floor(x); });
 #else
   return round_fixup_simd<double, false>(a, [](native<double> x) { return stdx::floor(x); });
 #endif
 }
 inline native<double> rndne_simd(native<double> a) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   return map_native64_scalar<double>(a, [](double x) { return rndne_scalar(x); });
 #else
   return rndne_bits_simd(a);
@@ -908,14 +841,6 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Flush F32 subnormals to signed zero without host floating-point arithmetic.
-inline native<float> flush_denorm_f32_simd(native<float> v) {
-  using U = native<uint32_t>;
-  U b = std::bit_cast<U>(v);
-  stdx::where(((b & 0x7F800000u) == 0u) && ((b & 0x007FFFFFu) != 0u), b) = b & 0x80000000u;
-  return std::bit_cast<native<float>>(b);
-}
-
 /// Native-width adapters for the shared integer transcendental mappings.
 inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
   return map_native_convert_scalar<float, float>(
@@ -940,42 +865,6 @@ inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
 inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
   return map_native_convert_scalar<float, float>(
       a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
-}
-
-/// Branchless SWAR population count over a uint32 vector. Each lane holds
-/// std::popcount(lane) in [0, 32], bit-identical to the scalar std::popcount.
-/// Used by the bit-scan VOP1/VOP3 SIMD fast paths (bcnt / ffbh / ffbl / cls).
-inline native<uint32_t> popcount_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  x = x - ((x >> 1) & U(0x55555555u));
-  x = (x & U(0x33333333u)) + ((x >> 2) & U(0x33333333u));
-  x = (x + (x >> 4)) & U(0x0F0F0F0Fu);
-  x = x + (x >> 8);
-  x = x + (x >> 16);
-  return x & U(0x3Fu);
-}
-
-/// Count leading zeros over a uint32 vector. RAW count: a zero input yields 32
-/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed
-/// as 32 - popcount(MSB-smear), so a lane with its MSB at bit b yields 31 - b.
-inline native<uint32_t> clz_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  U s = x;
-  s = s | (s >> 1);
-  s = s | (s >> 2);
-  s = s | (s >> 4);
-  s = s | (s >> 8);
-  s = s | (s >> 16);
-  return U(32u) - popcount_u32_simd(s);
-}
-
-/// Count trailing zeros over a uint32 vector. RAW count: a zero input yields 32
-/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed as
-/// popcount((x & -x) - 1): isolate the lowest set bit, then count the bits below.
-inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  U lowbit = x & (~x + U(1u));
-  return popcount_u32_simd(lowbit - U(1u));
 }
 
 /// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
@@ -1047,7 +936,7 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
 ///   if (a==b)              return signbit(a) ? <tie> : <other>;
 ///   return a <cmp> b ? a : b;
 template <typename V> V ieee_maximum_simd(V a, V b) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   if constexpr (std::is_same_v<typename V::value_type, double>) {
     return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
       if (std::isnan(lhs) || std::isnan(rhs))
@@ -1070,7 +959,7 @@ template <typename V> V ieee_maximum_simd(V a, V b) {
   }
 }
 template <typename V> V ieee_minimum_simd(V a, V b) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   if constexpr (std::is_same_v<typename V::value_type, double>) {
     return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
       if (std::isnan(lhs) || std::isnan(rhs))
@@ -1203,7 +1092,7 @@ inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
 inline native<double> frexp_mant_f64_simd(native<double> x) {
   using U = native<uint64_t>;
   U v = std::bit_cast<U>(x);
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   U out = map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
     constexpr uint64_t kSign = 0x8000000000000000ull;
     constexpr uint64_t kMant = 0x000FFFFFFFFFFFFFull;
@@ -1247,7 +1136,7 @@ inline native<double> frexp_mant_f64_simd(native<double> x) {
 inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
   using U = native<uint64_t>;
   U v = std::bit_cast<U>(x);
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   return map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
     uint64_t E = (bits >> 52) & 0x7FFull;
     uint64_t M = bits & 0x000FFFFFFFFFFFFFull;
@@ -1276,121 +1165,11 @@ inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
 #endif
 }
 
-/// Sum of the four per-byte absolute differences of two uint32 lanes (the core
-/// of v_sad_u8 / v_sad_hi_u8). Each byte difference is in [0,255], so the sum is
-/// in [0,1020]; bit-identical to the scalar byte loop.
-inline native<uint32_t> sad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    U ai = (a >> (i * 8)) & U(0xFFu);
-    U bi = (b >> (i * 8)) & U(0xFFu);
-    U d = ai - bi;
-    stdx::where(bi > ai, d) = bi - ai; // |ai - bi|
-    r += d;
-  }
-  return r;
-}
+#endif // RJ_HOST_HAS_STDX_SIMD
 
-/// Masked per-byte SAD (v_msad_u8): like sad_bytes_u32_simd but a byte whose
-/// reference (src1) value is zero contributes nothing. Bit-identical to scalar.
-inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    U ai = (a >> (i * 8)) & U(0xFFu);
-    U bi = (b >> (i * 8)) & U(0xFFu);
-    U d = ai - bi;
-    stdx::where(bi > ai, d) = bi - ai;
-    stdx::where(bi == 0u, d) = 0u; // skip masked-out (zero reference) bytes
-    r += d;
-  }
-  return r;
-}
-
-/// Per-byte unsigned lerp (v_lerp_u8): out_byte = (a + b + (c & 1)) >> 1,
-/// computed independently per byte and repacked. Bit-identical to the scalar.
-inline native<uint32_t> lerp_u8_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
-  using U = native<uint32_t>;
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    const int sh = i * 8;
-    U ab = (a >> sh) & U(0xFFu);
-    U bb = (b >> sh) & U(0xFFu);
-    U round_up = (c >> sh) & U(1u);
-    r = r | (((ab + bb + round_up) >> 1) << sh);
-  }
-  return r;
-}
-
-/// Byte permute (v_perm_b32): build each output byte from a selector byte of
-/// src2 indexing the 8 bytes of the {src0:src1} 64-bit source (src1 = low word).
-/// Selector 0..7 picks a source byte; 8..11 sign-extend source bytes 1, 3, 5,
-/// and 7; 12 yields zero; and every selector >= 13 yields 0xFF.
-inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
-  using U = native<uint32_t>;
-  U srcbyte[8];
-  for (int k = 0; k < 4; ++k)
-    srcbyte[k] = (b >> (k * 8)) & U(0xFFu); // bytes 0..3 from the low word (src1)
-  for (int k = 0; k < 4; ++k)
-    srcbyte[k + 4] = (a >> (k * 8)) & U(0xFFu); // bytes 4..7 from the high word (src0)
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    U sel = (c >> (i * 8)) & U(0xFFu);
-    U byte(0u);
-    for (int k = 0; k < 8; ++k)
-      stdx::where(sel == U(static_cast<uint32_t>(k)), byte) = srcbyte[k];
-    for (int k = 0; k < 4; ++k)
-      stdx::where(sel == U(static_cast<uint32_t>(k + 8)), byte) =
-          (srcbyte[k * 2 + 1] >> 7) * U(0xFFu);
-    stdx::where(sel >= U(13u), byte) = U(0xFFu);
-    r = r | (byte << (i * 8));
-  }
-  return r;
-}
-
-/// High 32 bits of the 64-bit UNSIGNED product a*b (v_mul_hi_u32 semantics).
-///
-/// Computed purely with 32-bit-lane SIMD ops via the 16x16 partial-product
-/// decomposition, deliberately avoiding `fixed_size_simd<uint64_t, N>`: clang +
-/// libstdc++ miscompile the 64-bit-lane multiply/shift of an over-native-width
-/// `fixed_size_simd` (the high half comes out wrong), so the int64-widening
-/// approach diverges from the scalar `(uint64)a * b >> 32` at every SIMD width.
-/// This decomposition uses only native<uint32_t> arithmetic, so it is
-/// bit-identical to the scalar reference on every host. aHi/bHi/aLo/bLo are the
-/// 16-bit halves; each 16x16 partial fits in 32 bits and the carry chain stays
-/// below 2^32 (cross <= 3*0xFFFF), so no intermediate overflows.
-inline native<uint32_t> mul_hi_u32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  const U aLo = a & U(0xFFFFu), aHi = a >> 16;
-  const U bLo = b & U(0xFFFFu), bHi = b >> 16;
-  const U lolo = aLo * bLo;
-  const U hilo = aHi * bLo;
-  const U lohi = aLo * bHi;
-  const U hihi = aHi * bHi;
-  const U cross = (lolo >> 16) + (hilo & U(0xFFFFu)) + (lohi & U(0xFFFFu));
-  return hihi + (hilo >> 16) + (lohi >> 16) + (cross >> 16);
-}
-
-/// High 32 bits of the 64-bit SIGNED product a*b (v_mul_hi_i32 semantics).
-/// Derived from the unsigned high word with the standard signed correction
-/// `hi_s = hi_u - (a<0 ? b : 0) - (b<0 ? a : 0)`. Same clang/libstdc++
-/// motivation as `mul_hi_u32_simd`: no `fixed_size_simd<int64_t, N>`.
-inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  U hi = mul_hi_u32_simd(a, b);
-  // Sign correction in the uint domain (the negative test is the high bit, so
-  // the where-mask type matches `hi` and avoids a signed/unsigned mask mismatch).
-  stdx::where((a >> 31) != U(0u), hi) = hi - b;
-  stdx::where((b >> 31) != U(0u), hi) = hi - a;
-  return hi;
-}
-#endif // __has_include(<experimental/simd>)
-
-#if !__has_include(<experimental/simd>)
-// Fallback stub for non-template gtest callers (e.g. UtilSimd.FlushDenormF32),
-// whose discarded `if constexpr (has_stdx_simd)` branch is still type-checked.
-template <class T> native<T> flush_denorm_f32_simd(native<T>) { return {}; }
+#if !RJ_HOST_HAS_STDX_SIMD
+// Fallback stubs for non-template gtest callers, whose discarded
+// `if constexpr (has_stdx_simd)` branch is still type-checked.
 inline native<float> trunc_simd(native<float>) { return {}; }
 inline native<float> ceil_simd(native<float>) { return {}; }
 inline native<float> floor_simd(native<float>) { return {}; }
@@ -1399,8 +1178,6 @@ inline native<double> trunc_simd(native<double>) { return {}; }
 inline native<double> ceil_simd(native<double>) { return {}; }
 inline native<double> floor_simd(native<double>) { return {}; }
 inline native<double> rndne_simd(native<double>) { return {}; }
-inline native<uint32_t> mul_hi_u32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
-inline native<uint32_t> mul_hi_i32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
 #endif
 
 } // namespace util

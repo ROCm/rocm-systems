@@ -2,7 +2,8 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
-set(ROCPROFILER_LIB_PC_SAMPLING_IOCTL_TEST_SOURCES pc_sampling_versioning.cpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_IOCTL_TEST_SOURCES pc_sampling_versioning.cpp
+                                                   kfd_unavailable.cpp)
 
 add_executable(pcs-ioctl-test)
 
@@ -19,4 +20,5 @@ rocprofiler_add_unit_test(
     SOURCES ${ROCPROFILER_LIB_PC_SAMPLING_IOCTL_TEST_SOURCES}
     TIMEOUT 45
     LABELS "unittests;pc-sampling;ioctl"
-    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+    SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]")

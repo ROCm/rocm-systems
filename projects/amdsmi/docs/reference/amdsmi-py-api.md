@@ -500,6 +500,112 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_gpu_cuid_info
+
+Description: Returns the Component Unified ID (CUID) of the device together with
+its provenance. Prefer this over `amdsmi_get_gpu_device_uuid`, which returns a
+legacy device UUID rather than a CUID.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`primary` | Canonical CUID as a UUIDv8 string. Empty when the caller lacks the privilege to read it, since the primary payload embeds the raw serial number. An empty value is not an error
+`derived` | Derived CUID as a UUIDv8 string. Names the component without disclosing its serial, and is the value to record
+`component_type` | On-wire Component Type by name: `PLATFORM`, `CPU`, `GPU`, `NIC`, `NPU`, `STORAGE`, `MEMORY`, `GENPCIE`, `GENC`, `RACKTRAY`, `RACK`, `OTHER`, or `UNKNOWN`
+`source` | Which stage of the staged lookup answered: `DRIVER`, `LIBRARY` or `UNKNOWN`
+`auxiliary` | `True` for a temporary CUID, built from the machine ID and world-readable device information. Such a value changes when the machine ID changes and is not unique across nodes
+
+Every CUID is temporary: built from the machine ID and world-readable device
+information. A handle of a GPU in SPX reports the whole GPU's CUID, and one for
+a partition in DPX and above reports that partition's.
+The result is built from several queries, so it is not atomic under a
+topology change. If the auxiliary flag cannot be read, the call raises
+rather than reporting `False`.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cuid_info` function:
+
+* `AmdSmiParameterException`
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_NO_PERM` - The auxiliary flag cannot be read by this caller
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_gpu_cuid_info(device)
+            print("Derived CUID:", info['derived'])
+            print("Component type:", info['component_type'])
+            print("Source:", info['source'])
+            print("Auxiliary:", info['auxiliary'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cuid_components
+
+Description: Lists every component on the node that has a CUID: the platform,
+each CPU package, each AMD GPU and GPU partition, each NPU, and each NIC
+function, ordered by component type, then BDF, then device path. Needs no
+processor handle. Every CUID is temporary, so `primary` is empty.
+
+Input parameters: `None`
+
+Output: List of dictionaries, one per component, with fields; empty list if the node has none
+
+Field | Content
+---|---
+`primary` | Primary CUID, or `""` without root
+`derived` | Derived CUID
+`component_type` | `PLATFORM`, `CPU`, `GPU`, `NIC`, ...
+`source` | `DRIVER`, `LIBRARY` or `UNKNOWN`
+`auxiliary` | `True` for a temporary CUID
+`bdf` | PCI address; for a GPU partition, the address amd-smi uses for it, as `amd-smi list` shows it; `""` for the platform and CPUs
+`device_path` | Sysfs path, or `""` for the platform
+`vendor_id` | PCI or CPUID vendor ID, `0` for the platform
+
+Exceptions that can be thrown by `amdsmi_get_cuid_components` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NO_PERM` - A component's auxiliary flag cannot be read by this caller
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Built without CUID support
+- `AMDSMI_STATUS_API_FAILED` - API call failed
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    for component in amdsmi.amdsmi_get_cuid_components():
+        print(component['component_type'], component['bdf'], component['derived'])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_get_gpu_enumeration_info
 
 Description: Returns enumeration information for the given GPU
@@ -568,13 +674,9 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-``driver_name`` |  driver name
-``driver_kernel_version`` | amdgpu kernel source version, such as ``6.19.14``
-``amdgpu_driver_version`` | amdgpu module version, such as ``31400000``
-``driver_version`` | driver version, such as ``6.19.14.31400000``
-``driver_build_version`` | active DKMS build version, such as ``2370381``
-``driver_full_version`` | composed version, such as ``6.19.14.31400000-2370381``
-``driver_date`` |  driver_date
+`driver_name` |  driver name
+`driver_version` |  driver_version
+``driver_date`` | driver date, such as ``2015/01/01 00:00``, or ``N/A`` when the kernel does not report one
 
 Exceptions that can be thrown by `amdsmi_get_gpu_driver_info` function:
 
@@ -1515,6 +1617,8 @@ Fields | Description
 `pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in MT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: OAM, PCIE, CEM, or Unknown</td></tr></tbody></table>
 `pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed in MT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
 
+On a GPU that KFD reports as connected to the CPU over xGMI (no PCIe host link), `max_pcie_width`, `max_pcie_speed` and `pcie_interface_version` are `"N/A"`.
+
 Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
 * `AmdSmiLibraryException`
@@ -1959,7 +2063,7 @@ Description: Get the AFIDs from CPER buffer
 
 Input parameters:
 
-* `cper_afid_data`: raw bytes of a single CPER record.
+* `cper_afid_data`: raw bytes of a single CPER record, or a list of CPER records, each a dict with `bytes` (list of byte values) and `size` keys.
 
 Output: Tuple[List[int], int]: A tuple containing:
           - A list of extracted AFIDs.
@@ -2915,9 +3019,11 @@ finally:
 ### amdsmi_get_gpu_fan_speed
 
 Description: Get the fan speed for the specified device as a value relative to
-the maximum fan speed. For legacy hwmon GPUs the maximum is AMDSMI_MAX_FAN_SPEED (255).
-For GPUs with the gpu_od sysfs interface, use `amdsmi_get_gpu_fan_speed_max()` to
-query the actual maximum. It is not supported on virtual machine guest
+the maximum fan speed. The value is the hwmon pwm1 duty cycle, whose maximum is
+AMDSMI_MAX_FAN_SPEED (255). On GPUs exposing the gpu_od sysfs interface, the range
+accepted by `amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is NOT derivable
+from this value or from `amdsmi_get_gpu_fan_speed_max()`. It is not supported on
+virtual machine guest
 
 Input parameters:
 
@@ -2962,8 +3068,9 @@ finally:
 ### amdsmi_get_gpu_fan_speed_max
 
 Description: Get the max fan speed of the device with provided device handle.
-For legacy hwmon GPUs this returns 255. For GPUs with the gpu_od sysfs interface,
-the maximum is read from the OD_RANGE (e.g. 100).
+This is the hwmon pwm1_max ceiling (255) and pairs with `amdsmi_get_gpu_fan_speed()`.
+On GPUs exposing the gpu_od sysfs interface, the range accepted by
+`amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is NOT derivable from this value.
 It is not supported on virtual machine guest
 
 Input parameters:
@@ -5679,7 +5786,7 @@ finally:
 
 ### amdsmi_topo_get_link_type
 
-Description: Retrieve the hops and the connection type between 2 GPUs
+Description: Retrieve the hops and the connection type between 2 processors (GPUs or NICs)
 
 Input parameters:
 
@@ -5690,8 +5797,8 @@ Output:  Dictionary with fields:
 
 Field | Description
 ---|---
-`hops` | Number of hops
-`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+`hops` | Number of hops. Not meaningful when either processor is a NIC; it reads `UINT64_MAX` then
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. For a NIC pair it is `AMDSMI_LINK_TYPE_PCIE` (same PCIe switch), `AMDSMI_LINK_TYPE_NUMA` (same NUMA node, different switch), `AMDSMI_LINK_TYPE_XNUMA` (different NUMA nodes) or `AMDSMI_LINK_TYPE_UNKNOWN`. Refer to the example below for more details.
 
 Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 
@@ -5730,8 +5837,145 @@ try:
             print('xgmi')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
             print('not applicable')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_NUMA:
+            print('same NUMA node, different PCIe switch (NIC pairs)')
+        if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XNUMA:
+            print('different NUMA nodes (NIC pairs)')
         if link_type['type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
             print('unknown')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_gpu_cpu_links
+
+Description: Return this GPU's directly-connected CPU link(s), of any link type, via KFD io_link only.
+
+An empty list is a normal, successful result on GPUs that have no CPU io_link at all -- it means "no such links exist", not a failure.
+
+Input parameters:
+
+* `processor_handle` the device handle for which to query CPU links
+
+Output: list of dictionaries, one per connected CPU, each with fields:
+
+Field | Description
+---|---
+`package_id` | The real physical socket id of the connected CPU (not a NUMA node id -- a package can expose multiple NUMA nodes)
+`link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_cpu_links` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device_num, device in enumerate(devices):
+            cpu_links = amdsmi.amdsmi_get_gpu_cpu_links(device)
+            for link in cpu_links:
+                print(link['package_id'])
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                    print('xgmi')
+                if link['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                    print('pcie')
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_link_topology
+
+Description: Return GPU link topology using the host API's fields.
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dst` the destination device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`weight` | The link weight
+`link_status` | Integer value of `amdsmi.AmdSmiLinkStatus`, retained for host API parity
+`link_type` | Integer `AMDSMI_LINK_TYPE_*` value
+`num_hops` | Abstracted topology steps, capped at 255, not physical xGMI links
+`fb_sharing` | 1 if P2P framebuffer access is available; 0 if unavailable or the query failed
+
+`amdsmi.AmdSmiLinkStatus` members:
+
+Member | Value
+---|---
+`AMDSMI_LINK_STATUS_ENABLED` | 0
+`AMDSMI_LINK_STATUS_DISABLED` | 1
+`AMDSMI_LINK_STATUS_INACTIVE` | 2
+`AMDSMI_LINK_STATUS_ERROR` | 3
+
+Baremetal notes:
+
+- Self pair: `INTERNAL`, `ENABLED`, zero weight and hops, `fb_sharing=1`.
+- Peer types: PCIe or xGMI. MI4XX IFoE reporting is not implemented.
+- Current successful calls always report `AMDSMI_LINK_STATUS_ENABLED` (0).
+- `UNKNOWN` to `DISABLED` (1) is defensive, not a current success case.
+- `INACTIVE` (2) and `ERROR` (3) are not produced.
+- Status is not link health or P2P access.
+- The topology CLI uses `amdsmi_is_P2P_accessible`; it can report `DISABLED` when this API reports `ENABLED`.
+- Queries are sequential, so topology changes can affect field consistency.
+
+Exceptions that can be thrown by `amdsmi_get_link_topology` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_INIT` - Library not initialized
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    elif len(devices) == 1:
+        print("Only 1 GPU on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dst = devices[1]
+        topology = amdsmi.amdsmi_get_link_topology(processor_handle_src, processor_handle_dst)
+        print(topology['weight'])
+        print(topology['num_hops'])
+        print(topology['fb_sharing'])
+        print(amdsmi.AmdSmiLinkStatus(topology['link_status']).name)
+        if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+            print('xgmi')
+        if topology['link_type'] == amdsmi.AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+            print('pcie')
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -6111,7 +6355,7 @@ Refer to [amd_smi_partition_example.py](https://github.com/ROCm/rocm-systems/blo
 
 ### amdsmi_set_gpu_memory_partition_mode
 
-Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function.
+Description: Set the memory partition mode for the given GPU using the newer partition mode API. All GPU processes must be idle before calling this function. The change takes effect at the next driver reload. Requesting the current mode cancels a pending change; older amdgpu drivers ignore that request because of a driver bug.
 
 Input parameters:
 
@@ -6261,6 +6505,239 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_ampp_profiles
+
+**Note:** This is a kernel UAPI feature (sysfs `app_modes/`), not libdrm. Unrelated
+to the legacy `amdsmi_get_gpu_power_profile_presets` / `amdsmi_set_gpu_power_profile`
+preset-mask API.
+
+Description: Get the list of AMPP (amdsmi power profile) recipes published by the
+driver under `app_modes/`. Profiles, fields, and units are all dynamically
+enumerated at runtime -- nothing is hardcoded, since the driver does not
+guarantee a fixed field set, profile count, or naming across SoC generations.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Tuple of `(version, profiles)`:
+
+* `version` `str` parsed from `app_modes/profile_abi` (e.g. `"1.0"`), a
+  single tree-wide value -- not a per-profile field.
+* `profiles` List of dicts, one per published `profile_N`, each with fields:
+
+Field | Description
+---|---
+`name` | Opaque profile name (e.g. `"profile_2"`)
+`index` | Slot index, as parsed from the `profile_N` dirname
+`is_active` | `True` if this is `app_modes/active_profile`
+`is_writable` | `True` if bit `index` is set in `config/writable_slot_mask`
+`is_configured` | `False` for an empty, unconfigured custom slot
+
+Exceptions that can be thrown by `amdsmi_get_ampp_profiles` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - The device has no `app_modes/` (AMPP not
+  implemented on this ASIC)
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
+  malformed (missing `0x` prefix or unparsable)
+- `AMDSMI_STATUS_OUT_OF_RESOURCES` - The caller-supplied `profiles` buffer
+  is smaller than the number of published profiles
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            version, profiles = amdsmi.amdsmi_get_ampp_profiles(device)
+            for profile in profiles:
+                print(f"{profile['name']}: active={profile['is_active']} "
+                      f"writable={profile['is_writable']}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_ampp_fields
+
+**Note:** This is a kernel UAPI feature (sysfs `app_modes/`), not libdrm.
+
+Description: Get the fields of a single AMPP power profile. Field name and
+unit are opaque strings taken verbatim from sysfs; never mapped to an
+AMDSMI-defined enum.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `profile_name` name of the profile to query (e.g. `"profile_2"`), as
+  returned by `amdsmi_get_ampp_profiles`
+
+Output: List of dicts, one per published field:
+
+Field | Description
+---|---
+`name` | Opaque field name (e.g. `"PPT0_Limit"`)
+`unit` | Opaque unit string (e.g. `"W"`, `"MHz"`, `"bool"`)
+`value` | Parsed value
+`limit_min` | Guidance-only lower bound from `limits/min/<field>`
+`limit_max` | Guidance-only upper bound from `limits/max/<field>`
+`has_limits` | `True` if `limit_min`/`limit_max` were found in `limits/`
+
+Exceptions that can be thrown by `amdsmi_get_ampp_fields` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - The device has no `app_modes/`
+- `AMDSMI_STATUS_NO_DATA` - `profile_name` is a writable but unconfigured
+  custom slot
+- `AMDSMI_STATUS_INVAL` - `profile_name` does not match any published
+  `profile_N` directory
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
+  malformed (missing `0x` prefix or unparsable)
+- `AMDSMI_STATUS_OUT_OF_RESOURCES` - The caller-supplied `fields` buffer is
+  smaller than the number of published fields for this profile
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            version, profiles = amdsmi.amdsmi_get_ampp_profiles(device)
+            if profiles and profiles[0]["is_configured"]:
+                fields = amdsmi.amdsmi_get_ampp_fields(device, profiles[0]["name"])
+                for field in fields:
+                    print(f"{field['name']}: {field['value']} {field['unit']}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_activate_ampp_profile
+
+**Note:** This is a kernel UAPI feature (sysfs `app_modes/`), not libdrm.
+Requires root/`CAP_SYS_ADMIN`.
+
+Description: Activate an AMPP profile.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `profile_name` name of the profile to activate (e.g. `"profile_2"`), as
+  returned by `amdsmi_get_ampp_profiles`
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_activate_ampp_profile` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - The device has no `app_modes/`
+- `AMDSMI_STATUS_NO_PERM` - The caller lacks root/`CAP_SYS_ADMIN`
+- `AMDSMI_STATUS_INVAL` - `profile_name` does not match any published
+  `profile_N`
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_activate_ampp_profile(device, "profile_2")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_configure_ampp_profile
+
+**Note:** This is a kernel UAPI feature (sysfs `app_modes/`), not libdrm.
+Requires root/`CAP_SYS_ADMIN`.
+
+Description: Configure a custom AMPP profile slot.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `profile_name` name of the profile to configure (e.g. `"profile_5"`), as
+  returned by `amdsmi_get_ampp_profiles`
+* `fields` list of dicts with `name` and `value` to stage (partial staging
+  is allowed), but at least one field is required -- the driver's
+  `config/commit` rejects with `-EINVAL` if `config/profile` was never set
+  or no field was ever staged for this attempt, so AMDSMI defensively
+  requires a non-empty `fields` list before issuing any sysfs writes at all.
+
+Output: `None`
+
+Exceptions that can be thrown by `amdsmi_configure_ampp_profile` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - The device has no `app_modes/`, or the
+  profile is not listed in `config/writable_slot_mask`
+- `AMDSMI_STATUS_NO_PERM` - The caller lacks root/`CAP_SYS_ADMIN`
+- `AMDSMI_STATUS_INVAL` - `profile_name` does not match any published
+  `profile_N`, `fields` contains a field name not recognized for this
+  profile, or `fields` is `None`/empty
+- `AMDSMI_STATUS_UNEXPECTED_DATA` - `config/writable_slot_mask` content is
+  malformed (missing `0x` prefix or unparsable)
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            # Stage and commit a field on a writable custom slot
+            amdsmi.amdsmi_configure_ampp_profile(
+                device,
+                "profile_5",
+                fields=[{"name": "PPT0_Limit", "value": 300}],
+            )
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### GTT (TTM `pages_limit`) APIs
 
 **Supported ASICs and prerequisites:**
@@ -6374,6 +6851,116 @@ import amdsmi
 try:
     amdsmi.amdsmi_init()
     amdsmi.amdsmi_reset_ttm_pages_limit()
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_power_stabilization_info
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+
+Description: Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info for a GPU. Reads `host_control_enabled`, `enabled`, and all configuration parameters directly from sysfs. A read returns the current effective value of each parameter, which can differ from the last value written, regardless of `host_control_enabled` or `enabled` state. When NPM (Node-level Power Management) coordination is active on a node, every field becomes node-wide rather than per-GPU; a read reflects the current effective node-wide value regardless of which GPU handle on that node is used.
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output: Dictionary with fields:
+
+Field | Description
+---|---
+`host_control_enabled` | Read-only: `True` if the host has control of Power Stabilization
+`enabled` | Power Stabilization enabled
+`power_floor` | Power Floor, % of power limit (0-100)
+`delay` | Insertion delay, milliseconds
+`insertion_priority` | HAWK insertion priority (`AmdSmiHawkInsertionPriority`)
+`ramp_enabled` | Ramp Management enabled
+`ramp_max_ramp_up_rate` | Max ramp-up rate, %PL/sec (100 disables ramp-up management)
+`ramp_max_ramp_down_rate` | Max ramp-down rate, %PL/sec (100 disables ramp-down management)
+`ramp_min_time_at_power_floor` | Minimum time at Power Floor, seconds
+`ramp_stop_delay` | Ramp stop delay, seconds
+
+Exceptions that can be thrown by `amdsmi_get_power_stabilization_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, or the device is multi-VF
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            info = amdsmi.amdsmi_get_power_stabilization_info(device)
+            print(f"Enabled: {info['enabled']}")
+            print(f"Power floor: {info['power_floor']}")
+            print(f"Insertion priority: {info['insertion_priority'].name}")
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_set_power_stabilization_param
+
+
+**Supported ASICs and prerequisites:**
+
+- Bare-metal Linux only. Not available on multi-VF devices; both cases
+  return `AMDSMI_STATUS_NOT_SUPPORTED`.
+- Writing requires root (or equivalent sysfs write permission).
+
+Description: Set a single Power Stabilization parameter. Applies exactly one parameter per call; a batch of calls is not rolled back if a later call fails. When NPM (Node-level Power Management) coordination is active on a node, every `param_id` becomes node-wide rather than per-GPU; amdsmi does not detect NPM state or reroute the write on the caller's behalf, so the caller is responsible for selecting the node's primary GPU handle (OAM ID 0) before calling this function. Any parameter dependency (for example, ramp-down configuration requiring Power Stabilization to already be enabled) is enforced by the driver via the sysfs write itself; this function performs no client-side dependency or range validation.
+
+Input parameters:
+
+* `processor_handle` the device handle
+* `param_id` parameter to set (`AmdSmiPowerStabilizationParamId`)
+* `value` new value, written as a signed 64-bit integer: every `param_id`, including `RAMP_MAX_RAMP_UP_RATE` and `RAMP_MAX_RAMP_DOWN_RATE` despite being a %PL/sec rate, accepts an `int` only (`bool` is rejected since it is an `int` subclass; this parameter's sysfs node cannot accept floating-point values)
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_power_stabilization_param` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiParameterException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Power Stabilization is not implemented on this device, the device is multi-VF, or the driver rejects the write due to an unmet dependency
+- `AMDSMI_STATUS_NO_PERM` - amd-smi lacks permission to write sysfs
+- `AMDSMI_STATUS_INVAL` - `param_id` is invalid, or the driver rejects the value
+- `AMDSMI_STATUS_FILE_ERROR` - The sysfs write could not complete
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    devices = amdsmi.amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi.amdsmi_set_power_stabilization_param(
+                device, amdsmi.AmdSmiPowerStabilizationParamId.POWER_FLOOR, 60
+            )
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

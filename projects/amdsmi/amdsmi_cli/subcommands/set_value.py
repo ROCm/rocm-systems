@@ -5,11 +5,15 @@
 import json
 import logging
 import math
+import os
+import stat
 import sys
 
+from amdsmi_cli_exceptions import AmdSmiInvalidFilePathException
 from amdsmi_cli_exceptions import AmdSmiRequiredCommandException
 from amdsmi_cli_exceptions import AmdSmiInvalidParameterException
 from amdsmi_cli_exceptions import AmdSmiExitCode
+from amdsmi_helpers import AMDSMIHelpers
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
@@ -829,6 +833,416 @@ class SetValueCommands:
             return None
         return eligible[-1]
 
+    @staticmethod
+    def _is_valid_ampp_field(field):
+        # amdsmi_configure_ampp_profile() does field["name"].encode()/int(field["value"])
+        # and assigns straight into ctypes struct fields, which raise a bare
+        # TypeError/ValueError/OverflowError (not AmdSmiLibraryException) for a
+        # non-string name or an out-of-range value -- reject those here so one bad
+        # field can't abort the whole file-restore loop with an unhandled traceback.
+        # Shares its name/value checks with the --ampp-configure argv parser
+        # (amdsmi_parser.py) via AMDSMIHelpers so the two can't drift apart.
+        if not isinstance(field, dict) or "name" not in field or "value" not in field:
+            return False
+        if not AMDSMIHelpers.is_valid_ampp_field_name(field["name"]):
+            return False
+        return AMDSMIHelpers.parse_ampp_field_value(field["value"]) is not None
+
+    # Max size accepted for an `@<path>` replay file (AMPP / Power
+    # Stabilization configure): generous for a multi-GPU `gpu_data` dump,
+    # small enough to reject a pathological/hostile input before json.loads.
+    _JSON_REPLAY_MAX_BYTES = 1024 * 1024
+
+    def _load_gpu_section_from_json_file(
+        self, file_path, gpu_id, gpu_bdf, section_key, label, *, allow_not_applicable=False
+    ):
+        """Load+validate an `amd-smi static --<flag> --json`-shaped `@<path>`
+        replay file, then look up this GPU's `section_key` entry. Shared by
+        the AMPP and Power Stabilization `@<path>` configure handlers so the
+        open/parse/shape-check logic can't drift between the two.
+
+        The file is opened with O_NOFOLLOW (reject a symlink) and
+        O_NONBLOCK (reject blocking on a FIFO), and read with an explicit
+        MAX+1-byte cap enforced against the bytes actually read rather than
+        an earlier fstat() snapshot, before being parsed. The whole-file
+        parse is cached per `file_path` on this instance: `set_gpu()` calls
+        the per-GPU configure handler once per device in a `--gpu all` run,
+        and without this cache a malformed file would only be discovered
+        after earlier GPUs in that run were already mutated.
+
+        If `allow_not_applicable` is set and this GPU's `section_key` entry
+        is the literal string "N/A" (the read-path dump's marker for "not
+        supported on this device"), returns None instead of raising -- lets
+        a `--gpu all` replay of a mixed-node dump skip unsupported GPUs
+        instead of aborting the whole run.
+        """
+        command = " ".join(sys.argv[1:])
+        cli_flag = label.lower().replace(" ", "-")
+        cache = getattr(self, "_json_replay_file_cache", None)
+        if cache is None:
+            cache = self._json_replay_file_cache = {}
+
+        file_data = cache.get(file_path)
+        if file_data is None:
+            try:
+                fd = os.open(file_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except OSError as e:
+                raise AmdSmiInvalidFilePathException(
+                    command, self.logger.format, f"Unable to read '{file_path}': {e}"
+                ) from e
+            try:
+                file_stat = os.fstat(fd)
+                if not stat.S_ISREG(file_stat.st_mode):
+                    raise AmdSmiInvalidFilePathException(
+                        command, self.logger.format, f"'{file_path}' is not a regular file."
+                    )
+                read_limit = self._JSON_REPLAY_MAX_BYTES + 1
+                chunks = []
+                total = 0
+                while total < read_limit:
+                    chunk = os.read(fd, read_limit - total)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    total += len(chunk)
+                raw_bytes = b"".join(chunks)
+            except OSError as e:
+                raise AmdSmiInvalidFilePathException(
+                    command, self.logger.format, f"Unable to read '{file_path}': {e}"
+                ) from e
+            finally:
+                os.close(fd)
+
+            if len(raw_bytes) > self._JSON_REPLAY_MAX_BYTES:
+                raise AmdSmiInvalidFilePathException(
+                    command,
+                    self.logger.format,
+                    f"'{file_path}' exceeds the {self._JSON_REPLAY_MAX_BYTES}-byte limit "
+                    "for a replay file.",
+                )
+
+            try:
+                raw = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError as e:
+                raise AmdSmiInvalidFilePathException(
+                    command, self.logger.format, f"'{file_path}' is not valid UTF-8: {e}"
+                ) from e
+
+            try:
+                file_data = json.loads(raw)
+            except (json.JSONDecodeError, RecursionError, ValueError) as e:
+                raise AmdSmiInvalidFilePathException(
+                    command, self.logger.format, f"'{file_path}' is not valid JSON: {e}"
+                ) from e
+
+            if not isinstance(file_data, dict) or not isinstance(file_data.get("gpu_data"), list):
+                raise AmdSmiInvalidFilePathException(
+                    command,
+                    self.logger.format,
+                    f"'{file_path}' is not an 'amd-smi static --{cli_flag} --json' shaped file "
+                    "(expected a top-level 'gpu_data' list).",
+                )
+            cache[file_path] = file_data
+
+        gpu_entry = next(
+            (
+                entry
+                for entry in file_data["gpu_data"]
+                if isinstance(entry, dict) and entry.get("gpu") == gpu_id
+            ),
+            None,
+        )
+        if gpu_entry is None:
+            found_ids = [
+                entry.get("gpu") for entry in file_data["gpu_data"] if isinstance(entry, dict)
+            ]
+            raise AmdSmiInvalidFilePathException(
+                command,
+                self.logger.format,
+                f"'{file_path}' has no entry for GPU {gpu_id} (BDF:{gpu_bdf}). Found gpu ids: "
+                f"{', '.join(str(i) for i in found_ids) or 'none'}",
+            )
+
+        section_entry = gpu_entry.get(section_key)
+        if allow_not_applicable and section_entry == "N/A":
+            return None
+        if not isinstance(section_entry, dict):
+            raise AmdSmiInvalidFilePathException(
+                command,
+                self.logger.format,
+                f"'{file_path}' has no {label} data for GPU {gpu_id} (BDF:{gpu_bdf}).",
+            )
+        return section_entry
+
+    def _configure_ampp_from_file(self, args, file_path, gpu_bdf, gpu_id):
+        # Restores every writable profile for this GPU's entry from a
+        # `amd-smi static --ampp --json`-shaped file (--ampp-configure @<path>).
+        # That file's top level is `{"gpu_data": [{"gpu": <int>, "ampp": {...}}, ...]}`
+        # (see AMDSMILogger.combine_arrays_to_json), so entries are matched by
+        # the integer "gpu" index, not by BDF.
+        ampp_entry = self._load_gpu_section_from_json_file(
+            file_path, gpu_id, gpu_bdf, "ampp", "AMPP"
+        )
+
+        profiles = ampp_entry.get("profiles")
+        if not isinstance(profiles, list):
+            profiles = []
+        writable_profiles = [
+            p
+            for p in profiles
+            if isinstance(p, dict)
+            and isinstance(p.get("name"), str)
+            and p.get("name")
+            and p.get("is_writable")
+            and isinstance(p.get("fields"), list)
+            and p.get("fields")
+        ]
+
+        if not writable_profiles:
+            self.logger.store_output(
+                args.gpu,
+                "ampp_configure",
+                f"No writable AMPP profiles with staged fields found in '{file_path}'.",
+            )
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
+
+        results = []
+        for profile_entry in writable_profiles:
+            profile_name = profile_entry["name"]
+            fields = profile_entry["fields"]
+            # amdsmi_activate/configure_ampp_profile() encodes the name to
+            # UTF-8, which raises for a lone surrogate; reject it here so one
+            # bad entry can't abort the restore part-way through.
+            if not AMDSMIHelpers.is_valid_ampp_field_name(profile_name):
+                results.append(f"{ascii(profile_name)}: Malformed profile 'name', skipping")
+                continue
+            if not all(self._is_valid_ampp_field(f) for f in fields):
+                results.append(f"{profile_name}: Malformed 'fields' entry, skipping")
+                continue
+            try:
+                amdsmi_interface.amdsmi_configure_ampp_profile(args.gpu, profile_name, fields)
+                field_str = ", ".join(f"{f['name']}={f['value']}" for f in fields)
+                results.append(f"{profile_name}: Successfully configured ({field_str})")
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError("Command requires elevation") from e
+                results.append(
+                    f"{profile_name}: [{e.get_error_info(detailed=False)}] Unable to configure"
+                )
+                self.helpers.error_collector.record_library_error(e.get_error_code())
+
+        self.logger.store_output(args.gpu, "ampp_configure", results)
+        self.logger.print_output()
+        self.logger.clear_multiple_devices_output()
+
+    def _power_stabilization_npm_note(self, args, attempted):
+        """Returns a one-line note (as a list) about NPM's node-wide effect on
+        this write, or None if NPM isn't active. [INFO] when args.gpu is the
+        primary GPU (the write genuinely is node-wide); [WARNING] + the
+        equivalent primary-GPU command otherwise (the write only affects this
+        GPU's own node state, not the actual node-wide value)."""
+        if not self.helpers.is_npm_enabled(getattr(self, "node_handle", None)):
+            return None
+        if self.primary_gpu_handle is not None and args.gpu.value == self.primary_gpu_handle.value:
+            return ["[INFO] NPM is enabled; this setting applies node-wide, not just to this GPU."]
+        if self.primary_gpu_handle is None:
+            return None
+        primary_gpu_id = self.helpers.get_gpu_id_from_device_handle(self.primary_gpu_handle)
+        return [
+            "[WARNING] power_stabilization is node-wide while NPM is enabled; "
+            "this write only reflects this GPU's own node state. To configure "
+            f"the node, use its primary GPU instead: 'amd-smi set --gpu "
+            f"{primary_gpu_id} --power-stabilization-configure {attempted}'"
+        ]
+
+    def _apply_power_stabilization_params(
+        self, args, parsed, source_file=None, prefix_messages=None
+    ):
+        # Apply one parameter per call, in order; the core API performs no
+        # rollback, so stop at the first failure (matches its own semantics).
+        # Accumulate into a single "power_stabilization_configure" document,
+        # same as _configure_ampp_from_file's `results` list, instead of one
+        # store_output() key per field, so a `--gpu all` run can't carry a
+        # prior GPU's leftover keys into the next GPU's document.
+        # When applying a `@<path>` replay (source_file set), an aggregate
+        # "applied N/N" line is appended so an automated caller can tell a
+        # partial restore from a complete one without counting the per-field
+        # lines itself.
+        total = len(parsed)
+        applied = 0
+        results = list(prefix_messages) if prefix_messages else []
+
+        for param_id, value in parsed:
+            field_name = param_id.name.lower()
+            try:
+                amdsmi_interface.amdsmi_set_power_stabilization_param(args.gpu, param_id, value)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                error_code = e.get_error_code()
+                if error_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError("Command requires elevation") from e
+                if error_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                    # NOT_SUPPORTED covers both "unsupported on this
+                    # device/platform" and a driver-enforced parameter
+                    # dependency (e.g. ramp-down requires PS already enabled);
+                    # the CLI does not special-case which one failed.
+                    out = (
+                        f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set {field_name} to "
+                        f"{value}: not supported on this device or platform, a "
+                        "dependent setting may be unmet"
+                    )
+                elif error_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                    out = (
+                        f"[AMDSMI_STATUS_INVAL] Unable to set {field_name} to {value}: "
+                        "invalid value"
+                    )
+                else:
+                    out = (
+                        f"[{e.get_error_info(detailed=False)}] Unable to set "
+                        f"{field_name} to {value}"
+                    )
+                results.append(out)
+                self.helpers.error_collector.record_library_error(error_code)
+                break
+            else:
+                applied += 1
+                results.append(f"Successfully set {field_name} to {value}")
+
+        if source_file is not None:
+            results.append(f"Applied {applied}/{total} parameters from '{source_file}'")
+
+        self.logger.store_output(args.gpu, "power_stabilization_configure", results)
+        self.logger.print_output()
+        self.logger.clear_multiple_devices_output()
+        return results
+
+    def _parse_power_stabilization_file_tokens(
+        self, file_path, gpu_bdf, gpu_id, *, allow_not_applicable=False
+    ):
+        # Resolves this GPU's entry from a `--power-stabilization-configure
+        # @<path>` file into (param_id, value) tokens, without applying them.
+        # Shared by the real apply path and by the `--gpu all` pre-validation
+        # pass, so a malformed file or a GPU missing from it is discovered
+        # identically by both -- see _prevalidate_power_stabilization_file().
+        #
+        # Returns None (instead of raising) when `allow_not_applicable` is
+        # set and this GPU's entry is "N/A" -- a mixed-node dump (some GPUs
+        # support Power Stabilization, some don't) can then be replayed with
+        # `--gpu all` by skipping the unsupported GPUs rather than aborting
+        # the whole run.
+        ps_entry = self._load_gpu_section_from_json_file(
+            file_path,
+            gpu_id,
+            gpu_bdf,
+            "power_stabilization",
+            "Power Stabilization",
+            allow_not_applicable=allow_not_applicable,
+        )
+        if ps_entry is None:
+            return None
+
+        # The read-path dict reports state with stative names
+        # (host_control_enabled/enabled/ramp_enabled); the KEY=VALUE setter
+        # keys are the param_id operation names (host_control/enable/
+        # ramp_enable). Translate before building tokens so a `static --json`
+        # dump can be replayed as-is.
+        read_to_write_key = {
+            "host_control_enabled": "host_control",
+            "enabled": "enable",
+            "ramp_enabled": "ramp_enable",
+        }
+
+        # JSON booleans (from the `--json` read-path dump) must become 0/1,
+        # not the strings "True"/"False". Unit-bearing fields read back as
+        # unit_format()'s {"value": ..., "unit": ...} shape; unwrap to the
+        # bare value before building the KEY=VALUE token.
+        def _token_value(value):
+            if isinstance(value, dict) and "value" in value:
+                value = value["value"]
+            return int(value) if isinstance(value, bool) else value
+
+        tokens = [
+            f"{read_to_write_key.get(key, key)}={_token_value(value)}"
+            for key, value in ps_entry.items()
+        ]
+
+        command = " ".join(sys.argv[1:])
+        parsed = []
+        for token in tokens:
+            try:
+                result = AMDSMIHelpers.parse_power_stabilization_token(token, ignore_read_only=True)
+            except ValueError as e:
+                raise AmdSmiInvalidFilePathException(
+                    command, self.logger.format, f"'{file_path}': {e}"
+                ) from e
+            if result is not None:
+                parsed.append(result)
+        return parsed
+
+    def _prevalidate_power_stabilization_file(self, args, file_path):
+        # `--gpu all --power-stabilization-configure @<path>` applies one GPU
+        # at a time (see handle_gpus()), so a file missing a later GPU's
+        # entry would otherwise only surface after earlier GPUs were already
+        # written. Resolve every target GPU's tokens up front -- without
+        # applying them -- so a bad file aborts before any GPU is touched.
+        # `allow_not_applicable=True`: a GPU that doesn't support Power
+        # Stabilization reads back as "N/A" in the dump (not a malformed
+        # entry), so it's skipped here rather than failing the whole
+        # pre-validation pass -- the per-GPU apply step skips it the same way.
+        for device_handle in args.gpu:
+            try:
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
+            except amdsmi_exception.AmdSmiLibraryException:
+                gpu_bdf = f"BDF Unavailable for {device_handle}"
+            try:
+                gpu_id = self.helpers.get_gpu_id_from_device_handle(device_handle)
+            except IndexError:
+                gpu_id = f"ID Unavailable for {device_handle}"
+            self._parse_power_stabilization_file_tokens(
+                file_path, gpu_bdf, gpu_id, allow_not_applicable=True
+            )
+
+    def _configure_power_stabilization_from_file(self, args, file_path, gpu_bdf, gpu_id):
+        # Restores Power Stabilization settings for this GPU's entry from a
+        # `amd-smi static --power-stabilization --json`-shaped file
+        # (--power-stabilization-configure @<path>). That file's top level is
+        # `{"gpu_data": [{"gpu": <int>, "power_stabilization": {...}}, ...]}`
+        # (see AMDSMILogger.combine_arrays_to_json), so entries are matched by
+        # the integer "gpu" index, not by BDF.
+        parsed = self._parse_power_stabilization_file_tokens(
+            file_path, gpu_bdf, gpu_id, allow_not_applicable=True
+        )
+
+        if parsed is None:
+            # This GPU's entry is "N/A" (Power Stabilization not supported on
+            # it) -- skip it instead of failing, so a mixed-node dump can
+            # still be replayed with `--gpu all`.
+            self.logger.store_output(
+                args.gpu,
+                "power_stabilization_configure",
+                f"Power Stabilization is 'N/A' (not supported) for GPU {gpu_id} in "
+                f"'{file_path}'; skipping.",
+            )
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
+
+        if not parsed:
+            self.logger.store_output(
+                args.gpu,
+                "power_stabilization_configure",
+                f"No settable Power Stabilization fields found in '{file_path}' for GPU {gpu_id}.",
+            )
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
+
+        note = self._power_stabilization_npm_note(args, f"@{file_path}")
+        self._apply_power_stabilization_params(
+            args, parsed, source_file=file_path, prefix_messages=note
+        )
+
     def set_gpu(
         self,
         args,
@@ -850,6 +1264,9 @@ class SetValueCommands:
         ptl_format=None,
         mem_carveout=None,
         compute_partition_mem_alloc_mode=None,
+        power_stabilization_configure=None,
+        ampp_activate=None,
+        ampp_configure=None,
     ):
         """Issue reset commands to target gpu(s)
 
@@ -870,6 +1287,7 @@ class SetValueCommands:
             ptl_status (int, optional): Value override for args.ptl_status. Defaults to None.
             ptl_format(string, optional): Value override for args.ptl_format. Defaults to None.
             compute_partition_mem_alloc_mode (str, optional): Value override for args.compute_partition_mem_alloc_mode. Defaults to None.
+            power_stabilization_configure (namedtuple, optional): Value override for args.power_stabilization_configure as power_stabilization_configure_args(tokens, file_path), where tokens is a list of (AmdSmiPowerStabilizationParamId, value) tuples (mutually exclusive with file_path). Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no gpu subcommand argument is provided
             AmdSmiInvalidParameterException: If mutually exclusive/invalid parameters are supplied
@@ -913,6 +1331,12 @@ class SetValueCommands:
             args.mem_carveout = mem_carveout
         if compute_partition_mem_alloc_mode is not None:
             args.compute_partition_mem_alloc_mode = compute_partition_mem_alloc_mode
+        if power_stabilization_configure is not None:
+            args.power_stabilization_configure = power_stabilization_configure
+        if ampp_activate is not None:
+            args.ampp_activate = ampp_activate
+        if ampp_configure is not None:
+            args.ampp_configure = ampp_configure
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -921,6 +1345,16 @@ class SetValueCommands:
         if not self.group_check_printed:
             self.helpers.check_required_groups()
             self.group_check_printed = True
+
+        if (
+            isinstance(args.gpu, list)
+            and len(args.gpu) > 1
+            and getattr(args, "power_stabilization_configure", None) is not None
+            and args.power_stabilization_configure.file_path is not None
+        ):
+            self._prevalidate_power_stabilization_file(
+                args, args.power_stabilization_configure.file_path
+            )
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(
@@ -951,6 +1385,9 @@ class SetValueCommands:
                     getattr(args, "process_isolation", None) is not None,
                     getattr(args, "mem_carveout", None) is not None,
                     getattr(args, "compute_partition_mem_alloc_mode", None) is not None,
+                    getattr(args, "power_stabilization_configure", None) is not None,
+                    getattr(args, "ampp_activate", None) is not None,
+                    getattr(args, "ampp_configure", None) is not None,
                 ]
             ):
                 command = " ".join(sys.argv[1:])
@@ -1354,7 +1791,14 @@ class SetValueCommands:
                     amdsmi_interface.amdsmi_set_gpu_memory_partition_mode(
                         args.gpu, memory_partition
                     )
-                    out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
+                    if memory_dict["current"] == args.memory_partition:
+                        # Requesting the current mode cancels a pending change: nothing to reload.
+                        out = (
+                            f"Memory partition is already {args.memory_partition}; "
+                            "this request cancels any pending memory partition change."
+                        )
+                    else:
+                        out = f"Successfully set memory partition to {args.memory_partition}, use `sudo modprobe -r amdgpu && sudo modprobe amdgpu` to reload driver"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
@@ -1984,6 +2428,88 @@ class SetValueCommands:
             self.logger.clear_multiple_devices_output()
             return
 
+        if getattr(args, "ampp_activate", None):
+            try:
+                amdsmi_interface.amdsmi_activate_ampp_profile(args.gpu, args.ampp_activate)
+                self.logger.store_output(
+                    args.gpu,
+                    "ampp_activate",
+                    f"Successfully activated AMPP profile {args.ampp_activate}",
+                )
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError("Command requires elevation") from e
+
+                # Get available profiles for error message
+                try:
+                    _, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
+                    available_str = ", ".join(p["name"] for p in ampp_profiles)
+                except amdsmi_exception.AmdSmiLibraryException as get_error:
+                    available_str = "Unable to fetch available AMPP profiles"
+                    logging.debug(
+                        f"Failed to fetch available AMPP profiles: {get_error.get_error_info()}"
+                    )
+
+                error_msg = (
+                    f"[{e.get_error_info(detailed=False)}] Unable to activate AMPP profile "
+                    f"{args.ampp_activate}"
+                )
+                self.helpers.store_device_error(
+                    self.logger, args.gpu, "ampp_activate", error_msg, exception=e
+                )
+                print(f"\nValid AMPP Profiles: [{available_str}]\n")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
+        if getattr(args, "ampp_configure", None):
+            if args.ampp_configure.file_path is not None:
+                self._configure_ampp_from_file(args, args.ampp_configure.file_path, gpu_bdf, gpu_id)
+                return
+
+            profile_name = args.ampp_configure.profile_name
+            fields = args.ampp_configure.fields
+            try:
+                amdsmi_interface.amdsmi_configure_ampp_profile(args.gpu, profile_name, fields)
+                field_str = ", ".join(f"{f['name']}={f['value']}" for f in fields)
+                self.logger.store_output(
+                    args.gpu,
+                    "ampp_configure",
+                    f"Successfully configured AMPP profile {profile_name}"
+                    + (f" ({field_str})" if field_str else " (no fields staged)"),
+                )
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError("Command requires elevation") from e
+
+                # Get available profiles/fields for error message
+                try:
+                    _, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
+                    available_str = ", ".join(p["name"] for p in ampp_profiles if p["is_writable"])
+                except amdsmi_exception.AmdSmiLibraryException as get_error:
+                    available_str = "Unable to fetch available AMPP profiles"
+                    logging.debug(
+                        f"Failed to fetch available AMPP profiles: {get_error.get_error_info()}"
+                    )
+
+                error_msg = (
+                    f"[{e.get_error_info(detailed=False)}] Unable to configure AMPP profile "
+                    f"{profile_name}"
+                )
+                self.helpers.store_device_error(
+                    self.logger, args.gpu, "ampp_configure", error_msg, exception=e
+                )
+                print(f"\nWritable AMPP Profiles: [{available_str}]\n")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
+
         if getattr(args, "compute_partition_mem_alloc_mode", None):
             try:
                 mode = amdsmi_interface.AmdSmiAcceleratorPartitionMemAllocModeType[
@@ -2028,6 +2554,22 @@ class SetValueCommands:
             self.logger.store_output(args.gpu, "accelerator_partition_mem_alloc_mode", out)
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
+            return
+
+        if getattr(args, "power_stabilization_configure", None) is not None:
+            if args.power_stabilization_configure.file_path is not None:
+                self._configure_power_stabilization_from_file(
+                    args, args.power_stabilization_configure.file_path, gpu_bdf, gpu_id
+                )
+                return
+            attempted = " ".join(
+                f"{param_id.name.lower()}={value}"
+                for param_id, value in args.power_stabilization_configure.tokens
+            )
+            note = self._power_stabilization_npm_note(args, attempted)
+            self._apply_power_stabilization_params(
+                args, args.power_stabilization_configure.tokens, prefix_messages=note
+            )
             return
 
     def set_value(
@@ -2075,6 +2617,9 @@ class SetValueCommands:
         core_msr_floor_limit=None,
         mem_carveout=None,
         gtt=None,
+        power_stabilization_configure=None,
+        ampp_activate=None,
+        ampp_configure=None,
         node_balancing_mode=None,
     ):
         """Issue reset commands to target gpu(s)
@@ -2090,6 +2635,9 @@ class SetValueCommands:
             compute_partition (amdsmi_interface.AmdSmiComputePartitionType, optional): Value override for args.compute_partition. Defaults to None.
             memory_partition (amdsmi_interface.AmdSmiMemoryPartitionType, optional): Value override for args.memory_partition. Defaults to None.
             power_cap (int, optional): Value override for args.power_cap. Defaults to None.
+            ampp_activate (str, optional): Value override for args.ampp_activate (profile name to ACTIVATE). Defaults to None.
+            ampp_configure (namedtuple, optional): Value override for args.ampp_configure
+                (profile_name, fields) to CONFIGURE. Defaults to None.
 
             cpu (cpu_handle, optional): device_handle for target device. Defaults to None.
             cpu_pwr_limit (int, optional): Value override for args.cpu_pwr_limit. Defaults to None.
@@ -2121,7 +2669,8 @@ class SetValueCommands:
             process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             AmdSmiRequiredCommandException: If no device target or argument is provided
-            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined or --gtt/--node-balancing-mode is misused
+            AmdSmiInvalidParameterException: If GPU/CPU/CORE arguments are combined, or
+                --gtt or --node-balancing-mode is misused
             PermissionError: If a set operation requires elevation (AMDSMI_STATUS_NO_PERM)
 
         Return:
@@ -2232,6 +2781,9 @@ class SetValueCommands:
             "ptl_format",
             "mem_carveout",
             "compute_partition_mem_alloc_mode",
+            "power_stabilization_configure",
+            "ampp_activate",
+            "ampp_configure",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -2301,6 +2853,8 @@ class SetValueCommands:
                         args.process_isolation is not None,
                         args.mem_carveout is not None,
                         args.compute_partition_mem_alloc_mode is not None,
+                        args.ampp_activate is not None,
+                        args.ampp_configure is not None,
                     ]
                 )
             except AttributeError:
@@ -2458,6 +3012,9 @@ class SetValueCommands:
                     ptl_status,
                     ptl_format,
                     mem_carveout,
+                    power_stabilization_configure=power_stabilization_configure,
+                    ampp_activate=ampp_activate,
+                    ampp_configure=ampp_configure,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
             if args.cpu == None and args.core == None:
@@ -2522,4 +3079,7 @@ class SetValueCommands:
                 ptl_status,
                 ptl_format,
                 mem_carveout,
+                power_stabilization_configure=power_stabilization_configure,
+                ampp_activate=ampp_activate,
+                ampp_configure=ampp_configure,
             )

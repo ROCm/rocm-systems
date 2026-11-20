@@ -27,10 +27,11 @@ namespace simdojo {
 ///
 /// @details Each worker thread manages exactly one partition and holds the
 /// partition's event queue, incoming message queues, and synchronization
-/// state. In single-threaded mode only the event queue and async wakeup
-/// fields are used. In multi-threaded mode, threads synchronize via a
+/// state. In single-threaded mode only the event queue and idle publication
+/// flag are used. In multi-threaded mode, threads synchronize via a
 /// global barrier; each partition publishes its local_next before the
 /// barrier, and the barrier completion function computes the new global LBTS.
+/// Context zero's idle publication flag serves both worker modes.
 class alignas(64) PartitionContext {
 public:
   explicit PartitionContext(PartitionID pid, uint32_t num_partitions) : partition_id(pid) {
@@ -72,7 +73,11 @@ private:
   /// local_next values to compute the new global LBTS.
   std::atomic<Tick> local_next{TICK_MAX};
 
-  /// @brief Single-threaded idle wait (atomic wait/notify for async wakeup).
+  /// @brief Engine-wide idle publication flag, stored on context zero.
+  /// @details Producers exchange true with release ordering. Only the single
+  /// worker or barrier completion consumes the flag with an acquire-release
+  /// exchange before rechecking event and exit state. Other contexts' flags
+  /// are unused.
   std::atomic<bool> idle_wakeup_{false};
 
   /// @brief Drain all incoming queues into the local event queue.
@@ -87,7 +92,7 @@ private:
 /// **Single-threaded mode** (`num_threads == 1`): drains events directly from
 /// the priority queue in timestamp order. No LBTS computation, no barriers,
 /// no epoch structure. When the queue empties, drains async buffers and either
-/// terminates or blocks on a condition variable for external events.
+/// terminates or waits for external event publications (timed when paced).
 ///
 /// **Multi-threaded mode** (`num_threads > 1`): runs a conservative
 /// barrier-based Parallel Discrete Event Simulation (PDES) loop. Each epoch:
@@ -101,16 +106,21 @@ private:
 /// Functional\<Base\> CRTP mixin, which self-schedules a timer callback and
 /// re-enqueues after each advance(). If no events are ever scheduled and no
 /// primaries are registered, the simulation terminates via quiescence. If
-/// primaries are registered, the engine blocks until async events arrive or
-/// all primaries signal completion.
+/// primaries are registered and `max_ticks == 0`, the engine waits until async
+/// events arrive or all primaries signal completion. A finite run does not wait
+/// indefinitely for foreign-thread publications: an active primary with no
+/// queued work stops before the tick limit with `ExitCause::ACTIVE_PRIMARY_STALL`.
 ///
 /// Typical usage:
 /// @code
 ///   SimulationEngine::Config config{.num_threads = 4};
 ///   SimulationEngine engine(config);
 ///   engine.topology().set_root(std::move(my_model));
-///   engine.topology().partition_balanced(config.num_threads);
-///   engine.create(); // validates the partition policy and initializes components
+///   util::StringDiagnostic diagnostic;
+///   if (engine.topology().partition_balanced(config.num_threads, diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
+///   if (engine.create(diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
 ///   // (user enqueues work via CP)
 ///   auto exit = engine.run(); // starts up components, runs to completion
 /// @endcode
@@ -118,13 +128,15 @@ class SimulationEngine {
 public:
   /// @brief Configuration parameters for the simulation engine.
   struct Config {
-    Tick max_ticks = 0;       ///< Simulation stops at this tick (0 = unlimited).
+    Tick max_ticks = 0; ///< Maximum simulation tick (0 = unlimited). A finite run can stop earlier
+                        ///< when an active primary becomes quiescent, reporting
+                        ///< ExitCause::ACTIVE_PRIMARY_STALL at the last processed tick.
     uint32_t num_threads = 1; ///< Number of worker threads (one per partition).
     double wall_clock_ratio =
         0.0;                      ///< Sim-time per wall-time ratio (0 = disabled, 1.0 = real-time).
-    bool await_primaries = false; ///< If true, don't terminate on quiescence until at least one
-                                  ///< primary has registered. Used by the KFD driver to keep the
-                                  ///< engine alive while waiting for external stimuli (doorbells).
+    bool await_primaries = false; ///< When idle before the first primary registers, wait for an
+                                  ///< async event or shutdown, even with a finite tick budget.
+                                  ///< Used by the KFD driver to await external doorbells.
   };
 
   /// @brief Construct with config. Caller populates topology(), then calls create().
@@ -149,14 +161,18 @@ public:
   /// self-scheduling is deferred: the Clocked/Functional mixins enqueue their
   /// first event in startup() (invoked by the first run()/step() call), not
   /// here, so no events exist until execution begins.
-  /// @throws std::invalid_argument if the worker count, partition count, or
-  /// cross-partition link configuration is invalid.
-  void create();
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  /// @returns Failure with a diagnostic for invalid admission configuration. On
+  /// failure no component engine pointers are changed and is_created() remains false.
+  /// Allocations and component initialize callbacks can still throw.
+  util::Result create(util::DiagnosticEmitter emit_error = {});
 
   /// @brief Tear down engine state (shutdown components, join workers).
   ///
   /// @details After shutdown(), the engine can be rebuilt with a new create() call.
   /// Called automatically by the destructor if still built.
+  /// Requires run() or step() to have returned; use request_exit() to stop a
+  /// running engine from another thread, then join that thread before shutdown().
   void shutdown();
 
   /// @brief Return whether the engine has been created and is ready for execution.
@@ -217,9 +233,10 @@ public:
   /// @details On the first call, starts all components (initialization
   /// happens in create()). Each subsequent call advances to the next event
   /// time and processes all events at that timestamp, then returns.
-  /// Ticks without scheduled events are skipped. If the queue is empty
-  /// but primaries are registered, returns true so the caller can poll
-  /// for async events.
+  /// Ticks without scheduled events are skipped. If the queue is empty but
+  /// primaries are registered, an unlimited run returns true so the caller can
+  /// poll for async events. A finite run instead returns false with
+  /// ExitCause::ACTIVE_PRIMARY_STALL at the last processed tick.
   /// @retval true Simulation can continue.
   /// @retval false Simulation is done (query last_exit() for details).
   bool step();
@@ -235,16 +252,17 @@ public:
   /// @brief Register the calling component as a primary (work-producing).
   ///
   /// @details Primary components participate in the end-of-simulation consensus
-  /// protocol. The simulation ends gracefully when all registered primaries
-  /// have called primary_release(). Must be called during initialize()
-  /// or startup(), before the main simulation loop starts.
+  /// protocol. An unlimited run waits until all registered primaries call
+  /// primary_release(). A finite run can instead stop with
+  /// ExitCause::ACTIVE_PRIMARY_STALL when no work remains before max_ticks.
+  /// Must be called during initialize() or startup(), before the main simulation loop starts.
   void register_as_primary();
 
   /// @brief Release this primary (signal it is done producing work).
   ///
   /// @details Thread-safe. Decrements the active primary count. When all
-  /// registered primaries have been released, the engine sets exit reason
-  /// COMPLETED at the next epoch boundary.
+  /// registered primaries have been released and pending work has drained,
+  /// the engine can stop with ExitCause::ALL_PRIMARIES_COMPLETED.
   void primary_release();
 
   /// @brief Retain this primary (it has new work after a previous release).
@@ -256,6 +274,12 @@ public:
   /// @brief Return the exit event from the last completed run() or step().
   /// @returns Const reference to the stored exit event.
   const ExitStatus &last_exit() const { return exit_status_; }
+
+  /// @brief Read the exit code safely while a host thread may request exit.
+  int exit_code() const {
+    std::lock_guard<std::mutex> lock(exit_mutex_);
+    return exit_status_.code;
+  }
 
   /// @brief Enqueue an event from any thread (thread-safe).
   ///
@@ -349,12 +373,12 @@ private:
   /// updates current_time_, runs service callbacks, and checks termination.
   void barrier_completion();
 
-  /// @brief Sleep out an epoch in which every partition published TICK_MAX.
+  /// @brief Wait out an epoch in which every partition published TICK_MAX.
   ///
   /// @details Called from @ref barrier_completion, so every other worker is
-  /// parked in the barrier for its duration. Returns as soon as an async event
-  /// is pending or the run is done, and in any case within a millisecond so
-  /// termination keeps being re-checked.
+  /// parked in the barrier for its duration. Returns when async work, a primary
+  /// release or an exit publication requires another epoch. Event and exit
+  /// producers must change and notify context zero's publication flag.
   void idle_wait_quiescent();
 
   /// @brief Whether any partition has undrained async events.
@@ -408,18 +432,18 @@ private:
   /// @brief Drain async events for a single partition, flooring timestamps.
   ///
   /// @details In multi-threaded mode, floors each async event timestamp at
-  /// the global LBTS to ensure that events are not placed before the
-  /// already-committed safe time. In single-threaded mode, no flooring is needed.
+  /// the last committed simulation tick or the partition's current tick,
+  /// whichever is later.
   void drain_async_for_partition(PartitionContext &ctx);
 
   /// @brief Compute the safe minimum timestamp for async events in a partition.
   ///
-  /// @details Returns global_lbts_ clamped to at least event_queue.current_tick().
+  /// @details Returns current_time_ clamped to at least event_queue.current_tick().
   /// Returns 0 in single-threaded mode.
   Tick compute_async_floor(const PartitionContext &ctx) const;
 
-  /// @brief Set the exit event (internal helper).
-  void set_exit(ExitReason reason, Tick tick, std::string message, int code = 0);
+  /// @brief Record the cause of a successful simulation exit.
+  void set_exit(ExitCause cause, Tick tick, std::string message);
 
   /// @brief Record a terminal FAILURE status and mark the generation done, atomically.
   /// @details For terminal failures only, and unlike set_exit() it is last-writer-wins:
@@ -429,11 +453,6 @@ private:
   /// generation whose components never started. done_ is stored in the same critical
   /// section because request_exit() gates its overwrite on reading it under this lock.
   void set_terminal_exit(ExitReason reason, Tick tick, std::string message, int code);
-
-  /// @brief Check if all registered primaries have signaled OK to end.
-  /// @retval true All primaries are done (and at least one is registered).
-  /// @retval false No primaries registered, or some are still active.
-  bool all_primaries_done() const;
 
   /// @brief Check if all partitions are fully quiescent.
   ///
@@ -450,26 +469,31 @@ private:
   bool check_termination(Tick lbts);
 
   /// @brief Set up partition contexts, async queues, and engine pointers.
-  void setup_partitions();
+  util::Result setup_partitions(util::DiagnosticEmitter emit_error);
 
-  /// @brief Wake an idle single-threaded worker so it re-checks its exit and event state.
+  /// @brief Wake the idle worker or quiescent barrier completion.
   ///
-  /// @details No-op outside single-threaded mode, or once the partition is gone.
+  /// @details No-op once the partition is gone. Multi-threaded publications share
+  /// context zero's flag because only barrier completion can wait for them.
   /// The caller must already hold @ref contexts_mutex_ (shared or exclusive).
-  /// @param pid The partition to wake.
+  /// @param pid The publication's partition, checked for liveness. The wake
+  /// always targets context zero's shared flag.
   void wake_partition_locked(PartitionID pid);
 
-  /// @brief Wake an idle single-threaded worker, guarding against concurrent teardown.
+  /// @brief Wake the idle engine, guarding against concurrent teardown.
   ///
   /// @details Takes a shared lock on @ref contexts_mutex_ so the context cannot be
   /// destroyed by shutdown() between the bounds check and the notify.
-  /// @param pid The partition to wake.
+  /// @param pid The publication's partition, checked for liveness. The wake
+  /// always targets context zero's shared flag.
   void wake_partition(PartitionID pid);
 
   Topology topology_; ///< The simulation topology.
   Config config_;     ///< Engine configuration.
-  /// @brief Reusable event for the max-ticks exit sentinel.
-  /// @details Scheduled at config_.max_ticks during init. When processed, triggers sim exit.
+  /// @brief Reusable max-ticks exit sentinel for single-threaded execution.
+  /// @details With a positive limit, single-threaded run() and the first step()
+  /// schedule this event at config_.max_ticks after component startup. The
+  /// partitioned engine enforces the limit at its epoch barrier.
   Event max_ticks_event_{nullptr, EventType::SIM_EXIT};
   /// @brief Guards destruction of contexts_ and async_queues_ against foreign threads.
   ///
@@ -537,7 +561,7 @@ private:
   };
   std::vector<std::unique_ptr<AsyncQueue>> async_queues_; ///< One per partition.
 
-  std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
+  mutable std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
   bool exit_set_ = false; ///< True once exit_status_ has been written (sentinel for set_exit).
 };
 

@@ -1,0 +1,83 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+//! HSA runtime ABI frontend backed directly by `rocddi`.
+//!
+//! This frontend is early-access runtime software, not a drop-in replacement
+//! for the production `ROCr` HSA runtime. Its packaging, symbol-versioning,
+//! coexistence, platform coverage, and hardware qualification remain subject
+//! to change. Callers must select it explicitly.
+//!
+//! The crate owns HSA-visible process state and translates each C entry point
+//! into the private rocddi mechanisms. Public handles are integer or pointer
+//! encodings into runtime-owned objects; the individual modules document the
+//! lifetime and synchronization rules for those objects.
+
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::drop_non_drop,
+        clippy::forget_non_drop,
+        clippy::zero_sized_map_values,
+        reason = "native resource owners are uninhabited without a Windows provider"
+    )
+)]
+// HSA attribute tables and generated dispatch have long functions; modules also
+// import the shared FFI catalog. Keep those two structural exceptions explicit.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_ptr_alignment,
+    clippy::cast_sign_loss,
+    clippy::manual_let_else,
+    clippy::match_same_arms,
+    clippy::must_use_candidate,
+    clippy::semicolon_if_nothing_returned,
+    clippy::too_many_lines,
+    clippy::wildcard_imports
+)]
+
+// Unit-test executables call the Rust entry points directly. They do not
+// export the shared library's versioned ABI symbols.
+#[cfg(all(target_os = "linux", not(test)))]
+core::arch::global_asm!(include_str!("exports_linux.S"));
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+core::arch::global_asm!(include_str!(concat!(
+    env!("OUT_DIR"),
+    "/api_trace_dispatch_linux.S"
+)));
+
+mod admission;
+mod agent;
+#[cfg(all(hsa_tool_dispatch, not(test)))]
+mod api_trace;
+mod callback_arg;
+mod clock;
+mod config;
+mod core_dump;
+mod debugger;
+mod dispatch;
+mod events;
+mod ffi;
+mod image;
+mod isa;
+mod lifecycle;
+mod loader;
+mod logging;
+mod memory;
+mod pc_sampling;
+mod platform;
+mod queue;
+mod queue_intercept;
+mod session;
+mod signal;
+mod status;
+mod tool_events;
+
+mod api;
+pub(crate) use api::agent::hsa_agent_get_info;
+
+#[cfg(test)]
+pub(crate) use api::lifecycle::{hsa_init, hsa_shut_down};
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests;

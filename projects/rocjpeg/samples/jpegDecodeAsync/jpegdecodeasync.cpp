@@ -51,10 +51,6 @@ int main(int argc, char **argv) {
 
     RocJpegUtils::ParseCommandLine(input_path, output_file_path, save_images, device_id, rocjpeg_backend, decode_params, nullptr, nullptr, argc, argv, &num_iterations);
 
-    bool is_roi_valid = false;
-    uint32_t roi_width  = decode_params.crop_rectangle.right  - decode_params.crop_rectangle.left;
-    uint32_t roi_height = decode_params.crop_rectangle.bottom - decode_params.crop_rectangle.top;
-
     if (!RocJpegUtils::GetFilePaths(input_path, file_paths, is_dir, is_file)) {
         std::cerr << "ERROR: Failed to get input file paths!" << std::endl;
         return EXIT_FAILURE;
@@ -76,8 +72,8 @@ int main(int argc, char **argv) {
         RocJpegImage image = {};
         uint32_t channel_sizes[ROCJPEG_MAX_COMPONENT] = {};
         uint32_t num_channels = 0;
-        uint32_t width = 0;
-        uint32_t height = 0;
+        uint32_t width = 0;   // output width: the crop width when cropping, otherwise the image width
+        uint32_t height = 0;  // output height: the crop height when cropping, otherwise the image height
         RocJpegChromaSubsampling subsampling = {};
         std::string file_path;
     };
@@ -123,8 +119,8 @@ int main(int argc, char **argv) {
 
             if (s == ROCJPEG_STATUS_SUCCESS && save_images) {
                 std::string image_save_path = output_file_path;
-                uint32_t width  = is_roi_valid ? roi_width  : slot->width;
-                uint32_t height = is_roi_valid ? roi_height : slot->height;
+                uint32_t width  = slot->width;
+                uint32_t height = slot->height;
                 std::string base = slot->file_path.substr(slot->file_path.find_last_of("/\\") + 1);
                 if (is_dir)
                     rocjpeg_utils.GetOutputFileExt(decode_params.output_format, base, width, height, slot->subsampling, image_save_path);
@@ -188,8 +184,10 @@ int main(int argc, char **argv) {
 
         CHECK_ROCJPEG(rocJpegGetImageInfo(rocjpeg_handle, rocjpeg_stream_handle, &num_components, &subsampling, widths, heights));
 
-        if (roi_width > 0 && roi_height > 0 && roi_width <= widths[0] && roi_height <= heights[0])
-            is_roi_valid = true;
+        RocJpegDecodeParams image_decode_params = RocJpegUtils::FitCropToImage(decode_params, widths[0], heights[0]);
+        uint32_t roi_width  = image_decode_params.crop_rectangle.right  - image_decode_params.crop_rectangle.left;
+        uint32_t roi_height = image_decode_params.crop_rectangle.bottom - image_decode_params.crop_rectangle.top;
+        bool is_roi_valid = roi_width > 0 && roi_height > 0;
 
         rocjpeg_utils.GetChromaSubsamplingStr(subsampling, chroma_sub_sampling);
         std::cout << "Input image resolution: " << widths[0] << "x" << heights[0] << std::endl;
@@ -213,7 +211,7 @@ int main(int argc, char **argv) {
             return EXIT_FAILURE;
         }
 
-        if (rocjpeg_utils.GetChannelPitchAndSizes(decode_params, subsampling, widths, heights, num_channels, output_image, channel_sizes)) {
+        if (rocjpeg_utils.GetChannelPitchAndSizes(image_decode_params, subsampling, widths, heights, num_channels, output_image, channel_sizes)) {
             std::cerr << "ERROR: Failed to get the channel pitch and sizes" << std::endl;
             shutdown();
             return EXIT_FAILURE;
@@ -264,12 +262,12 @@ int main(int argc, char **argv) {
                 slot->image.pitch[c] = output_image.pitch[c];
             }
             slot->num_channels = num_channels;
-            slot->width         = widths[0];
-            slot->height        = heights[0];
+            slot->width         = is_roi_valid ? roi_width  : widths[0];
+            slot->height        = is_roi_valid ? roi_height : heights[0];
             slot->subsampling   = subsampling;
             slot->file_path     = file_path;
 
-            rocjpeg_status = rocJpegDecodeAsync(rocjpeg_handle, rocjpeg_stream_handle, &decode_params, &slot->image);
+            rocjpeg_status = rocJpegDecodeAsync(rocjpeg_handle, rocjpeg_stream_handle, &image_decode_params, &slot->image);
             if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
                 std::cerr << "ERROR: rocJpegDecodeAsync returned " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
                 {

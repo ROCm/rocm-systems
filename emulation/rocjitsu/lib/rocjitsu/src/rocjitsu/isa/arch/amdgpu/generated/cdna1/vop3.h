@@ -16,6 +16,13 @@ namespace cdna1 {
 
 class VInterpP1F32Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void append_mnemonic(std::string &out) const override {
+    out += mnemonic_;
+    out += "_e64";
+  }
   VInterpP1F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -26,6 +33,13 @@ public:
 
 class VInterpP2F32Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void append_mnemonic(std::string &out) const override {
+    out += mnemonic_;
+    out += "_e64";
+  }
   VInterpP2F32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -36,6 +50,13 @@ public:
 
 class VInterpMovF32Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, nullptr);
+  }
+  void append_mnemonic(std::string &out) const override {
+    out += mnemonic_;
+    out += "_e64";
+  }
   VInterpMovF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -1863,6 +1884,14 @@ public:
 
 class VInterpP1llF16Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 & 0x100u)
+      out += " high";
+    Vop3::build_modifiers(out);
+  }
   VInterpP1llF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -1872,6 +1901,14 @@ public:
 
 class VInterpP1lvF16Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 & 0x100u)
+      out += " high";
+    Vop3::build_modifiers(out);
+  }
   VInterpP1lvF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
@@ -1882,6 +1919,14 @@ public:
 
 class VInterpP2LegacyF16Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 & 0x100u)
+      out += " high";
+    Vop3::build_modifiers(out);
+  }
   VInterpP2LegacyF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
@@ -1893,6 +1938,14 @@ public:
 
 class VInterpP2F16Vop3 : public Vop3 {
 public:
+  void append_src_operand(std::string &out, uint8_t index) const override {
+    append_interp_operand(out, index, src0, &src1);
+  }
+  void build_modifiers(std::string &out) const override {
+    if (inst_.src0 & 0x100u)
+      out += " high";
+    Vop3::build_modifiers(out);
+  }
   VInterpP2F16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   void implicit_uses(RegisterSet &uses) const override;
@@ -4063,6 +4116,22 @@ public:
   Operand src0;
   Operand src1;
   Operand sdst_exec;
+};
+
+class VExpLegacyF32Vop3 : public Vop3 {
+public:
+  VExpLegacyF32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+};
+
+class VLogLegacyF32Vop3 : public Vop3 {
+public:
+  VLogLegacyF32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
 };
 
 class VAddCoU32Vop3SdstEnc : public Vop3SdstEnc {

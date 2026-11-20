@@ -45,8 +45,10 @@ def run_and_log(cmd, logFilePath):
     # progress stays visible during long runs, while appending it to the log.
     # cmd is an argument list launched without a shell, so paths holding spaces
     # or shell metacharacters reach the sample unmangled.
+    # universal_newlines (not the 3.7+ 'text' alias) keeps this working on the
+    # python3 3.6 that ships with SLES 15 and RHEL 8.
     with open(logFilePath, 'a') as logf:
-        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, text=True)
+        p = Popen(cmd, shell=False, stdout=PIPE, stderr=STDOUT, universal_newlines=True)
         for line in p.stdout:
             print(line, end='')
             logf.write(line)
@@ -112,6 +114,8 @@ parser.add_argument('--check_decode_status',          type=int, default=0,
                     help='Report the number of streams that have completed decoding without abortion. For decoder stability check. - optional (default:0, meaning normal performance report)')
 parser.add_argument('--use_ffmpeg_demuxer',   type=int, default=1,
                     help='Indicator to use FFMPEG demuxer - optional (default:1). If set to 0, built-in bitstream reader is used.')
+parser.add_argument('--mem_type',   type=int, default=None, choices=[0, 1, 2, 3],
+                    help='Output surface memory type passed to the sample as -m - optional (default: the sample\'s own default, 0 for videoDecode and 3 for videoDecodePerf) [0: device internal, 1: device copied, 2: host copied, 3: not mapped / decode only]')
 
 args = parser.parse_args()
 
@@ -126,6 +130,7 @@ numThreads = args.num_threads
 maxNumFrames = args.max_num_decoded_frames
 checkDecStatus = args.check_decode_status
 useFFDemuxer = args.use_ffmpeg_demuxer
+memType = args.mem_type
 if checkDecStatus == 1:
     sampleMode = 0
 
@@ -166,6 +171,8 @@ run_rocDecode_app = os.path.abspath(rocDecode_exe)
 os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
+    if memType is not None:
+        print("STATUS: output surface memory type - "+str(memType)+"\n")
 else:
     print("\nERROR: rocDecode Executable Not Found - "+run_rocDecode_app)
     print("Build the sample first, or pass --videodecode_exe to point at it.\n")
@@ -195,6 +202,8 @@ if sampleMode == 0:
         cmd = [run_rocDecode_app, '-i', str(current_file), '-d', str(gpuDeviceID), '-f', str(maxNumFrames)]
         if bsReaderOption:
             cmd.append(bsReaderOption)
+        if memType is not None:
+            cmd += ['-m', str(memType)]
         logFilePath = resultsPath+'/rocDecode_output.log'
         run_and_log(cmd, logFilePath)
         print("\n\n")
@@ -235,6 +244,8 @@ elif sampleMode == 1:
         print_bitrate(current_file)
 
         cmd = [run_rocDecode_app, '-i', str(current_file), '-t', str(numThreads), '-f', str(maxNumFrames)]
+        if memType is not None:
+            cmd += ['-m', str(memType)]
         logFilePath = resultsPath+'/rocDecode_output.log'
         run_and_log(cmd, logFilePath)
         print("\n\n")
@@ -331,6 +342,8 @@ if checkDecStatus == 0:
         f.write("\n\nBenchmark Report\n")
         f.write("--------\n")
         f.write("\n")
+        if memType is not None:
+            f.write("Output surface memory type: %d\n" % memType)
         f.write("\n")
         f.write(df.to_markdown(index=False))
         f.write("\n")

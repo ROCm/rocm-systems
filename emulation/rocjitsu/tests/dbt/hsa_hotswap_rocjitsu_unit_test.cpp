@@ -3,7 +3,7 @@
 
 #include <gtest/gtest.h>
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -23,7 +23,6 @@
 #include <iomanip>
 #include <iterator>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <regex>
 #include <sstream>
@@ -52,12 +51,10 @@ extern "C" void rj_test_force_next_translation_status(int status);
 extern "C" uint64_t rj_test_dump_path_count();
 extern "C" uint64_t rj_test_sample_fingerprint(const void *bytes, size_t size);
 extern "C" void rj_test_retain_completed_claims(bool retain);
-extern "C" void rj_test_fail_next_memo_admission(int stage);
 extern "C" void rj_test_set_pretranslation_root(const char *root);
 extern "C" uint64_t rj_test_pretranslation_hits();
 
 namespace {
-
 constexpr hsa_agent_t kA0Agent{1250};
 constexpr hsa_executable_t kExecutable{42};
 constexpr uint32_t kAsicRevisionAttribute = 0xA012;
@@ -95,7 +92,6 @@ int g_vendor_reader_calls = 0;
 hsa_file_t g_vendor_file = -1;
 size_t g_vendor_offset = 0;
 size_t g_vendor_size = 0;
-bool g_throw_from_deprecated_load = false;
 
 void reset_fakes() {
   g_next_reader = 1;
@@ -115,7 +111,6 @@ void reset_fakes() {
   g_vendor_file = -1;
   g_vendor_offset = 0;
   g_vendor_size = 0;
-  g_throw_from_deprecated_load = false;
 }
 
 hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, void *),
@@ -215,8 +210,6 @@ hsa_status_t HSA_API fake_load_program(hsa_executable_t, hsa_code_object_reader_
 hsa_status_t HSA_API fake_load_deprecated(hsa_executable_t, hsa_agent_t, hsa_code_object_t,
                                           const char *) {
   ++g_load_deprecated_calls;
-  if (g_throw_from_deprecated_load)
-    throw std::bad_alloc();
   return HSA_STATUS_SUCCESS;
 }
 
@@ -452,10 +445,8 @@ TEST_F(HsaHotswapHookTest, EmitsConcurrentTranslationRecordsAtomically) {
   EXPECT_EQ(record_count, kThreadCount * kRecordsPerThread);
 }
 
-// A rejected install must not leave the hook stuck. install() commits g_state.core
-// only AFTER its one fallible step (building the saved-table snapshot), so a
-// rejected or throwing install cannot latch core non-null and permanently reject
-// every later install. A failed OnLoad is followed by a successful one here.
+// A rejected install must not leave the hook stuck. A failed OnLoad is followed
+// by a successful one here.
 TEST_F(HsaHotswapHookTest, RejectedInstallLeavesHookInstallable) {
   // Missing a required lower entry makes install() reject before committing state.
   FakeApi incomplete;
@@ -702,7 +693,7 @@ TEST_F(HsaHotswapHookTest, RepeatedEnvironmentalFailuresCaptureOneArtifact) {
   ASSERT_EQ(setenv("HSA_HOTSWAP_DUMP_DIR", capture_directory.path().c_str(), 1), 0);
   constexpr size_t kLoads = 8;
 
-  // A throwing translator is not remembered, so every load translates again.
+  // An environmental translation failure is not remembered, so every load translates again.
   // Capture must still leave exactly one file behind.
   for (size_t load = 0; load < kLoads; ++load) {
     rj_test_force_next_translation_status(1 /* ROCJITSU_STATUS_ERROR */);
@@ -1087,24 +1078,6 @@ TEST_F(HsaHotswapHookTest, RefusesAgentlessAndDeprecatedA0Loads) {
   EXPECT_EQ(g_load_deprecated_calls, 0);
 }
 
-TEST_F(HsaHotswapHookTest, ContainsExceptionsAtTheHsaBoundary) {
-  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
-  g_asic_revision = 1;
-  g_throw_from_deprecated_load = true;
-  ASSERT_EQ(unsetenv("HSA_HOTSWAP_VERBOSE"), 0);
-  testing::internal::CaptureStderr();
-  EXPECT_EQ(api.core.hsa_executable_load_code_object_fn(kExecutable, kA0Agent, hsa_code_object_t{1},
-                                                        nullptr),
-            HSA_STATUS_ERROR_OUT_OF_RESOURCES);
-  const std::string log_text = testing::internal::GetCapturedStderr();
-  EXPECT_EQ(g_load_deprecated_calls, 1);
-  EXPECT_NE(log_text.find("[hsa-hotswap-rj] error: "), std::string::npos) << log_text;
-  EXPECT_NE(log_text.find("operation=hsa_executable_load_code_object"), std::string::npos)
-      << log_text;
-  EXPECT_NE(log_text.find("exception=std::bad_alloc"), std::string::npos) << log_text;
-  EXPECT_NE(log_text.find("status="), std::string::npos) << log_text;
-}
-
 TEST_F(HsaHotswapHookTest, CallbackApiSnapshotIsSafeDuringUnload) {
   ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
   auto create = api.core.hsa_code_object_reader_create_from_memory_fn;
@@ -1149,6 +1122,18 @@ protected:
       waiters = rj_test_translation_waiters();
     }
     return waiters;
+  }
+
+  // Publishing a claim lets peers wait before its owner reaches the translation
+  // gate. Observe the owner's progress separately before sampling the count.
+  static uint64_t wait_for_translations(uint64_t expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    uint64_t translations = rj_test_translation_count();
+    while (translations < expected && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      translations = rj_test_translation_count();
+    }
+    return translations;
   }
 
   // Build a second object of the SAME size as @p base whose sampled windows are
@@ -1372,7 +1357,7 @@ TEST_F(HsaHotswapMemoTest, ConcurrentLoadsOfOneObjectTranslateOnce) {
   // here while threads were still held would abort the process instead of failing
   // the case.
   const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
-  const uint64_t translations_while_held = rj_test_translation_count();
+  const uint64_t translations_while_held = wait_for_translations(1);
   rj_test_open_translation_gate();
   for (auto &worker : workers)
     worker.join();
@@ -1421,10 +1406,7 @@ TEST_F(HsaHotswapMemoTest, ObjectsThatShareAFingerprintDoNotWaitForEachOther) {
 
   // Both should reach the gate, so two translations are in flight and nobody is
   // waiting. Sample, then release regardless of what was seen.
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  while (rj_test_translation_count() < 2 && std::chrono::steady_clock::now() < deadline)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  const uint64_t translations_while_held = rj_test_translation_count();
+  const uint64_t translations_while_held = wait_for_translations(2);
   const uint64_t waiters = rj_test_translation_waiters();
   rj_test_open_translation_gate();
   for (auto &worker : workers)
@@ -1644,53 +1626,6 @@ TEST_F(HsaHotswapMemoTest, ALateLoadTakesAResultThatIsStillDraining) {
   EXPECT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
   EXPECT_EQ(rj_test_translation_count(), 1u) << "a ready result was ignored";
 }
-
-// Admitting an entry allocates twice, and either allocation can come up short --
-// most plausibly right after a translation that peaked at 15.9 GB. Neither
-// failure may cost the waiters their answer: they would translate the same object
-// one at a time, N x 197 s, which is the convoy in a new place.
-class HsaHotswapAdmissionFaultTest : public HsaHotswapMemoTest,
-                                     public ::testing::WithParamInterface<int> {};
-
-TEST_P(HsaHotswapAdmissionFaultTest, AFailedAdmissionStillServesTheCohort) {
-  ASSERT_TRUE(OnLoad(&api.table, 0, 0, nullptr));
-  const std::vector<uint8_t> source = read_translation_fixture();
-  ASSERT_FALSE(source.empty()) << GFX1250_B0_TO_A0_FIXTURE;
-  constexpr size_t kThreadCount = 6;
-
-  // Room to spare, so the entry would be admitted if the allocation succeeded.
-  rj_test_close_translation_gate();
-  rj_test_fail_next_memo_admission(GetParam());
-
-  std::atomic<int> failures{0};
-  std::vector<std::thread> workers;
-  workers.reserve(kThreadCount);
-  for (size_t thread_index = 0; thread_index < kThreadCount; ++thread_index) {
-    workers.emplace_back([&] {
-      if (load_through_new_reader(source) != HSA_STATUS_SUCCESS)
-        failures.fetch_add(1, std::memory_order_relaxed);
-    });
-  }
-  const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
-  rj_test_open_translation_gate();
-  for (auto &worker : workers)
-    worker.join();
-
-  EXPECT_EQ(waiters, kThreadCount - 1);
-  // Every load succeeded, and exactly one translation served all of them.
-  EXPECT_EQ(failures.load(std::memory_order_relaxed), 0);
-  EXPECT_EQ(rj_test_translation_count(), 1u) << "the cohort was made to translate again";
-  // Nothing was cached, which is the cost of the failed admission and all of it.
-  EXPECT_EQ(rj_test_translation_memo_bytes(), 0u);
-
-  // A later load finds no entry and translates, confirming the memo really is
-  // empty rather than holding something unreachable.
-  ASSERT_EQ(load_through_new_reader(source), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(rj_test_translation_count(), 2u);
-}
-
-INSTANTIATE_TEST_SUITE_P(ListNodeAndIndexNode, HsaHotswapAdmissionFaultTest,
-                         ::testing::Values(1, 2));
 
 // Eviction has to run to the ceiling in one go, however many entries that takes.
 // Stopping part way -- as it would if anything in the loop could fail -- leaves

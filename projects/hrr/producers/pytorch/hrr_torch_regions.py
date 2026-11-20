@@ -10,14 +10,16 @@
 # lets replay tell "this pointer addresses a live tensor" from "this pointer is
 # past the end of one".
 #
-# Usage: put this directory on PYTHONPATH via a sitecustomize.py, or import it
-# from the application:
+# Usage: start it from the application,
 #
 #     import hrr_torch_regions; hrr_torch_regions.start()
 #
-# It is inert unless HRR capture is active, so leaving it enabled costs one idle
-# thread. The format it writes is specified in ../README.md; it calls no HRR
-# function and links against nothing.
+# or import it from a sitecustomize.py on PYTHONPATH and set
+# HRR_REGIONS_AUTOSTART=1. Importing it alone starts nothing: the producer turns
+# on PyTorch's allocator history, which keeps a record of every allocation and
+# free, so it runs only when asked. Once started it waits for HRR capture to be
+# active before it records anything. The format it writes is specified in
+# ../README.md; it calls no HRR function and links against nothing.
 
 import os
 import stat
@@ -43,9 +45,12 @@ _BATCH_PREFIX = struct.calcsize(_EVENT_HEADER) + 8  # + u32 n, u32 flags
 
 _INTERVAL_S = float(os.environ.get("HRR_REGIONS_INTERVAL_S", "2.0"))
 _VERBOSE = os.environ.get("HRR_REGIONS_VERBOSE", "") not in ("", "0")
-# PyTorch's trace ring depth. Must comfortably exceed the number of alloc/free
-# events between two polls, or events are overwritten before we read them.
-_MAX_ENTRIES = int(os.environ.get("HRR_REGIONS_MAX_ENTRIES", "1000000"))
+# PyTorch's trace ring depth, per device, which bounds how much allocator
+# history the process holds. Must exceed the number of alloc/free events between
+# two polls, or events are overwritten before we read them. A workload that
+# allocates more than that in HRR_REGIONS_INTERVAL_S needs a larger value or a
+# shorter interval.
+_MAX_ENTRIES = int(os.environ.get("HRR_REGIONS_MAX_ENTRIES", "100000"))
 
 # PyTorch device_trace actions that change what is live. free_requested and
 # free_completed both map to DEL: the replayer's erase is idempotent, and
@@ -72,8 +77,8 @@ def _archive_dir():
     This is the whole "is HRR recording?" check: the capture writer creates
     pid-<pid>/active as the last step of a successful open and removes it at
     shutdown, so that file is the signal. Neither pid-<pid> nor its events.bin
-    is: both stay when the writer refuses an archive or fails to resume one, and
-    capture is then off. Re-checked on every poll because capture starts at HIP
+    is: both can stay when the writer refuses an archive, and capture is then
+    off. Re-checked on every poll because capture starts at HIP
     init, which is normally after this module loads.
 
     The marker must name this process. A process killed with SIGKILL leaves its
@@ -269,10 +274,9 @@ class _Stream:
                 if dfd is not None:
                     os.close(dfd)
             self._pid = os.getpid()
-            # Only on a fresh file. The stream is opened for append, and DESIGN.md
-            # explicitly supports a process re-opening its own writer on resume, so
-            # writing unconditionally would splice a second file header into the
-            # middle of the record stream. The reader parses those 8 bytes as an
+            # Only on a fresh file. The stream is opened for append and can be
+            # re-opened after close(), so writing unconditionally would splice
+            # a second file header into the middle of the record stream. The reader parses those 8 bytes as an
             # event header, reads a garbage payload length, and discards every
             # record from that point on as a torn tail.
             if self._fh.tell() == 0:
@@ -444,5 +448,5 @@ def start():
 
 _start = start  # os.register_at_fork wants a plain callable
 
-if os.environ.get("HRR_REGIONS_AUTOSTART", "1") not in ("", "0"):
+if os.environ.get("HRR_REGIONS_AUTOSTART", "") not in ("", "0"):
     start()

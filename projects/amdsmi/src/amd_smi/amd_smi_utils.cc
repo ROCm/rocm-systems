@@ -19,10 +19,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -34,8 +34,13 @@
 #include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
 #include "amd_smi/impl/amd_smi_system.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/scoped_fd.h"
+#include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_io_link.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
 std::string leftTrim(const std::string& s) {
@@ -176,7 +181,7 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   DIR* dh;
   struct dirent* contents;
-  std::string device_path = "/sys/class/drm/" + device->get_gpu_path();
+  std::string device_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path();
   std::string directory_path = device_path + "/device/hwmon/";
 
   if (!isAMDGPU(device_path)) {
@@ -205,16 +210,16 @@ amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device,
 amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           amdsmi_board_info_t* info) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string model_number_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
-  std::string product_serial_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
-  std::string fru_id_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/fru_id");
-  std::string manufacturer_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
-  std::string product_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
+  std::string model_number_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_number");
+  std::string product_serial_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                    device->get_gpu_path() + std::string("/device/serial_number");
+  std::string fru_id_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                            std::string("/device/fru_id");
+  std::string manufacturer_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                       device->get_gpu_path() + std::string("/device/manufacturer");
+  std::string product_name_path = amd::smi::test_hooks::SysfsDrmRoot() + "/" +
+                                  device->get_gpu_path() + std::string("/device/product_name");
 
   auto ret_mod =
       openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
@@ -412,7 +417,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
                                       int* max_freq, int* min_freq, int* num_dpm,
                                       int* sleep_state_freq) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
+  std::string fullpath =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device";
 
   std::string smclk_min_max_fullpath = "";
 
@@ -481,7 +487,8 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
                                               uint64_t* enabled_blocks) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/ras/features";
+  std::string fullpath =
+      amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() + "/device/ras/features";
   std::ifstream f(fullpath.c_str());
   std::string tmp_str;
 
@@ -497,14 +504,28 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;  // ignore
   f1 >> tmp_str;
-
-  *enabled_blocks = strtoul(tmp_str.c_str(), nullptr, 16);
   f.close();
 
-  if (*enabled_blocks == 0 || *enabled_blocks == ULONG_MAX) {
+  // strtoul() alone can't tell "parsed 0" from "parsed nothing" -- both leave
+  // the result at 0 -- so confirm real hex digits were consumed via endptr. A
+  // cleanly-parsed 0 is a legitimate "no blocks enabled" mask, not a failure.
+  // ULONG_MAX stays a failure sentinel regardless: no real ASIC defines all 64
+  // mask bits (see AMDSMI_GPU_BLOCK_LAST), so a full set of 1s means a garbled
+  // read, not a plausible value.
+  char* endptr = nullptr;
+  unsigned long parsed = strtoul(tmp_str.c_str(), &endptr, 16);
+  bool parse_failed = endptr == tmp_str.c_str() || *endptr != '\0';
+  if (parse_failed || parsed == ULONG_MAX) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | " << fullpath << " line: \"" << line << "\""
+       << "; parsed token: \"" << tmp_str << "\""
+       << "; reason: " << (parse_failed ? "unparsable token" : "implausible all-bits-set value")
+       << "; returning AMDSMI_STATUS_API_FAILED";
+    LOG_DEBUG(ss);
     return AMDSMI_STATUS_API_FAILED;
   }
 
+  *enabled_blocks = parsed;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -514,8 +535,8 @@ amdsmi_status_t smi_amdgpu_get_bad_page_info(amd::smi::AMDSmiGPUDevice* device, 
   std::string line;
   std::vector<std::string> badPagesVec;
 
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/gpu_vram_bad_pages");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/ras/gpu_vram_bad_pages");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -608,35 +629,6 @@ amdsmi_status_t smi_amdgpu_validate_ras_eeprom(amd::smi::AMDSmiGPUDevice* device
   return AMDSMI_STATUS_NOT_SUPPORTED;
 }
 
-amdsmi_status_t smi_amdgpu_get_ecc_error_count(amd::smi::AMDSmiGPUDevice* device,
-                                               amdsmi_error_count_t* err_cnt) {
-  SMIGPUDEVICE_MUTEX(device->get_mutex())
-  char str[10];
-
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/umc_err_count");
-  std::ifstream f(fullpath.c_str());
-
-  if (f.fail()) {
-    // fall back to aca file
-    fullpath = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/ras/aca_umc");
-    f.open(fullpath.c_str());
-    if (f.fail()) {
-      return AMDSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
-
-  std::string line;
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->uncorrectable_count));
-
-  getline(f, line);
-  sscanf(line.c_str(), "%9s%ld", str, &(err_cnt->correctable_count));
-
-  f.close();
-
-  return AMDSMI_STATUS_SUCCESS;
-}
 amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device, int* length,
                                               char* version) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
@@ -657,6 +649,17 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   }
 
   return status;
+}
+
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature) {
+  // A max-value reading is the not-applicable sentinel (e.g. an APU with no
+  // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
+  if (metrics.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  *temperature = metrics.temperature_vrsoc;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed) {
@@ -685,6 +688,23 @@ amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uin
   return AMDSMI_STATUS_SUCCESS;
 }
 
+bool smi_amdgpu_has_xgmi_host_link(amd::smi::AMDSmiGPUDevice* device) {
+  uint64_t kfd_gpu_id = 0;
+  const rsmi_status_t status = rsmi_dev_guid_get(device->get_gpu_id(), &kfd_gpu_id);
+  const auto& kfd_nodes = amd::smi::RocmSMI::getInstance().kfd_node_map();
+  const auto node = status == RSMI_STATUS_SUCCESS ? kfd_nodes.find(kfd_gpu_id) : kfd_nodes.end();
+  if (node == kfd_nodes.end()) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | GPU " << device->get_gpu_id() << ": rsmi_dev_guid_get "
+       << amd::smi::getRSMIStatusString(status, false);
+    if (status == RSMI_STATUS_SUCCESS) ss << ", gpu_id " << kfd_gpu_id << " has no KFD node";
+    ss << "; keeping the PCIe link values";
+    LOG_INFO(ss);
+    return false;
+  }
+  return node->second->numa_node_type() == amd::smi::IOLINK_TYPE_XGMI;
+}
+
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice* device,
                                                        char* market_name) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
@@ -698,7 +718,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(amd::smi::AMDSmiGPUDevice
   std::ostringstream ss;
   std::string render_name = device->get_gpu_path();
   std::string path = "/dev/dri/" + render_name;
-  if (render_name.empty()) {
+  if (render_name.empty() || !device->has_libdrm()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -786,8 +806,8 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/pp_features");
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         std::string("/device/pp_features");
   std::ifstream fs(fullpath.c_str());
 
   if (fs.fail()) {
@@ -815,7 +835,8 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+  std::string fullpath = amd::smi::test_hooks::SysfsDrmRoot() + "/" + device->get_gpu_path() +
+                         "/device/vcn_busy_percent";
 
   std::ifstream fs(fullpath.c_str());
   if (fs.fail()) {
@@ -895,21 +916,7 @@ std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = 
   return std::string(err_str);
 }
 
-uint32_t smi_brcm_get_value_u32(const std::string& folder, const std::string& file_name) {
-  std::string file_path = folder + "/" + file_name;
-  std::ifstream file(file_path.c_str(), std::ifstream::in);
-  if (!file.is_open()) {
-    return 0xFFFF;
-  } else {
-    std::string line;
-    getline(file, line);
-    return static_cast<uint32_t>(stoi(line));
-  }
-
-  return 0;
-}
-
-std::string smi_brcm_get_value_string(const std::string& folder, const std::string& file_name) {
+std::string smi_read_sysfs_string(const std::string& folder, const std::string& file_name) {
   std::stringstream temp;
   std::string file_path = folder + "/" + file_name;
   std::ifstream file(file_path.c_str(), std::ifstream::in);
@@ -926,27 +933,6 @@ std::string smi_brcm_get_value_string(const std::string& folder, const std::stri
   }
 
   return temp.str();
-}
-
-amdsmi_status_t smi_brcm_execute_cmd_get_data(const std::string& command, std::string* data) {
-  std::string result;
-  char buffer[128];
-
-  // Open a pipe to execute the command
-  std::shared_ptr<FILE> pipe(popen(command.c_str(), "r"), [](FILE* f) {
-    if (f) pclose(f);
-  });
-  if (!pipe) {
-    return AMDSMI_STATUS_API_FAILED;
-  }
-
-  // Read the output of the command into the buffer
-  while (fgets(buffer, sizeof(buffer), pipe.get()) != nullptr) {
-    result += buffer;
-  }
-  *data = result;
-
-  return AMDSMI_STATUS_SUCCESS;
 }
 
 // TODO(amdsmi_team): Do we want to include these functions in header?
@@ -1380,8 +1366,8 @@ amdsmi_status_t smi_amdgpu_read_clk_freq_from_pp_dpm(amd::smi::AMDSmiGPUDevice* 
   }
 
   uint32_t drm_render = device->get_drm_render_minor();
-  std::string sysfs_path =
-      "/sys/class/drm/renderD" + std::to_string(drm_render) + "/device/" + pp_dpm_file;
+  std::string sysfs_path = amd::smi::test_hooks::SysfsDrmRoot() + "/renderD" +
+                           std::to_string(drm_render) + "/device/" + pp_dpm_file;
 
   std::ifstream file(sysfs_path);
   if (!file.good()) {
@@ -1479,278 +1465,13 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info) {
   info->external_rev_id = std::numeric_limits<uint32_t>::max();
 }
 
-namespace {
-
-namespace fs = std::filesystem;
-
-/** DKMS registers amdgpu under /var/lib/dkms/amdgpu/<version>/; package
- * metadata lives in source/dkms.conf behind the source symlink
- */
-constexpr std::string_view kAmdgpuDkmsPackageName = "amdgpu";
-constexpr std::string_view kAmdgpuDkmsSourceSymlinkName = "source";
-constexpr std::string_view kDkmsAmdgpuKernelPrefix = "kernel-";
-constexpr std::string_view kDkmsAmdgpuDkmsConfName = "dkms.conf";
-constexpr std::string_view kDkmsAmdgpuDkmsConfPackageName = "PACKAGE_NAME";
-constexpr std::string_view kDkmsAmdgpuDkmsConfPackageVersion = "PACKAGE_VERSION";
-
-// Ubuntu appends ".<os_release>" (e.g. "-2370381.24.04"); other distros'
-// PACKAGE_VERSION may end at the build number, so only that part is required.
-const auto kAmdgpuDkmsVersionDirRegex = std::regex{R"(^\d+\.\d+\.\d+-\d+(\..*)?$)"};
-// Custom and older amdgpu builds report only major.minor.patch.
-const auto kAmdgpuModuleVersionRegex = std::regex{R"(^(\d+\.\d+\.\d+)(?:\.(\d+))?$)"};
-
-using smi_amdgpu_dkms_conf_t = std::pair<std::string, std::string>;
-
-auto log_dkms_debug(std::string_view caller, std::string_view message) -> void {
-  auto outstream = std::ostringstream{};
-  outstream << caller << " | " << message;
-  LOG_DEBUG(outstream);
-}
-
-auto is_amdgpu_dkms_version_dir_name(std::string_view dir_name) -> bool {
-  return std::regex_match(dir_name.begin(), dir_name.end(), kAmdgpuDkmsVersionDirRegex);
-}
-
-auto has_prefix(std::string_view str, std::string_view prefix) -> bool {
-  return ((str.size() >= prefix.size()) && (str.compare(0, prefix.size(), prefix) == 0));
-}
-
-auto try_parse_dkms_conf_assignment(std::string_view line, std::string_view key)
-    -> std::optional<std::string_view> {
-  const auto trimmed_line = trim(line);
-  if ((trimmed_line.size() <= (key.size() + 1)) || (!has_prefix(trimmed_line, key))) {
-    return std::nullopt;
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
+  if (drm_date == "0") {
+    return {};
   }
-
-  if (trimmed_line[key.size()] != '=') {
-    return std::nullopt;
+  if (drm_date.size() == 8) {
+    return std::string{drm_date.substr(0, 4)} + "/" + std::string{drm_date.substr(4, 2)} + "/" +
+           std::string{drm_date.substr(6, 2)} + " 00:00";
   }
-
-  const auto value_part = trim(trimmed_line.substr((key.size() + 1)));
-  if ((value_part.size() < 2) || (value_part.front() != '"') || (value_part.back() != '"')) {
-    return std::nullopt;
-  }
-
-  return value_part.substr(1, (value_part.size() - 2));
-}
-
-auto resolve_symlink_target_path(const fs::path& source_link, const fs::path& target,
-                                 std::error_code& err_code) -> fs::path {
-  if (target.is_absolute()) {
-    return fs::weakly_canonical(target, err_code);
-  }
-  return fs::weakly_canonical(source_link.parent_path() / target, err_code);
-}
-
-auto read_dkms_conf(std::string_view caller, const fs::path& conf_path)
-    -> std::optional<smi_amdgpu_dkms_conf_t> {
-  auto instream = std::ifstream{conf_path};
-  if (instream.is_open()) {
-    auto package_name = std::string{};
-    auto package_version = std::string{};
-    auto line_str = std::string{};
-
-    while (std::getline(instream, line_str)) {
-      if ((!line_str.empty()) && (line_str.back() == '\r')) {
-        line_str.pop_back();
-      }
-
-      if (const auto parsed_name =
-              try_parse_dkms_conf_assignment(line_str, kDkmsAmdgpuDkmsConfPackageName)) {
-        package_name = std::string{*parsed_name};
-        continue;
-      }
-
-      if (const auto parsed_version =
-              try_parse_dkms_conf_assignment(line_str, kDkmsAmdgpuDkmsConfPackageVersion)) {
-        package_version = std::string{*parsed_version};
-      }
-    }
-
-    if ((!package_name.empty()) && (!package_version.empty())) {
-      return std::make_pair(package_name, package_version);
-    }
-
-    auto outstream = std::ostringstream{};
-    outstream << kDkmsAmdgpuDkmsConfName << " at: " << conf_path << " has no "
-              << kDkmsAmdgpuDkmsConfPackageName << " or " << kDkmsAmdgpuDkmsConfPackageVersion;
-    log_dkms_debug(caller, outstream.str());
-    return std::nullopt;
-  }
-
-  auto outstream = std::ostringstream{};
-  outstream << "Cannot open " << kDkmsAmdgpuDkmsConfName << " at: " << conf_path;
-  log_dkms_debug(caller, outstream.str());
-  return std::nullopt;
-}
-
-auto make_kernel_symlink_name(std::string_view release, std::string_view machine) -> std::string {
-  auto name = std::string{kDkmsAmdgpuKernelPrefix};
-  name.append(release);
-  name.push_back('-');
-  name.append(machine);
-  return name;
-}
-
-auto package_version_from_kernel_symlink(std::string_view caller, const fs::path& dkms_root,
-                                         const fs::path& kernel_link)
-    -> std::optional<std::string> {
-  auto err_code = std::error_code{};
-  if ((!fs::is_symlink(kernel_link, err_code)) || (err_code)) {
-    auto outstream = std::ostringstream{};
-    outstream << "No kernel symlink at: " << kernel_link;
-    log_dkms_debug(caller, outstream.str());
-    return std::nullopt;
-  }
-
-  const auto target = fs::read_symlink(kernel_link, err_code);
-  if ((err_code) || (target.empty())) {
-    auto outstream = std::ostringstream{};
-    outstream << "Cannot read kernel symlink at: " << kernel_link << ": " << err_code.message();
-    log_dkms_debug(caller, outstream.str());
-    return std::nullopt;
-  }
-
-  auto version = std::string{};
-  if (target.is_relative()) {
-    version = target.begin()->string();
-  } else {
-    const auto resolved = resolve_symlink_target_path(kernel_link, target, err_code);
-    if (err_code) {
-      auto outstream = std::ostringstream{};
-      outstream << "Cannot resolve kernel symlink at: " << kernel_link << ": "
-                << err_code.message();
-      log_dkms_debug(caller, outstream.str());
-      return std::nullopt;
-    }
-
-    const auto relative = fs::relative(resolved, dkms_root, err_code);
-    if ((err_code) || (relative.empty()) || (relative.has_root_path())) {
-      auto outstream = std::ostringstream{};
-      outstream << "Kernel symlink at: " << kernel_link
-                << " is outside the DKMS root: " << dkms_root;
-      log_dkms_debug(caller, outstream.str());
-      return std::nullopt;
-    }
-    version = relative.begin()->string();
-  }
-
-  if (!is_amdgpu_dkms_version_dir_name(version)) {
-    auto outstream = std::ostringstream{};
-    outstream << "Kernel symlink at: " << kernel_link
-              << " target is not version-shaped: " << target;
-    log_dkms_debug(caller, outstream.str());
-    return std::nullopt;
-  }
-  return version;
-}
-
-auto is_valid_dkms_package(std::string_view caller, const fs::path& version_dir,
-                           std::string_view dir_name) -> bool {
-  // DKMS source_tree is configurable, so follow the source symlink instead of assuming /usr/src.
-  const auto dkms_conf_path =
-      (version_dir / kAmdgpuDkmsSourceSymlinkName / kDkmsAmdgpuDkmsConfName);
-  const auto package_info = read_dkms_conf(caller, dkms_conf_path);
-  if (!package_info.has_value()) {
-    return false;
-  }
-
-  const auto& package_name = package_info->first;
-  const auto& package_version = package_info->second;
-  if (std::string_view{package_name} != kAmdgpuDkmsPackageName) {
-    auto outstream = std::ostringstream{};
-    outstream << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path
-              << " sets PACKAGE_NAME to: " << package_name
-              << "; expected: " << kAmdgpuDkmsPackageName;
-    log_dkms_debug(caller, outstream.str());
-    return false;
-  }
-
-  if (package_version != dir_name) {
-    auto outstream = std::ostringstream{};
-    outstream << kDkmsAmdgpuDkmsConfName << " at: " << dkms_conf_path << " sets PACKAGE_VERSION to "
-              << package_version << "; directory name is " << dir_name;
-    log_dkms_debug(caller, outstream.str());
-    return false;
-  }
-
-  return true;
-}
-
-}  // namespace
-
-auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
-                                      std::string_view package_version, amdsmi_driver_info_t* info)
-    -> amdsmi_status_t {
-  if (info == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-
-  const auto module_version_string = std::string{module_version};
-  smi_clear_char_and_reinitialize(info->driver_version, AMDSMI_MAX_STRING_LENGTH,
-                                  module_version_string);
-  info->driver_kernel_version[0] = '\0';
-  info->amdgpu_driver_version[0] = '\0';
-  info->driver_build_version[0] = '\0';
-  info->driver_full_version[0] = '\0';
-
-  if (module_version.empty() || (module_version == "N/A")) {
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  auto full_version = module_version_string;
-  auto match = std::smatch{};
-  if (std::regex_match(module_version_string, match, kAmdgpuModuleVersionRegex)) {
-    const auto kernel_version = match[1].str();
-    smi_clear_char_and_reinitialize(info->driver_kernel_version, AMDSMI_MAX_STRING_LENGTH,
-                                    kernel_version);
-    smi_clear_char_and_reinitialize(info->amdgpu_driver_version, AMDSMI_MAX_STRING_LENGTH,
-                                    match[2].str());
-    // A module built outside this DKMS package (custom kernel) must not report its build.
-    if (is_amdgpu_dkms_version_dir_name(package_version) &&
-        (package_version.substr(0, package_version.find('-')) == kernel_version)) {
-      const auto build_start = (package_version.find('-') + 1);
-      const auto build_end = package_version.find('.', build_start);
-      const auto build_version =
-          std::string{package_version.substr(build_start, (build_end - build_start))};
-      smi_clear_char_and_reinitialize(info->driver_build_version, AMDSMI_MAX_STRING_LENGTH,
-                                      build_version);
-      full_version.push_back('-');
-      full_version.append(build_version);
-    }
-  }
-  smi_clear_char_and_reinitialize(info->driver_full_version, AMDSMI_MAX_STRING_LENGTH,
-                                  full_version);
-
-  return AMDSMI_STATUS_SUCCESS;
-}
-
-auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,
-                                        std::string_view machine, std::string* active_version)
-    -> amdsmi_status_t {
-  if (active_version == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
-  active_version->clear();
-
-  if ((release.empty()) || (machine.empty())) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  const auto root = fs::path{std::string{dkms_root}};
-  const auto kernel_link = root / make_kernel_symlink_name(release, machine);
-  const auto selected = package_version_from_kernel_symlink(__func__, root, kernel_link);
-  if (!selected.has_value()) {
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  if (!is_valid_dkms_package(__func__, root / *selected, *selected)) {
-    auto outstream = std::ostringstream{};
-    outstream << "Kernel symlink package " << *selected << " is not a validated DKMS package";
-    log_dkms_debug(__func__, outstream.str());
-    return AMDSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  *active_version = *selected;
-  return AMDSMI_STATUS_SUCCESS;
+  return std::string{drm_date};
 }

@@ -24,19 +24,39 @@ THE SOFTWARE.
 
 #ifdef ROCDECODE_USE_DLOPEN_VA
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <va/va.h>
+#ifdef _WIN32
+#include <va/va_win32.h>
+#else
 #include <va/va_drm.h>
+#endif
 #include <va/va_drmcommon.h>
 
 // Function pointer table for all VA-API entry points used by rocdecode.
-// Populated by VaapiLoader via dlsym after dlopen.
+// Populated by VaapiLoader via dlsym after dlopen (Linux) or GetProcAddress
+// after LoadLibraryExW (Windows).
 struct VaapiVtable {
+#ifdef _WIN32
+    // va_win32
+    VADisplay       (*vaGetDisplayWin32)(const LUID *adapter_luid);
+#else
     // va-drm
     VADisplay       (*vaGetDisplayDRM)(int fd);
+#endif
     // va core
     VAStatus        (*vaInitialize)(VADisplay dpy, int *major_version, int *minor_version);
     VAStatus        (*vaTerminate)(VADisplay dpy);
@@ -44,7 +64,10 @@ struct VaapiVtable {
     const char *    (*vaQueryVendorString)(VADisplay dpy);
     const char *    (*vaErrorStr)(VAStatus error_status);
     int             (*vaMaxNumProfiles)(VADisplay dpy);
+    int             (*vaMaxNumEntrypoints)(VADisplay dpy);
     VAStatus        (*vaQueryConfigProfiles)(VADisplay dpy, VAProfile *profile_list, int *num_profiles);
+    VAStatus        (*vaQueryConfigEntrypoints)(VADisplay dpy, VAProfile profile,
+                                               VAEntrypoint *entrypoint_list, int *num_entrypoints);
     VAStatus        (*vaGetConfigAttributes)(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
                                             VAConfigAttrib *attrib_list, int num_attribs);
     VAStatus        (*vaCreateConfig)(VADisplay dpy, VAProfile profile, VAEntrypoint entrypoint,
@@ -76,18 +99,26 @@ struct VaapiVtable {
                                             uint32_t mem_type, uint32_t flags, void *descriptor);
 };
 
-// Loads librocm_sysdeps_va-drm.so.2 (and its transitive dependency
-// librocm_sysdeps_va.so.2) via dlopen(RTLD_LOCAL | RTLD_DEEPBIND), then resolves
-// all VA-API symbols via dlsym into the VaapiVtable.
+// Loads the ROCm sysdeps libva display backend at runtime and resolves all
+// VA-API symbols into the VaapiVtable.
 //
-// RTLD_LOCAL keeps sysdeps va* symbols out of the global scope, isolating them
-// from any system libva.so.2 loaded by other libraries (e.g. libavcodec).
+// Linux: dlopens librocm_sysdeps_va-drm.so.2 (and its transitive dependency
+// librocm_sysdeps_va.so.2) with RTLD_LOCAL | RTLD_DEEPBIND, then resolves all
+// symbols via dlsym. RTLD_LOCAL keeps sysdeps va* symbols out of the global
+// scope, isolating them from any system libva.so.2 loaded by other libraries
+// (e.g. libavcodec).
+//
+// Windows: loads rocm_sysdeps_va_win32.dll (and its dependency
+// rocm_sysdeps_va.dll) via LoadLibraryExW. vaGetDisplayWin32 replaces
+// vaGetDisplayDRM; there is no DRM on Windows. Unlike dlsym, GetProcAddress
+// does not search a module's dependencies, so the va core symbols are resolved
+// from a separate handle to rocm_sysdeps_va.dll.
 class VaapiLoader {
 public:
     VaapiVtable fn{};
 
-    // Detects the path of librocm_sysdeps_va-drm.so.2 at runtime (relative
-    // to librocdecode.so's own location) and dlopens it.
+    // Detects the location of the sysdeps libva display backend at runtime
+    // (relative to the rocdecode library's own location) and loads it.
     VaapiLoader();
     ~VaapiLoader();
 
@@ -95,16 +126,35 @@ public:
     VaapiLoader &operator=(const VaapiLoader &) = delete;
 
 private:
+#ifdef _WIN32
+    using LibHandle = HMODULE;
+    HMODULE va_win32_handle_ = nullptr;  // rocm_sysdeps_va_win32.dll
+    HMODULE va_handle_ = nullptr;        // rocm_sysdeps_va.dll (va core)
+#else
+    using LibHandle = void *;
     void *va_drm_handle_ = nullptr;
+#endif
 
-    // Finds the path of librocm_sysdeps_va-drm.so.* at runtime.
-    // Primary strategy: dladdr on a symbol in this translation unit to locate
-    // librocdecode.so, then look for rocm_sysdeps/lib/ as a sibling directory.
-    // Fallback: $ROCM_PATH/lib/rocm_sysdeps/lib/.
-    static std::string FindVaDrmLibPath();
+    // Finds the path of the sysdeps libva display backend at runtime.
+    // Linux: librocm_sysdeps_va-drm.so.*
+    //   Primary strategy: dladdr on a symbol in this translation unit to locate
+    //   librocdecode.so, then look for rocm_sysdeps/lib/ as a sibling directory.
+    //   Fallback: $ROCM_PATH/lib/rocm_sysdeps/lib/.
+    // Windows: rocm_sysdeps_va_win32.dll
+    //   Primary strategy: GetModuleHandleExW on a symbol in this translation
+    //   unit to locate rocdecode.dll (in <prefix>/bin), then look in
+    //   <prefix>/lib/rocm_sysdeps/bin/.
+    //   Fallbacks: %ROCM_PATH%/lib/rocm_sysdeps/bin/, then the absolute
+    //   directories listed in PATH (never the current directory).
+    static std::filesystem::path FindVaDisplayLibPath();
+
+    // Loads the libraries and resolves all symbols; throws on failure.
+    void Load();
+    // Releases every library handle and clears the function table.
+    void Unload() noexcept;
 
     template <typename T>
-    void LoadSym(const char *name, T *&fn_ptr);
+    void LoadSym(LibHandle handle, const char *name, T *&fn_ptr);
 };
 
 #endif // ROCDECODE_USE_DLOPEN_VA

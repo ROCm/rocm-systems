@@ -22,7 +22,7 @@
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
 // DMA-BUF feature gate: stays NULL when the platform does not support DMA-BUF.
-// hsa_init/hsa_system_get_info/hsa_status_string are called directly via the
+// hsa_init/hsa_shut_down/hsa_system_get_info/hsa_status_string are called directly via the
 // hsa-runtime64 library librccl links against (no dlopen/dlsym).
 DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf);
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
@@ -35,6 +35,7 @@ bool ncclCudaLaunchBlocking = false;
 
 static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 static ncclResult_t initResult;
+static bool rocrRefHeld = false;
 
 // This env var (NCCL_CUMEM_ENABLE) toggles cuMem API usage
 NCCL_PARAM(CuMemEnable, "CUMEM_ENABLE", -2);
@@ -44,8 +45,6 @@ CUmemAllocationHandleType ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_POSIX_FILE_DE
 
 static int ncclCuMemSupported = 0;
 
-#define KERNEL_VERSION_CODE(major, minor) ((major << 16) | (minor << 8))
-
 static int ncclGetKernelVersionCode() {
   struct utsname u;
   int major = 0, minor = 0;
@@ -54,7 +53,7 @@ static int ncclGetKernelVersionCode() {
   sscanf(u.release, "%d.%d", &major, &minor);
   INFO(NCCL_INIT, "Kernel version %d.%d", major, minor);
 
-  return KERNEL_VERSION_CODE(major, minor);
+  return NCCL_KERNEL_VERSION_CODE(major, minor);
 }
 
 // Runtime probe: run the cuMem VMM cycle + register.cc pointer queries once; some ROCm builds advertise cuMem but reject the ops at runtime. Returns 1 if all succeed, 0 otherwise; never fatal.
@@ -71,26 +70,30 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
   prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   prop.location.id = devOrdinal;
   prop.requestedHandleTypes = ncclCuMemHandleType;
+#if defined(__HIP_PLATFORM_AMD__)
+  // Match the buffers net.cc exports (alloc.h, mem_manager.cc).
+  prop.allocFlags.gpuDirectRDMACapable = 1;
+#endif
 
   // Smallest legal allocation: one granularity unit.
-  if (CUPFN(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess ||
+  if (CUPROBE(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess ||
       granularity == 0)
     goto done;
 
-  if (CUPFN(cuMemCreate(&handle, granularity, &prop, 0)) != hipSuccess)
+  if (CUPROBE(cuMemCreate(&handle, granularity, &prop, 0)) != hipSuccess)
     goto done; // 7.0.2.2-without-backport fails here
   created = true;
 
-  if (CUPFN(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess) goto cleanup;
+  if (CUPROBE(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess) goto cleanup;
   reserved = true;
 
-  if (CUPFN(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess) goto cleanup;
+  if (CUPROBE(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess) goto cleanup;
   mapped = true;
 
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   accessDesc.location.id = devOrdinal;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  if (CUPFN(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess) goto cleanup;
+  if (CUPROBE(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess) goto cleanup;
 
   // register.cc queries: LEGACY_IPC is the op 7.0.2.2 rejects even though alloc/map above succeed.
   {
@@ -98,10 +101,10 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
     size_t baseSize = 0;
     CUmemorytype memType;
     int legacyIpcCap = 0;
-    if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
-    if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
+    if (CUPROBE(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
+    if (CUPROBE(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
 #if HIP_VERSION >= 71260540
-    if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
+    if (CUPROBE(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
         hipSuccess)
       goto cleanup;
 #else
@@ -109,13 +112,24 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
 #endif
   }
 
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+  // Net transport exports every cuMem buffer as DMA-BUF; a host that cannot must keep cuMem off.
+  {
+    int dmaBufFd = -1;
+    if (CUPROBE(cuMemGetHandleForAddressRange((void*)&dmaBufFd, ptr, granularity, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                              0)) != hipSuccess ||
+        dmaBufFd < 0)
+      goto cleanup;
+    close(dmaBufFd);
+  }
+#endif
+
   ok = 1;
 
 cleanup:
   if (mapped) CUCHECKIGNORE(cuMemUnmap(ptr, granularity));
   if (reserved) CUCHECKIGNORE(cuMemAddressFree(ptr, granularity));
   if (created) CUCHECKIGNORE(cuMemRelease(handle));
-  (void)hipGetLastError(); // clear any sticky error from the probe
 done:
   if (!ok) INFO(NCCL_INIT, "cuMem functional probe failed on device %d; disabling cuMem", devOrdinal);
   return ok;
@@ -142,16 +156,12 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
     }
   }
 
-  if (ncclGetKernelVersionCode() < KERNEL_VERSION_CODE(6, 8)) {
-    WARN("cuMem support requires Linux kernel >= 6.8");
-    supported = 0;
-  }
   CUDACHECKGOTO(cudaDriverGetVersion(&cudaDriverVersion), ret, error);
   {
     // Block scope prevents the goto in CUDACHECKGOTO from jumping over the bool initialization.
     bool cuMemSupported = NCCL_CUMEM_VERSION_SUPPORTED(cudaDriverVersion);
     if (!cuMemSupported) {
-      WARN("cuMem support requires HIP_VERSION >= 7.2.0 (or ROCm 7.0.2.x backport)");
+      WARN("cuMem support requires ROCm >= 7.12 or the 7.0.2.x backport (found %d)", cudaDriverVersion);
       supported = 0;
     }
   }
@@ -167,6 +177,14 @@ static int ncclCuMemCapabilityCheck(int requireGfx1250ForAutoEnable) {
 
   // Cheap gates passed — confirm the driver actually implements the VMM path at runtime.
   if (supported && !ncclCuMemFunctionalProbe(currentDev, cudaDev)) supported = 0;
+
+  // Kernel < 6.8 only costs performance. Log from the check that decides: auto-detect for -2, runtime for force-on.
+  if (supported) {
+    const int param = ncclParamCuMemEnable();
+    const bool decides = requireGfx1250ForAutoEnable ? param == -2 : param > 0;
+    if (decides && !NCCL_CUMEM_KERNEL_PERF_RECOMMENDED(ncclGetKernelVersionCode()))
+      WARN("cuMem on Linux kernel < 6.8 may not be performant; kernel >= 6.8 is recommended");
+  }
 
   return supported;
 error:
@@ -197,9 +215,7 @@ int ncclCuMemEnable() {
   // NCCL_CUMEM_ENABLE=-2 means auto-detect CUMEM support
   int param = ncclParamCuMemEnable();
   if (param == 0) return 0;
-  // Force-on (param>0) still requires a usable VMM/dma-buf stack. Returning 1
-  // here on a kernel without DMA-BUF (e.g. 5.15) made P2P/CUMEM paths
-  // dereference uninitialized state and SIGSEGV.
+  // Force-on still needs the runtime check: without working VMM/DMA-BUF export (e.g. 5.15) cuMem paths SIGSEGV.
   if (param > 0) return ncclCuMemRuntimeSupported();
   return param == -2 && ncclCuMemSupported;
 #else
@@ -214,10 +230,7 @@ int ncclCuMemEnable() {
 static int ncclCumemHostEnable = -1;
 int ncclCuMemHostEnable() {
   if (ncclCumemHostEnable != -1) return ncclCumemHostEnable;
-  // NOTE: the cuMem *host* allocation path is NOT part of the ROCm 7.0.2.x
-  // backport (it relies on hipDeviceAttributeHostNumaId, which is absent there),
-  // so it has its own native-only gate rather than NCCL_CUMEM_VERSION_SUPPORTED().
-#if !NCCL_CUMEM_HOST_VERSION_SUPPORTED(HIP_VERSION)
+#if !NCCL_CUMEM_HOST_GATE
   ncclCumemHostEnable = 0;
   return ncclCumemHostEnable;
 #else
@@ -235,17 +248,12 @@ int ncclCuMemHostEnable() {
     if (ncclCumemHostEnable) {
       // Verify that host allocations actually work.  Docker in particular is known to disable "get_mempolicy",
       // causing such allocations to fail (this can be fixed by invoking Docker with "--cap-add SYS_NICE").
-      CUdevice currentDev;
-      int cpuNumaNodeId = -1;
       CUmemAllocationProp prop = {};
       size_t granularity = 0;
       size_t size;
       CUmemGenericAllocationHandle handle;
       CUDACHECK(cudaGetDevice(&cudaDev));
-      CUCHECK(cuDeviceGet(&currentDev, cudaDev));
-      CUCHECK(cuDeviceGetAttribute(&cpuNumaNodeId, hipDeviceAttributeHostNumaId, currentDev));
-      if (cpuNumaNodeId < 0) cpuNumaNodeId = 0;
-      // CLR rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
+      // HIP rejects HostNuma; probe with Host to match alloc.h's ncclCuMemHostAlloc.
       prop.location.type = hipMemLocationTypeHost;
       prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
       prop.requestedHandleTypes = ncclCuMemHandleType;
@@ -254,7 +262,7 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
       ALIGN_SIZE(size, granularity);
-      if (CUPFN(cuMemCreate(&handle, size, &prop, 0)) != CUDA_SUCCESS) {
+      if (CUPROBE(cuMemCreate(&handle, size, &prop, 0)) != CUDA_SUCCESS) {
         INFO(NCCL_INIT, "cuMem host allocations do not appear to be working; falling back to a /dev/shm/ based "
                         "implementation. This could be due to the container runtime disabling NUMA support. "
                         "To disable this warning, set NCCL_CUMEM_HOST_ENABLE=0");
@@ -387,11 +395,12 @@ static void initOnceFunc() {
     }
   }
   /*
-   * Required to initialize the ROCr Driver.
-   * Multiple calls of hsa_init() will return immediately
-   * without making any relevant change
+   * hsa_init() is reference counted: every successful call must be matched by
+   * hsa_shut_down(), or ROCr stays loaded until process exit. Its GPU-mapped
+   * host buffers are then torn down by exit_mmap, which evicts every queue of
+   * the process on every GPU. rocmLibraryFini() drops this reference.
    */
-  hsa_init();
+  if (hsa_init() == HSA_STATUS_SUCCESS) rocrRefHeld = true;
 
   initResult = ncclSuccess;
   return;
@@ -403,4 +412,13 @@ error:
 ncclResult_t rocmLibraryInit() {
   pthread_once(&initOnceControl, initOnceFunc);
   return initResult;
+}
+
+// librccl depends on libamdhip64, so this runs before HIP's own teardown and
+// leaves HIP holding the last ROCr reference.
+__attribute__((destructor)) static void rocmLibraryFini() {
+  if (rocrRefHeld) {
+    rocrRefHeld = false;
+    hsa_shut_down();
+  }
 }

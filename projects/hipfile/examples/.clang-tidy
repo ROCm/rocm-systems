@@ -1,0 +1,33 @@
+# Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+#
+# SPDX-License-Identifier: MIT
+
+# clang-tidy configuration for the examples
+#
+# The examples are written to C++17 (see AGENTS.md), but the build
+# compiles them as C++20, so clang-tidy would suggest newer constructs.
+# This turns off the checks whose fixes need C++20 or later, and those
+# that report how C++17 code without std::format or std::span has to be
+# written, and otherwise uses the top-level configuration.
+---
+InheritParentConfig: true
+Checks:
+  - -modernize-use-constraints
+  - -modernize-use-designated-initializers
+  - -modernize-use-integer-sign-comparison
+  - -modernize-use-ranges
+  - -modernize-use-starts-ends-with
+  - -modernize-use-std-bit
+  - -modernize-use-std-format
+  - -modernize-use-std-numbers
+  - -modernize-use-std-print
+  - -readability-container-contains
+  # The examples read their arguments as argv[1] and the like, and walk
+  # buffers with a pointer and an offset, since std::span is C++20
+  - -cppcoreguidelines-pro-bounds-pointer-arithmetic
+  # The examples print with printf() and fprintf(), since std::format is
+  # C++20
+  - -cppcoreguidelines-pro-type-vararg
+  # It reports every printf()-family call whose result is ignored, and
+  # checking or casting each one would only bury what the examples show
+  - -cert-err33-c

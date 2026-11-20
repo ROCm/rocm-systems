@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/sopp.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
 #include <memory>
 
@@ -18,6 +19,7 @@ SNopSopp::SNopSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_NOP);
 }
 
 namespace detail {
@@ -36,6 +38,7 @@ SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM);
 }
 
 namespace detail {
@@ -57,6 +60,7 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_BRANCH);
 }
 
 namespace detail {
@@ -79,6 +83,7 @@ SWakeupSopp::SWakeupSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SWakeupSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_WAKEUP);
 }
 
 namespace detail {
@@ -103,6 +108,7 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_SCC0);
 }
 
 namespace detail {
@@ -133,6 +139,7 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_SCC1);
 }
 
 namespace detail {
@@ -163,6 +170,7 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_VCCZ);
 }
 
 namespace detail {
@@ -193,6 +201,7 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_VCCNZ);
 }
 
 namespace detail {
@@ -223,6 +232,7 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_EXECZ);
 }
 
 namespace detail {
@@ -253,6 +263,7 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_EXECNZ);
 }
 
 namespace detail {
@@ -277,6 +288,7 @@ SBarrierSopp::SBarrierSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= BARRIER;
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER);
 }
 
 namespace detail {
@@ -296,6 +308,9 @@ SSetkillSopp::SSetkillSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  if (inst_.simm16 & 1u)
+    flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_SETKILL);
 }
 
 namespace detail {
@@ -316,6 +331,7 @@ SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT);
 }
 
 namespace detail {
@@ -335,6 +351,8 @@ SSethaltSopp::SSethaltSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SETHALT);
 }
 
 namespace detail {
@@ -354,6 +372,8 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SLEEP);
 }
 
 namespace detail {
@@ -373,6 +393,7 @@ SSetprioSopp::SSetprioSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_SETPRIO);
 }
 
 namespace detail {
@@ -396,6 +417,7 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSG);
 }
 
 namespace detail {
@@ -419,6 +441,8 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSGHALT);
 }
 
 namespace detail {
@@ -439,6 +463,9 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= SOFTWARE_TRAP;
+  flags_ |= WRITES_PC;
+  set_amdgpu_operation(amdgpu::Operation::S_TRAP);
 }
 
 namespace detail {
@@ -456,6 +483,7 @@ SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SIcacheInvSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_ICACHE_INV);
 }
 
 namespace detail {
@@ -475,6 +503,7 @@ SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_INCPERFLEVEL);
 }
 
 namespace detail {
@@ -495,6 +524,7 @@ SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_DECPERFLEVEL);
 }
 
 namespace detail {
@@ -516,6 +546,7 @@ STtracedataSopp::STtracedataSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_TTRACEDATA);
 }
 
 namespace detail {
@@ -536,6 +567,9 @@ SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGSYS);
 }
 
 namespace detail {
@@ -549,6 +583,11 @@ DecodeResult decodeSCbranchCdbgsysSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbgsysSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbguserSopp)),
@@ -556,6 +595,9 @@ SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGUSER);
 }
 
 namespace detail {
@@ -569,6 +611,11 @@ DecodeResult decodeSCbranchCdbguserSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbguserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysOrUserSopp)),
@@ -576,6 +623,9 @@ SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGSYS_OR_USER);
 }
 
 namespace detail {
@@ -589,6 +639,11 @@ DecodeResult decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbgsysOrUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SCbranchCdbgsysAndUserSopp)),
@@ -596,6 +651,9 @@ SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGSYS_AND_USER);
 }
 
 namespace detail {
@@ -609,12 +667,18 @@ DecodeResult decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode,
 }
 } // namespace detail
 
+std::optional<int64_t> SCbranchCdbgsysAndUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
+
 SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
     : Sopp("s_endpgm_saved", reinterpret_cast<const OpEncoding *>(inst),
            selected_exec_fn(InstructionExecutionId::SEndpgmSavedSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM_SAVED);
 }
 
 namespace detail {
@@ -633,6 +697,7 @@ SSetGprIdxOffSopp::SSetGprIdxOffSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SSetGprIdxOffSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_SET_GPR_IDX_OFF);
 }
 
 namespace detail {
@@ -658,6 +723,7 @@ SSetGprIdxModeSopp::SSetGprIdxModeSopp(const MachineInst *inst)
   num_dst_ = 1;
   m0.apply_fieldless_caps(false, false, false);
   m0_in.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_SET_GPR_IDX_MODE);
 }
 
 namespace detail {
@@ -677,6 +743,7 @@ SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM_ORDERED_PS_DONE);
 }
 
 namespace detail {

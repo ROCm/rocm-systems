@@ -61,19 +61,6 @@ void RdciDmonSubSystem::set_terminating(int sig) {
   }
 }
 
-std::string entity_to_string(uint32_t entity_index) {
-  rdc_entity_info_t info = rdc_get_info_from_entity_index(entity_index);
-
-  if (info.entity_role == RDC_DEVICE_ROLE_PARTITION_INSTANCE) {
-    if (info.device_type == RDC_DEVICE_TYPE_CPU) {
-      return "c" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
-    } else {
-      return "g" + std::to_string(info.device_index) + "." + std::to_string(info.instance_index);
-    }
-  }
-  return std::to_string(info.device_index);
-}
-
 void RdciDmonSubSystem::parse_cmd_opts(int argc, char** argv) {
   const int HOST_OPTIONS = 1000;
   const int LIST_ALL_FIELDS_OPT = 1001;
@@ -175,7 +162,12 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char** argv) {
           }
           field_ids_.push_back(field_id);
         } else {
-          field_ids_.push_back(static_cast<rdc_field_t>(std::stoi(vec_id)));
+          // Checked as a number: an ID that RDC does not know is not a value of rdc_field_t.
+          rdc_field_t field_id = RDC_FI_INVALID;
+          if (!amd::rdc::get_field_id_from_number(vec_id, &field_id)) {
+            throw RdcException(RDC_ST_BAD_PARAMETER, "Field " + vec_id + " is not supported");
+          }
+          field_ids_.push_back(field_id);
         }
       }
     }
@@ -570,7 +562,8 @@ void RdciDmonSubSystem::process() {
   result = rdc_group_gpu_get_info(rdc_handle_, options_[OPTIONS_GROUP_ID], &group_info);
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
-    if (result == RDC_ST_NOT_FOUND) {
+    // rdcd releases before ROCm 7.12 report a missing group as RDC_ST_NOT_FOUND.
+    if (result == RDC_ST_GROUP_NOT_FOUND || result == RDC_ST_NOT_FOUND) {
       error_msg = "Cannot find the group " + std::to_string(options_[OPTIONS_GROUP_ID]);
     }
     throw RdcException(result, error_msg.c_str());
@@ -583,7 +576,8 @@ void RdciDmonSubSystem::process() {
   result = rdc_group_field_get_info(rdc_handle_, options_[OPTIONS_FIELD_GROUP_ID], &field_info);
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
-    if (result == RDC_ST_NOT_FOUND) {
+    // rdcd releases before ROCm 7.12 report a missing field group as RDC_ST_NOT_FOUND.
+    if (result == RDC_ST_FLDGROUP_NOT_FOUND || result == RDC_ST_NOT_FOUND) {
       error_msg = "Cannot find the field group " + std::to_string(options_[OPTIONS_FIELD_GROUP_ID]);
     }
     throw RdcException(result, error_msg.c_str());

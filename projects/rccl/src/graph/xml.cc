@@ -54,6 +54,15 @@ static ncclResult_t ncclTopoXmlAddXgmiPeerGpu(struct ncclXml* xml, struct ncclXm
   if (createdOut) *createdOut = created;
   return ncclSuccess;
 }
+
+#ifdef USE_AMDSMI
+// RCCL: stamp the platform's per-GPU fabric bandwidth (GB/s per direction) on an xgmi entry, none when unreported.
+static ncclResult_t rcclTopoXmlSetFabricBandwidth(struct ncclXmlNode* xgmi, const amdsmiFabricDeviceInfo& dev) {
+  if (dev.bandwidth == 0) return ncclSuccess;
+  NCCLCHECK(xmlSetAttrFloat(xgmi, "fabric_bw_gbps", dev.bandwidth / kAmdSmiFabricMBpsPerGBps));
+  return ncclSuccess;
+}
+#endif
 #endif
 
 /*******************/
@@ -310,6 +319,10 @@ ncclResult_t ncclTopoDumpXmlRec(int indent, FILE* file, struct ncclXmlNode* node
   fprintf(file, "<%s", node->name);
 
   for (int a = 0; a < node->nAttrs; a++) {
+    // Skip NCCL-generated rail/plane IDs
+    if (strcmp(node->attrs[a].key, "rail") == 0 || strcmp(node->attrs[a].key, "plane") == 0) {
+      if (strtol(node->attrs[a].value, NULL, 0) & NCCL_TOPO_UNDEF_BIT) continue;
+    }
     fprintf(file, " %s=\"%s\"", node->attrs[a].key, node->attrs[a].value);
   }
   if (node->nSubs == 0) {
@@ -326,14 +339,16 @@ ncclResult_t ncclTopoDumpXmlRec(int indent, FILE* file, struct ncclXmlNode* node
 }
 
 ncclResult_t ncclTopoDumpXmlToFile(const char* xmlTopoFile, struct ncclXml* xml) {
+  ncclResult_t ret = ncclSuccess;
   FILE* file = fopen(xmlTopoFile, "w");
   if (file == NULL) {
     INFO(NCCL_GRAPH | NCCL_ENV, "Unable to open %s, not dumping topology.", xmlTopoFile);
     return ncclSuccess;
   }
-  NCCLCHECK(ncclTopoDumpXmlRec(0, file, xml->nodes));
+  NCCLCHECKGOTO(ncclTopoDumpXmlRec(0, file, xml->nodes), ret, exit);
+exit:
   fclose(file);
-  return ncclSuccess;
+  return ret;
 }
 
 static ncclResult_t xmlTopoFuseXmlRecursive(struct ncclXml* dst, struct ncclXmlNode* dstParent,
@@ -356,7 +371,7 @@ ncclResult_t ncclTopoFuseXml(struct ncclXml* dst, struct ncclXml* src) {
   NCCLCHECK(xmlFindTag(dst, "system", &topNodeDst));
 
   if (topNodeDst == NULL) {
-    xmlAddTree(dst, NULL, src->nodes);
+    NCCLCHECK(xmlAddTree(dst, NULL, src->nodes));
     return ncclSuccess;
   }
 
@@ -450,6 +465,7 @@ ncclResult_t ncclTopoXmlLoadSystem(FILE* file, struct ncclXml* xml, struct ncclX
 
 ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml, int warn) {
 #if NCCL_OS_LINUX
+  ncclResult_t ret = ncclSuccess;
   FILE* file = fopen(xmlTopoFile, "r");
   if (file == NULL) {
     if (warn) {
@@ -460,14 +476,16 @@ ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml
   INFO(NCCL_GRAPH, "Loading topology file %s", xmlTopoFile);
   struct xmlHandler handlers[] = {{"system", ncclTopoXmlLoadSystem}};
   xml->maxIndex = 0;
-  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
+  NCCLCHECKGOTO(xmlLoadSub(file, xml, NULL, handlers, 1), ret, exit);
+exit:
   fclose(file);
+  return ret;
 #elif NCCL_OS_WINDOWS
   (void)xmlTopoFile;
   (void)xml;
   (void)warn;
-#endif
   return ncclSuccess;
+#endif
 }
 
 /**********************/
@@ -534,7 +552,7 @@ ncclResult_t ncclTopoGetXmlFromCpu(struct ncclXmlNode* cpuNode, struct ncclXml* 
     // Fill CPU type / vendor / model
 #if defined(__PPC__)
     NCCLCHECK(xmlSetAttr(cpuNode, "arch", "ppc64"));
-#elif defined(__aarch64__)
+#elif defined(__aarch64__) || defined(_M_ARM64)
     NCCLCHECK(xmlSetAttr(cpuNode, "arch", "arm64"));
 #elif defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
     NCCLCHECK(xmlSetAttr(cpuNode, "arch", "x86_64"));
@@ -952,7 +970,7 @@ exit:
 // at that BDF is missing or a different function. Link those HIP siblings with
 // 1-hop XGMI even when SMI only enumerates the physical GPU.
 static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct ncclXmlNode* gpuNode,
-                                                   struct ncclXmlNode* pciNode, uint32_t xmlDev) {
+                                                   struct ncclXmlNode* pciNode, uint32_t hipDev) {
   const char* pciBusId = NULL;
   NCCLCHECK(xmlGetAttr(pciNode, "busid", &pciBusId));
   if (pciBusId == NULL) return ncclSuccess;
@@ -962,7 +980,7 @@ static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct n
   int nHip = 0;
   if (hipGetDeviceCount(&nHip) != hipSuccess) return ncclSuccess;
   for (int h = 0; h < nHip; h++) {
-    if (h == (int)xmlDev) continue;
+    if (h == (int)hipDev) continue;
     char peerBus[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
     if (hipDeviceGetPCIBusId(peerBus, sizeof(peerBus), h) != hipSuccess) continue;
     int64_t peerId = 0;
@@ -985,10 +1003,12 @@ static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct n
 }
 #endif
 
-ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev, uint32_t smiDev, struct ncclXml* xml,
+ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t hipDev, uint32_t smiDev, struct ncclXml* xml,
                                    struct ncclXmlNode** gpuNodeRet) {
   struct ncclXmlNode* gpuNode = NULL;
-  NCCLCHECK(xmlGetSubKvInt(pciNode, "gpu", &gpuNode, "dev", (int)xmlDev));
+  // Processes learn about each other's GPUs only through XML fusion, so "dev" must mean the same in all
+  // of them. hipDev depends on each process's device visibility; the SMI index does not.
+  NCCLCHECK(xmlGetSubKvInt(pciNode, "gpu", &gpuNode, "dev", (int)smiDev));
   if (gpuNode == NULL) NCCLCHECK(xmlAddNode(xml, pciNode, "gpu", &gpuNode));
 
   int index = -1;
@@ -996,7 +1016,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   int dev = -1;
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "dev", &index));
   if (index == -1) {
-    NCCLCHECK(xmlSetAttrInt(gpuNode, "dev", xmlDev));
+    NCCLCHECK(xmlSetAttrInt(gpuNode, "dev", smiDev));
   }
   NCCLCHECK(xmlGetAttrInt(gpuNode, "dev", &dev));
   if (dev == -1) {
@@ -1007,7 +1027,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "sm", &index));
   if (index == -1) {
     cudaDeviceProp devProp;
-    CUDACHECK(cudaGetDeviceProperties(&devProp, (int)xmlDev));
+    CUDACHECK(cudaGetDeviceProperties(&devProp, (int)hipDev));
     NCCLCHECK(xmlSetAttrInt(gpuNode, "sm", devProp.multiProcessorCount));
   }
   int sm;
@@ -1018,7 +1038,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "gcn", &index));
   if (index == -1) {
     hipDeviceProp_t devProp;
-    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)hipDev));
     // extract only the releveant info from the gcnArchName attribute
     // e.g.: convert "gfx908:sramecc+:xnack-" to "gfx908"
     char gcnArchNameSubstr[128];
@@ -1036,7 +1056,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
   NCCLCHECK(xmlGetAttrIndex(gpuNode, "arch", &index));
   if (index == -1) {
     hipDeviceProp_t devProp;
-    CUDACHECK(hipGetDeviceProperties(&devProp, (int)xmlDev));
+    CUDACHECK(hipGetDeviceProperties(&devProp, (int)hipDev));
     memcpy(&arch.arch, &devProp.arch, sizeof(hipDeviceArch_t));
     NCCLCHECK(xmlSetAttrInt(gpuNode, "arch", arch.value));
   }
@@ -1084,10 +1104,10 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
           // Either path stamps accelerator tclass: HIP bus IDs need not exist on
           // the physical PCI bus, so sysfs class at that BDF is not the peer GPU.
           int created;
-          // count=1: amd-smi does not yet report UALoE link count.
-          // TODO: Update amd_smi_getLinkInfo to return the number of links for UALoE.
+          // amd-smi has no UALoE link count; count=1 is one local fabric peer.
           NCCLCHECK(ncclTopoXmlAddXgmiPeerGpu(xml, gpuNode, lowerId, 1, &nvlNode, &created));
           if (created) {
+            NCCLCHECK(rcclTopoXmlSetFabricBandwidth(nvlNode, fabInfo_dev));
             uint64_t uuidHigh = 0;
             uint64_t uuidLow = 0;
             memcpy(&uuidHigh, fabInfo.clusterUuid, sizeof(uuidHigh));
@@ -1240,7 +1260,7 @@ ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t xmlDev,
 #endif
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  NCCLCHECK(ncclTopoXmlAddHipPartitionXgmi(xml, gpuNode, pciNode, xmlDev));
+  NCCLCHECK(ncclTopoXmlAddHipPartitionXgmi(xml, gpuNode, pciNode, hipDev));
 #endif
 #if CUDART_VERSION >= 11080
   struct ncclXmlNode* c2cNode = NULL;
@@ -1373,7 +1393,7 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
   NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, &smiIndex));
 #endif
   int hipDev = -1;
-  if (hipDeviceGetByPCIBusId(&hipDev, busId) != hipSuccess || hipDev < 0) hipDev = (int)smiIndex;
+  CUDACHECK(hipDeviceGetByPCIBusId(&hipDev, busId));
   NCCLCHECK(ncclTopoGetXmlFromGpu(node, (uint32_t)hipDev, smiIndex, xml, gpuNode));
 #else
   nvmlDevice_t nvmlDev;
@@ -1583,6 +1603,7 @@ ncclResult_t ncclTopoXmlGraphLoadGraphs(FILE* file, struct ncclXml* xmlGraph, st
 }
 
 ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXml* xml) {
+  ncclResult_t ret = ncclSuccess;
   FILE* file = fopen(xmlGraphFile, "r");
   if (file == NULL) {
     WARN("Could not open XML graph file %s : %s", xmlGraphFile, strerror(errno));
@@ -1590,9 +1611,10 @@ ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXm
   }
   struct xmlHandler handlers[] = {{"graphs", ncclTopoXmlGraphLoadGraphs}};
   xml->maxIndex = 0;
-  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
+  NCCLCHECKGOTO(xmlLoadSub(file, xml, NULL, handlers, 1), ret, exit);
+exit:
   fclose(file);
-  return ncclSuccess;
+  return ret;
 }
 
 #elif NCCL_OS_WINDOWS

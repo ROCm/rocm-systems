@@ -523,6 +523,189 @@ TEST_P(RmaMPITest, MixedIPutIGetIPutSignal)
     }
 }
 
+// Earlier aggregated puts complete through the tail completion's sequence number, not a completion of their own.
+TEST_P(RmaMPITest, AggregatedIPutsCompleteBySequence)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    const size_t kBlock   = MessageSize();
+    const size_t kBufSize = kInflightN * kBlock;
+    const int    nCtx     = NumContexts();
+
+    void* sendBuf = AllocBuf(kBufSize);
+    void* recvBuf = AllocBuf(kBufSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            FillBuf(static_cast<uint8_t*>(sendBuf) + i * kBlock, kBlock, /*seed=*/i);
+        }
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kBufSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kBufSize, &recvMh, &recvGh));
+
+    Barrier();
+    std::vector<void*> reqs(kInflightN, nullptr);
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            ASSERT_EQ(ncclSuccess,
+                      IPut( /*context=*/i % nCtx,
+                                 /*srcOff=*/i * kBlock, sendMh, kBlock,
+                                 /*dstOff=*/i * kBlock, recvMh,
+                                 /*peerRank=*/1, &reqs[i],
+                                 ncclRmaOptFlagsAggregateRequests));
+        }
+    }
+
+    // The batch stays queued until the first test() rings the doorbell.
+    Barrier();
+    if(worldRank_ == 1 && RetiresBatchOnTailCompletion())
+    {
+        EXPECT_TRUE(AllSentinel(recvBuf, kBufSize, 0)) << "batch posted before test()";
+    }
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        // The first request of each context is unsignaled: polling it rings
+        // that context's doorbell and waits for the batch tail's completion.
+        for(int c = 0; c < nCtx; ++c)
+        {
+            EXPECT_TRUE(PollUntilDone(reqs[c]))
+                << "first request of ctx " << c << " did not complete";
+        }
+
+        const bool retiresBatch = RetiresBatchOnTailCompletion();
+        for(int i = nCtx; i < kInflightN; ++i)
+        {
+            const bool doneNow = TestOnce(reqs[i]);
+            if(retiresBatch)
+            {
+                EXPECT_TRUE(doneNow)
+                    << "request " << i << " (ctx " << (i % nCtx)
+                    << ") was not retired by its batch's single completion";
+            }
+            if(!doneNow)
+            {
+                EXPECT_TRUE(PollUntilDone(reqs[i]))
+                    << "request " << i << " (ctx " << (i % nCtx) << ") did not complete";
+            }
+        }
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(recvBuf) + i * kBlock,
+                                  kBlock, /*seed=*/i))
+                << "block " << i << " (ctx " << (i % nCtx) << ") mismatched";
+        }
+    }
+}
+
+// An unsignaled RDMA READ completes via a later write and atomic, so its data is in place when test() reports done.
+TEST_P(RmaMPITest, AggregatedMixedBatchCompletesInPostingOrder)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    const size_t kSize = MessageSize();
+
+    void* getBuf     = AllocBuf(kSize);
+    void* putSendBuf = AllocBuf(kSize);
+    void* putRecvBuf = AllocBuf(kSize);
+    void* psSendBuf  = AllocBuf(kSize);
+    void* psRecvBuf  = AllocBuf(kSize);
+    void* sigBuf     = AllocBuf(kSignalSize);
+    ASSERT_NE(getBuf,     nullptr);
+    ASSERT_NE(putSendBuf, nullptr);
+    ASSERT_NE(putRecvBuf, nullptr);
+    ASSERT_NE(psSendBuf,  nullptr);
+    ASSERT_NE(psRecvBuf,  nullptr);
+    ASSERT_NE(sigBuf,     nullptr);
+
+    if(worldRank_ == 0)
+    {
+        FillBuf(putSendBuf, kSize, /*seed=*/0x24);
+        FillBuf(psSendBuf,  kSize, /*seed=*/0x66);
+    }
+    if(worldRank_ == 1)
+    {
+        FillBuf(getBuf, kSize, /*seed=*/0x42);
+    }
+
+    void *getMh, *getGh, *putSendMh, *putSendGh, *putRecvMh, *putRecvGh;
+    void *psSendMh, *psSendGh, *psRecvMh, *psRecvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(getBuf,     kSize,       &getMh,     &getGh));
+    ASSERT_EQ(ncclSuccess, RegMr(putSendBuf, kSize,       &putSendMh, &putSendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(putRecvBuf, kSize,       &putRecvMh, &putRecvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(psSendBuf,  kSize,       &psSendMh,  &psSendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(psRecvBuf,  kSize,       &psRecvMh,  &psRecvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,     kSignalSize, &sigMh,     &sigGh));
+
+    // Ctx2 must not repeat Ctx1: post the batch on the last context.
+    const int ctx = NumContexts() - 1;
+
+    Barrier();
+    void *getReq = nullptr, *putReq = nullptr, *psReq = nullptr;
+    if(worldRank_ == 0)
+    {
+        ASSERT_EQ(ncclSuccess,
+                  IGet( /*context=*/ctx, 0, getMh, kSize, 0, getMh, 1, &getReq,
+                       ncclRmaOptFlagsAggregateRequests));
+        ASSERT_EQ(ncclSuccess,
+                  IPut( /*context=*/ctx, 0, putSendMh, kSize, 0, putRecvMh, 1, &putReq,
+                       ncclRmaOptFlagsAggregateRequests));
+        ASSERT_EQ(ncclSuccess,
+                  IPutSignal( /*context=*/ctx,
+                                   0, psSendMh, kSize,
+                                   0, psRecvMh, 1,
+                                   0, sigMh, /*signalValue=*/0,
+                                   NCCL_NET_SIGNAL_OP_INC, &psReq,
+                                   ncclRmaOptFlagsAggregateRequests));
+    }
+
+    // The batch stays queued until the first test() rings the doorbell.
+    Barrier();
+    if(worldRank_ == 1 && RetiresBatchOnTailCompletion())
+    {
+        EXPECT_TRUE(AllSentinel(putRecvBuf, kSize, 0)) << "batch posted before test()";
+        EXPECT_EQ(ReadSignal(sigBuf), 0u) << "batch posted before test()";
+    }
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        EXPECT_TRUE(PollUntilDone(getReq));
+        EXPECT_TRUE(VerifyBuf(getBuf, kSize, /*seed=*/0x42))
+            << "iget reported done before its data landed";
+        EXPECT_TRUE(PollUntilDone(putReq));
+        EXPECT_TRUE(PollUntilDone(psReq));
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(putRecvBuf, kSize, /*seed=*/0x24));
+        EXPECT_TRUE(VerifyBuf(psRecvBuf,  kSize, /*seed=*/0x66));
+        EXPECT_EQ(ReadSignal(sigBuf), 1u);
+    }
+}
+
 TEST_P(RmaMPIFixedSizeTest, IPutSignalZeroSize)
 {
     if(!SetUpFixture(2, 2))
@@ -606,6 +789,156 @@ TEST_P(RmaMPIFixedSizeTest, IPutSignalInvalidSignalOp)
             << "iputSignal accepted invalid signalOp 0x99 (returned " << r << ")";
     }
     Barrier();
+}
+
+// Close each context's aggregated puts with one default-flag put, then check
+// the receiver's blocks. Doorbell coalescing is covered by NetIbGinMicrotest (transport/net_ib/gin-test.cc).
+TEST_P(RmaMPITest, AggregatedPutsClosedByDefault)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    const size_t kBlock   = MessageSize();
+    const size_t kBufSize = kInflightN * kBlock;
+    const int    nCtx     = NumContexts();
+
+    void* sendBuf = AllocBuf(kBufSize);
+    void* recvBuf = AllocBuf(kBufSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            FillBuf(static_cast<uint8_t*>(sendBuf) + i * kBlock, kBlock, /*seed=*/i + 1);
+        }
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kBufSize, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kBufSize, &recvMh, &recvGh));
+
+    Barrier();
+    if(worldRank_ == 0)
+    {
+        std::vector<void*> reqs(kInflightN, nullptr);
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            const bool     lastOnCtx = i + nCtx >= kInflightN;
+            const uint32_t flags     = lastOnCtx ? ncclRmaOptFlagsDefault
+                                                 : ncclRmaOptFlagsAggregateRequests;
+            ASSERT_EQ(ncclSuccess,
+                      IPut( /*context=*/i % nCtx,
+                                 /*srcOff=*/i * kBlock, sendMh, kBlock,
+                                 /*dstOff=*/i * kBlock, recvMh,
+                                 /*peerRank=*/1, &reqs[i], flags));
+        }
+
+        const bool retiresBatch = RetiresBatchOnTailCompletion();
+        for(int c = 0; c < nCtx; ++c)
+        {
+            EXPECT_TRUE(PollUntilDone(reqs[c]))
+                << "first request of ctx " << c << " did not complete";
+        }
+        for(int i = nCtx; i < kInflightN; ++i)
+        {
+            const bool doneNow = TestOnce(reqs[i]);
+            if(retiresBatch)
+            {
+                EXPECT_TRUE(doneNow)
+                    << "request " << i << " (ctx " << (i % nCtx)
+                    << ") was not retired when its context's batch was closed";
+            }
+            if(!doneNow)
+            {
+                EXPECT_TRUE(PollUntilDone(reqs[i]))
+                    << "request " << i << " (ctx " << (i % nCtx) << ") did not complete";
+            }
+        }
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        for(int i = 0; i < kInflightN; ++i)
+        {
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(recvBuf) + i * kBlock,
+                                  kBlock, /*seed=*/i + 1))
+                << "block " << i << " mismatched";
+        }
+    }
+}
+
+// Flush after aggregated puts and collect the flush and the put completions.
+// The payload must match. Doorbell ordering is covered by NetIbGinMicrotest (transport/net_ib/gin-test.cc).
+TEST_P(RmaMPITest, IFlushAfterAggregatedPuts)
+{
+    if(!SetUpFixture(2, 2))
+    {
+        return;
+    }
+
+    constexpr int kN     = 4;
+    const size_t  kBlock = MessageSize();
+    const size_t  kBuf   = kN * kBlock;
+
+    void* sendBuf = AllocBuf(kBuf);
+    void* recvBuf = AllocBuf(kBuf);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+
+    if(worldRank_ == 0)
+    {
+        for(int i = 0; i < kN; ++i)
+        {
+            FillBuf(static_cast<uint8_t*>(sendBuf) + i * kBlock, kBlock, /*seed=*/0x40 + i);
+        }
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kBuf, &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kBuf, &recvMh, &recvGh));
+
+    Barrier();
+    if(worldRank_ == 0)
+    {
+        void* reqs[kN] = {};
+        for(int i = 0; i < kN; ++i)
+        {
+            ASSERT_EQ(ncclSuccess,
+                      IPut( /*context=*/0,
+                                 /*srcOff=*/i * kBlock, sendMh, kBlock,
+                                 /*dstOff=*/i * kBlock, recvMh,
+                                 /*peerRank=*/1, &reqs[i],
+                                 ncclRmaOptFlagsAggregateRequests));
+        }
+
+        void* flushReq = nullptr;
+        ASSERT_EQ(ncclSuccess,
+                  rma_->iflush(rmaCtx_, /*context=*/0, recvMh, /*peerRank=*/1, &flushReq));
+        if(flushReq != nullptr)
+        {
+            EXPECT_TRUE(PollUntilDone(flushReq));
+        }
+        for(int i = 0; i < kN; ++i)
+        {
+            EXPECT_TRUE(PollUntilDone(reqs[i])) << "aggregated put " << i << " did not complete";
+        }
+    }
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        for(int i = 0; i < kN; ++i)
+        {
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(recvBuf) + i * kBlock,
+                                  kBlock, /*seed=*/0x40 + i))
+                << "block " << i << " mismatched";
+        }
+    }
 }
 
 // ===========================================================================
@@ -719,6 +1052,77 @@ TEST_F(RmaMPIStressTest, IPutSignalStress10k)
     }
 }
 
+// One doorbell per window: 15 aggregated put-signals, then one default-flag
+// put-signal that rings the doorbell, then drain all 16. Polling inside the
+// window would call rma->test, and the net_ib proxy posts any held batch
+// first, so only the first window would stay aggregated.
+TEST_F(RmaMPIStressTest, AggregatedIPutSignalStress)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2)) return;
+
+    constexpr int    kIterations = 4096;
+    constexpr int    kWindow     = 16;
+    constexpr size_t kPayload    = 64;
+    static_assert(kIterations % kWindow == 0, "each window must close with a default-flag op");
+
+    void* sendBuf = AllocBuf(kPayload);
+    void* recvBuf = AllocBuf(kPayload);
+    void* sigBuf  = AllocBuf(kSignalSize);
+    ASSERT_NE(sendBuf, nullptr);
+    ASSERT_NE(recvBuf, nullptr);
+    ASSERT_NE(sigBuf,  nullptr);
+
+    if(worldRank_ == 0)
+    {
+        FillBuf(sendBuf, kPayload, /*seed=*/0x51);
+    }
+
+    void *sendMh, *sendGh, *recvMh, *recvGh, *sigMh, *sigGh;
+    ASSERT_EQ(ncclSuccess, RegMr(sendBuf, kPayload,    &sendMh, &sendGh));
+    ASSERT_EQ(ncclSuccess, RegMr(recvBuf, kPayload,    &recvMh, &recvGh));
+    ASSERT_EQ(ncclSuccess, RegMr(sigBuf,  kSignalSize, &sigMh,  &sigGh));
+
+    Barrier();
+
+    if(worldRank_ == 0)
+    {
+        for(int base = 0; base < kIterations; base += kWindow)
+        {
+            void* reqs[kWindow] = {};
+            for(int j = 0; j < kWindow; ++j)
+            {
+                const bool     closing = j == kWindow - 1;
+                const uint32_t flags   = closing ? ncclRmaOptFlagsDefault
+                                                 : ncclRmaOptFlagsAggregateRequests;
+                ASSERT_EQ(ncclSuccess,
+                          IPutSignal( /*context=*/0,
+                                           /*srcOff=*/0, sendMh, kPayload,
+                                           /*dstOff=*/0, recvMh,
+                                           /*peerRank=*/1,
+                                           /*signalOff=*/0, sigMh,
+                                           /*signalValue=*/0,
+                                           NCCL_NET_SIGNAL_OP_INC,
+                                           &reqs[j], flags))
+                    << "iteration " << (base + j) << " post failed";
+            }
+            for(int j = 0; j < kWindow; ++j)
+            {
+                ASSERT_TRUE(PollUntilDone(reqs[j]))
+                    << "iteration " << (base + j) << " drain failed";
+            }
+        }
+    }
+
+    Barrier();
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_EQ(ReadSignal(sigBuf), static_cast<uint64_t>(kIterations))
+            << "aggregated iputSignal dropped or duplicated a signal";
+        EXPECT_TRUE(VerifyBuf(recvBuf, kPayload, /*seed=*/0x51));
+    }
+}
+
 namespace
 {
 
@@ -773,6 +1177,201 @@ INSTANTIATE_TEST_SUITE_P(
         ::testing::Values(1, 2),
         ::testing::Bool()),
     CtxOnlyName);
+
+// The proxy reads mrs[0] and posts on qps[0], so a fused vNIC costs it the second
+// NIC's bandwidth and nothing more: the bytes still have to arrive.
+TEST_F(RmaMPIFusedNicTest, IPutOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+
+    if(worldRank_ == 0 && sendBuf != nullptr)
+    {
+        FillBuf(sendBuf, kSize, /*seed=*/0xE7);
+    }
+
+    // RegMr allgathers addresses and rkeys, so every rank must call it the same
+    // number of times; agree on allocation first and short-circuit neither call.
+    void *sendMh = nullptr, *recvMh = nullptr;
+    if(AnyRankFailed(sendBuf == nullptr || recvBuf == nullptr))
+    {
+        if(sendBuf == nullptr || recvBuf == nullptr) ADD_FAILURE() << "buffer allocation failed";
+        return;
+    }
+
+    ncclResult_t sendReg = RegMr(sendBuf, kSize, &sendMh);
+    ncclResult_t recvReg = RegMr(recvBuf, kSize, &recvMh);
+    bool         setupFailed = sendReg != ncclSuccess || recvReg != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer registration failed";
+        return;
+    }
+
+    Barrier();
+
+    // Non-fatal: returning on rank 0 alone would strand rank 1 in the barrier below.
+    bool putFailed = false;
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        putFailed = IPut(/*context=*/0,
+                         /*srcOff=*/0, sendMh, kSize,
+                         /*dstOff=*/0, recvMh,
+                         /*peerRank=*/1, &req) != ncclSuccess;
+        if(putFailed) ADD_FAILURE() << "iput over a fused vNIC was rejected";
+        else if(!PollUntilDone(req))
+        {
+            putFailed = true;
+            ADD_FAILURE() << "iput over a fused vNIC never completed";
+        }
+    }
+    Barrier();
+
+    // Skip verification when the put never landed: the payload mismatch that
+    // rank 1 would report says nothing beyond what rank 0 already reported.
+    if(AnyRankFailed(putFailed)) return;
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0xE7));
+    }
+}
+
+// RDMA_READ rather than WRITE: iget takes the remote rkey from the peer's handle,
+// a second addressing path that IPutOverFusedVNic does not reach.
+TEST_F(RmaMPIFusedNicTest, IGetOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* buf = AllocBuf(kSize);
+    if(worldRank_ == 1 && buf != nullptr)
+    {
+        FillBuf(buf, kSize, /*seed=*/0xD4);
+    }
+
+    // RegMr is collective, so allocation is agreed before any rank registers.
+    void* mh = nullptr;
+    if(AnyRankFailed(buf == nullptr))
+    {
+        if(buf == nullptr) ADD_FAILURE() << "buffer allocation failed";
+        return;
+    }
+
+    bool setupFailed = RegMr(buf, kSize, &mh) != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer registration failed";
+        return;
+    }
+
+    Barrier();
+    // Non-fatal for the same reason as IPutOverFusedVNic: rank 1 waits below.
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        if(IGet(/*context=*/0,
+                /*remoteOff=*/0, mh, kSize,
+                /*localOff=*/0, mh,
+                /*peerRank=*/1, &req) != ncclSuccess)
+        {
+            ADD_FAILURE() << "iget over a fused vNIC was rejected";
+        }
+        else if(!PollUntilDone(req))
+        {
+            ADD_FAILURE() << "iget over a fused vNIC never completed";
+        }
+        else
+        {
+            EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0xD4));
+        }
+    }
+    Barrier();
+}
+
+// iputSignal chains two work requests, payload then signal, both on qps[0], so a
+// fused device has to leave their ordering intact as well as the data.
+TEST_F(RmaMPIFusedNicTest, IPutSignalOverFusedVNic)
+{
+    if(!SetUpFixture(/*minProcs=*/2, /*maxProcs=*/2))
+    {
+        return;
+    }
+
+    constexpr size_t kSize = 1 * 1024 * 1024;
+
+    void* sendBuf = AllocBuf(kSize);
+    void* recvBuf = AllocBuf(kSize);
+    void* sigBuf  = AllocBuf(kSignalSize);
+
+    if(worldRank_ == 0 && sendBuf != nullptr)
+    {
+        FillBuf(sendBuf, kSize, /*seed=*/0x3C);
+    }
+
+    // RegMr is collective: allocation is agreed first, then all three registrations
+    // run on every rank without short-circuiting each other.
+    void *sendMh = nullptr, *recvMh = nullptr, *sigMh = nullptr;
+    const bool allocFailed = sendBuf == nullptr || recvBuf == nullptr || sigBuf == nullptr;
+    if(AnyRankFailed(allocFailed))
+    {
+        if(allocFailed) ADD_FAILURE() << "buffer allocation failed";
+        return;
+    }
+
+    ncclResult_t sendReg = RegMr(sendBuf, kSize, &sendMh);
+    ncclResult_t recvReg = RegMr(recvBuf, kSize, &recvMh);
+    ncclResult_t sigReg  = RegMr(sigBuf, kSignalSize, &sigMh);
+    bool setupFailed = sendReg != ncclSuccess || recvReg != ncclSuccess || sigReg != ncclSuccess;
+    if(AnyRankFailed(setupFailed))
+    {
+        if(setupFailed) ADD_FAILURE() << "buffer registration failed";
+        return;
+    }
+
+    Barrier();
+    // Non-fatal for the same reason as IPutOverFusedVNic: rank 1 waits below.
+    bool putFailed = false;
+    if(worldRank_ == 0)
+    {
+        void* req = nullptr;
+        putFailed = IPutSignal(/*context=*/0,
+                               /*srcOff=*/0, sendMh, kSize,
+                               /*dstOff=*/0, recvMh,
+                               /*peerRank=*/1,
+                               /*signalOff=*/0, sigMh,
+                               /*signalValue=*/0, // unused for INC
+                               NCCL_NET_SIGNAL_OP_INC,
+                               &req) != ncclSuccess;
+        if(putFailed) ADD_FAILURE() << "iputSignal over a fused vNIC was rejected";
+        else if(!PollUntilDone(req))
+        {
+            putFailed = true;
+            ADD_FAILURE() << "iputSignal over a fused vNIC never completed";
+        }
+    }
+    Barrier();
+
+    if(AnyRankFailed(putFailed)) return;
+
+    if(worldRank_ == 1)
+    {
+        EXPECT_TRUE(VerifyBuf(recvBuf, kSize, /*seed=*/0x3C));
+        EXPECT_EQ(ReadSignal(sigBuf), 1u);
+    }
+}
 
 } // namespace RCCLRmaTests
 

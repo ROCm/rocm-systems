@@ -445,11 +445,14 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type, uint32_t 
 static bool is_power_of_2(uint64_t n) { return n && !(n & (n - 1)); }
 
 rsmi_status_t rsmi_init(uint64_t flags) {
-  // Rocm smi is deprecated now, give warning for all users
-  std::cout << "WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 "
-               "(https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html). "
-               "Please switch to AMD-SMI (https://github.com/ROCm/amdsmi)."
+  // Rocm smi is deprecated now, give warning for all users. stderr keeps
+  // machine-readable output on stdout (rocm-smi --json/--csv) parseable.
+  // clang-format off
+  std::cerr << "WARNING: ROCm-SMI is fully deprecated as of ROCm 10.1 "
+               "(https://rocm.blogs.amd.com/ecosystems-and-partners/rocm-10.1-blog/README.html#rocm-smi-transitions-to-amd-smi). "
+               "Please switch to AMD-SMI (https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi)."
             << std::endl;
+  // clang-format on
 
   TRY amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
@@ -468,6 +471,18 @@ rsmi_status_t rsmi_init(uint64_t flags) {
   if (smi.ref_count() == 1) {
     try {
       smi.Initialize(flags);
+    } catch (const amd::smi::rsmi_exception& e) {
+      smi.Cleanup();
+      if (e.error_code() == RSMI_STATUS_DRIVER_NOT_LOADED) {
+        // This system does not actually have ROCM drivers set up
+        // We were probably just called through dependency, just report the
+        // error and log without complaining loudly.
+        std::ostringstream ss;
+        ss << "Exception caught: " << e.what() << ".";
+        LOG_INFO(ss);
+        return RSMI_STATUS_DRIVER_NOT_LOADED;
+      }
+      throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
     } catch (...) {
       smi.Cleanup();
       throw amd::smi::rsmi_exception(RSMI_STATUS_INIT_ERROR, __FUNCTION__);
@@ -3565,6 +3580,11 @@ rsmi_status_t rsmi_status_string(rsmi_status_t status, const char** status_strin
       *status_string =
           "RSMI_STATUS_FAIL_LOAD_SYMBOL: Failed to load the "
           "required symbol";
+      break;
+    case RSMI_STATUS_DRIVER_NOT_LOADED:
+      *status_string =
+          "RSMI_STATUS_DRIVER_NOT_LOADED: The amdgpu driver is not "
+          "loaded";
       break;
 
     default:

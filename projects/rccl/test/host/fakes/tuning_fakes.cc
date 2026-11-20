@@ -50,6 +50,7 @@ int64_t ncclParamMinNchannels() { return g_paramMinNchannels; }
 int64_t ncclParamMaxNchannels() { return g_paramMaxNchannels; }
 // Referenced by init.cc but not declared inside it, so the redirected NCCL_PARAM does not cover it.
 int64_t ncclParamPatEnable() { return g_loadParam("PAT_ENABLE", 0); }  // graph/tuning.cc:1105
+int64_t ncclParamSymCTAs() { return g_loadParam("SYM_CTAS", 0); }      // tuning/sym_model.cc:20
 
 int g_tuningIndexValue = 0;
 std::string g_tuningIndexLastArch;
@@ -66,6 +67,9 @@ std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*
 ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncclTuningResult_t* const result) {
   return g_tuningCompute(input, result);
 }
+
+// A no-op: the overrides only retune system->tuning after a Rome model matches.
+void rcclApplyTuningOverrides(struct ncclTopoSystem*) {}
 
 void ResetTuningFakes() {
   g_topoGetAlgoTime = DefaultTopoGetAlgoTime;

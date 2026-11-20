@@ -103,8 +103,16 @@ private:
              handle_object_set_t<register_class_t>>
     m_handle_object_sets{};
 
+public:
+  /* Max. VGPR register number in wave32 mode.  */
+  const amdgpu_regnum_t max_vgpr_32;
+
+  /* Max. VGPR register number in wave64 mode.  */
+  const amdgpu_regnum_t max_vgpr_64;
+
 protected:
-  architecture_t (elf_amdgpu_machine_t e_machine, std::string target_triple);
+  architecture_t (elf_amdgpu_machine_t e_machine, std::string target_triple,
+                  amdgpu_regnum_t max_vgpr32, amdgpu_regnum_t max_vgpr64);
 
 public:
   /* Return the map of all instantiated architectures  */
@@ -183,9 +191,6 @@ public:
     virtual std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const = 0;
 
-    /* Return true if a scratch slot is allocated for this record.  */
-    virtual bool is_scratch_enabled () const = 0;
-
     /* The shader engine ID this wave was created on.  */
     virtual uint32_t shader_engine_id () const = 0;
     /* Scratch region slot ID.  */
@@ -255,9 +260,21 @@ public:
 
   virtual std::pair<amd_dbgapi_size_t /* offset  */,
                     amd_dbgapi_size_t /* size  */>
-  scratch_memory_region (const agent_t &,
-                         uint32_t compute_tmpring_size_register,
-                         const cwsr_record_t &cwsr_record) const
+  scratch_memory_region (
+    const agent_t &,
+    uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
+    const cwsr_record_t &cwsr_record) const
+    = 0;
+
+  /* Total size of allocated scratch memory.  The unit is number of waves.  */
+  virtual amd_dbgapi_size_t
+  scratch_memory_allocation (uint32_t compute_tmpring_size_register) const
+    = 0;
+
+  /* Size, in bytes, of the scratch memory allocated per wave.  */
+  virtual amd_dbgapi_size_t
+  scratch_memory_size (uint32_t compute_tmpring_size_register) const
     = 0;
 
   virtual bool

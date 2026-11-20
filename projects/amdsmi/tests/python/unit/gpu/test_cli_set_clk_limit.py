@@ -24,6 +24,7 @@ try:
     from common.common import (
         amdsmi_path,
         cli_search_order,
+        fake_module,
         find_cli_dir,
         load_cli_module,
         stub_modules,
@@ -115,6 +116,12 @@ class TestSnapClkLimitToDpm(unittest.TestCase):
                 f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()
+        # set_value.py does `from amdsmi_helpers import AMDSMIHelpers`; stub that
+        # module directly so the real amdsmi_helpers -> amdsmi_init import chain
+        # never loads. This suite never touches the bare imported class.
+        modules["amdsmi_helpers"] = fake_module(
+            "amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {})
+        )
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
         cls.module = _load_set_value_module()
@@ -281,6 +288,12 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
                 f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()
+        # set_value.py does `from amdsmi_helpers import AMDSMIHelpers`; stub that
+        # module directly so the real amdsmi_helpers -> amdsmi_init import chain
+        # never loads. This suite never touches the bare imported class.
+        modules["amdsmi_helpers"] = fake_module(
+            "amdsmi_helpers", AMDSMIHelpers=type("AMDSMIHelpers", (), {})
+        )
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
         # Extra surface the set_gpu clk-limit branch touches beyond the snap
