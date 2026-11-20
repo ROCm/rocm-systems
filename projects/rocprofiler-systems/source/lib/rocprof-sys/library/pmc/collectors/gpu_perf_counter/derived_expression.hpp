@@ -130,11 +130,11 @@ private:
     };
 
     static constexpr auto k_sum_operators =
-        std::array{ binary_operator{ '+', node_kind::add },
-                    binary_operator{ '-', node_kind::subtract } };
+        std::array{ binary_operator{ .symbol = '+', .kind = node_kind::add },
+                    binary_operator{ .symbol = '-', .kind = node_kind::subtract } };
     static constexpr auto k_product_operators =
-        std::array{ binary_operator{ '*', node_kind::multiply },
-                    binary_operator{ '/', node_kind::divide } };
+        std::array{ binary_operator{ .symbol = '*', .kind = node_kind::multiply },
+                    binary_operator{ .symbol = '/', .kind = node_kind::divide } };
 
     [[nodiscard]] subexpression parse_complete(expression_scanner& scanner)
     {
@@ -163,9 +163,10 @@ private:
         auto result = parse_operand();
         while(true)
         {
-            auto const next = std::ranges::find_if(operators, [&](binary_operator op) {
-                return scanner.consume(op.symbol);
-            });
+            auto const next =
+                std::ranges::find_if(operators, [&](binary_operator binary_op) {
+                    return scanner.consume(binary_op.symbol);
+                });
             if(next == operators.end())
             {
                 return result;
