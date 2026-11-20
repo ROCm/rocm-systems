@@ -85,7 +85,7 @@ extern "C" {
  * @brief hipFile minor version number
  * @ingroup core
  */
-#define HIPFILE_VERSION_MINOR 6
+#define HIPFILE_VERSION_MINOR 7
 /*!
  * @brief hipFile patch version number
  * @ingroup core
@@ -475,10 +475,12 @@ HIPFILE_API
 void hipFileHandleDeregister(hipFileHandle_t fh);
 
 /*!
- * @brief Registers a GPU memory region to be used with GPU IO
+ * @brief Registers a memory region to be used with IO
  * @ingroup file
  *
  * The memory region should be allocated by the user before being passed to the API call
+ *
+ * Memory regions can refer to GPU device memory or host memory
  *
  * @note If the library has not already been initialized, the first call to
  *       `hipFileBufRegister()` will initialize the library and increment
@@ -494,7 +496,7 @@ HIPFILE_API
 hipFileError_t hipFileBufRegister(const void *buffer_base, size_t length, int flags);
 
 /*!
- * @brief Deregisters a GPU memory region from being used with GPU IO
+ * @brief Deregisters a memory region from being used with IO
  * @ingroup file
  *
  * @param [in] buffer_base \buffer_base_param
@@ -516,8 +518,14 @@ hipFileError_t hipFileBufDeregister(const void *buffer_base);
  *
  * \max_io_size_note
  *
+ * @note A failed read may leave the HIP Runtime's last error set, even when
+ *       -1 is returned. The return value and `errno` describe the failure.
+ *       Call hipGetLastError() to clear it.
+ *
  * @return if >= 0: Number of bytes read
  * @return if -1:   System error (check `errno` for the specific error)
+ * @return if -hipFileHipDriverError: HIP Runtime error. The hipError_t can
+ *         be retrieved with hipGetLastError() or hipPeekAtLastError().
  * @return else:    Negative value of the related hipFileOpError_t
  */
 HIPFILE_API
@@ -536,8 +544,14 @@ ssize_t hipFileRead(hipFileHandle_t fh, void *buffer_base, size_t size, hoff_t f
  *
  * \max_io_size_note
  *
+ * @note A failed write may leave the HIP Runtime's last error set, even when
+ *       -1 is returned. The return value and `errno` describe the failure.
+ *       Call hipGetLastError() to clear it.
+ *
  * @return if >= 0: Number of bytes written
  * @return if -1:   System error (check `errno` for the specific error)
+ * @return if -hipFileHipDriverError: HIP Runtime error. The hipError_t can
+ *         be retrieved with hipGetLastError() or hipPeekAtLastError().
  * @return else:    Negative value of the related hipFileOpError_t
  */
 HIPFILE_API

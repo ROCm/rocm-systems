@@ -1,9 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from collections import OrderedDict
+from collections import ChainMap, OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -32,24 +33,39 @@ class ArchConfig:
     # [Index: Metric name] pairs
     metric_list: dict[str, str] = field(default_factory=dict)
 
-    # [Metric name: Counters] pairs
-    metric_counters: dict[str, list] = field(default_factory=dict)
+
+@dataclass
+class MlApiTracePair:
+    """Marker rows from one profiling pass and the sibling counter CSV."""
+
+    marker_df: pd.DataFrame
+    counter_path: Path
+    joined_df: Optional[pd.DataFrame] = None
 
 
 @dataclass
 class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # One counter table per pass, on raw_pmc's rows, keyed by pass name.
+    pass_tables: Dict[str, ChainMap] = field(default_factory=dict)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: list[int] = field(default_factory=list)
     filter_gpu_ids: list[int] = field(default_factory=list)
     filter_dispatch_ids: list[int] = field(default_factory=list)
-    avail_ips: list[int] = field(default_factory=list)
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
+    roofline_html_path: Optional[str] = None
     path: str = field(default_factory=str)
-    filter_top_n: str = field(default_factory=str)
-    # Matched ML API trace rows keyed by backend, populated by operator filters.
-    matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Marker CSV / counter CSV pairs, one entry per profiling pass.
+    ml_api_trace_pairs: list[MlApiTracePair] = field(default_factory=list)
+    # Dispatches unmatched on Correlation_ID and GUID.
+    unmatched_kernel_frames: list[pd.DataFrame] = field(default_factory=list)
+    # Consolidated marker rows after matching operator calls across passes.
+    ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Nested utils_analysis.CallTreeNode roots keyed by Thread_Id.
+    ml_api_call_trees: dict[str, list[Any]] = field(default_factory=dict)
+    # --operator patterns keyed by the backend they match in this workload.
+    operator_patterns: dict[str, list[str]] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None

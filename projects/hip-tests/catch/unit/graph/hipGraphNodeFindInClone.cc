@@ -17,8 +17,8 @@ Negative:
 6) Destroy the graph node in the original graph
    and try to get the deleted graph node
    from the cloned graph
-7) Clone the graph,Add node to Original graph
-   and try to find the original node in the cloned graph
+7) Clone the graph, add a node to both graphs, and try to find the new
+   original node in the cloned graph
 
 
 Functional:
@@ -86,6 +86,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeFindInClone_Negative) {
   }
 
   SECTION("Find node in cloned graph which is only present in original graph") {
+    hipGraphNode_t cloneOnlyNode;
+    HIP_CHECK(hipGraphAddEmptyNode(&cloneOnlyNode, clonedgraph, nullptr, 0));
     REQUIRE(hipGraphNodeFindInClone(&clonedgraphnode, newnode, clonedgraph) ==
             hipErrorInvalidValue);
   }

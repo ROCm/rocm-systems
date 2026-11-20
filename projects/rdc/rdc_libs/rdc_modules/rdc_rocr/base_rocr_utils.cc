@@ -39,6 +39,25 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
+// Destroy the executable and the code object reader that LoadKernelFromObjFile() created.
+// Failures are logged, not thrown, because this runs from destructors.
+static void ReleaseKernel(RdcRocrBase* test) {
+  if (test->executable().handle != 0) {
+    hsa_status_t err = hsa_executable_destroy(test->executable());
+    if (err != HSA_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "hsa_executable_destroy() failed with status " << err);
+    }
+    test->executable().handle = 0;
+  }
+  if (test->code_obj_rdr().handle != 0) {
+    hsa_status_t err = hsa_code_object_reader_destroy(test->code_obj_rdr());
+    if (err != HSA_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "hsa_code_object_reader_destroy() failed with status " << err);
+    }
+    test->code_obj_rdr().handle = 0;
+  }
+}
+
 // Clean up some of the common handles and memory used by RdcRocrBase code, then
 // shut down hsa. Restore HSA_ENABLE_INTERRUPT to original value, if necessary
 hsa_status_t CommonCleanUp(RdcRocrBase* test) {
@@ -62,6 +81,8 @@ hsa_status_t CommonCleanUp(RdcRocrBase* test) {
     err = hsa_signal_destroy(test->aql().completion_signal);
     throw_if_error(err);
   }
+
+  ReleaseKernel(test);
 
   err = hsa_shut_down();
   throw_if_error(err);
@@ -246,8 +267,6 @@ bool CheckProfile(RdcRocrBase const* test) {
 //  -kernarg_align()
 hsa_status_t LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent) {
   hsa_status_t err;
-  hsa_code_object_reader_t code_obj_rdr = {0};
-  hsa_executable_t executable = {0};
 
   assert(test != nullptr);
   if (agent == nullptr) {
@@ -282,20 +301,24 @@ hsa_status_t LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent) {
     return (hsa_status_t)errno;
   }
 
-  err = hsa_code_object_reader_create_from_file(file_handle, &code_obj_rdr);
-  throw_if_error(err);
+  // The test object keeps the reader and the executable, so that its clean-up releases them
+  // whether or not the rest of the test succeeds.
+  ReleaseKernel(test);
+  err = hsa_code_object_reader_create_from_file(file_handle, &test->code_obj_rdr());
   close(file_handle);
+  throw_if_error(err);
 
   err = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL,
-                                  &executable);
+                                  &test->executable());
   throw_if_error(err);
-  err = hsa_executable_load_agent_code_object(executable, *agent, code_obj_rdr, NULL, NULL);
+  err = hsa_executable_load_agent_code_object(test->executable(), *agent, test->code_obj_rdr(),
+                                              NULL, NULL);
   throw_if_error(err);
-  err = hsa_executable_freeze(executable, NULL);
+  err = hsa_executable_freeze(test->executable(), NULL);
   throw_if_error(err);
 
   hsa_executable_symbol_t kern_sym;
-  err = hsa_executable_get_symbol(executable, NULL, (kern_name + ".kd").c_str(), *agent, 0,
+  err = hsa_executable_get_symbol(test->executable(), NULL, (kern_name + ".kd").c_str(), *agent, 0,
                                   &kern_sym);
   throw_if_error(err);
 
@@ -332,20 +355,6 @@ hsa_status_t LoadKernelFromObjFile(RdcRocrBase* test, hsa_agent_t* agent) {
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts) {
-  hsa_status_t err;
-
-  if (num_pkts == 0) {
-    err = hsa_agent_get_info(device, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &num_pkts);
-    throw_if_error(err);
-  }
-
-  err = hsa_queue_create(device, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX,
-                         queue);
-  throw_if_error(err);
-
-  return HSA_STATUS_SUCCESS;
-}
 // Initialize the provided aql packet with standard default values, and
 // values from provided RdcRocrBase object.
 hsa_status_t InitializeAQLPacket(const RdcRocrBase* test, hsa_kernel_dispatch_packet_t* aql) {

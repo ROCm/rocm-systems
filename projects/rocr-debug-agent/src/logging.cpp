@@ -30,7 +30,6 @@
 
 #include "logging.h"
 
-#include <amd-dbgapi/amd-dbgapi.h>
 #include <cstdio>
 #include <stdarg.h>
 
@@ -41,7 +40,14 @@ namespace amd::debug_agent
 
 log_level_t log_level = log_level_t::warning;
 
-std::ofstream agent_out;
+std::ofstream &
+agent_out ()
+{
+  /* Constructed on first use: the agent starts from a static initializer
+     (debug_agent.cpp) that may run before this file's.  */
+  static std::ofstream out;
+  return out;
+}
 
 namespace detail
 {
@@ -51,12 +57,12 @@ log (log_level_t level, const char *format, ...)
 {
   va_list va;
 
-  agent_out << "rocm-debug-agent: ";
+  agent_out () << "rocm-debug-agent: ";
 
   if (level == log_level_t::error)
-    agent_out << "error: ";
+    agent_out () << "error: ";
   else if (level == log_level_t::warning)
-    agent_out << "warning: ";
+    agent_out () << "warning: ";
 
   va_start (va, format);
   size_t size = vsnprintf (NULL, 0, format, va);
@@ -67,33 +73,9 @@ log (log_level_t level, const char *format, ...)
   vsprintf (&str[0], format, va);
   va_end (va);
 
-  agent_out << str << std::endl;
+  agent_out () << str << std::endl;
 }
 
 } /* namespace detail */
-
-void
-set_log_level (log_level_t level)
-{
-  log_level = level;
-  switch (level)
-    {
-    case log_level_t::none:
-      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_NONE);
-      break;
-    case log_level_t::verbose:
-      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_VERBOSE);
-      break;
-    case log_level_t::info:
-      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_INFO);
-      break;
-    case log_level_t::warning:
-      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_WARNING);
-      break;
-    case log_level_t::error:
-      amd_dbgapi_set_log_level (AMD_DBGAPI_LOG_LEVEL_FATAL_ERROR);
-      break;
-    }
-}
 
 } /* namespace amd::debug_agent */

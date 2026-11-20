@@ -13,6 +13,7 @@
 #include "plugin.h"
 #include "nccl_rma.h"
 #include "gin/gin_host_proxy.h"
+#include "net.h"
 
 #include <string.h>
 #include <errno.h>
@@ -20,16 +21,19 @@
 
 typedef ncclRma_t* getNcclRma_t(void* rmaPluginLib);
 
+extern getNcclRma_t getNcclRma_v17;
 extern getNcclRma_t getNcclRma_v16;
 extern getNcclRma_t getNcclRma_v15;
 extern getNcclRma_t getNcclRma_v14;
 extern getNcclRma_t getNcclRma_v13;
 NCCL_PARAM(RmaPluginRefCount, "RMA_PLUGIN_REF_COUNT", 0);
-#define NCCL_RMA_VERSION_COUNT 4
-int ncclRmaVersion[NCCL_RMA_VERSION_COUNT] = {16, 15, 14, 13};
-getNcclRma_t* getNcclRma[NCCL_RMA_VERSION_COUNT] = {getNcclRma_v16, getNcclRma_v15, getNcclRma_v14, getNcclRma_v13};
+#define NCCL_RMA_VERSION_COUNT 5
+int ncclRmaVersion[NCCL_RMA_VERSION_COUNT] = {17, 16, 15, 14, 13};
+getNcclRma_t* getNcclRma[NCCL_RMA_VERSION_COUNT] = {getNcclRma_v17, getNcclRma_v16, getNcclRma_v15, getNcclRma_v14,
+                                                    getNcclRma_v13};
 
-#define NCCL_RMA_NUM_RESERVED_PLUGINS 4
+// [RCCL] GIN and NET plugin RMA, and up to three internal backends: IB-CAST, IB and socket.
+#define NCCL_RMA_NUM_RESERVED_PLUGINS 5
 #define NCCL_RMA_NUM_INTERNAL_PLUGINS 2
 
 typedef enum ncclRmaPluginState {
@@ -52,6 +56,8 @@ typedef struct rmaPluginLib {
 } rmaPluginLib_t;
 
 static int pluginCount = 0;
+// [RCCL] The internal backends at the end of pluginLibs: 3 with IB-CAST, else 2.
+static int pluginInternalCount = NCCL_RMA_NUM_INTERNAL_PLUGINS;
 static rmaPluginLib_t pluginLibs[NCCL_RMA_MAX_PLUGINS] = {0};
 static std::mutex pluginMutex;
 static std::once_flag initPluginLibsOnceFlag;
@@ -151,9 +157,9 @@ static ncclResult_t ncclRmaPluginAssignToComm(struct ncclComm* comm, int pluginI
 
 static ncclResult_t ncclRmaPluginDisableOtherExternal(int pluginIndex) {
   // Only if an external plugin is enabled, disable other external plugins
-  if (pluginIndex >= (pluginCount - NCCL_RMA_NUM_INTERNAL_PLUGINS)) return ncclSuccess;
+  if (pluginIndex >= (pluginCount - pluginInternalCount)) return ncclSuccess;
   char names[MAX_STR_LEN * (NCCL_RMA_MAX_PLUGINS - NCCL_RMA_NUM_INTERNAL_PLUGINS)] = {0};
-  for (int i = 0; i < (pluginCount - NCCL_RMA_NUM_INTERNAL_PLUGINS); i++) {
+  for (int i = 0; i < (pluginCount - pluginInternalCount); i++) {
     if (i != pluginIndex && pluginLibs[i].state >= ncclRmaPluginStateEnabled) {
       // Append all disabled plugin names to a string
       snprintf(names + strlen(names), sizeof(names) - strlen(names), (strlen(names) == 0) ? "%s" : ", %s",
@@ -203,7 +209,7 @@ static void initPluginLibsOnceFunc() {
       }
       rmaPluginName = strtok_r(nullptr, ",", &savePtr);
     }
-    if (envRmaPluginList) free(envRmaPluginList);
+    free(envRmaPluginList);
   } else {
     // Add default rma plugin
     pluginLibs[pluginCounter].state = ncclRmaPluginStateLoadReady;
@@ -222,17 +228,23 @@ static void initPluginLibsOnceFunc() {
     strcpy(pluginLibs[pluginCounter++].name, ncclGetPluginLibName(ncclPluginTypeRma));
   }
 
-  // Add internal ib plugin. IB-CAST uses its own RMA backend layered on the CAST
-  // transport (also backs GIN over IB-CAST via the generic ncclGinProxy); all other
-  // cases use the default IB RMA proxy.
+  // Add internal ib plugin. [RCCL] IB-CAST's RMA backend (which also backs GIN over IB-CAST) goes first
+  // when plugin/net.cc's internal NET plugin is IB-CAST, with the generic IB one after it as a fallback.
   {
-    const char* envNet = ncclGetEnv("NCCL_NET");
-    if (envNet && strcasecmp(envNet, "IB-CAST") == 0) {
+    const char* envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
+    const bool extNetPluginRequested = envNetPlugin && envNetPlugin[0] != '\0' && strcasecmp(envNetPlugin, "none") != 0;
+    const char* envNet = rcclCanonicalNetName(ncclGetEnv("NCCL_NET"));
+    const bool useCast = !extNetPluginRequested && (envNet ? strcasecmp(envNet, "IB-CAST") == 0 : rcclUseAinic());
+    if (useCast) {
       pluginLibs[pluginCounter].ncclRma = &IbCastRmaIbProxy;
-    } else {
-      pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
+      pluginLibs[pluginCounter].state = ncclRmaPluginStateInitReady;
+      pluginLibs[pluginCounter].version = ncclRmaVersion[0];
+      pluginCounter++;
     }
+    pluginInternalCount = useCast ? 3 : 2;
+    INFO(NCCL_INIT | NCCL_NET, "RMA/Plugin: internal RMA backend %s", useCast ? "IB-CAST, then IB" : "IB");
   }
+  pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
   pluginLibs[pluginCounter].state = ncclRmaPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclRmaVersion[0];
   pluginCounter++;
@@ -251,7 +263,7 @@ static ncclResult_t ncclRmaPluginFinalize(struct ncclComm* comm, int pluginIndex
     NCCLCHECK(pluginLibs[pluginIndex].ncclRma->finalize(comm->rmaContext));
   }
   pluginLibs[pluginIndex].refCount--;
-  if (pluginIndex < (pluginCount - NCCL_RMA_NUM_INTERNAL_PLUGINS)) {
+  if (pluginIndex < (pluginCount - pluginInternalCount)) {
     NCCLCHECK(ncclRmaPluginUnload(&pluginLibs[pluginIndex]));
   }
   return ncclSuccess;
@@ -263,7 +275,7 @@ ncclResult_t ncclRmaInit(struct ncclComm* comm) {
   std::call_once(initPluginLibsOnceFlag, initPluginLibsOnceFunc);
   std::lock_guard<std::mutex> lock(pluginMutex);
   for (int pluginIndex = 0; pluginIndex < pluginCount; pluginIndex++) {
-    if (pluginIndex < (pluginCount - NCCL_RMA_NUM_INTERNAL_PLUGINS) &&
+    if (pluginIndex < (pluginCount - pluginInternalCount) &&
         pluginLibs[pluginIndex].state == ncclRmaPluginStateLoadReady) {
       NCCLCHECK(ncclRmaPluginLoad(&pluginLibs[pluginIndex]));
     }

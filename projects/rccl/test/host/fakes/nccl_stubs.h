@@ -34,6 +34,7 @@ extern std::function<ncclResult_t(int /*cudaArch*/, int /*maxSharedMem*/, size_t
 
 // src/misc/coll_trace.cc: comm teardown tears the trace ring down through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_collTraceDestroy;
+extern std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommClosePeerMappings;
 
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerThreadDestroy;
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinalize;
@@ -52,11 +53,6 @@ extern std::function<ncclResult_t(ncclComm_t)> g_ncclCommDestroy;
 
 // rcclEnsureHierarchicalComms creates its two child communicators through this API.
 extern std::function<ncclResult_t(ncclComm_t, int, int, ncclComm_t*, ncclConfig_t*)> g_ncclCommSplit;
-
-// src/channel.cc: the fake initChannel does NOT allocate ring->userRanks/rankToIndex like the real one;
-// callers must supply storage.
-extern ncclResult_t g_initChannelResult;
-extern int g_initChannelLastId;
 
 // commCleanup() ordering oracle (init.cc:3696). The block is pure ordering + error propagation, so the
 // oracle is the call-order log, not any return code. Every teardown step appends its own name in call

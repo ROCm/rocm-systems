@@ -4,6 +4,8 @@ description: "Documentation review subagent. Checks docs, comments, help text, d
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Documentation Review — amd-smi
@@ -21,7 +23,8 @@ Project structure and API cascade path are stored in repo memories.
 3. Check that comments explain *why*, not *what*
 4. Identify stale or misleading docs/comments in changed code
 5. Verify docs are updated when APIs are renamed or added (architecture subagent owns the full cascade — you only check the docs leg: CLI help text, docstrings, `docs/` content)
-6. **Load `amdsmi-changelog-automation` skill** — check `CHANGELOG.md` is updated for user-visible changes
+6. **Load `amdsmi-changelog-automation` skill** — check `CHANGELOG.md` is updated for user-visible changes, under the newest unreleased version
+7. When a C API's statuses or behavior change, check that the Python API reference (`docs/reference/amdsmi-py-api.md`, including the call's "Possible Library Exceptions") says what `amdsmi.h` says, and that the Rust doc comments do not contradict `amdsmi.h`
 
 ## Severity
 

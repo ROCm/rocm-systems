@@ -144,7 +144,10 @@ HIP_TEMPLATE_TEST_CASE(Unit_hipArray3DCreate_MaxTexture, int, uint4, short, usho
       size_t estimatedBytes = w * h * d * bytesPerElement;
       size_t freeMem = 0, totalMem = 0;
       HIP_CHECK(hipMemGetInfo(&freeMem, &totalMem));
-      if (estimatedBytes > freeMem) {
+      // Tiled image layouts can be up to twice the linear size.
+      // Arrays that don't fit in VRAM fall back to host memory on AMD.
+      // Such large allocations on host can be very slow. Hence skip them.
+      if (estimatedBytes > freeMem / 2) {
         WARN("Skipping allocation of " << (estimatedBytes >> 20)
              << " MB (free: " << (freeMem >> 20) << " MB)");
         return;

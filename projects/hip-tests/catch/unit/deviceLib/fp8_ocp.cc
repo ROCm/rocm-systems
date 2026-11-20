@@ -282,6 +282,47 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare) {
   HIP_CHECK(hipFree(d_numbers));
 }
 
+__global__ void cvt_float2_fp8x2_sat(const float2* in, __hip_fp8x2_storage_t* out, size_t size,
+                                     __hip_fp8_interpretation_t interp) {
+  size_t i = threadIdx.x;
+  if (i < size) {
+    out[i] = __hip_cvt_float2_to_fp8x2(in[i], __HIP_SATFINITE, interp);
+  }
+}
+
+// Out of range inputs: the packed device path must saturate like the scalar host path.
+HIP_TEST_CASE(Unit_fp8x2_ocp_saturate_compare) {
+  FP8_OCP_SKIP_TEST
+  const std::vector<float2> numbers = {{1000.0f, -1000.0f}, {-500.0f, 500.0f},
+                                       {70000.0f, 1.5f},    {-3.0f, -70000.0f},
+                                       {1e30f, -1e30f}};
+  float2* d_in;
+  __hip_fp8x2_storage_t* d_out;
+  HIP_CHECK(hipMalloc(&d_in, sizeof(float2) * numbers.size()));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(__hip_fp8x2_storage_t) * numbers.size()));
+  HIP_CHECK(
+      hipMemcpy(d_in, numbers.data(), sizeof(float2) * numbers.size(), hipMemcpyHostToDevice));
+
+  for (auto interp : {__HIP_E4M3, __HIP_E5M2}) {
+    INFO("interp " << interp);
+    cvt_float2_fp8x2_sat<<<1, numbers.size()>>>(d_in, d_out, numbers.size(), interp);
+    HIP_CHECK(hipGetLastError());
+    std::vector<__hip_fp8x2_storage_t> result(numbers.size());
+    HIP_CHECK(hipMemcpy(result.data(), d_out, sizeof(__hip_fp8x2_storage_t) * numbers.size(),
+                        hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < numbers.size(); i++) {
+      const unsigned lo = __hip_cvt_float_to_fp8(numbers[i].x, __HIP_SATFINITE, interp);
+      const unsigned hi = __hip_cvt_float_to_fp8(numbers[i].y, __HIP_SATFINITE, interp);
+      INFO("in " << numbers[i].x << ", " << numbers[i].y << " gpu 0x" << std::hex << result[i]
+                 << " cpu 0x" << ((hi << 8) | lo));
+      CHECK(result[i] == ((hi << 8) | lo));
+    }
+  }
+
+  HIP_CHECK(hipFree(d_in));
+  HIP_CHECK(hipFree(d_out));
+}
+
 __FP8_DEVICE__ void e4m3_fp8x4_ocp_device(float4* val) {
 #if (defined(__gfx1200__) || defined(__gfx1201__) || defined(__gfx950__)) && __HIP_DEVICE_COMPILE__
   __hip_fp8x4_e4m3 tmp(*val);

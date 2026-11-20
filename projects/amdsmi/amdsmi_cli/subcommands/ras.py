@@ -8,7 +8,11 @@ import sys
 import time
 from pathlib import Path
 
-from amdsmi_cli_exceptions import AmdSmiInvalidCommandException, AmdSmiInvalidFilePathException
+from amdsmi_cli_exceptions import (
+    AmdSmiInvalidCommandException,
+    AmdSmiInvalidFilePathException,
+    AmdSmiDriverNotLoadedException,
+)
 
 from amdsmi import amdsmi_exception
 
@@ -199,7 +203,7 @@ class RasCommands:
             args.cper_file = cper_file
         if follow:
             args.follow = follow
-        if args.gpu is None:
+        if not hasattr(args, "gpu") or args.gpu is None:
             args.gpu = self.device_handles
 
         # Validate all arguments before touching the driver or the filesystem.
@@ -241,7 +245,7 @@ class RasCommands:
             return
 
         if not args.gpu:
-            return
+            raise AmdSmiDriverNotLoadedException("ras", ["amdgpu"], self.logger.format)
 
         if not isinstance(args.gpu, list):
             args.gpu = [args.gpu]

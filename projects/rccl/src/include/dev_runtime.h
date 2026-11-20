@@ -13,6 +13,7 @@
 #include "allocator.h"
 #include "bitops.h"
 #include "utils.h"
+#include "multicast.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // ncclDevr[_]: runtime implements for symmetric API.
@@ -69,7 +70,13 @@ struct ncclDevrNonSymExchangeEntry {
 };
 #endif
 
-struct ncclDevrWindowSorted;
+// Sorted winSorted[] entry ordered by userAddr for ncclDevrFindWindow. Defined
+// here so host tests can install windows without linking device runtime helpers.
+struct ncclDevrWindowSorted {
+  uintptr_t userAddr;
+  size_t size;
+  struct ncclDevrWindow* win;
+};
 struct ncclDevrTeam;
 
 struct ncclDevrRegTask {
@@ -85,6 +92,7 @@ struct ncclDevrCommCreateTask {
   struct ncclDevCommRequirements* reqs;
   struct ncclDevComm* outDevComm;
   uint32_t deviceCodeVersion;
+  bool isInternal;
 };
 
 struct ncclDevrStateCftUc {
@@ -92,12 +100,19 @@ struct ncclDevrStateCftUc {
 };
 
 struct ncclDevrState {
-  // Like localRank/localRanks except "lsa" ranks must be consecutive in the world
-  // and all lsa subsets have the same number of ranks. If any condition is
+  // A complete set of LSA ranks (with pointer access via CUDA P2P), in ascending communicator-rank order.
+  // This is the local node normally, the MNNVL clique when MNNVL is active, and the full NVLink fabric domain when
+  // cross-clique P2P is enabled.
+  int lsaDomainSelf;
+  int lsaDomainSize;
+  int* lsaDomainRankList;
+
+  // Like lsaDomainSelf/lsaDomainSize except the team ranks must be consecutive in the world
+  // and all the lsa teams within a communicator have the same number of ranks. If any condition is
   // false then the lsa team is just the singleton of self.
-  int lsaSelf;
-  int lsaSize;
-  int* lsaRankList;
+  int lsaTeamSelf;
+  int lsaTeamSize;
+  int* lsaTeamRankList; // Part of lsaDomainRankList -- watch out when free()ing!
   int nLsaTeams;
 
   int cftSelf;
@@ -105,6 +120,8 @@ struct ncclDevrState {
   int cftMcSelf;
   int cftMcSize;
   struct ncclDevrStateCftUc le[2]; // 0: UC LE ID base, 1: Counted UC LE ID base (rank_i le = base + i)
+
+  int* lsaPeerDelta4GDev;
 
   size_t granularity; // cuMemGetAllocationGranularity
   bool ginEnabled;
@@ -115,8 +132,11 @@ struct ncclDevrState {
   int winSortedCapacity, winSortedCount;
   struct ncclDevrTeam* teamHead;
   size_t bigSize; // size of our big logical space (128GB?)
+  // bigSize slice of the NVLS transport's MC group, for a multimem team over exactly the comm's
+  // local ranks. Empty on a comm that reuses a parent's NVLS resources instead of building the group.
+  struct ncclMcPartition nvlsMcPartition;
   struct ncclSpace bigSpace; // allocates our big VA space.
-  void* lsaFlatBase; // base ptr for all lsa ranks big VA's concatenated together: size = lsaRanks*bigSize
+  void* lsaFlatBase; // base ptr for all LSA-domain ranks' big VAs: size = lsaDomainSize*bigSize
   struct ncclShadowPool shadows;
   struct ncclDevCommWindowTable* windowTable;
 
@@ -124,16 +144,41 @@ struct ncclDevrState {
   struct ncclIntruQueue<struct ncclDevrCommCreateTask, &ncclDevrCommCreateTask::next> commCreateTaskQueue;
 };
 
+struct ncclGinBackendState;
+
 struct ncclDevCommCompat {
   int minVersion, maxVersion;
   ncclResult_t (*commPropertiesFilter)(ncclComm_t comm, struct ncclCommProperties* props);
   ncclResult_t (*devCommRequirementsFilter)(ncclComm_t comm, ncclDevCommRequirements_t* reqs);
   ncclResult_t (*devCommCopyNewToOld)(ncclComm_t comm, void* oldDevComm, struct ncclDevComm const* newDevComm);
   ncclResult_t (*devCommCopyOldToNew)(ncclComm_t comm, struct ncclDevComm* newDevComm, void const* oldDevComm);
+  ncclResult_t (*ginSignalsPerBarrier)(ncclComm_t comm, struct ncclGinBackendState const* backend, int nRanks,
+                                       int* outSlots);
 };
+
+// ginSignalsPerBarrier implementations. Device code before 2.32.4 strides by the team size; from 2.32.4 on it
+// strides by ncclGinBarrierSlots() of the selected backend's barrier preference.
+ncclResult_t ncclDevCommGinSignalsPerBarrier_v22902(ncclComm_t comm, struct ncclGinBackendState const* backend,
+                                                    int nRanks, int* outSlots);
+ncclResult_t ncclDevCommGinSignalsPerBarrier_v23204(ncclComm_t comm, struct ncclGinBackendState const* backend,
+                                                    int nRanks, int* outSlots);
+
+// One of NCCL's own GIN barrier requirements; ncclGinDevCommSetup re-sizes it for each backend it tries.
+struct ncclGinBarrierReq {
+  struct ncclDevResourceRequirements* req;
+  struct ncclTeam team;
+  int nBarriers;
+};
+ncclResult_t ncclGinBarrierSizeRequirement(struct ncclComm* comm, struct ncclGinBackendState const* backend,
+                                           struct ncclDevCommCompat const* devCompat,
+                                           struct ncclGinBarrierReq const* barrierReq);
 
 // Check if GIN resources have been requested as part of `reqs`.
 bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs);
+
+int computeLsaTeamSize(struct ncclComm* comm);
+// Compute the symmetric VA size (bigSize) from the comm's peer info without any side effects.
+size_t computeBigSize(struct ncclComm* comm);
 
 // Check if there is only one LSA team. This function uses the cached value of comm or computes the
 // value from the comm topology.
@@ -142,6 +187,7 @@ bool ncclDevrIsOneLsaTeam(struct ncclComm* comm);
 // Returns the CUDA version supported by CFT on this GPU, or 0 when CFT is unsupported.
 ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport, bool* gpuCftMulticastSupport,
                                bool* gpuCftCountedSupport);
+ncclResult_t ncclGpuGetCliqueIds(CUdevice dev, uint32_t* unicastId, uint32_t* multicastId);
 
 // We assume ncclComm has a `ncclDevrState symState` member.
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm);
@@ -155,10 +201,15 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* ptr, siz
 
 ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCommRequirements* reqs,
                                         struct ncclDevComm* outDevComm, bool isInternal, uint32_t deviceCodeVersion);
+ncclResult_t ncclDevrCommCreateAsync(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
+                                     struct ncclDevComm* outDevComm, bool isInternal, uint32_t deviceCodeVersion);
 void freeDevCommRequirements(struct ncclDevCommRequirements* reqs);
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win);
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win);
+// GPU-only multi-segment windows left unregistered with GIN. Symk GIN kernels
+// put through the user window and would read a null segment table.
+bool ncclDevrWindowMissingGinSegments(struct ncclDevrWindow* win);
 // RCCL: smallest registered size across this window's LSA team. Falls back to the
 // local size for host-only test windows that do not carry runtime memory state.
 size_t ncclDevrWindowLsaMinSize(struct ncclDevrWindow const* win);
