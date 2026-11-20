@@ -1463,16 +1463,18 @@ public:
     // A dynamic wave's initial allocation can be smaller than the descriptor
     // count. Growing that count does not allocate the envelope's save VGPRs.
     // Walk dynamic roots first so a shared block inherits their restriction.
+    const uint8_t storage = state_bit(CallableState::UnavailableStorage);
+    const PointState dynamic_storage = {.before = storage, .after = storage};
     bool unknown_dynamic_target = dynamic_roots.size() != dynamic_entries.size();
     visit(dynamic_roots);
     for (const BasicBlock *block : reachable) {
       unknown_dynamic_target |= block->successor_issue() != BasicBlock::SuccessorIssue::None;
       for (const Instruction &inst : block->instructions())
-        states_.at(&inst).after |= state_bit(CallableState::UnavailableStorage);
+        states_.at(&inst) = dynamic_storage;
     }
     if (unknown_dynamic_target)
       for (auto &[inst, point] : states_)
-        point.after |= state_bit(CallableState::UnavailableStorage);
+        point = dynamic_storage;
     visit(static_roots);
     for (const CallableState state :
          {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
@@ -2017,10 +2019,18 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                              "per code object");
         continue;
       }
-      bool unsafe_state = false;
-      // Dispatch enters a separate stub once. Guest backedges to the original
-      // entry do not revisit this callback and cannot change its initial state.
-      if (pt.kind != InstrumentationKind::KernelEntry) {
+      if (pt.kind == InstrumentationKind::KernelEntry) {
+        // Only dispatch executes the entry stub. Guest backedges to the original
+        // entry do not change the storage available to this callback.
+        if (out.kernels.size() != 1 || pt.anchor_offset != out.kernels.front().entry_text_offset) {
+          out.errors.emplace_back("KernelEntry must name the sole kernel's descriptor entry");
+          continue;
+        }
+        if (uses_dynamic_vgprs(arch_, out.kernels.front().descriptor)) {
+          out.errors.emplace_back("KernelEntry requires a static VGPR allocation at dispatch");
+          continue;
+        }
+      } else {
         if (!callable_state_analysis_)
           callable_state_analysis_ =
               std::make_unique<CallableStateAnalysis>(blocks_, out.kernels, text_bytes, arch_);
@@ -2047,6 +2057,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                                   "CDNA5 code object containing packed permutes");
           continue;
         }
+        bool unsafe_state = false;
         for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
                                           CallableState::UnavailableStorage}) {
           if (callable_state_analysis_->may_be_unsafe(
@@ -2062,9 +2073,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
             break;
           }
         }
+        if (unsafe_state)
+          continue;
       }
-      if (unsafe_state)
-        continue;
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));
@@ -2317,13 +2328,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   std::optional<uint16_t> entry_storage_base;
   const bool has_entry_callback = std::ranges::any_of(
       sites, [](const auto &site) { return site.kind == InstrumentationKind::KernelEntry; });
-  for (const ResolvedInstrumentationSite &site : sites) {
-    if (site.kind == InstrumentationKind::KernelEntry &&
-        (kernels.size() != 1 || site.anchor_offset != kernels.front().entry_text_offset)) {
-      result.errors.emplace_back("KernelEntry must name the sole kernel's descriptor entry");
-      return result;
-    }
-  }
   if (probes_read_entry_storage(resolved.probes) || has_entry_callback) {
     std::string err;
     entry_patch = plan_entry_prologue(kernels, kernel_sgpr_count, liveness_scope, resolved.probes,
