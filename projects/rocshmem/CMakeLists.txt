@@ -44,10 +44,10 @@ endif()
 ###############################################################################
 
 option(PROFILE "Enable statistics and timing support" OFF)
-option(USE_RO "Enable RO conduit" OFF)
+option(USE_RO "Enable RO backend" OFF)
 option(USE_HOST_VERBS "Enable host-side verbs networking layer (src/net)" OFF)
 option(USE_IPC "Enable IPC support (using HIP)" ON)
-option(USE_GDA "Enable GDA conduit" OFF)
+option(USE_GDA "Enable GDA backend" OFF)
 option(USE_SDMA "Enable SDMA transport (MI300X+). Implied by USE_IPC." ${USE_IPC})
 option(USE_LDS_STAGE "Enable LDS-staged async IPC copy on gfx1250, using the portable async global<->LDS backend" OFF)
 option(USE_TDM "Enable TDM (Tensor Data Mover) specifically for LDS-staged IPC transfers on gfx1250." OFF)
