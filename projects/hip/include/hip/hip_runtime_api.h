@@ -3445,7 +3445,8 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  * observed, and all subsequent work on those blocking streams waits for the wait to complete.
  * When @p stream is the per-thread default stream (@p hipStreamPerThread, or NULL or
  * @p hipStreamLegacy when the per-thread default stream is enabled), the wait applies only
- * to that per-thread stream and does not synchronize with other blocking streams on the device.
+ * to that per-thread stream. It still synchronizes bidirectionally with the legacy default
+ * stream, but does not synchronize with other user-created blocking streams on the device.
  *
  * Flags include:
  *   hipEventWaitDefault: Default event creation flag.
