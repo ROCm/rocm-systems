@@ -544,12 +544,6 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
 
-    // Populate user output
-    handle->handle = memory->GetHandler();
-    out_desc->data = memory->GetOutputBuf();
-    out_desc->size = SPM_DESC_SIZE;
-    spm_state_map()->insert(*handle, s);
-
     {
         aql_profile::Pm4Factory* pm4_factory = nullptr;
         try
@@ -631,15 +625,24 @@ _internal_aqlprofile_spm_create_packets(aqlprofile_handle_t*          handle,
         pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
         uint8_t*                 cmdbuf     = reinterpret_cast<uint8_t*>(memory->GetCmdBuf());
 
-        profile.memcpy_cb(cmdbuf, start_cmd.Data(), start_cmd.Size(), profile.userdata);
+        auto status =
+            profile.memcpy_cb(cmdbuf, start_cmd.Data(), start_cmd.Size(), profile.userdata);
+        if(status != HSA_STATUS_SUCCESS) return status;
         aql_profile::PopulateAql(cmdbuf, start_cmd.Size(), cmd_writer, &packets->start_packet);
         cmdbuf += start_size;
-        profile.memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), profile.userdata);
+        status = profile.memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), profile.userdata);
+        if(status != HSA_STATUS_SUCCESS) return status;
         aql_profile::PopulateAql(cmdbuf, stop_cmd.Size(), cmd_writer, &packets->stop_packet);
     }
 
     s->output_buffer_ptr  = memory->GetOutputBuf();
     s->output_buffer_size = memory->GetOutputBufSize();
+
+    // Populate user output
+    handle->handle = memory->GetHandler();
+    out_desc->data = memory->GetOutputBuf();
+    out_desc->size = SPM_DESC_SIZE;
+    spm_state_map()->insert(*handle, s);
 
     return HSA_STATUS_SUCCESS;
 }

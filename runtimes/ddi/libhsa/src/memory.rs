@@ -475,7 +475,7 @@ impl Memory {
 /// ranges need only the pointer metadata, hence the optional owner.
 pub(crate) struct LockedMemory {
     /// Native registration when the host range needed one.
-    allocation: Option<Allocation>,
+    pub(crate) allocation: Option<Allocation>,
     /// Host and agent aliases reported by pointer queries.
     pub(crate) description: PointerDescription,
 }

@@ -748,7 +748,8 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
       devInfo->fabricType = v1->fabric_type;
       devInfo->state = v1->accel_state;
       devInfo->acceleratorId = v1->accelerator_id;
-      devInfo->bandwidth = v1->bandwidth;
+      // amd-smi leaves a field it could not read at UINT32_MAX; 0 is how an unreported bandwidth is carried on.
+      devInfo->bandwidth = v1->bandwidth == UINT32_MAX ? 0 : v1->bandwidth;
       devInfo->latency = v1->latency;
       memcpy(devInfo->clusterUuid, v1->ppod_id, sizeof(v1->ppod_id));
       devInfo->ppodSize = v1->ppod_size;
@@ -762,9 +763,9 @@ ncclResult_t amd_smi_ensureFabricInitialized() {
       memcpy(&uuidLow, devInfo->clusterUuid + sizeof(uint64_t), sizeof(uint64_t));
       const char* typeStr = (devInfo->fabricType == AMDSMI_FABRIC_TYPE_UALLINK) ? "UALLink" : "UALoE";
       INFO(NCCL_INIT,
-           "GPU %d: %s fabric detected%s - accelId=%u bw=%uMb/s lat=%uns vpod=%u/%u uuid=%lx.%lx ppod_size=%u", d,
-           typeStr, useSysfs ? " (sysfs)" : "", devInfo->acceleratorId, devInfo->bandwidth, devInfo->latency,
-           devInfo->cliqueId, devInfo->vpodSize, uuidHigh, uuidLow, devInfo->ppodSize);
+           "GPU %d: %s fabric detected%s - accelId=%u bw=%.1fGB/s lat=%uns vpod=%u/%u uuid=%lx.%lx ppod_size=%u", d,
+           typeStr, useSysfs ? " (sysfs)" : "", devInfo->acceleratorId, devInfo->bandwidth / kAmdSmiFabricMBpsPerGBps,
+           devInfo->latency, devInfo->cliqueId, devInfo->vpodSize, uuidHigh, uuidLow, devInfo->ppodSize);
     }
   }
 
@@ -795,19 +796,19 @@ ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabr
   return ncclSuccess;
 }
 
-ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidthMbps) {
+ncclResult_t amd_smi_getFabricBandwidth(uint32_t deviceIndex, uint32_t* bandwidthMBps) {
   RET_ON_FAIL(amd_smi_ensureFabricInitialized());
 
   if (deviceIndex >= (uint32_t)amdsmiFabricDeviceCount) {
-    *bandwidthMbps = 0;
+    *bandwidthMBps = 0;
     return ncclSuccess;
   }
 
   const struct amdsmiFabricDeviceInfo* devInfo = &amdsmiFabricDevices[deviceIndex];
   if (devInfo->fabricSupported) {
-    *bandwidthMbps = devInfo->bandwidth;
+    *bandwidthMBps = devInfo->bandwidth;
   } else {
-    *bandwidthMbps = 0; // Indicate fallback to arch-based defaults
+    *bandwidthMBps = 0; // Indicate fallback to arch-based defaults
   }
 
   return ncclSuccess;
