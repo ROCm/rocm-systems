@@ -58,9 +58,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_process_list()` returning invalid entries**.  
   - The list could end with entries of undefined content: in `amdsmi_get_gpu_compute_process_info()` when processes exited between its count and its read, and in `amdsmi_get_gpu_process_list()` when a process started after a count of 0. When processes started between a count above 0 and the read, both calls failed.
 
-- **Fixed the documented units of `amdsmi_process_info_t`'s `vram_usage` and `cu_occupancy`** (documentation-only ABI change).  
-  - The header gave `vram_usage` in MB and `cu_occupancy` as a percent; `amdsmi_get_gpu_compute_process_info()` and `amdsmi_get_gpu_compute_process_info_by_pid()` return bytes and a number of compute units.
-
 - **Fixed process information in containers showing other processes' data**.  
   - In a container with its own PID namespace, `amd-smi process` and the process APIs could show host PIDs or another process's name, memory or GPUs. They now show only the container's processes (other users' only with `CAP_SYS_PTRACE`) by their container PIDs, and the driver's per-process statistics, such as CU occupancy and SDMA usage, are N/A unless the container shares the host's PID namespace (`docker run --pid=host`).
 

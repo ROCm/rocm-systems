@@ -5214,9 +5214,9 @@ Field | Description
 ---|---
 `process_id` | Process ID
 `pasid` | PASID (Not working in ROCm 6.4+, Deprecated in 7.0)
-`vram_usage` | VRAM usage in bytes
+`vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
-`cu_occupancy` | Number of Compute Units utilized
+`cu_occupancy` | Compute Unit usage in percents
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
 note: Sum of the process memory is not expected to be the total memory usage.
@@ -5267,9 +5267,9 @@ Field | Description
 ---|---
 `process_id` | Process ID
 `pasid` | PASID (Not working in ROCm 6.4+, deprecating in 7.0)
-`vram_usage` | VRAM usage in bytes
+`vram_usage` | VRAM usage
 `sdma_usage` | SDMA usage in microseconds
-`cu_occupancy` | Number of Compute Units utilized
+`cu_occupancy` | Compute Unit usage in percents
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
 note: A value with all bits set is not available. In a PID namespace other than the host's, `pid` is a process of that namespace. It is not found unless it has /dev/kfd open, its `vram_usage`, `sdma_usage`, `cu_occupancy` and `evicted_time` are not available, and the call raises `AMDSMI_STATUS_NO_PERM` if the caller may not read its open files.
