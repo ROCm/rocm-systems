@@ -608,9 +608,9 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_RanksAtCap_SetsUpFabricPath) {
 
 TEST_F(FabricInitCommInitMicrotest, CommInit_PeerNotReady_FallsBackWithoutFabricState) {
   // MirrorAllGather copies this rank's slot to every peer. The sizeof(int)
-  // gathers are the block cap, the scratch and barrier handle-exchange votes,
-  // then the LL-buffer ready flag, where one peer reports 0.
-  constexpr int kLLReadyGather = 4;
+  // gathers are the block cap, the scratch-ready vote, the scratch and barrier
+  // handle-exchange votes, then the LL-buffer ready flag, where one peer reports 0.
+  constexpr int kLLReadyGather = 5;
   int intGathers = 0;
   int readyFlag = -1;
   auto mirror = g_bootstrapAllGather;
@@ -634,6 +634,35 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_PeerNotReady_FallsBackWithoutFabric
   EXPECT_TRUE(AllReleased());
 }
 
+// A peer that could not set up its scratch reports 0 on the scratch-ready vote, the gather after the block cap. Every
+// rank then falls back before the pointer exchange instead of waiting in it.
+TEST_F(FabricInitCommInitMicrotest, CommInit_PeerScratchFailed_FallsBackBeforeTheExchange) {
+  constexpr int kScratchReadyGather = 2;
+  int intGathers = 0;
+  int scratchReady = -1;
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather,
+                    [this, &intGathers, &scratchReady, mirror](void* state, void* allData, int size) {
+                      ncclResult_t result = mirror(state, allData, size);
+                      if (result == ncclSuccess && size == static_cast<int>(sizeof(int)) &&
+                          ++intGathers == kScratchReadyGather) {
+                        auto* slots = static_cast<int*>(allData);
+                        scratchReady = slots[comm_->rank];
+                        slots[PeerRanks(comm_->nRanks, comm_->rank)[0]] = 0;
+                      }
+                      return result;
+                    });
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle, g_hipMemExportToShareableHandle);  // count only
+
+  EXPECT_EQ(ncclDdaFabricCommInit(comm_.get()), ncclSuccess);
+
+  EXPECT_EQ(intGathers, kScratchReadyGather) << "entered a later exchange";
+  EXPECT_EQ(scratchReady, 1);
+  EXPECT_EQ(exportHandle.calls, 0) << "exported the scratch handle for a pointer exchange";
+  ExpectNoFabricState(*comm_);
+  EXPECT_TRUE(AllReleased());
+}
+
 // ---------------------------------------------------------------------------
 // ncclDdaFabricCommInit: failure
 // ---------------------------------------------------------------------------
@@ -647,10 +676,10 @@ TEST_F(FabricInitCommInitMicrotest, CommInit_BlockCapGatherFails_ReturnsErrorWit
   EXPECT_TRUE(AllReleased());
 }
 
-// Current behaviour, tracked as AICOMRCCL-2827: a rank that fails before the
-// barrier's pointer exchange skips exchanges its peers still enter. A failure
-// from FabricGpuBarrier::mallocAndInit on records ready=0 and still enters the
-// ready allgather; `publishesNotReady` marks those cases.
+// A rank that fails to set up its scratch records 0 on the scratch-ready vote, before any exchange. Current
+// behaviour, tracked as AICOMRCCL-2827: a rank that fails after that vote and before the barrier's pointer exchange
+// skips exchanges its peers still enter. A failure from FabricGpuBarrier::mallocAndInit on records ready=0 and still
+// enters the ready allgather; `publishesNotReady` marks the cases that publish a 0.
 struct FailCase {
   const char* name;
   std::function<void()> install;
@@ -724,7 +753,7 @@ INSTANTIATE_TEST_SUITE_P(
                        },
                        hipErrorOutOfMemory);
                  },
-                 false},
+                 true},
         FailCase{"ScratchExchange",
                  [] {
                    int calls = 0;

@@ -63,13 +63,14 @@ struct HierComm {
   ncclComm* get() { return &comm; }
 };
 
-// A child comm handed out by the faked ncclCommSplit. One rank, so initChildFabric skips it.
+// A child comm handed out by the faked ncclCommSplit. With one rank, initChildFabric skips it.
 struct Children {
+  int ranks = 1;
   std::vector<std::unique_ptr<ncclComm>> comms;
   ncclComm_t next() {
     comms.push_back(std::make_unique<ncclComm>());
     std::memset(comms.back().get(), 0, sizeof(ncclComm));
-    comms.back()->nRanks = 1;
+    comms.back()->nRanks = ranks;
     return comms.back().get();
   }
 };
@@ -173,6 +174,68 @@ TEST_F(HostHierEnsureTest, ChildNotReadyHereFailsTheVote) {
   EXPECT_EQ(rcclHostHierFailed, hc.comm.hostHierState);
   EXPECT_EQ(1, votes.calls);
   EXPECT_EQ(1u, g_aborted.size());
+  rcclHostHierTeardown(hc.get());
+}
+
+// A peer failing the intra-host child's fabric init makes this rank abort both children at that vote.
+TEST_F(HostHierEnsureTest, PeerFailingFabricInitAbortsBothChildren) {
+  HierComm hc;
+  Children children;
+  Votes votes{{-1, -1, /*vote 2*/ 2}};
+  int splits = 0;
+  ScopedHook split(g_ncclCommSplit, SplitHook(&children, &splits, /*failOnCall=*/-1));
+  ScopedHook vote(g_bootstrapAllGather, VoteHook(&votes));
+  EXPECT_EQ(ncclRemoteError, rcclHostHierEnsure(hc.get()));
+  EXPECT_EQ(rcclHostHierFailed, hc.comm.hostHierState);
+  EXPECT_EQ(3, votes.calls) << "the inter-host fabric init must not start";
+  EXPECT_EQ(2u, g_aborted.size());
+  rcclHostHierTeardown(hc.get());
+}
+
+// Two-rank children on the fabric path run DDA fabric init; when it fails here, this rank reports it at the vote.
+TEST_F(HostHierEnsureTest, FabricInitFailingHereFailsTheVote) {
+  HierComm hc;
+  Children children;
+  children.ranks = 2;
+  Votes votes;
+  int splits = 0;
+  std::vector<ncclComm_t> inits;
+  ScopedHook split(g_ncclCommSplit, SplitHook(&children, &splits, /*failOnCall=*/-1));
+  ScopedHook vote(g_bootstrapAllGather, VoteHook(&votes));
+  ScopedHook fabricPath(g_ncclDdaUseFabricPath, [](ncclComm*) { return true; });
+  ScopedHook fabricInit(g_ncclDdaFabricCommInit, [&inits](ncclComm* child) {
+    inits.push_back(child);
+    return ncclSystemError;
+  });
+  EXPECT_EQ(ncclSystemError, rcclHostHierEnsure(hc.get()));
+  EXPECT_EQ(rcclHostHierFailed, hc.comm.hostHierState);
+  ASSERT_EQ(1u, inits.size()) << "the inter-host child's fabric init must not start";
+  EXPECT_EQ(children.comms[0].get(), inits[0]);
+  EXPECT_EQ(3, votes.calls);
+  EXPECT_EQ(2u, g_aborted.size());
+  rcclHostHierTeardown(hc.get());
+}
+
+TEST_F(HostHierEnsureTest, TwoRankChildrenGetFabricInit) {
+  HierComm hc;
+  Children children;
+  children.ranks = 2;
+  Votes votes;
+  int splits = 0;
+  std::vector<ncclComm_t> inits;
+  ScopedHook split(g_ncclCommSplit, SplitHook(&children, &splits, /*failOnCall=*/-1));
+  ScopedHook vote(g_bootstrapAllGather, VoteHook(&votes));
+  ScopedHook fabricPath(g_ncclDdaUseFabricPath, [](ncclComm*) { return true; });
+  ScopedHook fabricInit(g_ncclDdaFabricCommInit, [&inits](ncclComm* child) {
+    inits.push_back(child);
+    return ncclSuccess;
+  });
+  EXPECT_EQ(ncclSuccess, rcclHostHierEnsure(hc.get()));
+  EXPECT_EQ(rcclHostHierReady, hc.comm.hostHierState);
+  ASSERT_EQ(2u, inits.size());
+  EXPECT_EQ(hc.comm.hostHier->intra, inits[0]);
+  EXPECT_EQ(hc.comm.hostHier->inter, inits[1]);
+  EXPECT_EQ(4, votes.calls);
   rcclHostHierTeardown(hc.get());
 }
 
