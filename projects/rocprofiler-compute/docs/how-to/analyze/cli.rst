@@ -162,6 +162,8 @@ self-contained HTML page next to the workload, and prints the page's path below 
 chart, as in the preceding output. The page needs no network access. It shows:
 
 * The chart for all kernels together, the same chart the terminal shows.
+* A kernel list. Click a kernel to show the chart ``analyze -k <id>`` shows for it;
+  click it again or **Show all** to return to all kernels.
 * The memory bandwidth stalls and guidance. Click a stall to go to its guidance.
 * The metric name and description of a value, when you hover over it.
 
