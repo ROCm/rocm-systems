@@ -332,18 +332,9 @@ ruff format .
 Metric equations in YAML config files follow a canonical format. The canonical
 implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 
-**Scope.** Equation formatting applies to YAML files under
-`src/rocprof_compute_soc/`:
-
-- `analysis_configs/gfx*/*.yaml` (panel configs)
-- `metric_library/<arch>/*.yaml`, including `collectables.yaml`
-- `analysis_configs/collectables/<arch>_collectables.yaml`
-
-Template files (`*_template.yaml`) and build artifacts are excluded. In the panel
-and metric library files, only values under these keys are equations: `value`,
-`avg`, `min`, `max`, `std dev`, `expr`, `peak`, `formula`, `peak_empirical`.
-Table headers use the same keys for column titles and are not checked. In the panel
-collectables files, every top-level value is an equation.
+**Scope.** Equation formatting applies to the metric library,
+`src/rocprof_compute_soc/metric_library/<arch>/*.yaml`, including `collectables.yaml`.
+Only values under `formula`, `peak` and `peak_empirical` are equations.
 
 **Rules.**
 
@@ -370,18 +361,18 @@ parentheses, a missing operand) with its key and the parser message, and leaves
 it unchanged; fix it by hand.
 
 **Enforcement.** The `yaml-format-fix` pre-commit hook runs
-`tools/format_yaml.py --fix` on staged config files and auto-corrects equations
+`tools/format_yaml.py --fix` on staged metric library files and auto-corrects equations
 in place. Re-stage the modified files and commit again.
 
 ```bash
 # Report equations that need formatting
-python tools/format_yaml.py --check src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --check src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 
 # Show proposed changes
 python tools/format_yaml.py --diff src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 
 # Auto-fix in place
-python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/collectables/*.yaml
+python tools/format_yaml.py --fix src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 ```
 
 ## Documentation Changes
@@ -398,19 +389,16 @@ Customers read `docs/how-to/`, `CHANGELOG.md`, and the CLI help.
 
 ## Metrics Management
 
-If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `tools/per_arch_metric_definitions/gfx<arch>_metrics_description.yaml` — follow the metric management workflow:
-
-1. Edit the relevant panel YAMLs.
-2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
-3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
-
-For full details, see the [metric config management README](./tools/config_management/README.md).
+If your PR changes a metric (`src/rocprof_compute_soc/metric_library/<arch>/*.yaml`) or
+what a panel shows (`src/rocprof_compute_soc/views/<arch>/*.yaml`), review and stage the
+files the `metric-config-check` pre-commit hook regenerates, as the
+[metric config management README](./tools/config_management/README.md) describes.
 
 A metric whose counters do not fit one profiling pass is split into collectables. The [metric library README](./src/rocprof_compute_soc/metric_library/README.md#collectables) explains how.
 
 ### Metric Library
 
-The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks, and its [description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions) before writing a metric description.
+The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks, and its [description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions) before writing a metric description.
 
 ## Memory Chart Layouts
 

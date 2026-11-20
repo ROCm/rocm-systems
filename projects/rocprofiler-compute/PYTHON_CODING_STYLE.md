@@ -859,34 +859,29 @@ class DataProcessor:
 # License header...
 
 """
-Hash manager for tracking configuration file changes.
-Can be used standalone or imported by the master workflow.
-
-Usage:
-    python hash_manager.py --compute-all <configs_dir>
+Write the metric lock: what each metric library metric resolves to on each arch.
+Imported by the metric-config-check pre-commit hook.
 """
 
-import argparse
-import hashlib
-import json
-import sys
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict
+
+from rocprof_compute_soc.metric_library import loader
 
 # Constants
-DEFAULT_HASH_DB = "config/.hashes.json"
+LOCK_DIR = Path(__file__).resolve().parent / "metric_lock"
 
 # Public functions in logical order
-def compute_file_hash(filepath: Path) -> str:
-    """Compute MD5 hash of a file."""
+def arch_lock(metric_dir: Path, arch: str) -> Dict[str, Dict[str, Any]]:
+    """Return arch's lock: each metric's locked fields and counters, by metric id."""
     # ...
 
-def compute_arch_hashes(arch_dir: Path) -> dict:
-    """Compute hashes for all YAML files in an arch directory."""
+def lock_text(lock: Dict[str, Dict[str, Any]]) -> str:
+    """Return a lock as the text of its file, one line per field."""
     # ...
 
-def load_hash_db(hash_file: Path) -> dict:
-    """Load hash database from file."""
+def write_lock(lock_dir: Path, metric_dir: Path) -> None:
+    """Write every arch's lock file to lock_dir."""
     # ...
 ```
 

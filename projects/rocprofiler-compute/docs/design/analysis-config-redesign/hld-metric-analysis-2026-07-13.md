@@ -52,6 +52,11 @@ Total metric rows loaded: **2,862** across 824 unique metric names.
 > a renderer. The panel-level `description` key (14 gfx1250 panels and the gfx115x memory
 > chart) was also unread and was removed; it held developer notes, not user-facing text.
 
+> **Update (2026-11-13):** `cli_style` is no longer read either. The CLI derives a table's
+> style from the data: a header of exactly `metric` and `expr` is a simple box, panel 300
+> is the memory chart and panel 400 is the roofline. The analysis views have no
+> `cli_style` field.
+
 ---
 
 ## Step 2 — Consistency matrix

@@ -9,13 +9,39 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Analyze no longer shows rows that have no value.
+
+* Analyze, `--list-metrics` and the CSV and DB exports show the corrected metric descriptions, for example vL1D Cache Hit Rate is described as 100 minus the percentage of requests sent to the L2.
+
+* The gfx1250 roofline `WMMA FLOPs (FP64)` row shows its theoretical peak.
+
+* `-b membw_analysis` fails on gfx908, gfx90a, and gfx942, which have no Memory Bandwidth Analysis block.
+
+* A numeric metric ID selects the row at that position in the current output, for example `-b 2.1.6` on gfx908 now selects LDS Bank Conflicts per Access instead of SALU Utilization.
+
+* Some table IDs change, for example gfx942 `18.12` is now `18.10`.
+
+* The Instruction Mix and TA/TD blocks on AMD Instinct MI100, MI200, MI300, and MI350 Series say Buffer instead of Spill/Stack, for example `Buffer Read`.
+
+* Some rows show their metric's name, for example `vL1D Access Latency Cycles` instead of `L1 Access Latency`, `Write and Atomic Bytes` instead of `Write and Atomic BW`, and on gfx1250 `LDS Load Instructions` instead of `LDS Load Requests`.
+
 ### Removed
+
+* Removed the gfx908 `compute_thruput_flops` set, whose metrics MI100 has no counters for.
+
+* Removed the PC Sampling block (`-b 21`, `-b pc_sampling`) on gfx908, which doesn't support PC sampling.
+
+* Removed the duplicate Async Direct Load Instruction and Async Direct Store Instruction rows from the TXA block on gfx1250.
 
 ### Optimized
 
 * Profiling on MI200 collects two fewer counters, which saves one profiling pass.
 
+* Profiling on MI100 with no filter collects fewer counters, which saves one profiling pass.
+
 ### Resolved issues
+
+* Fixed the gfx1250 roofline missing its L0 and L2 points.
 
 ### Upcoming changes
 
