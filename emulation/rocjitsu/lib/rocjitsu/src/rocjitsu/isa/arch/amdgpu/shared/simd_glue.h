@@ -421,17 +421,6 @@ inline util::native<uint32_t> simd_sign_extend_u32(util::native<uint32_t> v, uns
   return ((v & mask) ^ sign) - sign;
 }
 
-inline util::native<uint32_t> simd_mul_i24_u32(util::native<uint32_t> lhs,
-                                               util::native<uint32_t> rhs) {
-  return simd_sign_extend_u32(lhs, 24) * simd_sign_extend_u32(rhs, 24);
-}
-
-inline util::native<uint32_t> simd_mad_i24_u32(util::native<uint32_t> lhs,
-                                               util::native<uint32_t> rhs,
-                                               util::native<uint32_t> addend) {
-  return simd_mul_i24_u32(lhs, rhs) + addend;
-}
-
 inline util::native<uint32_t> simd_lshl_u32(util::native<uint32_t> v, util::native<uint32_t> sh) {
   return util::map_native_scalar<uint32_t>(
       v, sh, [](uint32_t value, uint32_t count) { return value << (count & 31u); });
@@ -456,44 +445,6 @@ inline util::native<uint64_t> simd_ashr_i64(util::native<uint64_t> v, util::nati
   return util::map_native64_scalar<uint64_t>(v, sh, [](uint64_t value, uint64_t count) {
     return static_cast<uint64_t>(static_cast<int64_t>(value) >> (count & 63u));
   });
-}
-
-inline util::native<uint32_t> simd_bfe_u32(util::native<uint32_t> src,
-                                           util::native<uint32_t> offset,
-                                           util::native<uint32_t> width) {
-  return util::map_native_scalar<uint32_t>(
-      src, offset, width, [](uint32_t value, uint32_t offset_value, uint32_t width_value) {
-        const uint32_t off = offset_value & 31u;
-        const uint32_t w = width_value & 31u;
-        if (w == 0)
-          return uint32_t{0};
-        const uint32_t mask = (uint32_t{1} << w) - 1u;
-        return (value >> off) & mask;
-      });
-}
-
-inline util::native<uint32_t> simd_bfe_i32(util::native<uint32_t> src,
-                                           util::native<uint32_t> offset,
-                                           util::native<uint32_t> width) {
-  return util::map_native_scalar<uint32_t>(
-      src, offset, width, [](uint32_t value, uint32_t offset_value, uint32_t width_value) {
-        const uint32_t off = offset_value & 31u;
-        const uint32_t w = width_value & 31u;
-        if (w == 0)
-          return uint32_t{0};
-        const uint32_t mask = (uint32_t{1} << w) - 1u;
-        const uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(value) >> off) & mask;
-        const uint32_t signbit = uint32_t{1} << (w - 1u);
-        return (extracted ^ signbit) - signbit;
-      });
-}
-
-inline util::native<uint32_t> simd_bfm_b32(util::native<uint32_t> width,
-                                           util::native<uint32_t> offset) {
-  return util::map_native_scalar<uint32_t>(width, offset,
-                                           [](uint32_t width_value, uint32_t offset_value) {
-                                             return bfm_b32(width_value, offset_value);
-                                           });
 }
 
 inline util::native<int32_t> simd_cvt_i32_f32(util::native<float32_t> s) {
