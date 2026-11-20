@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from utils import schema
+from utils.parser import KernelTables
 from utils.roofline_calc import (
     XMAX_DEFAULT,
     GraphPoints,
@@ -45,11 +46,10 @@ def run_calc_ai_analyze_with_values(
     top_stats: dict[str, object] | None = None,
 ) -> dict:
     """
-    Build mocks and invoke calc_ai_analyze with controlled metric values.
+    Invoke calc_ai_analyze on one kernel with controlled metric values.
 
     metric_values is a dict with keys ai_hbm, ai_l2, ai_l1,
-    ai_lds, performance whose values are injected into the table-402
-    DataFrame that eval_metric would normally populate.
+    ai_lds, performance whose values fill the kernel's evaluated table 402.
 
     top_stats adds columns to the top-kernels table, which is where the
     per-kernel dispatch count, aggregate time, and percent runtime are joined
@@ -74,57 +74,31 @@ def run_calc_ai_analyze_with_values(
     workload.filter_kernel_ids = []
     workload.path = "/mock/path"
 
-    arch_config = schema.ArchConfig()
-    arch_config.dfs = {
-        401: pd.DataFrame(),
-        402: pd.DataFrame({
-            "Metric": pd.Series(dtype="str"),
-            "Value": pd.Series(dtype="object"),
-        }),
-    }
-    arch_config.dfs_type = {401: "metric_table", 402: "metric_table"}
-
-    pmc_df = pd.DataFrame({"Kernel_Name": [kernel_name]})
-
-    def mock_eval_metric(
-        dfs: dict,
-        dfs_type: dict,
-        dfs_expressions: object,
-        sys_info_row: object,
-        roofline_peaks: object,
-        pmc_data: object,
-        debug: object,
-        pass_tables: object = None,
-    ) -> None:
-        dfs[402] = pd.DataFrame({
-            "Metric": [
-                "AI HBM",
-                "AI L2",
-                "AI L1",
-                "AI LDS",
-                "Performance (GFLOPs)",
+    points_table = pd.DataFrame({
+        "Metric": ["AI HBM", "AI L2", "AI L1", "AI LDS", "Performance (GFLOPs)"],
+        "Value": pd.array(
+            [
+                metric_values["ai_hbm"],
+                metric_values["ai_l2"],
+                metric_values["ai_l1"],
+                metric_values["ai_lds"],
+                metric_values["performance"],
             ],
-            "Value": pd.array(
-                [
-                    metric_values["ai_hbm"],
-                    metric_values["ai_l2"],
-                    metric_values["ai_l1"],
-                    metric_values["ai_lds"],
-                    metric_values["performance"],
-                ],
-                dtype=object,
-            ),
-        })
-
-    monkeypatch.setattr("utils.roofline_calc.eval_metric", mock_eval_metric)
+            dtype=object,
+        ),
+    })
 
     monkeypatch.setattr("utils.roofline_calc.console_debug", lambda *a, **kw: None)
     monkeypatch.setattr("utils.roofline_calc.console_warning", lambda *a, **kw: None)
 
     return calc_ai_analyze(
         workload=workload,
-        pmc_df=pmc_df,
-        arch_config=arch_config,
+        kernel_tables={
+            kernel_id: KernelTables(
+                kernel_name,
+                {401: pd.DataFrame(), 402: points_table},
+            )
+        },
     )
 
 
