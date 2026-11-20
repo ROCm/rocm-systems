@@ -201,13 +201,16 @@ def _print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) ->
             print(f"\nInteractive roofline plot saved to {html_path}\n", file=output)
 
 
-def is_roofline_shown(
+def show_roofline(
     args: argparse.Namespace,
     runs: dict[str, Any],
     output: Optional[TextIO],
-) -> bool:
+) -> None:
+    """Print the roofline section: its heading, the HTML path, and the per-kernel
+    4.1 and 4.2 tables. Print nothing if the filter skips roofline or no run has
+    roofline data."""
     if not selects_roofline(args.filter_metrics):
-        return False
+        return
 
     # Check if any run has valid roofline data (already validated in analysis_base.py)
     # This check determines whether to display roofline section in the output report
@@ -217,7 +220,7 @@ def is_roofline_shown(
     ):
         # roofline_peaks is empty, meaning CSV validation failed earlier.
         # Skip displaying this section entirely (error already logged).
-        return False
+        return
 
     print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
@@ -282,8 +285,6 @@ def is_roofline_shown(
 
         else:
             print("\nNo per-kernel metrics available", file=output)
-
-    return True
 
 
 def list_ml_operators(
@@ -931,7 +932,7 @@ def show_all(
         # The roofline panel has its own per-kernel layout.
         # With --debug-table-view, tables 401/402 render as normal tables.
         if panel_id == ROOFLINE_PANEL_ID and not args.debug_table_view:
-            _ = is_roofline_shown(args, runs, output)
+            show_roofline(args, runs, output)
 
         panel_content = ""  # store content of all data_source from one panel
         # Metric id -> value from every table in this panel, drawn as one chart
@@ -1063,7 +1064,7 @@ def show_all(
                     chart_width=_max_line_width(chart_output),
                 )
 
-        # Roofline printing is handled separately above in is_roofline_shown.
+        # Roofline printing is handled separately above in show_roofline.
         # With --debug-table-view, roofline tables (401/402) render as normal tables.
         if panel_content and (
             table_config["id"] not in [401, 402] or args.debug_table_view
