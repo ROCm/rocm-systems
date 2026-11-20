@@ -642,7 +642,8 @@ amdcuid_status_t CuidGpu::discover(std::vector<DevicePtr>& gpus) {
   return AMDCUID_STATUS_SUCCESS;
 }
 
-amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std::string& input_path) {
+amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info,
+                                          const std::string& input_path) {
   if (!gpu_info) return AMDCUID_STATUS_INVALID_ARGUMENT;
   CuidGpuRoute route;
   const auto resolved = resolve_path(input_path, route);
@@ -664,8 +665,8 @@ amdcuid_status_t CuidGpu::discover_single(amdcuid_gpu_info* gpu_info, const std:
   // No PCI configuration space under a card whose unit_id is 0 means a spatial
   // partition rather than a whole GPU.
   std::string config_file = device_path + "/config";
-  if (resolved != AMDCUID_STATUS_SUCCESS &&
-      access(config_file.c_str(), F_OK) == -1 && info.header.fields.gpu.unit_id == 0) {
+  if (resolved != AMDCUID_STATUS_SUCCESS && access(config_file.c_str(), F_OK) == -1 &&
+      info.header.fields.gpu.unit_id == 0) {
     return discover_partition(gpu_info, device_path);
   }
 
