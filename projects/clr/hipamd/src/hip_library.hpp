@@ -42,7 +42,7 @@ class LibraryContainer {
   // Get the Kernel from name
   hipError_t Kernel(hipKernel_t* k, const std::string &name);
   // Resolve an internal kernel for a specific device without changing the current device.
-  hipError_t ResolveKernelForDevice(hipKernel_t* k, const std::string& name, int device);
+  hipError_t ResolveKernelByNameForDevice(hipKernel_t* k, const std::string& name, int device);
 
   // Register the kernel function, make an entry in global state
   void Register(const std::string &name, int device, hipKernel_t k);
@@ -74,7 +74,7 @@ class LibraryContainer {
   std::unique_ptr<hip::DynCO> dynco_;
   // Set once Module() has registered dynco_ into PlatformState.
   bool module_registered_ = false;
-  // Function-only code objects keyed by device ID; dynco_ owns the primary full load.
+  // Secondary code objects keyed by device ID; dynco_ owns the primary full load.
   std::map<int, std::unique_ptr<hip::DynCO>> code_objects_by_device_;
   // Cache of hipKernel_t handles keyed by (name, device).
   std::map<std::pair<std::string /* name */, int /* device */>, hipKernel_t> kernels_;

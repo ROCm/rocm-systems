@@ -171,14 +171,8 @@ Var::~Var() {
   // device_ptr is being removed and its amd::Memory obj is being released during
   // ihipFree in hip::StatCO::removeFatBinary; however in DynCO path it bypasses ihipFree,
   // so we check the map first to avoid double-release.
-  for (auto& mem : dMem_) {
-    if (mem != nullptr) {
-      void* ptr = mem->getSvmPtr();
-      if (amd::MemObjMap::FindMemObj(ptr) != nullptr) {
-        amd::MemObjMap::RemoveMemObj(ptr);
-        mem->release();
-      }
-    }
+  for (int device_id = 0; device_id < static_cast<int>(dMem_.size()); ++device_id) {
+    releaseDeviceVar(device_id);
   }
   if (shadowVptr != nullptr) {
     textureReference* texRef = reinterpret_cast<textureReference*>(shadowVptr);
@@ -187,6 +181,23 @@ Var::~Var() {
     shadowVptr = nullptr;
   }
   modules_ = nullptr;
+}
+
+// ================================================================================================
+void Var::releaseDeviceVar(int deviceId) {
+  guarantee((deviceId >= 0), "Invalid DeviceId, less than zero");
+  guarantee((static_cast<size_t>(deviceId) < dMem_.size()),
+            "Invalid DeviceId, greater than no of code objects");
+
+  amd::Memory*& mem = dMem_[deviceId];
+  if (mem != nullptr) {
+    void* ptr = mem->getSvmPtr();
+    if (amd::MemObjMap::FindMemObj(ptr) != nullptr) {
+      amd::MemObjMap::RemoveMemObj(ptr);
+      mem->release();
+    }
+    mem = nullptr;
+  }
 }
 
 // ================================================================================================

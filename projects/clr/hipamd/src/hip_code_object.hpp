@@ -99,12 +99,13 @@ class DynCO : public CodeObject {
       : device_id_(device_id), fb_info_(nullptr), module_(nullptr) {}
   virtual ~DynCO();
 
-  // Primary device loads code object and initialize global and managed variables. In case we need
-  // to set attribute for a device that's not current, we need to load the code object for it, but
-  // don't need to initialize global/managed-variable state.
+  // A primary-device load initializes global and managed-variable state. Secondary code objects
+  // can skip that allocation and later bind their managed symbols to the primary allocation.
   hipError_t loadCodeObject(const char* fname, const void* image = nullptr,
                             bool init_global_vars = true,
                             std::vector<char>* image_storage = nullptr);
+  // Binds this code object's managed symbols to allocations owned by primary.
+  hipError_t bindManagedVarsFrom(DynCO& primary);
   hipModule_t getModule() const { return module_; };
 
   // Device the code object was loaded for at construction. Callers that key
@@ -149,6 +150,7 @@ class DynCO : public CodeObject {
   int device_id_;
   FatBinaryInfo* fb_info_;
   hipModule_t module_;
+  DynCO* managed_var_primary_ = nullptr;  //!< Non-owning; primary outlives this secondary DynCO
 
   // Maps for vars/funcs, could be keyed in with std::string name
   std::unordered_map<std::string, Function*> functions_;
@@ -158,6 +160,7 @@ class DynCO : public CodeObject {
   hipError_t populateDynGlobalFuncs();
   hipError_t populateDynGlobalVars();
   hipError_t initDynManagedVars(const std::string& managedVar);
+  void releaseManagedVarViews();
 };
 
 // Static Code Object

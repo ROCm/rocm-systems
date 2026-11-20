@@ -36,6 +36,9 @@ library:
   Unit_hipKernelSetAttribute_Positive_FunctionOverride:
     <<: *level_2
     tags: [module]
+  Unit_hipKernelSetAttribute_Positive_CrossDevice:
+    <<: *level_default
+    tags: [module, multigpu]
   Unit_hipKernelSetAttribute_Negative_Parameters:
     <<: *level_default
     tags: [module]
@@ -60,6 +63,18 @@ library:
   Unit_hipKernelGetFunction_Negative_Parameters:
     <<: *level_default
     tags: [module]
+  Unit_hipKernelGetFunction_Positive_CrossDevice:
+    <<: *level_default
+    tags: [module, multigpu]
+  Unit_hipKernelGetFunction_Positive_CrossDeviceManagedGlobal:
+    <<: *level_default
+    tags: [module, multigpu, managed_memory]
+  Unit_hipKernelApis_CudaKernelHandleSemantics:
+    <<: *level_default
+    tags: [module]
+    unsupported:
+      targets: [amd_linux, amd_windows]
+      reason: "ROCM-34390 - CUDA-only validation of CUkernel/cudaKernel_t interoperability."
   Unit_hipLibraryGetGlobal_Negative:
     <<: *level_default
     tags: [module]

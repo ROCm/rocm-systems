@@ -275,8 +275,6 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Positive_CrossDevice) {
     std::fill(image.begin(), image.end(), 0);
   }
 
-  LoadLibraryKernel(&library, &kernel);
-
   HIP_CHECK(
       hipKernelSetAttributeForDevice(kernel, hipFuncAttributeMaxDynamicSharedMemorySize, 0, 0));
   HIP_CHECK(
@@ -389,6 +387,10 @@ HIP_TEST_CASE(Unit_hipKernelSetAttributeForDevice_Negative_Parameters) {
                   hipErrorInvalidValue);
   (void)hipGetLastError();
   HIP_CHECK(hipLibraryUnload(library));
+  HIP_CHECK_ERROR(
+      hipKernelSetAttributeForDevice(kernel, hipFuncAttributeMaxDynamicSharedMemorySize, 0, 0),
+      hipErrorInvalidDeviceFunction);
+  (void)hipGetLastError();
 }
 
 #endif
