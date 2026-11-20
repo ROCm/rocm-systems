@@ -252,11 +252,14 @@ TEST_F(ConSanInputFixture, CollisionAndSingleLaneShareOnePhysicalStoreSite) {
   }
 }
 
-TEST_F(ConSanInputFixture, BarrierAndWideAccessCannotBecomeNoSyncFacts) {
+TEST_F(ConSanInputFixture, BarrierAndExcludedAccessCannotBecomeNoSyncFacts) {
   EXPECT_TRUE(inspect(load("barrier")).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
   EXPECT_TRUE(error_.text_offset.has_value());
-  EXPECT_TRUE(inspect(load("wide")).failed());
+  const std::vector<uint8_t> excluded =
+      test::read_fixture(test::target_fixture_path({"gfx1100", 32}, "width-excluded-b8"));
+  ASSERT_FALSE(excluded.empty());
+  EXPECT_TRUE(inspect(excluded).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
   EXPECT_TRUE(error_.text_offset.has_value());
 }

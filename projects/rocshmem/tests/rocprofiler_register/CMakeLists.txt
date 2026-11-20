@@ -24,7 +24,7 @@
 
 # Regression test for rocprofiler-register integration (AIPROFSYST-787).
 #
-# Verifies that ROCSHMEM_ROCPROFILER_REGISTER=1 was set at compile time by:
+# Verifies that ROCSHMEM_ROCPROFILER_REGISTER was defined at compile time by:
 #   (a) Link-time: fails if rocprofiler_register_import_rocshmem is missing
 #       from librocshmem.a.  The executable is always built so this check
 #       fires even when CTest registration is disabled (BUILD_CTESTS=OFF).

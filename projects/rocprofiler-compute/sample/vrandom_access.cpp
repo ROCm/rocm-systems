@@ -3,6 +3,7 @@
 
 // Keep in sync with its copies under projects/rocprofiler-compute/:
 //   skills/rocprof-compute-memory/evals/samples/vrandom_access.cpp
+//   skills/rocprof-compute-pc-sampling/evals/samples/vrandom_access.cpp
 
 /*
 An example code to execute random access to explore cache hits/misses in L2 Cache.

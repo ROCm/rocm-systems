@@ -20,6 +20,7 @@
 #include "device/comgrctx.hpp"
 #include "device/devhostcall.hpp"
 #include "device/rocm/rocdevice.hpp"
+#include "device/rocm/rocabce.hpp"
 #include "device/rocm/rocblit.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocprogram.hpp"
@@ -82,8 +83,11 @@ extern const char* HipExtraSourceCodeNoGWS;
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 bool roc::Device::hostVmemSupported_ = false;
+
 std::vector<hsa_agent_t> roc::Device::gpu_agents_ ROCCLR_INIT_PRIORITY(101);
 std::vector<AgentInfo> roc::Device::cpu_agents_ ROCCLR_INIT_PRIORITY(101);
+std::unordered_map<uint64_t, uint32_t> roc::Device::agent_driver_node_ids_
+    ROCCLR_INIT_PRIORITY(101);
 
 address Device::mg_sync_ = nullptr;
 
@@ -160,18 +164,9 @@ Device::Device(hsa_agent_t bkendDevice)
   cache_state_ = Device::CacheState::kCacheStateInvalid;
 }
 
-int Device::agentGlobalIndex(hsa_agent_t agent) {
-  for (size_t gpu_idx = 0; gpu_idx < gpu_agents_.size(); ++gpu_idx) {
-    if (gpu_agents_[gpu_idx].handle == agent.handle) {
-      return static_cast<int>(gpu_idx);
-    }
-  }
-  for (size_t cpu_idx = 0; cpu_idx < cpu_agents_.size(); ++cpu_idx) {
-    if (cpu_agents_[cpu_idx].agent.handle == agent.handle) {
-      return static_cast<int>(gpu_agents_.size() + cpu_idx);
-    }
-  }
-  return -1;
+uint32_t Device::agentDriverNodeId(hsa_agent_t agent) {
+  const auto driver_node = agent_driver_node_ids_.find(agent.handle);
+  return driver_node != agent_driver_node_ids_.end() ? driver_node->second : UINT32_MAX;
 }
 
 // Query HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU (MI300A reports true despite BASE profile).
@@ -271,6 +266,10 @@ Device::~Device() {
   coopQueue_ = nullptr;
   delete xferQueue_;
   xferQueue_ = nullptr;
+
+  // The transfer queue can submit through ABCE, so destroy it before draining
+  // and releasing the copy-engine rings.
+  abce_engine_set_.reset();
 
   // Final drain of deferred destroys on the main thread before hsa_shut_down.
   DrainDeferredQueueDestroys();
@@ -376,6 +375,17 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
   if (stat != HSA_STATUS_SUCCESS) {
     LogPrintfError("HSA_AGENT_INFO_DEVICE failed with %x", stat);
     return stat;
+  }
+
+  // Only ABCE copy routing needs the KFD node id; an agent without one keeps
+  // enumerating and its copies stay on the ROCr path.
+  uint32_t driver_node_id = UINT32_MAX;
+  if (Hsa::agent_get_info(agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+                          &driver_node_id) == HSA_STATUS_SUCCESS) {
+    agent_driver_node_ids_[agent.handle] = driver_node_id;
+  } else {
+    ClPrint(amd::LOG_WARNING, amd::LOG_INIT, "HSA_AMD_AGENT_INFO_DRIVER_NODE_ID unavailable");
   }
 
   if (dev_type == HSA_DEVICE_TYPE_CPU) {
@@ -692,23 +702,13 @@ bool Device::create() {
   info_.hdpMemFlushCntl = hdpInfo.HDP_MEM_FLUSH_CNTL;
   info_.hdpRegFlushCntl = hdpInfo.HDP_REG_FLUSH_CNTL;
 
-  // The AQL extensions ROCr reports for the agent; unknown to a runtime without the query
-  int aql_ext_dispatch = -1;
-  uint8_t aql_extensions[8] = {};
-  if (Hsa::agent_get_info(bkendDevice_,
-                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
-                          aql_extensions) == HSA_STATUS_SUCCESS) {
-    aql_ext_dispatch =
-        hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH) ? 1 : 0;
-  }
-
   // Create HSA settings
   assert(!settings_);
   roc::Settings* hsaSettings = new roc::Settings();
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           pcie_stores_need_flush_, isAPU_, aql_ext_dispatch)) {
+                                           pcie_stores_need_flush_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -765,8 +765,6 @@ bool Device::create() {
                    pciDeviceId_);
     return false;
   }
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d",
-          hsaSettings->ext_dispatch_packet_);
   hsaSettings->limit_blit_wg_ = info().maxComputeUnits_;
   if (!flagIsDefault(DEBUG_CLR_LIMIT_BLIT_WG)) {
     hsaSettings->limit_blit_wg_ = std::max(DEBUG_CLR_LIMIT_BLIT_WG, 0x1U);
@@ -1207,6 +1205,7 @@ bool Device::populateOCLDeviceConstants() {
 
   assert(cachesize[0] > 0);
   info_.globalMemCacheSize_ = cachesize[0];
+  info_.l3CacheSize_ = cachesize[2];
 
   info_.globalMemCacheType_ = CL_READ_WRITE_CACHE;
 
@@ -1304,21 +1303,11 @@ bool Device::populateOCLDeviceConstants() {
       amd::IS_HIP && info_.largeBar_ && (device_signal_pool_.handle != 0) && !tool_attached;
   graph_device_signals_ = DEBUG_CLR_GRAPH_DEV_SIGNALS && device_signals;
   queue_device_signals_ = DEBUG_CLR_DEV_SIGNALS && device_signals;
-  // CP firmware without hint support takes a hinted handle as the signal address. Left false by
-  // a runtime that does not report the AQL extension. A profiler tool hands packet completion
-  // signals to ROCr, which rejects a hinted handle.
-  if (!tool_attached) {
-    uint8_t aql_extensions[8] = {};
-    Hsa::agent_get_info(bkendDevice_,
-                        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
-                        aql_extensions);
-    signal_hints_ = hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
-  }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
           "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
-          "AQL rings %d. Signal hints %d (profiler tool: %d)",
+          "AQL rings %d (profiler tool: %d)",
           signal_pool_name, graph_device_signals_, queue_device_signals_, AqlRingsInDeviceMemory(),
-          signal_hints_, tool_attached);
+          tool_attached);
 
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
@@ -1958,8 +1947,52 @@ bool Device::populateOCLDeviceConstants() {
 }
 
 // ================================================================================================
+void Device::ResolveCpFirmwareCaps() {
+  std::call_once(cpCapsOnce_, [this]() {
+    // ROCr learns what the CP firmware supports by running a packet on the agent's utility queue,
+    // so this query creates a queue. Asked at device init, every process would hold a queue and
+    // doorbells on every GPU it never uses, which runs out of doorbells with many processes on
+    // a partitioned system.
+    uint8_t aql_extensions[8] = {};
+    if (Hsa::agent_get_info(bkendDevice_,
+                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                            aql_extensions) == HSA_STATUS_SUCCESS) {
+      // The only write to settings after init. Its readers are VirtualGPUs, which call_once orders
+      // after it.
+      static_cast<Settings*>(settings_)->ext_dispatch_packet_ =
+          hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+      // CP firmware without hint support takes a hinted handle as the signal address. Left false
+      // by a runtime that does not report the AQL extension. A profiler tool hands packet
+      // completion signals to ROCr, which rejects a hinted handle.
+      signal_hints_.store(
+          hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS) &&
+              !amd::activity_prof::tool_attached.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
+    }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d, signal hints: %d",
+            settings().ext_dispatch_packet_, SignalHints());
+  });
+}
+
+// ================================================================================================
+AbceEngineSet* Device::getOrCreateAbceEngineSet() {
+  // Device discovery creates every Device in every process. Delay the per-engine
+  // SDMA queues until this process actually reaches ABCE on this device,
+  // avoiding KFD's queue limit in multi-process workloads.
+  if (!DEBUG_CLR_ENABLE_ABCE) {
+    return nullptr;
+  }
+  std::call_once(abce_engine_set_once_,
+                 [this]() { abce_engine_set_ = AbceEngineSet::Create(*this); });
+  return abce_engine_set_.get();
+}
+
+// ================================================================================================
 device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool cooperative) {
   std::scoped_lock lock(vgpusAccess());
+  ResolveCpFirmwareCaps();
+
+  getOrCreateAbceEngineSet();
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
   bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&

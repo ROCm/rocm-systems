@@ -10,6 +10,9 @@
 )]
 
 //! Virtual-address reservations, detached memory, mappings, and interval ownership.
+//!
+//! Session retirement rejects new reservations, mappings, and permission
+//! changes while preserving unmap and release, including failed-cleanup retries.
 
 use super::{
     DeviceAccess, MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemoryInfo,
@@ -157,6 +160,7 @@ where
         alignment: u64,
         address: u64,
     ) -> Result<Self, Error> {
+        let _operation = driver.admission().enter()?;
         // Allocate metadata before reserving native address space so a
         // metadata failure cannot strand a successful driver reservation.
         let process = ProcessIdentity::capture().map_err(|source| {
@@ -323,6 +327,10 @@ impl<D: VirtualMemoryOperations> DriverVirtualMemory<D>
 where
     D::DeviceState: AddressSpaceInfo,
 {
+    pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        self.driver.admission().enter()
+    }
+
     pub(crate) fn new(
         driver: Shared<D>,
         inner: Shared<Owned<D::VirtualMemory>>,
@@ -361,6 +369,7 @@ where
         size: u64,
         permissions: DeviceAccess,
     ) -> Result<DriverVirtualHostMapping<D>, Error> {
+        let _operation = self.admit()?;
         self.ensure_process()?;
         reservation.ensure_process()?;
         if !Shared::ptr_eq(&self.driver, &reservation.driver) {
@@ -413,6 +422,7 @@ where
         reservation: &DriverVirtualAddress<D>,
         request: VirtualMapRequest,
     ) -> Result<DriverVirtualDeviceMapping<D>, Error> {
+        let _operation = self.admit()?;
         self.ensure_process()?;
         reservation.ensure_process()?;
         let VirtualMapRequest {
@@ -669,6 +679,24 @@ pub(crate) struct DriverVirtualHostMapping<D: VirtualMemoryOperations> {
 }
 
 impl<D: VirtualMemoryOperations> DriverVirtualHostMapping<D> {
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "foreign diagnostic mapping",
+        })?;
+        let inner = self
+            .inner
+            .as_ref()
+            .filter(|_| self.host_intervals.is_some())
+            .ok_or(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "virtual host map has retired",
+            })?;
+        D::diagnostic_virtual_host_mapping(inner)
+    }
+
     pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
         self.process.check().map_err(|_| Error::Operation {
             kind: ErrorKind::InvalidArgument,
@@ -680,6 +708,15 @@ impl<D: VirtualMemoryOperations> DriverVirtualHostMapping<D> {
                 detail: "virtual host mapping is no longer live",
             });
         }
+        let _operation = self
+            .driver
+            .as_ref()
+            .ok_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "virtual host mapping is no longer live",
+            })?
+            .admission()
+            .enter()?;
         let inner = self.inner.as_mut().ok_or(Error::Operation {
             kind: ErrorKind::InvalidArgument,
             detail: "virtual host mapping is no longer live",
@@ -748,6 +785,16 @@ pub struct VirtualHostMapping {
 }
 
 impl VirtualHostMapping {
+    /// Borrows a live host mapping for fatal diagnostic reads.
+    ///
+    /// # Errors
+    /// Rejects retired or unsupported backing and foreign processes.
+    pub fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.inner.diagnostic_memory()
+    }
+
     /// Changes process-wide CPU page permissions on a live host map.
     ///
     /// # Errors
