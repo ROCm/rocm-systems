@@ -17,7 +17,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
+from membw_analysis.models import MemBwAnalysisResult
+from membw_analysis.summary import active_leaves
 from memory_chart.loader import Layout, LayoutArrow, LayoutBlock, Layouts
 from memory_chart.units import (
     PERCENT,
@@ -570,21 +571,12 @@ def _stall_rows(
     membw: Optional[MemBwAnalysisResult], level: Optional[str]
 ) -> list[_StallRow]:
     """Active leaf bottlenecks of membw at *level*, in tree order."""
-    rows: list[_StallRow] = []
     if membw is None or level is None:
-        return rows
-    for node in membw.nodes:
-        _collect_stall_rows(node, level, rows)
-    return rows
-
-
-def _collect_stall_rows(
-    node: BottleneckNode, level: str, rows: list[_StallRow]
-) -> None:
-    if node.state != "active":
-        return
-    if node.level == level and not any(c.state == "active" for c in node.children):
-        value = node.supporting[0].value if node.supporting else None
-        rows.append(_StallRow(f"[!] {node.label}", value))
-    for child in node.children:
-        _collect_stall_rows(child, level, rows)
+        return []
+    return [
+        _StallRow(
+            f"[!] {node.label}", node.supporting[0].value if node.supporting else None
+        )
+        for node in active_leaves(membw.nodes)
+        if node.level == level
+    ]
