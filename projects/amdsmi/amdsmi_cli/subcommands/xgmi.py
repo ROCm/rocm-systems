@@ -509,9 +509,16 @@ class XgmiCommands:
                             if link["bdf"] == dest_gpu_bdf:
                                 link_indexes.append(idx)
 
-                        # Use the found link index to get the status if valid
-                        if link_indexes and len(link_indexes) <= len(
-                            src_link_status_map.get(src_gpu_bdf, [])
+                        # Link status is indexed by physical slot; packed metrics
+                        # line up with it only when every slot is reported.
+                        if dest_gpu_bdf == src_gpu_bdf:
+                            status = "SELF"
+                        elif (
+                            len(xgmi_metrics_info["links"])
+                            == amdsmi_interface.AMDSMI_MAX_NUM_XGMI_LINKS
+                            and len(src_link_status_map.get(src_gpu_bdf, []))
+                            >= amdsmi_interface.AMDSMI_MAX_NUM_XGMI_LINKS
+                            and link_indexes
                         ):
                             statuses = []
                             for link_idx in link_indexes:
@@ -525,8 +532,6 @@ class XgmiCommands:
                                 status = "/".join(statuses)
                             else:
                                 status = "N/A"
-                        elif dest_gpu_bdf == src_gpu_bdf:
-                            status = "SELF"
                         else:
                             status = "N/A"
 

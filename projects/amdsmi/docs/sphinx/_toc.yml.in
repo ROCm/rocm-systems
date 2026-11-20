@@ -50,6 +50,8 @@ subtrees:
     title: Python API
   - file: reference/amdsmi-go-api.md
     title: Go API
+  - file: reference/amdsmi-go-coverage.md
+    title: Go API coverage
   - file: reference/changelog.md
     title: Changelog
 
