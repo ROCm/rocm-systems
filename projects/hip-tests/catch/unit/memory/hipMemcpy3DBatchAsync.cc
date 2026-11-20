@@ -5,8 +5,12 @@
  */
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <thread>
 #include <vector>
 
 #include <hip_test_common.hh>
@@ -37,6 +41,28 @@ hipMemcpy3DBatchOp MakeArrayToArrayOp(hipArray_t source, hipArray_t destination,
   op.flags = hipMemcpyFlagDefault;
   return op;
 }
+
+struct SnapshotGate {
+  std::atomic<bool> open{false};
+  std::atomic<bool> timed_out{false};
+};
+
+void HoldSnapshotCopy(void* data) {
+  auto& gate = *static_cast<SnapshotGate*>(data);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  while (!gate.open.load(std::memory_order_acquire)) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      gate.timed_out.store(true, std::memory_order_release);
+      return;
+    }
+    std::this_thread::yield();
+  }
+}
+
+struct OpenSnapshotGateOnExit {
+  SnapshotGate& gate;
+  ~OpenSnapshotGateOnExit() { gate.open.store(true, std::memory_order_release); }
+};
 }  // namespace
 
 /**
@@ -99,6 +125,147 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync
   std::vector<uint32_t> copied(destination_count);
   HIP_CHECK(hipMemcpy(copied.data(), destination.ptr(), destination_bytes, hipMemcpyDeviceToHost));
   REQUIRE(copied == expected);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - DuringApiCall also finishes accessing device, managed and array sources before the caller
+ *   submits an overwrite on another stream. A gate holds any queued source read until the
+ *   overwrite finishes; an independent releaser lets synchronous copies make progress.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_DuringApiCall_NonHostSources) {
+  enum class SourceKind { Device, Managed, Array };
+  const auto source_kind = GENERATE(SourceKind::Device, SourceKind::Managed, SourceKind::Array);
+  const bool single_operation = GENERATE(false, true);
+  INFO("source kind: " << static_cast<int>(source_kind)
+                       << ", single operation: " << single_operation);
+  if (source_kind == SourceKind::Array) {
+    CHECK_IMAGE_SUPPORT
+  }
+  constexpr size_t kWidth = 4;
+  constexpr size_t kHeight = 3;
+  constexpr size_t kDepth = 2;
+  constexpr size_t kCount = kWidth * kHeight * kDepth;
+  constexpr size_t kBytes = kCount * sizeof(uint32_t);
+  std::vector<uint32_t> pattern(kCount);
+  for (size_t i = 0; i < kCount; ++i) {
+    pattern[i] = 0x11000000u + i;
+  }
+  const hipExtent extent = make_hipExtent(kWidth, kHeight, kDepth);
+  SnapshotGate gate;
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  StreamGuard overwrite_stream(Streams::withFlags, hipStreamNonBlocking);
+  LinearAllocGuard<uint32_t> source(
+      source_kind == SourceKind::Managed ? LinearAllocs::hipMallocManaged : LinearAllocs::hipMalloc,
+      kBytes);
+  LinearAllocGuard<uint32_t> destination(LinearAllocs::hipMalloc, kBytes);
+  std::unique_ptr<ArrayAllocGuard<uint32_t>> array;
+  OpenSnapshotGateOnExit release{gate};
+  hipMemcpy3DParms fill{};
+  hipMemcpy3DBatchOp op = MakePointerToPointerOp(
+      source.ptr(), destination.ptr(), make_hipExtent(kWidth * sizeof(uint32_t), kHeight, kDepth));
+  if (source_kind == SourceKind::Array) {
+    array = std::make_unique<ArrayAllocGuard<uint32_t>>(extent);
+    fill.srcPtr = make_hipPitchedPtr(pattern.data(), kWidth * sizeof(uint32_t), kWidth, kHeight);
+    fill.dstArray = array->ptr();
+    fill.extent = extent;
+    fill.kind = hipMemcpyHostToDevice;
+    HIP_CHECK(hipMemcpy3D(&fill));
+    op.src.type = hipMemcpyOperandTypeArray;
+    op.src.op.array.array = array->ptr();
+    op.src.op.array.offset = {0, 0, 0};
+    op.extent = extent;
+  } else {
+    HIP_CHECK(hipMemcpy(source.ptr(), pattern.data(), kBytes, hipMemcpyHostToDevice));
+  }
+  std::vector<uint32_t> overwrite(kCount, 0xABABABABu);
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchHostFunc(stream.stream(), HoldSnapshotCopy, &gate));
+  std::atomic<bool> api_returned{false};
+  std::atomic<bool> overwrite_finished{false};
+  bool overwrite_timed_out = false;
+  std::thread releaser([&] {
+    // If the API returns early, keep its stream blocked until the source overwrite completes.
+    // Otherwise release it after a bounded wait so a synchronous implementation can return.
+    const auto return_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!api_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < return_deadline) {
+      std::this_thread::yield();
+    }
+    if (api_returned.load(std::memory_order_acquire)) {
+      const auto overwrite_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (!overwrite_finished.load(std::memory_order_acquire) &&
+             std::chrono::steady_clock::now() < overwrite_deadline) {
+        std::this_thread::yield();
+      }
+      overwrite_timed_out = !overwrite_finished.load(std::memory_order_acquire);
+    }
+    gate.open.store(true, std::memory_order_release);
+  });
+  op.srcAccessOrder = hipMemcpySrcAccessOrderDuringApiCall;
+  // Defer assertions until the releaser is joined, including on an API error.
+  const hipError_t copy_status = single_operation
+                                     ? hipMemcpy3DWithAttributesAsync(&op, 0, stream.stream())
+                                     : hipMemcpy3DBatchAsync(1, &op, nullptr, 0, stream.stream());
+  api_returned.store(true, std::memory_order_release);
+  hipError_t overwrite_status = hipSuccess;
+  if (source_kind == SourceKind::Array) {
+    fill.srcPtr.ptr = overwrite.data();
+    overwrite_status = hipMemcpy3DAsync(&fill, overwrite_stream.stream());
+  } else if (source_kind == SourceKind::Managed) {
+    std::copy(overwrite.begin(), overwrite.end(), source.host_ptr());
+  } else {
+    overwrite_status = hipMemcpyAsync(source.ptr(), overwrite.data(), kBytes, hipMemcpyHostToDevice,
+                                      overwrite_stream.stream());
+  }
+  const hipError_t overwrite_sync_status = hipStreamSynchronize(overwrite_stream.stream());
+  overwrite_finished.store(true, std::memory_order_release);
+  releaser.join();
+  HIP_CHECK(copy_status);
+  HIP_CHECK(overwrite_status);
+  HIP_CHECK(overwrite_sync_status);
+  REQUIRE_FALSE(overwrite_timed_out);
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  REQUIRE_FALSE(gate.timed_out.load(std::memory_order_acquire));
+  std::vector<uint32_t> copied(kCount);
+  HIP_CHECK(hipMemcpy(copied.data(), destination.ptr(), kBytes, hipMemcpyDeviceToHost));
+  REQUIRE(copied == pattern);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - DuringApiCall rejects and invalidates capture before accessing the source or waiting on the
+ *   captured stream.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_DuringApiCall_CaptureIsUnsupported) {
+  const bool single_operation = GENERATE(false, true);
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  LinearAllocGuard<uint8_t> source(LinearAllocs::hipMalloc, 8);
+  LinearAllocGuard<uint8_t> destination(LinearAllocs::hipMalloc, 8);
+  hipMemcpy3DBatchOp op =
+      MakePointerToPointerOp(source.ptr(), destination.ptr(), make_hipExtent(4, 2, 1));
+  op.srcAccessOrder = hipMemcpySrcAccessOrderDuringApiCall;
+  HIP_CHECK(hipStreamBeginCapture(stream.stream(), hipStreamCaptureModeRelaxed));
+  for (hipError_t expected : {hipErrorStreamCaptureUnsupported, hipErrorStreamCaptureInvalidated}) {
+    if (single_operation) {
+      HIP_CHECK_ERROR(hipMemcpy3DWithAttributesAsync(&op, 0, stream.stream()), expected);
+    } else {
+      size_t fail_idx = 0;
+      HIP_CHECK_ERROR(hipMemcpy3DBatchAsync(1, &op, &fail_idx, 0, stream.stream()), expected);
+      REQUIRE(fail_idx == SIZE_MAX);
+    }
+  }
+  hipGraph_t graph = nullptr;
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream.stream(), &graph), hipErrorStreamCaptureInvalidated);
+  REQUIRE(graph == nullptr);
 }
 
 /**
@@ -548,34 +715,190 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_Any_MatchesSourceAfterSync) {
 /**
  * Test Description
  * ------------------------
- * - A copy from a stack array to device memory with srcAccessOrder DuringApiCall, followed by an
- *   overwrite of the stack array right after the call returns: after stream sync, the destination
- *   holds the values from before the overwrite.
- * Test source
+ * - DuringApiCall captures pageable and mapped host sources before return while the destination
+ *   waits on its stream. Padded rows, padded layers, pointer offsets and array offsets are
+ * preserved by both the batch API and the single-operation API, despite a subsequent source
+ * overwrite. Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
  */
 HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_DuringApiCall_IgnoresSourceWritesAfterReturn) {
-  const std::vector<uint8_t> pattern = {0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87};
-  uint8_t source[8];
-  const hipExtent extent = make_hipExtent(4, 2, 1);
-  StreamGuard stream(Streams::created);
-  LinearAllocGuard<uint8_t> destination(LinearAllocs::hipMalloc, pattern.size());
-  std::copy(pattern.begin(), pattern.end(), source);
-  HIP_CHECK(hipMemset(destination.ptr(), 0xFF, pattern.size()));
+  const auto source_kind =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::mallocAndRegister, LinearAllocs::hipHostMalloc);
+  const bool array_destination = GENERATE(false, true);
+  const bool single_operation = GENERATE(false, true);
+  INFO("source: " << to_string(source_kind) << ", array destination: " << array_destination
+                  << ", single operation: " << single_operation);
+  if (array_destination) {
+    CHECK_IMAGE_SUPPORT
+  }
 
-  HIP_CHECK(hipStreamSynchronize(stream.stream()));
-  HIP_CHECK(hipGetLastError());
-  hipMemcpy3DBatchOp op = MakePointerToPointerOp(source, destination.ptr(), extent);
+  constexpr size_t kWidth = 4;
+  constexpr size_t kHeight = 3;
+  constexpr size_t kDepth = 2;
+  constexpr size_t kSourceRow = 7;
+  constexpr size_t kSourceLayer = 5;
+  constexpr size_t kSourceOffset = 3;
+  constexpr size_t kSourceCount = kSourceOffset + kSourceRow * kSourceLayer * kDepth;
+  constexpr size_t kDestinationRow = 8;
+  constexpr size_t kDestinationLayer = 5;
+  constexpr size_t kDestinationDepth = 3;
+  constexpr size_t kDestinationOffset = kDestinationRow * (kDestinationLayer + 1) + 2;
+  constexpr size_t kDestinationCount = kDestinationRow * kDestinationLayer * kDestinationDepth;
+  const hipExtent array_extent =
+      make_hipExtent(kDestinationRow, kDestinationLayer, kDestinationDepth);
+  SnapshotGate gate;
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  LinearAllocGuard<uint32_t> source(source_kind, kSourceCount * sizeof(uint32_t));
+  LinearAllocGuard<uint32_t> destination(LinearAllocs::hipMalloc,
+                                         kDestinationCount * sizeof(uint32_t));
+  std::unique_ptr<ArrayAllocGuard<uint32_t>> array;
+  if (array_destination) {
+    array = std::make_unique<ArrayAllocGuard<uint32_t>>(array_extent);
+  }
+  OpenSnapshotGateOnExit release{gate};
+  for (size_t i = 0; i < kSourceCount; ++i) {
+    source.host_ptr()[i] = 0x11000000u + i;
+  }
+  std::vector<uint32_t> expected(kDestinationCount, 0xFFFFFFFFu);
+  if (array_destination) {
+    hipMemcpy3DParms fill{};
+    fill.srcPtr = make_hipPitchedPtr(expected.data(), kDestinationRow * sizeof(uint32_t),
+                                     kDestinationRow, kDestinationLayer);
+    fill.dstArray = array->ptr();
+    fill.extent = array_extent;
+    fill.kind = hipMemcpyHostToDevice;
+    HIP_CHECK(hipMemcpy3D(&fill));
+  } else {
+    HIP_CHECK(hipMemset(destination.ptr(), 0xFF, kDestinationCount * sizeof(uint32_t)));
+  }
+  for (size_t z = 0; z < kDepth; ++z) {
+    for (size_t y = 0; y < kHeight; ++y) {
+      std::copy_n(
+          source.host_ptr() + kSourceOffset + (z * kSourceLayer + y) * kSourceRow, kWidth,
+          expected.data() + kDestinationOffset + (z * kDestinationLayer + y) * kDestinationRow);
+    }
+  }
+  const size_t element_bytes = array_destination ? 1 : sizeof(uint32_t);
+  hipMemcpy3DBatchOp op =
+      MakePointerToPointerOp(source.ptr() + kSourceOffset, destination.ptr() + kDestinationOffset,
+                             make_hipExtent(kWidth * element_bytes, kHeight, kDepth));
+  op.src.op.ptr.rowLength = kSourceRow * element_bytes;
+  op.src.op.ptr.layerHeight = kSourceLayer;
+  if (array_destination) {
+    op.dst.type = hipMemcpyOperandTypeArray;
+    op.dst.op.array.array = array->ptr();
+    op.dst.op.array.offset = {2, 1, 1};
+  } else {
+    op.dst.op.ptr.rowLength = kDestinationRow * sizeof(uint32_t);
+    op.dst.op.ptr.layerHeight = kDestinationLayer;
+  }
   op.srcAccessOrder = hipMemcpySrcAccessOrderDuringApiCall;
+  HIP_CHECK(hipDeviceSynchronize());
+  HIP_CHECK(hipLaunchHostFunc(stream.stream(), HoldSnapshotCopy, &gate));
   size_t fail_idx = 0;
-  HIP_CHECK(hipMemcpy3DBatchAsync(1, &op, &fail_idx, 0, stream.stream()));
-  std::fill_n(source, pattern.size(), static_cast<uint8_t>(0xAB));
+  if (single_operation) {
+    HIP_CHECK(hipMemcpy3DWithAttributesAsync(&op, 0, stream.stream()));
+  } else {
+    HIP_CHECK(hipMemcpy3DBatchAsync(1, &op, &fail_idx, 0, stream.stream()));
+    REQUIRE(fail_idx == SIZE_MAX);
+  }
+  std::fill_n(source.host_ptr(), kSourceCount, 0xABABABABu);
+  gate.open.store(true, std::memory_order_release);
+  HIP_CHECK(hipStreamSynchronize(stream.stream()));
+  REQUIRE_FALSE(gate.timed_out.load(std::memory_order_acquire));
+
+  std::vector<uint32_t> copied(kDestinationCount);
+  if (array_destination) {
+    hipMemcpy3DParms read{};
+    read.srcArray = array->ptr();
+    read.dstPtr = make_hipPitchedPtr(copied.data(), kDestinationRow * sizeof(uint32_t),
+                                     kDestinationRow, kDestinationLayer);
+    read.extent = array_extent;
+    read.kind = hipMemcpyDeviceToHost;
+    HIP_CHECK(hipMemcpy3D(&read));
+  } else {
+    HIP_CHECK(hipMemcpy(copied.data(), destination.ptr(), kDestinationCount * sizeof(uint32_t),
+                        hipMemcpyDeviceToHost));
+  }
+  REQUIRE(copied == expected);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Both DuringApiCall entry points preserve multiple layered-1D array layers from pageable,
+ *   registered and pinned host sources with default or padded row and layer strides.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_DuringApiCall_Layered1D) {
+  CHECK_IMAGE_SUPPORT
+  const auto source_kind =
+      GENERATE(LinearAllocs::malloc, LinearAllocs::mallocAndRegister, LinearAllocs::hipHostMalloc);
+  const bool padded = GENERATE(false, true);
+  const bool single_operation = GENERATE(false, true);
+  INFO("source: " << to_string(source_kind) << ", padded: " << padded
+                  << ", single operation: " << single_operation);
+  constexpr size_t kWidth = 4;
+  constexpr size_t kLayers = 3;
+  constexpr size_t kSourceOffset = 3;
+  constexpr size_t kDestinationWidth = 6;
+  constexpr size_t kDestinationLayers = 5;
+  const size_t source_row = padded ? 7 : kWidth;
+  const size_t source_layer_height = padded ? 2 : 1;
+  const size_t source_count = kSourceOffset + source_row * source_layer_height * kLayers;
+  const hipExtent destination_extent = make_hipExtent(kDestinationWidth, 1, kDestinationLayers);
+  StreamGuard stream(Streams::withFlags, hipStreamNonBlocking);
+  LinearAllocGuard<uint32_t> source(source_kind, source_count * sizeof(uint32_t));
+  ArrayAllocGuard<uint32_t> destination(make_hipExtent(kDestinationWidth, 0, kDestinationLayers),
+                                        hipArrayLayered);
+  for (size_t i = 0; i < source_count; ++i) {
+    source.host_ptr()[i] = 0x11000000u + i;
+  }
+  std::vector<uint32_t> expected(kDestinationWidth * kDestinationLayers, 0xFFFFFFFFu);
+  hipMemcpy3DParms fill{};
+  fill.srcPtr = make_hipPitchedPtr(expected.data(), kDestinationWidth * sizeof(uint32_t),
+                                   kDestinationWidth, 1);
+  fill.dstArray = destination.ptr();
+  fill.extent = destination_extent;
+  fill.kind = hipMemcpyHostToDevice;
+  HIP_CHECK(hipMemcpy3D(&fill));
+  for (size_t layer = 0; layer < kLayers; ++layer) {
+    std::copy_n(source.host_ptr() + kSourceOffset + layer * source_row * source_layer_height,
+                kWidth, expected.data() + (layer + 1) * kDestinationWidth + 1);
+  }
+
+  hipMemcpy3DBatchOp op{};
+  op.src.type = hipMemcpyOperandTypePointer;
+  op.src.op.ptr.ptr = source.ptr() + kSourceOffset;
+  op.src.op.ptr.rowLength = padded ? source_row : 0;
+  op.src.op.ptr.layerHeight = padded ? source_layer_height : 0;
+  op.dst.type = hipMemcpyOperandTypeArray;
+  op.dst.op.array.array = destination.ptr();
+  op.dst.op.array.offset = {1, 0, 1};
+  op.extent = make_hipExtent(kWidth, 1, kLayers);
+  op.srcAccessOrder = hipMemcpySrcAccessOrderDuringApiCall;
+  if (single_operation) {
+    HIP_CHECK(hipMemcpy3DWithAttributesAsync(&op, 0, stream.stream()));
+  } else {
+    size_t fail_idx = 0;
+    HIP_CHECK(hipMemcpy3DBatchAsync(1, &op, &fail_idx, 0, stream.stream()));
+    REQUIRE(fail_idx == SIZE_MAX);
+  }
+  std::fill_n(source.host_ptr(), source_count, 0xABABABABu);
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
-  std::vector<uint8_t> copied(pattern.size());
-  HIP_CHECK(hipMemcpy(copied.data(), destination.ptr(), pattern.size(), hipMemcpyDeviceToHost));
-  REQUIRE(copied == pattern);
+  std::vector<uint32_t> copied(expected.size());
+  hipMemcpy3DParms read{};
+  read.srcArray = destination.ptr();
+  read.dstPtr =
+      make_hipPitchedPtr(copied.data(), kDestinationWidth * sizeof(uint32_t), kDestinationWidth, 1);
+  read.extent = destination_extent;
+  read.kind = hipMemcpyDeviceToHost;
+  HIP_CHECK(hipMemcpy3D(&read));
+  REQUIRE(copied == expected);
 }
 
 /**

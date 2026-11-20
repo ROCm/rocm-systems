@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -862,6 +863,8 @@ class WriteMemoryCommand : public OneMemoryArgCommand {
   BufferRect bufRect_;   //!< Buffer rectangle information
   BufferRect hostRect_;  //!< Host memory rectangle information
   amd::CopyMetadata copyMetadata_;
+  std::unique_ptr<char[]>
+      sourceSnapshot_;  //!< Source bytes retained through completion and unpinning.
 
  public:
   WriteMemoryCommand(HostQueue& queue, cl_command_type cmdType, const EventWaitList& eventWaitList,
@@ -922,6 +925,11 @@ class WriteMemoryCommand : public OneMemoryArgCommand {
   amd::CopyMetadata copyMetadata() const { return copyMetadata_; }
   //! Updates the host memory to read from
   void setSource(const void* hostPtr) { hostPtr_ = hostPtr; }
+  //! Own source bytes that the caller may release as soon as the API returns.
+  void setSourceSnapshot(std::unique_ptr<char[]>&& snapshot) {
+    sourceSnapshot_ = std::move(snapshot);
+    hostPtr_ = sourceSnapshot_.get();
+  }
   //! Updates the host memory to write to
   void setDestination(Memory& memory) { memory_ = &memory; }
 
