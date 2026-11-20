@@ -878,12 +878,12 @@ public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
-    return !mnemonic_.starts_with("image_atomic_") &&
+    return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&
            Instruction::should_print_dst_operand(operand_index);
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
-    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
+    if (operand_index == 0 && inst_.tfe && amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic) {
       // VDATA is the first source. Assembly includes the status slot;
       // the source dependency includes only the atomic payload.
       const auto first = operand->encoding_value();

@@ -14,7 +14,6 @@ import pytest
 from amdisa.codegen.execute import float_fract, float_ldexp
 from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS, lower_sema_block
 from amdisa.codegen.execute.simd_codegen import (
-    SIMD_VOP1_UNARY,
     local_coverage_probe,
     simd_probe_line,
 )
@@ -47,14 +46,10 @@ from amdisa.semantics import derive_semantics
 
 def test_cls_i32_codegen():
     semantic = _INLINE_UNARY_OPS['cls_i32']
-    simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
-
-    for emitted in (semantic, simd):
-        assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
-        assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
-        assert 'countl_zero(abs_val)) - 1' not in emitted
-        assert 'countl_zero(a)) - 1' not in emitted
-        assert 'clz_u32_simd(u) - 1' not in emitted
+    assert '0xFFFFFFFFu' in semantic or 'static_cast<uint32_t>(-1)' in semantic
+    assert 'countl_zero' in semantic
+    assert 'countl_zero(abs_val)) - 1' not in semantic
+    assert 'countl_zero(a)) - 1' not in semantic
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():

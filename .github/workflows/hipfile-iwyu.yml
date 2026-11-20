@@ -1,0 +1,156 @@
+name: hipfile-iwyu
+run-name: Check that hipFile still builds with include-what-you-use
+
+# Builds with HIPFILE_USE_IWYU to check that include-what-you-use still
+# runs. IWYU's suggestions are advisory: they're listed in the job summary
+# and a warning annotation, but they don't fail the job. It fails only
+# when IWYU itself fails, which means building with HIPFILE_USE_IWYU is
+# broken.
+#
+# Don't make this a required check. Which suggestions IWYU makes depends
+# on its version, so a new image or IWYU package can change them.
+
+env:
+  AIS_INPUT_CI_IMAGE: ${{ inputs.ci_image }}
+  # IWYU doesn't look at the HIP kernel, so it's built for one target
+  # only, to save time
+  AIS_HIP_ARCHITECTURES: gfx942
+
+on:
+  workflow_call:
+    inputs:
+      ci_image:
+        description: "Full CI image name & tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  iwyu:
+    name: include-what-you-use (advisory)
+    runs-on: [ubuntu-24.04]
+    steps:
+      - name: Set AIS CI container name
+        # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
+        run: |
+          echo "AIS_PR_NUMBER=${GITHUB_REF//[^0-9]/}" >> "${GITHUB_ENV}"
+      - name: Compute container name
+        run: |
+          echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_iwyu" >> "${GITHUB_ENV}"
+      - name: Fetching code repository...
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          path: rocm-systems
+          sparse-checkout: |
+            projects/hipfile
+            .github/workflows
+      - name: Authenticating to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Starting Docker Container
+        run: |
+          docker run \
+            -dt \
+            --rm \
+            --pull always \
+            -v "${GITHUB_WORKSPACE}":/mnt/ais:ro \
+            --name "${AIS_CONTAINER_NAME}" \
+            "${AIS_INPUT_CI_IMAGE}"
+      - name: Make copy of the code repository and create build directories
+        # Single quotes necessary to ensure string/command substitutions happen
+        # in the container and not on the host.
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cp -R /mnt/ais /ais
+              mkdir -p /ais/build/hipfile /ais/build/iwyu-runs
+            '
+      - name: Install include-what-you-use
+        # Installed here rather than baked into the CI image because this is the
+        # only job that needs it. Ninja keeps each command's output together, so
+        # IWYU's output for one file isn't interleaved with another's in the
+        # build log.
+        run: |
+          docker exec \
+            -t \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              set -e
+              apt-get update
+              apt-get install -y --no-install-recommends iwyu ninja-build
+              include-what-you-use --version
+            '
+      - name: Generate build files for hipFile with IWYU enabled
+        # CMake hides IWYU's failures (see util/iwyu-wrapper.sh), so it runs
+        # IWYU through a wrapper that records every run for the check step.
+        #
+        # The compiler is amdclang++, as in the other workflows. IWYU parses
+        # with its own, older clang, so the build leaves out the warning flags
+        # when IWYU is on (see hipfile_set_compiler_flags()).
+        #
+        # No -Werror: the build workflow checks for warnings, and this job is
+        # only about IWYU.
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            -e AIS_HIP_ARCHITECTURES \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake \
+                -G Ninja \
+                -DCMAKE_BUILD_TYPE=Debug \
+                -DCMAKE_CXX_COMPILER=amdclang++ \
+                -DCMAKE_HIP_ARCHITECTURES="${AIS_HIP_ARCHITECTURES}" \
+                -DCMAKE_HIP_PLATFORM=amd \
+                -DHIPFILE_USE_IWYU=ON \
+                -DHIPFILE_IWYU_EXE=/ais/rocm-systems/projects/hipfile/util/iwyu-wrapper.sh \
+                ../../rocm-systems/projects/hipfile
+            '
+      - name: Compile hipFile with IWYU
+        run: |
+          docker exec \
+            -t \
+            -w /ais/build/hipfile \
+            -e HIPFILE_IWYU_LOG_DIR=/ais/build/iwyu-runs \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              cmake --build . --parallel
+            '
+      - name: Check IWYU
+        # The check runs in the container, where the paths in IWYU's output
+        # are, so it writes its summary there, and this step adds it to the
+        # job summary whether or not the check passed. GITHUB_ACTIONS turns on
+        # its annotations. No -t on the second docker exec: a terminal would
+        # turn the summary's line endings into CRLF.
+        run: |
+          status=0
+          docker exec \
+            -t \
+            -e GITHUB_ACTIONS \
+            "${AIS_CONTAINER_NAME}" \
+            /ais/rocm-systems/projects/hipfile/util/check-iwyu.sh \
+              /ais/build/iwyu-runs \
+              /ais/build/iwyu-summary.md \
+            || status=$?
+          docker exec \
+            "${AIS_CONTAINER_NAME}" \
+            cat /ais/build/iwyu-summary.md >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
+      - name: Cleanup & Stop the Docker container
+        if: ${{ always() }}
+        run: |
+          if docker inspect "${AIS_CONTAINER_NAME}" >/dev/null 2>&1; then
+            docker stop "${AIS_CONTAINER_NAME}"
+          else
+            echo "Container ${AIS_CONTAINER_NAME} does not exist; skipping stop"
+          fi

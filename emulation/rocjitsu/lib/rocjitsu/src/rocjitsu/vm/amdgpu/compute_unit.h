@@ -1216,7 +1216,7 @@ public:
 
 private:
   static bool nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf);
-  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                              uint64_t deferred_gds_sources = 0);
 
   // RegisterAccess is the instruction-facing register boundary. These
@@ -1573,7 +1573,7 @@ public:
     assert(inst->execute && "instruction execution backend is not linked");
     wf.begin_instruction_execution();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
-    if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
+    if (drop_set_vgpr_msb && inst->amdgpu_operation() == Operation::S_SET_VGPR_MSB)
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
     if (wf.discards_valu_result(*inst))
@@ -1710,10 +1710,11 @@ protected:
   void tick_pipelines();
 
   /// @brief Route a memory instruction into the appropriate pipeline.
-  /// @param inst Ownership transfers when the pipeline accepts the instruction.
-  /// Rejected instructions stay with the issuer until it reports the failure.
+  /// @param inst Synchronous completion preserves ownership; retry and deferred
+  /// completion transfer it to the pipeline. Pre-routing rejection leaves the
+  /// instruction with the issuer until it reports the failure.
   /// @param wf The issuing wavefront.
-  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                     uint64_t deferred_gds_sources = 0);
   void track_memory_wait(Instruction &inst, Wavefront &wf, uint64_t *deferred_gds_sources);
   void lock_gds_sources(const Instruction &inst, Wavefront &wf, uint64_t sequence);
@@ -2001,15 +2002,42 @@ protected:
   struct BarrierCounter {
     uint32_t member_count = 0;
     uint32_t signal_count = 0;
+    /// The current round. Advances when a round completes and on
+    /// S_BARRIER_INIT, which discards the signals counted so far.
+    uint64_t generation = 0;
   };
   struct WorkgroupBarriers {
     uint32_t allocated_count = 0;
     std::array<BarrierCounter, kMaxNamedBarriers + 1> named{};
     std::array<BarrierCounter, 2> workgroup{};
   };
-  std::vector<Wavefront *> complete_barrier(uint32_t dispatch_id, uint32_t wg_id,
-                                            uint8_t completion_bit, uint32_t named_barrier_id = 0);
-  void notify_barrier_complete(std::span<Wavefront *> members, uint8_t completion_bit);
+  /// The waves of a completed round.
+  struct BarrierCompletion {
+    /// Every member the round notified.
+    std::vector<Wavefront *> members;
+    /// The members whose completion bit the round set, so their next wait is
+    /// for this round. A member whose bit was still set by an earlier round
+    /// keeps that round (CDNA5 ISA 5.6.1).
+    std::vector<Wavefront *> armed;
+    /// The members released from a pending s_barrier_wait.
+    std::vector<Wavefront *> woken;
+  };
+  /// The round `generation` of the barrier with `completion_bit`.
+  static BarrierRound barrier_round(uint8_t completion_bit, uint32_t named_barrier_id,
+                                    uint64_t generation);
+  /// Set the completion bit of every member of the workgroup's barrier and
+  /// release the members waiting on it. Plugins are not notified.
+  BarrierCompletion complete_barrier(uint32_t dispatch_id, uint32_t wg_id, uint8_t completion_bit,
+                                     uint64_t generation, uint32_t named_barrier_id = 0);
+  /// Report a completed round: onAmdgpuBarrierResolved() for its members and
+  /// onAmdgpuBarrierRoundCompleted() for its armed members under one plugin
+  /// lock, then onAmdgpuBarrierWaitPassed() for each woken member.
+  static void notify_barrier_complete(ExecutionPluginGroup &plugins, BarrierCompletion &completion,
+                                      const BarrierRound &round);
+  /// Complete the current round of `barrier`, advance its generation and
+  /// report the round.
+  void finish_barrier_round(BarrierCounter &barrier, uint32_t dispatch_id, uint32_t wg_id,
+                            uint8_t completion_bit, uint32_t named_barrier_id = 0);
   std::unordered_map<uint64_t, WorkgroupBarriers> barrier_wgs_;
 
   /// @brief CU-private fallback GWS store, used when no shared store is injected.

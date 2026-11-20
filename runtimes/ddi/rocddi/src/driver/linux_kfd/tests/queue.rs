@@ -66,6 +66,7 @@ fn backing_file() -> File {
 
 fn native_node() -> sysfs::KfdNode {
     sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
         host_atomics: false,
         node: 1,
         gpu_id: 42,
@@ -214,6 +215,9 @@ struct State {
     updates: Vec<uapi::UpdateQueue>,
     update_errno: VecDeque<Option<i32>>,
     cu_masks: Vec<(uapi::SetCuMask, Vec<u32>)>,
+    wave_errno: Option<i32>,
+    wave_stack_size: Option<u32>,
+    wave_reads: usize,
 }
 
 struct Fixture {
@@ -234,7 +238,11 @@ impl Fixture {
         let render = backing_file();
         let contents = render.try_clone().unwrap();
         let observed_contents = contents.try_clone().unwrap();
-        let process_memory = File::open("/proc/self/mem").unwrap();
+        let process_memory = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/proc/self/mem")
+            .unwrap();
         let endpoint = if doorbells_mappable {
             backing_file()
         } else {
@@ -698,6 +706,24 @@ impl Fixture {
                         if let Some(Some(errno)) = state.update_errno.pop_front() {
                             return Err(io::Error::from_raw_os_error(errno));
                         }
+                    }
+                    connection::Call::QueueWaveState(args) => {
+                        assert!(state.live);
+                        assert_eq!(args.queue_id, 0);
+                        assert!(
+                            state.updates.last().is_some_and(
+                                |update| update.ring_size == 0 && update.percentage == 0
+                            )
+                        );
+                        state.wave_reads += 1;
+                        if let Some(errno) = state.wave_errno {
+                            return Err(io::Error::from_raw_os_error(errno));
+                        }
+                        args.control_stack_used_size = state.wave_stack_size.unwrap_or(256);
+                        args.save_area_used_size = 512;
+                        process_memory
+                            .write_all_at(&[0xA5; 16], args.control_stack_address)
+                            .unwrap();
                     }
                     connection::Call::SetCuMask(args, mask) => {
                         assert!(state.live, "masked a queue after native destruction");
@@ -2561,5 +2587,66 @@ fn local_ring_placement_is_independent_of_the_selected_queue_generation() {
             *ring_memory = QueueRingMemory::HostVisibleLocal;
         }
         assert!(Request::validate(&native, desc).is_ok(), "target {target}");
+    }
+}
+
+#[test]
+fn core_snapshot_stops_before_wave_refresh_and_retains_real_extents_after_loss() {
+    use crate::device::gpu::diagnostic::DiagnosticReader;
+    for svm in [false, true] {
+        let fixture = Fixture::new(true);
+        if !svm {
+            fixture.state.lock().unwrap().svm_errno = Some(errno::EOPNOTSUPP);
+        }
+        let mut desc = descriptor(aql(QueueProducerMode::Multiple));
+        desc.ring_size_bytes = 1024;
+        let mut queue = fixture.create(desc).unwrap();
+        fixture.state.lock().unwrap().lost = true;
+        assert!(queue.check().is_err());
+        {
+            let capture = queue.core_snapshot().unwrap();
+            assert_eq!(
+                (capture.queue_id, capture.gpu_id, capture.queue_type),
+                (0, 42, 2)
+            );
+            assert_eq!(capture.ring_size_bytes, 1024);
+            assert!(capture.memory[0].size() >= 4096);
+            assert_eq!(capture.context_size, 65536);
+            assert!(capture.memory[2].size() >= 65536);
+            let mut bytes = [0; 16];
+            DiagnosticReader::new()
+                .unwrap()
+                .read(capture.memory[2], 0, &mut bytes)
+                .unwrap();
+            assert_eq!(bytes, [0xA5; 16]);
+        }
+        assert_eq!(fixture.state.lock().unwrap().wave_reads, 1);
+        queue.destroy().unwrap();
+        fixture.assert_released();
+    }
+}
+
+#[test]
+fn core_snapshot_rejects_failed_stop_query_and_invalid_native_lengths() {
+    for failure in 0..3 {
+        let fixture = Fixture::new(true);
+        let mut queue = fixture
+            .create(descriptor(aql(QueueProducerMode::Multiple)))
+            .unwrap();
+        {
+            let mut state = fixture.state.lock().unwrap();
+            match failure {
+                0 => state.update_errno.push_back(Some(errno::EBUSY)),
+                1 => state.wave_errno = Some(errno::EIO),
+                _ => state.wave_stack_size = Some(u32::MAX),
+            }
+        }
+        assert!(queue.core_snapshot().is_err());
+        assert_eq!(
+            fixture.state.lock().unwrap().wave_reads,
+            usize::from(failure != 0)
+        );
+        queue.destroy().unwrap();
+        fixture.assert_released();
     }
 }
