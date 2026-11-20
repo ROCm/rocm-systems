@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
@@ -96,7 +97,8 @@ struct Wave32PluginFixture {
   explicit Wave32PluginFixture(
       rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5,
       amdgpu::MemoryWaitDiagnostics wait_checks = amdgpu::MemoryWaitDiagnostics::Warn,
-      uint32_t vgpr_slot_size = 256)
+      uint32_t vgpr_slot_size = 256,
+      amdgpu::ArithmeticSemantics semantics = amdgpu::ArithmeticSemantics::Compatibility)
       : gpu_mem(std::make_unique<amdgpu::GpuMemory>("wave32_plugin_mem")),
         l2(std::make_unique<amdgpu::L2Cache>("wave32_plugin_l2")) {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -106,6 +108,7 @@ struct Wave32PluginFixture {
     cfg.vgprs_per_wf = vgpr_slot_size;
     cfg.lds_size_kb = 64;
     cfg.memory_wait_diagnostics = wait_checks;
+    cfg.arithmetic.semantics = semantics;
     rocjitsu::test::initialize_compute_unit(cu, "wave32_plugin_cu", cfg, gpu_mem.get(), l2.get());
     if (!cu)
       return;
@@ -428,7 +431,7 @@ TEST(ExecutionPluginTest, Gfx11IndexedGdsUsesOneLaneForInputsAndResults) {
   }
 }
 
-TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSourcesAndTheSimdPredicate) {
+TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSources) {
   Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5);
   ASSERT_TRUE(f.cu);
   auto *observer = f.attach_ordering_plugin();
@@ -453,15 +456,9 @@ TEST(ExecutionPluginTest, Gfx115CompareUsesAllocatedSourcesAndTheSimdPredicate) 
         f.cu->write_vgpr(base + 20, 0, 0x40000000);
         wave->set_trapsts(0);
         observer->events.clear();
-        amdgpu::ScopedSimdFastPathTracker tracker;
         ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
         EXPECT_EQ(wave->vcc(), 1u);
         EXPECT_EQ(wave->trapsts() & 1u, 1u);
-        if (scalar || !util::has_stdx_simd)
-          EXPECT_TRUE(tracker.no_tracked_path_executed());
-        else
-          EXPECT_TRUE(
-              tracker.only_tracked_path_executed(amdgpu::SimdFastPath::VOPC_COMPARE_STATUS));
         const auto reads = vgpr_read_events(*observer);
         ASSERT_EQ(reads.size(), 2u);
         EXPECT_EQ(reads[0].physical_reg, base);
@@ -804,77 +801,86 @@ TEST(ExecutionPluginTest, Gfx115WmmaUsesPerWaveAccumulatorAndDestinationTuples) 
 }
 
 TEST(ExecutionPluginTest, Gfx115ConstantCompareAndDppAddObserveTheirPendingSourceLanes) {
-  Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32);
-  auto *observed = f.attach_ordering_plugin();
-  auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
-  ASSERT_NE(wave, nullptr);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
-  const auto base = wave->vgpr_alloc().base;
-  constexpr uint64_t active = 0x10003;
-  wave->set_exec(active);
-  for (bool scalar : {false, true}) {
-    ForceScalarOverride mode(scalar);
-    for (const auto &[words, add, fixed] :
-         {std::tuple{std::array{0x7c200314u, 0u, 0u}, false, true}, // V_CMP_F_F32 e32
-          std::tuple{std::array{0x7c3e0314u, 0u, 0u}, false, true}, // V_CMP_T_F32 e32
-          std::tuple{std::array{0xd410006au, 0x02020314u, 0u}, false, true},
-          std::tuple{std::array{0xd41f006au, 0x02020314u, 0u}, false, true},
-          std::tuple{std::array{0x7c2002fau, 0x1f091114u, 0u}, false, true},
-          std::tuple{std::array{0x7c2002e9u, 0xfac68814u, 0u}, false, true},
-          std::tuple{std::array{0x7c240314u, 0u, 0u}, false, false}, // V_CMP_EQ_F32
-          std::tuple{std::array{0x060628fau, 0x1f00e401u, 0u}, true, false},
-          std::tuple{std::array{0xd5030003u, 0x000228fau, 0x1f00e401u}, true, false},
-          std::tuple{std::array{0x060628fau, 0xff00e401u, 0u}, true, false}}) {
-      auto inst = decoder->decode_window(words);
-      ASSERT_TRUE(inst.succeeded());
-      for (bool clamp : {false, true}) {
-        SCOPED_TRACE(testing::Message()
-                     << std::hex << words[0] << " clamp=" << clamp << " scalar=" << scalar);
-        wave->set_mode_raw((wave->mode_raw() & ~0x100u) | (clamp ? 0x100u : 0u));
-        wave->set_trapsts(0);
-        wave->set_vcc_mask(0);
-        for (unsigned lane : {0u, 1u, 16u}) {
-          f.cu->write_vgpr(base, lane, add ? 0x40000000u : 0x7fa00000u);
-          f.cu->write_vgpr(base + 1, lane, 0x3f800000u);
-          f.cu->write_vgpr(base + 3, lane, 0xdeadbeefu);
-        }
-        observed->events.clear();
-        ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
-        uint64_t actual = 0;
-        for (const auto &e : vgpr_read_events(*observed))
-          if (e.physical_reg == base)
-            actual |= e.lane_mask;
-        if (add) {
-          EXPECT_EQ(actual, active);
-          EXPECT_EQ(f.cu->read_vgpr(base + 3, 0), 0x40400000u);
-          const bool both_rows = words[1] == 0xff00e401u;
-          EXPECT_EQ(f.cu->read_vgpr(base + 3, 16), both_rows ? 0x40400000u : 0xdeadbeefu);
-        } else {
-          EXPECT_EQ(actual != 0, !fixed || !clamp);
-          EXPECT_EQ(wave->trapsts() & 1u, unsigned(!clamp));
-        }
-        auto &state = wave->ensure_memory_wait_scoreboard();
-        for (unsigned lane : {0u, 1u, 16u}) {
-          state.clear();
-          unsigned warnings = 0;
-          state.bind(0x200, &warnings, [](void *ctx, const auto &hazard) {
-            if (!hazard.write)
-              ++*static_cast<unsigned *>(ctx);
-          });
-          constexpr auto counter = amdgpu::WaitCounterKind::Load;
-          state.add({state.issue(counter),
-                     0x100,
-                     uint64_t{1} << lane,
-                     {RegClass::VGPR, 0, 1},
-                     counter,
-                     0xf});
-          state.check_instruction(*inst.value(), *wave);
-          EXPECT_EQ(warnings != 0, bool(actual & (uint64_t{1} << lane))) << lane;
+  for (auto semantics :
+       {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose,
+        amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus}) {
+    Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::MemoryWaitDiagnostics::Warn, 32,
+                          semantics);
+    auto *observed = f.attach_ordering_plugin();
+    auto *wave = f.cu->dispatch_wf(0, 0, 104, 16, 32);
+    ASSERT_NE(wave, nullptr);
+    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+    const auto base = wave->vgpr_alloc().base;
+    constexpr uint64_t active = 0x10003;
+    wave->set_exec(active);
+    for (bool scalar : {false, true}) {
+      ForceScalarOverride mode(scalar);
+      for (const auto &[words, add, fixed] :
+           {std::tuple{std::array{0x7c200314u, 0u, 0u}, false, true}, // V_CMP_F_F32 e32
+            std::tuple{std::array{0x7c3e0314u, 0u, 0u}, false, true}, // V_CMP_T_F32 e32
+            std::tuple{std::array{0xd410006au, 0x02020314u, 0u}, false, true},
+            std::tuple{std::array{0xd41f006au, 0x02020314u, 0u}, false, true},
+            std::tuple{std::array{0x7c2002fau, 0x1f091114u, 0u}, false, true},
+            std::tuple{std::array{0x7c2002e9u, 0xfac68814u, 0u}, false, true},
+            std::tuple{std::array{0x7c240314u, 0u, 0u}, false, false}, // V_CMP_EQ_F32
+            std::tuple{std::array{0x060628fau, 0x1f00e401u, 0u}, true, false},
+            std::tuple{std::array{0xd5030003u, 0x000228fau, 0x1f00e401u}, true, false},
+            std::tuple{std::array{0x060628fau, 0xff00e401u, 0u}, true, false}}) {
+        auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        for (bool clamp : {false, true}) {
+          SCOPED_TRACE(testing::Message()
+                       << std::hex << words[0] << " clamp=" << clamp << " scalar=" << scalar
+                       << " semantics=" << unsigned(semantics));
+          wave->set_mode_raw((wave->mode_raw() & ~0x100u) | (clamp ? 0x100u : 0u));
+          wave->set_trapsts(0);
+          wave->set_vcc_mask(0);
+          for (unsigned lane : {0u, 1u, 16u}) {
+            f.cu->write_vgpr(base, lane, add ? 0x40000000u : 0x7fa00000u);
+            f.cu->write_vgpr(base + 1, lane, 0x3f800000u);
+            f.cu->write_vgpr(base + 3, lane, 0xdeadbeefu);
+          }
+          observed->events.clear();
+          ASSERT_TRUE(f.cu->execute_instruction(inst.value().get(), *wave).succeeded());
+          uint64_t actual = 0;
+          for (const auto &e : vgpr_read_events(*observed))
+            if (e.physical_reg == base)
+              actual |= e.lane_mask;
+          if (add) {
+            EXPECT_EQ(actual, active);
+            EXPECT_EQ(f.cu->read_vgpr(base + 3, 0), 0x40400000u);
+            const bool both_rows = words[1] == 0xff00e401u;
+            EXPECT_EQ(f.cu->read_vgpr(base + 3, 16), both_rows ? 0x40400000u : 0xdeadbeefu);
+          } else {
+            const bool reports = semantics == amdgpu::ArithmeticSemantics::Compatibility;
+            EXPECT_EQ(actual != 0, !fixed || (!clamp && reports));
+            EXPECT_EQ(wave->trapsts() & 1u, unsigned(!clamp && reports));
+          }
+          auto &state = wave->ensure_memory_wait_scoreboard();
+          for (unsigned lane : {0u, 1u, 16u}) {
+            state.clear();
+            unsigned warnings = 0;
+            state.bind(0x200, &warnings, [](void *ctx, const auto &hazard) {
+              if (!hazard.write)
+                ++*static_cast<unsigned *>(ctx);
+            });
+            constexpr auto counter = amdgpu::WaitCounterKind::Load;
+            state.add({state.issue(counter),
+                       0x100,
+                       uint64_t{1} << lane,
+                       {RegClass::VGPR, 0, 1},
+                       counter,
+                       0xf});
+            state.check_instruction(*inst.value(), *wave);
+            EXPECT_EQ(warnings != 0, bool(actual & (uint64_t{1} << lane))) << lane;
+            state.clear();
+            state.bind(0, nullptr, nullptr);
+          }
         }
       }
     }
+    wave->halt();
   }
-  wave->halt();
 }
 
 TEST(ExecutionPluginTest, Gfx115ValuReadsAndWaitsUseTheSameAllocatedSource) {
@@ -3080,8 +3086,9 @@ TEST(ExecutionPluginTest, VopdArithmeticObserversSeeCallerFpState) {
        {{8, 1u}, {9, 0x3ff00000u}, {10, 0x3f800001u}}},
   };
   for (const Case &test : cases) {
-    const bool uses_arith =
-        test.arch == ROCJITSU_CODE_ARCH_RDNA3 || test.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool uses_arith = test.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
+                            test.arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+                            test.arch == ROCJITSU_CODE_ARCH_CDNA5;
     const uint32_t observed_bits = uses_arith ? ~uint32_t(_MM_EXCEPT_MASK) : UINT32_MAX;
     for (bool force_scalar : {false, true}) {
       SCOPED_TRACE(

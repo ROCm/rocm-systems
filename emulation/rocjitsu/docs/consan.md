@@ -284,7 +284,7 @@ were safe.
 ## How to use
 
 This example runs a **gfx1250 wave32** assembly fixture with 64 threads in one
-workgroup through the rocJitsu simulator; no physical gfx1250 GPU is required.
+workgroup through the rocjitsu simulator; no physical gfx1250 GPU is required.
 The AMDHSA code-object-v5 image, entry, target, and wave mode must match the
 simulator configuration. A runner option does not change an image's wave mode.
 
@@ -483,7 +483,7 @@ A new analysis primarily extends **compiler facts/probes and offline diagnosis**
 together. Define its question, scope, required evidence, and behavior under loss:
 
 - **Compiler:** select operations and lower probes while preserving guest state
-  and executing each original operation once. Reuse rocJitsu's code-object
+  and executing each original operation once. Reuse rocjitsu's code-object
   parsing, ISA decoders/builders, and ELF rewriting/relocation through the
   [shared DBI machinery](dbi-design.md).
 - **Offline analyzer:** qualify the saved evidence and implement checks,
