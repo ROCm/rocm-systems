@@ -19,7 +19,7 @@ To use external resources in HIP, you typically follow these steps:
 - Use external resources as if they were created in HIP
 - Destroy the HIP resource object to clean up
 
-Semaphore Functions
+Semaphore functions
 ===============================================================================
 
 Semaphore functions are essential for synchronization in parallel computing.
@@ -32,7 +32,7 @@ of concurrent processes.
 
 External semaphore functions can be used in HIP as described in :ref:`external_resource_interoperability_reference`.
 
-Memory Functions
+Memory functions
 ===============================================================================
 
 HIP external memory functions focus on the efficient sharing and management of
