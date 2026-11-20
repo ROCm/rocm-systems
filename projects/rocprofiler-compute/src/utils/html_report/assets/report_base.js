@@ -192,7 +192,7 @@
         swatch.style.backgroundColor = item.color || "#888888";
 
         var label = document.createElement("span");
-        label.className = "report-panel-name";
+        label.className = "report-panel-name report-kernel-name";
         label.textContent = item.label;
 
         action.appendChild(swatch);
@@ -278,6 +278,7 @@
 
   window.HtmlReport = {
     readModel: readModel,
+    clamp: clamp,
     initTheme: initTheme,
     createKernelList: createKernelList,
   };

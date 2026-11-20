@@ -7,8 +7,6 @@ MI200 (gfx90a) tests run through the ``analyze`` CLI and assert that roofline
 HTML is generated, including the per-datatype VALU/MFMA legend.
 """
 
-import json
-import re
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -17,23 +15,13 @@ from pathlib import Path
 import common
 import pytest
 
+from roofline.roofline_html import MODEL_ID
 from tests.integration import common as integration_common
 
 config = {}
 config["cleanup"] = True
 
 roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
-
-
-def embedded_roofline_model(document: str) -> dict:
-    """Parse the JSON model from a standalone roofline document."""
-    match = re.search(
-        r'<script id="roofline-model" type="application/json">(.*?)</script>',
-        document,
-        re.DOTALL,
-    )
-    assert match is not None
-    return json.loads(match.group(1))
 
 
 # Roofline HTML generation
@@ -62,7 +50,7 @@ def test_analyze_generates_roofline_html(
 
         html_text = html_files[0].read_text(encoding="utf-8")
         assert 'id="roofline-precision-btn"' in html_text
-        model = embedded_roofline_model(html_text)
+        model = common.embedded_model(html_text, MODEL_ID)
         assert "FP32" in model["precisions"]
         assert model["frame"] == {
             "x": [0.01, 1000.0],

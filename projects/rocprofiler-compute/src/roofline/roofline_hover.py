@@ -6,19 +6,9 @@
 import html
 from typing import NamedTuple, Optional
 
-KERNEL_NAME_FONT_FAMILY = "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+from utils.html_report.report_shell import KERNEL_NAME_FONT_FAMILY
 
 _HOVER_WRAP_WIDTH = 44
-
-
-def truncate_kernel_name(name: str) -> str:
-    """Cap a kernel name at 200 characters so a pathological name can't blow
-    up the tooltip."""
-    max_length = 200
-    suffix = "..."
-    if len(name) <= max_length:
-        return name
-    return name[: max_length - len(suffix)] + suffix
 
 
 def wrap_hover_name(name: str) -> str:
