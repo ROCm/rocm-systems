@@ -1,0 +1,475 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# HIP test intended-coverage model.
+#
+# This file records the coverage *dimensions* HIP testing intends to hold and
+# maps each risk-weighted coverage class to the concrete suites that cover it
+# today. It is a companion to test_inventory.yaml: the inventory records what
+# exists; this model records the axes, risk classes, and cross-axis checks the
+# suites are meant to satisfy. Every `current_inventory` value is an id defined
+# in test_inventory.yaml; no suite is invented here.
+#
+# Coverage axes are deliberately coarse. `api_surface` groups the public HIP
+# API into broad surfaces (device/context management map onto runtime/driver;
+# occupancy and device-side primitives map onto kernel_launch; pools, VMM, and
+# texture resources map onto memory). The precise domain is named in each
+# class `intent`.
+#
+# All evidence paths are relative to this component directory (projects/hip-tests).
+# This model does NOT claim exhaustive Cartesian coverage: the classes name the
+# dimensions that materially change behavior, and the pairwise_checks are review
+# and measurement priorities, not a guarantee that every pair is enumerated.
+#
+# risk:        high | medium | low  - review and remediation priority.
+# gap_status:  free-form, e.g. covered_dual_tier (a contract invariant plus a
+#              functional suite), contract_only, no_contract_tier,
+#              capability_gated, environment_gated, distributed_classification_open,
+#              informational_only.
+
+schema_version: 1
+component: hip-tests
+
+coverage_model:
+  axes:
+    - id: api_surface
+      source: catch/contract/CMakeLists.txt and HIP headers
+      classes: [runtime, driver, memory, stream_event, kernel_launch, graph, module, rtc, interop]
+    - id: behavior
+      classes: [success, invalid_input, sticky_error, lifecycle, synchronization, data_integrity]
+    - id: execution_context
+      classes: [host_only, single_gpu, multi_gpu, multiprocess]
+      # Host-only harness coverage is modeled explicitly below; other host-side
+      # checks can also accompany device-facing single_gpu suites.
+    - id: environment
+      classes: [amd_linux, amd_windows, amd_wsl, nvidia_backend, graphics_capable, sanitizer]
+      # Per-OS AMD platform values are tracked per suite in test_inventory.yaml
+      # (execution.platforms); the coverage model audits environment only where it
+      # changes behavior (nvidia_backend, graphics_capable, sanitizer).
+      informational_classes: [amd_linux, amd_windows, amd_wsl]
+    - id: cadence
+      classes: [pr, nightly, release, on_demand]
+      # No inventory suite currently declares a nightly or release cadence: the
+      # actual cadences any suite runs on are PR and on-demand (see the "Actual
+      # cadence and gating" table in TESTING.md). nightly/release therefore remain
+      # declared vocabulary, not yet an audited claim, and are marked
+      # informational below. TESTING.md's per-tier "Testing strategy and layers"
+      # prose is kept conservative to match: it describes each tier only with the
+      # PR/on-demand cadences the inventory backs, and tools/check_testing_docs.py
+      # (cadence-prose check) guards that section against reintroducing an
+      # unaudited nightly/release per-tier cadence. The dedicated "## Nightly
+      # validation" / "## Release validation" sections stay out of that scope -
+      # they describe broader external validation flows, not a per-tier build
+      # cadence.
+      informational_classes: [nightly, release]
+    - id: architecture
+      source: catch/unit/CMakeLists.txt platform guards and TESTING.md "Supported configurations"
+      classes: [cdna, rdna, any_gpu, nvidia_backend]
+    - id: capability
+      source: catch/contract/AUTHORING.md capability-skip conventions and per-record prerequisites in test_inventory.yaml
+      classes: [baseline, image_support, vmm_capable, peer_capable, graphics_capable, multi_device]
+    - id: integration_boundary
+      source: TEST_RESTRUCTURING.md integration classification (Section 1.3 and the open multi-GPU item)
+      classes: [in_process, cross_stream, cross_device, cross_process, external_producer]
+      # in_process is the implicit default boundary that most suites occupy; it is
+      # declared for completeness rather than audited as a distinct claim.
+      informational_classes: [in_process]
+
+  classes:
+
+    # -- test-harness surface -------------------------------------------------
+
+    - id: test_harness.level_selection
+      owner: HIP Runtime - Test Harness
+      axes: [behavior.invalid_input, execution_context.host_only, cadence.pr]
+      risk: low
+      intent: HIP_TEST_LEVEL selection and abort-on-invalid-level behavior are validated by host-only harness tests, so malformed or unsupported levels fail before device tests are selected.
+      expected_test_kinds: [unit]
+      current_inventory: [harness-test-level]
+      evidence:
+        - path: catch/hipTestMain/tests/CMakeLists.txt
+          claim: HipTestLevelUnitTest and HipTestLevelAbortTest are registered with hip_add_host_test and the hosttest label.
+        - path: catch/hipTestMain/hip_test_level.cc
+          claim: The host-test executables exercise this HIP_TEST_LEVEL resolution logic.
+      gap_status: host_only_harness_coverage
+
+    # -- memory surface -------------------------------------------------------
+
+    - id: memory.allocation_and_integrity
+      owner: HIP Runtime - Memory
+      axes: [api_surface.memory, behavior.success, behavior.invalid_input, behavior.data_integrity, execution_context.single_gpu, architecture.nvidia_backend]
+      risk: high
+      intent: Allocation, free, memset, host/pitched/managed memory, and advise invariants plus invalid-input and out-of-bounds behavior remain observable, with allocation round-trips and byte-level integrity preserved. The contract tier is intended to be portable to the HIP-over-CUDA (NVIDIA backend) architecture, where it is measured separately.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-memory, unit-memory, unit-oob]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: Memory, memset, host, pitched, managed, and advise domains are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: The functional memory group and out-of-bounds group are built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    - id: memory.transfer_integrity
+      owner: HIP Runtime - Memory
+      axes: [api_surface.memory, behavior.data_integrity, behavior.invalid_input, execution_context.single_gpu]
+      risk: high
+      intent: hipMemcpy family, async transfers, 2D/3D copies, and array copies preserve byte-for-byte round-trip and reject invalid direction or zero-byte misuse.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-transfer, unit-memory]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: Transfer, copy3d, and array copy domains are built under BUILD_CONTRACT_TESTS.
+        - path: catch/config/configs/contract.yaml
+          claim: Contract transfer and driver-memcpy cases carry level and semantic tags.
+      gap_status: contract_pins_invariant_functional_sweeps_in_unit_memory
+
+    - id: memory.pools_and_virtual_memory
+      owner: HIP Runtime - Memory
+      axes: [api_surface.memory, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu, capability.vmm_capable]
+      risk: high
+      intent: Memory-pool lifecycle and access plus virtual-memory reserve/map/unmap invariants remain observable with explicit capability gating; unsupported outcomes are accepted rather than failed.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-memory-pool-vmm, unit-vmm]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: memory_pool*, mem_location_pool, mempool_shareable_handle, vmm, and vmm_handle are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: virtualMemoryManagement is built under BUILD_UNIT_TESTS.
+      gap_status: capability_gated
+
+    - id: memory.texture_sampling
+      owner: HIP Runtime - Texture/Surface
+      axes: [api_surface.memory, behavior.data_integrity, behavior.invalid_input, capability.image_support]
+      risk: medium
+      intent: Texture object and reference query/bind invariants and sampled-value integrity, with texture resources modeled under the memory surface.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-texture, unit-texture-surface]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: texture, driver_texture_object, texture_reference, and texture_reference_symbol are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: texture, surface, and channelDescriptor functional groups are built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    # -- stream/event surface -------------------------------------------------
+
+    - id: stream_event.ordering_and_synchronization
+      owner: HIP Runtime - Stream/Event
+      axes: [api_surface.stream_event, behavior.synchronization, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu, integration_boundary.cross_stream]
+      risk: high
+      intent: Stream and event creation, properties, callbacks, CU masks, stream-ordered memory ops, and cross-stream or host synchronization remain observable and correctly ordered.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-stream-event, unit-stream-event, unit-multithread-sync]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: stream_event and related stream domains are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: stream, event, streamperthread, multiThread, and synchronization groups are built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    # -- kernel/launch surface ------------------------------------------------
+
+    - id: kernel_launch.configuration_and_execution
+      owner: HIP Runtime - Kernel Launch
+      axes: [api_surface.kernel_launch, behavior.success, behavior.invalid_input, execution_context.single_gpu]
+      risk: high
+      intent: Kernel object and function attributes, call-config, kernel launch, and driver launch-ex produce correct results and reject invalid launch configuration.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-kernel-launch, unit-kernel-launch]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: kernel, call_config, func_attributes, kernel_launch, and driver_launch_ex are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: kernel, executionControl, launchBounds, and executionContext groups are built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    - id: kernel_launch.occupancy_bounds
+      owner: HIP Runtime - Kernel Launch
+      axes: [api_surface.kernel_launch, behavior.success, behavior.invalid_input]
+      risk: medium
+      intent: Occupancy calculator, extended, and variable-shared-memory queries return values within documented bounds and reject invalid input.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-occupancy, unit-occupancy]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: occupancy, occupancy_ext, and occupancy_variable are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: The occupancy functional group is built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    - id: kernel_launch.device_side_correctness
+      owner: HIP Runtime - Device Libraries
+      axes: [api_surface.kernel_launch, behavior.data_integrity, execution_context.single_gpu, architecture.any_gpu, architecture.cdna, architecture.rdna]
+      risk: medium
+      intent: Device-side math, atomics, warp and sync primitives, complex and vector types, and device printf produce numerically correct results when launched; these run through kernels and have no host contract surface. Wavefront-sensitive primitives (warp, sync, atomics) must stay correct across both CDNA (64-wide) and RDNA (configurable 32/64) architectures.
+      expected_test_kinds: [functional]
+      current_inventory: [unit-device-libraries, unit-printf]
+      evidence:
+        - path: catch/unit/CMakeLists.txt
+          claim: math, atomics, warp, syncthreads, threadfence, complex, vector_types, deviceLib, and printf groups are built under BUILD_UNIT_TESTS.
+      gap_status: no_contract_tier
+
+    # -- graph surface --------------------------------------------------------
+
+    - id: graph.lifecycle_and_error_paths
+      owner: HIP Runtime - Graph
+      axes: [api_surface.graph, behavior.lifecycle, behavior.invalid_input, behavior.synchronization, execution_context.single_gpu]
+      risk: high
+      intent: Graph creation, capture, node types, update, clone, child graphs, host nodes, exec lifecycle, and invalid-state behavior remain observable and isolated.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-graph, unit-graph]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: The graph and graph_* node domains plus capture and driver_graph_node are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: The graph functional group is built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    # -- module/RTC surface ---------------------------------------------------
+
+    - id: module.loader_and_jit
+      owner: HIP Runtime - Module/Loader
+      axes: [api_surface.module, behavior.success, behavior.invalid_input, behavior.lifecycle]
+      risk: medium
+      intent: Module load file/ex/exec, JIT link, and library load produce loadable symbols and launches and reject malformed code objects.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-module-loader, unit-module-loader]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: module, module_load_ex, module_load_file, module_exec, jit_link, library, and library_file are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: module, dynamicLoading, and library groups are built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    - id: rtc.runtime_compilation
+      owner: HIP Runtime - Module/Loader
+      axes: [api_surface.rtc, behavior.success, behavior.invalid_input, execution_context.single_gpu]
+      risk: medium
+      intent: HIPRTC program creation, compilation, name expression, and link paths compile and execute correctly; there is no contract-tier counterpart today.
+      expected_test_kinds: [functional]
+      current_inventory: [unit-rtc]
+      evidence:
+        - path: catch/unit/CMakeLists.txt
+          claim: The rtc functional group is built under BUILD_UNIT_TESTS.
+      gap_status: no_contract_tier
+
+    # -- runtime/driver management and errors ---------------------------------
+
+    - id: runtime.device_management
+      owner: HIP Runtime - Device/Context
+      axes: [api_surface.runtime, behavior.lifecycle, behavior.invalid_input, execution_context.single_gpu]
+      risk: high
+      intent: Device enumeration and identity, configuration, reset, and lifecycle invariants remain observable; device reset leaves the device usable.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-device, unit-device-context]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: device, device_identity, device_config, device_lifecycle, device_reset, device_texture_query, and green_context are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: The device functional group is built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    - id: runtime.services_and_entry_points
+      owner: HIP Runtime - Core Services
+      axes: [api_surface.runtime, behavior.success, behavior.invalid_input]
+      risk: medium
+      intent: Runtime init and version, extension, logging, profiler-control, and driver entry-point lookup invariants remain observable.
+      expected_test_kinds: [contract]
+      current_inventory: [contract-runtime-services]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: runtime, extension, logging, profiler, and driver_entry_point are built under BUILD_CONTRACT_TESTS.
+      gap_status: contract_only
+
+    - id: runtime.error_reporting
+      owner: HIP Runtime - Error Handling
+      axes: [api_surface.runtime, behavior.sticky_error, behavior.invalid_input]
+      risk: high
+      intent: Runtime and driver error reporting preserves sticky versus cleared semantics and error-string and name lookups.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-error, unit-error-handling]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: error_api and driver_error are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: The errorHandling functional group is built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    - id: driver.context_management
+      owner: HIP Runtime - Device/Context
+      axes: [api_surface.driver, behavior.lifecycle, behavior.invalid_input]
+      risk: medium
+      intent: Driver context creation, mutation, and configuration invariants and invalid-state behavior, modeled under the driver API surface.
+      expected_test_kinds: [contract, functional]
+      current_inventory: [contract-context, unit-device-context]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: context, context_mutation, and context_config are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: The context functional group is built under BUILD_UNIT_TESTS.
+      gap_status: covered_dual_tier
+
+    # -- interop and multi-GPU ------------------------------------------------
+
+    - id: interop.import_and_ipc
+      owner: HIP Runtime - Interop
+      axes: [api_surface.interop, behavior.invalid_input, behavior.lifecycle, execution_context.multiprocess, capability.graphics_capable, integration_boundary.cross_process, integration_boundary.external_producer]
+      risk: medium
+      intent: Graphics interop, external-resource import, and IPC handle exchange import correctly or reject cleanly when producers or a graphics environment are absent.
+      expected_test_kinds: [contract, functional, integration]
+      current_inventory: [contract-interop, unit-interop-graphics, integration-multiprocess]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: graphics_interop, external_resource, and ipc are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: vulkan_interop and gl_interop are built under BUILD_UNIT_TESTS within an AMD guard.
+      gap_status: environment_gated
+
+    - id: multi_gpu.peer_and_cooperative_launch
+      owner: HIP Runtime - Multi-GPU
+      axes: [api_surface.kernel_launch, execution_context.multi_gpu, behavior.success, behavior.data_integrity, capability.multi_device, capability.peer_capable, integration_boundary.cross_device]
+      risk: high
+      intent: Peer query, access, and copy, cooperative-groups launch and sync, and cross-device launch remain observable with clean single-GPU degradation; the execution-context classification of these cases is an open restructuring item.
+      expected_test_kinds: [contract, functional, integration]
+      current_inventory: [contract-peer, contract-multi-device-launch, unit-cooperative-multigpu]
+      evidence:
+        - path: catch/contract/CMakeLists.txt
+          claim: peer_query, peer_access, peer_copy, and multi_device_launch are built under BUILD_CONTRACT_TESTS.
+        - path: catch/unit/CMakeLists.txt
+          claim: cooperativeGrps and p2p are built under BUILD_UNIT_TESTS.
+      gap_status: distributed_classification_open
+
+  # Pairwise priorities. Each entry pairs two axis.class dimensions that
+  # materially change behavior and names the suites that currently exercise the
+  # pair. These are review and measurement priorities - not an assertion that
+  # every pair is exhaustively enumerated, and not a Cartesian product of the
+  # axes above. `status: review_priority` marks every entry as such.
+  pairwise_checks:
+
+    # API/domain x behavior
+    - id: memory_x_data_integrity
+      category: api_x_behavior
+      pair: [api_surface.memory, behavior.data_integrity]
+      status: review_priority
+      priority: high
+      rationale: Transfer and copy round-trips must preserve bytes across sizes and directions, not only return success.
+      current_inventory: [contract-transfer, unit-memory]
+      gap_status: covered_dual_tier
+    - id: stream_event_x_synchronization
+      category: api_x_behavior
+      pair: [api_surface.stream_event, behavior.synchronization]
+      status: review_priority
+      priority: high
+      rationale: Ordering and completion signals must hold under concurrency, not just in single-threaded sequence.
+      current_inventory: [contract-stream-event, unit-stream-event, unit-multithread-sync]
+      gap_status: covered_dual_tier
+    - id: runtime_x_sticky_error
+      category: api_x_behavior
+      pair: [api_surface.runtime, behavior.sticky_error]
+      status: review_priority
+      priority: high
+      rationale: Sticky-versus-cleared error semantics are a recurring hazard and must be asserted explicitly.
+      current_inventory: [contract-error, unit-error-handling]
+      gap_status: covered_dual_tier
+    - id: graph_x_lifecycle
+      category: api_x_behavior
+      pair: [api_surface.graph, behavior.lifecycle]
+      status: review_priority
+      priority: high
+      rationale: Instantiate, launch, and teardown must stay isolated so a graph does not leak state into later work.
+      current_inventory: [contract-graph, unit-graph]
+      gap_status: covered_dual_tier
+    - id: kernel_launch_x_invalid_input
+      category: api_x_behavior
+      pair: [api_surface.kernel_launch, behavior.invalid_input]
+      status: review_priority
+      priority: medium
+      rationale: Invalid launch configuration must be rejected with a stable error rather than undefined behavior.
+      current_inventory: [contract-kernel-launch]
+      gap_status: contract_only
+
+    # API/domain x environment
+    - id: interop_x_graphics_capable
+      category: api_x_environment
+      pair: [api_surface.interop, environment.graphics_capable]
+      status: review_priority
+      priority: medium
+      rationale: OpenGL and Vulkan import paths only run where a graphics-capable environment is configured and are AMD-gated.
+      current_inventory: [contract-interop, unit-interop-graphics]
+      gap_status: environment_gated
+    - id: memory_x_nvidia_backend
+      category: api_x_environment
+      pair: [api_surface.memory, environment.nvidia_backend]
+      status: review_priority
+      priority: medium
+      rationale: Contract memory invariants are intended to be portable to the HIP-over-CUDA backend, which must be measured separately.
+      current_inventory: [contract-memory]
+      gap_status: contract_portable_backend_measurement_pending
+    - id: memory_x_sanitizer
+      category: api_x_environment
+      pair: [api_surface.memory, environment.sanitizer]
+      status: review_priority
+      priority: medium
+      rationale: Out-of-bounds coverage is disabled under ASAN, so signal-preserving rejection differs between sanitizer and non-sanitizer builds.
+      current_inventory: [unit-oob]
+      gap_status: environment_gated
+
+    # graph / module / RTC x execution context
+    - id: graph_x_single_gpu
+      category: integration_x_execution_context
+      pair: [api_surface.graph, execution_context.single_gpu]
+      status: review_priority
+      priority: medium
+      rationale: Graph execution must be observable and isolated on a single device before multi-device graph behavior is considered.
+      current_inventory: [contract-graph, unit-graph]
+      gap_status: covered_dual_tier
+    - id: module_x_single_gpu
+      category: integration_x_execution_context
+      pair: [api_surface.module, execution_context.single_gpu]
+      status: review_priority
+      priority: low
+      rationale: Loader and JIT paths must load and launch correctly on a single device.
+      current_inventory: [contract-module-loader, unit-module-loader]
+      gap_status: covered_dual_tier
+    - id: rtc_x_single_gpu
+      category: integration_x_execution_context
+      pair: [api_surface.rtc, execution_context.single_gpu]
+      status: review_priority
+      priority: medium
+      rationale: Runtime-compiled kernels must execute correctly on the device, and no contract tier covers this path.
+      current_inventory: [unit-rtc]
+      gap_status: no_contract_tier
+    - id: kernel_launch_x_multi_gpu
+      category: integration_x_execution_context
+      pair: [api_surface.kernel_launch, execution_context.multi_gpu]
+      status: review_priority
+      priority: high
+      rationale: Cooperative and cross-device launch depend on runner topology and need explicit multi-GPU classification.
+      current_inventory: [contract-multi-device-launch, unit-cooperative-multigpu, contract-peer]
+      gap_status: distributed_classification_open
+
+    # capability-gated paths x cadence
+    - id: vmm_capable_x_pr_cadence
+      category: capability_x_cadence
+      pair: [capability.vmm_capable, cadence.pr]
+      status: review_priority
+      priority: medium
+      rationale: VMM-capable pool, virtual-memory, and shareable-handle paths run on PR cadence but only assert behavior where the driver capability exists; elsewhere the unsupported outcome is accepted.
+      current_inventory: [contract-memory-pool-vmm, unit-vmm]
+      gap_status: capability_gated
+    - id: baseline_capability_x_on_demand_cadence
+      category: capability_x_cadence
+      pair: [capability.baseline, cadence.on_demand]
+      status: review_priority
+      priority: low
+      rationale: Baseline-capability kernel-launch performance microbenchmarks need no special device capability; they are an opt-in build mode run on demand as an informational signal, not a PR gate.
+      current_inventory: [performance-api]
+      gap_status: informational_only
+    - id: graphics_capable_x_on_demand_cadence
+      category: capability_x_cadence
+      pair: [capability.graphics_capable, cadence.on_demand]
+      status: review_priority
+      priority: low
+      rationale: Graphics-capable interop runs on demand only where a graphics-capable environment is configured, not on every PR.
+      current_inventory: [unit-interop-graphics]
+      gap_status: environment_gated

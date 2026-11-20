@@ -15,9 +15,27 @@ This document does not define testing strategy for ROCm math libraries, communic
 
 **Key architectural constraint that shapes testing:** HIP runtime behavior is mostly hardware- and driver-observable, so the highest-confidence tests are device-executed contract, functional, integration, and stress tests rather than CPU-only unit tests.
 
+## Companion documents
+
+`TESTING.md` is the current-state strategy: it describes the behavior that is validated today, the signals that gate changes, and the gaps that remain. It is deliberately concise. The detailed, evidence-backed facts live in companion documents so this guide does not drift into a generated case list:
+
+- [`test_inventory.yaml`](test_inventory.yaml) records **what exists** — the meaningful test groups, their source paths, build options, cadence, gating, and disposition, each tied to repository evidence.
+- [`test_coverage_model.yaml`](test_coverage_model.yaml) records the **intended coverage dimensions** — risk-weighted coverage classes across API surface, behavior, execution context, environment, and cadence, each mapped to the inventory records that cover it.
+- [`TESTING_INCIDENTS.md`](TESTING_INCIDENTS.md) preserves the **historical rationale** for non-obvious guards, skips, quarantines, and validation controls, so a control is not removed before the failure it prevents is understood.
+- [`TEST_RESTRUCTURING.md`](TEST_RESTRUCTURING.md) holds **proposals** — evidence-backed restructuring findings, migration criteria, and workstreams. It describes what is proposed, not what is enforced today.
+- The generated [`catch/TEST_PLAN.md`](catch/TEST_PLAN.md) is the derived per-case assertion inventory.
+
+### Evidence boundaries
+
+A few boundaries keep these documents honest and prevent over-claiming:
+
+- `catch/TEST_PLAN.md` is **generated** from the `@asserts:` annotations by `catch/tools/gen_test_plan.py`. It is not a hand-maintained duplicate inventory: cite it as evidence, never edit it by hand, and do not re-list its cases in this guide or in `test_inventory.yaml`.
+- CI lanes that run outside this repository — notably the TheRock build and HIP runtime test jobs — are **external** to hip-tests. The inventory marks them `external:` and links them to the evidence that does live here. A single static, build-free workflow runs in-repo and is **path-filtered** rather than always-on: `.github/workflows/hip-contract-coverage.yml`, whose one `contract-coverage` job runs two static checks — a contract-coverage check and a test-plan check (scoped by the workflow's `paths:` filter to pull requests touching the HIP headers, the contract tier, or the contract tooling). These checks are workflow-defined and path-filtered; whether either is merge-required is governed by branch-protection settings that are external to this repository and not asserted here. A change outside the workflow's filtered paths does not trigger it; in particular a docs-only change does not trigger the contract-coverage workflow. The testing-documentation set additionally has a dedicated consistency checker, `tools/check_testing_docs.py` with unit tests under `tools/tests/`, that validates these documents as a connected set (schema, vocabularies, disposition/retirement targets, repository-path pointers, incident references, and Markdown links). It is a **recommended local validation** to run before pushing changes to this documentation set; it is **not currently enforced by a CI gate** in this repository. Wiring it into CI is a planned integration, and this document will be updated to describe it as an enforced gate only once such a workflow exists.
+- An unsupported-capability skip (`HIP_SKIP_TEST`, YAML `unsupported:`) is **signal-preserving behavior, not passing coverage**. A cleanly skipped case records that a path was not exercised here; it does not count as a validated contract.
+
 ## Development workflow
 
-All tests are C++ built on Catch2 and discovered and run through CTest. Test executables are grouped by CMake `BUILD_*` options and by CTest labels generated from Catch2/YAML tags. Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` only sets the parameters (default `level_2`) and never filters; a Catch2 filter such as `[level_0]` or `ctest -L level_0` only selects tests and never changes the parameters. Set both to combine them, e.g. `HIP_TEST_LEVEL=level_0 ctest -L level_0`.
+All device and runtime tests — the contract, unit/functional, and performance tiers that exercise the HIP runtime on a GPU — are C++ built on Catch2 and discovered and run through CTest. (The in-repo documentation/governance tooling, notably `tools/check_testing_docs.py`, is a standalone Python check with its own `unittest` suite under `tools/tests/`; it is build-free and is not part of the Catch2/CTest harness.) Test executables are grouped by CMake `BUILD_*` options and by CTest labels generated from Catch2/YAML tags. Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` only sets the parameters (default `level_2`) and never filters; a Catch2 filter such as `[level_0]` or `ctest -L level_0` only selects tests and never changes the parameters. Set both to combine them, e.g. `HIP_TEST_LEVEL=level_0 ctest -L level_0`.
 
 | You changed | Run this before pushing | Needs GPU |
 |---|---|---|
@@ -26,6 +44,7 @@ All tests are C++ built on Catch2 and discovered and run through CTest. Test exe
 | YAML tags, levels, or config generation | Config validation and a focused CTest label using the generated tags | Usually yes |
 | Build or test harness logic | Configure, build, and run a small representative label such as `contract` or the touched feature label | Usually yes |
 | Performance-sensitive runtime path | Relevant functional tests plus the matching performance scenario when available | Yes |
+| Testing-documentation set (these docs, `test_inventory.yaml`, `test_coverage_model.yaml`, `tools/`) | `python tools/check_testing_docs.py` plus its unit tests `python -m unittest tools/tests/test_check_testing_docs.py` — run these locally as a recommended validation; not currently enforced by a CI gate | No |
 | Documentation-only change | Markdown/link checks and review against the current test framework | No |
 
 ## Testing strategy and layers
@@ -36,17 +55,17 @@ The suite lives under `projects/hip-tests/catch/`. Each layer is gated by a CMak
 |---|---|---|---|
 | Contract | `catch/contract/` | ON through `BUILD_CONTRACT_TESTS` | Small public-API invariants and coverage drift |
 | Unit / functional | `catch/unit/` plus related focused suites | ON through `BUILD_UNIT_TESTS` | Per-API and per-feature behavior |
-| Integration | Currently distributed across unit, interop, multi-GPU, multiprocess, RTC, loader, and graph areas | No separate top-level build option today; runs as a PR/nightly subset depending on platform and capability | Runtime interaction with the ROCm stack and real devices |
+| Integration | Currently distributed across unit, interop, multi-GPU, multiprocess, RTC, loader, and graph areas | No separate top-level build option today; runs as a PR or on-demand subset depending on platform and capability | Runtime interaction with the ROCm stack and real devices |
 | Performance | `catch/performance/` | OFF by default through `BUILD_PERF_TESTS` | Hot-path throughput and latency measurements |
 | Stress | `catch/stress/` | OFF by default through `BUILD_STRESS_TESTS` | Long-running and high-load behavior |
 
 ### Contract testing
 
-Contract tests live in `catch/contract/` and are built ON by default through `BUILD_CONTRACT_TESTS`. Each case pins the small, portable, device-only semantic guarantee of a public HIP API: successful round-trips, accepted-or-unsupported capability probes, invalid-input rejection, and sticky-error behavior. Cases carry an `@asserts: API - invariant` annotation directly above the case. `catch/tools/gen_test_plan.py` compiles these annotations into `catch/TEST_PLAN.md`, an inventory of what each case asserts. Every declared public API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The repository-root coverage drift gate in `.github/workflows/hip-contract-coverage.yml` runs the static coverage checker and the generated test-plan staleness check so new public HIP APIs do not land without a contract test or an explicit allowlist entry.
+Contract tests live in `catch/contract/` and are built ON by default through `BUILD_CONTRACT_TESTS`. Each case pins the small, portable, device-only semantic guarantee of a public HIP API: successful round-trips, accepted-or-unsupported capability probes, invalid-input rejection, and sticky-error behavior. Cases carry an `@asserts: API - invariant` annotation directly above the case. `catch/tools/gen_test_plan.py` compiles these annotations into `catch/TEST_PLAN.md`, an inventory of what each case asserts. Every declared public API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The repository-root workflow `.github/workflows/hip-contract-coverage.yml` is path-filtered: its single `contract-coverage` job runs two static checks — the coverage checker and the generated test-plan staleness check — on pull requests that touch the HIP headers, the contract tier, or the contract tooling, so new public HIP APIs do not land without a contract test or an explicit allowlist entry. The checks are workflow-defined and path-filtered, not always-on — a docs-only change does not trigger them; whether either is merge-required depends on branch-protection settings external to this repository.
 
 ### Unit and functional testing
 
-Unit and functional tests live under `catch/unit/` feature-area directories and are built ON by default through `BUILD_UNIT_TESTS`. They validate functional correctness of individual HIP APIs and features across many feature areas, including memory, stream, graph, module, texture, cooperative groups, peer-to-peer, RTC, and virtual memory: arguments accepted or rejected, values returned, and observable side effects such as data movement and synchronization. Tests use the in-tree `HIP_CHECK` and `HIP_ASSERT` helpers, are discovered with `catch_discover_tests`, and run under CTest as one process per case. Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` sets the parameters and a `[level_N]` Catch2 filter or `ctest -L level_N` selects the tests, independently of each other; `catch/config/configs/definitions.yaml` holds the generated per-level parameters and `catch/README.md` is the canonical reference for level semantics.
+Unit and functional tests live under `catch/unit/` feature-area directories and are built ON by default through `BUILD_UNIT_TESTS`. They validate functional correctness of individual HIP APIs and features across many feature areas, including memory, stream, graph, module, texture, cooperative groups, peer-to-peer, RTC, and virtual memory: arguments accepted or rejected, values returned, and observable side effects such as data movement and synchronization. Tests use the in-tree `HIP_CHECK` and `HIP_ASSERT` helpers and are discovered with `catch_discover_tests`, so under CTest each registered case runs in its own process; running a Catch2 test executable directly instead shares a single process across the cases it holds, which is the shared-process hazard that case-level isolation such as the sticky-error reset guards against (see [TI-002](TESTING_INCIDENTS.md#ti-002-sticky-error-reset-after-intentional-rejection)). Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` sets the parameters and a `[level_N]` Catch2 filter or `ctest -L level_N` selects the tests, independently of each other; `catch/config/configs/definitions.yaml` holds the generated per-level parameters and `catch/README.md` is the canonical reference for level semantics.
 
 ### Integration testing
 
@@ -58,7 +77,7 @@ Performance tests live in `catch/performance/` and are OFF by default through `B
 
 ### Stress and system-style validation
 
-Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRESS_TESTS`. They cover long-running and high-load soak behavior and are run on a periodic or release cadence rather than per PR. End-to-end, full-stack system-style scenarios are today expressed through the integration and stress areas rather than a distinct top-level system tier.
+Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRESS_TESTS`. They cover long-running and high-load soak behavior and are run on demand or on a periodic/scheduled cadence rather than per PR. End-to-end, full-stack system-style scenarios are today expressed through the integration and stress areas rather than a distinct top-level system tier.
 
 ## Pre-submit and CI gates
 
@@ -67,11 +86,15 @@ Stress tests live in `catch/stress/` and are OFF by default through `BUILD_STRES
 | Signal | Classification | Blocks merge? | Notes |
 |---|---|---|---|
 | TheRock build and HIP runtime test jobs | Trusted gate | Yes, when required by the PR policy | Builds ROCm packages and runs the configured HIP test set. |
-| Contract API coverage drift check | Trusted gate | Yes | Requires new public APIs to have a contract test or an explicit allowlist rationale. |
-| Generated test-plan staleness check | Trusted gate | Yes | Keeps `catch/TEST_PLAN.md` synchronized with `@asserts:` annotations. |
+| Contract API coverage drift check (a static check in the single `contract-coverage` job of `hip-contract-coverage.yml`) | Trusted, path-filtered workflow check | Workflow-defined and path-filtered; whether it is merge-required depends on branch-protection settings external to this repository (unknown here) | Path-filtered (workflow `paths:` filter), not always-on; a docs-only PR does not trigger it. Requires new public APIs to have a contract test or an explicit allowlist rationale. |
+| Generated test-plan staleness check (the second static check in the same `contract-coverage` job) | Trusted, path-filtered workflow check | Workflow-defined and path-filtered; branch-protection/merge-required status external to this repository (unknown here) | Path-filtered, not always-on. Keeps `catch/TEST_PLAN.md` synchronized with `@asserts:` annotations. |
 | Formatting and PR-description checks | Trusted gate | Yes, where configured | Maintains source and review hygiene. |
 | Performance and stress sweeps | Informational or scheduled gate, depending on workflow | Not universally on every PR | Used for longer-running validation and regression investigation. |
 | Flaky or quarantined cases | Unstable-flaky | No until fixed | Must have an owner, issue, and removal plan before becoming trusted signal. |
+
+The contract API coverage drift check and the generated test-plan staleness check are not two independent workflows: they are two static checks run by the single `contract-coverage` job in `.github/workflows/hip-contract-coverage.yml`, under one shared `paths:` filter. Listing them on separate rows reflects the two distinct signals, not two separately configured required gates.
+
+The testing-documentation set (these Markdown docs, the inventory/coverage YAML, and `tools/`) has a dedicated consistency checker, `tools/check_testing_docs.py` with unit tests under `tools/tests/`, but it is **not** in the table above because it is not an enforced CI gate today: it is a recommended local validation to run before pushing changes to this documentation set, and wiring it into CI is a planned integration rather than a current merge-blocking check. It is listed here, and in the development-workflow table above, so contributors can run it without implying an enforcement that does not yet exist.
 
 ### PR test classification
 
@@ -85,9 +108,58 @@ Disabling a test case should be rare and explicit. It is appropriate when a test
 
 ## Coverage
 
-Contract coverage is tracked statically: every declared public HIP API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The inventory of what each case asserts is generated into `catch/TEST_PLAN.md` by `catch/tools/gen_test_plan.py` from the `@asserts:` annotations, and the repository-root `.github/workflows/hip-contract-coverage.yml` enforces both the coverage drift check and the test-plan staleness check. Functional coverage is organized per feature area under `catch/unit/`, with the expectation that every public HIP API a change touches has at least one functional test exercising the changed behavior. Device-side code coverage is not fully captured by host coverage tools.
+Contract coverage is tracked statically: every declared public HIP API is either covered by a contract test or listed with a rationale in `catch/contract/uncovered_apis.txt`. The inventory of what each case asserts is generated into `catch/TEST_PLAN.md` by `catch/tools/gen_test_plan.py` from the `@asserts:` annotations, and the repository-root `.github/workflows/hip-contract-coverage.yml` runs both the coverage drift check and the test-plan staleness check as two static checks in its single `contract-coverage` job, path-filtered (scoped by its `paths:` filter to HIP-header, contract-tier, and contract-tooling changes rather than running on every PR); these checks are workflow-defined, and any merge-required status is governed by branch-protection settings external to this repository. Functional coverage is organized per feature area under `catch/unit/`, with the expectation that every public HIP API a change touches has at least one functional test exercising the changed behavior. Device-side code coverage is not fully captured by host coverage tools.
 
 Code coverage and test coverage are different signals. Code coverage measures which host-side lines or branches executed. Test coverage measures which public API contracts, configurations, capabilities, and regression scenarios were intentionally validated. HIP runtime confidence depends heavily on test coverage across real hardware and runtime configurations, not only on line coverage.
+
+### Inventory-informed coverage view
+
+The tables below summarize the inventory and coverage model at a glance. Each row points at an inventory record id in [`test_inventory.yaml`](test_inventory.yaml) or a coverage class id in [`test_coverage_model.yaml`](test_coverage_model.yaml) rather than restating source-file lists; consult those files for the authoritative paths, build options, and evidence. They are a reading aid, not a replacement for the companion documents.
+
+**Current test kinds**
+
+| Kind | Representative inventory records | Build option | Default cadence / gating |
+|---|---|---|---|
+| Contract | `contract-memory`, `contract-stream-event`, `contract-graph`, `contract-device`, `contract-runtime-services` (and the rest of the contract tier) | `BUILD_CONTRACT_TESTS` (ON) | PR / trusted |
+| Unit / functional | `unit-memory`, `unit-graph`, `unit-kernel-launch`, `unit-device-libraries`, `unit-rtc` (and the rest of the legacy unit tier) | `BUILD_UNIT_TESTS` (ON) | PR / trusted |
+| Integration (distributed) | `integration-multiprocess`, `unit-cooperative-multigpu`, `unit-interop-graphics` | Built via `BUILD_UNIT_TESTS`; no separate top-level tier today | PR or on-demand, platform/capability-gated |
+| Performance | `performance-api`, `performance-scenarios` | `BUILD_PERF_TESTS` (OFF) | On-demand / informational |
+| Stress | `stress-suite` | `BUILD_STRESS_TESTS` (OFF) | On-demand / informational |
+| Static governance (workflow) | `static-contract-coverage`, `static-test-plan` | n/a (two Python checks in one workflow job, no GPU/build) | PR (path-filtered) / trusted, in-repo |
+| Static governance (build-time) | `static-config-check`, `static-sources-check` | `ENABLE_YAML_TAGS` (ON); `check_hip_tests_config` / `check_hip_tests_sources` custom targets | Runs during any build; config check gates (fails the build), sources check warns by default (fails only under `THEROCK_REQUIRE_HIP_YAML_ENTRIES`) |
+
+**Major behavioral domains**
+
+| Coverage class | Tiers present | Inventory records | Status |
+|---|---|---|---|
+| `memory.allocation_and_integrity` | contract + functional | `contract-memory`, `unit-memory`, `unit-oob` | covered_dual_tier |
+| `stream_event.ordering_and_synchronization` | contract + functional | `contract-stream-event`, `unit-stream-event`, `unit-multithread-sync` | covered_dual_tier |
+| `graph.lifecycle_and_error_paths` | contract + functional | `contract-graph`, `unit-graph` | covered_dual_tier |
+| `kernel_launch.configuration_and_execution` | contract + functional | `contract-kernel-launch`, `unit-kernel-launch` | covered_dual_tier |
+| `runtime.error_reporting` | contract + functional | `contract-error`, `unit-error-handling` | covered_dual_tier |
+| `rtc.runtime_compilation` | functional only | `unit-rtc` | no_contract_tier |
+| `multi_gpu.peer_and_cooperative_launch` | contract + functional | `contract-peer`, `contract-multi-device-launch`, `unit-cooperative-multigpu` | distributed_classification_open |
+
+**Actual cadence and gating**
+
+| Cadence / gating | Inventory records | Notes |
+|---|---|---|
+| PR, trusted | Contract tier, legacy unit/functional tier, `integration-multiprocess`, `static-contract-coverage`, `static-test-plan`, `static-config-check` | Device suites run through external TheRock jobs; the `static-contract-coverage`/`static-test-plan` checks run in-repo as two checks in the single path-filtered `contract-coverage` workflow job (scoped to HIP-header, contract-tier, and contract-tooling changes, not docs-only PRs); `static-config-check` is instead a build-time hard gate — the `check_hip_tests_config` `ENABLE_YAML_TAGS` custom target that fails any build with a malformed YAML config — not a workflow job; merge-required status for all of these is governed by branch protection external to this repository |
+| Build-time, informational | `static-sources-check` | The `check_hip_tests_sources` `ENABLE_YAML_TAGS` custom target runs on every build and only warns when a source Catch2 case has no YAML config entry; it escalates to a hard build failure solely when `THEROCK_REQUIRE_HIP_YAML_ENTRIES` is set, and is not a per-PR workflow gate |
+| On-demand, informational | `performance-api`, `performance-scenarios`, `stress-suite`, `unit-interop-graphics` | Opt-in build modes or environment-gated lanes, not per-PR gates |
+| Capability- or environment-gated | `contract-memory-pool-vmm`, `unit-vmm`, `contract-peer`, `unit-cooperative-multigpu`, `unit-interop-graphics` | Skip cleanly when the driver capability, device topology, or graphics environment is absent |
+
+**Coverage gaps from the model**
+
+| Coverage class | `gap_status` | What it means |
+|---|---|---|
+| `kernel_launch.device_side_correctness`, `rtc.runtime_compilation` | no_contract_tier | Device-side primitive and HIPRTC paths have functional coverage only; no portable contract invariant pins them yet |
+| `runtime.services_and_entry_points` | contract_only | Covered by a contract invariant with no functional counterpart today |
+| `memory.pools_and_virtual_memory` | capability_gated | Asserted only where the driver capability exists; unsupported outcomes are accepted, not failed |
+| `interop.import_and_ipc` | environment_gated | Runs only where a graphics/producer environment is configured. Contract coverage (graphics-interop, external-resource, and IPC invariants in `contract-interop`) spans the AMD and NVIDIA backends per the inventory; only the AMD-only functional graphics portion (`unit-interop-graphics` Vulkan/OpenGL) is AMD-gated |
+| `multi_gpu.peer_and_cooperative_launch` | distributed_classification_open | Cases live in unit directories but are integration/multi-GPU by execution context; classification is an open review item |
+
+These statuses mirror the `gap_status` fields in [`test_coverage_model.yaml`](test_coverage_model.yaml); a gap here is a coverage shape to review, not a failing test. The narrative [Known gaps summary](#known-gaps-summary) below covers the current-state process gaps.
 
 ## Nightly validation
 
@@ -135,6 +207,15 @@ Use `isQuickLevel()` inside the test function to trim workload size at `level_0`
 | Device-side code coverage is not fully captured by host coverage tools | Medium | A high host coverage number can still miss device-only behavior | Contract, functional, integration, and stress tests execute behavior on real devices |
 | Flaky and quarantined tracking should keep converging toward owner plus issue plus expiry | Medium | Suppressed failures can age into permanent blind spots | Treat flaky/quarantined cases as unstable signal until each has a tracking issue and removal plan |
 | Sanitizer coverage of device-side paths is inherently partial and is not part of the default per-PR gate | Low | Memory or race issues can escape sanitizer lanes | Use sanitizers as an additional signal, not a replacement for device-executed tests |
+
+### Restructuring and migration references
+
+Restructuring is tracked as evidence, not as an assumed move. The inventory and coverage model record the current state; [`TEST_RESTRUCTURING.md`](TEST_RESTRUCTURING.md) records proposals. Concretely, the evidence shows:
+
+- **Legacy and restructured coverage coexist.** The contract tier pins portable public-API invariants while the legacy `catch/unit/` functional groups remain active for deeper, sweep-sized behavior. Records such as `unit-memory`, `unit-graph`, and `unit-stream-event` in [`test_inventory.yaml`](test_inventory.yaml) carry `disposition: review`, not `retire`; both tiers run today.
+- **Integration coverage is distributed.** There is no separate top-level integration build option. `integration-multiprocess`, `unit-cooperative-multigpu`, and `unit-interop-graphics` carry integration responsibility from inside the unit and multiproc directories rather than a dedicated tier.
+- **Multi-GPU classification remains a specific open review item.** `contract-multi-device-launch` and `unit-cooperative-multigpu` are cooperative/multi-device by execution context but live in single-device directories; coverage class `multi_gpu.peer_and_cooperative_launch` in [`test_coverage_model.yaml`](test_coverage_model.yaml) marks this `distributed_classification_open`. This documentation change does not move any test source.
+- **Retirement requires replacement evidence and owner review.** A suite is retired only when replacement records preserve the original oracle and meaningful prerequisites, provide equivalent or stronger coverage with CI evidence, and an owner approves. Until then the classification stays `review` and the legacy cases keep running; see the migration and retirement decision rules in [`TEST_RESTRUCTURING.md`](TEST_RESTRUCTURING.md).
 
 ## Why we test this way
 
