@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include <atomic>
+#include <thread>
 #include <vector>
 
 #include "suites/functional/signal_wait_multi.h"
@@ -181,4 +183,53 @@ void SignalWaitMultiTest::TestWaitAllReportsSatisfyingValues(void) {
   EXPECT_EQ(3, satisfying_values[0]);
   EXPECT_EQ(4, satisfying_values[1]);
   EXPECT_EQ(5, satisfying_values[2]);
+}
+
+/*
+ * Test Name: TestInterruptNotifyRaceStress
+ * Scope: Regression / Stress
+ *
+ * Purpose: Stress test for the race between StoreReleaseAndNotify and concurrent
+ * waiters registering in InterruptSignal::WaitRelaxed and Signal::WaitMultiple.
+ * Without the seq_cst fence pairing added in the fix, the notifier could observe
+ * InWaiting()==false while a waiter had already committed to sleeping, causing
+ * hsa_amd_signal_wait_any to hang indefinitely. QMCPACK (a Quantum Monte Carlo
+ * workload that exercises hipGraph and GPU signal completion paths heavily) was
+ * used as an application-level validation for this change.
+ *
+ * Expected Results: All iterations complete without hanging, satisfying_index is
+ * 0 (signals[0] satisfies), and the test finishes within timeout.
+ */
+void SignalWaitMultiTest::TestInterruptNotifyRaceStress(void) {
+  constexpr int kIterations = 10000;
+
+  hsa_signal_t signals[2];
+  ASSERT_EQ(HSA_STATUS_SUCCESS, CreateSignal(0, &signals[0]));
+  ASSERT_EQ(HSA_STATUS_SUCCESS, CreateSignal(0, &signals[1]));
+
+  // Producer rapidly alternates the signal value. The consumer uses
+  // hsa_amd_signal_wait_any with BLOCKED hint, exercising the interrupt-signal
+  // wait path and the internal StoreReleaseAndNotify wake mechanism.
+  std::atomic<bool> stop{false};
+  std::thread producer([&]() {
+    while (!stop.load(std::memory_order_relaxed)) {
+      hsa_signal_store_screlease(signals[0], 1);
+      hsa_signal_store_screlease(signals[0], 0);
+    }
+  });
+
+  hsa_signal_condition_t conds[2] = {HSA_SIGNAL_CONDITION_EQ, HSA_SIGNAL_CONDITION_EQ};
+  hsa_signal_value_t vals[2] = {1, 1};
+
+  for (int i = 0; i < kIterations; ++i) {
+    hsa_signal_store_relaxed(signals[0], 0);
+    hsa_signal_value_t sat_val = 0;
+    hsa_amd_signal_wait_any(2, signals, conds, vals, timeout_hint_,
+                            HSA_WAIT_STATE_BLOCKED, &sat_val);
+    ASSERT_EQ(1, sat_val) << "iteration " << i;
+  }
+
+  stop.store(true, std::memory_order_release);
+  hsa_signal_store_screlease(signals[0], 1);  // unblock producer's last iteration
+  producer.join();
 }

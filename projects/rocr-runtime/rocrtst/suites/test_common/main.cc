@@ -301,6 +301,13 @@ TEST(rocrtstFunc, Signal_Wait_All_Satisfying_Values) {
   RunCustomTestEpilog(&swm);
 }
 
+TEST(rocrtstFunc, Signal_Interrupt_Notify_Race_Stress) {
+  SignalWaitMultiTest swm;
+  if (!RunCustomTestProlog(&swm)) return;
+  swm.TestInterruptNotifyRaceStress();
+  RunCustomTestEpilog(&swm);
+}
+
 /* Temporary: Disable CU Masking until it is fixed */
 TEST(rocrtstFunc, DISABLED_CU_Masking) {
   CU_Masking sd;

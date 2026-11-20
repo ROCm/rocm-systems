@@ -2253,6 +2253,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             for (size_t e = 0; e < async_events_.Size(); e++) {
               hsa_signals[e]->WaitingInc();
             }
+            // Pairs with the fence in StoreReleaseAndNotify().
+            std::atomic_thread_fence(std::memory_order_seq_cst);
 
             // Re-check all signals after WaitingInc to close the race window
             for (size_t ri = 0; ri < async_events_.Size(); ri++) {
