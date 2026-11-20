@@ -12,6 +12,7 @@ Documentation for rocJPEG is available at
 ### Resolved issues
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
+* Fixed the build using no GPU targets when `AMDGPU_TARGETS` or `GPU_ARCHS` is set in the environment but empty. An empty value is now treated the same as an unset one and the default target list applies.
 
 ### Changed
 
