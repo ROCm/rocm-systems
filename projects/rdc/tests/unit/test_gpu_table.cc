@@ -22,9 +22,10 @@ THE SOFTWARE.
 
 // The flat GPU table in SmiUtils.cc and RDC's AMD SMI session, against the fake
 // AMD SMI functions below: a slot per GPU, a placeholder for a processor AMD SMI
-// cannot identify, the retries that fill placeholders in place, and the
-// session's reference count. SmiUtils.cc is compiled into this binary, so it
-// needs neither librdc nor a GPU.
+// cannot identify, the retries that fill placeholders in place, partition
+// instances, groups, and the session's reference count. SmiUtils.cc,
+// RdcGroupSettingsImpl.cc and RdcPartitionImpl.cc are compiled into this binary,
+// so it needs neither librdc nor a GPU.
 
 #include <gtest/gtest.h>
 
@@ -37,6 +38,8 @@ THE SOFTWARE.
 #include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
+#include "rdc_lib/impl/RdcGroupSettingsImpl.h"
+#include "rdc_lib/impl/RdcPartitionImpl.h"
 #include "rdc_lib/impl/SmiUtils.h"
 
 namespace {
@@ -103,6 +106,16 @@ amdsmi_processor_handle lookup(uint32_t index, amdsmi_status_t* status = nullptr
     *status = ret;
   }
   return ret == AMDSMI_STATUS_SUCCESS ? handle : nullptr;
+}
+
+// The entity index of partition instance `instance` of socket `socket`.
+uint32_t instance(uint32_t socket, uint32_t instance) {
+  rdc_entity_info_t info = {};
+  info.device_type = RDC_DEVICE_TYPE_GPU;
+  info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+  info.device_index = socket;
+  info.instance_index = instance;
+  return rdc_get_entity_index_from_info(info);
 }
 
 std::vector<bool> availability() {
@@ -214,6 +227,12 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   return AMDSMI_STATUS_SUCCESS;
 }
 
+// RdcPartitionImpl.cc calls this; no test here does.
+amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
+    amdsmi_processor_handle, amdsmi_accelerator_partition_profile_config_t*) {
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
 // Other helpers in SmiUtils.cc call these; no test here does.
 amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle, amdsmi_kfd_info_t*) {
   return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -295,6 +314,64 @@ TEST_F(GpuTable, RetryNeverGivesOneHandleToTwoIndexes) {
   g_sockets[1][0] = gpu(3);  // the listing now names GPU 3 at GPU 1's place
   EXPECT_EQ(lookup(1), nullptr);
   EXPECT_EQ(lookup(2), handle_of(3));
+}
+
+TEST_F(GpuTable, RetryFindsEachSlotByItsHandle) {
+  // GPU 0 is no longer listed and GPU 1 has its place now: GPU 0 is unavailable, GPU 1 reads.
+  g_sockets = {{gpu(1), gpu(2)}, {unknown(3)}};  // the placeholder keeps the table retrying
+  ASSERT_EQ(availability(), (std::vector<bool>{true, true, false}));
+  g_sockets[0] = {gpu(2)};
+  EXPECT_EQ(lookup(0), nullptr);
+  EXPECT_EQ(lookup(1), handle_of(2));
+  EXPECT_EQ(availability(), (std::vector<bool>{false, true, false}));
+  // GPU 1's slot has GPU 0's old place now, so it is partition instance 0 of socket 0.
+  EXPECT_EQ(lookup(instance(0, 0)), handle_of(2));
+}
+
+TEST_F(GpuTable, RetryGivesAPlaceholderOnlyItsOwnProcessor) {
+  // Another processor in the placeholder's place does not fill it.
+  g_sockets = {{gpu(1)}, {unknown(2)}};
+  ASSERT_EQ(availability(), (std::vector<bool>{true, false}));
+  g_sockets[1] = {gpu(5)};
+  EXPECT_EQ(lookup(1), nullptr);
+  EXPECT_EQ(availability(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(GpuTable, PartitionInstanceIsASlotOfTheTable) {
+  g_sockets = {{gpu(1), unknown(2), gpu(3)}, {gpu(4)}};
+  amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
+  EXPECT_EQ(lookup(instance(0, 0)), handle_of(1));
+  EXPECT_EQ(lookup(instance(0, 1), &status), nullptr);
+  EXPECT_EQ(status, AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(lookup(instance(0, 2)), handle_of(3));
+  EXPECT_EQ(lookup(instance(1, 0)), handle_of(4));
+  EXPECT_EQ(lookup(instance(0, 3), &status), nullptr);
+  EXPECT_EQ(status, AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
+  EXPECT_EQ(lookup(instance(2, 0), &status), nullptr);
+  EXPECT_EQ(status, AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
+}
+
+TEST_F(GpuTable, GroupKeepsAPartitionInstanceOfAnUnidentifiedGpu) {
+  // AMD SMI cannot identify either partition of the GPU on socket 0.
+  g_sockets = {{unknown(1), unknown(2)}, {gpu(3)}};
+  amd::rdc::RdcGroupSettingsImpl groups(std::make_shared<amd::rdc::RdcPartitionImpl>());
+  rdc_gpu_group_t group = 0;
+  ASSERT_EQ(groups.rdc_group_gpu_create("group", &group), RDC_ST_OK);
+  EXPECT_EQ(groups.rdc_group_gpu_add(group, instance(0, 1)), RDC_ST_OK);
+  EXPECT_EQ(groups.rdc_group_gpu_add(group, 0), RDC_ST_OK);
+  EXPECT_EQ(groups.rdc_group_gpu_add(group, instance(0, 2)), RDC_ST_NOT_FOUND)
+      << "socket 0 has no third processor";
+  rdc_entity_info_t odd = {};  // a physical role with an instance: a partition index
+  odd.device_type = RDC_DEVICE_TYPE_GPU;
+  odd.entity_role = RDC_DEVICE_ROLE_PHYSICAL;
+  odd.device_index = 9;
+  odd.instance_index = 1;
+  EXPECT_EQ(groups.rdc_group_gpu_add(group, rdc_get_entity_index_from_info(odd)), RDC_ST_NOT_FOUND)
+      << "there is no socket 9";
+  rdc_resource_profile_t profile = {};
+  EXPECT_EQ(amd::rdc::RdcPartitionImpl().rdc_instance_profile_get_impl(
+                instance(0, 1), RDC_ACCELERATOR_XCC, &profile),
+            RDC_ST_NOT_FOUND);
 }
 
 TEST_F(GpuTable, RetriesAtMostOncePerPeriod) {
