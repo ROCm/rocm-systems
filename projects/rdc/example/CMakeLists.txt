@@ -33,9 +33,6 @@ option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and au
 
 # Set compile flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
-    string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
-endif()
 set(CMAKE_CXX_FLAGS_DEBUG
     "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
     CACHE STRING
@@ -68,6 +65,11 @@ if(CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.4.0)
 endif()
 
 project(RDC_example)
+
+# CMAKE_SYSTEM_PROCESSOR is set by project(), so this check must follow it.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
+endif()
 
 # provides cmake_print_variables(VAR)
 include(CMakePrintHelpers)

@@ -61,9 +61,6 @@ set_property(
 
 # Set compile flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
-    string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
-endif()
 set(CMAKE_CXX_FLAGS_DEBUG
     "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
     CACHE STRING
@@ -130,15 +127,6 @@ option(RDC_BUILD_RACE_TESTS "Build the ThreadSanitizer race tests" OFF)
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
-    option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
-else()
-    option(BUILD_ESMI "Enable AMDSMI ESMI Library" OFF)
-endif()
-if(BUILD_ESMI)
-    add_definitions("-DENABLE_ESMI_LIB=1")
-endif()
-
 # Enable address sanitizer
 set(ADDRESS_SANITIZER_DEFAULT OFF)
 if(DEFINED ENV{ADDRESS_SANITIZER})
@@ -170,6 +158,17 @@ project(${RDC} VERSION "${VERSION_STRING}" HOMEPAGE_URL "https://github.com/Rade
 # Include CMAKE_INSTALL_* variables
 # this must go after project()
 include(GNUInstallDirs)
+
+# CMAKE_SYSTEM_PROCESSOR is set by project(), so these checks must follow it.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64")
+    string(APPEND CMAKE_CXX_FLAGS " -m64 -msse -msse2")
+    option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
+else()
+    option(BUILD_ESMI "Enable AMDSMI ESMI Library" OFF)
+endif()
+if(BUILD_ESMI)
+    add_definitions("-DENABLE_ESMI_LIB=1")
+endif()
 
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
@@ -247,6 +246,34 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(CMAKE_COMPILER_IS_GNUCC AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.4.0)
     message("Compiler version is " ${CMAKE_CXX_COMPILER_VERSION})
     message(FATAL_ERROR "Require at least gcc-5.4.0")
+endif()
+
+# With BUILD_TESTS off, RDC also builds against an AMD SMI built without E-SMI:
+# no executable links librdc, which rdcd loads lazily with dlopen, and rdcd then
+# exits at its first CPU field read. Stop here instead.
+if(BUILD_ESMI)
+    include(CMakePushCheckState)
+    include(CheckCXXSymbolExists)
+    cmake_push_check_state(RESET)
+    set(CMAKE_REQUIRED_DEFINITIONS -DENABLE_ESMI_LIB=1)
+    set(CMAKE_REQUIRED_INCLUDES ${AMD_SMI_INCLUDE_DIR})
+    set(CMAKE_REQUIRED_LIBRARIES amd_smi)
+    # Only this symbol has to resolve, not the libraries AMD SMI depends on.
+    set(CMAKE_REQUIRED_LINK_OPTIONS "LINKER:--allow-shlib-undefined")
+    # Check on every configure: the AMD SMI found can change.
+    unset(RDC_AMD_SMI_HAS_ESMI CACHE)
+    check_cxx_symbol_exists(amdsmi_get_cpu_socket_count "amd_smi/amdsmi.h" RDC_AMD_SMI_HAS_ESMI)
+    cmake_pop_check_state()
+    if(NOT RDC_AMD_SMI_HAS_ESMI)
+        message(
+            FATAL_ERROR
+            "The AMD SMI in ${AMD_SMI_LIB_DIR} does not provide amdsmi_get_cpu_socket_count: it "
+            "was most likely built without E-SMI, which the CPU fields need. Configure RDC with "
+            "-DBUILD_ESMI=OFF, or use an AMD SMI built with -DENABLE_ESMI_LIB=ON. "
+            "${CMAKE_BINARY_DIR}/CMakeFiles/CMakeConfigureLog.yaml (CMakeError.log before CMake "
+            "3.26) shows why the check failed."
+        )
+    endif()
 endif()
 
 message("Build Configuration:")

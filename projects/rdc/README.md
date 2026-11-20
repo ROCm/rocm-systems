@@ -203,6 +203,16 @@ If you prefer to build RDC from source, follow the steps below.
             cmake -B build -DBUILD_RUNTIME=OFF
             ```
 
+        - **Build RDC Without CPU Fields:**
+
+            On x86_64, RDC reads its CPU fields (`RDC_FI_CPU_*`) through the E-SMI support of AMD SMI by default. If the AMD SMI it finds was built without E-SMI, configuring RDC stops with an error. Use an AMD SMI built with `-DENABLE_ESMI_LIB=ON`, or build RDC without the CPU fields:
+
+            ```bash
+            cmake -B build -DBUILD_ESMI=OFF
+            ```
+
+            A build directory keeps the `BUILD_ESMI` value in its CMake cache. To read the CPU fields in one configured with `BUILD_ESMI=OFF`, pass `-DBUILD_ESMI=ON`.
+
 3. **Build and Install:**
 
     ```bash

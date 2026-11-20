@@ -18,6 +18,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci stats -j` labels each GPU by its ID, such as `GPU 3`, or `GPU g0.1` for partition 1 of GPU 0, instead of by its position in the job. The JSON keys follow, such as `gpu_3` and `gpu_g0.1`. A statistic without samples prints as `N/A` in the text output and as `null` in JSON, instead of zeros and a minimum of 18446744073709551615. PCIe standard deviations print with two decimals, like the other statistics.
 
+- On x86_64, configuring RDC stops with an error when the AMD SMI it finds was built without E-SMI. Configure with `-DBUILD_ESMI=OFF` to build RDC without the CPU fields.
+  - A build directory configured by RDC in ROCm 10.1.0 or 10.2.0 keeps `BUILD_ESMI=OFF` in its CMake cache. Configure it with `-DBUILD_ESMI=ON`, or use a new build directory.
+
 ### Resolved Issues
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
@@ -89,6 +92,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdcd` no longer crashes listing more than 128 (`RDC_MAX_NUM_DEVICES`) GPUs and GPU partitions; `rdc_device_get_all()` lists the first 128.
 
 - `rdci policy --reg` no longer uses a whole CPU core once rdcd goes away, and no longer reads freed memory as it exits. With a connection to rdcd, `rdc_policy_unregister()` and `rdc_disconnect()` now wait for a running policy callback to return, and `rdc_policy_register()` works again for a group that was unregistered; it used to return `RDC_ST_CONFLICT` for that group until the connection was closed.
+
+- RDC reads some of its CPU fields (`RDC_FI_CPU_*`) on x86_64. RDC in ROCm 10.1.0 and 10.2.0 was built without them, and every CPU field reported N/A.
+  - Most CPU fields, such as the socket energy and the CPU clocks, still report N/A. On CPUs that AMD SMI does not support, such as Intel CPUs, AMD SMI prints `ESMI not initialized; skipping CPU discovery` to stderr when RDC starts.
 
 ## RDC 1.4.0 for ROCm 10.2.0
 

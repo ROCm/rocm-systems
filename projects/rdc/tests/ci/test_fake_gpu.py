@@ -24,6 +24,7 @@ holds that lock. RDC CI runs it in its own pytest invocation.
 import fcntl
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -52,9 +53,30 @@ RDCD_LOCKS = ("/var/run/rdcd.lock", "/tmp/rdcd.lock")
 # fails until it does).
 DEFERRED_CRASHES: dict = {}
 
+# The calls of RDC's CPU fields, which librdc makes when built with E-SMI
+# (BUILD_ESMI, on by default on x86_64).
+CPU_APIS = (
+    "amdsmi_get_cpu_cclk_limit",
+    "amdsmi_get_cpu_cores_per_socket",
+    "amdsmi_get_cpu_family",
+    "amdsmi_get_cpu_fclk_mclk",
+    "amdsmi_get_cpu_hsmp_driver_version",
+    "amdsmi_get_cpu_hsmp_proto_ver",
+    "amdsmi_get_cpu_model",
+    "amdsmi_get_cpu_model_name",
+    "amdsmi_get_cpu_smu_fw_version",
+    "amdsmi_get_cpu_socket_c0_residency",
+    "amdsmi_get_cpu_socket_count",
+    "amdsmi_get_cpu_socket_current_active_freq_limit",
+    "amdsmi_get_cpu_socket_energy",
+    "amdsmi_get_cpu_socket_freq_range",
+    "amdsmi_get_cpu_socket_lclk_dpm_level",
+)
+
 # amdsmi_* calls RDC links that this module does not reach, with the reason.
 # The coverage test fails once one of them is reached, so the list stays true.
 UNREACHED_APIS = {
+    **dict.fromkeys(CPU_APIS, "no workload reads a CPU field"),
     "amdsmi_get_afids_from_cper": "needs CPER records; the fake reports none by default",
     "amdsmi_get_gpu_accelerator_partition_profile_config": "partition profile query",
     "amdsmi_get_gpu_compute_process_gpus": "needs processes; the fake reports none by default",
@@ -555,7 +577,7 @@ def test_embedded_start_read_stop(tools):
 # Every amdsmi_* call RDC makes: implemented by the fake, reached, and failing
 # ---------------------------------------------------------------------------
 REQUIRED_BINARIES = ("rdcd", "rdci", "librdc.so", "librdc_bootstrap.so")
-MIN_RDC_APIS = 40  # RDC references about 60; fewer means a binary was missed
+MIN_RDC_APIS = 40  # fewer than this means a binary was missed
 
 
 def _nm(path, defined):
@@ -597,6 +619,26 @@ def test_fake_exports_every_amdsmi_call_rdc_makes(tools):
     assert len(RDC_APIS) >= MIN_RDC_APIS, f"only {len(RDC_APIS)} amdsmi_* references found"
     missing = sorted(set(RDC_APIS) - _nm(tools[2], defined=True))
     assert not missing, f"the fake does not implement: {missing}"
+
+
+def test_rdc_makes_the_cpu_calls_on_x86_64():
+    """BUILD_ESMI is on by default on x86_64, so librdc makes the CPU calls."""
+    if platform.machine() not in ("x86_64", "amd64"):
+        pytest.skip(f"BUILD_ESMI is off by default on {platform.machine()}")
+    if shutil.which("nm") is None:
+        _missing("nm (binutils)")
+    # The librdc that rdc_bootstrap loads
+    librdc = _first_file(os.path.join(PREFIX, "lib", "librdc.so"))
+    if librdc is None:
+        _missing("librdc.so")
+    calls = _nm(librdc, defined=False)
+    assert calls, f"nm found no amdsmi_* calls in {librdc}"
+    missing = sorted(set(CPU_APIS) - calls)
+    assert len(missing) < len(CPU_APIS), (
+        "RDC was built with BUILD_ESMI=OFF; this test expects the x86_64 default, ON"
+        " (an older build directory keeps OFF in its CMake cache)"
+    )
+    assert not missing, f"librdc no longer makes these CPU calls; update CPU_APIS: {missing}"
 
 
 def _workload_commands(field_ids):
