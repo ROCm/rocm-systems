@@ -265,7 +265,8 @@ bool is_ignored_dbt_strict_top_level_field(std::string_view name) {
   // The DBT strict pass catches misspelled dbt_guest keys before handoff. The
   // plugin loader owns its top-level policy fields, so they bypass only this
   // DBT-specific validation and are still parsed by the plugin layer.
-  return name == "plugins" || name == "require_all_plugins" || name == "required_plugins";
+  return name == "plugins" || name == "require_all_plugins" || name == "required_plugins" ||
+         name == "sinks";
 }
 
 std::string json_without_dbt_strict_ignored_top_level_fields(std::string_view json) {

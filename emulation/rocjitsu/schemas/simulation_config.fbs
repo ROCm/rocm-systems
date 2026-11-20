@@ -366,6 +366,13 @@ table SystemManifestDef {
   coherence_domains: [SystemCoherenceDomainDef];
 }
 
+/// Execution-plugin output sink configuration. Parsed by PluginLoader from the
+/// same top-level JSON as the VM config.
+table PluginSinkDef {
+  types: [string];
+  dir: string;
+}
+
 /// Top-level simulation configuration.
 table SimulationConfig {
   max_ticks: uint64;             // Maximum simulation ticks before halting.
@@ -401,6 +408,9 @@ table SimulationConfig {
   local_node: string;
   // Omission preserves per-CU policies; an empty object selects Compatibility for all CUs.
   arithmetic: ArithmeticPolicyConfig;
+  // Optional execution-plugin sink configuration. The simulator schema accepts
+  // it so the plugin layer can consume it from the original JSON.
+  sinks: PluginSinkDef;
 }
 
 root_type SimulationConfig;
