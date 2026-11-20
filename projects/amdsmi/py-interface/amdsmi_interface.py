@@ -4491,13 +4491,10 @@ def amdsmi_get_power_info(processor_handle: processor_handle_t) -> Dict[str, cty
         "ubb_power": power_info.ubb_power,
     }
 
+    # Unavailable members hold UINT32_MAX or UINT64_MAX; the WSL backend also
+    # leaves UINT32_MAX in uint64_t members. A smaller maximum such as 255 is real.
     for key, value in power_info_dict.items():
-        if value in (
-            MaxUIntegerTypes.UINT8_T,
-            MaxUIntegerTypes.UINT16_T,
-            MaxUIntegerTypes.UINT32_T,
-            MaxUIntegerTypes.UINT64_T,
-        ):
+        if value in (MaxUIntegerTypes.UINT32_T, MaxUIntegerTypes.UINT64_T):
             power_info_dict[key] = "N/A"
 
     return power_info_dict
@@ -7095,7 +7092,8 @@ def amdsmi_get_gpu_od_volt_curve_regions(
 
     result = []
 
-    for index in range(region_count.value):
+    # Read no more records than the buffer holds.
+    for index in range(min(region_count.value, num_regions)):
         result.extend(
             [
                 {
