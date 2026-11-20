@@ -81,18 +81,21 @@ HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxActiveBlocksPerMultiprocessor
 // occupancy contracts above are portable. Parity would require NVIDIA to expose
 // the cluster-occupancy query wrappers (CUDA has the underlying cluster APIs).
 #if HT_AMD
-// @asserts: hipOccupancyMaxPotentialClusterSize - on cluster-capable devices the cluster-occupancy queries report a usable range (size >= 1, active clusters >= 0)
+// @asserts: hipOccupancyMaxPotentialClusterSize - single-block query: size >= 1, active >= 0
 HIP_TEST_CASE(Contract_OccupancyExt_HipOccupancyMaxPotentialClusterSize_ClusterQueries_CapabilityGatedRange) {
+#if HT_WIN
+  // PAL does not provide HSA's single-block fallback for cluster queries.
   int current_device = 0;
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDevice(&current_device));
   HIP_CHECK(hipGetDeviceProperties(&props, current_device));
-
   if (!props.clusterLaunch) {
     HIP_SKIP_TEST("Cluster launch is not supported on this device.");
     return;
   }
-
+#endif
+  // A single-block cluster is supported without multi-block cluster launch.
+  // These occupancy queries inspect metadata; they do not dispatch a cluster.
   // Build a minimal launch configuration with a single cluster-dimension
   // attribute. The cluster queries must succeed and report a usable range: a
   // maximum cluster size of at least one block and a non-negative count of
