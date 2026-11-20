@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu: eligibility against
-// the fixed 1 MiB LL slot, the datatype dispatch, the packet grid and its epoch clamp, and the launch.
+// the fixed 1 MiB LL slot, the datatype dispatch, the packet grid and its epoch clamp, block counts and the launch.
 
 #include <gtest/gtest.h>
 
@@ -34,6 +34,11 @@ constexpr size_t kScratchPerRank = 4u << 20;
 template <typename T, int N>
 const void* Kernel() {
   return KernelPtr(&dda::common::ddaReduceScatterFabricLL<T, N>);
+}
+
+template <typename T>
+const void* SpreadKernel() {
+  return KernelPtr(&dda::common::ddaReduceScatterFabricSpreadLL<T, 0>);
 }
 
 class DdaReduceScatterFabricLLMicrotest : public ::testing::Test {
@@ -67,15 +72,15 @@ class DdaReduceScatterFabricLLMicrotest : public ::testing::Test {
   }
 
   template <typename T>
-  void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
-    EXPECT_EQ(launch.kernel, (Kernel<T, 8>()));
+  void ExpectLaunchOf(const DdaLaunch& launch, const void* kernel, size_t recvcount) {
+    EXPECT_EQ(launch.kernel, kernel);
     ASSERT_EQ(launch.args.size(), 10u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
     EXPECT_EQ(launch.Arg<size_t>(3), recvcount);
     EXPECT_EQ(launch.Arg<int>(4), 7);
-    EXPECT_EQ(launch.Arg<int>(5), 8);
+    EXPECT_EQ(launch.Arg<int>(5), comm().nRanks);
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), dda::common::ddaBankSize(comm().ddaScratchBytes));
@@ -149,6 +154,14 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ShardBytesMultipleOf16UpTo1Mi
   EXPECT_FALSE(Eligible(kMaxShardBytes / 4 + 4));
 }
 
+// Eligibility ignores the buffers, so ranks whose pointers differ in alignment still agree.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_IgnoresBufferAlignment) {
+  char* const base = reinterpret_cast<char*>(0x10000);
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), base + 8, kRecvbuff, 4, ncclFloat32, ncclSum));
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), kSendbuff, base + 4, 4, ncclFloat32, ncclSum));
+  EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(mock_.get(), base + 2, base + 2, 8, ncclBfloat16, ncclSum));
+}
+
 TEST_F(DdaReduceScatterFabricLLMicrotest, Eligible_ScratchMustHoldBothBanksOfFixedSlots) {
   comm().ddaScratchBytes = 8 * kScratchPerRank;
   EXPECT_TRUE(Eligible(4));
@@ -167,30 +180,45 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_UnsupportedDatatypeReturnsInval
 }
 
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_EachDatatypeLaunchesItsOwnKernel) {
-  ExpectLaunchOf<float>(RunOne(16, ncclFloat32), 16);
-  ExpectLaunchOf<half>(RunOne(16, ncclFloat16), 16);
-  ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), 16);
-  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), 16);
-  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), 16);
+  ExpectLaunchOf<float>(RunOne(16, ncclFloat32), Kernel<float, 8>(), 16);
+  ExpectLaunchOf<half>(RunOne(16, ncclFloat16), Kernel<half, 8>(), 16);
+  ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), Kernel<bf16, 8>(), 16);
+  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), Kernel<dda::common::fp8e4m3, 8>(), 16);
+  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), Kernel<dda::common::fp8e5m2, 8>(), 16);
+  comm().nRanks = dda::common::kDdaLLRsSpreadMinRanks;
+  ExpectLaunchOf<float>(RunOne(16, ncclFloat32), SpreadKernel<float>(), 16);
+  ExpectLaunchOf<half>(RunOne(16, ncclFloat16), SpreadKernel<half>(), 16);
+  ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), SpreadKernel<bf16>(), 16);
+  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), SpreadKernel<dda::common::fp8e4m3>(), 16);
+  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), SpreadKernel<dda::common::fp8e5m2>(), 16);
 }
 
+// The shard and spread kernels. Each launch takes the stop event, so the loop re-arms it.
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_TakesTheStopEventOnTheStream) {
-  const DdaLaunch& launch = RunOne(4);
-  EXPECT_EQ(launch.block.x, 256u);
-  EXPECT_EQ(launch.stream, kStream);
-  EXPECT_EQ(launch.startEvent, nullptr);
-  EXPECT_EQ(launch.stopEvent, kStopEvent);
-  EXPECT_EQ(comm().addonStopEvent, nullptr);
-  EXPECT_EQ(launch.sharedMemBytes, 0u);
-  EXPECT_EQ(launch.flags, 0u);
+  for (int nRanks : {8, dda::common::kDdaLLRsSpreadMinRanks}) {
+    SCOPED_TRACE(::testing::Message() << "nRanks " << nRanks);
+    comm().nRanks = nRanks;
+    comm().addonStopEvent = kStopEvent;
+    const DdaLaunch& launch = RunOne(4);
+    EXPECT_EQ(launch.block.x, 256u);
+    EXPECT_EQ(launch.stream, kStream);
+    EXPECT_EQ(launch.startEvent, nullptr);
+    EXPECT_EQ(launch.stopEvent, kStopEvent);
+    EXPECT_EQ(comm().addonStopEvent, nullptr);
+    EXPECT_EQ(launch.sharedMemBytes, 0u);
+    EXPECT_EQ(launch.flags, 0u);
+  }
 }
 
+// From kDdaLLRsSpreadMinRanks ranks the spread kernel runs instead.
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_FourAndEightRanksUnrolledOthersRuntime) {
   const std::pair<int, const void*> cases[] = {{4, Kernel<float, 4>()},
                                                {8, Kernel<float, 8>()},
                                                {2, Kernel<float, 0>()},
                                                {5, Kernel<float, 0>()},
-                                               {144, Kernel<float, 0>()}};
+                                               {15, Kernel<float, 0>()},
+                                               {16, SpreadKernel<float>()},
+                                               {144, SpreadKernel<float>()}};
   for (const auto& [nRanks, kernel] : cases) {
     comm().nRanks = nRanks;
     const DdaLaunch& launch = RunOne(4);
@@ -217,9 +245,55 @@ TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_GridFollowsShardPacketsWithinCa
   EXPECT_EQ(RunOne(1u << 18).grid.x, 1u);
 }
 
+// The spread kernel puts a block on every 256 packets (2 KiB) of the whole message, 16 shards here, within the same
+// caps, and its slices are whole 128 B lines.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_SpreadGridFollowsMessagePacketsWithinCaps) {
+  comm().nRanks = dda::common::kDdaLLRsSpreadMinRanks;
+  const DdaLaunch& launch = RunOne(32);
+  EXPECT_EQ(launch.kernel, (SpreadKernel<float>()));
+  EXPECT_EQ(launch.block.x, 256u);
+  EXPECT_EQ(launch.grid.x, 1u);
+  EXPECT_EQ(RunOne(1, ncclFloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(34).grid.x, 2u);
+  EXPECT_EQ(RunOne(64, ncclFloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(1u << 12).grid.x, 128u);
+  comm().ddaFabricMaxBlocks = 6;
+  EXPECT_EQ(RunOne(1u << 18).grid.x, 6u);
+  comm().ddaFabricMaxBlocks = 256;
+  comm().ddaLLEpochLen = 9;
+  EXPECT_EQ(RunOne(1u << 18).grid.x, 9u);
+  // 32768 packets in 176-packet slices fill 187 of 192 blocks.
+  comm().ddaLLEpochLen = 256;
+  comm().ddaFabricMaxBlocks = 192;
+  EXPECT_EQ(RunOne(1u << 16).grid.x, 187u);
+}
+
+// The reported block count is the launch grid, caps included, for both kernels.
+TEST_F(DdaReduceScatterFabricLLMicrotest, Blocks_MatchTheLaunchedGrid) {
+  struct Case {
+    size_t count;
+    ncclDataType_t datatype;
+  };
+  const Case cases[] = {{4, ncclFloat32}, {68, ncclFloat32}, {516, ncclFloat32}, {1u << 16, ncclBfloat16}};
+  for (int nRanks : {8, dda::common::kDdaLLRsSpreadMinRanks}) {
+    comm().nRanks = nRanks;
+    for (int maxBlocks : {256, 192, 6}) {
+      comm().ddaFabricMaxBlocks = maxBlocks;
+      for (const Case& c : cases) {
+        EXPECT_EQ(ncclReduceScatterDdaFabricLLBlocks(mock_.get(), c.count, c.datatype),
+                  RunOne(c.count, c.datatype).grid.x)
+          << "nRanks " << nRanks << " count " << c.count << " maxBlocks " << maxBlocks;
+      }
+    }
+  }
+}
+
 TEST_F(DdaReduceScatterFabricLLMicrotest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
-  EXPECT_EQ(Run(4), ncclUnhandledCudaError);
+  for (int nRanks : {8, dda::common::kDdaLLRsSpreadMinRanks}) {
+    comm().nRanks = nRanks;
+    EXPECT_EQ(Run(4), ncclUnhandledCudaError) << "nRanks " << nRanks;
+  }
 }
 
 }  // namespace

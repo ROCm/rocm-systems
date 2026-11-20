@@ -193,9 +193,10 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr
       link_indx = static_cast<uint32_t>(std::stoi(dentry_io_link->d_name));
       link = std::make_shared<IOLink>(node_indx, link_indx, directory);
 
-      link->Initialize();
-
-      (*links)[std::make_pair(link->node_from(), link->node_to())] = link;
+      // An unread link names node 0 and would replace that node's real link.
+      if (link->Initialize() == 0) {
+        (*links)[std::make_pair(link->node_from(), link->node_to())] = link;
+      }
 
       dentry_io_link = readdir(io_link_dir);
     }
@@ -261,9 +262,10 @@ static int DiscoverLinksPerNode(uint32_t node_indx,
     link_indx = static_cast<uint32_t>(std::stoi(dentry->d_name));
     link = std::make_shared<IOLink>(node_indx, link_indx, directory);
 
-    link->Initialize();
-
-    (*links)[link->node_to()] = link;
+    // An unread link names node 0 and would replace that node's real link.
+    if (link->Initialize() == 0) {
+      (*links)[link->node_to()] = link;
+    }
 
     dentry = readdir(io_link_dir);
   }
@@ -327,20 +329,23 @@ int IOLink::Initialize(void) {
     return ret;
   }
 
-  ret = get_property_value(kIOLinkPropTYPEStr, reinterpret_cast<uint64_t*>(&type_));
+  ret = get_property_value(kIOLinkPropTYPEStr, &tmp64);
   if (ret) {
     return ret;
   }
+  type_ = static_cast<IO_LINK_TYPE>(static_cast<uint32_t>(tmp64));
 
-  ret = get_property_value(kIOLinkPropNODE_FROMStr, reinterpret_cast<uint64_t*>(&node_from_));
+  ret = get_property_value(kIOLinkPropNODE_FROMStr, &tmp64);
   if (ret) {
     return ret;
   }
+  node_from_ = static_cast<uint32_t>(tmp64);
 
-  ret = get_property_value(kIOLinkPropNODE_TOStr, reinterpret_cast<uint64_t*>(&node_to_));
+  ret = get_property_value(kIOLinkPropNODE_TOStr, &tmp64);
   if (ret) {
     return ret;
   }
+  node_to_ = static_cast<uint32_t>(tmp64);
 
   ret = get_property_value(kIOLinkPropWEIGHTStr, &weight_);
   if (ret) {

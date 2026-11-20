@@ -1216,7 +1216,7 @@ public:
 
 private:
   static bool nullify_unallocated_memory_result(Instruction &inst, const Wavefront &wf);
-  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+  VmAccessOutcome route_prepared_memory_inst(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                              uint64_t deferred_gds_sources = 0);
 
   // RegisterAccess is the instruction-facing register boundary. These
@@ -1573,7 +1573,7 @@ public:
     assert(inst->execute && "instruction execution backend is not linked");
     wf.begin_instruction_execution();
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
-    if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
+    if (drop_set_vgpr_msb && inst->amdgpu_operation() == Operation::S_SET_VGPR_MSB)
       return util::Result::success();
     check_static_isa_diagnostics(*inst, wf);
     if (wf.discards_valu_result(*inst))
@@ -1710,10 +1710,11 @@ protected:
   void tick_pipelines();
 
   /// @brief Route a memory instruction into the appropriate pipeline.
-  /// @param inst Ownership transfers when the pipeline accepts the instruction.
-  /// Rejected instructions stay with the issuer until it reports the failure.
+  /// @param inst Synchronous completion preserves ownership; retry and deferred
+  /// completion transfer it to the pipeline. Pre-routing rejection leaves the
+  /// instruction with the issuer until it reports the failure.
   /// @param wf The issuing wavefront.
-  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &&inst, Wavefront &wf,
+  VmAccessOutcome route_memory_inst(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                     uint64_t deferred_gds_sources = 0);
   void track_memory_wait(Instruction &inst, Wavefront &wf, uint64_t *deferred_gds_sources);
   void lock_gds_sources(const Instruction &inst, Wavefront &wf, uint64_t sequence);

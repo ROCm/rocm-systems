@@ -164,6 +164,7 @@ set(TEST_SRC
     hipMemset2DAsyncMultiThreadAndKernel.cc
     hipMemcpyDtoD.cc
     hipMemcpyDtoDAsync.cc
+    hipMemcpyLargeD2D.cc
     hipHostMalloc.cc
     hipMemcpy_EdgeCases.cc
     hipMemcpy_derivatives.cc
@@ -214,6 +215,7 @@ if(HIP_PLATFORM MATCHES "amd")
       ${TEST_SRC}
       # Test below currently doesn't work on NVIDIA, will update based on ticket response
       hipDrvMemcpy2DUnaligned.cc
+      hipArrayGetPlane.cc
       # Below 3 tests should be compiled for NVIDIA as well after EXSWHTEC-349 is addressed
       hipArrayGetInfo.cc
       hipArrayGetDescriptor.cc
