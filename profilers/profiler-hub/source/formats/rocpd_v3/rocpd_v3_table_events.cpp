@@ -8,6 +8,8 @@
 #include "data_storage/backends/database_backend.hpp"
 #include "profiler-hub/c/profiler_hub_types.h"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -1188,6 +1190,9 @@ rocpd_v3_reader::summarize_name_durations(const resolved_event_query& query,
         " E ON E.id = " + source->alias + ".event_id LEFT JOIN " + sample_table +
         " S ON S.event_id = " + source->alias + ".event_id WHERE " +
         (where.empty() ? std::string("1") : where) + " GROUP BY 1";
+    spdlog::info("rocpd_v3_reader::summarize_name_durations event_type={} sql={}",
+                 event_type,
+                 sql);
 
     std::unordered_map<std::string, name_duration_summary_t> groups;
     auto collect = [&](const duration_summary_row& row) {
