@@ -939,6 +939,11 @@ hipFileError_t hipFileStreamRegister(hipStream_t stream, unsigned flags);
  * @note Deregister every stream you registered with `hipFileStreamRegister()`
  *       before destroying it. Deregistering synchronizes the stream, so the call
  *       waits for all work queued on it, including asynchronous I/O in flight.
+ *       If the stream processed any asynchronous I/O, deregistering it also frees
+ *       the stream's signal memory with `hipFree`, which synchronizes all streams
+ *       on the device. Don't deregister a registered stream that has processed I/O
+ *       while another stream on the same device is blocked, since the `hipFree`
+ *       call will hang until that stream unblocks.
  *       Don't submit I/O to a stream while it is being deregistered. Deregistering
  *       the default stream (a NULL handle or `hipStreamPerThread`) does nothing and
  *       returns success.

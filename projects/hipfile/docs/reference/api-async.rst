@@ -35,7 +35,11 @@ Registered streams on devices that support stream wait values
    wait for it to finish, so later work on the stream still runs after the
    transfer. Transfers on different streams can run at the same time, and
    queuing a request never waits for the stream, so you can hold a stream with
-   your own wait value, queue requests, and release it afterward.
+   your own wait value, queue requests, and release it afterward. Do not
+   deregister a registered stream on the same device that has processed I/O
+   while the hold is in effect: deregistration calls ``hipFree`` on the
+   stream's signal memory, which synchronizes the device and hangs until the
+   held stream unblocks.
 
 Unregistered streams, and registered streams on devices without stream wait values
    The transfer runs in stream order inside a stream host function that waits
@@ -55,6 +59,12 @@ The null stream and ``hipStreamPerThread``
 Deregister every stream you registered with ``hipFileStreamRegister()`` before
 you destroy it. ``hipFileStreamDeregister()`` synchronizes the stream before it
 frees the stream's resources, so it waits for the stream's transfers in flight.
+If the stream processed any asynchronous I/O, deregistration also calls
+``hipFree`` to release the stream's signal memory, which synchronizes all
+streams on the device. Do not deregister a registered stream that has processed
+I/O while another stream on the same device is blocked --- for example, one
+held with a wait value you have not yet released --- because the ``hipFree``
+call will hang until that stream unblocks.
 A stream you used for asynchronous I/O without registering it holds no hipFile
 state and needs no deregistration.
 
