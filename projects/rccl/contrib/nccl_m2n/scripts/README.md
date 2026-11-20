@@ -43,7 +43,7 @@ shim), `hip-python`, `mpi4py`, `setuptools < 82` (torch), Cython, and `/opt/hipd
 
 ```bash
 bash $SD/build.sh            # rccl -> ~/m2n-ruby/rccl-install, nccl_m2n + tests + benches -> ~/m2n-ruby/mk,
-                             # nccl4py + nccl.m2n wheels -> ~/m2n-ruby/whl;  or: build.sh rccl|m2n|bench|py
+                             # nccl4py + nccl.m2n wheels -> ~/m2n-ruby/whl;  or: build.sh rccl|m2n|bench|py|extras ...
 ```
 
 `M2N_GPU_ARCHS` (default `gfx90a;gfx942;gfx950`) sets the archs of RCCL and `libnccl_m2n.so`. The staging kernels
