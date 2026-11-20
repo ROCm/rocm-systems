@@ -60,8 +60,8 @@ MATH_UNARY_SP_KERNEL_DEF(__fsqrt_rn);
  * Test Description
  * ------------------------
  *    - Tests the numerical accuracy of `__fsqrt_rn(x)` for all possible inputs. The results are
- * compared against reference function `float std::sqrt(float)`. The error bounds are
- * IEEE-compliant.
+ * compared against reference function `float std::sqrt(float)`. RDNA4 permits 1 ULP;
+ * other targets retain exact comparison.
  *
  * Test source
  * ------------------------
@@ -70,11 +70,30 @@ MATH_UNARY_SP_KERNEL_DEF(__fsqrt_rn);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_UNARY_SP_TEST_DEF_IMPL(__fsqrt_rn, static_cast<float (*)(float)>(std::sqrt),
-                            EqValidatorBuilderFactory<float>());
+HIP_TEST_CASE(Unit_Device___fsqrt_rn_Accuracy_Positive) {
+  const auto validator_builder = [rdna4 = IsNavi4X()](
+                                     float target, float) -> std::unique_ptr<MatcherBase<float>> {
+  // RDNA4 ISA, V_SQRT_F32: 1 ULP. The compiler scales subnormal inputs
+  // for __ocml_native_sqrt_f32, so retain the unflushed reference here.
+#if defined(OCML_BASIC_ROUNDED_OPERATIONS)
+    // This opt-in selects the explicitly correctly rounded OCML operation.
+    (void)rdna4;
+#else
+    if (rdna4 && std::isfinite(target) && target != 0.0f) {
+      return ULPValidatorBuilderFactory<float>(1)(target);
+    }
+#endif
+    return EqValidatorBuilderFactory<float>()(target);
+  };
+  UnarySinglePrecisionTest(__fsqrt_rn_kernel, static_cast<float (*)(float)>(std::sqrt),
+                           validator_builder);
+}
 
 
-static float __frsqrt_rn_ref(float x) { return 1.0f / std::sqrt(x); }
+static float __frsqrt_rn_ref(float x) {
+  // Round once to float after computing the reciprocal square root in double.
+  return static_cast<float>(1.0 / std::sqrt(static_cast<double>(x)));
+}
 
 MATH_UNARY_SP_KERNEL_DEF(__frsqrt_rn);
 
@@ -82,8 +101,8 @@ MATH_UNARY_SP_KERNEL_DEF(__frsqrt_rn);
  * Test Description
  * ------------------------
  *    - Tests the numerical accuracy of `__frsqrt_rn(x)` for all possible inputs. The results are
- * compared against reference function `float std::sqrt(float)`. The error bounds are
- * IEEE-compliant.
+ * compared against a double-precision reciprocal square root rounded to float. RDNA4
+ * permits 1 ULP and flushes subnormal inputs to signed zero; other targets retain exact comparison.
  *
  * Test source
  * ------------------------
@@ -92,12 +111,136 @@ MATH_UNARY_SP_KERNEL_DEF(__frsqrt_rn);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_UNARY_SP_TEST_DEF_IMPL(__frsqrt_rn, __frsqrt_rn_ref, EqValidatorBuilderFactory<float>());
+HIP_TEST_CASE(Unit_Device___frsqrt_rn_Accuracy_Positive) {
+  const auto validator_builder = [rdna4 = IsNavi4X()](
+                                     float target, float x) -> std::unique_ptr<MatcherBase<float>> {
+    if (rdna4) {
+      // __frsqrt_rn directly uses V_RSQ_F32: 1 ULP and input denormals flushed
+      // to signed zero (RDNA4 ISA, VOP1 instructions).
+      if (std::fpclassify(x) == FP_SUBNORMAL) {
+        target = std::copysign(std::numeric_limits<float>::infinity(), x);
+      }
+      if (std::isfinite(target) && target != 0.0f) {
+        return ULPValidatorBuilderFactory<float>(1)(target);
+      }
+    }
+    return EqValidatorBuilderFactory<float>()(target);
+  };
+  UnarySinglePrecisionTest(__frsqrt_rn_kernel, __frsqrt_rn_ref, validator_builder);
+}
 
 
-MATH_UNARY_SP_VALIDATOR_BUILDER_DEF(__expf) {
-  const int64_t ulp_err = 2 + static_cast<int64_t>(std::floor(std::abs(1.16f * x)));
-  return ULPValidatorBuilderFactory<float>(ulp_err)(target);
+class ExponentialUlpValidator : public MatcherBase<float> {
+ public:
+  ExponentialUlpValidator(float target, int64_t ulps, bool flush_denormals)
+      : target_{target},
+        ulps_{ulps},
+        flush_denormals_{flush_denormals},
+        validator_{ULPValidatorBuilderFactory<float>(ulps)(target)} {}
+
+  bool match(const float& value) const override {
+    // Exponentials cannot produce a negative result, including negative zero.
+    // A saturated ULP allowance can otherwise span both signs.
+    if (std::signbit(value)) return false;
+    if (flush_denormals_) {
+      if (std::fpclassify(value) == FP_SUBNORMAL) return false;
+      if (value == 0.0f) {
+        // Flush the permitted result interval, not just the reference. A
+        // near-boundary approximation can cross in either direction.
+        const float largest_subnormal = std::nextafter(std::numeric_limits<float>::min(), 0.0f);
+        if (std::fpclassify(target_) == FP_SUBNORMAL || validator_->match(largest_subnormal)) {
+          return true;
+        }
+      }
+    }
+    return validator_->match(value);
+  }
+
+  std::string describe() const override {
+    // Catch builds its displayed range one nextafter step per ULP. Large
+    // exponential error budgets must not make failure reporting take billions of steps.
+    std::ostringstream message;
+    message << "is within " << ulps_ << " ULPs of "
+            << std::setprecision(std::numeric_limits<float>::max_digits10) << target_;
+    if (flush_denormals_) message << " after flushing subnormal results to zero";
+    return message.str();
+  }
+
+ private:
+  float target_;
+  int64_t ulps_;
+  bool flush_denormals_;
+  std::unique_ptr<MatcherBase<float>> validator_;
+};
+
+static std::unique_ptr<MatcherBase<float>> ExponentialValidator(float target, float x,
+                                                                float error_scale,
+                                                                bool flush_denormals = false) {
+  // Non-finite inputs have exact special results, not a finite error budget.
+  // Finite inputs keep their ULP allowance even when the reference overflows
+  // or rounds to zero: an approximate result can cross either boundary.
+  if (!std::isfinite(x)) {
+    return EqValidatorBuilderFactory<float>()(target);
+  }
+
+  // Clamp before converting to an integer: even finite x can overflow the
+  // float product. Catch requires a ULP budget strictly below UINT32_MAX.
+  const double ulp_err = 2.0 + std::floor(std::abs(error_scale * x));
+  constexpr auto max_ulps = std::numeric_limits<uint32_t>::max() - 1;
+  const auto bounded_ulps = static_cast<int64_t>(std::min(ulp_err, static_cast<double>(max_ulps)));
+  return std::make_unique<ExponentialUlpValidator>(target, bounded_ulps, flush_denormals);
+}
+
+HIP_TEST_CASE(Unit_ExponentialValidator_ResultBounds) {
+  const bool flush_denormals = GENERATE(false, true);
+  const float error_scale = GENERATE(1.16f, 2.95f);
+  const float infinity = std::numeric_limits<float>::infinity();
+  const float smallest_normal = std::numeric_limits<float>::min();
+  const float smallest_subnormal = std::numeric_limits<float>::denorm_min();
+
+  SECTION("Saturated allowances reject every negative result") {
+    const float x = GENERATE(-1.0e10f, 1.0e10f);
+    const auto validator =
+        ExponentialValidator(x < 0.0f ? 0.0f : infinity, x, error_scale, flush_denormals);
+    for (const float value :
+         {-0.0f, -smallest_subnormal, -1.0f, -std::numeric_limits<float>::max(), -infinity}) {
+      CAPTURE(x, value, flush_denormals, error_scale);
+      REQUIRE_FALSE(validator->match(value));
+    }
+    REQUIRE(validator->match(0.0f));
+    REQUIRE(validator->match(std::numeric_limits<float>::max()));
+    REQUIRE(validator->match(infinity));
+    REQUIRE_FALSE(validator->match(std::numeric_limits<float>::quiet_NaN()));
+  }
+
+  SECTION("Positive overflow and underflow retain their boundary allowances") {
+    const auto overflow = ExponentialValidator(infinity, 100.0f, error_scale, flush_denormals);
+    REQUIRE(overflow->match(infinity));
+    REQUIRE(overflow->match(std::numeric_limits<float>::max()));
+
+    const auto underflow = ExponentialValidator(0.0f, -110.0f, error_scale, flush_denormals);
+    REQUIRE(underflow->match(0.0f));
+    REQUIRE(underflow->match(smallest_subnormal) == !flush_denormals);
+
+    const auto normal_boundary =
+        ExponentialValidator(smallest_normal, -87.0f, error_scale, flush_denormals);
+    REQUIRE(normal_boundary->match(smallest_normal));
+    REQUIRE(normal_boundary->match(0.0f) == flush_denormals);
+  }
+
+  SECTION("Ordinary results still obey their ULP allowance") {
+    const auto validator = ExponentialValidator(1.0f, 0.0f, error_scale, flush_denormals);
+    float value = std::nextafter(std::nextafter(1.0f, infinity), infinity);
+    REQUIRE(validator->match(value));
+    REQUIRE_FALSE(validator->match(std::nextafter(value, infinity)));
+  }
+}
+
+static auto ExponentialValidatorBuilder(float error_scale) {
+  return [error_scale, rdna4 = IsNavi4X()](float target, float x) {
+    // The AMD wrappers use V_EXP_F32, whose RDNA4 contract flushes denormals.
+    return ExponentialValidator(target, x, error_scale, rdna4);
+  };
 }
 
 MATH_UNARY_SP_KERNEL_DEF(__expf);
@@ -107,7 +250,7 @@ MATH_UNARY_SP_KERNEL_DEF(__expf);
  * ------------------------
  *    - Tests the numerical accuracy of `__expf(x)` for all possible inputs. The results are
  * compared against reference function `double std::exp(double)`. The maximum ulp error is `2 +
- * floor(abs(1.16 * x))`.
+ * floor(abs(1.16 * x))`. RDNA4 flushes subnormal outputs to zero.
  *
  * Test source
  * ------------------------
@@ -116,13 +259,8 @@ MATH_UNARY_SP_KERNEL_DEF(__expf);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_UNARY_SP_TEST_DEF(__expf, static_cast<double (*)(double)>(std::exp));
-
-
-MATH_UNARY_SP_VALIDATOR_BUILDER_DEF(__exp10f) {
-  const int64_t ulp_err = 2 + static_cast<int64_t>(std::floor(std::abs(2.95f * x)));
-  return ULPValidatorBuilderFactory<float>(ulp_err)(target);
-}
+MATH_UNARY_SP_TEST_DEF_IMPL(__expf, static_cast<double (*)(double)>(std::exp),
+                            ExponentialValidatorBuilder(1.16f));
 
 MATH_UNARY_SP_KERNEL_DEF(__exp10f);
 
@@ -131,7 +269,7 @@ MATH_UNARY_SP_KERNEL_DEF(__exp10f);
  * ------------------------
  *    - Tests the numerical accuracy of `__exp10f(x)` for all possible inputs. The results are
  * compared against reference function `double exp10(double)`. The maximum ulp error is `2 +
- * floor(abs(2.95 * x))`.
+ * floor(abs(2.95 * x))`. RDNA4 flushes subnormal outputs to zero.
  *
  * Test source
  * ------------------------
@@ -140,7 +278,8 @@ MATH_UNARY_SP_KERNEL_DEF(__exp10f);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_UNARY_SP_TEST_DEF(__exp10f, static_cast<double (*)(double)>(exp10));
+MATH_UNARY_SP_TEST_DEF_IMPL(__exp10f, static_cast<double (*)(double)>(exp10),
+                            ExponentialValidatorBuilder(2.95f));
 
 
 MATH_UNARY_SP_VALIDATOR_BUILDER_DEF(__logf) {
@@ -187,7 +326,8 @@ MATH_UNARY_SP_KERNEL_DEF(__log2f);
  * ------------------------
  *    - Tests the numerical accuracy of `__log2f(x)` for all possible inputs. The results are
  * compared against reference function `double std::log2(double)`. For `x` in [0.5, 2], the maximum
- * absolute error is 2^-22, otherwise, the maximum ulp error is 2.
+ * absolute error is 2^-22, otherwise, the maximum ulp error is 2. RDNA4 flushes subnormal
+ * inputs to signed zero before taking the logarithm.
  *
  * Test source
  * ------------------------
@@ -196,7 +336,19 @@ MATH_UNARY_SP_KERNEL_DEF(__log2f);
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-MATH_UNARY_SP_TEST_DEF(__log2f, static_cast<double (*)(double)>(std::log2));
+HIP_TEST_CASE(Unit_Device___log2f_Accuracy_Positive) {
+  const auto validator_builder = [rdna4 = IsNavi4X()](
+                                     float target, float x) -> std::unique_ptr<MatcherBase<float>> {
+    // __log2f directly uses V_LOG_F32. Both signs of subnormal input flush
+    // to zero and produce -infinity under the RDNA4 instruction contract.
+    if (rdna4 && std::fpclassify(x) == FP_SUBNORMAL) {
+      return EqValidatorBuilderFactory<float>()(-std::numeric_limits<float>::infinity());
+    }
+    return __log2f_validator_builder(target, x);
+  };
+  UnarySinglePrecisionTest(__log2f_kernel, static_cast<double (*)(double)>(std::log2),
+                           validator_builder);
+}
 
 
 MATH_UNARY_SP_VALIDATOR_BUILDER_DEF(__log10f) {
