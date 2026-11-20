@@ -35,9 +35,10 @@ void getAndPrintMemoryDetails(const hipMemPool_t& pool) {
  * ------------------------
  * - This test case, tests the following scenario :
  * - 1) Get the default pool
- * - 2) Allocate total 30GB of memory using hipMallocAsync in 2GB and 1GB chunks
- * - 3) Deallocate the 10 GB of memory out of 30 GB
- * - 4) Deallocate remaining 20 GB of memory
+ * - 2) Allocate twenty buffers in alternating two-unit and one-unit chunks.
+ * -    Retain 1 GiB units where 30 GiB fits; otherwise use half of free memory.
+ * - 3) Deallocate the ten one-unit buffers.
+ * - 4) Deallocate the remaining ten two-unit buffers.
  * - 5) Print Free Device memory and Reserved and Used current memory details
  * -    after every step.
  * - 6) Performance improvement can be observed in terms of current used memory.
@@ -52,18 +53,28 @@ void getAndPrintMemoryDetails(const hipMemPool_t& pool) {
  */
 
 HIP_TEST_CASE(Performance_MempoolManager_hipMallocAsync_hipFreeAsync) {
-  size_t free = 0, total = 0;
-  HIP_CHECK(hipMemGetInfo(&free, &total));
-  if (free < 30_GB) {
-    HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeGpuMemory);
-  }
-
-  hipMemPool_t pool;
+  constexpr int ptrs = 20;
+  constexpr size_t allocation_units = (ptrs / 2) * 3;
   int device = 0;
   HIP_CHECK(hipSetDevice(device));
+
+  size_t free = 0, total = 0;
+  HIP_CHECK(hipMemGetInfo(&free, &total));
+  // Preserve the original workload where 30 GiB fits. On smaller devices, leave
+  // half of free memory for the runtime and pool allocation overhead, rounding
+  // down so both chunk sizes are whole MiB.
+  const size_t unit = free >= 30_GB ? 1_GB : (free / 2 / allocation_units) / 1_MB * 1_MB;
+  if (unit == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kNotEnoughFreeGpuMemory);
+  }
+  const size_t allocation_bytes = allocation_units * unit;
+  std::cout << "Allocation unit (bytes): " << unit
+            << ", total allocation (bytes): " << allocation_bytes << std::endl;
+
+  hipMemPool_t pool;
   HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, device));
 
-  uint64_t threshold = 30_GB;
+  uint64_t threshold = allocation_bytes;
   HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
 
   std::cout << "\n Memory details at start : ";
@@ -72,18 +83,17 @@ HIP_TEST_CASE(Performance_MempoolManager_hipMallocAsync_hipFreeAsync) {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  constexpr int ptrs = 20;
   void* dPtr[ptrs];
   for (int i = 0; i < ptrs; i++) {
     dPtr[i] = nullptr;
   }
 
-  // Allocate 30 GB (In 2GB and 1GB chunks)
+  // Allocate ten two-unit chunks and ten one-unit chunks.
   for (int i = 0; i < ptrs; i++) {
     if (i % 2 == 0) {
-      HIP_CHECK(hipMallocAsync(&dPtr[i], 2_GB, stream));
+      HIP_CHECK(hipMallocAsync(&dPtr[i], 2 * unit, stream));
     } else {
-      HIP_CHECK(hipMallocAsync(&dPtr[i], 1_GB, stream));
+      HIP_CHECK(hipMallocAsync(&dPtr[i], unit, stream));
     }
   }
   HIP_CHECK(hipStreamSynchronize(stream));
@@ -92,10 +102,10 @@ HIP_TEST_CASE(Performance_MempoolManager_hipMallocAsync_hipFreeAsync) {
     REQUIRE(dPtr[i] != nullptr);
   }
 
-  std::cout << "\n Memory details after allocating 30 GB memory : ";
+  std::cout << "\n Memory details after allocating " << allocation_bytes << " bytes : ";
   getAndPrintMemoryDetails(pool);
 
-  // Free 10 GB out of 30 GB (All 1GB chunks)
+  // Free the ten one-unit chunks.
   for (int i = 0; i < ptrs; i++) {
     if (i % 2 != 0) {
       HIP_CHECK(hipFreeAsync(dPtr[i], stream));
@@ -103,10 +113,11 @@ HIP_TEST_CASE(Performance_MempoolManager_hipMallocAsync_hipFreeAsync) {
   }
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  std::cout << "\n Memory details after deallocating 10 GB out of 30 GB :";
+  std::cout << "\n Memory details after deallocating " << (ptrs / 2) * unit << " bytes out of "
+            << allocation_bytes << " :";
   getAndPrintMemoryDetails(pool);
 
-  // Free remaining 20 GB also (All 2GB chunks)
+  // Free the remaining ten two-unit chunks.
   for (int i = 0; i < ptrs; i++) {
     if (i % 2 == 0) {
       HIP_CHECK(hipFreeAsync(dPtr[i], stream));
@@ -114,7 +125,7 @@ HIP_TEST_CASE(Performance_MempoolManager_hipMallocAsync_hipFreeAsync) {
   }
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  std::cout << "\n Memory details after deallocating the remaining 20 GB :";
+  std::cout << "\n Memory details after deallocating the remaining " << ptrs * unit << " bytes :";
   getAndPrintMemoryDetails(pool);
 
   HIP_CHECK(hipStreamDestroy(stream));
