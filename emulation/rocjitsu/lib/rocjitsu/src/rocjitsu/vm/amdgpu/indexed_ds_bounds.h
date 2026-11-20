@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/bit.h"
 
 #include <algorithm>
@@ -11,6 +12,16 @@
 #include <optional>
 
 namespace rocjitsu::amdgpu {
+
+inline bool cdna1_ds_atomic_nullified(const VectorMemState &d, rj_code_arch_t arch,
+                                      const RegAllocation &vgprs) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA1 || d.flat_local_lane_mask || !d.is_load ||
+      d.atomic_op == AtomicOp::NONE)
+    return false;
+  // MI100 3.6.1 nullifies the RMW when any returned VGPR is unallocated.
+  return !vgprs.contains(d.dst_reg_base, d.destination_vgpr_count()) ||
+         (d.ds2_active && !vgprs.contains(d.ds2_dst_reg_base, d.ds2_destination_vgpr_count()));
+}
 
 class IndexedDsAccessBounds {
 public:
@@ -39,10 +50,12 @@ inline std::optional<IndexedDsAccessBounds> indexed_ds_access_bounds(const Vecto
                                                                      rj_code_arch_t arch,
                                                                      uint32_t lds_base,
                                                                      uint32_t lds_size) {
-  if (!checks_entire_native_ds_address(arch) || state.flat_local_lane_mask)
+  if (!checks_entire_native_ds_address(arch) || state.flat_local_lane_mask || state.gds ||
+      (state.gds_m0 && arch != ROCJITSU_CODE_ARCH_RDNA1))
     return std::nullopt;
-  const uint64_t begin = lds_base;
-  const uint64_t end = begin + lds_size;
+  const uint64_t begin = state.ds_base(lds_base);
+  const uint64_t end = state.gds_m0 ? std::min<uint64_t>(65536, begin + (*state.gds_m0 & 0xffffu))
+                                    : begin + lds_size;
   return IndexedDsAccessBounds{begin, end, uint64_t{state.elem_size} * state.num_elems};
 }
 

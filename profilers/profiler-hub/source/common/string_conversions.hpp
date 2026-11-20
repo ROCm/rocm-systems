@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include <fmt/format.h>
 

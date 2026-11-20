@@ -2539,7 +2539,8 @@ ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataTy
   if (!rcclDdaBcEnabled(archTable, comm->nRanks)) return ncclSuccess;
   const size_t entryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
   if (!rcclDdaEnabled(comm, bytes, entryMax, query, "BC")) return ncclSuccess;
-  const bool fabric = IsArchMatch(comm->archName, "gfx1250");
+  // Gate on the fabric handler, as the other DDA fabric tiers do, not on the arch.
+  const bool fabric = comm->ddaFabricMemHandler != nullptr;
   if (!fabric && !(rcclParamDdaBcAllowIpc() && comm->ddaIpcMemHandler != nullptr)) return ncclSuccess;
 
   const size_t llMax = rcclDdaLLThresholdTab(archTable, ncclFuncBroadcast, comm->nRanks);
