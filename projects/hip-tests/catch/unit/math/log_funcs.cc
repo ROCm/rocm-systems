@@ -186,7 +186,13 @@ template <typename T> int ilogb_ref(T arg) {
   if (arg == 0) {
     return std::numeric_limits<int>::min();
   } else if (std::isnan(arg)) {
+#if HT_AMD
+    // OCML uses OpenCL's default FP_ILOGBNAN (INT_MAX), which can differ
+    // from the host C library's FP_ILOGBNAN (for example, glibc uses INT_MIN).
+    return std::numeric_limits<int>::max();
+#else
     return std::numeric_limits<int>::min();
+#endif
   } else if (std::isinf(arg)) {
     return std::numeric_limits<int>::max();
   } else {
