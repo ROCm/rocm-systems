@@ -32,7 +32,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather         // [2] AllGather
     1ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 1M on 4-16 ranks
-    32ULL*1024*1024,     // [4] AllReduce
+    1ULL*1024*1024,      // [4] AllReduce       -- the LL one-shot; peer-parallel LL128 above it
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -204,7 +204,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
     0,                   // [3] ReduceScatter   -- ddaLLMax total: LL128 takes over at 2M-4M on 8 and 16 ranks,
                          //                        and LL runs to 2M from 32 ranks (ddaRsLLLargeComm*)
-    1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
+    0,                   // [4] AllReduce       -- not rank-scaled: LL stops at 1M at every rank count
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -234,10 +234,13 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
-  // From 32 ranks, AllReduce VMM beats LL two-shot / LL128 1.3-3.7x between 2M and nRanks x 512K.
-  .ddaArVmmFirstMinRanks = 32,
-  .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
-  .ddaArVmmFirstMaxPerRank = 512ULL*1024,
+  // Off: peer-parallel LL128 beats AllReduce VMM 2.3-3.4x between 4M and 16M on 32 ranks, so VMM no longer
+  // goes ahead of the LL tiers.
+  .ddaArVmmFirstMinRanks = 0,
+  .ddaArVmmFirstMinBytes = 0,
+  .ddaArVmmFirstMaxPerRank = 0,
+  // LL128 one-shot beats the peer-parallel two-shot to 1M / 512K / 256K at 4 / 8 / 16 ranks, i.e. 4M / nRanks.
+  .ddaArLL128OneShotRankBytes = 4ULL*1024*1024,
   // Registered sum AllReduce past symMinR2: DDA beats Ring in capture to max(32M, n x 2M)
   // and CE-registered eager on whole 512K-1M shards.
   .ddaArRegCaptureMinBytes = 32ULL*1024*1024,
