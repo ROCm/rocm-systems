@@ -128,12 +128,12 @@ Notes:
 - CI's build workflow
   ([hipfile-build.yml](../../.github/workflows/hipfile-build.yml), started
   by [hipfile-ci-toplevel.yml](../../.github/workflows/hipfile-ci-toplevel.yml))
-  builds with `amdclang++`, `clang++`, and `g++` across several Linux
-  distributions and ROCm versions (the matrix is in
-  `hipfile-ci-toplevel.yml`). Each job builds `Debug` and
-  `Release`, both with `-DCMAKE_CXX_FLAGS=-Werror`, runs the unit tests in
-  each, then packages the Debug build with `cpack`, installs the package,
-  and builds the installed examples against it
+  builds with `amdclang++` across several Linux distributions and ROCm
+  versions, and with `clang++` and `g++` on one distribution and ROCm
+  version (the matrix is in `hipfile-ci-toplevel.yml`). Each job builds
+  `Debug` and `Release`, both with `-DCMAKE_CXX_FLAGS=-Werror`, runs the unit
+  tests in each, then packages the Debug build with `cpack`, installs the
+  package, and builds the installed examples against it
   ([`util/ci-build-installed-examples.sh`](util/ci-build-installed-examples.sh)).
   The CI images are built from
   [`util/docker`](util/docker).
@@ -158,9 +158,14 @@ Notes:
     that supports it (check with `tools/ais-check/ais-check`); they fail
     without it unless configured with
     `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON`.
-  - `stress`: `state_mt` and `batch_mt`, short concurrency tests run under
-    `gdb`. They can pass for a while after a bug lands, so a failure may not
-    come from the change you're looking at.
+  - `stress`: short concurrency tests run under `gdb`: `state_mt`,
+    `batch_mt`, and `hipfileread-cpu-visibility`, which runs once with only
+    fastpath and once with only fallback in `HIPFILE_CAPABLE_DIR`. The
+    `hipfileread-cpu-visibility` tests are skipped on GPUs whose VRAM the CPU
+    can't map, and `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON` also skips its
+    fastpath run where fastpath is unavailable. The stress tests can pass for
+    a while after a bug lands, so a failure may not come from the change
+    you're looking at.
 
   System and stress tests may not work on every machine. CI runs them on
   self-hosted AIS runners

@@ -311,7 +311,7 @@ fn counted_inactivation_rejects_without_stopping_shared_indices() {
         assert_eq!(hsa_queue_add_write_index_relaxed(public, 2), 23);
         assert_eq!((*write).load(Ordering::Relaxed), 25);
         assert_eq!(hsa_queue_load_write_index_relaxed(public), 25);
-        let mut state = QueueState::new();
+        let mut state = QueueState::new(4);
         state.counted_queues.insert(public as usize, counted);
         assert_eq!(
             inactivate_unintercepted_queue(&mut state, public),
@@ -434,6 +434,33 @@ fn firmware_queue_errors_map_to_public_status_codes() {
     assert_eq!(queue_error_status(0x2000_0000), MEMORY_APERTURE_VIOLATION);
     assert_eq!(queue_error_status(0x4000_0000), ILLEGAL_INSTRUCTION);
     assert_eq!(queue_error_status(0x8000_0000), EXCEPTION);
+}
+
+#[test]
+fn kfd_queue_exceptions_preserve_public_status_codes() {
+    for (code, status) in [
+        (1, EXCEPTION),
+        (2, EXCEPTION),
+        (3, EXCEPTION),
+        (4, ILLEGAL_INSTRUCTION),
+        (5, MEMORY_FAULT),
+        (6, MEMORY_APERTURE_VIOLATION),
+        (16, INCOMPATIBLE_ARGUMENTS),
+        (17, INVALID_ALLOCATION),
+        (18, INVALID_CODE_OBJECT),
+        (20, INVALID_PACKET_FORMAT),
+        (21, INVALID_ARGUMENT),
+        (22, INVALID_DISPATCH_PARAMETERS),
+        (23, INVALID_PACKET_FORMAT),
+        (30, ERROR),
+        (33, MEMORY_APERTURE_VIOLATION),
+        (34, ERROR),
+        (35, ERROR),
+        (36, ERROR),
+        (49, ERROR),
+    ] {
+        assert_eq!(event::queue_exception_status(1 << (code - 1)), status);
+    }
 }
 
 #[test]

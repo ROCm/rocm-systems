@@ -309,7 +309,7 @@ pub extern "C" fn hsa_amd_vmem_map(
     size: usize,
     offset: usize,
     memory_handle: HsaAmdVmemAllocHandle,
-    flags: u64,
+    _flags: u64,
 ) -> Status {
     boundary(|| {
         let page = match current_host_page() {
@@ -321,7 +321,6 @@ pub extern "C" fn hsa_amd_vmem_map(
             || size == 0
             || size % page != 0
             || offset % page != 0
-            || flags != 0
         {
             return INVALID_ARGUMENT;
         }
@@ -765,7 +764,13 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(mapping) = runtime.memory_state.vmem_mappings.get(&(address as usize)) else {
+        let Some((_, mapping)) = runtime
+            .memory_state
+            .vmem_mappings
+            .range(..=address as usize)
+            .next_back()
+            .filter(|(_, mapping)| mapping.contains(address as usize))
+        else {
             return INVALID_ALLOCATION;
         };
         let handle_id = mapping.handle;
