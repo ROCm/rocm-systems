@@ -57,6 +57,11 @@ not the ability to raise a flag on half of all DOT mnemonics.
 
 ## CDNA and gfx1250
 
+gfx1250 FP32 ADD/SUB/SUBREV use their `_gfx1250` entry points with no
+Compatibility FP causes. MUL retains inherited input-denormal/range reporting
+without adding gfx12 INVALID causes; OMOD retains its legacy cause suppression.
+Both explicit strict modes remain unqualified for these operations.
+
 ### Matrix instructions
 
 CDNA matrix support covers twenty gfx942 MFMA forms (FP16/BF16, XF32 and FP8/BF8),
