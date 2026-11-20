@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "common/spin_mutex.hpp"
+
 #include <mutex>
 #include <shared_mutex>
 #include <string>
@@ -57,9 +59,9 @@ public:
     void reset_after_fork() noexcept;
 
 private:
-    mutable std::shared_mutex m_gate;
-    mutable std::mutex        m_mutex;
-    std::unordered_set<pid_t> m_tids;
+    mutable std::shared_mutex  m_gate;
+    mutable common::spin_mutex m_mutex;
+    std::unordered_set<pid_t>  m_tids;
 };
 
 /// System TID of the calling thread.
