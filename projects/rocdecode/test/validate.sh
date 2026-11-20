@@ -296,7 +296,11 @@ if [[ $SKIP_CONFORMANCE -eq 0 ]]; then
       echo "       another conformance run shares the results directory; re-run with nothing else"
       echo "       decoding on this machine."
       RESULTS["Conformance $CODEC"]="FAILED"
-    elif grep -q "The number of failing streams is 0" "$OUT" && \
+    # One grep per failing bucket. The sweep splits streams into five disjoint
+    # groups and a clean run needs all three failure groups at zero; skips are
+    # not a failure, so they are deliberately not checked here.
+    elif grep -q "The number of streams whose digest did not match is 0" "$OUT" && \
+         grep -q "The number of streams that decoded but exited non-zero is 0" "$OUT" && \
          grep -q "The number of streams that did not finish decoding is 0" "$OUT"; then
       RESULTS["Conformance $CODEC"]="PASSED"
     else
