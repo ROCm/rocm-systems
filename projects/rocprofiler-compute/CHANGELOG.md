@@ -16,6 +16,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * It shows the same values as the terminal chart.
   * Click a stall to see its memory bandwidth guidance.
 
+* The HTML memory chart lists the kernels; click one to show its chart.
+
 ### Changed
 
 * Analyze mode accepts numpy versions from 1.26.4 to 2.5.x. It previously required exactly 1.26.4, or 2.5.2 on Python 3.13 and newer.
