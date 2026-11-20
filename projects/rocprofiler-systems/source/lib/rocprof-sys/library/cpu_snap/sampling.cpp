@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/cpu_snap/sampling.hpp"
+#include "common/clocks.hpp"
 #include "common/env_vars.hpp"
 #include "core/config.hpp"
 #include "core/thread_list/internal_thread_list.hpp"
@@ -82,12 +83,19 @@ pause() noexcept
 }
 
 void
-resume() noexcept
+resume()
 {
-    if(g_sampler)
+    if(!g_sampler)
     {
-        g_sampler->resume();
+        return;
     }
+    if(g_sampler->is_paused())
+    {
+        // Taken before re-arming, so every sample after the resume is later than this.
+        auto const resume_ns = clocks::timeline::now_ns();
+        trace_cache::get_metadata_registry().add_sampling_resume(resume_ns);
+    }
+    g_sampler->resume();
 }
 
 void

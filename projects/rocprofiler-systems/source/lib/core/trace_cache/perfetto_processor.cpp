@@ -531,7 +531,8 @@ perfetto_processor_t::perfetto_processor_t(
 , m_default_group_by_queue(config::get_group_by_queue())
 , m_tracks(tracks)
 , m_cpu_snap_decoder([this](const backtrace_region_sample& sample) { handle(sample); },
-                     get_cpu_snap_skipped_module_prefixes())
+                     get_cpu_snap_skipped_module_prefixes(),
+                     m_metadata.get_sampling_resumes())
 {
     for(const auto& agent_ptr : m_agent_manager.get_agents())
     {

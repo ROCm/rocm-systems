@@ -48,9 +48,11 @@ struct frame_strings
 
 struct cpu_snap_decoder::impl
 {
-    impl(on_slice_fn on_slice_in, std::vector<std::string> skipped_module_prefixes_in)
+    impl(on_slice_fn on_slice_in, std::vector<std::string> skipped_module_prefixes_in,
+         std::vector<std::uint64_t> sampling_resumes_in)
     : on_slice{ std::move(on_slice_in) }
     , skipped_module_prefixes{ std::move(skipped_module_prefixes_in) }
+    , sampling_resumes{ std::move(sampling_resumes_in) }
     {
         reader.on_event([this](const ::cpu_snap::core::record_variant& record) {
             on_record(record);
@@ -92,7 +94,9 @@ struct cpu_snap_decoder::impl
     {
         auto const [previous, is_first] =
             previous_timestamp.try_emplace(sample.tid, sample.timestamp_ns);
-        auto const start = std::exchange(previous->second, sample.timestamp_ns);
+        auto const previous_ns = std::exchange(previous->second, sample.timestamp_ns);
+        auto const start =
+            slice_start(sampling_resumes, previous_ns, sample.timestamp_ns);
         // Leaf 0 is an intentionally empty stack.
         if(is_first || sample.leaf_node_id == 0)
         {
@@ -172,9 +176,10 @@ struct cpu_snap_decoder::impl
 
     using address_at = std::pair<std::uint64_t, std::uint64_t>;
 
-    on_slice_fn              on_slice;
-    std::vector<std::string> skipped_module_prefixes;
-    ::cpu_snap::core::reader reader;
+    on_slice_fn                on_slice;
+    std::vector<std::string>   skipped_module_prefixes;
+    std::vector<std::uint64_t> sampling_resumes;
+    ::cpu_snap::core::reader   reader;
     // Modules loaded over time, from the stream's maps records; read by the symbolizer.
     ::cpu_snap::core::module_map                modules;
     ::cpu_snap::processing::symbols::symbolizer symbols{
@@ -190,10 +195,11 @@ struct cpu_snap_decoder::impl
     std::uint64_t                                    unresolved_samples = 0;
 };
 
-cpu_snap_decoder::cpu_snap_decoder(on_slice_fn              on_slice,
-                                   std::vector<std::string> skipped_module_prefixes)
-: m_impl{ std::make_unique<impl>(std::move(on_slice),
-                                 std::move(skipped_module_prefixes)) }
+cpu_snap_decoder::cpu_snap_decoder(on_slice_fn                on_slice,
+                                   std::vector<std::string>   skipped_module_prefixes,
+                                   std::vector<std::uint64_t> sampling_resumes)
+: m_impl{ std::make_unique<impl>(std::move(on_slice), std::move(skipped_module_prefixes),
+                                 std::move(sampling_resumes)) }
 {}
 
 cpu_snap_decoder::~cpu_snap_decoder() = default;

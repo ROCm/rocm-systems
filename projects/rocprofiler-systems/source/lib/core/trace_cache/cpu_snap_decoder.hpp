@@ -49,13 +49,13 @@ slice_start(std::span<const std::uint64_t> resumes, std::uint64_t previous_ns,
  * @brief Turns one process's cpu-snap chunks into backtrace_region_sample records.
  *
  * Feed the chunks of a single process in store order, starting with the first one.
- * Every sample becomes one slice per frame, outermost frame first, spanning from the
- * thread's previous sample to this one; a thread's first sample only opens its first
- * slice. Frames are named by cpu-snap's symbolizer (in-process, libdwfl), resolved
- * against the modules loaded when the sample was taken; an address it cannot name
- * keeps "0x<address>". The call_stack JSON carries name, pc and binary path, as the
- * old sampler writes it. Frames whose module file name starts with one of the given
- * prefixes are left out; the frames around them stay.
+ * Every sample becomes one slice per frame, outermost frame first, from slice_start()
+ * to this sample; a pause stays empty; a thread's first sample draws no slice; it only
+ * marks where the thread's first slice starts. Frames are named by cpu-snap's symbolizer
+ * (in-process, libdwfl), resolved against the modules loaded when the sample was taken;
+ * an address it cannot name keeps "0x<address>". The call_stack JSON carries name, pc and
+ * binary path, as the old sampler writes it. Frames whose module file name starts with
+ * one of the given prefixes are left out; the frames around them stay.
  */
 class cpu_snap_decoder
 {
@@ -67,9 +67,12 @@ public:
      * @param on_slice                Receives each slice.
      * @param skipped_module_prefixes Frames whose module file name starts with one of
      *                                these are left out; empty keeps every frame.
+     * @param sampling_resumes        Timestamps of sampling resumed in this process,
+     *                                in accending order.
      */
-    cpu_snap_decoder(on_slice_fn              on_slice,
-                     std::vector<std::string> skipped_module_prefixes);
+    cpu_snap_decoder(on_slice_fn                on_slice,
+                     std::vector<std::string>   skipped_module_prefixes,
+                     std::vector<std::uint64_t> sampling_resumes);
     ~cpu_snap_decoder();
 
     cpu_snap_decoder(const cpu_snap_decoder&)            = delete;

@@ -22,9 +22,10 @@ setup();
 void
 pause() noexcept;
 
-/// Resumes sampling; no-op without a running sampler. Callable from any thread.
+/// Resumes sampling; no-op without a running sampler. Callable from any thread. When
+/// the sampler was paused, records the resume time in the trace-cache metadata registry.
 void
-resume() noexcept;
+resume();
 
 /// Stops sampling and flushes the remaining data into the trace cache. Call before
 /// the trace cache shuts down.
