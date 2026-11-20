@@ -13,12 +13,24 @@
 
 #include "fail_loud.h"
 #include "nccl_fakes.h"
+#include "rccl_common.h"
 #include "rma/rma.h"
 
 // init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
 // rcclP2pPolicyChannels; wrap_fakes.cc supplies the body for binaries that
 // compile rccl_wrap.cc, which this target does not.
 int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
+bool ncclP2pUsesMemcpy() {
+  const char* value = getenv("NCCL_P2P_USE_CUDA_MEMCPY");
+  return value != nullptr && strtoll(value, nullptr, 0) != 0;
+}
+int64_t rcclParamP2pCeChannelsPerPeer() { return g_loadParam("RCCL_P2P_CE_CHANNELS_PER_PEER", 16); }
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap) {
+  if (!isGfx1250 || !useMemcpy || configuredCap <= 0 || pool <= 0) return current;
+  int cap = pow2Down((int)(configuredCap < pool ? configuredCap : pool));
+  if (cap < 1) cap = 1;
+  return current < cap ? current : cap;
+}
 
 // rma.cc owns scheduleRmaTasksToPlan, but rma_fakes.cc also links into binaries that compile the
 // real rma.cc. api_trace.cc owns ncclGetErrorString, and api_trace_fakes.cc does not link here.
@@ -28,6 +40,10 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm*, struct ncclKernelPlan*) {
 }
 #endif
 const char* ncclGetErrorString(ncclResult_t) { FailLoudUnfaked("enqueue_test_deps", "ncclGetErrorString"); }
+
+// paths.cc owns RCCL_PARAM(SaturateP2pNChannels). This binary does not compile
+// paths.cc, and rcclP2pPolicyChannels consults the accessor.
+int64_t rcclParamSaturateP2pNChannels() { return g_loadParam("RCCL_SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET); }
 
 void ResetEnqueueTestDeps() {
   ResetAllocatorFakes();

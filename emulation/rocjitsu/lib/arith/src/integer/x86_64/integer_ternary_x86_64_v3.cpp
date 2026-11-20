@@ -44,6 +44,9 @@ void integer_ternary_x86_64_v3(uint32_t exec_mask, uint32_t *d, const uint32_t *
     if constexpr (Op == IntegerTernary::XorAdd) {
       result = _mm256_add_epi32(_mm256_xor_si256(x, y), z);
     }
+    if constexpr (Op == IntegerTernary::Mad) {
+      result = _mm256_add_epi32(_mm256_mullo_epi32(x, y), z);
+    }
     if constexpr (Op == IntegerTernary::Lerp) {
       // Native byte average rounds up. Subtract one only for an odd sum
       // whose C byte requests truncation; higher C bits are ignored.
@@ -83,5 +86,8 @@ template void integer_ternary_x86_64_v3<IntegerTernary::Xor3>(uint32_t, uint32_t
 template void integer_ternary_x86_64_v3<IntegerTernary::XorAdd>(uint32_t, uint32_t *,
                                                                 const uint32_t *, const uint32_t *,
                                                                 const uint32_t *);
+
+template void integer_ternary_x86_64_v3<IntegerTernary::Mad>(uint32_t, uint32_t *, const uint32_t *,
+                                                             const uint32_t *, const uint32_t *);
 
 } // namespace rocjitsu::arith

@@ -39,7 +39,7 @@ Struct field rules:
 
 Special extra fields appended to certain structs (after normal params):
   __hipRegisterFatBinary:
-      uint64_t blob_hash_lo;  // FNV-1a-128 lo  (raw data* replaced by hash)
+      uint64_t blob_hash_lo;  // 128-bit content lo  (raw data* replaced by hash)
       uint64_t blob_hash_hi;
       uint64_t blob_size;
   hipModuleLoadData / hipModuleLoadDataEx:
@@ -102,6 +102,9 @@ MANUAL_CAPTURE_APIS: Set[str] = {
     "hipLaunchKernelExC",
     # Cooperative launch — void** kernelParams, same encoding as the others.
     "hipModuleLaunchCooperativeKernel",
+    # Graph launch — snapshot records for pinned host memory follow the fixed event.
+    "hipGraphLaunch",
+    "hipGraphLaunch_spt",
     # <<<>>> launch config — must save grid/block/shared/stream into TLS for hipLaunchByPtr
     "__hipPushCallConfiguration",
     # Module load — code object snapshotting to disk
@@ -202,6 +205,10 @@ _VARIABLE_KERNEL_LAUNCH_MIN_PAYLOAD_EXPR = (
 # (hipModuleGetFunction: function handles identified by name at launch time)
 PASSTHROUGH_ONLY: Set[str] = {
     "hipModuleGetFunction",
+    # Generated capture would store these process-local struct pointers without
+    # their pointees, so replay could not reconstruct either operation.
+    "hipMemcpyWithAttributesAsync",
+    "hipMemcpy3DWithAttributesAsync",
 }
 
 # ---------------------------------------------------------------------------
@@ -311,7 +318,9 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # replaced entry is freed first, and hipFreeHost / hipHostFree give the
     # allocation back
     "hipHostMalloc",
+    "hipHostAlloc",
     "hipMallocHost",
+    "hipMemAllocHost",
     "hipFreeHost",
     "hipHostFree",
     # Host memory registration — need handle map + blob restore + device ptr recording
@@ -335,6 +344,7 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # built via the unsupported explicit node API.
     "hipGraphInstantiateWithFlags",
     "hipGraphLaunch",
+    "hipGraphLaunch_spt",
     # DtoH driver-style copies — dst is a host pointer (not in alloc_map); need temp buffer
     "hipMemcpyDtoH",
     "hipMemcpyDtoHAsync",
@@ -680,10 +690,7 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMalloc3DArray",
     # hipMalloc3D — pitchedDevPtr output (stale), hipExtent non-castable; output not needed for D2H — noop
     "hipMalloc3D",
-    # hipMemAllocHost / hipHostAlloc — host ptr alloc; not device allocations — noop
-    # (hipMallocHost / hipFreeHost are replayed by hand: see MANUAL_PLAYBACK_APIS)
-    "hipMemAllocHost",
-    "hipHostAlloc",
+    # hipMallocHost / hipFreeHost / hipHostAlloc / hipMemAllocHost: see MANUAL_PLAYBACK_APIS.
     # hipMemAllocPitch — hipDeviceptr_t* output (type mismatch) + output not in alloc_map — noop
     "hipMemAllocPitch",
     # hipHostGetFlags — output flag ptr (stale) — noop
@@ -850,7 +857,9 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipArrayGetDescriptor",
     "hipArray3DGetDescriptor",
     "hipArrayGetInfo",
+    "hipArrayGetSparseProperties",
     "hipArrayDestroy",
+    "hipArrayGetPlane",
     "hipGetChannelDesc",
     "hipCreateTextureObject",
     "hipDestroyTextureObject",
@@ -872,6 +881,10 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipGraphDestroy",
     "hipGraphUpload",
     "hipGraphDebugDotPrint",
+    "hipGraphGetId",
+    "hipGraphExecGetId",
+    "hipGraphNodeGetLocalId",
+    "hipGraphNodeGetToolsId",
     "hipGraphNodeGetType",
     "hipGraphNodeGetEnabled",
     "hipGraphKernelNodeGetParams",
@@ -942,8 +955,8 @@ DIRECT_PLAYBACK_APIS: Set[str] = {
 # Maps API name -> list of (field_type, field_name, comment) to append
 EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     "__hipRegisterFatBinary": [
-        ("uint64_t", "blob_hash_lo", "FNV-1a-128 lo of fat binary"),
-        ("uint64_t", "blob_hash_hi", "FNV-1a-128 hi"),
+        ("uint64_t", "blob_hash_lo", "128-bit content lo of fat binary"),
+        ("uint64_t", "blob_hash_hi", "128-bit content hi"),
         ("uint64_t", "blob_size",    "fat binary byte count"),
     ],
     "hipModuleLoadData": [
@@ -1579,6 +1592,7 @@ _ENUM_TYPES = {
     "hipGraphMemAttributeType", "hipJitInputType",
     "hipMemAllocationHandleType", "hipMemRangeHandleType",
     "hipPointer_attribute", "hipStreamAttrID", "hipGLDeviceList",
+    "hipExecAffinityType",
 }
 
 # Scalar type map: normalised type string -> C field type
@@ -2015,7 +2029,7 @@ _HEADER_PREAMBLE = """\
  *   events.bin:
  *     [0..7]   hrr_file_header  { magic, version, reserved }
  *     [8..]    hrr_event_header (32 bytes) + payload bytes, repeated per event
- *   blobs/<2hex>/   content-addressed raw buffers (FNV-1a-128 hash)
+ *   blobs/<2hex>/   content-addressed raw buffers (128-bit content hash)
  *   code_objects/   .hsaco ELFs keyed by hash
  *
  * hrr_event_header fields (32 bytes, pack(1)):
@@ -2089,8 +2103,24 @@ _HEADER_PREAMBLE = """\
  * A v10 reader would decode those events as the wrong API.
  * v12: hipExtMemcpyBatchAsync was appended to HipDispatchTable,
  * shifting the compiler API IDs up by one. A v11 reader would decode
- * those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)12u)
+ * those events as the wrong API.
+ * v13: a hipGraphLaunch or hipGraphLaunch_spt event carries pinned host
+ * snapshot records after its fixed fields. A v12 reader would launch the
+ * graph without restoring them.
+ * v14: hipMemcpyWithAttributesAsync, hipMemcpy3DWithAttributesAsync and
+ * hipArrayGetSparseProperties were appended to HipDispatchTable, shifting
+ * the compiler API IDs up by three. A v13 reader would decode those events
+ * as the wrong API.
+ * v15: four graph ID queries were appended to HipDispatchTable, shifting the
+ * compiler API IDs up by four. A v14 reader would decode those events as the
+ * wrong API.
+ * v16: hipDeviceGetExecAffinitySupport was appended to HipDispatchTable,
+ * shifting the compiler API IDs up by one. A v15 reader would decode
+ * those events as the wrong API.
+ * v17: hipArrayGetPlane was appended to HipDispatchTable, shifting the
+ * compiler API IDs up by one. A v16 reader would decode those events as
+ * the wrong API. */
+#define HRR_VERSION ((uint16_t)17u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -3435,8 +3465,10 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     if base in _PLAYBACK_HANDLE_TRANSLATE:
         fn = _PLAYBACK_HANDLE_TRANSLATE[base]
         return f"({t}){fn}(a->{name})"
-    # hipArray_const_t and hipMipmappedArray_const_t
-    if 'hipArray' in base:
+    # hipArray_const_t and hipMipmappedArray_const_t. Match the handle types
+    # exactly: a substring test also catches struct types such as
+    # hipArraySparseProperties, which are output parameters, not handles.
+    if base in ('hipArray_t', 'hipArray_const_t'):
         return f"(hipArray_t)ctx.translate_array(a->{name})"
     if 'hipMipmappedArray' in base:
         return f"(hipMipmappedArray_t)ctx.translate_mipmapped(a->{name})"

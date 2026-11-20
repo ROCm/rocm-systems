@@ -13,6 +13,15 @@
 //! encodings into runtime-owned objects; the individual modules document the
 //! lifetime and synchronization rules for those objects.
 
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::drop_non_drop,
+        clippy::forget_non_drop,
+        clippy::zero_sized_map_values,
+        reason = "native resource owners are uninhabited without a Windows provider"
+    )
+)]
 // HSA attribute tables and generated dispatch have long functions; modules also
 // import the shared FFI catalog. Keep those two structural exceptions explicit.
 #![allow(
@@ -31,27 +40,37 @@
 // export the shared library's versioned ABI symbols.
 #[cfg(all(target_os = "linux", not(test)))]
 core::arch::global_asm!(include_str!("exports_linux.S"));
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 core::arch::global_asm!(include_str!(concat!(
     env!("OUT_DIR"),
     "/api_trace_dispatch_linux.S"
 )));
 
-#[cfg(all(target_os = "linux", target_arch = "x86_64", not(test)))]
+mod admission;
+mod agent;
+#[cfg(all(hsa_tool_dispatch, not(test)))]
 mod api_trace;
 mod callback_arg;
+mod clock;
+mod config;
+mod core_dump;
+mod debugger;
+mod dispatch;
+mod events;
 mod ffi;
-mod image_abi;
-mod image_gfx12;
+mod image;
 mod isa;
+mod lifecycle;
 mod loader;
+mod logging;
 mod memory;
 mod pc_sampling;
 mod platform;
 mod queue;
 mod queue_intercept;
-mod runtime;
+mod session;
 mod signal;
+mod status;
 mod tool_events;
 
 mod api;

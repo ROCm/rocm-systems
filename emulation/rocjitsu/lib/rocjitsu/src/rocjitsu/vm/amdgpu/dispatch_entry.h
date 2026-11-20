@@ -65,6 +65,7 @@ struct ComputeQueueConfig {
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink{};
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
   uint32_t queue_id = 0;
   QueueCuSelection enabled_cus = std::nullopt;
   uint64_t ring_base_va = 0;
@@ -78,8 +79,12 @@ struct ComputeQueueConfig {
   QueueDoorbellMode doorbell_mode = QueueDoorbellMode::Explicit;
   bool uses_kfd_queue_abi = false;
   uint64_t queue_desc_va = 0;
+  /// GPU virtual address of the runtime queue exception status word.
   uint64_t exception_status_va = 0;
+  /// Runtime event ID for software queue exceptions.
   uint32_t exception_event_id = 0;
+  /// Software exception route, independent of packet mailbox interrupts.
+  InterruptSink exception_event_sink{};
   /// Spread each of this queue's dispatches over every XCD of the SoC, the way a
   /// multi-XCD part does when it runs as a single partition. Set by the queue
   /// creation path that models such a device; registering the queue replicates it
@@ -143,7 +148,12 @@ enum class CompletionPublicationPhase : uint8_t {
 class CompletionPublicationState {
 public:
   CompletionPublicationPhase phase = CompletionPublicationPhase::ExecutionEnd;
-  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> access;
+  /// Ordinary binding used to select and publish this dispatch's L2 lines.
+  /// Replacement revokes it, so a refused flush cannot resume on a new root.
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> flush_access;
+  /// Pinned dispatch binding used by the retryable signal journal. It can
+  /// finish an already committed signal after the ordinary root is replaced.
+  util::IntrusiveSharedPtr<GpuVmAccessSnapshot> signal_access;
   uint64_t start_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t mailbox_pointer = 0;
@@ -163,7 +173,7 @@ enum class QueueIdlePublicationPhase : uint8_t {
   ReadEventId,
   StoreMailbox,
   DeliverEventInterrupt,
-  DeliverGenericInterrupt,
+  NotifyIdle,
   Complete,
 };
 
@@ -316,11 +326,21 @@ struct DispatchEntry {
   /// Wrapped AQL ring slot exposed in saved wave context.
   uint32_t queue_packet_id = 0;
   AddressSpaceHandle address_space;
-  /// Immutable VM snapshot captured by the queue-service transaction that
-  /// admitted this dispatch. Every wave in the dispatch shares this snapshot.
+  /// Immutable VM snapshot captured when this packet was admitted. Kernel
+  /// waves and completion publication share its backing generation.
   util::IntrusiveSharedPtr<const GpuVmAccessSnapshot> execution_access;
+  /// VM generation selected for execution and completion. A revoked snapshot
+  /// can be refreshed after invalidation; root replacement leaves it pinned.
+  uint64_t execution_translation_epoch = 0;
+  /// Write-admission sequence captured before this dispatch's waves start.
+  /// Missing or saturated proof fails closed on invalidation.
+  uint64_t execution_cache_write_sequence = UINT64_MAX;
+  /// Shared by all waves and XCD shards. Once a potentially effectful
+  /// instruction runs, completion cannot rebind its signal after invalidation.
+  std::shared_ptr<std::atomic_bool> execution_effect_possible;
   InterruptSink interrupt_sink;
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
 
   /// Snapshot of the queue's physical CU selection; nullopt means unrestricted.
   QueueCuSelection enabled_cus = std::nullopt;
@@ -387,6 +407,10 @@ struct DispatchEntry {
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
   bool enable_wg_info = false;
+  enum class OrderedAppend { Disabled, PerWave, PerWorkgroup };
+  OrderedAppend ordered_append = OrderedAppend::Disabled;
+  /// Number of distinct compute IDs in the ring's GDS_COMPUTE_MAX_WAVE_ID range.
+  uint32_t ordered_id_count = 4096;
   /// Enable the private-segment wave-offset SGPR at dispatch.
   bool enable_private_segment = false;
   uint8_t enable_vgpr_workitem_id = 0;
@@ -436,6 +460,9 @@ struct DispatchEntry {
   /// An AMD vendor packet executes this PM4 buffer before publishing completion.
   uint64_t aql_pm4_ib_address = 0;
   uint32_t aql_pm4_ib_dwords = 0;
+  /// Standard HSA barrier with no acquire or release fence scope. Such a
+  /// packet has no cache effects of its own across a VM root replacement.
+  bool no_fence_aql_barrier = false;
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;

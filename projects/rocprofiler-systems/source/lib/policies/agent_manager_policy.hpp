@@ -35,6 +35,5 @@ concept agent_manager_policy =
         { const_manager.get_agents_by_type(type) } -> std::ranges::range;
         { const_manager.get_agents() } -> std::ranges::range;
         { const_manager.get_gpu_agents_count() } -> std::convertible_to<std::size_t>;
-        { const_manager.get_cpu_agents_count() } -> std::convertible_to<std::size_t>;
     };
 }  // namespace rocprofsys::policies

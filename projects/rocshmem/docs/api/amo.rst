@@ -10,19 +10,19 @@ Atomic memory operations
 
 You can call these functions from divergent control paths at the per-thread level.
 
-ROSHMEM_ATOMIC_FETCH
---------------------
+SHMEM_ATOMIC_FETCH
+------------------
 .. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch(TYPE *source, int pe)
 .. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch(rocshmem_ctx_t ctx, TYPE *source, int pe)
 
- :param ctx:  Context with which to perform this operation.
- :param dest: Destination address. Must be an address on the symmetric heap.
- :param pe:   PE of the remote process.
+ :param ctx:    Context with which to perform this operation.
+ :param source: Source address. Must be an address on the symmetric heap.
+ :param pe:     PE of the remote process.
 
- :returns:    The value of ``dest``.
+ :returns:    The value of ``source``.
 
 **Description:**
-This function atomically returns the value of ``dest`` to the calling PE.
+This function atomically returns the value of ``source`` to the calling PE.
 
 Valid ``TYPENAME`` and ``TYPE`` values are listed in EXTENDED_AMO_TYPES_.
 
@@ -47,8 +47,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in EXTENDED_AMO_TYPES_.
 SHMEM_ATOMIC_COMPARE_SWAP
 -------------------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_compare_swap(TYPE *dest, TYPE cond, TYPE value, TYPE pe);
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_compare_swap(rocshmem_ctx_t ctx, TYPE *dest, TYPE cond, TYPE value, TYPE pe);
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_compare_swap(TYPE *dest, TYPE cond, TYPE value, int pe);
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_compare_swap(rocshmem_ctx_t ctx, TYPE *dest, TYPE cond, TYPE value, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -69,8 +69,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in STANDARD_AMO_TYPES_.
 SHMEM_ATOMIC_SWAP
 -----------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_swap(TYPE *dest, TYPE value, TYPE pe);
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_swap(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe);
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_swap(TYPE *dest, TYPE value, int pe);
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_swap(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -89,8 +89,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in EXTENDED_AMO_TYPES_.
 SHMEM_ATOMIC_FETCH_INC
 ----------------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_inc(TYPE *dest, TYPE pe);
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_inc(rocshmem_ctx_t ctx, TYPE *dest, TYPE pe);
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_inc(TYPE *dest, int pe);
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_inc(rocshmem_ctx_t ctx, TYPE *dest, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -108,8 +108,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in STANDARD_AMO_TYPES_.
 SHMEM_ATOMIC_INC
 ----------------
 
-.. cpp:function:: __device__ void rocshmem_TYPENAME_atomic_inc(TYPE *dest, TYPE pe);
-.. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_atomic_inc(rocshmem_ctx_t ctx, TYPE *dest, TYPE pe);
+.. cpp:function:: __device__ void rocshmem_TYPENAME_atomic_inc(TYPE *dest, int pe);
+.. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_atomic_inc(rocshmem_ctx_t ctx, TYPE *dest, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -127,8 +127,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in STANDARD_AMO_TYPES_.
 SHMEM_ATOMIC_FETCH_ADD
 ----------------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_add(TYPE *dest, TYPE value, TYPE pe);
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_add(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe);
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_add(TYPE *dest, TYPE value, int pe);
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_add(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -147,8 +147,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in STANDARD_AMO_TYPES_.
 SHMEM_ATOMIC_ADD
 ----------------
 
-.. cpp:function:: __device__ void rocshmem_TYPENAME_atomic_add(TYPE *dest, TYPE value, TYPE pe);
-.. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_atomic_add(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe);
+.. cpp:function:: __device__ void rocshmem_TYPENAME_atomic_add(TYPE *dest, TYPE value, int pe);
+.. cpp:function:: __device__ void rocshmem_ctx_TYPENAME_atomic_add(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -167,8 +167,8 @@ Valid ``TYPENAME`` and ``TYPE`` values can be seen in STANDARD_AMO_TYPES_.
 SHMEM_ATOMIC_FETCH_AND
 ----------------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_and(TYPE *dest, TYPE value, TYPE pe);
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_and(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe);
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_and(TYPE *dest, TYPE value, int pe);
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_and(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -187,8 +187,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in BITWISE_AMO_TYPES_.
 SHMEM_ATOMIC_AND
 ----------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_and(TYPE *dest, TYPE value, TYPE pe);
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_and(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe);
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_and(TYPE *dest, TYPE value, int pe);
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_and(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -207,8 +207,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in BITWISE_AMO_TYPES_.
 SHMEM_ATOMIC_FETCH_OR
 ----------------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_or(TYPE *dest, TYPE value, TYPE pe)
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_or(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe)
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_or(TYPE *dest, TYPE value, int pe)
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_or(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe)
 
 
   :param ctx:     Context with which to perform this operation.
@@ -227,8 +227,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in BITWISE_AMO_TYPES_.
 SHMEM_ATOMIC_OR
 ---------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_or(TYPE *dest, TYPE value, TYPE pe)
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_or(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe)
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_or(TYPE *dest, TYPE value, int pe)
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_or(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe)
 
 
   :param ctx:     Context with which to perform this operation.
@@ -247,8 +247,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in BITWISE_AMO_TYPES_.
 SHMEM_ATOMIC_FETCH_XOR
 ----------------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_xor(TYPE *dest, TYPE value, TYPE pe);
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_xor(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe);
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_fetch_xor(TYPE *dest, TYPE value, int pe);
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_fetch_xor(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe);
 
 
   :param ctx:     Context with which to perform this operation.
@@ -267,8 +267,8 @@ Valid ``TYPENAME`` and ``TYPE`` values are listed in BITWISE_AMO_TYPES_.
 SHMEM_ATOMIC_XOR
 ----------------
 
-.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_xor(TYPE *dest, TYPE value, TYPE pe)
-.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_xor(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, TYPE pe)
+.. cpp:function:: __device__ TYPE rocshmem_TYPENAME_atomic_xor(TYPE *dest, TYPE value, int pe)
+.. cpp:function:: __device__ TYPE rocshmem_ctx_TYPENAME_atomic_xor(rocshmem_ctx_t ctx, TYPE *dest, TYPE value, int pe)
 
 
   :param ctx:     Context with which to perform this operation.
