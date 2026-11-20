@@ -19,8 +19,29 @@
  */
 texture<float, 2, hipReadModeElementType> texRef;
 
-// MipMap is currently supported only on windows
-#if (defined(_WIN32) && !__HIP_NO_IMAGE_SUPPORT)
+#if !__HIP_NO_IMAGE_SUPPORT
+struct MipmappedTextureGuard {
+  hipMipmappedArray_t mip_array = nullptr;
+  float* output = nullptr;
+  bool bound = false;
+
+  MipmappedTextureGuard() = default;
+  MipmappedTextureGuard(const MipmappedTextureGuard&) = delete;
+  MipmappedTextureGuard& operator=(const MipmappedTextureGuard&) = delete;
+
+  ~MipmappedTextureGuard() {
+    if (output != nullptr) {
+      static_cast<void>(hipFree(output));
+    }
+    if (bound) {
+      static_cast<void>(hipUnbindTexture(texRef));
+    }
+    if (mip_array != nullptr) {
+      static_cast<void>(hipFreeMipmappedArray(mip_array));
+    }
+  }
+};
+
 __global__ void tex2DKernel(float* outputData, int width, int height, float level) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -40,9 +61,7 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
   height /= pow(2, mipmap_level);
   unsigned int size = width * height * sizeof(float);
 
-  float* hData = reinterpret_cast<float*>(malloc(size));
-  REQUIRE(hData != nullptr);
-  memset(hData, 0, size);
+  std::vector<float> hData(width * height);
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
       hData[i * width + j] = i * width + j;
@@ -52,43 +71,49 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
   // Allocate memory for Mipmapped array and set data to mipmap_level
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<float>();
 
-  hipMipmappedArray* mip_array_ptr;
-  HIP_CHECK(hipMallocMipmappedArray(&mip_array_ptr, &channelDesc,
-                                    make_hipExtent(orig_width, orig_height, 0), 2 * mipmap_level,
-                                    hipArrayDefault));
+  MipmappedTextureGuard resources;
+  hipError_t status = hipMallocMipmappedArray(&resources.mip_array, &channelDesc,
+                                              make_hipExtent(orig_width, orig_height, 0),
+                                              2 * mipmap_level, hipArrayDefault);
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
+  }
+  HIP_CHECK(status);
 
-  hipArray_t hipArray = nullptr;
-  HIP_CHECK(hipGetMipmappedArrayLevel(&hipArray, mip_array_ptr, mipmap_level));
-  HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(float), width * sizeof(float),
-                               height, hipMemcpyHostToDevice));
+  // The level is borrowed from mip_array and released with its parent.
+  hipArray_t level_array = nullptr;
+  HIP_CHECK(hipGetMipmappedArrayLevel(&level_array, resources.mip_array, mipmap_level));
+  HIP_CHECK(hipMemcpy2DToArray(level_array, 0, 0, hData.data(), width * sizeof(float),
+                               width * sizeof(float), height, hipMemcpyHostToDevice));
 
   // Set texture parameters
   texRef.addressMode[0] = hipAddressModeWrap;
   texRef.addressMode[1] = hipAddressModeWrap;
   texRef.filterMode = hipFilterModePoint;
+  texRef.mipmapFilterMode = hipFilterModePoint;
+  texRef.minMipmapLevelClamp = 0;
+  texRef.maxMipmapLevelClamp = mipmap_level;
   texRef.normalized = 1;
 
   // Bind the array to the texture
-  HIP_CHECK(hipBindTextureToMipmappedArray(&texRef, mip_array_ptr, &channelDesc));
+  resources.bound = true;
+  HIP_CHECK(hipBindTextureToMipmappedArray(&texRef, resources.mip_array, &channelDesc));
 
   // Allocate device memory for result
-  float* dData = nullptr;
-  HIP_CHECK(hipMalloc(&dData, size));
-  REQUIRE(dData != nullptr);
+  HIP_CHECK(hipMalloc(&resources.output, size));
+  REQUIRE(resources.output != nullptr);
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid(width / dimBlock.x, height / dimBlock.y, 1);
 
-  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, width, height,
-                     mipmap_level);
+  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, resources.output, width,
+                     height, mipmap_level);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
   // Allocate memory on host and copy result from device to host
-  float* hOutputData = reinterpret_cast<float*>(malloc(size));
-  REQUIRE(hOutputData != nullptr);
-  memset(hOutputData, 0, size);
-  HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
+  std::vector<float> hOutputData(width * height);
+  HIP_CHECK(hipMemcpy(hOutputData.data(), resources.output, size, hipMemcpyDeviceToHost));
 
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
@@ -100,10 +125,11 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
     }
   }
   HIP_CHECK(hipUnbindTexture(texRef));
-  HIP_CHECK(hipFree(dData));
-  HIP_CHECK(hipFreeArray(hipArray));
-  HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
-  free(hData);
+  resources.bound = false;
+  HIP_CHECK(hipFree(resources.output));
+  resources.output = nullptr;
+  HIP_CHECK(hipFreeMipmappedArray(resources.mip_array));
+  resources.mip_array = nullptr;
 }
 #endif
 
@@ -118,7 +144,6 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
  * Test requirements
  * ------------------------
  *  - Textures supported on device
- *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
@@ -127,7 +152,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
   // Height Width Vector
   std::vector<unsigned int> hw_vec = {2048, 1024, 512, 256, 64};
   std::vector<unsigned int> mip_vec = {8, 4, 2, 1};
-#if (defined(_WIN32) && !__HIP_NO_IMAGE_SUPPORT)
+#if !__HIP_NO_IMAGE_SUPPORT
   for (auto& hw : hw_vec) {
     for (auto& mip : mip_vec) {
       if ((hw / static_cast<int>(pow(2, (mip * 2)))) > 0) {
@@ -136,7 +161,7 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
     }
   }
 #else
-  HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
+  HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
 #endif
 }
 
@@ -156,31 +181,41 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Positive_Check) {
  * Test requirements
  * ------------------------
  *  - Textures supported on device
- *  - Host specific (WINDOWS)
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
   CHECK_IMAGE_SUPPORT
 
-#if defined(_WIN32)
+#if !__HIP_NO_IMAGE_SUPPORT
   unsigned int width = 64;
   unsigned int height = 64;
   unsigned int mipmap_level = 1;
 
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<float>();
 
-  hipMipmappedArray* mip_array_ptr;
-  HIP_CHECK(hipMallocMipmappedArray(&mip_array_ptr, &channelDesc, make_hipExtent(width, height, 0),
-                                    mipmap_level, hipArrayDefault));
+  MipmappedTextureGuard resources;
+  hipError_t status =
+      hipMallocMipmappedArray(&resources.mip_array, &channelDesc, make_hipExtent(width, height, 0),
+                              mipmap_level, hipArrayDefault);
+  if (status == hipErrorNotSupported) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
+  }
+  HIP_CHECK(status);
 
   texRef.addressMode[0] = hipAddressModeWrap;
   texRef.addressMode[1] = hipAddressModeWrap;
   texRef.filterMode = hipFilterModePoint;
-  texRef.normalized = 0;
+  texRef.mipmapFilterMode = hipFilterModePoint;
+  texRef.minMipmapLevelClamp = 0;
+  texRef.maxMipmapLevelClamp = 0;
+  texRef.normalized = 1;
+  // Establish valid binding before varying one argument in each section.
+  resources.bound = true;
+  HIP_CHECK(hipBindTextureToMipmappedArray(&texRef, resources.mip_array, &channelDesc));
   hipError_t ret;
 
   SECTION("textureReference is nullptr") {
-    ret = hipBindTextureToMipmappedArray(nullptr, mip_array_ptr, &channelDesc);
+    ret = hipBindTextureToMipmappedArray(nullptr, resources.mip_array, &channelDesc);
     REQUIRE(ret != hipSuccess);
   }
 
@@ -190,13 +225,16 @@ HIP_TEST_CASE(Unit_hipTextureMipmapRef2D_Negative_Parameters) {
   }
 
   SECTION("Channel descriptor is nullptr") {
-    ret = hipBindTextureToMipmappedArray(&texRef, mip_array_ptr, nullptr);
+    ret = hipBindTextureToMipmappedArray(&texRef, resources.mip_array, nullptr);
     REQUIRE(ret != hipSuccess);
   }
 
-  HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
+  HIP_CHECK(hipUnbindTexture(texRef));
+  resources.bound = false;
+  HIP_CHECK(hipFreeMipmappedArray(resources.mip_array));
+  resources.mip_array = nullptr;
 #else
-  HIP_SKIP_TEST(HipTest::SkipReason::kMipmappedArraysUnsupported);
+  HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
 #endif
 }
 #endif
