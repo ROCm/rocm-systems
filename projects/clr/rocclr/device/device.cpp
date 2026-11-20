@@ -372,21 +372,24 @@ MemObjMap::LookupResult MemObjMap::findMemObjNoLock(const void* ptr, Device* dev
   // Global map: upper_bound - 1 is the only candidate. Entries can overlap or nest (for example
   // buffer views from hipExternalMemoryGetMappedBuffer), so a later key may take over part of an
   // entry's range. A hit returns the length over which this same entry stays the answer: the
-  // allocation size, cut at the next key. That length is non-zero and marks the result cacheable.
+  // allocation size, cut at the next key. A non-zero length marks the result cacheable.
   auto next = MemObjMap_.upper_bound(key);
   auto it = next;
   if (it != MemObjMap_.begin()) {
     --it;
     amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if (key >= it->first && key < (it->first + mem_size)) {
-      size_t valid_size = mem_size;
-      if (next != MemObjMap_.end()) {
-        valid_size = std::min<size_t>(mem_size, next->first - it->first);
+    const size_t mem_offset = key - it->first;
+    // Physical handles are opaque keys and must not enter the address-range cache.
+    if (mem->getMemFlags() & ROCCLR_MEM_PHYMEM) {
+      if (mem_offset == 0) {
+        return {mem, 0, 0};
       }
-      return {mem, key - it->first, valid_size};
+    } else if (mem_offset < mem->getSize()) {
+      size_t valid_size = mem->getSize();
+      if (next != MemObjMap_.end()) {
+        valid_size = std::min<size_t>(valid_size, next->first - it->first);
+      }
+      return {mem, mem_offset, valid_size};
     }
   }
 
@@ -423,10 +426,8 @@ amd::Memory* MemObjMap::FindOverlap(const void* ptr, size_t size) {
   if (it != MemObjMap_.begin()) {
     --it;
     amd::Memory* mem = it->second;
-    size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                          ? sizeof(mem->getUserData().hsa_handle)
-                          : mem->getSize();
-    if ((it->first + mem_size) > start) {
+    if ((mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? it->first >= start
+                                                 : (it->first + mem->getSize()) > start) {
       return mem;
     }
   }
@@ -444,10 +445,8 @@ amd::Memory* MemObjMap::FindAndRemoveMemObj(const void* k) {
   }
   --it;
   amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                        ? sizeof(mem->getUserData().hsa_handle)
-                        : mem->getSize();
-  if (key < it->first || key >= (it->first + mem_size)) {
+  const size_t mem_offset = key - it->first;
+  if ((mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? mem_offset != 0 : mem_offset >= mem->getSize()) {
     return nullptr;
   }
 
@@ -531,8 +530,8 @@ void MemObjMap::FindMemObjBatchPairs(const void* const* srcs, const void* const*
     if (!resolved) {
       result = findMemObjNoLock(ptr, dev);
       // size != 0 marks a global-map hit; [base, base + size) is exactly the keys a fresh
-      // lookup resolves to this entry (the range base is key - offset). Windows VA-map hits
-      // report size 0.
+      // lookup resolves to this entry (the range base is key - offset). Physical handles and
+      // Windows VA-map hits report size 0.
       if (cache_active && result.size != 0) {
         const uintptr_t base = key - result.offset;
         range_cache[cache_next] = {base, base + result.size, result.memory};
@@ -1706,12 +1705,10 @@ amd::Memory* Device::FindDevMemObj(const void* k, size_t* offset) const {
 
   --it;
   amd::Memory* mem = it->second;
-  size_t mem_size = (mem->getMemFlags() & ROCCLR_MEM_PHYMEM)
-                        ? sizeof(mem->getUserData().hsa_handle)
-                        : mem->getSize();
-  if (key >= it->first && key < (it->first + mem_size)) {
+  const size_t mem_offset = key - it->first;
+  if ((mem->getMemFlags() & ROCCLR_MEM_PHYMEM) ? mem_offset == 0 : mem_offset < mem->getSize()) {
     if (offset != nullptr) {
-      *offset = key - it->first;
+      *offset = mem_offset;
     }
     return mem;
   }

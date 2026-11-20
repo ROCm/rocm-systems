@@ -1579,8 +1579,8 @@ class MemObjMap : public AllStatic {
   struct LookupResult {
     amd::Memory* memory;
     size_t offset;
-    size_t size;        //!< size == 0 for Windows overlapping VA range or a miss, and is
-                        //!< not cacheable. Otherwise (global map hit) the length from the entry's
+    size_t size;        //!< size == 0 for physical handles, Windows overlapping VA ranges, or
+                        //!< a miss, and is not cacheable. Otherwise the length from the entry's
                         //!< start over which a fresh lookup returns this same entry: its size, cut
                         //!< at the next key so overlapping entries cannot be served from the cache
   };
