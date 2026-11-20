@@ -363,6 +363,39 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
 }
 
 #ifdef ENABLE_ESMI_LIB
+// ESMI indexes its HSMP map in /proc/cpuinfo order. Its energy and MSR
+// paths fold SMT siblings modulo the number of physical cores. Don't pass
+// a guessed CPU to a setter when Linux's numbering doesn't fit that model.
+static std::vector<std::vector<uint32_t>> esmi_core_indices(uint32_t sockets, uint32_t cpus,
+                                                            uint32_t threads) {
+  const uint32_t cores = cpus / threads;
+  const std::string root = std::string(SysDevicesSystemRoot()) + "/cpu/";
+  std::string online;
+  if (cores == 0 || cpus % threads || !(std::ifstream(root + "online") >> online) ||
+      online != (cpus == 1 ? "0" : "0-" + std::to_string(cpus - 1)))
+    return {};
+
+  using Core = std::pair<uint32_t, uint32_t>;  // package and kernel core_id
+  std::vector<Core> primary;
+  std::set<Core> seen;
+  std::vector<std::vector<uint32_t>> indices(sockets);
+  for (uint32_t cpu = 0; cpu < cpus; ++cpu) {
+    const std::string path = root + "cpu" + std::to_string(cpu) + "/topology/";
+    Core core;
+    if (!(std::ifstream(path + "physical_package_id") >> core.first) || core.first >= sockets ||
+        !(std::ifstream(path + "core_id") >> core.second) || core.second == UINT32_MAX)
+      return {};
+    if (cpu < cores) {
+      if (!seen.insert(core).second) return {};
+      primary.push_back(core);
+      indices[core.first].push_back(cpu);
+    } else if (core != primary[cpu % cores]) {
+      return {};
+    }
+  }
+  return indices;
+}
+
 amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
   uint32_t sockets, cpus, threads;
   amdsmi_status_t amd_smi_status;
@@ -394,6 +427,8 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
     return AMDSMI_STATUS_SUCCESS;
   }
 
+  const auto core_indices = esmi_core_indices(sockets, cpus, threads);
+  const auto cores_per_socket = (cpus / threads) / sockets;
   for (uint32_t i = 0; i < sockets; i++) {
     std::string cpu_socket_id = std::to_string(i);
     // Multiple cores may share the same socket
@@ -412,8 +447,11 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
     socket->add_processor(cpusocket);
     processors_.insert(cpusocket);
 
-    for (uint32_t k = 0; k < (cpus / threads) / sockets; k++) {
-      AMDSmiProcessor* core = new AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, k);
+    for (uint32_t k = 0; k < cores_per_socket; k++) {
+      const auto cpu = !core_indices.empty() && core_indices[i].size() == cores_per_socket
+                           ? core_indices[i][k]
+                           : UINT32_MAX;
+      AMDSmiProcessor* core = new AMDSmiProcessor(k, cpu, i);
       socket->add_processor(core);
       processors_.insert(core);
     }
