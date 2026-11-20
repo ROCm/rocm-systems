@@ -29,32 +29,14 @@ namespace amd {
 namespace rdc {
 class MemoryTest : public TestBase {
  public:
-  explicit MemoryTest(uint32_t gpu_index);
+  MemoryTest(uint32_t gpu_index, uint32_t node_id, GpuOutcome* outcome);
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryTest();
 
-  // @Brief: Setup the environment for measurement
-  virtual hsa_status_t SetUp();
-
-  // @Brief: Core measurement execution
-  virtual void Run();
-
-  // @Brief: Clean up and retrieve the resource
-  virtual void Close();
-
-  // @Brief: Display  results
-  virtual void DisplayResults() const;
-
-  // @Brief: Display information about what this test does
-  virtual void DisplayTestInfo(void);
-
-  hsa_status_t MaxSingleAllocationTest(void);
-
-  hsa_status_t TestAllocate(hsa_amd_memory_pool_t pool, size_t sz);
-
- private:
-  hsa_status_t MaxSingleAllocationTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool);
+  // Each pool says what it did in a sentence of its own; a call that fails before any of them
+  // is this GPU's failure, named with its status, and leaves by throwing.
+  void MaxSingleAllocationTest(void);
 };
 
 }  // namespace rdc

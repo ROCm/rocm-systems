@@ -30,25 +30,10 @@ namespace rdc {
 
 class MemoryAccessTest : public TestBase {
  public:
-  explicit MemoryAccessTest(uint32_t gpu_index);
+  MemoryAccessTest(uint32_t gpu_index, uint32_t node_id, GpuOutcome* outcome);
 
   // @Brief: Destructor for test case of MemoryTest
   virtual ~MemoryAccessTest();
-
-  // @Brief: Setup the environment for measurement
-  virtual hsa_status_t SetUp();
-
-  // @Brief: Core measurement execution
-  virtual void Run();
-
-  // @Brief: Clean up and retrieve the resource
-  virtual void Close();
-
-  // @Brief: Display  results
-  virtual void DisplayResults() const;
-
-  // @Brief: Display information about what this test does
-  virtual void DisplayTestInfo(void);
 
   // @Brief: This test verify that CPU is able to Read & write GPU memory
   void CPUAccessToGPUMemoryTest(void);
@@ -57,8 +42,7 @@ class MemoryAccessTest : public TestBase {
   void GPUAccessToCPUMemoryTest(void);
 
  private:
-  void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
-                                hsa_amd_memory_pool_t pool);
+  void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_amd_memory_pool_t pool);
   void GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
 };
 

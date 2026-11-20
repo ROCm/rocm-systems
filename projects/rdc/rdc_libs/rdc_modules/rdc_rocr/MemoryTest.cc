@@ -23,8 +23,9 @@ THE SOFTWARE.
 #include "rdc_modules/rdc_rocr/MemoryTest.h"
 
 #include <algorithm>
-#include <iostream>
 #include <memory>
+#include <new>
+#include <string>
 #include <vector>
 
 #include "rdc_lib/RdcLogger.h"
@@ -35,218 +36,139 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-static const uint32_t kNumBufferElements = 256;
-
-MemoryTest::MemoryTest(uint32_t gpu_index) : TestBase(gpu_index) {
-  set_num_iteration(10);  // Number of iterations to execute of the main test;
-                          // This is a default value which can be overridden
-                          // on the command line.
-  set_title("Max Single Allocation Memory Test");
-  set_description(
-      "This series of tests check memory allocation limits, extent"
-      " of GPU access to system memory and other memory related "
-      "functionality.");
-}
+MemoryTest::MemoryTest(uint32_t gpu_index, uint32_t node_id, GpuOutcome* outcome)
+    : TestBase(gpu_index, node_id, outcome) {}
 
 MemoryTest::~MemoryTest(void) {}
 
-// Any 1-time setup involving member variables used in the rest of the test
-// should be done here.
-hsa_status_t MemoryTest::SetUp(void) {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
+namespace {
 
-  TestBase::SetUp();
+// What one allocation of a pool takes: enough to show the pool hands memory out and takes it
+// back, little enough that the check does not hold memory the GPU's own work needs. ROCr rounds
+// a request up to its page.
+const uint64_t kPoolAllocationBytes = 64ull * 1024 * 1024;
 
-  err = SetDefaultAgents(this);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  err = SetPoolsTypical(this);
-  return err;
+// A number of bytes as the GPU's report reads it.
+std::string bytes_text(uint64_t bytes) {
+  if (bytes >= 1024 * 1024 && (bytes % (1024 * 1024)) == 0) {
+    return std::to_string(bytes / (1024 * 1024)) + " MiB";
+  }
+  if (bytes >= 1024 && (bytes % 1024) == 0) {
+    return std::to_string(bytes / 1024) + " KiB";
+  }
+  return std::to_string(bytes) + " bytes";
 }
 
-void MemoryTest::Run(void) {
-  // Compare required profile for this test case with what we're actually
-  // running on
-  if (!CheckProfile(this)) {
-    return;
+// The agent's pools, each handle recorded and no attribute read: a callback that reads one makes
+// its failure the iteration's, which ROCr reports as a status of its own, and the pools after it
+// are never seen. A callback never throws.
+hsa_status_t ListPools(hsa_amd_memory_pool_t pool, void* data) {
+  if (data == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-
-  TestBase::Run();
+  try {
+    static_cast<std::vector<hsa_amd_memory_pool_t>*>(data)->push_back(pool);
+  } catch (const std::bad_alloc&) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
-void MemoryTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
+}  // namespace
 
-void MemoryTest::DisplayResults(void) const {
-  // Compare required profile for this test case with what we're actually
-  // running on
-  if (!CheckProfile(this)) {
-    return;
-  }
+// Each pool of the GPU that allows allocation is allocated from and freed at once, and what the
+// check reports is that it did so: a user reads this check to learn that the GPU's memory can be
+// taken and given back, not how large a block the GPU happens to have free, which is what the
+// other processes on it decide. The pool's own attributes are read after the iteration has
+// returned, so that a read that fails is that pool's failure and the pools after it are checked
+// all the same.
+void MemoryTest::MaxSingleAllocationTest(void) {
+  hsa_agent_t current_gpu = {};
+  get_agent_by_node_id(node_id_, &current_gpu);
 
-  return;
-}
+  std::vector<hsa_amd_memory_pool_t> pools;
+  const hsa_status_t listed = hsa_amd_agent_iterate_memory_pools(current_gpu, ListPools, &pools);
+  throw_if_error(listed, "Fail to call hsa_amd_agent_iterate_memory_pools().");
 
-void MemoryTest::Close() {
-  // This will close handles opened within rocrtst utility calls and call
-  // hsa_shut_down(), so it should be done after other hsa cleanup
-  TestBase::Close();
-}
+  uint32_t counted = 0;
+  for (size_t i = 0; i < pools.size(); i++) {
+    const std::string number = std::to_string(i + 1);
 
-hsa_status_t MemoryTest::TestAllocate(hsa_amd_memory_pool_t pool, size_t sz) {
-  void* ptr;
-  hsa_status_t err;
-
-  err = hsa_amd_memory_pool_allocate(pool, sz, 0, &ptr);
-
-  if (err == HSA_STATUS_SUCCESS) {
-    err = hsa_memory_free(ptr);
-  }
-
-  return err;
-}
-
-static const char kSubTestSeparator[] = "  **************************";
-
-static void PrintMemorySubtestHeader(const char* header) {
-  RDC_LOG(RDC_DEBUG, "  *** Memory Subtest: " << header << " ***");
-}
-
-// Test Fixtures
-hsa_status_t MemoryTest::MaxSingleAllocationTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool) {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
-
-  pool_info_t pool_i;
-  char ag_name[64];
-  hsa_device_type_t ag_type;
-
-  err = hsa_agent_get_info(ag, HSA_AGENT_INFO_NAME, ag_name);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  err = hsa_agent_get_info(ag, HSA_AGENT_INFO_DEVICE, &ag_type);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  uint32_t node = 0;
-  err = hsa_agent_get_info(ag, HSA_AGENT_INFO_NODE, &node);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  if (verbosity() > 0) {
-    std::string device_type;
-    switch (ag_type) {
-      case HSA_DEVICE_TYPE_CPU:
-        device_type = "CPU";
-        break;
-      case HSA_DEVICE_TYPE_GPU:
-        device_type = "GPU";
-        break;
-      case HSA_DEVICE_TYPE_DSP:
-        device_type = "DSP";
-        break;
+    bool alloc_allowed = false;
+    hsa_status_t err = hsa_amd_memory_pool_get_info(
+        pools[i], HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &alloc_allowed);
+    if (err != HSA_STATUS_SUCCESS) {
+      say(RDC_DIAG_RESULT_FAIL,
+          hsa_error_text(
+              "Fail to call hsa_amd_memory_pool_get_info() for memory pool " + number + ".", err));
+      continue;
     }
-    RDC_LOG(RDC_DEBUG, "  Agent: " << ag_name << " Node " << node << " (" << device_type << ")");
-  }
-
-  err = AcquirePoolInfo(pool, &pool_i);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  if (verbosity() > 0) {
-    DumpMemoryPoolInfo(&pool_i, 2);
-  }
-
-  if (!pool_i.alloc_allowed || pool_i.alloc_granule == 0 || pool_i.alloc_alignment == 0) {
-    if (verbosity() > 0) {
-      RDC_LOG(RDC_DEBUG, "  Test not applicable. Skipping.");
-    }
-    return err;
-  }
-  // Do everything in "granule" units
-  auto gran_sz = pool_i.alloc_granule;
-  auto pool_sz = pool_i.aggregate_alloc_max / gran_sz;
-
-  // Neg. test: Try to allocate more than the pool size
-  err = TestAllocate(pool, pool_sz * gran_sz + gran_sz);
-  if (err != HSA_STATUS_ERROR_INVALID_ALLOCATION) return err;
-
-  auto max_alloc_size = pool_sz / 2;
-  uint64_t upper_bound = pool_sz;
-  uint64_t lower_bound = 0;
-
-  while (true) {
-    err = TestAllocate(pool, max_alloc_size * gran_sz);
-
-    if (err != HSA_STATUS_SUCCESS || err != HSA_STATUS_ERROR_OUT_OF_RESOURCES) return err;
-
-    if (err == HSA_STATUS_SUCCESS) {
-      lower_bound = max_alloc_size;
-      max_alloc_size += (upper_bound - lower_bound) / 2;
-    } else if (err == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
-      upper_bound = max_alloc_size;
-      max_alloc_size -= (upper_bound - lower_bound) / 2;
+    if (!alloc_allowed) {
+      RDC_LOG(RDC_DEBUG, "Memory pool " << number << " does not allow allocation: not checked.");
+      continue;
     }
 
-    if ((upper_bound - lower_bound) < 2) {
-      break;
+    uint64_t max_size = 0;
+    err =
+        hsa_amd_memory_pool_get_info(pools[i], HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &max_size);
+    if (err != HSA_STATUS_SUCCESS) {
+      say(RDC_DIAG_RESULT_FAIL,
+          hsa_error_text(
+              "Fail to call hsa_amd_memory_pool_get_info() for memory pool " + number + ".", err));
+      continue;
+    }
+    // ROCr refuses a request of no bytes, so a pool that reports no maximum cannot be checked.
+    if (max_size == 0) {
+      RDC_LOG(RDC_DEBUG, "Memory pool " << number << " reports a maximum of 0: not checked.");
+      continue;
     }
 
-    if (upper_bound <= lower_bound) {
-      RDC_LOG(RDC_ERROR, "Wrong upper bound and lower bound");
-      return err;
+    const uint64_t bytes = std::min<uint64_t>(kPoolAllocationBytes, max_size);
+    bool freed = false;
+    {
+      const LoggedStep step(gpu_index_, "Pool " + number + " allocate and free");
+
+      // The block goes back to its pool as soon as it was handed out, and a free that fails is
+      // this GPU's failure, through the holder.
+      PoolBlockHolder block(release_context());
+      void* address = nullptr;
+      err = hsa_amd_memory_pool_allocate(pools[i], bytes, 0, &address);
+      if (err == HSA_STATUS_SUCCESS) {
+        block.reset(address);
+      }
+      // The block is given back here, inside the step, so that the sentence below says what this
+      // pool did rather than what it was asked to do.
+      block.reset();
+      freed = !block.release_failed();
     }
-  }
 
-  if (verbosity() > 0) {
-    RDC_LOG(RDC_DEBUG, "  Biggest single allocation size for this pool is "
-                           << (max_alloc_size * gran_sz) / 1024 << "KB.");
-    RDC_LOG(RDC_DEBUG, "  This is " << static_cast<float>(max_alloc_size) / pool_sz * 100
-                                    << "% of the total.");
-  }
-
-  if (ag_type == HSA_DEVICE_TYPE_GPU) {
-    if ((float)max_alloc_size / pool_sz < (float)15 / 16) {
-      RDC_LOG(RDC_ERROR, "the allocate size is wrong");
-      throw_if_error(HSA_STATUS_ERROR, "The allocate size is wrong");
+    // A pool with no free memory says so and is not counted: the GPU's memory is in use, which
+    // is not a fault of the GPU.
+    if (err == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
+      say(RDC_DIAG_RESULT_SKIP, "Memory pool " + number + " had no free memory.");
+      continue;
     }
-    // EXPECT_GE((float)max_alloc_size/pool_sz, (float)15/16);
-  }
-  if (verbosity() > 0) {
-    std::cout << kSubTestSeparator << std::endl;
-  }
-
-  return err;
-}
-
-hsa_status_t MemoryTest::MaxSingleAllocationTest(void) {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
-  std::vector<std::shared_ptr<agent_pools_t>> agent_pools;
-
-  PrintMemorySubtestHeader("Maximum Single Allocation in Memory Pools");
-
-  err = GetAgentPools(&agent_pools);
-  throw_if_error(err, "GetAgentPools pool fail.");
-
-  hsa_agent_t current_gpu;
-  err = get_agent_by_gpu_index(gpu_index_, &current_gpu);
-  throw_if_error(err, "Get agent by GPU index fail.");
-
-  auto pool_idx = 0;
-  for (auto a : agent_pools) {
-    if (a->agent.handle != current_gpu.handle) continue;
-    for (auto p : a->pools) {
-      pool_idx++;
-      RDC_LOG(RDC_DEBUG, "  Pool " << pool_idx << ":");
-      err = MaxSingleAllocationTest(a->agent, p);
-      throw_if_error(err, "MaxSingleAllocationTest .");
-      per_gpu_info_ += title();
-      per_gpu_info_ += " Pool ";
-      per_gpu_info_ += std::to_string(pool_idx);
-      per_gpu_info_ += " test pass. ";
+    if (err != HSA_STATUS_SUCCESS) {
+      say(RDC_DIAG_RESULT_FAIL,
+          hsa_error_text(
+              "Fail to call hsa_amd_memory_pool_allocate() for memory pool " + number + ".", err));
+      continue;
     }
-  }
-  gpu_info_ += title();
-  gpu_info_ += " for GPU ";
-  gpu_info_ += std::to_string(gpu_index_);
-  gpu_info_ += " Pass. ";
 
-  return err;
+    // A pool whose block could not be given back says that it was allocated, is not counted
+    // and is that pool's failure: the holder has already made that release this GPU's failure,
+    // and a pool the check did not finish with is not a pool that passed.
+    if (freed) {
+      counted++;
+    }
+    const std::string did = freed ? ": allocated and freed " : ": allocated ";
+    say(freed ? RDC_DIAG_RESULT_PASS : RDC_DIAG_RESULT_FAIL,
+        "Memory pool " + number + did + bytes_text(bytes) + ".");
+  }
+
+  if (counted == 0) {
+    throw_if_skip("No memory pool could be checked.");
+  }
 }
 
 }  // namespace rdc

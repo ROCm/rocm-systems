@@ -15,7 +15,16 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci diag`'s compute process lines cover only the GPUs of the group, and leave out the process that runs the check (`rdcd`, or the program that embeds RDC), which can stay listed on a GPU after the ROCr diagnostics have used it.
 
-- `rdci diag` cuts a compute process, node topology or GPU parameters detail too long to show after a whole sentence, GPU pair or process ID and ends it with "(N more not shown)".
+- `rdci diag` cuts a compute process, node topology, GPU parameters, Compute Queue or System memory detail too long to show after a whole sentence, GPU pair or process ID and ends it with "(N more not shown)".
+
+- `rdci diag` skips the Compute Queue and System memory checks on a GPU it cannot match to a GPU that ROCr lists, for example when AMD SMI cannot report the GPU's KFD node or ROCR_VISIBLE_DEVICES hides it, instead of testing whichever GPU ROCr lists in that position.
+
+- `rdci diag`'s Compute Queue and System memory checks no longer spend about 0.75 seconds of CPU time per GPU in an unused timer (more on CPUs with a lower base clock).
+
+- `rdci diag`'s Compute Queue and System memory checks report a GPU, or a part of a check, that they could not run as skipped, with the reason, instead of passed.
+
+- `rdci diag`'s System memory check uses much less GPU memory and time.
+  - It allocates and frees up to 64 MiB in each GPU memory pool that allows allocation instead of half of the pool, has the CPU write and read back 8 KiB of each GPU's memory instead of about 2 MB, and reports a pool without free memory as skipped instead of failed.
 
 - **`rdc_field_watch()` documents that a `max_keep_samples` or `max_keep_age` of 0 keeps no samples**.
   - The documentation said 0 meant no limit. To keep every sample, pass a large value, such as `UINT32_MAX`.
@@ -79,7 +88,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdc_job_get_stats()` and `rdci stats -j` report every GPU of a job. Only the GPU with the lowest ID was summarized, and the entries of the other GPUs were not filled in. Job statistics for a GPU partition, or for a GPU whose ID is above 15, no longer crash `rdcd`. A GPU without a total memory reading reports memory utilization as unavailable instead of failing the call, and memory utilization is no longer inflated on GPUs with 400 GiB of memory or more.
 
 - `rdcd` no longer crashes during `rdci diag`, and later diagnostic runs and profiler fields keep working. Repeated `rdci diag` runs also no longer use up GPU memory in `rdcd`.
-  - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests now run one at a time.
+  - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests that check the same GPU take turns on its compute queue; requests for different GPUs run at the same time.
 
 - The node topology diagnostic checks each pair of GPUs, instead of each GPU against itself, and names the GPUs by index.
 
@@ -115,6 +124,28 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdcd` no longer crashes listing more than 128 (`RDC_MAX_NUM_DEVICES`) GPUs and GPU partitions; `rdc_device_get_all()` lists the first 128.
 
 - `rdci policy --reg` no longer uses a whole CPU core once rdcd goes away, and no longer reads freed memory as it exits. With a connection to rdcd, `rdc_policy_unregister()` and `rdc_disconnect()` now wait for a running policy callback to return, and `rdc_policy_register()` works again for a group that was unregistered; it used to return `RDC_ST_CONFLICT` for that group until the connection was closed.
+
+- `rdci diag`'s Compute Queue and System memory checks run on the GPU each result names, report a result and a line for each GPU, and name each GPU in their progress lines.
+
+- `rdci diag` reports correct per-GPU results for groups with GPU partitions.
+
+- `rdcd` no longer stops when a Compute Queue or System memory check fails to clean up.
+
+- `rdci diag`'s Compute Queue and System memory checks no longer clear the `HSA_ENABLE_INTERRUPT` environment variable of the process that runs them.
+
+- Fixed memory-safety issues in `rdci diag`'s Compute Queue and System memory checks.
+
+- `rdci diag`'s Compute Queue check fails a GPU whose kernel returns a wrong search result; before, it reported such a run as passed.
+
+- A diagnostic GPU kernel or memory copy that does not finish in 10 seconds fails its GPU's check instead of holding the diagnostic run, and a diagnostic queue that cannot be destroyed fails its GPU's check, where its failure was ignored.
+  - Until the process that runs them (`rdcd`, or a program that embeds RDC) restarts, later runs report that GPU as failed and every other GPU of the Compute Queue and System memory checks as skipped, and the GPU memory of that GPU's queue and of the stopped check stays reserved.
+
+- RDC no longer loads diagnostic kernels from the working directory of the process that runs them (`rdcd`, or a program that embeds RDC).
+
+- `rdci diag`'s System memory check reports a value mismatch as its GPU's failure; `rdcd` logs it at debug level instead of always printing it to its standard output.
+
+- The `rdc_diag_kernel_tests` program of the RDC test package starts from its installed location.
+  - It now also checks the diagnostic kernels installed under `lib/rdc/hsaco`; before, it checked only the build machine's source tree and reported its checks as skipped when that tree was absent.
 
 ## RDC 1.4.0 for ROCm 10.2.0
 

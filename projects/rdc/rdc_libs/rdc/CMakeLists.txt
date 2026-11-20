@@ -37,6 +37,7 @@ set(RDC_LIB_INC_LIST
     ${RDC_LIB_INC_LIST}
     "${COMMON_DIR}/rdc_capabilities.h"
     "${COMMON_DIR}/rdc_fields_supported.h"
+    "${INC_DIR}/DiagText.h"
     "${INC_DIR}/RdcCacheManager.h"
     "${INC_DIR}/RdcDiagnostic.h"
     "${INC_DIR}/RdcDiagnosticLibInterface.h"

@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include "rdc_lib/RdcDiagnostic.h"
+#include "rdc_lib/RdcDiagnosticLibInterface.h"
 #include "rdc_lib/RdcLibraryLoader.h"
 
 namespace amd {
@@ -57,12 +58,13 @@ class RdcRocrLib : public RdcDiagnostic {
 
  private:
   RdcLibraryLoader lib_loader_;
-  rdc_status_t (*test_case_run_)(rdc_diag_test_cases_t, uint32_t[RDC_MAX_NUM_DEVICES], uint32_t,
-                                 const char*, size_t, rdc_diag_test_result_t*,
-                                 rdc_diag_callback_t*);
-  rdc_status_t (*diag_test_cases_query_)(rdc_diag_test_cases_t[MAX_TEST_CASES], uint32_t*);
-  rdc_status_t (*diag_init_)(uint64_t);
-  rdc_status_t (*diag_destroy_)();
+  // The module's entry points, taken from the interface it implements so that the two
+  // cannot drift apart. Each name is qualified, as three of them are also this class's
+  // own member functions, which an unqualified name would find instead.
+  decltype(&::rdc_diag_test_case_run) test_case_run_;
+  decltype(&::rdc_diag_test_cases_query) diag_test_cases_query_;
+  decltype(&::rdc_diag_init) diag_init_;
+  decltype(&::rdc_diag_destroy) diag_destroy_;
 };
 
 typedef std::shared_ptr<RdcRocrLib> RdcRocrLibPtr;

@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include "rdc/rdc.h"
+#include "rdc_lib/DiagText.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
@@ -49,57 +50,6 @@ constexpr uint32_t kProcessesStarting = 16;
 constexpr uint32_t kProcessListReads = 3;
 // Fills a process's GPU list before amd-smi writes it: no GPU has this index.
 constexpr uint32_t kNoGpu = std::numeric_limits<uint32_t>::max();
-
-// A check's text, built from units (sentences, topology pairs, process IDs) joined by single
-// spaces in at most MAX_DIAG_MSG_LENGTH - 1 bytes. The fixed start, if any, is always kept. Units
-// are kept while they fit and the rest only counted; a cut text ends after a whole unit with
-// " (N more not shown)".
-class DiagText {
- public:
-  explicit DiagText(std::string start = {}) : text_(std::move(start)) {}
-
-  void add(const std::string& unit) {
-    const size_t space = text_.empty() ? 0 : 1;
-    if (more_ == 0 && text_.size() + space + unit.size() <= kBudget) {
-      unit_starts_.push_back(text_.size());
-      text_.append(space, ' ');
-      text_ += unit;
-    } else {
-      more_++;
-    }
-  }
-
-  bool has_units() const { return !unit_starts_.empty() || more_ != 0; }
-
-  void copy_to(char (&out)[MAX_DIAG_MSG_LENGTH]) const {
-    std::string text = text_;
-    size_t kept = unit_starts_.size();
-    size_t more = more_;
-    while (more != 0) {
-      const std::string suffix =
-          (text.empty() ? "(" : " (") + std::to_string(more) + " more not shown)";
-      if (text.size() + suffix.size() <= kBudget || kept == 0) {
-        text += suffix;
-        break;
-      }
-      text.resize(unit_starts_[--kept]);
-      more++;
-    }
-    strncpy_with_null(out, text.c_str(), sizeof(out));
-  }
-
- private:
-  static constexpr size_t kBudget = MAX_DIAG_MSG_LENGTH - 1;
-  std::string text_;
-  std::vector<size_t> unit_starts_;  // where each kept unit, with the space before it, starts
-  size_t more_ = 0;                  // units not kept
-};
-
-rdc_status_t skip_empty_group(rdc_diag_test_result_t* result) {
-  result->status = RDC_DIAG_RESULT_SKIP;
-  strncpy_with_null(result->info, "The group has no GPU.", MAX_DIAG_MSG_LENGTH);
-  return RDC_ST_OK;
-}
 
 // amd-smi reports a value it cannot read as its type's maximum.
 template <typename T>
@@ -124,7 +74,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
   if (gpu_count == 0) {
     return skip_empty_group(result);
   }
-  // gpu_index and result->gpu_results hold RDC_MAX_NUM_DEVICES entries.
+  // gpu_index[] holds the ids the caller passed (the dispatcher passes at most
+  // RDC_GROUP_MAX_ENTITIES); RDC_MAX_NUM_DEVICES is the bound of result->gpu_results[].
   gpu_count = std::min<uint32_t>(gpu_count, RDC_MAX_NUM_DEVICES);
 
   // A process that starts between the count call and the fill call can leave the fill without
@@ -312,7 +263,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
   if (gpu_count == 0) {
     return skip_empty_group(result);
   }
-  // gpu_index holds RDC_MAX_NUM_DEVICES entries.
+  // gpu_index[] holds the ids the caller passed (the dispatcher passes at most
+  // RDC_GROUP_MAX_ENTITIES); RDC_MAX_NUM_DEVICES is the most this check reads of them.
   gpu_count = std::min<uint32_t>(gpu_count, RDC_MAX_NUM_DEVICES);
 
   DiagText info;
@@ -369,7 +321,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_param_info(uint32_t gpu_index[RDC_M
   if (gpu_count == 0) {
     return skip_empty_group(result);
   }
-  // gpu_index and result->gpu_results hold RDC_MAX_NUM_DEVICES entries.
+  // gpu_index[] holds the ids the caller passed (the dispatcher passes at most
+  // RDC_GROUP_MAX_ENTITIES); RDC_MAX_NUM_DEVICES is the bound of result->gpu_results[].
   gpu_count = std::min<uint32_t>(gpu_count, RDC_MAX_NUM_DEVICES);
 
   result->status = RDC_DIAG_RESULT_PASS;
@@ -416,6 +369,13 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_param_info(uint32_t gpu_index[RDC_M
       }
       messages.copy_to(per_gpu.gpu_result.msg);
     }
+    // Each check's result is the highest of its GPUs' outcomes, which rests on the order
+    // rdc.h declares rdc_diag_result_t in.
+    static_assert(RDC_DIAG_RESULT_PASS < RDC_DIAG_RESULT_SKIP &&
+                      RDC_DIAG_RESULT_SKIP < RDC_DIAG_RESULT_WARN &&
+                      RDC_DIAG_RESULT_WARN < RDC_DIAG_RESULT_FAIL,
+                  "rdc_diag_result_t must run from Pass to Fail for std::max to take the highest "
+                  "outcome");
     // Set to higher error level
     result->status = std::max(result->status, gpu.status);
     result->per_gpu_result_count++;
