@@ -235,9 +235,8 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
   //   bits [31:24] - rxReqIndex: receiver's request slot index (from CTS fifo)
   //   bit  [23]    - WR_IMM_SPLIT_DATA_FLAG: set when sending across >1 QPs
   //   bits [22:0]  - unused; receiver uses wc->byte_len for size unless the record has it
-  // - nreqs > 1, or one request sent under Adaptive Routing
-  //      Sizes are written directly to remote completion records array. Under Adaptive Routing the data
-  //      goes as plain RDMA Writes and the trailing Write with immediate carries no data, so its byte_len is 0.
+  // - nreqs > 1, or one request under Adaptive Routing (its trailing Write with imm has byte_len 0)
+  //      Sizes are written directly to remote completion records array
   struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
   bool arSizeInRecord = false;
   if (!useWriteOp) {
@@ -374,8 +373,8 @@ ncclResult_t IbCastMultiSend(struct ncclIbSendComm* comm, int slot, int nqps, in
       lastWr->sg_list = &(comm->devs[devIndex].sge);
       lastWr->sg_list[0].addr = (uint64_t)(comm->remCmplsRecords.elems[slot]);
       lastWr->sg_list[0].length = nreqs * sizeof(int);
-      // Populate the correct RKey based on the device used
-      lastWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
+      // The records are registered on the receiver's devices, so the RKey follows the remote device
+      lastWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[qp->remDevIdx];
     }
 
     struct ibv_send_wr* bad_wr;
@@ -1204,8 +1203,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
              wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclInternalError;
       }
-      // The sender's RDMA Write lands sizes[0] before this completion when it writes the record
-      // (Adaptive Routing); its byte_len then covers only that write, not the data.
+      // A size record written by the sender (see IbCastMultiSend) wins over byte_len.
       if (req->nreqs == 1 && req->recv.cmplsRecords->sizes[0] == 0) {
         req->recv.aggSize += wc->byte_len;
       }
@@ -1313,8 +1311,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
              wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->qp_num);
         return ncclInternalError;
       }
-      // The sender's RDMA Write lands sizes[0] before this completion when it writes the record
-      // (Adaptive Routing); its byte_len then covers only that write, not the data.
+      // A size record written by the sender (see IbCastMultiSend) wins over byte_len.
       if (req->nreqs == 1 && req->recv.cmplsRecords->sizes[0] == 0) {
         req->recv.aggSize += wc->byte_len;
       }
