@@ -99,7 +99,6 @@ def make_roofline_panel(*, html_path: Optional[str] = None) -> SimpleNamespace:
     table_config = {
         "id": 401,
         "title": "Roofline Performance Rates",
-        "cli_style": "Roofline",
         "header": {"metric": "Metric", "value": "Value"},
     }
     arch_configs = SimpleNamespace(
@@ -498,7 +497,6 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     table_config = {
         "id": 301,
         "title": "Instruction Cache",
-        "cli_style": "mem_chart",
         "header": {"metric": "Metric", "value": "Value", "unit": "Unit"},
         "metric": {"DRAM Read Bandwidth": {"value": "X", "unit": "Bytes/s"}},
     }
@@ -955,7 +953,6 @@ def test_show_all_debug_table_view_replaces_memory_chart_panel(
                         "metric_table": {
                             "id": 301,
                             "title": "Memory Chart",
-                            "cli_style": "mem_chart",
                             "header": {"metric": "Metric", "value": "Value"},
                         }
                     }
@@ -1005,12 +1002,11 @@ def test_show_all_debug_table_view_skips_per_kernel_roofline_layout(
     per-kernel layout."""
     roofline_called = False
 
-    def _spy(*_a, **_k) -> bool:
+    def _spy(*_a, **_k) -> None:
         nonlocal roofline_called
         roofline_called = True
-        return False
 
-    monkeypatch.setattr("utils.tty.is_roofline_shown", _spy)
+    monkeypatch.setattr("utils.tty.show_roofline", _spy)
     panel = make_roofline_panel()
     monkeypatch.setattr(
         "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe

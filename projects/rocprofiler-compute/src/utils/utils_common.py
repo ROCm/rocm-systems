@@ -53,7 +53,9 @@ NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
 NATIVE_AGENTS_PREFIX = "agents"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
-# Panel id of block 4, Roofline
+# Panel id of block 3, Memory Chart, drawn as the memory chart in the CLI
+MEMORY_CHART_PANEL_ID: int = 300
+# Panel id of block 4, Roofline, drawn as the per-kernel roofline layout in the CLI
 ROOFLINE_PANEL_ID: int = 400
 # --list-metrics value that lists every metric
 LIST_ALL_METRICS = "all"
