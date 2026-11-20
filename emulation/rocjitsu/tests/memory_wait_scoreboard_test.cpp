@@ -2720,6 +2720,48 @@ TEST(MemoryWaitExecutionTest, BufferTypeMismatchRetainsLoadcntWithoutWritingData
         }
 }
 
+TEST(MemoryWaitExecutionTest, ExecZeroAsyncBarrierDoesNotAdmitOrOccupyAsynccnt) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr WaitCounterKind counter = WaitCounterKind::Async;
+  const util::FailureOr<uint32_t> maximum =
+      WaitCounterPolicy::maximum_dependency_wait(arch, counter);
+  ASSERT_TRUE(maximum.succeeded());
+  const uint32_t capacity = maximum.value() + 1;
+  for (uint32_t pending : {1u, capacity})
+    for (uint64_t exec : {0u, 1u}) {
+      SCOPED_TRACE(std::format("pending={} exec={}", pending, exec));
+      GpuMemory memory("async_barrier_memory");
+      L2Cache l2("async_barrier_l2");
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 32;
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "async_barrier_cu", config, &memory, &l2));
+      Wavefront *wave = cu->dispatch_wf(0, 0x100, 128, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(exec);
+      std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+      const auto words = cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds, {});
+      util::StringDiagnostic error;
+      DecodeResult inst = decoder->decode_window(words, 0, error.emitter());
+      ASSERT_TRUE(inst.succeeded()) << error.message();
+      MemoryWaitScoreboard &state = wave->ensure_memory_wait_scoreboard();
+      for (uint32_t index = 0; index < pending; ++index)
+        state.issue(counter);
+      // CDNA5 ISA 3.2.2.1 permits skipping this LDS instruction when EXEC and
+      // DScnt are zero, even with ASYNCcnt nonzero. Check admission separately
+      // from issue so dropping only one of them cannot hide the other's effect.
+      state.before(*inst.value(), arch, wave);
+      EXPECT_EQ(state.outstanding(counter), exec == 0 ? pending : std::min(pending, capacity - 1));
+      cu->track_memory_wait(*inst.value(), *wave);
+      EXPECT_EQ(state.outstanding(counter), exec == 0 ? pending : std::min(pending + 1, capacity));
+    }
+}
+
 TEST(MemoryWaitExecutionTest, ExecZeroIssueCountsForPartialWaitsAndCapacity) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,

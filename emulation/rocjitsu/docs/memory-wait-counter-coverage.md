@@ -53,17 +53,31 @@ Functional execution routes the requesting lanes by address space.
 
 A gfx1250 buffer load with resource TYPE other than 0 produces no register
 result (CDNA5 ISA section 9.6), but retains its ordered LOADcnt position.
-Counter admission and occupancy are independent of those data effects. An
-ordinary load followed by a TYPE-mismatched buffer load can therefore use
-`s_wait_loadcnt 1` before consuming the first load's result. The mismatched
-load leaves its destination unchanged and creates no register dependency.
+For example, with active EXEC, `v4 = 0`, a readable address in `s[0:1]`, and
+a backed buffer descriptor with TYPE = 2 in `s[8:11]`:
+
+```asm
+s_wait_loadcnt 0
+global_load_b32 v0, v4, s[0:1]              // A: loads v0
+buffer_load_b32 v1, v4, s[8:11], null offen // B: keeps v1 unchanged
+s_wait_loadcnt 1                          // At most B remains; A is ready
+v_mov_b32 v2, v0
+```
+
+Dropping B's counter position would make the checker report a false hazard
+on the final instruction. Changing the wait threshold to 2 leaves A pending.
+B creates no register dependency, so its unchanged `v1` can be read immediately.
 This counter behavior has not been validated on hardware.
 
 With EXEC zero, gfx1250 VMEM retains its LOAD/STORE/ASYNC/TENSOR obligations,
 LDS retains DSCNT, and FLAT retains both
-domains, following the skip conditions in CDNA5 ISA section 3.2.2.1. An LDS
-instruction's ASYNC obligation is not guaranteed by those conditions. RDNA retains
-its counter positions. On CDNA1–4, ordinary VMEM and LDS instructions with EXEC
+domains, following the skip conditions in CDNA5 ISA section 3.2.2.1. The core
+and race plugin share this EXEC-zero filter. For example,
+`ds_atomic_async_barrier_arrive_b64` may be skipped with EXEC and DScnt zero
+even while ASYNCcnt is nonzero. It must not force progress on ASYNCcnt at
+admission or add a position that a later partial wait could use. This
+qualification is independent of descriptor TYPE and its suppressed data effects.
+RDNA retains its counter positions. On CDNA1–4, ordinary VMEM and LDS instructions with EXEC
 zero retain positions behind pending operations, so partial waits and counter
 capacity still prove completion of older results. Generic FLAT retains the
 address-dependent accounting described above.
