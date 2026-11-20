@@ -25,7 +25,6 @@ const unsigned int kNumNode = 5;
  * `hipError_t hipGraphLaunch(hipGraphExec_t graphExec, hipStream_t stream);`
  * - Launches an executable graph in the specified stream.
  */
-unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C_d, size_t NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
@@ -47,6 +46,7 @@ template <typename T> __global__ void vectorADD(const T* A_d, const T* B_d, T* C
  * - HIP_VERSION >= 6.4
  */
 HIP_TEST_CASE(Performance_hipGraph_ParallelGraph) {
+  const unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
   hipGraphNode_t memCpy1, memCpy2, memCpy3;
   std::vector<hipGraphNode_t> kNode(kNumNode);
   hipGraph_t graph;
