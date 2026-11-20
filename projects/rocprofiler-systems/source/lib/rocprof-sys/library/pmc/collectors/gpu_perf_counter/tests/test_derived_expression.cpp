@@ -106,13 +106,16 @@ TEST(DerivedExpressionTest, MfmaUtilIsEvaluatedOnItsInputs)
     constexpr double k_simd_count  = 4.0;
     constexpr double k_expected    = 87.0;
 
-    auto const expression = derived_expression{ k_mfma_util, sdk_definitions() };
+    auto       slots = input_slots{};
+    auto const expression =
+        parse_derived_expression(k_mfma_util, sdk_definitions(), slots);
 
-    ASSERT_EQ(expression.evaluation(), derived_evaluation::interval);
-    ASSERT_EQ(expression.input_names(),
-              (std::vector<std::string>{ "SQ_VALU_MFMA_BUSY_CYCLES", "GRBM_GUI_ACTIVE",
-                                         "simd_count" }));
-    EXPECT_THAT(expression.referenced_names(),
+    ASSERT_EQ(expression.evaluation, derived_evaluation::interval);
+    ASSERT_THAT(slots, ::testing::UnorderedElementsAre(
+                           ::testing::Pair("SQ_VALU_MFMA_BUSY_CYCLES", 0),
+                           ::testing::Pair("GRBM_GUI_ACTIVE", 1),
+                           ::testing::Pair("simd_count", 2)));
+    EXPECT_THAT(expression.referenced_names,
                 ::testing::UnorderedElementsAre("SQ_VALU_MFMA_BUSY_CYCLES",
                                                 "GRBM_GUI_ACTIVE", "SIMD_NUM",
                                                 "simd_count"));
@@ -125,10 +128,9 @@ TEST(DerivedExpressionTest, MfmaUtilIsEvaluatedOnItsInputs)
 
 TEST(DerivedExpressionTest, OperatorsFollowPrecedenceAndReduceOperations)
 {
-    auto const expression = derived_expression{
+    auto const expression = parse_derived_expression(
         "reduce(GRBM_COUNT,max) - reduce(GRBM_COUNT,min) * 2 + reduce(GRBM_COUNT,avr)",
-        sdk_definitions()
-    };
+        sdk_definitions());
 
     auto const inputs = std::array{ reduction_of({ 10.0, 4.0, 1.0 }) };
     EXPECT_DOUBLE_EQ(expression.evaluate(inputs), 10.0 - (1.0 * 2.0) + 5.0);
@@ -136,7 +138,7 @@ TEST(DerivedExpressionTest, OperatorsFollowPrecedenceAndReduceOperations)
 
 TEST(DerivedExpressionTest, DivisionByZeroIntervalIsZero)
 {
-    auto const expression = derived_expression{ k_mfma_util, sdk_definitions() };
+    auto const expression = parse_derived_expression(k_mfma_util, sdk_definitions());
 
     auto const inputs =
         std::array{ reduction_of({ 0.0 }), reduction_of({ 0.0 }), reduction_of({ 4.0 }) };
@@ -182,8 +184,8 @@ TEST(DerivedExpressionTest, ClassifiesHowASampleIsObtained)
     {
         SCOPED_TRACE(test_case.expression);
         auto const expression =
-            derived_expression{ test_case.expression, sdk_definitions() };
-        EXPECT_EQ(expression.evaluation(), test_case.expected);
+            parse_derived_expression(test_case.expression, sdk_definitions());
+        EXPECT_EQ(expression.evaluation, test_case.expected);
     }
 }
 
@@ -221,7 +223,7 @@ TEST(DerivedExpressionTest, RejectsUnsupportedExpressionsNamingTheReason)
         SCOPED_TRACE(test_case.expression);
         auto const parse = [&test_case] {
             [[maybe_unused]] auto const expression =
-                derived_expression(test_case.expression, sdk_definitions());
+                parse_derived_expression(test_case.expression, sdk_definitions());
         };
         EXPECT_THAT(parse, ::testing::ThrowsMessage<std::invalid_argument>(
                                ::testing::HasSubstr(std::string{ test_case.reason })));

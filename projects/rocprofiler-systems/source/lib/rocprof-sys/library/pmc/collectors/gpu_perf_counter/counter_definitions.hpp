@@ -5,12 +5,11 @@
 
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 
-#include <cstddef>
 #include <functional>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
@@ -42,17 +41,7 @@ public:
     }
 
 private:
-    struct name_hash
-    {
-        using is_transparent = void;
-        [[nodiscard]] size_t operator()(std::string_view name) const noexcept
-        {
-            return std::hash<std::string_view>{}(name);
-        }
-    };
-
-    std::unordered_map<std::string, counter_metadata, name_hash, std::equal_to<>>
-        m_by_name;
+    std::map<std::string, counter_metadata, std::less<>> m_by_name;
 };
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter

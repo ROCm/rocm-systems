@@ -269,12 +269,12 @@ private:
         {
             try
             {
-                auto const expression = collectors::gpu_perf_counter::derived_expression{
-                    meta.expression, lookup.definitions
-                };
-                referenced = expression.referenced_names();
+                auto const expression =
+                    collectors::gpu_perf_counter::parse_derived_expression(
+                        meta.expression, lookup.definitions);
+                referenced = expression.referenced_names;
                 collect_inputs =
-                    expression.evaluation() ==
+                    expression.evaluation ==
                     collectors::gpu_perf_counter::derived_evaluation::interval;
             } catch(const std::invalid_argument& e)
             {

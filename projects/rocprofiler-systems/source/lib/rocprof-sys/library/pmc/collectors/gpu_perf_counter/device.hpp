@@ -138,12 +138,8 @@ public:
 
         for(auto& counter : m_interval_counters)
         {
-            for(size_t i = 0; i < counter.slots.size(); ++i)
-            {
-                counter.inputs[i] = m_input_reductions[counter.slots[i]];
-            }
             m_result_cache.push_back(
-                { counter.counter_id, counter.expression.evaluate(counter.inputs) });
+                { counter.counter_id, counter.expression.evaluate(m_input_reductions) });
         }
 
         return m_result_cache;
@@ -213,10 +209,8 @@ private:
     // values; the SDK value of a non-linear expression of totals cannot be differenced.
     struct interval_counter
     {
-        counter_id_t                 counter_id{ 0 };
-        derived_expression           expression;
-        std::vector<size_t>          slots;   // m_input_reductions index per input
-        std::vector<input_reduction> inputs;  // per-sample scratch, one per input
+        counter_id_t       counter_id{ 0 };
+        derived_expression expression;  // reads m_input_reductions by slot
     };
 
     void build_record_roles(const std::vector<counter_metadata>& inputs)
@@ -225,7 +219,7 @@ private:
         all_counters.insert(all_counters.end(), inputs.begin(), inputs.end());
         auto const definitions = counter_definitions{ all_counters };
 
-        auto slots_by_name = std::unordered_map<std::string, size_t>{};
+        auto slots_by_name = input_slots{};
         for(const auto& meta : m_counter_meta)
         {
             add_requested(meta, definitions, slots_by_name);
@@ -243,9 +237,8 @@ private:
         m_input_reductions.resize(slots_by_name.size());
     }
 
-    void add_requested(const counter_metadata&                  meta,
-                       const counter_definitions&               definitions,
-                       std::unordered_map<std::string, size_t>& slots_by_name)
+    void add_requested(const counter_metadata&    meta,
+                       const counter_definitions& definitions, input_slots& slots_by_name)
     {
         if(!meta.is_derived)
         {
@@ -254,8 +247,9 @@ private:
             return;
         }
 
-        auto expression = derived_expression{ meta.expression, definitions };
-        switch(expression.evaluation())
+        auto expression =
+            parse_derived_expression(meta.expression, definitions, slots_by_name);
+        switch(expression.evaluation)
         {
             case derived_evaluation::constant:
                 m_record_roles[meta.counter_id] = { .is_constant = true,
@@ -268,23 +262,13 @@ private:
             default:
                 throw std::logic_error(
                     fmt::format("derived_evaluation {} not handled",
-                                static_cast<int>(expression.evaluation())));
+                                static_cast<int>(expression.evaluation)));
         }
 
         // The SDK value of an interval counter is replaced by the evaluated one.
         m_record_roles[meta.counter_id] = {};
-        auto slots                      = std::vector<size_t>{};
-        for(const auto& name : expression.input_names())
-        {
-            slots.push_back(
-                slots_by_name.try_emplace(name, slots_by_name.size()).first->second);
-        }
-        auto const input_count = slots.size();
         m_interval_counters.push_back(
-            { .counter_id = meta.counter_id,
-              .expression = std::move(expression),
-              .slots      = std::move(slots),
-              .inputs     = std::vector<input_reduction>(input_count) });
+            { .counter_id = meta.counter_id, .expression = std::move(expression) });
     }
 
     [[nodiscard]] record_role& role_of(counter_id_t counter_id)
