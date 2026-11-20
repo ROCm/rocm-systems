@@ -8,7 +8,7 @@ requires = [
     # "UNKNOWN" distribution name.
     "setuptools>=61.0",
     "wheel",
-    "cmake>=3.20",
+    "cmake>=3.26",
     # Cap the major version: the CMake glue re-enables RTTI/exceptions by poking
     # nanobind's internal `nanobind-static` target (see CMakeLists.txt), which is
     # not a stable public contract and could change across a major bump.
@@ -23,7 +23,7 @@ name = "rocshmem4py"
 dynamic = ["version"]
 description = "Python bindings for ROCm OpenSHMEM (rocSHMEM) runtime library"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
     {name = "Advanced Micro Devices, Inc."}
@@ -36,11 +36,10 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: C++",
     "Topic :: Scientific/Engineering",
     "Topic :: Software Development :: Libraries",
