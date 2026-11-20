@@ -376,6 +376,61 @@ python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/gfx95
 
 For instructions on building and testing changes to files under the `docs/` folder, see the [ROCm documentation contributing guide](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
+## Writing Style
+
+These rules cover how sentences read in documentation, code comments, docstrings, commit messages, pull request descriptions, and design documents. They cover the language only, not what to write. Plain sentences make review faster.
+
+### Rules
+
+- Write short sentences. Give each sentence one idea.
+- Put the subject and the main verb first. Do not open a sentence with a long clause.
+- Add extra detail in a "which" clause or in a second sentence.
+- Use ordinary words. Avoid jargon such as "rolls up to".
+- Use the domain word when one exists, such as "aggregate" instead of "add up".
+- Say what happens, not how the code makes it happen.
+- Reuse the terms that the user docs already define. Define any new term the first time you use it.
+- Name the concrete thing, such as "per-kernel ISA CSV" or "source line". Do not write a bare "row", "line", "file", or "it" when the reader cannot tell which one you mean.
+- Call a metric a "metric", not a "row".
+- When classes with similar names exist in several modules, qualify each with its module, for example `analysis_orm.InstructionLine` and `pc_sampling_analysis.InstructionLineRecord`.
+- Write grammatical sentences, not fragments.
+- Do not stack nouns. Turn the stack into a sentence with a verb.
+- Do not end a relative clause with a preposition. Rewrite "the X that Y gave Z" as "X with Z" or "X without Z".
+- Keep the normal order of subject, verb, and object.
+- Put one point in each bullet, also inside note boxes in `.rst` files.
+- Join ideas with periods, commas, parentheses, or colons. Do not use em dashes or en dashes. Hyphens in compound words are fine.
+
+### Examples
+
+**Long clause before the verb**
+
+- Bad: "Where ROCm Compute Profiler runs, for example on the host when the process is in a container, use the ROCprofiler-SDK from the same ROCm release as ROCm Compute Profiler or a newer one."
+- Good: "ROCm Compute Profiler needs ROCprofiler-SDK from the same ROCm release, or a newer one."
+
+**How instead of what**
+
+- Bad: "`_` is left out of the safe set so a run of them collapses to the one replacing it."
+- Good: "Consecutive underscores are collapsed into one."
+
+**Relative clause ending in a preposition**
+
+- Bad: `Skip the rows that "?" frames are stored as.`
+- Good: `Skip "?" frames, which are stored without a line number.`
+
+**Relative clause with two objects**
+
+- Bad: "the instructions that the compiler gave no line number"
+- Good: "instructions without a source line number"
+
+**Inverted order**
+
+- Bad: "A source line's counts add up the instructions whose inline stack names it."
+- Good: "The counts of a source line are the sums over all instructions whose inline stack includes that source line."
+
+**Noun stack**
+
+- Bad: "RDNA 3.5 and RDNA 4 specs with GL1 count and GDDR channel fields."
+- Good: "Specs of RDNA 3.5 and RDNA 4 GPUs. They also hold the number of GL1 caches and of GDDR channels."
+
 ## Writing for Users
 
 Customers read `docs/how-to/`, `CHANGELOG.md`, and the CLI help.

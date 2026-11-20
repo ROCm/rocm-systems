@@ -36,7 +36,6 @@ configuration. Keep that header tree at a matching revision.
 | `RJ_ENABLE_TSAN` | `OFF` | Enable ThreadSanitizer |
 | `RJ_ENABLE_MSAN` | `OFF` | Enable MemorySanitizer |
 | `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
-| `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis |
 | `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support; requires CMake 3.28+ and Linux 6.1+ UAPI headers |
@@ -98,8 +97,14 @@ UBSan builds with `RJ_UBSAN_VPTR=OFF`, including GCC's default.
 
 ### Static analysis
 
-```bash
-cmake -B build -G Ninja -DRJ_CLANG_TIDY=ON
+Configure a Clang build and generate the schema headers. From the RocJITsu
+source directory, point `run-clang-tidy` at the directory containing
+`compile_commands.json` and select the source paths to check. This example checks the simulator and its project headers.
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=clang++
+cmake --build build --target flatbuffers_schemas
+run-clang-tidy -p build -config-file .clang-tidy '/lib/rocjitsu/src/rocjitsu/vm/.*\.cpp$'
 ```
 
 ## Formatting

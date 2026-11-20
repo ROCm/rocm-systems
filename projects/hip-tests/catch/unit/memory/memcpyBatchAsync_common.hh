@@ -7,7 +7,14 @@
 #pragma once
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
+#include <csignal>
+#include <cstdlib>
 #include <iterator>
+#include <mutex>
+#include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -16,6 +23,97 @@
 #include <hip_test_process.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+
+// Back-to-back batches enqueue many batches on one stream before a single synchronization, so
+// the stream's completion signals are reused several times over while earlier batches are still
+// queued. Copies of 2 MiB stay on SDMA under the default thresholds (peer copies move to SDMA above
+// 1 MiB), where one batch becomes several engine operations that all wait on the stream's prior
+// work.
+inline constexpr size_t kBackToBackCopySize = 2 * 1024 * 1024;
+inline constexpr size_t kBackToBackIterations = 400;
+
+// A child that hangs, as these tests do with the legacy tracker when it re-arms a signal under a
+// queued wait, is killed after this long. A test takes about a second, and the ones that check
+// their own deadlines give up after 20 s at most. The all-device allgather moves much more data and
+// takes a few seconds on 8 GPUs.
+inline constexpr int kSignalTrackerChildDeadlineSeconds = 30;
+inline constexpr int kSignalTrackerChildLongDeadlineSeconds = 60;
+
+// The exit code of a Catch2 run in which every test case was skipped, as HIP_SKIP_TEST does
+inline constexpr int kAllTestsSkippedExitCode = 4;
+
+// Runs the child to completion and returns its exit code, or kills it after the deadline and sets
+// timed_out. The code of a killed child is 128 plus the signal on Linux.
+inline int RunChildWithDeadline(hip::SpawnProc& child, const std::string& args, int deadline_seconds,
+                                bool& timed_out) {
+  timed_out = false;
+  if (child.spawn(args) != 0) {
+    return -1;
+  }
+  std::mutex mutex;
+  std::condition_variable condition;
+  bool finished = false;
+  std::thread watchdog([&] {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (!condition.wait_for(lock, std::chrono::seconds(deadline_seconds),
+                            [&] { return finished; })) {
+      timed_out = true;
+#if HT_WIN
+      TerminateProcess(child.getProcess().hProcess, 1);
+#else
+      kill(child.getProcess(), SIGKILL);
+#endif
+    }
+  });
+  const int exit_code = child.wait();
+  {
+    std::lock_guard<std::mutex> lock(mutex);
+    finished = true;
+  }
+  condition.notify_all();
+  watchdog.join();
+  return exit_code;
+}
+
+// The runtime picks one of two signal trackers when it loads, by DEBUG_CLR_DEV_SIGNALS: the legacy
+// one (0) re-armed a stream's signal under the waits of the batches queued behind it, and the
+// retiring one (1, the default since the queue signals moved to device memory) pins them. In a
+// process that has no tracker chosen for it, runs the calling test case once with each tracker in a
+// process of its own and returns true, so the caller returns. In those processes it returns false
+// and the caller runs the test. A child that doesn't finish within deadline_seconds fails the test
+// and is killed. If the test skips itself in the children, for lack of a second GPU for example, it
+// is skipped here too.
+inline bool RunInEachSignalTracker(const std::string& test_name,
+                                   const int deadline_seconds = kSignalTrackerChildDeadlineSeconds) {
+  constexpr const char* kChildMarker = "HIP_TEST_BATCH_COPY_SIGNAL_TRACKER_CHILD";
+  if (std::getenv(kChildMarker) != nullptr) {
+    return false;
+  }
+  bool skipped = false;
+  bool failed = false;
+  for (const char* dev_signals : {"0", "1"}) {
+    INFO("DEBUG_CLR_DEV_SIGNALS=" << dev_signals);
+    hip::SpawnProc proc(getSelfExePath());
+    proc.setEnv("DEBUG_CLR_DEV_SIGNALS", dev_signals);
+    proc.setEnv(kChildMarker, "1");
+    bool timed_out = false;
+    const int exit_code =
+        RunChildWithDeadline(proc, test_name, deadline_seconds, timed_out);
+    if (!timed_out && exit_code == kAllTestsSkippedExitCode) {
+      skipped = true;
+      continue;
+    }
+    failed = failed || timed_out || exit_code != 0;
+    INFO("Exit code " << exit_code);
+    INFO("The test did not finish within " << deadline_seconds << " s and was killed: " << timed_out);
+    CHECK(!timed_out);
+    CHECK(exit_code == 0);
+  }
+  if (skipped && !failed) {
+    HIP_SKIP_TEST("The test skipped itself in the process it ran in.");
+  }
+  return true;
+}
 
 // Copy `data` from the host into `buffer`, picking the copy kind from the buffer's allocation type
 // so device and host buffers can be filled through one call.

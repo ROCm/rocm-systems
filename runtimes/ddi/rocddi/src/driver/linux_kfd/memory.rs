@@ -6,7 +6,7 @@
 //! A primary-process VM may survive session destruction in the kernel. The
 //! Linux process connection retains its exact render files through exit for
 //! later activation; secondary bindings are released with their session.
-use super::{drm, errno, error, native_error, os_file, os_memory, sys, sysfs, uapi};
+use super::{connection, drm, errno, error, native_error, os_file, os_memory, sysfs, uapi};
 use crate::device::event::{
     DeviceEvent, GpuHardwareException, GpuMemoryFault, GpuMemoryFaultCause, GpuResetCause,
     GpuResetScope,
@@ -145,10 +145,10 @@ impl VmBindings {
 
     pub(super) fn device(
         &self,
-        kfd: &Shared<sys::Kfd>,
+        kfd: &Shared<connection::Kfd>,
         node: &sysfs::KfdNode,
-        xnack_requested: Option<crate::session::XnackModeRequest>,
-        debugger: Option<sys::RuntimeDebuggerRegistration>,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
     ) -> Result<Shared<DeviceVm>, Error> {
         self.device_with_render(kfd, node, xnack_requested, debugger, sysfs::open_render)
     }
@@ -161,10 +161,10 @@ impl VmBindings {
     )]
     fn device_with_render(
         &self,
-        kfd: &Shared<sys::Kfd>,
+        kfd: &Shared<connection::Kfd>,
         node: &sysfs::KfdNode,
-        xnack_requested: Option<crate::session::XnackModeRequest>,
-        debugger: Option<sys::RuntimeDebuggerRegistration>,
+        xnack_requested: Option<super::XnackModeRequest>,
+        debugger: Option<super::DebuggerRegistration>,
         open_render: impl FnOnce(u32) -> io::Result<File>,
     ) -> Result<Shared<DeviceVm>, Error> {
         kfd.check_process()
@@ -370,11 +370,11 @@ impl DeviceVm {
         self.loss.has_latched_loss()
     }
 
-    pub(super) fn kfd(&self) -> &sys::Kfd {
+    pub(super) fn kfd(&self) -> &connection::Kfd {
         &self.loss.kfd
     }
 
-    pub(super) fn kfd_owner(&self) -> Shared<sys::Kfd> {
+    pub(super) fn kfd_owner(&self) -> Shared<connection::Kfd> {
         self.loss.kfd.clone()
     }
 
@@ -436,7 +436,7 @@ impl DeviceVm {
 /// serialized observer, so neither path can consume another path's details.
 struct LossEvent {
     /// Exact KFD connection that created the native event IDs.
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     /// Native hardware exception event identity.
     hardware_event_id: AtomicU32,
     /// Native memory exception event identity.
@@ -690,7 +690,7 @@ impl LossEvent {
         Ok(())
     }
 
-    fn create(kfd: Shared<sys::Kfd>) -> Result<Shared<Self>, Error> {
+    fn create(kfd: Shared<connection::Kfd>) -> Result<Shared<Self>, Error> {
         let observed = ObservedEvents::new()?;
         let event = Shared::new(Self {
             kfd,
@@ -2608,7 +2608,7 @@ mod tests;
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 pub(super) fn queue_fixture(
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     render: File,
     node: sysfs::KfdNode,
 ) -> Shared<DeviceVm> {
@@ -2618,7 +2618,7 @@ pub(super) fn queue_fixture(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 pub(super) fn queue_fixture_with_range(
-    kfd: Shared<sys::Kfd>,
+    kfd: Shared<connection::Kfd>,
     render: File,
     node: sysfs::KfdNode,
     bounds: (u64, u64),

@@ -1929,6 +1929,9 @@ class AMDSMIHelpers:
             is REQUIRED in order to complete updating ALL GPUs in the hive to
             the requested partition mode.
 
+            A requested mode stays pending until the next driver reload.
+            Requesting the current mode cancels a pending mode.
+
             ******REMINDER******
             In order to reload the AMD GPU driver, users MUST quit all GPU
             workloads across all devices.
@@ -2078,7 +2081,7 @@ class AMDSMIHelpers:
 
     def get_pci_device_ids(self) -> Set[str]:
         pci_devices_path = "/sys/bus/pci/devices"
-        pci_devices: set[str] = set()
+        pci_devices: Set[str] = set()
         for device in os.listdir(pci_devices_path):
             device_path = os.path.join(pci_devices_path, device, "device")
             try:
