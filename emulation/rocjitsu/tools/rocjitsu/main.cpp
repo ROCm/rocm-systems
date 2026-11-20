@@ -1252,10 +1252,30 @@ void begin_adopted_process_grid_child_cleanup(AdoptedProcessGridChild &child, in
 void begin_process_grid_termination(std::vector<ProcessGridRank> &ranks,
                                     std::vector<AdoptedProcessGridChild> &adopted_children,
                                     int signal, std::chrono::steady_clock::time_point started_at) {
-  for (ProcessGridRank &rank : ranks)
+  std::vector<pid_t> signaled_groups;
+  auto remember_group = [&](pid_t pgid) {
+    if (pgid <= 0 || std::ranges::find(signaled_groups, pgid) != signaled_groups.end())
+      return;
+    signaled_groups.push_back(pgid);
+  };
+  auto group_was_signaled = [&](pid_t pgid) {
+    return pgid > 0 && std::ranges::find(signaled_groups, pgid) != signaled_groups.end();
+  };
+
+  for (ProcessGridRank &rank : ranks) {
+    const bool signal_targets_group = rank.pgid > 0 && rank.group_present;
     begin_process_grid_rank_cleanup_at(rank, signal, started_at);
-  for (AdoptedProcessGridChild &child : adopted_children)
-    begin_adopted_process_grid_child_cleanup_at(child, signal, started_at);
+    if (signal_targets_group && rank.cleanup_started)
+      remember_group(rank.pgid);
+  }
+
+  const pid_t launcher_pgid = getpgrp();
+  for (AdoptedProcessGridChild &child : adopted_children) {
+    const bool already_signaled = group_was_signaled(child.pgid);
+    begin_adopted_process_grid_child_cleanup_at(child, signal, started_at, already_signaled);
+    if (!already_signaled && child.pgid > 0 && child.pgid != launcher_pgid)
+      remember_group(child.pgid);
+  }
 }
 
 ProcessGridRank *find_adopted_process_grid_child_owner(std::vector<ProcessGridRank> &ranks,
