@@ -252,6 +252,8 @@ TEST_F(HostHierAllReduceMPITest, UnalignedBuffersOnOneRank)
             [this](size_t i, float v) { return v == rankSumMod(i, 16); }, rank_ == 0 ? sizeof(float) : 0);
         ASSERT_RUN_OK(run);
         ASSERT_MPI_TRUE(builtChildComms());
+        // Rank 0's copy holds the whole message in scratch.
+        ASSERT_MPI_TRUE(rank_ != 0 || comm()->hostHier->scratchBytes >= countFor(128 * 1024) * sizeof(float));
     }
 }
 

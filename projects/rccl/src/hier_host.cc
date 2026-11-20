@@ -375,10 +375,17 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
     for (int host = 0; host < layout.nHosts; host++) {
       inter[host] = h->hostRanks[host * layout.ranksPerHost + layout.localRank];
     }
-    NCCLCHECK(ncclAllReduceDdaFabricHier(in, out, count, datatype, comm, stream, layout.nHosts, layout.ranksPerHost,
-                                         layout.hostIndex, layout.localRank,
-                                         h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data()));
+    // With a copy-out after the kernel, the kernel must not record the stop event that orders the next call, which
+    // writes the same scratch: hand it back so rcclAddonLaunchEnd records it after the copy.
+    hipEvent_t stopEvent = aligned ? nullptr : rcclTakeAddonStopEvent(comm);
+    const ncclResult_t res =
+      ncclAllReduceDdaFabricHier(in, out, count, datatype, comm, stream, layout.nHosts, layout.ranksPerHost,
+                                 layout.hostIndex, layout.localRank,
+                                 h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data());
+    if (!aligned) comm->addonStopEvent = stopEvent;
+    NCCLCHECK(res);
   } else {
+    // The child comms keep their own stop events, so this comm's is recorded after the copy-out below.
     char* rsOut = copy + copyBytes;
     char* agIn = doInter ? rsOut + stride : rsOut;
     // The parent AllReduce is already recorded.
