@@ -73,6 +73,14 @@ __device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint6
   return true;
 }
 
+// Wait until this wave's wire stores have completed (gfx1250; a no-op elsewhere),
+// e.g. before the kernel publishes its LL epoch.
+__device__ __forceinline__ void ddaLL128WaitStores() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  asm volatile("s_wait_storecnt 0x0" ::: "memory");
+#endif
+}
+
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
 // word holds 2 x fp32, 4 x fp16/bf16 or 8 x fp8. fp8 adds the whole word at
 // once; other types fold each 4B half with the shared vecElementAdd<T> (which

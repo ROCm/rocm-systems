@@ -7949,6 +7949,76 @@ TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_EmptyEnvIsUnset) {
       });
 }
 
+// With the peer-parallel kernels the LL128 one-shot AllReduce runs to the arch table's ddaArLL128OneShotRankBytes over
+// nRanks, at most RCCL_DDA_LL128_ONESHOT_THRESHOLD's 4 MiB default; a table without the entry, or no table (as under
+// RCCL_IGNORE_ARCH_TABLE), keeps that default at every rank count.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_TableRankBytesOverNRanksElseEnvDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_TableRankBytesOverNRanksElseEnvDefault",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        const struct {
+          int nRanks;
+          size_t cap;
+        } cases[] = {{2, 2 * kMiB}, {3, 4 * kMiB / 3}, {4, 1 * kMiB}, {8, 512 * kKiB},
+                     {16, 256 * kKiB}, {32, 128 * kKiB}, {1, 4 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.nRanks;
+          EXPECT_EQ(c.cap, rcclDdaLL128OneShotThreshold(comm)) << "nRanks " << c.nRanks;
+        }
+        comm->nRanks = 2;
+        table.ddaArLL128OneShotRankBytes = 16 * kMiB;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "never past the env default";
+        comm->nRanks = 8;
+        table.ddaArLL128OneShotRankBytes = 0;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "table without the entry";
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "no table";
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(nullptr)) << "no comm";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_DDA_LL128_AR_PEER_PARALLEL=0 keeps the one-warp-per-slice kernels, and with them the flat 4 MiB one-shot cap.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_PeerParallelOffKeepsTheEnvDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_PeerParallelOffKeepsTheEnvDefault",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+        g_loadParam = ForceParam("RCCL_DDA_LL128_AR_PEER_PARALLEL", int64_t(0));
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        comm->nRanks = 32;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user-set RCCL_DDA_LL128_ONESHOT_THRESHOLD is the cap at every rank count.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_EnvIsTheCapAtEveryRankCount) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_EnvIsTheCapAtEveryRankCount",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL128_ONESHOT_THRESHOLD", "2097152");
+        g_loadParam = ForceParam("RCCL_DDA_LL128_ONESHOT_THRESHOLD", int64_t(2) << 20);
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        for (int nRanks : {4, 8, 32}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(2 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "nRanks " << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ===========================================================================
 // AICOMRCCL-1756: rank-scaled gfx1250 DDA tiers, Tree for small AllReduce,
 // Ring protocol ranges and the ReduceScatter channel cap.
