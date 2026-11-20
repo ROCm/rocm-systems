@@ -58,6 +58,9 @@ cache level, because it tells you which level to open.
 
 Always analyze one kernel at a time with `-k`.
 
+From ROCm 10.4, analyze also writes the chart as an HTML page and prints its path.
+Do not open the page; the terminal chart has the same values.
+
 If there is no workload yet, collect only the memory blocks:
 
 ```bash

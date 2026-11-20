@@ -5,6 +5,10 @@
 the chart, where each block goes, which metric each block and arrow shows, and how to
 draw them. The analysis supplies the values.
 
+The HTML page that `analyze` writes next to the workload draws the same file with
+[`assets/mem_chart.js`](assets/mem_chart.js), so a change to the format updates that
+script too.
+
 Other tools that draw the chart, such as ROCm Optiq, read the same format from the
 analysis database. The analysis stores each value unrounded: [`units.py`](units.py) sets how
 many decimals the terminal chart shows for each unit, and other renderers choose their
@@ -164,7 +168,9 @@ Bump it in the same change that changes the format:
 3. Run `./tools/memory_chart_layout_format.py` to write the file in the standard style.
    The pre-commit hook checks the style.
 4. Preview the chart without a GPU: `./tools/memory_chart_preview.py <arch>`.
-5. Run `python -m pytest tests/unit/memory_chart`. The tests check the ids against the
+5. Check the HTML page: run `rocprof-compute analyze` on a workload of the
+   architecture and open the `mem_chart_gpu-0.html` it writes.
+6. Run `python -m pytest tests/unit/memory_chart`. The tests check the ids against the
    panel config, and check that each arrow `style` and `bar` fit the metric's unit.
 
 No Python changes are needed. When a change to a `0300_memory_chart.yaml` adds,
