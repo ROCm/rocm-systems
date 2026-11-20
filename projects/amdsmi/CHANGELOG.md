@@ -46,6 +46,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
+- **Fixed `amd-smi static` showing 255 as the NUMA node of an AI NIC that has none**.  
+  - An AI NIC NUMA node, maximum PCIe width, or maximum PCIe speed that can't be read now shows `N/A` in `amd-smi` and the Python interface, instead of 255 or 4294967295.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added

@@ -145,6 +145,8 @@ _UNAVAILABLE_UINT32 = 0xFFFFFFFF
 _LARGEST_CARRIER = _UNAVAILABLE_CARRIER - 1
 _LARGEST_MTU = _UNAVAILABLE_MTU - 1
 _LARGEST_UINT32 = _UNAVAILABLE_UINT32 - 1
+_UNAVAILABLE_UINT8 = 0xFF
+_LARGEST_UINT8 = _UNAVAILABLE_UINT8 - 1
 _FAILING_PORT = 1
 _TOP_LEVEL_KEYS = {"ASIC", "BUS", "DRIVER", "NUMA", "PORTS", "RDMA_DEVICES"}
 
@@ -162,6 +164,16 @@ def _ports_values(*per_port: Dict[str, int]) -> List[Dict[str, Any]]:
 def _port_values(**values: int) -> Dict[str, Any]:
     """Detail of a one-port NIC whose port carries ``values``."""
     return _ports_values(values)[0]
+
+
+def _bus_and_numa_values(max_pcie_width: int, max_pcie_speed: int, node: int) -> Dict[str, Any]:
+    """BUS and NUMA detail of a NIC whose bus and NUMA info carry these values."""
+    nic = _nic(0, [])
+    nic.bus.max_pcie_width = max_pcie_width
+    nic.bus.max_pcie_speed = max_pcie_speed
+    nic.numa.node = node
+    detail = _load_detail()(nic)
+    return {**detail["BUS"], **detail["NUMA"]}
 
 
 class _FakeLibraryException(Exception):
@@ -258,6 +270,27 @@ class TestNicInfoDetailPortValues(unittest.TestCase):
             (up["CARRIER"], up["MTU"], up["LINK_SPEED"], up["ACTIVE_FEC"]),
             (1, "9000B", "100000 Mb/s", "8"),
         )
+
+
+class TestNicInfoDetailBusAndNuma(unittest.TestCase):
+    def test_a_value_the_library_could_not_read_shows_na(self) -> None:
+        values = _bus_and_numa_values(_UNAVAILABLE_UINT8, _UNAVAILABLE_UINT32, _UNAVAILABLE_UINT8)
+        self.assertEqual(values["MAX_PCIE_WIDTH"], "N/A")
+        self.assertEqual(values["MAX_PCIE_SPEED"], "N/A")
+        self.assertEqual(values["NODE"], "N/A")
+
+    def test_a_value_that_was_read_stays_an_integer(self) -> None:
+        values = _bus_and_numa_values(16, 32, 0)
+        self.assertEqual(
+            (values["MAX_PCIE_WIDTH"], values["MAX_PCIE_SPEED"], values["NODE"]), (16, 32, 0)
+        )
+        self.assertIs(type(values["NODE"]), int)
+
+    def test_the_value_below_the_marker_is_a_real_value(self) -> None:
+        values = _bus_and_numa_values(_LARGEST_UINT8, _LARGEST_UINT32, _LARGEST_UINT8)
+        self.assertEqual(values["MAX_PCIE_WIDTH"], _LARGEST_UINT8)
+        self.assertEqual(values["MAX_PCIE_SPEED"], _LARGEST_UINT32)
+        self.assertEqual(values["NODE"], _LARGEST_UINT8)
 
 
 class TestNicInfoDetailFirmware(unittest.TestCase):
