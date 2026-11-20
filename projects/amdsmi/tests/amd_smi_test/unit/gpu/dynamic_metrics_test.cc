@@ -11,8 +11,10 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <iostream>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -21,6 +23,7 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_main.h"
 #include "test_common.h"
 #include "test_fixture_utils.h"
@@ -35,7 +38,51 @@ AMDGpuMetricVersionFlags_t translate_header_to_flag_version(
 GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t gpu_metric_version,
                                          bool is_partition_metrics, const std::string& file_path);
 
+namespace test_hooks {
+extern thread_local uint64_t metrics_dumps_formatted;
+}  // namespace test_hooks
+
 }  // namespace amd::smi
+
+namespace ROCmLogging {
+
+// The singleton reads RSMI_LOGGING only at initialization. Keep this test independent of
+// startup order and of the runner's log file, and restore its settings even on ASSERT failure.
+class ScopedMetricsTestLog {
+ public:
+  explicit ScopedMetricsTestLog(bool enabled)
+      : logger_(*Logger::getInstance()),
+        enabled_(logger_.m_loggingIsOn),
+        type_(logger_.m_LogType),
+        level_(logger_.m_LogLevel),
+        console_(std::cout.rdbuf(output_.rdbuf())) {
+    logger_.m_loggingIsOn = enabled;
+    logger_.updateLogType(CONSOLE);
+    logger_.updateLogLevel(LOG_LEVEL_DEBUG);
+  }
+  bool TakeDumpOutput() {
+    bool found = output_.str().find("*** GPU Metrics Data: ***") != std::string::npos;
+    output_.str("");
+    return found;
+  }
+
+  ~ScopedMetricsTestLog() {
+    logger_.m_loggingIsOn = enabled_;
+    logger_.updateLogType(type_);
+    logger_.updateLogLevel(level_);
+    std::cout.rdbuf(console_);
+  }
+
+ private:
+  Logger& logger_;
+  bool enabled_;
+  LogType type_;
+  LogLevel level_;
+  std::ostringstream output_;
+  std::streambuf* console_;
+};
+
+}  // namespace ROCmLogging
 
 namespace {
 // Version helper checker
@@ -866,6 +913,37 @@ TEST(GpuUnit, MetricsTableSmallerThanItsHeaderIsRejected) {
 
   amd::smi::Device device(fake_device.path(), nullptr);
   EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
+}
+
+TEST(GpuUnit, PublicMetricsGettersReadSelectedTable) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("public_metrics_read");
+  fake_device.WriteMetrics(BuildApuMetricsBlob(1, kApuV21Size));
+  using Partition = amd::smi::AMDGpuMetrics_v18_Partition_v1_0_t;
+  fake_device.WritePartitionMetrics(BuildMetricsBlob(sizeof(Partition), 1, 0, sizeof(Partition)));
+  const ScopedRocmSmiDevice library_device(fake_device.path());
+  rsmi_gpu_metrics_t metrics{};
+
+  for (bool debug : {false, true}) {
+    SCOPED_TRACE(debug ? "debug on" : "debug off");
+    ROCmLogging::ScopedMetricsTestLog log(debug);
+    const auto& dumps = amd::smi::test_hooks::metrics_dumps_formatted;
+    auto before = dumps;
+    ASSERT_EQ(rsmi_dev_gpu_metrics_info_get(library_device.index(), &metrics), RSMI_STATUS_SUCCESS);
+    EXPECT_EQ(dumps - before, debug ? 1u : 0u) << "GPU metrics dump";
+    EXPECT_EQ(log.TakeDumpOutput(), debug);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+    EXPECT_EQ(metrics.apu_metrics->temperature_gfx,
+              FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_gfx)));
+
+    before = dumps;
+    ASSERT_EQ(rsmi_dev_gpu_partition_metrics_info_get(library_device.index(), &metrics),
+              RSMI_STATUS_SUCCESS);
+    EXPECT_EQ(dumps - before, debug ? 1u : 0u) << "partition metrics dump";
+    EXPECT_EQ(log.TakeDumpOutput(), debug);
+    EXPECT_EQ(metrics.current_uclk, FilledValue<uint16_t>(offsetof(Partition, m_current_uclk)));
+  }
 }
 
 // A malformed table must reach the caller as the reason setup gave. Only the
