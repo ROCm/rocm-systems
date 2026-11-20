@@ -25,7 +25,6 @@ public:
     MOCK_METHOD(uint64_t, nextSignalTarget, (), (override));
     MOCK_METHOD(uint64_t, releaseSignalTarget, (), (override));
     MOCK_METHOD(void, ensureSignalSlot, (), (override));
-    MOCK_METHOD(void, applyFlags, (uint32_t flags), (override));
     MOCK_METHOD(void, drainAndRelease, (), (override));
 };
 
