@@ -122,7 +122,7 @@ def check_gpu(report, gfx, image):
     if not os.path.isdir("/dev/dri"):
         return fail("/dev/dri is missing")
     # In CI the job already runs in the ROCm container, so rocminfo is on PATH.
-    # By hand on a host without it, run it in the same image through docker.
+    # Locally on a host without it, run it in the same image through docker.
     if shutil.which("rocminfo"):
         cmd = ["rocminfo"]
     else:

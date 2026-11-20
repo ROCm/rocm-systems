@@ -96,13 +96,6 @@ jobs:
           GFX: ${{ matrix.gfx }}
         run: python3 .github/scripts/lstt_hw_health.py --id "$ID" --gfx "$GFX"
 
-      # The container runs as root, so give the shared workspace back to the
-      # runner user or the next job on this runner cannot clean it.
-      - name: Give the workspace back to the runner user
-        if: always()
-        shell: bash
-        run: chown -R "$(stat -c '%u:%g' "$RUNNER_TEMP")" "$GITHUB_WORKSPACE"
-
   # Host level, no container: ipmitool and /dev/ipmi0 are the host's.
   bmc:
     name: ${{ matrix.id }} BMC
