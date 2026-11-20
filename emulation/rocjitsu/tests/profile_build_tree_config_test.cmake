@@ -37,6 +37,7 @@ string(
     "${_profile_json}"
 )
 file(WRITE "${_config_dir}/gfx950_mi350x.json" "${_profile_json}")
+file(WRITE "${_config_dir}/custom_detected.json" "${_profile_json}")
 
 execute_process(
     COMMAND
@@ -58,5 +59,28 @@ if(NOT _output MATCHES "Configured \\| 7 \\| 19 \\| 0 \\| 25")
     message(
         FATAL_ERROR
         "build-tree profile lookup used the wrong config:\n${_output}"
+    )
+endif()
+
+execute_process(
+    COMMAND
+        "${_bin_dir}/rocjitsu" --profile custom_detected --cpu-thread-budget 31
+        --thread-budget-table
+    RESULT_VARIABLE _result
+    OUTPUT_VARIABLE _output
+    ERROR_VARIABLE _error
+)
+
+if(NOT _result EQUAL 0)
+    message(
+        FATAL_ERROR
+        "build-tree profile discovery failed with ${_result}\nstdout:\n${_output}\nstderr:\n${_error}"
+    )
+endif()
+
+if(NOT _output MATCHES "Configured \\| 7 \\| 19 \\| 0 \\| 25")
+    message(
+        FATAL_ERROR
+        "build-tree profile discovery used the wrong config:\n${_output}"
     )
 endif()

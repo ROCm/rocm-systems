@@ -90,6 +90,7 @@ receiving real GPU descriptors over a Unix socket.
 ```
 Usage: rocjitsu [options] -- <app> [args...]
        rocjitsu [options] --daemon
+       rocjitsu --attach <id_or_path> [options] -- <app> [args...]
        rocjitsu paths [--json]
        rocjitsu [options] --vfio-socket <path> [--vfio-socket <path> ...]
 ```
@@ -103,7 +104,7 @@ Usage: rocjitsu [options] -- <app> [args...]
 | `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. |
 | `--thread-budget-table` | Print engine and dispatch allocations without running a VM. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
-| `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
+| `--attach <id_or_path>` | Attach to a running daemon. Use `default` for the current runtime directory, a daemon ID under that runtime directory, a runtime directory path, or a `daemon.sock` path. |
 | `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The number of sockets must match the selected node's local GPU count, and paths must be distinct. The VMM must share guest RAM through mmap-able file descriptors. |
 | `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
 | `--help`, `-h` | Print usage and exit. |
@@ -132,12 +133,12 @@ rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 # Daemon-only: run server (no app launched)
 rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 
-# Attach to running daemon
-rocjitsu --attach -- ./app
+# Attach to the daemon in the current runtime directory
+rocjitsu --attach default -- ./app
 
 # Attach to a running daemon while validating an explicit config. The client
 # still uses the daemon's already-running machine.
-rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
+rocjitsu --attach /run/user/$UID/rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
 rocjitsu --config configs/gfx1250_mi455x.json \
@@ -182,29 +183,36 @@ directories whose PID no longer exists and does not follow symlinks.
 
 ### Attach mode and runtime state
 
-`rocjitsu --attach` does not create or reconfigure a daemon. It starts the
-application with the interposer and points it at the daemon socket in the
-selected runtime directory: `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then
-`$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, then
-`/tmp/rocjitsu-<uid>/daemon.sock`. Use `rocjitsu paths` or
-`rocjitsu paths --json` to inspect the exact paths.
+`rocjitsu --attach <id_or_path>` does not create or reconfigure a daemon. It
+starts the application with the interposer and points it at one existing daemon
+socket. `default` selects the current runtime directory, resolved from
+`ROCJITSU_RUNTIME_DIR`, then `$XDG_RUNTIME_DIR/rocjitsu`, then
+`/tmp/rocjitsu-<uid>`. Any other identifier selects a subdirectory under that
+runtime directory. A path selects that runtime directory directly; a path ending
+in `daemon.sock` selects its parent directory. Use `rocjitsu paths` or
+`rocjitsu paths --json` to inspect the default paths.
 
 The daemon has already built its machine from the config it was started with.
 For that reason, attach rejects launch-only settings that would otherwise mutate
 the machine being built, including `--profile`, `--node`,
-`--cpu-thread-budget`, and `--wait-checking`. `--attach --config <path>`
+`--cpu-thread-budget`, and `--wait-checking`. `--attach <target> --config <path>`
 validates the named config, but it does not write a per-PID config handoff and
 does not change the running daemon's config. The attached client gets its active
 machine state from the daemon it connects to.
 
 The only shared state selected by attach is the runtime directory and its
-well-known daemon socket. To run independent daemons for the same user, give
-each session its own `ROCJITSU_RUNTIME_DIR`; otherwise attach intentionally
-targets the daemon already listening in the default runtime directory. Daemon
-launch mode passes the exact daemon PID to the exec'd client for ptrace
-authorization. Plain attach mode cannot know a launcher-owned daemon PID, so
-after the daemon handshake it trusts the same-user socket peer in the selected
-runtime directory.
+well-known daemon socket. The default runtime directory is selected from
+`ROCJITSU_RUNTIME_DIR`, then `$XDG_RUNTIME_DIR/rocjitsu`, then
+`/tmp/rocjitsu-<uid>`. `--attach` selects `default`, an ID under that default,
+or an explicit runtime/socket path. To run independent daemons for the same
+user, give each session its own runtime directory and pass that path to
+`--attach`. Daemon launch mode passes the exact daemon PID to the exec'd client
+for ptrace authorization. Plain attach mode cannot know a launcher-owned daemon
+PID, so after the daemon handshake it trusts the same-user socket peer in the
+selected runtime directory.
+
+A future `rocjitsu ps` command will list discoverable daemon targets; see
+ROCm/rocm-systems#16298.
 
 ## Architecture
 
