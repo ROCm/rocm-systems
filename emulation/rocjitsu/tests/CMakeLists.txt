@@ -995,6 +995,9 @@ set_tests_properties(
 set(_rj_dbt_visibility_config
     "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dbt_visibility_guest.json"
 )
+set(_rj_dbt_inline_vm_simulator_config
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dbt_inline_vm_simulator_guest.json"
+)
 add_test(
     NAME RocjitsuLaunchDbtVisibilityOverride
     COMMAND
@@ -1112,6 +1115,14 @@ add_test(
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
         "-DTEST_ARGS=--config;${_rj_dbt_visibility_config};--option;num_threads=2;--;/usr/bin/true"
+        "-DTEST_REGEX=--option num_threads cannot be combined with a dbt_guest simulator_config; set num_threads in .* instead"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuThreadBudgetTableRejectsDbtSimulatorConfigOverride
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_inline_vm_simulator_config};--option;num_threads=2;--thread-budget-table"
         "-DTEST_REGEX=--option num_threads cannot be combined with a dbt_guest simulator_config; set num_threads in .* instead"
         -P ${_rj_cli_failure_script}
 )

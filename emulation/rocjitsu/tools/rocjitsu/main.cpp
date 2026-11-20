@@ -1016,6 +1016,53 @@ bool reject_hardware_dbt_overrides(const config::LaunchOverrides &overrides) {
   return true;
 }
 
+bool reject_dbt_guest_launch_overrides(const config::LaunchOverrides &overrides,
+                                       const config::DbtGuestConfig &dbt_guest) {
+  if (!dbt_guest.enabled || overrides.empty())
+    return false;
+  if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
+    return reject_hardware_dbt_overrides(overrides);
+
+  // A dbt_guest simulator_config is resolved relative to the config naming it,
+  // and it, not this config, is what the host VM is built from. Moving overrides
+  // onto a copy would therefore both break that path and miss the config they
+  // must reach.
+  if (reject_dbt_guest_simulator_config_override(overrides.exec_mode.has_value(), "--exec-mode",
+                                                 "exec_mode", dbt_guest))
+    return true;
+  if (reject_dbt_guest_simulator_config_override(overrides.gpus_per_node.has_value(),
+                                                 "--gpus-per-node", "vm.gpu.num_gpus", dbt_guest))
+    return true;
+  if (reject_dbt_guest_simulator_config_override(!overrides.plugins.empty(), "--plugin", "plugins",
+                                                 dbt_guest))
+    return true;
+  if (reject_dbt_guest_simulator_config_override(overrides.cpu_thread_budget.has_value(),
+                                                 "--cpu-thread-budget", "cpu_thread_budget",
+                                                 dbt_guest))
+    return true;
+  if (reject_dbt_guest_simulator_config_override(overrides.wait_checking.has_value(),
+                                                 "--wait-checking", "wait_checking", dbt_guest))
+    return true;
+  if (reject_dbt_guest_simulator_config_override(overrides.num_threads.has_value(),
+                                                 "--option num_threads", "num_threads", dbt_guest))
+    return true;
+  if (reject_dbt_guest_simulator_config_override(overrides.cpu_dispatch_threads.has_value(),
+                                                 "--option cpu_dispatch_threads",
+                                                 "cpu_dispatch_threads", dbt_guest))
+    return true;
+  if (reject_dbt_guest_simulator_config_override(overrides.async_helper_threads.has_value(),
+                                                 "--option async_helper_threads",
+                                                 "async_helper_threads", dbt_guest))
+    return true;
+  if (!dbt_guest.host.simulator_config_path.empty()) {
+    std::cerr << std::format("rocjitsu: launch config overrides cannot be combined with a "
+                             "dbt_guest simulator_config; set them in {} instead\n",
+                             dbt_guest.host.simulator_config_path);
+    return true;
+  }
+  return false;
+}
+
 /// @brief Resolve automatic host selection once for every DBT runtime layer.
 bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
                       const std::vector<KfdGpuOrdinal> &topology,
@@ -1488,6 +1535,31 @@ int main(int argc, char *argv[]) {
   // config the user named is never rewritten, and simulations built from other
   // configs in the same process tree keep their own settings.
   util::StringDiagnostic launch_config_diagnostic;
+  rocjitsu::config::DbtGuestConfig dbt_guest_config;
+  bool dbt_guest_mode = false;
+  bool dbt_guest_config_loaded = false;
+  auto load_dbt_guest_config = [&]() -> bool {
+    if (dbt_guest_config_loaded)
+      return true;
+    dbt_guest_config_loaded = true;
+    if (abs_config.empty())
+      return true;
+    try {
+      auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
+          abs_config, launch_config_diagnostic.emitter());
+      if (maybe_dbt_guest.failed()) {
+        std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                                 launch_config_diagnostic.message());
+        return false;
+      }
+      dbt_guest_config = std::move(maybe_dbt_guest.value());
+      dbt_guest_mode = dbt_guest_config.enabled;
+      return true;
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
+      return false;
+    }
+  };
   auto config_json_for_this_launch = [&]() -> rocjitsu::FailureOr<std::string> {
     auto json = rocjitsu::config::read_config_file(abs_config, launch_config_diagnostic.emitter());
     if (json.failed())
@@ -1504,55 +1576,68 @@ int main(int argc, char *argv[]) {
       std::cerr << "rocjitsu: --thread-budget-table cannot be combined with a launch mode\n";
       return 1;
     }
-    rocjitsu::FailureOr<std::string> json = config_json_for_this_launch();
-    if (json.failed()) {
-      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
-                               launch_config_diagnostic.message());
+    if (!load_dbt_guest_config())
+      return 1;
+    if (dbt_guest_mode && !local_node.empty()) {
+      std::cerr << "rocjitsu: --node cannot be combined with dbt_guest mode\n";
       return 1;
     }
-    auto maybe_settings = rocjitsu::config::load_execution_thread_settings_from_string(
-        json.value(), rocjitsu::kEmbeddedSchema, launch_config_diagnostic.emitter());
-    if (maybe_settings.failed()) {
-      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
-                               launch_config_diagnostic.message());
+    if (reject_dbt_guest_launch_overrides(overrides, dbt_guest_config))
       return 1;
-    }
-    auto &settings = maybe_settings.value();
-    const uint32_t host = rocjitsu::amdgpu::available_host_threads();
-    std::cout
-        << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
-    auto print = [&](const std::string &label) -> util::Result {
-      util::FailureOr<rocjitsu::config::ExecutionThreadAllocation> allocation =
-          settings.resolve(host, launch_config_diagnostic.emitter());
-      if (allocation.failed())
-        return util::Result::failure();
-      const auto &plan = allocation.value();
-      uint64_t total = uint64_t{plan.engines} + plan.helpers;
-      std::string dispatch;
-      for (uint32_t width : plan.dispatch) {
-        if (!dispatch.empty())
-          dispatch += ",";
-        dispatch += std::to_string(width);
-        total += width - 1;
-      }
-      std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
-                               plan.helpers, total);
-      return util::Result::success();
-    };
-    if (print("Configured").failed()) {
-      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
-                               launch_config_diagnostic.message());
-      return 1;
-    }
-    for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
-      settings.request.budget = budget;
-      if (print(std::to_string(budget)).failed()) {
+    try {
+      rocjitsu::FailureOr<std::string> json = config_json_for_this_launch();
+      if (json.failed()) {
         std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
                                  launch_config_diagnostic.message());
         return 1;
       }
+      auto maybe_settings = rocjitsu::config::load_execution_thread_settings_from_string(
+          json.value(), rocjitsu::kEmbeddedSchema, launch_config_diagnostic.emitter());
+      if (maybe_settings.failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      auto &settings = maybe_settings.value();
+      const uint32_t host = rocjitsu::amdgpu::available_host_threads();
+      std::cout
+          << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
+      auto print = [&](const std::string &label) -> util::Result {
+        util::FailureOr<rocjitsu::config::ExecutionThreadAllocation> allocation =
+            settings.resolve(host, launch_config_diagnostic.emitter());
+        if (allocation.failed())
+          return util::Result::failure();
+        const auto &plan = allocation.value();
+        uint64_t total = uint64_t{plan.engines} + plan.helpers;
+        std::string dispatch;
+        for (uint32_t width : plan.dispatch) {
+          if (!dispatch.empty())
+            dispatch += ",";
+          dispatch += std::to_string(width);
+          total += width - 1;
+        }
+        std::cout << std::format("{} | {} | {} | {} | {}\n", label, plan.engines, dispatch,
+                                 plan.helpers, total);
+        return util::Result::success();
+      };
+      if (print("Configured").failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      for (uint32_t budget : {1u, 2u, 4u, 8u, 12u, 16u, 24u, 32u, 34u, 36u, 40u, 48u, 64u}) {
+        settings.request.budget = budget;
+        if (print(std::to_string(budget)).failed()) {
+          std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                   launch_config_diagnostic.message());
+          return 1;
+        }
+      }
+      return 0;
+    } catch (const std::exception &e) {
+      std::cerr << std::format("rocjitsu: thread allocation failed: {}\n", e.what());
+      return 1;
     }
-    return 0;
   }
 
   const rocjitsu::launcher::ParentEnvironment parent_environment =
@@ -1625,24 +1710,9 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  rocjitsu::config::DbtGuestConfig dbt_guest_config;
-  bool dbt_guest_mode = false;
-  if (!abs_config.empty()) {
-    try {
-      auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
-          abs_config, launch_config_diagnostic.emitter());
-      if (maybe_dbt_guest.failed()) {
-        std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
-                                 launch_config_diagnostic.message());
-        return 1;
-      }
-      dbt_guest_config = std::move(maybe_dbt_guest.value());
-      dbt_guest_mode = dbt_guest_config.enabled;
-    } catch (const std::exception &e) {
-      std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
-      return 1;
-    }
-  }
+  if (!load_dbt_guest_config())
+    return 1;
+
   if (dbt_guest_mode && gdb_requested && !attach_mode) {
     std::cerr << "rocjitsu: --gdb requires daemon mode, which dbt_guest does not support yet\n";
     return 1;
@@ -1655,51 +1725,8 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --node cannot be combined with dbt_guest mode\n";
     return 1;
   }
-  if (dbt_guest_mode &&
-      dbt_guest_config.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware &&
-      reject_hardware_dbt_overrides(overrides))
+  if (reject_dbt_guest_launch_overrides(overrides, dbt_guest_config))
     return 1;
-  // A dbt_guest simulator_config is resolved relative to the config naming it, and
-  // it, not this config, is what the host VM is built from. Moving overrides onto
-  // a copy would therefore both break that path and miss the config they must reach.
-  if (reject_dbt_guest_simulator_config_override(overrides.exec_mode.has_value(), "--exec-mode",
-                                                 "exec_mode", dbt_guest_config))
-    return 1;
-  if (reject_dbt_guest_simulator_config_override(overrides.gpus_per_node.has_value(),
-                                                 "--gpus-per-node", "vm.gpu.num_gpus",
-                                                 dbt_guest_config))
-    return 1;
-  if (reject_dbt_guest_simulator_config_override(!overrides.plugins.empty(), "--plugin", "plugins",
-                                                 dbt_guest_config))
-    return 1;
-  if (reject_dbt_guest_simulator_config_override(overrides.cpu_thread_budget.has_value(),
-                                                 "--cpu-thread-budget", "cpu_thread_budget",
-                                                 dbt_guest_config))
-    return 1;
-  if (reject_dbt_guest_simulator_config_override(overrides.wait_checking.has_value(),
-                                                 "--wait-checking", "wait_checking",
-                                                 dbt_guest_config))
-    return 1;
-  if (reject_dbt_guest_simulator_config_override(overrides.num_threads.has_value(),
-                                                 "--option num_threads", "num_threads",
-                                                 dbt_guest_config))
-    return 1;
-  if (reject_dbt_guest_simulator_config_override(overrides.cpu_dispatch_threads.has_value(),
-                                                 "--option cpu_dispatch_threads",
-                                                 "cpu_dispatch_threads", dbt_guest_config))
-    return 1;
-  if (reject_dbt_guest_simulator_config_override(overrides.async_helper_threads.has_value(),
-                                                 "--option async_helper_threads",
-                                                 "async_helper_threads", dbt_guest_config))
-    return 1;
-  if (!overrides.empty() && dbt_guest_config.enabled &&
-      !dbt_guest_config.host.simulator_config_path.empty()) {
-    std::cerr << std::format("rocjitsu: launch config overrides cannot be combined with a "
-                             "dbt_guest simulator_config; set them in {} instead\n",
-                             dbt_guest_config.host.simulator_config_path);
-    return 1;
-  }
-
   if (!write_config_for_this_launch())
     return 1;
 
