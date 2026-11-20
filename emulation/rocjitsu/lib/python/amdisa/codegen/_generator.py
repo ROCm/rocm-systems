@@ -19241,6 +19241,12 @@ class CodeGenerator:
                     tokens = (tokens,)
                 if any(token in impl_text for token in tokens):
                     result.append((include, system))
+            scalar_header = ('rj_arith/detail/rj_arith_scalar.h', False)
+            if (
+                'amdgpu::arith::execute_pseudo_scalar(' in impl_text
+                and scalar_header not in result
+            ):
+                result.append(scalar_header)
             return result
 
         if not max_bytes:
