@@ -230,8 +230,8 @@ TEST_F(nic_traits_register_agents_test_interface,
 
     EXPECT_EQ(nic_agent_count(), nic_before + 2);
 
-    expect_nic_agent_by_hardware_id(k_hw_nic_device_id_2, "AINIC-2");
-    expect_nic_agent_by_hardware_id(k_hw_nic_device_id_5, "AINIC-5");
+    expect_nic_agent_by_hardware_id(k_hw_nic_device_id_2, "rdma2");
+    expect_nic_agent_by_hardware_id(k_hw_nic_device_id_5, "rdma5");
 }
 
 TEST_F(nic_traits_register_agents_test_interface,
@@ -278,7 +278,7 @@ TEST_F(nic_traits_register_agents_test_interface,
     EXPECT_EQ(nic_agent_count_with_device_id(k_hw_nic_device_id_2), id2_before);
     EXPECT_EQ(nic_agent_count_with_device_id(k_hw_nic_device_id_5), id5_before + 1);
 
-    EXPECT_TRUE(has_nic_agent_with_id_and_name(k_hw_nic_device_id_5, "AINIC-5"));
+    EXPECT_TRUE(has_nic_agent_with_id_and_name(k_hw_nic_device_id_5, "rdma1"));
 }
 
 TEST_F(nic_traits_register_agents_test_interface, unsupported_nic_skipped_under_all_mode)
@@ -338,9 +338,8 @@ TEST_F(nic_traits_register_agents_test_interface,
     const agent& by_type_second =
         mgr.get_agent_by_type_index(nic_before + 1, agent_type::nic);
 
-    expect_nic_agent_fields(by_type_first, k_hw_nic_device_id_7, "AINIC-by-id-7",
-                            nic_before);
-    expect_nic_agent_fields(by_type_second, k_hw_nic_device_id_9, "AINIC-by-id-9",
+    expect_nic_agent_fields(by_type_first, k_hw_nic_device_id_7, "rdma0", nic_before);
+    expect_nic_agent_fields(by_type_second, k_hw_nic_device_id_9, "rdma1",
                             nic_before + 1);
 
     EXPECT_EQ(by_type_first.device_id,
@@ -399,7 +398,7 @@ TEST_F(nic_traits_register_agents_test_interface, agent_metadata_populated_from_
     const agent&         nic = mgr.get_agent_by_type_index(nic_before, agent_type::nic);
 
     EXPECT_EQ(nic.device_id, static_cast<std::uint64_t>(k_hw_nic_device_id_1));
-    EXPECT_EQ(nic.name, "Product-X");
+    EXPECT_EQ(nic.name, "rdma0");
     EXPECT_EQ(nic.model_name, "Vendor-Y");
     EXPECT_EQ(nic.vendor_name, "AI NIC");
     EXPECT_EQ(nic.product_name, "AI NIC");
