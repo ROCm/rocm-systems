@@ -15,6 +15,22 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`),
   so a process can be profiled to rocpd in one session and to Perfetto in the next.
 
+### Changed
+
+- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
+  the trace cache instead of Timemory. GPU kernels and memory copies are nested under the
+  API call that launched them, and each worker thread's tree starts at the top level
+  instead of under the `pthread_create` call that spawned it. The report is written
+  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of
+  that setting is now empty instead of `wall_clock`.
+
+### Removed
+
+- The `--profile-diff` option of `rocprof-sys-run` and `rocprof-sys-sample`. It compared
+  timemory profiles against a previous run, and the `wall_clock` profile is no longer
+  produced by timemory. Passing `--profile-diff` is now an unknown-argument error.
+
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
@@ -32,6 +48,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - The `profiler-hub` version is shown in the `rocprof-sys-*` version output. The tool now
   aborts at startup with an error if the loaded `libprofiler-hub` version differs from the
   version it was built against.
+- Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
+  reported several orders of magnitude too small.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

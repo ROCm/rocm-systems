@@ -22,6 +22,8 @@
  * IN THE SOFTWARE.
  *****************************************************************************/
 
+#include <hip/hip_version.h>
+
 using namespace rocshmem;
 
 /* Declare the template with a generic implementation */
@@ -65,6 +67,10 @@ TEAM_INT_REDUCTION_DEF_GEN(long, long)
 TEAM_INT_REDUCTION_DEF_GEN(long long, longlong)
 TEAM_FLOAT_REDUCTION_DEF_GEN(float, float)
 TEAM_FLOAT_REDUCTION_DEF_GEN(double, double)
+TEAM_FLOAT_REDUCTION_DEF_GEN(__half, half)
+#if !(HIP_VERSION_MAJOR == 7 && (HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))
+TEAM_FLOAT_REDUCTION_DEF_GEN(__hip_bfloat16, bfloat16)
+#endif
 // long double reduction fails. hipcc/device may not support long double.
 // so disable it for now.
 // FLOAT_REDUCTION_DEF_GEN(long double, longdouble)

@@ -137,10 +137,8 @@ inline InstructionFamily classify_instruction(const Instruction &inst) {
   constexpr uint64_t control_flags = BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL |
                                      PROGRAM_TERMINATOR | WAITCNT | BARRIER;
   // Checked before the memory fallback below so that LDS-pipe synchronisation
-  // and no-ops are not counted as LDS traffic. `s_barrier` catches the split
-  // barrier family: on CDNA5 only `s_barrier_wait` carries the BARRIER flag,
-  // so init/join/leave/signal/signal_isfirst would otherwise land in `scalar`
-  // next to ordinary ALU work.
+  // and no-ops are not counted as LDS traffic. Some split-barrier operations
+  // lack the BARRIER flag, so the name prefix keeps them in the control family.
   if ((inst.flags() & control_flags) != 0 || has_prefix("s_nop") || has_prefix("s_sleep") ||
       has_prefix("s_delay") || has_prefix("s_barrier") || has_prefix("ds_nop"))
     return InstructionFamily::Control;

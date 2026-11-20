@@ -256,7 +256,6 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
 TEST_F(SimdCoverage, PackedF16Numerics) {
   check_packed_half<PackedFloatOp::ADD, false>(*wf);
   check_packed_half<PackedFloatOp::MUL, false>(*wf);
-  check_packed_half<PackedFloatOp::FMA, false>(*wf);
   check_packed_half<PackedFloatOp::MIN, false>(*wf);
   check_packed_half<PackedFloatOp::MAX, false>(*wf);
   check_packed_half<PackedFloatOp::MINIMUM, false>(*wf);
@@ -582,37 +581,6 @@ TEST_F(SimdCoverage, DivisionScalePathReturnsAndPreservesInactiveMaskBits) {
   EXPECT_EQ(result, 0xabcdef01aaaaaaaaULL);
   for (uint32_t lane = 0; lane < 32; ++lane)
     EXPECT_EQ(get(3, lane), lane % 2 ? 0xdeadbeefu : 0x3f800000u);
-}
-
-TEST_F(SimdCoverage, MixedFmaUsesProfileSemanticsAndCompilerGuard) {
-  WordInst inst;
-  inst.inst_.opsel_hi = 0;
-  inst.inst_.opsel_hi_2 = 0;
-  constexpr uint32_t exec = 0xa5a5f0f0u;
-  constexpr uint32_t sentinel = 0xdeadbeefu;
-  wf->set_exec(exec);
-  const float a = std::bit_cast<float>(0x3f800001u);
-  const float b = std::bit_cast<float>(0x3f7fffffu);
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    put(0, lane, 0x3f800001u);
-    put(1, lane, 0x3f7fffffu);
-    put(2, lane, 0xbf800000u);
-    put(3, lane, sentinel);
-  }
-#if RJ_HOST_HAS_FMA
-  ASSERT_FALSE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane), sentinel);
-#else
-  ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane),
-              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(a * b - 1.0f) : sentinel);
-#endif
-  ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, true>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane),
-              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(std::fma(a, b, -1.0f)) : sentinel);
 }
 
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs

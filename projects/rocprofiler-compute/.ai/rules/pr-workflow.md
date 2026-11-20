@@ -49,6 +49,7 @@ approval. Do NOT create the PR without confirmation.
 
 **Body rules:**
 
+- Write every sentence following [`writing-style.md`](writing-style.md).
 - **Motivation**: Describe what this PR does and why, in 2-3 concise lines.
   Do not complain about previous behavior — focus on the positive framing of
   the current change. Highlight bugfixes as a distinct line starting with
