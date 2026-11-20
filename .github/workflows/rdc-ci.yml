@@ -229,8 +229,10 @@ jobs:
       run: |
         apt update -y
         # rdctst pulls in libamd_smi's netlink (NIC) code, so the runtime
-        # libnl stack must be present or the binary fails to load.
-        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0 binutils
+        # libnl stack must be present or the binary fails to load. The image's
+        # rocprofiler-sdk needs libdw.so.1, which the image does not carry, so
+        # the installed ROCp module, which loads it, needs libdw1 to load.
+        apt install -y python3 python3-pip libnl-3-200 libnl-genl-3-200 libmnl0 binutils libdw1
         pip3 install pytest pytest-timeout prometheus_client
 
     - name: Download RDC packages
