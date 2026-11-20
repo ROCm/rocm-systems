@@ -181,6 +181,7 @@ class DefaultSignal : private LocalSignal, public BusyWaitSignal {
       : LocalSignal(initial_value, batch, slot), BusyWaitSignal(signal(), false) {
     host_access_via_hdp_ = batch->host_access_via_hdp();
     host_can_monitor_ = !batch->host_access_across_link();
+    evict_after_host_load_ = batch->host_caches_arena();
   }
 
  protected:

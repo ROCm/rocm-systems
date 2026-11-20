@@ -25,6 +25,7 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
 
   std::string disassemble() const override;
+  void implicit_uses(RegisterSet &uses) const override;
 
 private:
   enum class Format : uint8_t { VopdXy };
@@ -43,6 +44,7 @@ private:
   };
 
   static const char *op_name(uint16_t op);
+  static amdgpu::Operation operation(uint16_t op);
 
   std::string format_slot(const Slot &slot) const;
   void init_operands();

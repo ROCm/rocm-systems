@@ -430,16 +430,9 @@ ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* pciBusId, uint32_t* de
       amdsmi_processor_handle processor_handle = 0;
 
       amdsmi_bdf_t bdf = {};
-      // This is the format that matches amd-smi BDF
-      // bdf.function_number = (busid & 0x7);
-      // bdf.device_number = (busid & 0xf8) >> 3;
-      // bdf.bus_number = (busid & 0xff00) >> 8;
-      // bdf.domain_number = (busid & 0xffffffffffff0000) >> 16;
-
-      // However, it is incompatible with the format enforced by NCCL in utils.cc:int64ToBusId
-      // !! To be reconciled after discussion with amdsmi team !!
+      // busIdToInt64 encoding: domain[35:20] bus[19:12] device[11:4] function[3:0].
       bdf.function_number = (busid & 0xf);
-      bdf.device_number = (busid & 0xff) >> 4;
+      bdf.device_number = (busid & 0xff0) >> 4;
       bdf.bus_number = (busid & 0xff000) >> 12;
       bdf.domain_number = busid >> 20;
 

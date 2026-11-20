@@ -169,6 +169,13 @@ public:
         {
             auto&       counter_des = counters_vec[index];
             const auto& block_des   = counter_des.block_des;
+            const bool  is_sqc_even_mirror =
+                (Primitives::GFXIP_LEVEL >= 11 &&
+                 (counter_des.block_info->attr & CounterBlockSqAttr) &&
+                 block_des.id != static_cast<uint32_t>(AQLPROFILE_BLOCK_NAME_SQG));
+            const bool is_odd_only_sqc_16bit =
+                (is_sqc_even_mirror && counter_des.spm_depth == AQLPROFILE_SPM_DEPTH_16_BITS &&
+                 !config->spm_enable_sq_even_lane);
 
             // The builder consumes resolved per-counter SPM depth and does not re-derive policy.
             // See resolve_spm_depth() in spm_v2.cpp for the current compatibility/default rules.
@@ -178,6 +185,11 @@ public:
                 counter_info_odd[block_des.id].push_back({block_des.id, index});
                 if(counter_des.block_info->attr & CounterBlockSpmGlobalAttr)
                     has_global_32bit_spm = true;
+            }
+            else if(is_odd_only_sqc_16bit)
+            {
+                counter_info_even[block_des.id].push_back({block_des.id, index});
+                counter_info_odd[block_des.id].push_back({block_des.id, index});
             }
             else
             {
@@ -368,6 +380,13 @@ public:
                 {
                     const auto  index       = counter_info_even[j][k].second;
                     const auto& counter_des = counters_vec[index];
+                    const bool  is_sqc_even_mirror =
+                        (Primitives::GFXIP_LEVEL >= 11 &&
+                         (counter_des.block_info->attr & CounterBlockSqAttr) &&
+                         counter_des.block_des.id !=
+                             static_cast<uint32_t>(AQLPROFILE_BLOCK_NAME_SQG));
+                    const bool map_even_lane =
+                        config->spm_enable_sq_even_lane || !is_sqc_even_mirror;
                     if(counter_des.spm_depth != depth[n]) continue;
                     if(depth[n] == AQLPROFILE_SPM_DEPTH_32_BITS)
                     {
@@ -381,7 +400,8 @@ public:
                     else
                     {
                         mux_ram[1][even_idx] = Primitives::spm_mux_ram_value(counter_des);
-                        counter_map[index]   = counter_map_value(even_idx, counter_des, false);
+                        if(map_even_lane)
+                            counter_map[index] = counter_map_value(even_idx, counter_des, false);
                     }
                     even_idx = Primitives::spm_mux_ram_idx_incr(even_idx);
                 }

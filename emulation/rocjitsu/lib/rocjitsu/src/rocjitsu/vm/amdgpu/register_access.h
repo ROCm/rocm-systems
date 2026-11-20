@@ -28,6 +28,7 @@
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/ordered_count.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "simdojo/components/vector_reg.h"
@@ -854,6 +855,16 @@ public:
       for (uint32_t reg = 0; reg < reg_count_; ++reg) {
         // The byte-mask check above admits raw data for every register.
         const auto *values = reg_data(reg);
+        if (lane_mask == wave_lane_mask) {
+          auto *out = destination.data() + reg * sizeof(uint32_t);
+          if (reg_count_ == 1) {
+            std::memcpy(out, values, wf_size_ * sizeof(uint32_t));
+          } else {
+            for (uint32_t lane = 0; lane < wf_size_; ++lane)
+              std::memcpy(out + lane * lane_stride, values + lane, sizeof(uint32_t));
+          }
+          continue;
+        }
         uint64_t active_lanes = lane_mask;
         while (active_lanes) {
           const uint32_t lane = std::countr_zero(active_lanes);
@@ -1140,9 +1151,64 @@ public:
 
   [[nodiscard]] std::optional<RegisterRef> memory_destination_register(const Instruction &inst,
                                                                        const Operand &op) const {
-    return destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
-                                wavefront().wf_size() == 64 &&
-                                    (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    auto result = destination_register(op, true, bool(inst.flags() & RESERVES_UNWRITTEN_VGPR),
+                                       wavefront().wf_size() == 64 &&
+                                           (inst.flags() & COMPACT_WAVE64_MEMORY_RESULT));
+    if (result && result->cls == RegClass::VGPR && (inst.flags() & INCLUDES_UNWRITTEN_LAST_VGPR))
+      --result->width;
+    return result;
+  }
+
+  /// VGPRs read by a GDS request. Ordered counts and GWS read their argument
+  /// from the first active lane. A suppressed result disables the request.
+  [[nodiscard]] uint64_t gds_source_lanes(const Instruction &inst) const {
+    if (const auto ordered = decoded_ordered_count_lanes(inst, wavefront()))
+      return ordered->contribution;
+    if (!vgpr_results_fit_allocation(inst))
+      return 0;
+    const uint64_t lanes = wavefront().exec();
+    return inst.mnemonic().starts_with("ds_gws_") ? lanes & -lanes : lanes;
+  }
+
+  /// Section 3.6.1 specifies an undefined data value for out-of-range
+  /// sources of reads and returning atomics. No-return DS/GDS and GWS
+  /// use the issuing wave's VGPR0 for each out-of-range source word.
+  [[nodiscard]] static bool ds_sources_use_vgpr0(const Instruction &inst) {
+    for (int i = 0; i < inst.num_dst_operands(); ++i)
+      if (inst.dst_operand(i)->decoded_vgpr())
+        return false;
+    return true;
+  }
+
+  /// Resolve each data-share source DWORD in the issuing wave. Preserve a
+  /// contiguous in-range tuple; a crossing tuple can refer to multiple VGPRs.
+  template <typename F>
+  void for_each_ds_source_range(const Operand &operand, bool use_vgpr0, F &&visit) const {
+    const auto reg = operand.decoded_vgpr();
+    if (!reg || !operand.reads_value())
+      return;
+    const auto &wf = wavefront();
+    const auto base = wf.vgpr_alloc().base;
+    const auto physical = base + reg->index;
+    if (use_vgpr0 ? wf.vgpr_alloc().contains(physical, reg->width)
+                  : cu_->owns_vgpr_range(wf, physical, reg->width)) {
+      visit(*reg);
+      return;
+    }
+    if (!use_vgpr0)
+      return;
+    for (uint32_t word = 0; word < reg->width; ++word) {
+      const auto physical_word = wf.ds_source_vgpr(physical + word);
+      visit(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(physical_word - base), 1});
+    }
+  }
+
+  template <typename F> void for_each_gds_source(const Instruction &inst, F &&visit) const {
+    for (int i = 0; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
+      for_each_ds_source_range(*inst.src_operand(i), ds_sources_use_vgpr0(inst), visit);
+    }
   }
 
   /// @brief Resolve a source using the execution bank and scalar selector.
@@ -1172,6 +1238,9 @@ public:
   /// Preserve backed inputs even if a later scalar word has no backing.
   [[nodiscard]] std::array<std::optional<RegisterRef>, 4>
   buffer_resource_registers(const Operand &op, unsigned scalar_words) const;
+
+  /// Inspect a scalar control input without publishing an architectural register read.
+  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
 
   // Scalar and per-lane operand access. Instruction implementations use these
   // for value-semantic operand reads and writes; Operand remains the
@@ -1339,7 +1408,7 @@ public:
     if (auto base = op.simd_vgpr_base_mut(wf);
         base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
       return;
-    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+    if (!(wf.vgpr_write_mask() & (uint64_t{1} << lane)) && op.simd_vgpr_storage_mut(wf))
       return;
     op.write_lane(wf, lane, value);
   }
@@ -1356,7 +1425,7 @@ public:
     if (auto base = op.simd_vgpr_base_mut(wf);
         base && !mutable_cu().valid_operand_vgpr_range(wf, *base, 1))
       return;
-    if (op.simd_vgpr_storage_mut(wf) && !(wf.vgpr_write_mask() & (uint64_t{1} << lane)))
+    if (!(wf.vgpr_write_mask() & (uint64_t{1} << lane)) && op.simd_vgpr_storage_mut(wf))
       return;
     op.write_lane(wf, lane, value);
   }
@@ -1710,6 +1779,44 @@ public:
     }
   }
 
+  /// @brief Read one dword from validated scalar storage without reporting an
+  /// instruction-visible register read.
+  /// @details Code that plans an instruction's accesses, or observes it, uses
+  /// this path to read encoding-selected control words such as a resource
+  /// descriptor, which are not register reads by the instruction itself. It is
+  /// header-only, so that self-contained plugins can use it. An SGPR the wave
+  /// does not own and an offset outside `range` give nullopt.
+  [[nodiscard]] std::optional<uint32_t> read_scalar_unobserved(const ScalarRegisterRange &range,
+                                                               uint32_t offset = 0) const {
+    const Wavefront &wf = wavefront();
+    if (offset >= range.width)
+      return std::nullopt;
+    const uint32_t index = range.index + offset;
+    const auto word = [index](uint64_t value) {
+      return static_cast<uint32_t>(value >> (index == 0 ? 0 : 32));
+    };
+    switch (range.storage) {
+    case ScalarRegisterStorage::SGPR:
+      // Like write_scalar_unobserved(), reach only this wave's SGPRs.
+      if (!cu_->owns_sgpr_range(wf, wf.sgpr_alloc().base + range.index, range.width))
+        return std::nullopt;
+      return cu_->read_sgpr_storage(wf.sgpr_alloc().base + index);
+    case ScalarRegisterStorage::FLAT_SCRATCH:
+      return word(read_sgpr_pair_unobserved(wf.scratch_base_));
+    case ScalarRegisterStorage::VCC:
+      return word(read_sgpr_pair_unobserved(wf.vcc_));
+    case ScalarRegisterStorage::TTMP:
+      return wf.ttmp(index);
+    case ScalarRegisterStorage::M0:
+      return wf.m0();
+    case ScalarRegisterStorage::EXEC:
+      return word(wf.exec_raw());
+    case ScalarRegisterStorage::DISCARD:
+      return 0u;
+    }
+    return std::nullopt;
+  }
+
   // Physical SGPR access. These APIs are for helpers that already know the
   // physical scalar register index. Reads may use a CU-bound compatibility path
   // that resolves one owner for the complete range. Writes require an explicit
@@ -1990,6 +2097,18 @@ private:
 
   friend class MemoryWaitScoreboard;
 
+  /// Read a VCC or FLAT_SCRATCH pair as Wavefront::read_sgpr_pair() does, but
+  /// inline: Wavefront::read_backed_sgpr_pair() is out of line because
+  /// Wavefront cannot see ComputeUnitCore's storage.
+  [[nodiscard]] uint64_t read_sgpr_pair_unobserved(const Wavefront::SgprPair &pair) const {
+    if (!pair.backed_words)
+      return pair.local;
+    const uint32_t lo = cu_->read_sgpr_storage(pair.physical_base);
+    const uint64_t hi =
+        pair.backed_words == 2 ? cu_->read_sgpr_storage(pair.physical_base + 1) : pair.local >> 32;
+    return (hi << 32) | lo;
+  }
+
   /// Only explicitly qualified destinations preserve bytes outside their mask.
   [[nodiscard]] static uint8_t operand_write_byte_mask(const Operand &op) {
     return op.preserve_unwritten_bytes() ? op.register_byte_mask()
@@ -1997,7 +2116,6 @@ private:
   }
   /// Read an encoding-selected control word while planning an instruction's
   /// accesses. This does not constitute an executed register access.
-  std::optional<uint32_t> scalar_control_value(uint32_t selector) const;
   std::optional<uint64_t> vector_control_value(RegisterRef reg, unsigned lane) const;
 
   [[nodiscard]] uint32_t vgpr_region_wave_size(uint32_t physical_base, uint32_t reg_count) const {

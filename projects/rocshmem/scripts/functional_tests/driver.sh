@@ -209,6 +209,18 @@ declare -A TEST_NUMBERS=(
   ["tile_put_wave_4d"]="193"
   ["tile_get_wave_4d"]="194"
   ["signal_ops_on_stream"]="195"
+  ["tile_put_3d_strided"]="196"
+  ["tile_get_3d_strided"]="197"
+  ["tile_put_wg_3d_strided"]="198"
+  ["tile_get_wg_3d_strided"]="199"
+  ["tile_put_wave_3d_strided"]="200"
+  ["tile_get_wave_3d_strided"]="201"
+  ["tile_put_4d_strided"]="202"
+  ["tile_get_4d_strided"]="203"
+  ["tile_put_wg_4d_strided"]="204"
+  ["tile_get_wg_4d_strided"]="205"
+  ["tile_put_wave_4d_strided"]="206"
+  ["tile_get_wave_4d_strided"]="207"
 )
 
 # Detect which runtime to use
@@ -396,9 +408,9 @@ ExecTest_SLR() {
 
   # Add environment variables and application
   if (( NUM_WF > 0 )); then
-    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" --num-wf "$NUM_WF" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   else
-    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap})
+    cmd+=("env" "${env_vars[@]}" "$APP" -a "$TEST_NUM" -w "$NUM_WG" -z "$NUM_THREADS" ${NOVERIF:+-noverif} -localbuftype ${LOCALBUFTYPE:-heap} ${ROCSHMEM_TEST_ARGS:-} )
   fi
 
   if [[ "" != "$MAX_MSG_SIZE" ]]
@@ -1102,7 +1114,6 @@ TestOther() {
   ExecTest  "shmemptr"         2       16           128       8
 
   ########################### Fence ordering tests #############################
-  if [[ $TEST != ro* ]]; then #AIROCSHMEM-418: fence tests not supported on RO
   ExecTest  "fence_putwavesignal"    2       1     $WAVE_SIZE 1048576
   ExecTest  "fence_putwavesignal"    2       8     256        1048576
   ExecTest  "fence_putwavesignal"    2       32    1024       65536
@@ -1113,7 +1124,6 @@ TestOther() {
   ExecTest  "fence_fanout"           8       8     256        65536
   ExecTest  "fence_putwavenbichunks" 2       1     $WAVE_SIZE 1048576
   ExecTest  "fence_putwavenbichunks" 2       8     256        65536
-  else echo "Skip:   fence_* (AIROCSHMEM-418: fence tests not supported on RO)"; fi
 }
 
 TestTiles() {

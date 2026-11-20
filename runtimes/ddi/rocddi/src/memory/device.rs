@@ -1,6 +1,15 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#![cfg_attr(
+    windows,
+    allow(
+        unused_imports,
+        unused_variables,
+        reason = "native provider routes are absent on this host target"
+    )
+)]
+
 //! Memory whose access is qualified for activated devices.
 //!
 //! Placement and access belong to an activated
@@ -14,13 +23,15 @@
 
 mod access;
 mod allocation;
+mod capabilities;
 mod registered_host;
 mod types;
 mod virtual_memory;
 
 pub use access::DeviceAccess;
 pub(crate) use allocation::record_rollback;
-pub use allocation::{Allocation, RollbackReport, with_rollback_report};
+pub use allocation::{Allocation, LocalBackingIdentity, RollbackReport, with_rollback_report};
+pub use capabilities::{DeviceMemoryCapabilities, MemoryCapabilityRequest};
 pub use registered_host::{RegisteredHostAllocation, RegisteredHostMemory};
 pub use types::{
     AllocationInfo, HostCacheability, HostMappingPolicy, MemoryKind, VirtualAddressInfo,
@@ -28,11 +39,9 @@ pub use types::{
 };
 pub use virtual_memory::{VirtualAddress, VirtualDeviceMapping, VirtualHostMapping, VirtualMemory};
 
+pub(crate) use super::constraints::{AllocationDesc, AllocationLimits};
 pub(crate) use allocation::{DriverAllocation, set_device_access_for};
-pub(crate) use types::{
-    AllocationDesc, AllocationLimits, HostRegistration, VirtualMapRequest,
-    registered_host_page_cover,
-};
+pub(crate) use types::{HostRegistration, VirtualMapRequest, registered_host_page_cover};
 #[cfg(test)]
 pub(crate) use virtual_memory::{DeviceIntervals, HostIntervals};
 pub(crate) use virtual_memory::{

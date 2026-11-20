@@ -19,6 +19,12 @@ template <int Bits, Shift Op>
 void shift_x86_64_v3(uint32_t exec_mask, uint32_t *const *d, const uint32_t *a,
                      const uint32_t *const *b);
 
+// Shift integer words. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <int Bits, Shift Op>
+void shift_x86_64_v4(uint32_t exec_mask, uint32_t *const *d, const uint32_t *a,
+                     const uint32_t *const *b);
+
 } // namespace rocjitsu::arith
 
 #endif

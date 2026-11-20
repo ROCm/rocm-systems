@@ -13,10 +13,12 @@
  * type-erased bitcode implementations.
  *
  * Usage:
+ * @code
  * #include <rocshmem/rocshmem.hpp>
  * #ifdef __HIP_DEVICE_COMPILE__
  * #include <rocshmem/rocshmem_device.hpp>
  * #endif
+ * @endcode
  *
  * NOTE: This header no longer includes internal context headers. The template
  * implementations in rocshmem_TILE_impl.hpp extract type information from
