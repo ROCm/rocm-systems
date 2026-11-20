@@ -27,12 +27,16 @@ extern "C" {
 rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 {
-    return nullptr;
+    static auto result = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t), nullptr, nullptr, nullptr};
+    return &result;
 }
 
 rocprofiler_tool_configure_attach_result_t*
 rocprofiler_configure_attach(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 {
-    return nullptr;
+    static auto result = rocprofiler_tool_configure_attach_result_t{
+        sizeof(rocprofiler_tool_configure_attach_result_t), nullptr, nullptr, nullptr};
+    return &result;
 }
 }

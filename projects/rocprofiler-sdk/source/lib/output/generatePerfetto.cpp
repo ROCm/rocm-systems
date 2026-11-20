@@ -1258,7 +1258,7 @@ write_perfetto(
     (*state->ofs.stream) << std::flush;
 
     ROCP_TRACE << "Destroying trace output stream...";
-    state->ofs.close();
+    state->ofs.close_checked();
 }
 
 }  // namespace tool

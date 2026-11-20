@@ -27,6 +27,8 @@
 
 #include <fmt/format.h>
 
+#include <memory>
+#include <stdexcept>
 #include <string_view>
 #include <unordered_set>
 
@@ -78,6 +80,12 @@ invalid_directory(const resolved_output& resolved)
 }
 }  // namespace
 
+bool
+is_standard_stream(std::string_view name)
+{
+    return name.empty() || stdout_names.count(name) > 0 || stderr_names.count(name) > 0;
+}
+
 std::optional<std::string>
 check_output_path(const output_config& cfg, std::string_view fname, std::string_view ext)
 {
@@ -91,8 +99,8 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
 
     if(auto invalid = invalid_directory(resolved))
     {
-        ROCP_FATAL << fmt::format(
-            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory", *invalid);
+        throw std::runtime_error{fmt::format(
+            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory", *invalid)};
     }
 
     for(const auto& itr : resolved.directories)
@@ -118,17 +126,13 @@ get_output_stream(const output_config& cfg,
     else if(cfg_output_path.empty() || fname.empty())
         return {&std::clog, [](auto*&) {}};
 
-    auto  output_file = get_output_filename(cfg, fname, ext);
-    auto* _ofs        = new(std::nothrow) std::ofstream{output_file, mode};
-
-    LOG_IF(FATAL, !_ofs) << fmt::format("Failed to allocate ofstream for output file '{}'",
-                                        output_file);
-    LOG_IF(FATAL, _ofs && !*_ofs) << fmt::format("Failed to open '{}' for output", output_file);
+    auto output_file = get_output_filename(cfg, fname, ext);
+    auto _ofs        = std::make_unique<std::ofstream>(output_file, mode);
+    if(!*_ofs) throw std::runtime_error{fmt::format("Failed to open '{}' for output", output_file)};
 
     ROCP_ERROR << "Opened result file: " << output_file;
 
-    return {_ofs, [](std::ostream*& v) {
-                if(v) dynamic_cast<std::ofstream*>(v)->close();
+    return {_ofs.release(), [](std::ostream*& v) {
                 delete v;
                 v = nullptr;
             }};

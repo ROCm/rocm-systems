@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "output_config.hpp"
+#include "output_stream.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -83,9 +84,21 @@ output_config::parse_env()
     perfetto_buffer_size = common::get_env("ROCPROF_PERFETTO_BUFFER_SIZE_KB", perfetto_buffer_size);
     defaults::validate_perfetto_buffer_size(perfetto_buffer_size);
 
-    output_path         = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
-    output_file         = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);
-    tmp_directory       = common::get_env("ROCPROF_TMPDIR", tmp_directory);
+    output_path = common::get_env("ROCPROF_OUTPUT_PATH", output_path);
+    output_file = common::get_env("ROCPROF_OUTPUT_FILE_NAME", output_file);
+    // Resolve the default after parsing -d/ROCPROF_OUTPUT_PATH, not at construction.
+    // Preserve explicit temporary-directory overrides for backwards compatibility.
+    tmp_directory = common::get_env("ROCPROF_TMPDIR", tmp_directory);
+    if(tmp_directory.empty())
+    {
+        tmp_directory = output_path;
+        if(is_standard_stream(format_path(output_path)))
+        {
+            auto ec       = std::error_code{};
+            auto tmp      = common::filesystem::temp_directory_path(ec);
+            tmp_directory = ec ? "%cwd%" : tmp.string();
+        }
+    }
     kernel_rename       = common::get_env("ROCPROF_KERNEL_RENAME", false);
     group_by_queue      = common::get_env("ROCPROF_GROUP_BY_QUEUE", false);
     annotate_args       = common::get_env("ROCPROF_ANNOTATE_ARGS", false);

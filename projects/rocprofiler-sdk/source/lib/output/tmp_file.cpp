@@ -31,9 +31,15 @@ bool
 tmp_file::fopen(const char* _mode)
 {
     auto fpath = fs::path{filename}.parent_path();
-    if(!fs::exists(fpath)) fs::create_directories(fpath);
+    auto ec    = std::error_code{};
+    fs::create_directories(fpath, ec);
+    if(ec)
+    {
+        ROCP_ERROR << "Cannot prepare temporary file '" << filename << "': " << ec.message();
+        return false;
+    }
 
-    if(!fs::exists(filename))
+    if(!fs::exists(filename, ec))
     {
         // if the filepath does not exist, open in out mode to create it
         std::ofstream _ofs{filename};
@@ -111,9 +117,15 @@ bool
 tmp_file::open(std::ios::openmode _mode)
 {
     auto fpath = fs::path{filename}.parent_path();
-    if(!fs::exists(fpath)) fs::create_directories(fpath);
+    auto ec    = std::error_code{};
+    fs::create_directories(fpath, ec);
+    if(ec)
+    {
+        ROCP_ERROR << "Cannot prepare temporary file '" << filename << "': " << ec.message();
+        return false;
+    }
 
-    if(!fs::exists(filename))
+    if(!fs::exists(filename, ec))
     {
         // if the filepath does not exist, open in out mode to create it
         std::ofstream _ofs{};
@@ -135,7 +147,8 @@ bool
 tmp_file::remove()
 {
     close();
-    if(fs::exists(filename))
+    auto exists_ec = std::error_code{};
+    if(fs::exists(filename, exists_ec))
     {
         ROCP_INFO << "removing temporary file: '" << filename << "'...";
         auto _ec  = std::error_code{};
@@ -157,7 +170,8 @@ tmp_file::remove()
 bool
 tmp_file::exists() const
 {
-    return fs::exists(filename);
+    auto ec = std::error_code{};
+    return fs::exists(filename, ec);
 }
 
 tmp_file::operator bool() const

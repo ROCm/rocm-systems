@@ -51,7 +51,15 @@ json_output::json_output(const output_config&       cfg,
     archive->makeArray();
 }
 
-json_output::~json_output() { close(); }
+json_output::~json_output()
+{
+    // Explicit close reports I/O errors. Cleanup during unwinding must not throw.
+    try
+    {
+        close();
+    } catch(const std::exception&)
+    {}
+}
 
 void
 json_output::close()
@@ -60,7 +68,7 @@ json_output::close()
     {
         archive->finishNode();
         archive.reset();
-        stream.close();
+        stream.close_checked();
     }
 }
 

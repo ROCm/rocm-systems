@@ -93,7 +93,7 @@ struct output_config
     std::string              stats_summary_unit          = "nsec";
     std::string              output_path                 = "%cwd%";
     std::string              output_file                 = "%hostname%/%pid%";
-    std::string              tmp_directory               = output_path;
+    std::string              tmp_directory               = {};
     std::string              stats_summary_file          = "stderr";
     std::string              perfetto_backend            = "inprocess";
     std::string              perfetto_buffer_fill_policy = "discard";

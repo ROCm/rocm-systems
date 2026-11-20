@@ -79,10 +79,29 @@ struct output_stream
         return ((stream) ? *stream : std::cerr) << std::forward<Tp>(value) << std::flush;
     }
 
-    void close()
+    // Explicit completion can report I/O failure; destruction remains non-throwing.
+    void close_checked()
     {
-        if(stream) (*stream) << std::flush;
+        if(!close()) throw std::runtime_error{"Failed to write or close profiling output"};
+    }
+
+    bool close() noexcept
+    {
+        if(!stream) return true;
+        bool success = false;
+        try
+        {
+            if(auto* file = dynamic_cast<std::ofstream*>(stream))
+                file->close();  // Also flushes buffered file output.
+            else
+                stream->flush();
+            success = !stream->fail();
+        } catch(...)
+        {}
         if(dtor) dtor(stream);
+        stream = nullptr;
+        dtor   = nullptr;
+        return success;
     }
 
     bool writes_to_file() const { return (dynamic_cast<std::ofstream*>(stream) != nullptr); }
@@ -91,9 +110,12 @@ struct output_stream
     ostream_dtor_t dtor   = nullptr;
 };
 
+bool
+is_standard_stream(std::string_view name);
+
 // Returns the directory that stops get_output_filename from writing this
-// artifact, or nothing when the path is usable. Creates nothing, so a caller
-// that cannot afford the ROCP_FATAL below can ask first.
+// artifact, or nothing when no directory collision is found. Creates nothing;
+// actual creation and output can still fail after this check.
 std::optional<std::string>
 check_output_path(const output_config& cfg, std::string_view fname, std::string_view ext);
 

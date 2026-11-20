@@ -144,12 +144,10 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
-// Thread for safe cleanup output generation
-auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
-
-// Tracks whether tool_detach produced output for the current attach session.
-// Set true by tool_detach, reset false by tool_attach (new session), read by tool_fini.
-std::atomic<bool> detach_output_generated = false;
+// Serialize attach, detach output, and finalization while they use the tool's shared buffers.
+std::mutex output_mutex;
+bool       tool_finalized          = false;
+bool       detach_output_generated = false;
 
 using sigaction_t      = struct sigaction;
 using signal_func_t    = sighandler_t (*)(int signum, sighandler_t handler);
@@ -2746,18 +2744,6 @@ get_tracing_callbacks()
     return tracing_callbacks_t{use_real_callbacks};
 }
 
-void
-reset_output_thread(std::optional<std::thread>& thread_ptr)
-{
-    if(thread_ptr.has_value())
-    {
-        ROCP_TRACE << "finalize output thread started...";
-        if(thread_ptr->joinable()) thread_ptr->join();
-        thread_ptr.reset();
-        ROCP_TRACE << "finalize output thread exiting...";
-    }
-}
-
 namespace
 {
 constexpr auto attach_session_file_perms =
@@ -2898,20 +2884,9 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
-    // Reset the detach output flag for this new session. If the process exits during this
-    // attach (without a corresponding tool_detach), tool_fini will see false and generate
-    // output for whatever was captured. tool_detach sets it true when it produces output.
+    auto lock = std::lock_guard<std::mutex>{output_mutex};
+    if(tool_finalized) return -1;
     detach_output_generated = false;
-
-    // reset any existing output thread from prior tool usage
-    // Only log if previous attachment used async mode (where background thread may still be
-    // running)
-    if(!tool::get_config().attach_output_generation_sync)
-    {
-        ROCP_INFO << "If files are still being written from the last detach, there will be a delay "
-                     "until this process is finished";
-    }
-    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     // save the existing config for comparison
     auto original_config = tool::get_config();
@@ -4146,11 +4121,7 @@ generate_config_output(const tool::config& cfg, const tool::metadata& tool_metad
 
 template <typename Tp, domain_type DomainT>
 void
-generate_output(tool::buffered_output<Tp, DomainT>& output_v,
-                output_data&                        output_data_v,
-                domain_stats_vec_t&                 contributions_v,
-                cleanup_vec_t&                      cleanups_v,
-                bool                                skip_output)
+register_output_cleanup(tool::buffered_output<Tp, DomainT>& output_v, cleanup_vec_t& cleanups_v)
 {
     cleanups_v.emplace_back([&output_v](cleanup_mode _mode) {
         switch(_mode)
@@ -4172,7 +4143,15 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
         }
         ROCP_CI_LOG(WARNING) << fmt::format("invalid cleanup mode {}", static_cast<int>(_mode));
     });
+}
 
+template <typename Tp, domain_type DomainT>
+void
+generate_output(tool::buffered_output<Tp, DomainT>& output_v,
+                output_data&                        output_data_v,
+                domain_stats_vec_t&                 contributions_v,
+                bool                                skip_output)
+{
     if(!output_v) return;
 
     // when benchmarking, we do not generate output
@@ -4282,6 +4261,30 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         cleanups.clear();
     };
 
+    auto outputs = std::tie(kernel_dispatch_output,
+                            hsa_output,
+                            hip_output,
+                            memory_copy_output,
+                            memory_allocation_output,
+                            kfd_output,
+                            marker_output,
+                            rccl_output,
+                            ompt_output,
+                            counters_output,
+                            scratch_memory_output,
+                            rocdecode_output,
+                            pc_sampling_host_trap_output,
+                            rocjpeg_output,
+                            pc_sampling_stochastic_output,
+                            spm_counters_output,
+                            hip_graph_output,
+                            rocshmem_output,
+                            hipfile_output,
+                            hip_event_output);
+    std::apply([&](auto&... output) { (register_output_cleanup(output, cleanups), ...); }, outputs);
+
+    auto _dtor = common::scope_destructor{run_cleanup};
+
     // Generate the configuration output regardless of whether there is any data
     // Skip config file output after an attach/detach cycle — detach already wrote it.
     if(tool::get_config().output_config_file && !skip_output)
@@ -4289,28 +4292,11 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
         generate_config_output(tool::get_config(), *tool_metadata);
     }
 
-    auto _dtor = common::scope_destructor{run_cleanup};
-
-    generate_output(kernel_dispatch_output, outdata, contributions, cleanups, skip_output);
-    generate_output(hsa_output, outdata, contributions, cleanups, skip_output);
-    generate_output(hip_output, outdata, contributions, cleanups, skip_output);
-    generate_output(memory_copy_output, outdata, contributions, cleanups, skip_output);
-    generate_output(memory_allocation_output, outdata, contributions, cleanups, skip_output);
-    generate_output(kfd_output, outdata, contributions, cleanups, skip_output);
-    generate_output(marker_output, outdata, contributions, cleanups, skip_output);
-    generate_output(rccl_output, outdata, contributions, cleanups, skip_output);
-    generate_output(ompt_output, outdata, contributions, cleanups, skip_output);
-    generate_output(counters_output, outdata, contributions, cleanups, skip_output);
-    generate_output(scratch_memory_output, outdata, contributions, cleanups, skip_output);
-    generate_output(rocdecode_output, outdata, contributions, cleanups, skip_output);
-    generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups, skip_output);
-    generate_output(rocjpeg_output, outdata, contributions, cleanups, skip_output);
-    generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups, skip_output);
-    generate_output(spm_counters_output, outdata, contributions, cleanups, skip_output);
-    generate_output(hip_graph_output, outdata, contributions, cleanups, skip_output);
-    generate_output(rocshmem_output, outdata, contributions, cleanups, skip_output);
-    generate_output(hipfile_output, outdata, contributions, cleanups, skip_output);
-    generate_output(hip_event_output, outdata, contributions, cleanups, skip_output);
+    std::apply(
+        [&](auto&... output) {
+            (generate_output(output, outdata, contributions, skip_output), ...);
+        },
+        outputs);
 
     if(!skip_output && tool::get_config().advanced_thread_trace &&
        !tool_metadata->att_filenames.empty())
@@ -4508,6 +4494,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 void
 tool_detach(void* /*tool_data*/)
 {
+    auto lock = std::lock_guard<std::mutex>{output_mutex};
+    if(tool_finalized) return;
     detach_output_generated = true;
 
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
@@ -4525,49 +4513,22 @@ tool_detach(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    // Check configuration to decide between async or sync output generation
+    auto write_output = [] { generate_output(cleanup_mode::reset); };
     if(tool::get_config().attach_output_generation_sync)
-    {
-        // Synchronous output generation - complete before returning
-        // This ensures output files are fully written before detach returns
-        ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
-        generate_output(cleanup_mode::reset);
-    }
+        write_output();
     else
-    {
-        // Launch generate output in an async background thread
-        // This allows tool_detach to return immediately without waiting.
-        // The thread will be joined later in tool_attach (for reattachment) or tool_fini
-        ::output_generation_thread.wlock([](auto& thread_ptr) {
-            reset_output_thread(thread_ptr);
-            thread_ptr.emplace([]() {
-                try
-                {
-                    generate_output(cleanup_mode::reset);
-                } catch(const std::exception& e)
-                {
-                    ROCP_ERROR << "Exception in detach cleanup thread: " << e.what();
-                } catch(...)
-                {
-                    ROCP_ERROR << "Unknown exception in detach cleanup thread";
-                }
-            });
-        });
-    }
+        std::async(std::launch::async, write_output).get();
 }
 
 void
 tool_fini(void* /*tool_data*/)
 {
-    static bool _first = true;
-    if(!_first) return;
-    _first = false;
+    auto lock = std::lock_guard<std::mutex>{output_mutex};
+    if(tool_finalized) return;
+    tool_finalized = true;
 
     client_identifier = nullptr;
     client_finalizer  = nullptr;
-
-    // Join the cleanup thread if it exists and is active
-    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
@@ -4582,11 +4543,16 @@ tool_fini(void* /*tool_data*/)
     if(tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));
 
-    // If tool_detach ran before us (sync or async — the thread join above ensures it finished),
-    // skip output generation here to avoid overwriting files the detach phase already wrote.
+    // Preserve the files from the last completed detach.
     const bool skip_output = detach_output_generated;
 
-    generate_output(cleanup_mode::destroy, skip_output);
+    try
+    {
+        generate_output(cleanup_mode::destroy, skip_output);
+    } catch(const std::exception& e)
+    {
+        ROCP_ERROR << "Profiling output failed during finalization: " << e.what();
+    }
 
     if(destructors)
     {
