@@ -73,10 +73,17 @@ Round-1 findings).
 - **Mode 2 (Rebuttal)** reviews the Round-1 findings + triage → dependent, must
   wait until after synthesis (the rebuttal round below).
 
+**Inputs are claims.** When a subagent gets the PR body or the author's
+replies, pass them as claims to check, not as verified facts; name who made a
+decision rather than calling it settled. Review the whole PR (`gh pr diff <N>`,
+or `origin/develop...HEAD` after `git fetch origin`), not only the newest
+commits: a develop merge into the branch, by the author or a bot, changes the
+code and the CHANGELOG sections under it.
+
 **Comprehensive reviews (default — includes rebuttal):**
 1. Dispatch `amdsmi-review-build` + `amdsmi-review-style` + CI evidence gathering in one batch (parallel). Style has no build dependency. If PR review, fetch CI run data via `gh` and compare against `develop` baseline.
 2. If build reports ❌ BLOCKING, stop — do not dispatch remaining subagents.
-3. Dispatch the remaining 8 subagents (`tests`, `docs`, `architecture`, `security`, `performance`, `skeptic` in Mode 1, `spec`, `maintainer`) in a single batch — all eight `runSubagent` calls in one message — each with the changed files/diff, build output, and CI evidence (pass build warnings to tests, CI evidence to tests & performance; pass any Confluence/issue/spec references to `spec`; pass the PR title, body and CI evidence to `maintainer`)
+3. Dispatch the remaining 8 subagents (`tests`, `docs`, `architecture`, `security`, `performance`, `skeptic` in Mode 1, `spec`, `maintainer`) in a single batch — all eight `runSubagent` calls in one message — each with the changed files/diff, build output, and CI evidence (pass build warnings to tests, CI evidence to tests & performance; pass any Confluence/issue/spec references to `spec`; pass the PR title, body, CI evidence and every earlier review comment on the PR, resolved and outdated threads and review bodies included, to `maintainer`)
 4. Collect findings from all subagents — renumber sequentially (F-1, F-2, …)
 5. Deduplicate overlapping findings (same file+line from multiple subagents)
 6. Add PR split assessment and unresolved comments analysis (done by you, not subagents)

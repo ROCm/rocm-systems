@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "core.h"
 #include "rccl_decision.h"
 #include "sym_kernels.h"
+#include "archinfo.h"
 
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,
@@ -388,6 +389,11 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 // when set, else the AllReduce LL128 tier cap where the arch table has that tier,
 // else the env var's default.
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL128 one-shot AllReduce: RCCL_DDA_LL128_ONESHOT_THRESHOLD
+// when set; with the peer-parallel kernels and an arch table that sets
+// ddaArLL128OneShotRankBytes, min(the env var's default, that / nRanks); else the
+// env var's default.
+size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
@@ -406,6 +412,12 @@ int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// DDA LL128 Broadcast thread count from the arch table, or 0 when it sets none.
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
+// DDA LL128 ReduceScatter batched kernel block size from the arch table, or 0 when it sets none.
+int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
+// Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.
+size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
 // skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to
@@ -541,4 +553,19 @@ int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMult
                                   int adjustedMaxNchannels, bool userUpdatedMaxChannels);
 int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
+
+// Ranks at or below this are not penalized. An FP8 ring above it gets 1024 unless exempted.
+constexpr int kFp8RingPenaltyRanks = 8;
+
+// 1024 for an FP8 ring above kFp8RingPenaltyRanks, or 1 when a single-node
+// gfx1250 allreduce above that sentinel is at or above the DDA LL128 ceiling.
+// Callers pass rcclDdaLL128Threshold(). A zero ceiling keeps the penalty, which is
+// what RCCL_IGNORE_ARCH_TABLE and DDA LL128 off produce.
+inline float rcclFp8RingCostFactor(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes, size_t nBytes,
+                                   size_t ddaLl128Ceiling, const char* arch) {
+  if ((dtype != ncclFloat8e4m3 && dtype != ncclFloat8e5m2) || nRanks <= kFp8RingPenaltyRanks) return 1.0f;
+  const bool exempt = func == ncclFuncAllReduce && nRanks > kFp8RingPenaltyRanks && nNodes == 1 &&
+                      ddaLl128Ceiling != 0 && nBytes >= ddaLl128Ceiling && IsArchMatch(arch, "gfx1250");
+  return exempt ? 1.0f : 1024.0f;
+}
 #endif

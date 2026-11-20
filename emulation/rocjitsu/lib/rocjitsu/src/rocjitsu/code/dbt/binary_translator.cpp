@@ -280,11 +280,18 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       uint16_t base_lo = 0;
       uint16_t base_width = 0;
       const bool loads_through_kernarg =
-          inst.mnemonic().starts_with("s_load_b") && inst.num_src_operands() >= 1 &&
-          pair_operand(inst.src_operand(0), base_lo, base_width) && state.pointer.contains(base_lo);
+          (inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B32 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B64 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B96 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B128 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B256 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B512) &&
+          inst.num_src_operands() >= 1 && pair_operand(inst.src_operand(0), base_lo, base_width) &&
+          state.pointer.contains(base_lo);
       uint16_t copy_lo = 0;
       uint16_t copy_width = 0;
-      const bool copies_pointer = inst.mnemonic() == "s_mov_b64" && inst.num_src_operands() == 1 &&
+      const bool copies_pointer = inst.amdgpu_operation() == amdgpu::Operation::S_MOV_B64 &&
+                                  inst.num_src_operands() == 1 &&
                                   pair_operand(inst.src_operand(0), copy_lo, copy_width) &&
                                   copy_width == 2 && state.pointer.contains(copy_lo);
 
@@ -296,7 +303,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       kill_defs(inst, state);
 
       // A call clobbers everything the ABI does not preserve, direct or indirect alike.
-      if ((flags & INDIRECT_CALL) != 0 || inst.mnemonic().starts_with("s_call")) {
+      if ((flags & INDIRECT_CALL) != 0) {
         std::erase_if(state.pointer, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
         std::erase_if(state.loaded, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
       }
@@ -424,7 +431,8 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
       if (decoded.succeeded()) {
         const std::unique_ptr<Instruction> &slot_inst = decoded.value();
         if (slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
-            slot_inst->mnemonic() == "s_branch" && slot_inst->branch_offset_bytes()) {
+            slot_inst->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
+            slot_inst->branch_offset_bytes()) {
           continue;
         }
       }
@@ -1219,8 +1227,10 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         continue;
       const Instruction *term = block->terminator();
       if (term != nullptr && term->size() == sizeof(uint32_t)) {
-        const std::string_view mnemonic = term->mnemonic();
-        if (mnemonic == "s_setpc_b64" || mnemonic == "s_set_pc_i64")
+
+        const amdgpu::Operation operation = term->amdgpu_operation();
+        if (operation == amdgpu::Operation::S_SETPC_B64 ||
+            operation == amdgpu::Operation::S_SET_PC_I64)
           candidates.emplace_back(
               block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
       }
@@ -1273,25 +1283,28 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         while (cursor > 0) {
           --cursor;
           const Instruction &inst = *ordered[cursor];
-          const std::string_view lane_mnemonic = inst.mnemonic();
+
+          const amdgpu::Operation lane_operation = inst.amdgpu_operation();
           // The lane identity here is a low selector only. Anything that moves the VGPR bank makes
           // that selector name a different physical register, so the comparison below stops meaning
           // what it says and the proof has to give up.
-          if (lane_mnemonic == "s_set_vgpr_msb" || lane_mnemonic == "s_setreg_b32" ||
-              lane_mnemonic == "s_setreg_imm32_b32")
+          if (lane_operation == amdgpu::Operation::S_SET_VGPR_MSB ||
+              lane_operation == amdgpu::Operation::S_SETREG_B32 ||
+              lane_operation == amdgpu::Operation::S_SETREG_IMM32_B32)
             return false;
           // A call only endangers the stash if the callee is allowed to write the lane's register.
           // The ABI keeps callee-saved VGPRs across a call, which is exactly what makes the
           // non-leaf save/call/restore shape legitimate, so those survive; a caller-saved register
           // may be overwritten inside the callee and fails closed.
           const bool is_call = (inst.flags() & INDIRECT_CALL) != 0 ||
-                               lane_mnemonic == "s_call_i64" || lane_mnemonic == "s_swap_pc_i64" ||
-                               lane_mnemonic == "s_swappc_b64";
+                               lane_operation == amdgpu::Operation::S_CALL_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAPPC_B64;
           if (is_call && !is_callee_saved_vgpr(vgpr))
             return false;
           const Operand *vdst = inst.dst_operand(0);
-          const bool writes_lane =
-              lane_mnemonic == "v_writelane_b32" && vdst != nullptr && vdst->encoding_value() >= 0;
+          const bool writes_lane = lane_operation == amdgpu::Operation::V_WRITELANE_B32 &&
+                                   vdst != nullptr && vdst->encoding_value() >= 0;
           if (writes_lane && static_cast<uint16_t>(vdst->encoding_value()) == vgpr) {
             const Operand *ssrc = inst.src_operand(0);
             const Operand *written_lane = inst.src_operand(1);
@@ -1363,9 +1376,11 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       // has no callee-saved SGPRs that a translated body may rely on here, so any call between the
       // definition and the use invalidates the value. The call instruction's own destination list
       // does not mention it, which is why this is checked before the operand walk.
-      const std::string_view sgpr_mnemonic = inst.mnemonic();
-      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_mnemonic == "s_call_i64" ||
-          sgpr_mnemonic == "s_swap_pc_i64" || sgpr_mnemonic == "s_swappc_b64")
+
+      const amdgpu::Operation sgpr_operation = inst.amdgpu_operation();
+      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_operation == amdgpu::Operation::S_CALL_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAPPC_B64)
         return Effect::kRedefines;
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
@@ -1389,7 +1404,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         return Effect::kNone;
       // The nested provenance query runs with this off: a lane restore is exactly what it is
       // trying to justify, so letting it count one would be circular.
-      if (!allow_lane_restore || inst.mnemonic() != "v_readlane_b32")
+      if (!allow_lane_restore || inst.amdgpu_operation() != amdgpu::Operation::V_READLANE_B32)
         return Effect::kRedefines;
       // Only a read of the exact lane this body saved the same register into restores the caller's
       // value. Reading some other lane, or another register's lane, produces a value this analysis
@@ -3493,7 +3508,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
         }
         const bool reachable_skip_over_pool =
-            preceding_terminator != nullptr && preceding_terminator->mnemonic() == "s_branch" &&
+            preceding_terminator != nullptr &&
+            preceding_terminator->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
             source_instruction_by_offset.contains(pool_end) && preceding_branch_target >= 0 &&
             static_cast<uint64_t>(preceding_branch_target) == pool_end;
         if (!reachable_header && !reachable_slot && !reachable_skip_over_pool)
@@ -4161,8 +4177,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // all_reduce run emitted 104,831 identical lines, burying the
         // diagnostics that do name a specific instruction. The record is
         // per-translation, so each code object still reports its own gaps.
-        if (leg == nullptr && is_gfx1250_b0_to_a0() &&
-            gfx1250_b0_to_a0_is_deferred_family(inst.mnemonic()) &&
+        if (leg == nullptr && is_gfx1250_b0_to_a0() && gfx1250_b0_to_a0_is_deferred_family(inst) &&
             reported_deferred_families_.emplace(inst.mnemonic()).second) {
           append_warning(result.diagnostics, DiagnosticKind::Legalization,
                          "gfx1250 translation passes through '" + std::string(inst.mnemonic()) +

@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'vitest';
+import { adaptPublishedDashboardData, firstSeenTargets } from '../../src/data/dashboardDataAdapter.js';
+import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { FIXED_TARGET_COUNT, generateTargetColors, targetColor, targetHues } from '../../src/theme/targetColors.js';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 import { colorTokens } from '../../src/theme/tokens.js';
@@ -24,7 +26,7 @@ for (const mode of ['light', 'dark']) {
 
   describe(`${mode} generated target colors`, () => {
     test('the first two targets keep the original blue and orange', () => {
-      const colors = generateTargetColors(mode, ['gfx950', 'gfx1250']);
+      const colors = generateTargetColors(mode, ['gfx1250', 'gfx950']);
       expect(colors.get('gfx1250')).toBe(colorTokens[mode].interactive);
       expect(colors.get('gfx950')).toBe(colorTokens[mode].seriesSecondary);
     });
@@ -48,10 +50,10 @@ for (const mode of ['light', 'dark']) {
       }
     });
 
-    test('a target keeps its color when the list is unchanged, whatever order it was published in', () => {
-      const forward = generateTargetColors(mode, ['gfx1100', 'gfx942', 'gfx950', 'gfx1250']);
-      const reversed = generateTargetColors(mode, ['gfx1250', 'gfx950', 'gfx942', 'gfx1100']);
-      expect([...forward]).toEqual([...reversed]);
+    test('colors follow the given first-seen order, not the names', () => {
+      const colors = generateTargetColors(mode, ['gfx950', 'gfx1250']);
+      expect(colors.get('gfx950')).toBe(colorTokens[mode].interactive);
+      expect(colors.get('gfx1250')).toBe(colorTokens[mode].seriesSecondary);
     });
 
     test('the theme exposes the generated colors', () => {
@@ -122,30 +124,18 @@ for (const mode of ['light', 'dark']) {
       }
     });
 
-    test('adding targets one at a time keeps every earlier target on its color', () => {
-      const names = ['gfx1100', 'gfx1200', 'gfx1250', 'gfx906', 'gfx942', 'gfx950', 'gfx90a', 'gfx908'];
-      const sorted = (list) => [...list].sort();
-      for (let count = 1; count < names.length; count += 1) {
-        const before = generateTargetColors(mode, sorted(names.slice(0, count)));
-        // Only a name that sorts after every existing one is appended, so no earlier position can shift.
-        const next = names.slice(0, count + 1);
-        const after = generateTargetColors(mode, next);
-        const appendedLast = sorted(next).at(-1) === names[count];
-        if (appendedLast) for (const [target, color] of before) expect(after.get(target), `${target} when ${names[count]} is added`).toBe(color);
-      }
-    });
-
-    test('the same targets published in any order get the same colors', () => {
-      const names = ['gfx950', 'gfx1250', 'gfx942', 'gfx1100', 'gfx906', 'gfx1200', 'gfx90a'];
-      const baseline = [...generateTargetColors(mode, names)].sort();
-      for (const order of [[...names].reverse(), [...names].sort(), [names[3], names[0], names[6], names[1], names[5], names[2], names[4]]]) {
-        expect([...generateTargetColors(mode, order)].sort()).toEqual(baseline);
-      }
+    test('targets appearing later never recolor earlier ones, whatever they sort like', () => {
+      const first = generateTargetColors(mode, ['gfx1250', 'gfx950']);
+      const second = generateTargetColors(mode, ['gfx1250', 'gfx950', 'gfx1201', 'gfx1100']);
+      const third = generateTargetColors(mode, ['gfx1250', 'gfx950', 'gfx1201', 'gfx1100', 'gfx942']);
+      for (const [target, color] of first) expect(second.get(target)).toBe(color);
+      for (const [target, color] of second) expect(third.get(target)).toBe(color);
+      expect(third.get('gfx942')).toBe(FIRST_SEVEN[mode][4]);
     });
 
     test('duplicate published targets count once and do not shift a color', () => {
       const once = generateTargetColors(mode, ['gfx1250', 'gfx950', 'gfx942']);
-      const repeated = generateTargetColors(mode, ['gfx950', 'gfx1250', 'gfx950', 'gfx942', 'gfx1250']);
+      const repeated = generateTargetColors(mode, ['gfx1250', 'gfx950', 'gfx1250', 'gfx942', 'gfx950']);
       expect([...repeated]).toEqual([...once]);
     });
 
@@ -163,10 +153,45 @@ for (const mode of ['light', 'dark']) {
   });
 }
 
-test('a target that sorts ahead of the existing ones shifts the colors after it (accepted, documented behaviour)', () => {
-  const before = generateTargetColors('light', ['gfx1250', 'gfx950']);
-  const after = generateTargetColors('light', ['gfx1100', 'gfx1250', 'gfx950']);
-  expect(after.get('gfx1100')).toBe(FIRST_SEVEN.light[0]);
-  expect(after.get('gfx1250')).toBe(FIRST_SEVEN.light[1]);
-  expect(after.get('gfx1250')).not.toBe(before.get('gfx1250'));
+test('firstSeenTargets orders by first appearance, alphabetical only within one run, and never moves a target', () => {
+  const run = (...targets) => ({ targets });
+  const history = [run('gfx950', 'gfx1250'), run('gfx1250', 'gfx950'), run('gfx1201', 'gfx1100', 'gfx950'), run('gfx942', 'gfx1100')];
+  expect(firstSeenTargets(history)).toEqual(['gfx1250', 'gfx950', 'gfx1100', 'gfx1201', 'gfx942']);
+  for (let count = 1; count <= history.length; count += 1) {
+    const earlier = firstSeenTargets(history.slice(0, count - 1));
+    expect(firstSeenTargets(history.slice(0, count)).slice(0, earlier.length)).toEqual(earlier);
+  }
+});
+
+test('the adapter exposes colors in first-seen order while the filter list stays alphabetical', () => {
+  const publication = createMaintainedPublication();
+  const base = publication.runs.filter((run) => run.publication.source.branch === 'develop');
+  const latest = base.at(-1);
+  latest.benchmark_results.push(...latest.benchmark_results.filter(({ target }) => target === 'gfx950').map((row) => ({ ...structuredClone(row), target: 'gfx942' })));
+  const { data } = adaptPublishedDashboardData(publication);
+  expect(data.targets).toEqual(['gfx1250', 'gfx942', 'gfx950']);
+  expect(data.targetColorOrder).toEqual(['gfx1250', 'gfx950', 'gfx942']);
+});
+
+test('first appearance is decided by run time, not by the order the runs are passed in', () => {
+  const run = (timestamp, ...targets) => ({ timestamp, runId: timestamp, targets });
+  const history = [run('2026-10-02T00:00:00Z', 'gfx950'), run('2026-10-03T00:00:00Z', 'gfx942'), run('2026-10-01T00:00:00Z', 'gfx1250')];
+  expect(firstSeenTargets(history)).toEqual(['gfx1250', 'gfx950', 'gfx942']);
+  expect(firstSeenTargets([...history].reverse())).toEqual(['gfx1250', 'gfx950', 'gfx942']);
+});
+
+test('a run without a usable timestamp is ordered first, so its targets take the first colors', () => {
+  const run = (timestamp, ...targets) => ({ timestamp, runId: String(timestamp), targets });
+  expect(firstSeenTargets([run('2026-10-01T00:00:00Z', 'gfx1250'), run(undefined, 'gfx900')])).toEqual(['gfx900', 'gfx1250']);
+});
+
+test('side-branch runs count toward first appearance', () => {
+  const publication = createMaintainedPublication();
+  const branch = publication.runs.find((run) => run.publication.source.branch !== 'develop');
+  const develop = publication.runs.filter((run) => run.publication.source.branch === 'develop');
+  const earliest = develop.map((run) => run.execution_summary.timestamp).sort()[0];
+  branch.execution_summary.timestamp = new Date(Date.parse(earliest) - 3_600_000).toISOString();
+  branch.benchmark_results.forEach((row) => { row.target = 'gfx900'; });
+  const { data } = adaptPublishedDashboardData(publication);
+  expect(data.targetColorOrder[0]).toBe('gfx900');
 });

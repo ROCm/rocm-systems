@@ -113,6 +113,7 @@ void CommandProcessor::set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_addr
 uint64_t CommandProcessor::register_pm4_queue(Pm4QueueConfig config) {
   // Compatibility entry point: PM4 is initial state of the same compute queue.
   return register_queue({.address_space = config.address_space,
+                         .process_identity_kind = ProcessIdentityKind::Vmid,
                          .ring_base_va = config.ring_base,
                          .ring_size = config.ring_size_bytes,
                          .read_ptr_va = config.consumer_pointer_address,
@@ -647,9 +648,12 @@ VmAccessOutcome CommandProcessor::init_wavefront_regs(ComputeUnitCore *cu, Wavef
       cu->write_sgpr(sbase + sys_idx++, wg_id_z);
   }
   if (pkt.enable_wg_info) {
-    cu->write_sgpr(sbase + sys_idx,
-                   ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup, wf_index_in_wg,
-                                                        wf_index_in_wg));
+    // Without ordered append the ABI supplies the wave-in-group as the term.
+    // An ordered launch reserves terms when the whole workgroup commits below.
+    if (pkt.ordered_append == DispatchEntry::OrderedAppend::Disabled)
+      cu->write_sgpr(sbase + sys_idx,
+                     ShaderProcessorInput::workgroup_info(arch, pkt.wfs_per_workgroup,
+                                                          wf_index_in_wg, wf_index_in_wg));
     ++sys_idx;
   }
   if (properties.uses_ttmp_workgroup_ids) {
@@ -893,6 +897,8 @@ void CommandProcessor::startup() {
       });
   completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
     erase_cluster_workgroups(entry.dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
     // Resume fetch after the blocking packet's completion is durable.
     if (entry.blocks_following && engine()) {
@@ -1453,7 +1459,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
   uint64_t exception_status_va = 0;
   uint32_t exception_event_id = 0;
   AddressSpaceHandle address_space;
-  InterruptSink interrupt_sink;
+  InterruptSink exception_event_sink;
   std::chrono::milliseconds ack_timeout;
   {
     std::lock_guard<std::recursive_mutex> lk(hw_queue_mutex_);
@@ -1466,7 +1472,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
     exception_event_id = queue->exception_event_id;
     ack_timeout = runtime_exception_ack_timeout_;
     address_space = queue->address_space;
-    interrupt_sink = queue->interrupt_sink;
+    exception_event_sink = queue->exception_event_sink;
   }
 
   const AtomicLoadResult previous =
@@ -1477,7 +1483,7 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
   if (gpu_vm_->atomic_store(address_space, exception_status_va, sizeof(combined_status),
                             combined_status) != VmAccessOutcome::Complete)
     return false;
-  interrupt_sink.deliver(process_id, exception_event_id);
+  exception_event_sink.deliver(process_id, exception_event_id);
   if (!wait_for_ack)
     return true;
   const auto deadline = std::chrono::steady_clock::now() + ack_timeout;
@@ -1494,21 +1500,33 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
 
 QueuePrepareCloseStatus
 CommandProcessor::prepare_unregister_queue_registration(uint64_t registration_id) noexcept {
+  return prepare_close_queue_registration(registration_id, QueueCloseMode::Graceful);
+}
+
+QueuePrepareCloseStatus
+CommandProcessor::prepare_preempt_queue_registration(uint64_t registration_id) noexcept {
+  return prepare_close_queue_registration(registration_id, QueueCloseMode::Preempt);
+}
+
+QueuePrepareCloseStatus
+CommandProcessor::prepare_close_queue_registration(uint64_t registration_id,
+                                                   QueueCloseMode mode) noexcept {
   if (!engine()) {
     std::lock_guard lock(hw_queue_mutex_);
     for (auto &queue : compute_queues_)
       queue.command_retry_pending = false;
     service_command_streams(0);
   }
-  return close_queue_registration(registration_id, false);
+  return close_queue_registration(registration_id, mode);
 }
 
 bool CommandProcessor::unregister_queue_registration(uint64_t registration_id) {
-  return close_queue_registration(registration_id, true) == QueuePrepareCloseStatus::Ready;
+  return close_queue_registration(registration_id, QueueCloseMode::ForceCancel) ==
+         QueuePrepareCloseStatus::Ready;
 }
 
 QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t registration_id,
-                                                                   bool force) noexcept {
+                                                                   QueueCloseMode mode) noexcept {
   if (registration_id == 0)
     return QueuePrepareCloseStatus::Faulted;
 
@@ -1531,7 +1549,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
     if (queue == compute_queues_.end())
       return QueuePrepareCloseStatus::Faulted;
-    if (!force) {
+    if (mode != QueueCloseMode::ForceCancel) {
       if (queue->publication_faulted || queue->command_fault_pending ||
           (queue->faulted && (!queue->entries.empty() || !queue->dispatches.entries.empty())))
         return QueuePrepareCloseStatus::Faulted;
@@ -1541,7 +1559,8 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
                     // while allocating backing. Only an unfinished notification publication
                     // must delay that removal.
                     queue->scratch_request.publication_pending() ||
-                    queue->scratch_reclaim.active() || queue->has_pending_commands();
+                    queue->scratch_reclaim.active() ||
+                    (mode == QueueCloseMode::Graceful && queue->has_pending_commands());
     }
     if (!retry_close) {
       queue_id = queue->queue_id;
@@ -1566,6 +1585,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
       // every XCD at once: the KFD paths sweep all command processors, and an
       // owner cascades to its replicas below. No XCD is left holding a grid that
       // can no longer retire. Unregistering a lone replica is not supported.
+      reset_ordered_ids(*queue);
       compute_queues_.erase(queue);
     }
   }
@@ -2028,7 +2048,7 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
         }
       }
       for (const auto &[interrupt_sink, process_id] : idle_queues)
-        interrupt_sink.deliver(process_id, 0);
+        interrupt_sink.notify_idle(process_id);
     }
 
     if (poll_count % 5000 == 1) {
@@ -2080,12 +2100,10 @@ bool CommandProcessor::barrier_satisfied(const ComputeQueueRecord &qs, size_t id
   if (idx == 0 && !qs.implicit_barrier_next)
     return true;
 
-  // Barrier bit: all prior entries must be fully completed, device-wide. A prior
-  // entry that is one XCD's share of a fanned-out dispatch is not done just
-  // because this XCD finished it, so gate on the whole grid or this XCD would run
-  // the next packet while a peer is still executing the previous one.
+  // A predecessor's workgroups can retire before its cache flush or signal
+  // publication. A barrier bit waits for those effects on every XCD too.
   for (size_t i = 0; i < idx; ++i) {
-    if (!qs.entries[i].grid_fully_completed())
+    if (completion_ ? !qs.entries[i].completion_notified : !qs.entries[i].grid_fully_completed())
       return false;
   }
   return true;
@@ -2118,16 +2136,24 @@ void CommandProcessor::drain_pending_cluster_barrier_completions() {
     completions.swap(pending_cluster_barrier_completions_);
   }
 
-  for (auto &completion : completions) {
-    std::vector<Wavefront *> members;
-    for (auto [cu, peer_wg_id] : completion.peers) {
-      auto peer_members =
-          cu->complete_barrier(completion.dispatch_id, peer_wg_id, completion.completion_bit);
-      members.insert(members.end(), peer_members.begin(), peer_members.end());
-    }
-    if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
+  for (auto &completion : completions)
+    complete_cluster_barrier_round(completion.dispatch_id, completion.completion_bit,
+                                   completion.generation, completion.peers);
+}
+
+void CommandProcessor::complete_cluster_barrier_round(
+    uint32_t dispatch_id, uint8_t completion_bit, uint64_t generation,
+    std::span<const std::pair<ComputeUnitCore *, uint32_t>> peers) {
+  ComputeUnitCore::BarrierCompletion completion;
+  for (auto [cu, peer_wg_id] : peers) {
+    auto peer = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit, generation);
+    completion.members.insert(completion.members.end(), peer.members.begin(), peer.members.end());
+    completion.armed.insert(completion.armed.end(), peer.armed.begin(), peer.armed.end());
+    completion.woken.insert(completion.woken.end(), peer.woken.begin(), peer.woken.end());
   }
+  ComputeUnitCore::notify_barrier_complete(
+      *plugin_group_, completion,
+      ComputeUnitCore::barrier_round(completion_bit, /*named_barrier_id=*/0, generation));
 }
 
 void CommandProcessor::register_cluster_workgroup(const DispatchEntry &entry, uint32_t local_wg_id,
@@ -2217,6 +2243,8 @@ uint32_t CommandProcessor::cluster_barrier_state(const Wavefront &wf, int32_t ba
 bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id) {
   bool is_first = false;
   const uint8_t completion_bit = static_cast<uint8_t>(-barrier_id);
+  uint64_t signaled_generation = 0;
+  bool completes = false;
   {
     std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
     ClusterWorkgroupPlacement *placement = nullptr;
@@ -2229,20 +2257,30 @@ bool CommandProcessor::cluster_barrier_signal(Wavefront &wf, int32_t barrier_id)
     if (!inserted)
       return false;
     is_first = barriers->signaled_workgroups[index].size() == 1;
-    if (barriers->signaled_workgroups[index].size() < barriers->member_count)
-      return is_first;
-
-    barriers->signaled_workgroups[index].clear();
-    PendingClusterBarrierCompletion completion{wf.dispatch_id(), completion_bit, {}};
-    auto &peers = completion.peers;
-    peers.reserve(placement->peer_wg_ids.size());
-    for (uint32_t peer_wg_id : placement->peer_wg_ids) {
-      auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
-      if (peer != cluster_wg_placements_.end() && peer->second.cu)
-        peers.emplace_back(peer->second.cu, peer_wg_id);
+    signaled_generation = barriers->generation[index];
+    if (barriers->signaled_workgroups[index].size() >= barriers->member_count) {
+      completes = true;
+      barriers->signaled_workgroups[index].clear();
+      ++barriers->generation[index];
+      PendingClusterBarrierCompletion completion{
+          wf.dispatch_id(), completion_bit, signaled_generation, {}};
+      auto &peers = completion.peers;
+      peers.reserve(placement->peer_wg_ids.size());
+      for (uint32_t peer_wg_id : placement->peer_wg_ids) {
+        auto peer = cluster_wg_placements_.find(wg_key(wf.dispatch_id(), peer_wg_id));
+        if (peer != cluster_wg_placements_.end() && peer->second.cu)
+          peers.emplace_back(peer->second.cu, peer_wg_id);
+      }
+      pending_cluster_barrier_completions_.push_back(std::move(completion));
     }
-    pending_cluster_barrier_completions_.push_back(std::move(completion));
   }
+  // Plugins are called outside the lock (see cluster_placements_mutex_). The
+  // signal precedes the round's completion, which a pool worker leaves queued
+  // until the fan-out rejoins.
+  plugin_group_->onAmdgpuBarrierSignaled(
+      wf, ComputeUnitCore::barrier_round(completion_bit, 0, signaled_generation));
+  if (!completes)
+    return is_first;
 
   // In serial mode this instruction already runs on the CP/engine thread, so
   // preserve immediate barrier resolution. Pool workers leave the compact
@@ -2257,6 +2295,7 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
   // both reach into a CU. Collect them under the lock and act after it is
   // dropped -- see cluster_placements_mutex_.
   std::array<std::vector<std::pair<ComputeUnitCore *, uint32_t>>, 2> resolved_peers;
+  std::array<uint64_t, 2> resolved_generation{};
   std::vector<std::pair<ComputeUnitCore *, uint64_t>> unpin;
   {
     std::lock_guard<std::recursive_mutex> lock(cluster_placements_mutex_);
@@ -2277,6 +2316,7 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
             barriers.signaled_workgroups[index].size() < barriers.member_count)
           continue;
         barriers.signaled_workgroups[index].clear();
+        resolved_generation[index] = barriers.generation[index]++;
         for (uint32_t peer_wg_id : peer_wg_ids) {
           auto peer = cluster_wg_placements_.find(wg_key(dispatch_id, peer_wg_id));
           if (peer != cluster_wg_placements_.end() && !peer->second.completed && peer->second.cu)
@@ -2300,16 +2340,9 @@ void CommandProcessor::mark_cluster_workgroup_complete(uint32_t dispatch_id, uin
     }
   }
 
-  for (uint32_t index = 0; index < resolved_peers.size(); ++index) {
-    std::vector<Wavefront *> members;
-    const uint8_t completion_bit = static_cast<uint8_t>(kClusterBarrierBit + index);
-    for (auto [cu, peer_wg_id] : resolved_peers[index]) {
-      auto peer_members = cu->complete_barrier(dispatch_id, peer_wg_id, completion_bit);
-      members.insert(members.end(), peer_members.begin(), peer_members.end());
-    }
-    if (!members.empty())
-      plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members), BarrierKind::Cluster);
-  }
+  for (uint32_t index = 0; index < resolved_peers.size(); ++index)
+    complete_cluster_barrier_round(dispatch_id, static_cast<uint8_t>(kClusterBarrierBit + index),
+                                   resolved_generation[index], resolved_peers[index]);
 
   release_cluster_lds_pins(unpin);
 }
@@ -2399,11 +2432,23 @@ CommandProcessor::DispatchWorkgroupResult
 CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   assert(!cus_.empty() && "command processor has no compute units");
 
-  // A dispatch may remain queued after its admission snapshot is invalidated.
-  // Fall back to current operation snapshots for subsequent wave setup rather
-  // than retrying the permanently revoked snapshot forever.
-  if (entry.execution_access && entry.execution_access->value.revoked())
-    entry.execution_access.reset();
+  // An unexecuted dispatch may retry after its admission snapshot is revoked.
+  // Recapture one generation for both its waves and completion; mixing the
+  // original generation with a later workgroup would not be recoverable.
+  if (!entry.pm4_abi && entry.execution_translation_epoch != 0 &&
+      (!entry.execution_access || entry.execution_access->value.revoked())) {
+    if (entry.dispatched_wgs != 0)
+      return {.dispatched = 0, .outcome = VmAccessOutcome::Revoked};
+    std::optional<GpuVmAccess> replacement =
+        gpu_vm_ != nullptr ? gpu_vm_->snapshot_pinned(entry.address_space) : std::nullopt;
+    if (!replacement)
+      return {.dispatched = 0, .outcome = VmAccessOutcome::Faulted};
+    if (entry.execution_access && !entry.execution_access->value.same_root_lineage(*replacement))
+      return {.dispatched = 0, .outcome = VmAccessOutcome::Revoked};
+    entry.execution_translation_epoch = replacement->info().translation_epoch;
+    entry.execution_access =
+        util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*replacement));
+  }
 
   // A peer can publish the shared terminal-fault latch before this CP drains
   // its fault inbox. Stop placement as soon as that publication is visible;
@@ -2508,7 +2553,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_wave_in_group(w);
       wf->set_address_space(entry.address_space);
       wf->set_vm_access(entry.execution_access);
-      wf->set_process_id(entry.process_id);
+      wf->set_execution_effect_guard(entry.execution_effect_possible);
+      wf->set_process_id(entry.process_id, entry.process_identity_kind);
       // Live queues share the host clock used for GPU timestamp calibration.
       wf->set_system_clock(entry.uses_kfd_queue_abi || entry.pm4_abi);
       wf->set_drm_shader_addresses(entry.drm_shader_addresses);
@@ -2525,11 +2571,11 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       if (initialization != VmAccessOutcome::Complete) {
         free_reserved();
         if (initialization == VmAccessOutcome::Revoked && !entry.pm4_abi) {
-          // No wave in this workgroup has executed. Discard its partial register
-          // setup and recapture access on retry; scratch provisioning is idempotent.
-          // Keep a retry scheduled even when releasing these reservations left
-          // every CU idle. PM4 retains its submission-failure path.
-          entry.execution_access.reset();
+          // No wave in this workgroup has executed. Keep the revoked snapshot
+          // as the lineage witness when recapturing access on retry; scratch
+          // provisioning is idempotent. Keep a retry scheduled even when
+          // releasing these reservations left every CU idle. PM4 retains its
+          // submission-failure path.
           if (engine())
             arm_stall_recheck(engine()->context(partition_id()).current_tick());
           return VmAccessOutcome::Unavailable;
@@ -2538,7 +2584,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       }
     }
 
-    // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
+    // All fallible per-wave work succeeded: commit the launch terms, WG and cluster pin.
+    ShaderProcessorInput::init_ordered_append(*cu, entry, wg_wavefronts);
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
                         entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
@@ -3167,6 +3214,8 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
+      if (gws_device_)
+        gws_device_->retire_ordered_dispatch(entry.process_id, entry.queue_id, entry.dispatch_id);
       state.entries.pop_front();
       if (flushed != VmAccessOutcome::Complete) {
         util::Logger::warn("PM4 queue failed: PM4 cache flush failed");
@@ -3272,10 +3321,18 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.dispatch_id = allocate_dispatch_id();
   dp.address_space = queue.address_space;
   dp.process_id = queue.process_id;
+  dp.process_identity_kind = queue.process_identity_kind;
   dp.queue_id = queue.queue_id;
   dp.interrupt_sink = queue.interrupt_sink;
   dp.enabled_cus = queue.enabled_cus;
   dp.kernel_wave_size = (initiator & (1u << 15)) ? 32 : 64;
+  if ((initiator & (1u << 3)) &&
+      (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)) {
+    dp.ordered_append = (initiator & (1u << 4)) ? DispatchEntry::OrderedAppend::PerWorkgroup
+                                                : DispatchEntry::OrderedAppend::PerWave;
+    // AMD's GFX10 compute-ring initialization programs 32 ordered IDs per physical CU.
+    dp.ordered_id_count = std::min<size_t>(cus_.size() * 32, GwsDevice::kComputeWaveIdMask + 1);
+  }
   if (RJ_AMDHSA_BITS_GET(rsrc2, COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT)) {
     dp.enable_private_segment = true;
     dp.pm4_scratch_waves_per_se = regs[kPm4ComputeTmpringSize] & 0xfff;
@@ -3444,9 +3501,20 @@ void CommandProcessor::cancel_queue_dispatches(const ComputeQueueRecord &queue) 
     erase_cluster_workgroups(dispatch_id);
     for (auto *cu : cus_)
       cu->abort_dispatch(dispatch_id);
+    if (gws_device_)
+      gws_device_->retire_ordered_dispatch(queue.process_id, queue.queue_id, dispatch_id);
     for (auto *spi : spis_)
       spi->release_wgp_dispatch(dispatch_id);
   }
+}
+
+void CommandProcessor::reset_ordered_ids(const ComputeQueueRecord &queue) {
+  // Production CUs share one device. Standalone CPs can own CU-local GDS stores.
+  if (gws_device_)
+    gws_device_->reset_ordered_ids(queue.process_id, queue.queue_id);
+  else
+    for (auto *cu : cus_)
+      cu->gws_device().reset_ordered_ids(queue.process_id, queue.queue_id);
 }
 
 void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
@@ -3470,6 +3538,10 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
 }
 
 void CommandProcessor::complete_failed_queue(ComputeQueueRecord &queue) {
+  // Completion callbacks can release command resources. Cancel queued data
+  // effects first; entered effects retain their backing until retirement drains.
+  for (auto &submission : queue.commands.submissions)
+    submission.data_transfer.reset();
   if (flush_gpu_caches(queue.address_space) != VmAccessOutcome::Complete)
     util::Logger::warn("PM4 queue cancellation cache flush failed");
   for (auto &submission : queue.commands.submissions)
@@ -3517,6 +3589,7 @@ void CommandProcessor::fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs
                 arm_stall_recheck(now);
               },
           .fault_queue = [this, &queue, &qs] { fail_pm4_queue(queue, qs); },
+          .reset_gds_wave_id = [this, &queue] { reset_ordered_ids(queue); },
       });
 }
 
@@ -3693,8 +3766,18 @@ AqlAdmissionResult CommandProcessor::request_dynamic_scratch(ComputeQueueRecord 
       queue.interrupt_sink.deliver(queue.process_id, state.event_id);
       return {.status = AqlAdmissionStatus::Blocked};
 
-    case QueueScratchRequestPhase::WaitingForRuntime:
+    case QueueScratchRequestPhase::WaitingForRuntime: {
+      // Replacing the backing may revoke the request's publication snapshot.
+      const AtomicLoadResult released = transaction_access.atomic_load(
+          state.signal_address + kSignalValueOffset, sizeof(uint64_t));
+      if (released.outcome != VmAccessOutcome::Complete)
+        return admission_from_vm_outcome(released.outcome);
+      if (released.value == 0)
+        state.reset();
+      // The replacement may include new mappings. End this transaction so the
+      // next admission takes a VM snapshot after the runtime's release.
       return {.status = AqlAdmissionStatus::Blocked};
+    }
     }
   }
 }
@@ -3919,6 +4002,10 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
     const hsa_kernel_dispatch_packet_t &pkt, ComputeQueueRecord &queue,
     const GpuVmAccess &transaction_access, uint64_t pkt_addr, uint32_t queue_packet_id,
     uint64_t aql_packet_id, ClusterDispatchShape cluster_shape) {
+  // The runtime owns descriptor fields until it releases a scratch request.
+  if (queue.scratch_request.active())
+    return request_dynamic_scratch(queue, transaction_access, aql_packet_id,
+                                   queue.scratch_request.status);
   const bool uses_kfd_queue_abi = queue.uses_kfd_queue_abi;
   using namespace rocjitsu::amdhsa;
   const KernelDescriptorReadResult descriptor =
@@ -4132,7 +4219,6 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
             wave_size == 32 ? kInsufficientScratchWave32 : kInsufficientScratchWave64;
         return request_dynamic_scratch(queue, transaction_access, aql_packet_id, status);
       }
-      queue.scratch_request.reset();
 
       uint32_t queue_properties = 0;
       const VmAccessOutcome properties_outcome =
@@ -4163,10 +4249,14 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.queue_packet_id = queue_packet_id;
   dp.address_space = queue.address_space;
   dp.execution_access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(transaction_access);
+  dp.execution_translation_epoch = transaction_access.info().translation_epoch;
+  dp.execution_cache_write_sequence = transaction_access.cache_write_sequence();
+  dp.execution_effect_possible = std::make_shared<std::atomic_bool>(false);
   if (!uses_kfd_queue_abi && private_segment_fixed_size > 0 && scratch_resolver_)
     dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
   dp.interrupt_sink = queue.interrupt_sink;
   dp.process_id = queue.process_id;
+  dp.process_identity_kind = queue.process_identity_kind;
   dp.aql_packet_id = aql_packet_id;
   dp.aql_packet_address = pkt_addr;
   dp.owns_aql_ring_slot = true;
@@ -4435,8 +4525,12 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .queue_id = queue->queue_id,
       .address_space = queue->address_space,
       .execution_access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(request.access),
+      .execution_translation_epoch = request.access.info().translation_epoch,
+      .execution_cache_write_sequence = UINT64_MAX,
+      .execution_effect_possible = {},
       .interrupt_sink = queue->interrupt_sink,
       .process_id = queue->process_id,
+      .process_identity_kind = queue->process_identity_kind,
       .aql_packet_id = request.packet_index,
       .aql_packet_address = request.packet_address,
       .owns_aql_ring_slot = true,
@@ -4446,6 +4540,7 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .blocks_following = prepared.blocks_following,
       .aql_pm4_ib_address = prepared.pm4_ib_address,
       .aql_pm4_ib_dwords = prepared.pm4_ib_dwords,
+      .no_fence_aql_barrier = prepared.no_fence_aql_barrier,
   };
   if (prepared.kind == AqlPreparedPacketKind::Pm4Ib) {
     // One completion token per XCD prevents automatic retirement of an unexecuted
@@ -4611,31 +4706,31 @@ void CommandProcessor::fetch_from_queue(ComputeQueueRecord &queue, simdojo::Tick
                         write_idx - read_idx);
   });
 
-  // AQL doorbell clamping (compute queues only).
+  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
+  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
+  // Reservations can advance beyond a full ring while its live headers remain
+  // valid. Bound admission by the public retirement cursor before replacing it
+  // with the private fetch cursor; a reservation does not release a ring slot.
+  uint64_t process_limit = write_idx;
+  if (write_idx > read_idx && write_idx - read_idx > num_slots)
+    process_limit = read_idx + num_slots;
+
   // Use the CP-private fetch cursor as the authoritative next-packet index. It
   // stays ahead of the consumer cursor while admitted dispatches are live, so
   // those packets remain visible without being fetched twice.
   read_idx = std::max(read_idx, queue.fetch_cursor);
-  uint64_t process_limit = write_idx;
   if (queue.doorbell_mode != QueueDoorbellMode::VmPolled) {
     const uint64_t doorbell = queue.last_doorbell;
-    // KFD initializes a new queue's doorbell to UINT64_MAX, meaning that no
-    // packet has been published yet. The producer may reserve a ring slot by
-    // advancing write_ptr before it initializes the packet and release-stores
-    // the header. Treating the sentinel as an unclamped producer cursor lets a
-    // concurrent CP read that partially initialized slot.
+    // KFD leaves the queue unarmed until its first doorbell notification.
     if (doorbell == std::numeric_limits<uint64_t>::max())
       return;
-    uint64_t doorbell_limit = doorbell + 1;
-    if (doorbell_limit < process_limit)
-      process_limit = doorbell_limit;
-    process_limit = std::max(process_limit, read_idx);
-  } else {
-    process_limit = std::max(process_limit, read_idx);
+    // Explicit frontends provide an admission bound. A polled host doorbell
+    // can lose a higher value when publishers ring out of reservation order;
+    // its write index and acquired valid headers below govern admission.
+    if (queue.doorbell_mode == QueueDoorbellMode::Explicit)
+      process_limit = std::min(process_limit, doorbell + 1);
   }
-
-  static_assert(sizeof(hsa_kernel_dispatch_packet_t) == kAqlPacketBytes);
-  const uint32_t num_slots = queue.ring_size / kAqlPacketBytes;
+  process_limit = std::max(process_limit, read_idx);
 
   while (read_idx < process_limit) {
     const uint32_t slot = static_cast<uint32_t>(read_idx % num_slots);

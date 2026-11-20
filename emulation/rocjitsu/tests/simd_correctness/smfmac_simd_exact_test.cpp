@@ -492,19 +492,9 @@ void check_fused_overflow_cancellation(const SmfmacCase &test, bool negate) {
 
 } // namespace
 
-TEST(SmfmacSimdExact, Cdna3DecodedForms) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
-  run_all_forms(CDNA3_CASES);
-}
+TEST(SmfmacSimdExact, Cdna3DecodedForms) { run_all_forms(CDNA3_CASES); }
 
-TEST(SmfmacSimdExact, Cdna4DecodedForms) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
-  run_all_forms(CDNA4_CASES);
-}
+TEST(SmfmacSimdExact, Cdna4DecodedForms) { run_all_forms(CDNA4_CASES); }
 
 TEST(SmfmacSimdExact, SparseGatherMatchesIndependentPhysicalLayoutOracle) {
   for (const auto &test : {CDNA3_CASES[0], CDNA4_CASES[0]}) {
@@ -578,24 +568,11 @@ TEST(SmfmacSimdExact, Cdna4IgnoresPartialExecAndUpdatesFullWave) {
   }
 }
 
-TEST(SmfmacSimdExact, Cdna3DestinationAliasesEachSource) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
-  run_all_aliases(CDNA3_CASES);
-}
+TEST(SmfmacSimdExact, Cdna3DestinationAliasesEachSource) { run_all_aliases(CDNA3_CASES); }
 
-TEST(SmfmacSimdExact, Cdna4DestinationAliasesEachSource) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
-  run_all_aliases(CDNA4_CASES);
-}
+TEST(SmfmacSimdExact, Cdna4DestinationAliasesEachSource) { run_all_aliases(CDNA4_CASES); }
 
 TEST(SmfmacSimdExact, Cdna3AccVgprDestinationAndSources) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
   for (size_t i = 0; i < CDNA3_CASES.size(); ++i)
     for (bool acc_sources : {false, true}) {
       const auto &test = CDNA3_CASES[i];
@@ -606,19 +583,9 @@ TEST(SmfmacSimdExact, Cdna3AccVgprDestinationAndSources) {
     }
 }
 
-TEST(SmfmacSimdExact, Cdna3NaNSourcePriority) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
-  run_all_nan_sources(CDNA3_CASES);
-}
+TEST(SmfmacSimdExact, Cdna3NaNSourcePriority) { run_all_nan_sources(CDNA3_CASES); }
 
-TEST(SmfmacSimdExact, Cdna4NaNSourcePriority) {
-  SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
-    GTEST_SKIP() << "SMFMAC AVX-512 fast path requires 16-wide native SIMD";
-  run_all_nan_sources(CDNA4_CASES);
-}
+TEST(SmfmacSimdExact, Cdna4NaNSourcePriority) { run_all_nan_sources(CDNA4_CASES); }
 
 TEST(Cdna4MatrixControlTest, SparseBf16ClampsFiniteOverflowAndPreservesInfiniteInputs) {
   struct Case {

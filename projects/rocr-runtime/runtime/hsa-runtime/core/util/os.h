@@ -293,6 +293,7 @@ uint64_t SystemClockFrequency();
 struct cpuid_t {
   char ManufacturerID[13];  // 12 char, NULL terminated
   bool mwaitx;
+  bool clflushopt;
 };
 
 /// @brief parse CPUID

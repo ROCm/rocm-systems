@@ -574,6 +574,22 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_ById_CarriesTheRequestIdAndAPlainWrId) 
   EXPECT_EQ(send_->base.remapWrId[0].state, NCCL_NET_IB_REMAP_UNUSED);
 }
 
+// The receiver finds the request at immData % NET_IB_MAX_REQUESTS, so the immediate must keep the id's low 32 bits
+// across 2^32 - 1 and 2^32 for the slot to stay the sender's.
+TEST_F(NetIbCastP2pIsendMicrotest, Isend_ById_ImmediateKeepsTheReceiveSlotPastTheIdWrap) {
+  WireSend(1, 1, BY_ID);
+  const uint64_t heads[] = {UINT32_MAX, (1ull << 32) + 5};
+  for (size_t i = 0; i < sizeof(heads) / sizeof(heads[0]); i++) {
+    send_->base.fifoHead = heads[i];
+    Cts(0, 1, 1, 4096);
+    void* req = nullptr;
+    ASSERT_EQ(Isend(64, 1, &req), ncclSuccess) << i;
+    const uint32_t imm = be32toh(Chain(0, i)[0].wr.imm_data);
+    EXPECT_EQ(imm, (uint32_t)heads[i]) << i;
+    EXPECT_EQ(imm % NET_IB_MAX_REQUESTS, heads[i] % NET_IB_MAX_REQUESTS) << i;
+  }
+}
+
 // A sharing sender stamps its commId into wr_id[63:48] and the receiver's commId into the BY_ID immediate.
 TEST_F(NetIbCastP2pIsendMicrotest, Isend_QpSharing_EncodesBothCommIds) {
   WireSend(1, 1, BY_ID);
@@ -1292,7 +1308,8 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_ReadsTheLastNonEmptyBufferOnEveryDevi
   }
 }
 
-// With a GPU scratchpad registered, each device first writes it (no completion) and then reads it back.
+// With a GPU scratchpad registered, each device posts the unsignaled write and
+// the signaled read as one chain. PostSend records one send per ibv_post_send.
 TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
   for (int d = 0; d < 2; d++) {
     recv_->devs[d].gpuFlush.gpuFlushGpuMem = &gpuMem_;
@@ -1302,9 +1319,10 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
   void* req = nullptr;
   ASSERT_EQ(Flush(&req), ncclSuccess);
   for (int d = 0; d < 2; d++) {
-    ASSERT_EQ(verbs_[d].sends.size(), 2u) << d;
+    ASSERT_EQ(verbs_[d].sends.size(), 1u) << d;
+    ASSERT_EQ(Chain(d, 0).size(), 2u) << d;
     const auto& write = Chain(d, 0)[0];
-    const auto& read = Chain(d, 1)[0];
+    const auto& read = Chain(d, 0)[1];
     EXPECT_EQ(write.wr.opcode, IBV_WR_RDMA_WRITE);
     EXPECT_EQ(write.wr.send_flags, 0);
     EXPECT_EQ(write.wr.wr.rdma.remote_addr, (uint64_t)&gpuMem_);
@@ -1320,8 +1338,8 @@ TEST_F(NetIbCastP2pIflushMicrotest, Iflush_GpuScratchpad_WritesThenReadsIt) {
     return std::string(env) == "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING" ? 0 : d;
   });
   ASSERT_EQ(Flush(&req), ncclSuccess);
-  EXPECT_EQ(verbs_[0].sends.size(), 3u);
-  EXPECT_EQ(Chain(0, 2)[0].wr.wr.rdma.remote_addr, (uint64_t)data_[0]);
+  EXPECT_EQ(verbs_[0].sends.size(), 2u);
+  EXPECT_EQ(Chain(0, 1)[0].wr.wr.rdma.remote_addr, (uint64_t)data_[0]);
 }
 
 TEST_F(NetIbCastP2pIflushMicrotest, Iflush_SharingAndFailures) {
