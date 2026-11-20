@@ -349,7 +349,7 @@ typedef enum {
                                       ///< or the component moves.
   AMDCUID_QUERY_SOURCE = 17,          ///< Query which stage answered the last derivation
                                       ///< (::amdcuid_source_t). Supported by all device types.
-  AMDCUID_QUERY_LAST
+  AMDCUID_QUERY_LAST = 18
 } amdcuid_query_t;
 
 /**
