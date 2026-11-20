@@ -2496,12 +2496,20 @@ typed scalar-register hooks. Scalar writes have only the typed callback.</p>
 <code>ExecutionPluginGroup</code>. An empty group returns before dispatch or locking. The
 group divides hooks by frequency and synchronization cost:</p>
 <ul>
-<li>Lifecycle, dispatch, workgroup, wavefront, and barrier callbacks are
+<li>Lifecycle, dispatch, workgroup, wavefront, and barrier-completion callbacks
+  (<code>onAmdgpuBarrierResolved</code> and <code>onAmdgpuBarrierRoundCompleted</code>) are
   infrequent. The group takes one recursive mutex before iterating its plugins,
   so two infrequent callbacks cannot overlap across simulation partitions. With
   the default hot-hook policy, an infrequent callback can still overlap a
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.</li>
+<li>The barrier signal and wait callbacks (<code>onAmdgpuBarrierSignaled</code> and
+  <code>onAmdgpuBarrierWaitPassed</code>) fire as instructions execute. Like the
+  high-frequency callbacks below, they take the mutex only when a plugin
+  requires serial hot hooks, and otherwise can run concurrently across
+  simulation partitions, with each other and with every other callback. A
+  plugin that shares state between them and the completion callbacks must
+  synchronize it or require serial hot hooks.</li>
 <li>Instruction before/after, memory-routing, tensor-DMA issue, tensor-DMA
   memory, and register-access callbacks are high-frequency and run concurrently
   with both other high-frequency callbacks and infrequent callbacks by default.
