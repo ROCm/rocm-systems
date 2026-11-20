@@ -17,13 +17,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default. Each job asks for what it needs: packages: read to
+# pull CI images from GHCR, and packages: write only in build_CI_image, the one
+# job that pushes images.
 permissions:
   contents: read
-  packages: write
 
 jobs:
   Precheck:
     runs-on: [ubuntu-24.04]
+    # packages: read to check which CI images are already published in GHCR
+    permissions:
+      contents: read
+      packages: read
     outputs:
       changed_dockerfile: ${{ steps.ci-flags.outputs.changed_dockerfile }}
       ci_matrix: ${{ steps.matrices.outputs.ci_matrix }}
@@ -34,11 +40,11 @@ jobs:
     env:
       # Matrix variables go here in JSON notation.
       # '>-' strips newlines
+      # clang++ and g++ run once via MATRIX_INCLUDE (ubuntu + 7.14.0), not
+      # fanned out.
       CXX_COMPILER: >-
         [
-          "amdclang++",
-          "clang++",
-          "g++"
+          "amdclang++"
         ]
       # C++20 is the production standard. C++23 is a forward-compat smoke test
       # run once via MATRIX_INCLUDE (ubuntu + amdclang++ + 10.0.0), not fanned out.
@@ -65,7 +71,9 @@ jobs:
       # combinations can be expressed without abandoning the base cross-product.
       MATRIX_INCLUDE: >-
         [
-          {"supported_platforms": "ubuntu", "rocm_versions": "10.0.0", "cxx_compiler": "amdclang++", "cxx_standard": 23}
+          {"supported_platforms": "ubuntu", "rocm_versions": "10.0.0", "cxx_compiler": "amdclang++", "cxx_standard": 23},
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.14.0", "cxx_compiler": "clang++", "cxx_standard": 20},
+          {"supported_platforms": "ubuntu", "rocm_versions": "7.14.0", "cxx_compiler": "g++", "cxx_standard": 20}
         ]
       # Only test nightly ROCm on non-ubuntu distros.
       MATRIX_EXCLUDE: >-
@@ -220,6 +228,9 @@ jobs:
         )
       }}
     needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.Precheck.outputs.ci_matrix) }}
@@ -267,6 +278,9 @@ jobs:
         )
       }}
     needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
     uses: ./.github/workflows/hipfile-sanitizers.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
@@ -284,7 +298,30 @@ jobs:
         )
       }}
     needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
     uses: ./.github/workflows/hipfile-clang-tidy.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
+
+  # Checks that building with include-what-you-use still works. IWYU's
+  # suggestions are advisory and don't fail the job. Compiler- and
+  # standard-independent, so run once against a single fixed image (the same
+  # convention as clang_tidy above).
+  iwyu:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/hipfile-iwyu.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
@@ -302,6 +339,9 @@ jobs:
         )
       }}
     needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
     uses: ./.github/workflows/hipfile-profiler-abi.yml
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
