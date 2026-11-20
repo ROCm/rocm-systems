@@ -13,7 +13,7 @@ use rocddi::driver::linux_kfd::{DebuggerRegistration, DebuggerRegistrationMode};
 use rocddi::topology::GpuInfo;
 
 use crate::ffi::{ERROR, OUT_OF_RESOURCES, Status};
-use crate::runtime::map_error;
+use crate::runtime::{map_error, map_startup_error};
 
 /// Exact trap build target and target/revision fixup rules from `ROCr`.
 pub(crate) fn trap_bytes(info: &GpuInfo) -> Option<&'static [u8]> {
@@ -107,18 +107,20 @@ impl PendingDebugger {
                 DebuggerRegistrationMode::Prefer,
             )
         }
-        .map_err(map_error)
+        .map_err(|error| map_startup_error("debugger_registration", error))
     }
 
     /// Retains a GPU's trap owner before starting fallible native publication.
     pub(crate) fn install(&mut self, device: &Device, cancel: &AtomicBool) -> Result<(), Status> {
         #[cfg(target_os = "linux")]
         {
-            let gpu = device.gpu().map_err(map_error)?;
+            let gpu = device
+                .gpu()
+                .map_err(|error| map_startup_error("debugger_device", error))?;
             // Preserve the registration/binding of a client that activated first.
             if !gpu
                 .debugger_registration_matches(super::record_address(), true)
-                .map_err(map_error)?
+                .map_err(|error| map_startup_error("debugger_registration_query", error))?
             {
                 return Ok(());
             }
@@ -127,7 +129,7 @@ impl PendingDebugger {
             // SAFETY: Target-selected ROCr normal trap code uses debugger ABI 11
             // with no TMA. HSA serializes its normal/sampling binding changes.
             let trap = unsafe { gpu.install_process_trap(super::record_address(), code, cancel) }
-                .map_err(map_error)?;
+                .map_err(|error| map_startup_error("trap_install", error))?;
             self.gpus.push(GpuDebugger {
                 device: device.clone(),
                 trap,

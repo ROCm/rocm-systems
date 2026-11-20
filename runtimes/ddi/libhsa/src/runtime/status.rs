@@ -23,6 +23,21 @@ pub(crate) fn map_error(error: rocddi::Error) -> Status {
     }
 }
 
+/// Preserves an opt-in startup diagnostic before native-to-HSA translation.
+pub(crate) fn map_startup_error(stage: &'static str, error: rocddi::Error) -> Status {
+    if std::env::var_os("ROCDDI_HSA_STARTUP_DIAGNOSTICS").is_some_and(|value| value == "1") {
+        use std::io::Write as _;
+        // Diagnostic I/O cannot replace the original native failure status.
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "rocddi HSA startup: stage={stage}; kind={:?}; native={:?}; error={error}",
+            error.kind(),
+            error.native_status(),
+        );
+    }
+    map_error(error)
+}
+
 /// Runs an HSA ABI operation behind the panic-to-status boundary.
 pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
     if !crate::platform::process_is_current() {
