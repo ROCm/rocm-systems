@@ -67,9 +67,11 @@ UNREACHED_APIS = {
     "amdsmi_reset_gpu": "policy reset action needs a breached threshold",
 }
 
-# test_fake_gpu_session.py fails amdsmi_init(); amdsmi_shut_down() has no failure
-# to inject.
-LIFECYCLE_APIS = {"amdsmi_init", "amdsmi_shut_down"}
+# test_fake_gpu_session.py fails amdsmi_init(). amdsmi_shut_down() has no failure
+# to inject. rdcd calls amdsmi_stop_gpu_event_notification() only when it stops,
+# for the GPU events of a job (rdci offers no event field to unwatch), and only
+# logs a failure there.
+LIFECYCLE_APIS = {"amdsmi_init", "amdsmi_shut_down", "amdsmi_stop_gpu_event_notification"}
 
 
 def _missing(what):

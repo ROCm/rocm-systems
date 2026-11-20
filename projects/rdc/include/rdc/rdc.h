@@ -1000,7 +1000,10 @@ rdc_status_t rdc_shutdown();
  *
  *  @details Embedded RDC takes its own AMD SMI reference and releases it when
  *  the last embedded handle stops, so a process that uses AMD SMI itself keeps
- *  its AMD SMI handles while RDC runs and after it stops.
+ *  its AMD SMI handles while RDC runs and after it stops. AMD SMI applies the
+ *  flags of the first amdsmi_init() of a process only: a process that
+ *  initializes AMD SMI before it starts RDC must pass AMDSMI_INIT_AMD_CPUS for
+ *  RDC to read CPU fields.
  *
  *  @param[in] op_mode Operation modes. When RDC_OPERATION_MODE_AUTO, RDC
  * schedules background task to collect the stats. When
@@ -1850,7 +1853,9 @@ rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* r
 /**
  *  @brief Set one configuration
  *
- *  @details Set the given configuration to all nodes belong to the given group
+ *  @details Set the given configuration to all nodes belong to the given group.
+ *  A GPU of the group that AMD SMI cannot identify (see rdc_device_get_all())
+ *  gets the configuration within about a minute after AMD SMI identifies it.
  *
  *  @param[in] p_rdc_handle Node handle
  *
@@ -1991,6 +1996,7 @@ typedef struct {
  *  @param[out] profile  The details how the resource is allocated.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND for a GPU that AMD SMI cannot identify, or an instance of one.
  */
 rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity_index,
                                       rdc_instance_resource_type_t resource_type,

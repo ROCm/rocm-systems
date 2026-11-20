@@ -12,6 +12,7 @@ import resource
 import subprocess
 import sys
 import time
+from collections import Counter
 
 import pytest
 
@@ -104,6 +105,52 @@ call("rdc_shutdown")
 print(json.dumps(out))
 """
 
+# Starts embedded RDC, watches a GPU event (RDC_EVNT_NOTIF_VMFAULT) on every GPU and stops,
+# several times in one process.
+_EVENT_ROUNDS = r"""
+import ctypes, sys
+lib = ctypes.CDLL(sys.argv[1])
+gpus, rounds = int(sys.argv[2]), int(sys.argv[3])
+def call(name, *args):
+    st = getattr(lib, name)(*args)
+    if st != 0:
+        sys.exit(f"{name} returned {st}")
+call("rdc_init", ctypes.c_uint64(0))
+for r in range(rounds):
+    handle, group, fgroup = ctypes.c_void_p(), ctypes.c_uint32(), ctypes.c_uint32()
+    call("rdc_start_embedded", 0, ctypes.byref(handle))  # RDC_OPERATION_MODE_AUTO
+    call("rdc_group_gpu_create", handle, 1, b"g%d" % r, ctypes.byref(group))  # RDC_GROUP_EMPTY
+    for gpu in range(gpus):
+        call("rdc_group_gpu_add", handle, group, gpu)
+    ids = (ctypes.c_uint32 * 1)(2000)
+    call("rdc_group_field_create", handle, 1, ids, b"f%d" % r, ctypes.byref(fgroup))
+    call("rdc_field_watch", handle, group, fgroup, ctypes.c_uint64(1000000), ctypes.c_double(60), 10)
+    if r == 1:
+        call("rdc_field_unwatch", handle, group, fgroup)  # stops the GPU events itself
+    call("rdc_stop_embedded", handle)
+call("rdc_shutdown")
+print("{}")
+"""
+
+# Through rdcd at argv[2], sets a 400 W power limit on group argv[3] (the fake accepts 300 to
+# 750 W), then clears it; prints both statuses. rdci config has no --host option.
+_CONFIG = r"""
+import ctypes, json, sys
+lib = ctypes.CDLL(sys.argv[1])
+class Setting(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("target_value", ctypes.c_uint64)]
+lib.rdc_config_set.argtypes = [ctypes.c_void_p, ctypes.c_uint32, Setting]
+lib.rdc_config_clear.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+handle = ctypes.c_void_p()
+assert lib.rdc_init(ctypes.c_uint64(0)) == 0
+assert lib.rdc_connect(sys.argv[2].encode(), ctypes.byref(handle), None, None, None) == 0
+group = int(sys.argv[3])
+out = {"set": lib.rdc_config_set(handle, group, Setting(2, 400))}  # RDC_CFG_POWER_LIMIT, watts
+out["clear"] = lib.rdc_config_clear(handle, group)
+assert lib.rdc_disconnect(handle) == 0
+print(json.dumps(out))
+"""
+
 # Starts embedded RDC once; prints what rdc_start_embedded returned and left in the handle.
 _START_ONCE = r"""
 import ctypes, json, sys
@@ -152,6 +199,29 @@ def test_host_amd_smi_handles_survive_embedded_rdc(tools, bootstrap):
     assert out["rdc_start_embedded"] == 0 and out["rdc_stop_embedded"] == 0, out
     # RDC must take and release its own AMD SMI reference, not reset the host's session.
     assert out["before"] == out["running"] == out["after"] == AMDSMI_STATUS_SUCCESS, out
+
+
+def test_embedded_rdc_stops_the_gpu_events_it_listens_for(tools, bootstrap, tmp_path):
+    # AMD SMI keeps a GPU's event file open until its notification is stopped, also through
+    # amdsmi_shut_down(), which RDC calls at every stop here.
+    log = tmp_path / "fake_calls.log"
+    _embedded(tools, _EVENT_ROUNDS, bootstrap, str(NUM_GPUS), "3", RDC_FAKE_LOG=str(log))
+    calls = [line.split()[:2] for line in log.read_text().splitlines()]
+    started = Counter(gpu for api, gpu in calls if api == "amdsmi_init_gpu_event_notification")
+    stopped = Counter(gpu for api, gpu in calls if api == "amdsmi_stop_gpu_event_notification")
+    assert started == {str(g): 3 for g in range(NUM_GPUS)}, started
+    assert stopped == started, stopped
+    # Each round stops its notifications before its amdsmi_shut_down(), and once: the round
+    # that unwatched the field first has nothing left to stop.
+    listening = Counter()
+    for api, gpu in calls:
+        if api == "amdsmi_init_gpu_event_notification":
+            listening[gpu] += 1
+        elif api == "amdsmi_stop_gpu_event_notification":
+            listening[gpu] -= 1
+        elif api == "amdsmi_shut_down":
+            assert set(listening.values()) <= {0}, f"at amdsmi_shut_down(): {listening}"
+    assert sum(api == "amdsmi_shut_down" for api, _ in calls) == 3, calls  # one per round
 
 
 def test_embedded_rdc_restarts_in_one_process(tools, bootstrap):
@@ -236,7 +306,7 @@ def _type_calls(d, gpu):
 # A GPU the fake fails to identify, first and second in the list: the others keep their
 # indexes around it, and the GPU count does not depend on GPU 0.
 @pytest.mark.parametrize("unidentified", [0, 1])
-def test_a_gpu_amd_smi_cannot_identify_keeps_its_index(tools, tmp_path, unidentified):
+def test_a_gpu_amd_smi_cannot_identify_keeps_its_index(tools, bootstrap, tmp_path, unidentified):
     d = Rdcd(tools, tmp_path, RDC_FAKE_FAIL=f"amdsmi_get_processor_type@{unidentified}")
     d.arm()  # rdcd lists the GPUs when it starts
     started = time.monotonic()
@@ -272,14 +342,52 @@ def test_a_gpu_amd_smi_cannot_identify_keeps_its_index(tools, tmp_path, unidenti
         assert {int(g): row == "N/A" for g, row in rows} == {
             g: g == unidentified for g in range(NUM_GPUS) if g != source
         }, topo
-        # The node topology check passes without the unidentified GPU as a source, instead of
-        # failing on its unset handle; the group lists every GPU, so pair indexes are GPU indexes.
+        # The node topology check passes without the unidentified GPU, instead of failing on its
+        # unset handle, and reads each pair's weight between the two GPUs (15 in the fake's one
+        # hive), not from a GPU to itself (0). The group lists every GPU, so pair indexes are
+        # GPU indexes.
         group = re.search(r"group ID (\d+)", d.ok("group", "-c", "all", "-a", gpus))
         assert group, "no group created"
         diag = d.ok("diag", "-g", group.group(1), "-r", "1", timeout=120)
         assert re.search(r"^Node topology check:\s+Pass", diag, re.M), diag
-        sources = {int(i) for i in re.findall(r"(\d+)=>\d+ weight:", diag)}
-        assert sources == set(range(NUM_GPUS)) - {unidentified}, diag
+        weights = {
+            (int(i), int(j)): int(w) for i, j, w in re.findall(r"(\d+)=>(\d+) weight:(\d+)", diag)
+        }
+        others = [g for g in range(NUM_GPUS) if g != unidentified]
+        assert weights == {(i, j): 15 for i in others for j in others if i != j}, diag
+        # ECC counts, in total and per block, of corrected, uncorrected and deferred errors: N/A
+        # for the unidentified GPU. The fake counts corrected errors in UMC only. Columns are
+        # matched by position: the totals' column names are not their field names.
+        # The corrected and uncorrected totals, UMC_CE, UMC_DE, and the deferred total.
+        ecc_fields = [600, 601, 628, 653, 659]
+        ecc = d.ok("dmon", "-e", ",".join(map(str, ecc_fields)), "-i", gpus, "-c", "1", "-d", "500")
+        rows = {}
+        for line in ecc.splitlines():
+            cols = line.split()
+            if cols and cols[0].isdigit():
+                assert len(cols) == len(ecc_fields) + 1, f"malformed dmon row {line!r} in:\n{ecc}"
+                rows[int(cols[0])] = cols[1:]
+        assert sorted(rows) == list(range(NUM_GPUS)), ecc
+        for gpu in range(NUM_GPUS):
+            if gpu == unidentified:
+                want = ["N/A"] * len(ecc_fields)
+            else:
+                corrected = str(golden.reading("ECC_UMC_CORRECTABLE", gpu))
+                want = [corrected, "0", corrected, "0", "0"]
+            assert rows[gpu] == want, f"GPU {gpu}: {rows[gpu]}\n{ecc}"
+        # A setting of the group goes to every GPU AMD SMI identifies, and is cleared there.
+        r = subprocess.run(
+            [sys.executable, "-c", _CONFIG, bootstrap, f"127.0.0.1:{d.port}", group.group(1)],
+            env=d.rdci_env,
+            capture_output=True,
+            text=True,
+            timeout=60 * FACTOR,
+        )
+        assert r.returncode == 0, f"config child exited {r.returncode}\n{r.stdout}{r.stderr}"
+        assert json.loads(r.stdout.splitlines()[-1]) == {"set": 0, "clear": 0}, r.stdout
+        # Each other GPU: the set, then the clear's reset to the default limit.
+        set_calls = Counter(g for api, g, _ in d.calls() if api == "amdsmi_set_power_cap")
+        assert set_calls == {g: 2 for g in others}, set_calls
         # One identification at start, then at most one retry per period.
         elapsed = time.monotonic() - started
         calls = _type_calls(d, unidentified)

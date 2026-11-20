@@ -86,7 +86,18 @@ static const uint64_t kMaskUnknown = ~uint64_t{0};
 
 RdcNotificationImpl::RdcNotificationImpl() {}
 
-RdcNotificationImpl::~RdcNotificationImpl() {}
+// AMD SMI keeps a GPU's event file open until its notification is stopped, also through
+// amdsmi_shut_down(). RDC's AMD SMI session outlives this, so the GPUs can still be looked up:
+// with no listener left, each GPU whose events are open has them stopped.
+RdcNotificationImpl::~RdcNotificationImpl() {
+  std::lock_guard<std::mutex> guard(notif_mutex_);
+  std::set<uint32_t> gpu_ids;
+  for (auto& gpu : gpus_) {
+    gpu.second.listeners.clear();
+    gpu_ids.insert(gpu.first);
+  }
+  apply_masks_locked(gpu_ids);
+}
 
 bool RdcNotificationImpl::is_notification_event(rdc_field_t field) const {
   if (rdc_2_smi_event_notif_map.find(field) == rdc_2_smi_event_notif_map.end()) {
