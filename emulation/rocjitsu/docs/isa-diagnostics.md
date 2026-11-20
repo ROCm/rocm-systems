@@ -1,6 +1,6 @@
 # ISA diagnostics
 
-RocJITsu checks for these explicitly undefined ISA conditions:
+rocjitsu checks for these explicitly undefined ISA conditions:
 
 | Check | Targets | Legal cases kept silent |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ RocJITsu checks for these explicitly undefined ISA conditions:
 | VOPD source-bank/scalar-input limits | RDNA3, RDNA3.5, RDNA4, CDNA5 | GFX12 same-register/same-width sharing and MOV/MOV routing; unused sources; unqualified cross-operation dependencies and older EXEC/SCC budgets |
 | `NEG[2]` or `NEG_HI` on IU DOT/WMMA | RDNA3, RDNA3.5, RDNA4, CDNA5 | `NEG[1:0]` signedness, floating-point modifiers, unqualified SWMMAC forms and CDNA5 DOT8 |
 | Misaligned normal SGPR data in `s_mov_b64` and scalar loads, or scalar-buffer descriptors | RDNA4, CDNA5 | Constants, special selectors, NULL destinations; other operand roles and ISA families |
-| Zero or non-power-of-two scalar group width on permlane BCAST/UP/DOWN/XOR | CDNA5 | Larger powers of two, empty EXEC, unqualified VGPR widths and IDX_GEN |
+| Zero or non-power-of-two scalar group width on permlane BCAST/UP/DOWN/XOR and IDX_GEN | CDNA5 | Larger powers of two and empty EXEC |
 
 Each `isa-undefined` warning identifies the CU, workgroup, wave and PC. Execution
 continues with the simulator's existing behavior. Reports are capped at 16 per CU.
@@ -23,7 +23,7 @@ do not scan register allocations, track lane conflicts or maintain an access
 history.
 
 These small checks run unconditionally, independently of memory-wait checking,
-in both RocJITsu and Mirage. They have no CLI or configuration switch.
+in both rocjitsu and Mirage. They have no CLI or configuration switch.
 A warning on a defined instruction is a checker bug and should be reported.
 
 Combined offsets are checked before alignment masks are applied. CDNA1–4 and

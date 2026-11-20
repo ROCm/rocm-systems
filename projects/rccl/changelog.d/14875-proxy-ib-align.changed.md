@@ -1,0 +1,1 @@
+* Aligned the net proxy progress loops and the IB send, receive and completion polling functions to 64 bytes. A nearby change in code size was shifting those loops and slowing a 2-node 2 MiB `ncclReduceScatter` by about 4%.

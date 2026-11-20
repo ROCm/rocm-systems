@@ -167,12 +167,19 @@ public:
     if (arithmetic_ && arithmetic_->wait_conflicts(*access))
       ++async_execution::stats.hazards;
     check_errors();
-    if (pending() && !matrix_coexecution::async_candidate(inst.mnemonic()) && !inst.is_memory_op())
+    if (pending() && !matrix_coexecution::async_candidate(inst) && !inst.is_memory_op())
       ++async_execution::stats.inline_overlap;
   }
 
+  // Admission requires production decoding to have rejected every operand or
+  // format that can reach report_instruction_execution_error() in a candidate.
+  // Helpers transport exceptions only: reading or reporting through the shared
+  // Wavefront error field races the issuer clearing it for later instructions.
+  // Keep new candidates synchronous unless their decode checks establish this
+  // invariant (including any execution-state checks), and cover those checks.
+  // Test/custom callbacks submitted here must obey the same restriction.
   bool submit_mma(std::unique_ptr<Instruction> &inst) {
-    if (stopped_ || !matrix_coexecution::async_candidate(inst->mnemonic()))
+    if (stopped_ || !matrix_coexecution::async_candidate(*inst))
       return false;
     auto access = async_execution::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
     const int sources = inst->num_src_operands();
@@ -185,7 +192,7 @@ public:
         continue;
       // Inline accumulator/scale constants are immutable. SGPRs and special
       // registers are not covered by the vector-register scoreboard.
-      if (i == sources || !operand->const_value())
+      if (i < 2 || i == sources || !operand->const_value())
         return false;
     }
     if (!pool_.available()) {

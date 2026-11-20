@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include <memory>
@@ -25,8 +26,8 @@ uint32_t vbuffer_vaddr_bits(const VbufferMachineInst *inst) {
 BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadU8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -48,6 +49,8 @@ BufferLoadU8Vbuffer::BufferLoadU8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -64,8 +67,8 @@ DecodeResult decodeBufferLoadU8Vbuffer(const MachineInst *opcode,
 BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadI8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -87,6 +90,8 @@ BufferLoadI8Vbuffer::BufferLoadI8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -103,8 +108,8 @@ DecodeResult decodeBufferLoadI8Vbuffer(const MachineInst *opcode,
 BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_u16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadU16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -126,6 +131,8 @@ BufferLoadU16Vbuffer::BufferLoadU16Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -142,8 +149,8 @@ DecodeResult decodeBufferLoadU16Vbuffer(const MachineInst *opcode,
 BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_i16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadI16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -165,6 +172,8 @@ BufferLoadI16Vbuffer::BufferLoadI16Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -181,8 +190,8 @@ DecodeResult decodeBufferLoadI16Vbuffer(const MachineInst *opcode,
 BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadB32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -204,6 +213,8 @@ BufferLoadB32Vbuffer::BufferLoadB32Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -220,8 +231,8 @@ DecodeResult decodeBufferLoadB32Vbuffer(const MachineInst *opcode,
 BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadB64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -243,6 +254,8 @@ BufferLoadB64Vbuffer::BufferLoadB64Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -259,8 +272,8 @@ DecodeResult decodeBufferLoadB64Vbuffer(const MachineInst *opcode,
 BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b96", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadB96Vbuffer)),
-      vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -282,6 +295,8 @@ BufferLoadB96Vbuffer::BufferLoadB96Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -298,8 +313,8 @@ DecodeResult decodeBufferLoadB96Vbuffer(const MachineInst *opcode,
 BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadB128Vbuffer)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -321,6 +336,8 @@ BufferLoadB128Vbuffer::BufferLoadB128Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -337,8 +354,8 @@ DecodeResult decodeBufferLoadB128Vbuffer(const MachineInst *opcode,
 BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreB8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -359,6 +376,8 @@ BufferStoreB8Vbuffer::BufferStoreB8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -375,8 +394,8 @@ DecodeResult decodeBufferStoreB8Vbuffer(const MachineInst *opcode,
 BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreB16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -397,6 +416,8 @@ BufferStoreB16Vbuffer::BufferStoreB16Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -413,8 +434,8 @@ DecodeResult decodeBufferStoreB16Vbuffer(const MachineInst *opcode,
 BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreB32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -434,6 +455,8 @@ BufferStoreB32Vbuffer::BufferStoreB32Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -450,8 +473,8 @@ DecodeResult decodeBufferStoreB32Vbuffer(const MachineInst *opcode,
 BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreB64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -471,6 +494,8 @@ BufferStoreB64Vbuffer::BufferStoreB64Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -487,8 +512,8 @@ DecodeResult decodeBufferStoreB64Vbuffer(const MachineInst *opcode,
 BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b96", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreB96Vbuffer)),
-      vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -508,6 +533,8 @@ BufferStoreB96Vbuffer::BufferStoreB96Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -524,8 +551,8 @@ DecodeResult decodeBufferStoreB96Vbuffer(const MachineInst *opcode,
 BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_b128", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreB128Vbuffer)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -545,6 +572,8 @@ BufferStoreB128Vbuffer::BufferStoreB128Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -561,8 +590,8 @@ DecodeResult decodeBufferStoreB128Vbuffer(const MachineInst *opcode,
 BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadD16U8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -582,6 +611,9 @@ BufferLoadD16U8Vbuffer::BufferLoadD16U8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -598,8 +630,8 @@ DecodeResult decodeBufferLoadD16U8Vbuffer(const MachineInst *opcode,
 BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadD16I8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -619,6 +651,9 @@ BufferLoadD16I8Vbuffer::BufferLoadD16I8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -635,8 +670,8 @@ DecodeResult decodeBufferLoadD16I8Vbuffer(const MachineInst *opcode,
 BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadD16B16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -656,6 +691,9 @@ BufferLoadD16B16Vbuffer::BufferLoadD16B16Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -672,8 +710,8 @@ DecodeResult decodeBufferLoadD16B16Vbuffer(const MachineInst *opcode,
 BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadD16HiU8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -693,6 +731,9 @@ BufferLoadD16HiU8Vbuffer::BufferLoadD16HiU8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_HI_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -709,8 +750,8 @@ DecodeResult decodeBufferLoadD16HiU8Vbuffer(const MachineInst *opcode,
 BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadD16HiI8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -730,6 +771,9 @@ BufferLoadD16HiI8Vbuffer::BufferLoadD16HiI8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_HI_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -746,8 +790,8 @@ DecodeResult decodeBufferLoadD16HiI8Vbuffer(const MachineInst *opcode,
 BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferLoadD16HiB16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -767,6 +811,9 @@ BufferLoadD16HiB16Vbuffer::BufferLoadD16HiB16Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_LOAD_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -783,8 +830,8 @@ DecodeResult decodeBufferLoadD16HiB16Vbuffer(const MachineInst *opcode,
 BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreD16HiB8Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -805,6 +852,9 @@ BufferStoreD16HiB8Vbuffer::BufferStoreD16HiB8Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_HI_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -821,8 +871,8 @@ DecodeResult decodeBufferStoreD16HiB8Vbuffer(const MachineInst *opcode,
 BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferStoreD16HiB16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -843,6 +893,9 @@ BufferStoreD16HiB16Vbuffer::BufferStoreD16HiB16Vbuffer(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_STORE_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -859,8 +912,8 @@ DecodeResult decodeBufferStoreD16HiB16Vbuffer(const MachineInst *opcode,
 BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicSwapB32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -886,6 +939,8 @@ BufferAtomicSwapB32Vbuffer::BufferAtomicSwapB32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -902,9 +957,9 @@ DecodeResult decodeBufferAtomicSwapB32Vbuffer(const MachineInst *opcode,
 BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicCmpswapB32Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vdata_return(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -931,6 +986,8 @@ BufferAtomicCmpswapB32Vbuffer::BufferAtomicCmpswapB32Vbuffer(const MachineInst *
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -948,8 +1005,8 @@ DecodeResult decodeBufferAtomicCmpswapB32Vbuffer(const MachineInst *opcode,
 BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicAddU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -975,6 +1032,8 @@ BufferAtomicAddU32Vbuffer::BufferAtomicAddU32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -991,8 +1050,8 @@ DecodeResult decodeBufferAtomicAddU32Vbuffer(const MachineInst *opcode,
 BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicSubU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1018,6 +1077,8 @@ BufferAtomicSubU32Vbuffer::BufferAtomicSubU32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1034,8 +1095,8 @@ DecodeResult decodeBufferAtomicSubU32Vbuffer(const MachineInst *opcode,
 BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicSubClampU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1061,6 +1122,8 @@ BufferAtomicSubClampU32Vbuffer::BufferAtomicSubClampU32Vbuffer(const MachineInst
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB_CLAMP_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1078,8 +1141,8 @@ DecodeResult decodeBufferAtomicSubClampU32Vbuffer(const MachineInst *opcode,
 BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMinI32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1105,6 +1168,8 @@ BufferAtomicMinI32Vbuffer::BufferAtomicMinI32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1121,8 +1186,8 @@ DecodeResult decodeBufferAtomicMinI32Vbuffer(const MachineInst *opcode,
 BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMinU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1148,6 +1213,8 @@ BufferAtomicMinU32Vbuffer::BufferAtomicMinU32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1164,8 +1231,8 @@ DecodeResult decodeBufferAtomicMinU32Vbuffer(const MachineInst *opcode,
 BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMaxI32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1191,6 +1258,8 @@ BufferAtomicMaxI32Vbuffer::BufferAtomicMaxI32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1207,8 +1276,8 @@ DecodeResult decodeBufferAtomicMaxI32Vbuffer(const MachineInst *opcode,
 BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMaxU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1234,6 +1303,8 @@ BufferAtomicMaxU32Vbuffer::BufferAtomicMaxU32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1250,8 +1321,8 @@ DecodeResult decodeBufferAtomicMaxU32Vbuffer(const MachineInst *opcode,
 BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicAndB32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1277,6 +1348,8 @@ BufferAtomicAndB32Vbuffer::BufferAtomicAndB32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_AND_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1293,8 +1366,8 @@ DecodeResult decodeBufferAtomicAndB32Vbuffer(const MachineInst *opcode,
 BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicOrB32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1320,6 +1393,8 @@ BufferAtomicOrB32Vbuffer::BufferAtomicOrB32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_OR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1336,8 +1411,8 @@ DecodeResult decodeBufferAtomicOrB32Vbuffer(const MachineInst *opcode,
 BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicXorB32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1363,6 +1438,8 @@ BufferAtomicXorB32Vbuffer::BufferAtomicXorB32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_XOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1379,8 +1456,8 @@ DecodeResult decodeBufferAtomicXorB32Vbuffer(const MachineInst *opcode,
 BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicIncU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1406,6 +1483,8 @@ BufferAtomicIncU32Vbuffer::BufferAtomicIncU32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_INC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1422,8 +1501,8 @@ DecodeResult decodeBufferAtomicIncU32Vbuffer(const MachineInst *opcode,
 BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicDecU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1449,6 +1528,8 @@ BufferAtomicDecU32Vbuffer::BufferAtomicDecU32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_DEC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1465,8 +1546,8 @@ DecodeResult decodeBufferAtomicDecU32Vbuffer(const MachineInst *opcode,
 BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicSwapB64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1492,6 +1573,8 @@ BufferAtomicSwapB64Vbuffer::BufferAtomicSwapB64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1508,9 +1591,9 @@ DecodeResult decodeBufferAtomicSwapB64Vbuffer(const MachineInst *opcode,
 BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicCmpswapB64Vbuffer)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vdata_return(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata_return(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1537,6 +1620,8 @@ BufferAtomicCmpswapB64Vbuffer::BufferAtomicCmpswapB64Vbuffer(const MachineInst *
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_CMPSWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1554,8 +1639,8 @@ DecodeResult decodeBufferAtomicCmpswapB64Vbuffer(const MachineInst *opcode,
 BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicAddU64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1581,6 +1666,8 @@ BufferAtomicAddU64Vbuffer::BufferAtomicAddU64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1597,8 +1684,8 @@ DecodeResult decodeBufferAtomicAddU64Vbuffer(const MachineInst *opcode,
 BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicSubU64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1624,6 +1711,8 @@ BufferAtomicSubU64Vbuffer::BufferAtomicSubU64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_SUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1640,8 +1729,8 @@ DecodeResult decodeBufferAtomicSubU64Vbuffer(const MachineInst *opcode,
 BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMinI64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1667,6 +1756,8 @@ BufferAtomicMinI64Vbuffer::BufferAtomicMinI64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1683,8 +1774,8 @@ DecodeResult decodeBufferAtomicMinI64Vbuffer(const MachineInst *opcode,
 BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMinU64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1710,6 +1801,8 @@ BufferAtomicMinU64Vbuffer::BufferAtomicMinU64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1726,8 +1819,8 @@ DecodeResult decodeBufferAtomicMinU64Vbuffer(const MachineInst *opcode,
 BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMaxI64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1753,6 +1846,8 @@ BufferAtomicMaxI64Vbuffer::BufferAtomicMaxI64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1769,8 +1864,8 @@ DecodeResult decodeBufferAtomicMaxI64Vbuffer(const MachineInst *opcode,
 BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMaxU64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1796,6 +1891,8 @@ BufferAtomicMaxU64Vbuffer::BufferAtomicMaxU64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1812,8 +1909,8 @@ DecodeResult decodeBufferAtomicMaxU64Vbuffer(const MachineInst *opcode,
 BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicAndB64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1839,6 +1936,8 @@ BufferAtomicAndB64Vbuffer::BufferAtomicAndB64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_AND_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1855,8 +1954,8 @@ DecodeResult decodeBufferAtomicAndB64Vbuffer(const MachineInst *opcode,
 BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicOrB64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1882,6 +1981,8 @@ BufferAtomicOrB64Vbuffer::BufferAtomicOrB64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_OR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1898,8 +1999,8 @@ DecodeResult decodeBufferAtomicOrB64Vbuffer(const MachineInst *opcode,
 BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicXorB64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1925,6 +2026,8 @@ BufferAtomicXorB64Vbuffer::BufferAtomicXorB64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_XOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1941,8 +2044,8 @@ DecodeResult decodeBufferAtomicXorB64Vbuffer(const MachineInst *opcode,
 BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicIncU64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -1968,6 +2071,8 @@ BufferAtomicIncU64Vbuffer::BufferAtomicIncU64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_INC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1984,8 +2089,8 @@ DecodeResult decodeBufferAtomicIncU64Vbuffer(const MachineInst *opcode,
 BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicDecU64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2011,6 +2116,8 @@ BufferAtomicDecU64Vbuffer::BufferAtomicDecU64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_DEC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2027,8 +2134,8 @@ DecodeResult decodeBufferAtomicDecU64Vbuffer(const MachineInst *opcode,
 BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicCondSubU32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2054,6 +2161,8 @@ BufferAtomicCondSubU32Vbuffer::BufferAtomicCondSubU32Vbuffer(const MachineInst *
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_COND_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2071,8 +2180,8 @@ DecodeResult decodeBufferAtomicCondSubU32Vbuffer(const MachineInst *opcode,
 BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMinNumF32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2098,6 +2207,8 @@ BufferAtomicMinNumF32Vbuffer::BufferAtomicMinNumF32Vbuffer(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2115,8 +2226,8 @@ DecodeResult decodeBufferAtomicMinNumF32Vbuffer(const MachineInst *opcode,
 BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMaxNumF32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2142,6 +2253,8 @@ BufferAtomicMaxNumF32Vbuffer::BufferAtomicMaxNumF32Vbuffer(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2159,8 +2272,8 @@ DecodeResult decodeBufferAtomicMaxNumF32Vbuffer(const MachineInst *opcode,
 BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicAddF64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2186,6 +2299,8 @@ BufferAtomicAddF64Vbuffer::BufferAtomicAddF64Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2202,8 +2317,8 @@ DecodeResult decodeBufferAtomicAddF64Vbuffer(const MachineInst *opcode,
 BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicAddF32Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2229,6 +2344,8 @@ BufferAtomicAddF32Vbuffer::BufferAtomicAddF32Vbuffer(const MachineInst *inst)
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2245,8 +2362,8 @@ DecodeResult decodeBufferAtomicAddF32Vbuffer(const MachineInst *opcode,
 BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicPkAddF16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2272,6 +2389,8 @@ BufferAtomicPkAddF16Vbuffer::BufferAtomicPkAddF16Vbuffer(const MachineInst *inst
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2289,8 +2408,8 @@ DecodeResult decodeBufferAtomicPkAddF16Vbuffer(const MachineInst *opcode,
 BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicPkAddBf16Vbuffer)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2316,6 +2435,8 @@ BufferAtomicPkAddBf16Vbuffer::BufferAtomicPkAddBf16Vbuffer(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2333,8 +2454,8 @@ DecodeResult decodeBufferAtomicPkAddBf16Vbuffer(const MachineInst *opcode,
 BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMinNumF64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2360,6 +2481,8 @@ BufferAtomicMinNumF64Vbuffer::BufferAtomicMinNumF64Vbuffer(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MIN_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2377,8 +2500,8 @@ DecodeResult decodeBufferAtomicMinNumF64Vbuffer(const MachineInst *opcode,
 BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *inst)
     : Vbuffer("buffer_atomic_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
               selected_exec_fn(InstructionExecutionId::BufferAtomicMaxNumF64Vbuffer)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
-      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdata(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vaddr(vbuffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc),
       soffset(32, OperandType::OPR_SREG_M0, reinterpret_cast<const OpEncoding *>(inst)->soffset),
@@ -2404,6 +2527,8 @@ BufferAtomicMaxNumF64Vbuffer::BufferAtomicMaxNumF64Vbuffer(const MachineInst *in
                                                               : amdgpu::WaitCounterType::STORECNT),
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::BUFFER_ATOMIC_MAX_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Buffer, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {

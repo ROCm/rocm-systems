@@ -133,7 +133,7 @@ instead, so the syntax a module uses is the syntax it supports.
 
 ### Rules
 
-- Never add `from __future__ import annotations`, or any other `__future__` import.
+- Never use `from __future__ import annotations`, or any other `__future__` import. When you change a module that has one, remove it and write its annotations in the 3.8 form.
 - Use `typing.List`, `typing.Dict`, `typing.Tuple`, and `typing.Set` for annotations, not the builtin generics `list[...]`, `dict[...]`, `tuple[...]`, `set[...]`.
 - Use `typing.Optional[X]` and `typing.Union[X, Y]`, not `X | None` or `X | Y`.
 - Do not use 3.9+ library additions such as `dict` merge with `|`, `str.removeprefix`, or `str.removesuffix`.
@@ -563,10 +563,9 @@ def pre_processing(self) -> None:
         # Each operation delegated to a focused helper
         workload.raw_pmc = file_io.create_df_pmc(...)
 
-        if self._profiling_config.get("iteration_multiplexing") is not None:
+        if self._profiling_config.get("iteration_multiplexing"):
             workload.raw_pmc = self.iteration_multiplex_impute_counters(
                 workload.raw_pmc,
-                policy=self._profiling_config["iteration_multiplexing"],
                 workload_dir=Path(path_info[0]),
             )
 

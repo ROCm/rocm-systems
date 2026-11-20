@@ -25,18 +25,30 @@ namespace {
 
 class FlatMemory final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
 public:
-  FlatMemory() : bytes_(0x4000) {}
+  static constexpr uint64_t kSize = 0x4000;
+  FlatMemory() : bytes_(kSize) {}
 
-  VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
+  VmTranslationResult translate(uint64_t address, std::size_t size,
+                                VmAccessKind access) const override {
+    for (const uint64_t alias : aliases) {
+      if (address >= alias && address - alias < bytes_.size()) {
+        address -= alias;
+        break;
+      }
+    }
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
-    return {
-        .outcome = VmAccessOutcome::Complete,
-        .translation = {.domain = VmMemoryDomain::System,
-                        .address = address,
-                        .contiguous_bytes = bytes_.size() - address,
-                        .mtype = Mtype::RW,
-                        .permissions = {.readable = true, .writable = true, .executable = false}}};
+    const VmPermissions permissions = protected_address_ && address == *protected_address_
+                                          ? protected_permissions_
+                                          : VmPermissions{.readable = true, .writable = true};
+    if (!permissions.allows(access))
+      return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    return {.outcome = VmAccessOutcome::Complete,
+            .translation = {.domain = VmMemoryDomain::System,
+                            .address = address,
+                            .contiguous_bytes = bytes_.size() - address,
+                            .mtype = Mtype::RW,
+                            .permissions = permissions}};
   }
 
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
@@ -58,6 +70,8 @@ public:
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
+    if (unavailable_read_ && address == *unavailable_read_)
+      return {.outcome = VmAccessOutcome::Unavailable};
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
         width > bytes_.size() - address)
       return {.outcome = VmAccessOutcome::Malformed};
@@ -100,12 +114,22 @@ public:
   }
 
   void make_read_unavailable(uint64_t address) { unavailable_read_ = address; }
+  void make_reads_available() { unavailable_read_.reset(); }
+  void protect(uint64_t address, VmPermissions permissions) {
+    protected_address_ = address;
+    protected_permissions_ = permissions;
+  }
   void make_store_unavailable_once(uint64_t address) { unavailable_store_once_ = address; }
   void make_store_faulted_once(uint64_t address) {
     store_outcome_once_ = std::pair{address, VmAccessOutcome::Faulted};
   }
+  std::vector<uint64_t> aliases;
 
 private:
+  // Optional operand whose translation enforces directional access permissions.
+  std::optional<uint64_t> protected_address_;
+  // Permissions for that operand; other fixture memory remains readable and writable.
+  VmPermissions protected_permissions_;
   std::vector<std::byte> bytes_;
   std::optional<uint64_t> unavailable_read_;
   std::optional<uint64_t> unavailable_store_once_;
@@ -195,8 +219,67 @@ TEST_F(Pm4PacketProcessorTest, ProcessesRegisterWriteAcrossNativeRingWrap) {
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
 }
 
-TEST_F(Pm4PacketProcessorTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {
-  context.arch = ROCJITSU_CODE_ARCH_CDNA3;
+TEST_F(Pm4PacketProcessorTest, LoadsHighRegisterAddressesInTheQueueAddressSpace) {
+  constexpr uint64_t raw = 0x0000800012340000;
+  constexpr uint64_t canonical = 0xffff800012340000;
+  constexpr uint64_t wide = 0x0001800056780000;
+  constexpr uint32_t lo = static_cast<uint32_t>(raw), hi = raw >> 32;
+  constexpr uint32_t wide_lo = static_cast<uint32_t>(wide + 12), wide_hi = wide >> 32;
+  const std::array<uint32_t, 30> packets{
+      0xc0035e00, lo,      hi,      1, 1, // LOAD_UCONFIG_REG
+      0xc0035f00, lo,      hi,      2, 1, // LOAD_SH_REG
+      0xc0036100, lo,      hi,      3, 1, // LOAD_CONTEXT_REG
+      0xc0036300, lo,      hi,      4, 1, // LOAD_SH_REG_INDEX
+      0xc0039f00, lo,      hi,      5, 1, // LOAD_CONTEXT_REG_INDEX
+      0xc0036300, wide_lo, wide_hi, 6, 1, // Full-width indexed source.
+  };
+  for (bool native_ring : {false, true}) {
+    SCOPED_TRACE(native_ring);
+    memory->aliases = {native_ring ? raw : canonical, wide};
+    const uint32_t value = native_ring ? 40 : 20;
+    for (uint32_t i = 0; i < 4; ++i)
+      memory->store(i * 4, value + i);
+    submit(packets, native_ring);
+    queue.commands.submissions.front().graphics_engine = true;
+    ASSERT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(queue.commands.uconfig_registers[1], value + 1);
+    EXPECT_EQ(queue.commands.sh_registers[2], value + 2);
+    EXPECT_EQ(queue.commands.context_registers[3], value + 3);
+    EXPECT_EQ(queue.commands.sh_registers[4], value);
+    EXPECT_EQ(queue.commands.context_registers[5], value);
+    EXPECT_EQ(queue.commands.sh_registers[6], value + 3);
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, RegisterLoadReadsAcrossTheDrmVaSplit) {
+  constexpr uint64_t split = uint64_t{1} << 47;
+  memory->aliases = {split - FlatMemory::kSize, 0xffff800000000000};
+  memory->store<uint32_t>(FlatMemory::kSize - 4, 55);
+  memory->store<uint32_t>(0, 66);
+  // The indexed load straddles bit 47. The shadow load adds a register
+  // offset that puts its first source dword in the upper half.
+  const std::array<uint32_t, 10> packets{0xc0036300, 0xfffffffc, 0x7fff, 2, 2,
+                                         0xc0035f00, 0xfffffffc, 0x7fff, 1, 1};
+  submit(packets);
+  ASSERT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(queue.commands.sh_registers[1], 66u);
+  EXPECT_EQ(queue.commands.sh_registers[2], 55u);
+  EXPECT_EQ(queue.commands.sh_registers[3], 66u);
+}
+
+TEST_F(Pm4PacketProcessorTest, ShadowLoadRejectsOffsetPastThe48BitAperture) {
+  // A register offset of one dword would carry the encoded base into bit 48.
+  memory->aliases = {uint64_t{1} << 48};
+  const std::array<uint32_t, 5> packet{0xc0035f00, 0xfffffffc, 0xffff, 1, 1};
+  submit(packet);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+}
+
+class Pm4PredExecTest : public Pm4PacketProcessorTest,
+                        public ::testing::WithParamInterface<rj_code_arch_t> {};
+
+TEST_P(Pm4PredExecTest, MaskedPredExecRetainsSkippedCursorAcrossPublicationRetry) {
+  context.arch = GetParam();
   context.xcc_id = 0;
   const std::array words{0xc0002300u, (1u << 25) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
   submit(words, true, 6, 8);
@@ -210,6 +293,76 @@ TEST_F(Pm4PacketProcessorTest, MaskedPredExecRetainsSkippedCursorAcrossPublicati
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 5u);
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
   EXPECT_TRUE(completed);
+}
+
+TEST_P(Pm4PredExecTest, SelectedPredExecExecutesOnHighestVirtualXcc) {
+  context.arch = GetParam();
+  context.xcc_id = 7;
+  const std::array words{0xc0002300u, (1u << 31) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+  submit(words);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 99u);
+  EXPECT_TRUE(completed);
+}
+
+TEST_P(Pm4PredExecTest, RejectsReservedPredExecBitsBeforeEffects) {
+  context.arch = GetParam();
+  for (uint32_t bit = 14; bit < 24; ++bit) {
+    SCOPED_TRACE(bit);
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    const std::array words{
+        0xc0002300u, (1u << bit) | (1u << 24) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+    EXPECT_FALSE(completed);
+  }
+}
+
+TEST_P(Pm4PredExecTest, RejectsPredExecXccOutsideMask) {
+  context.arch = GetParam();
+  context.xcc_id = 8;
+  const std::array words{0xc0002300u, 0xff000005u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+  submit(words);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_FALSE(completed);
+}
+
+TEST_P(Pm4PredExecTest, RejectsPredExecBeyondBufferForSelectedAndMaskedXcc) {
+  context.arch = GetParam();
+  for (uint32_t mask : {1u << 24, 1u << 25}) {
+    SCOPED_TRACE(mask);
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    const std::array words{0xc0002300u, mask | 6u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+    EXPECT_FALSE(completed);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Cdna, Pm4PredExecTest,
+                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                                           ROCJITSU_CODE_ARCH_CDNA5));
+
+TEST_F(Pm4PacketProcessorTest, RejectsPredExecOnOtherArchitectures) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_RDNA1,
+        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+        ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    context.arch = arch;
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    const std::array words{0xc0002300u, (1u << 24) | 5u, 0xc0033700u, 5u << 8, kOutput, 0u, 99u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+    EXPECT_FALSE(completed);
+  }
 }
 
 TEST_F(Pm4PacketProcessorTest, CondExecRetainsSkippedCursorAcrossPublicationRetry) {
@@ -327,6 +480,23 @@ TEST_F(Pm4PacketProcessorTest, RejectsTruncatedPacketBeforeCallingItsHandler) {
   EXPECT_FALSE(completed);
 }
 
+TEST_F(Pm4PacketProcessorTest, CursorPublicationRetryDoesNotReplayCompletedDma) {
+  constexpr uint32_t kSource = 0x1000;
+  const std::array words{0xc0055000u, 0u, kSource, 0u, kOutput, 0u, 8u};
+  memory->store<uint64_t>(kSource, 0x123456789abcdef0);
+  submit(words, true);
+  memory->make_store_unavailable_once(kReadPointer);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  EXPECT_FALSE(completed);
+  EXPECT_FALSE(queue.commands.submissions.front().data_transfer);
+  EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0u);
+  memory->store<uint64_t>(kSource, 0);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_TRUE(completed);
+  EXPECT_EQ(memory->load<uint64_t>(kOutput), 0x123456789abcdef0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), words.size());
+}
+
 TEST_F(Pm4PacketProcessorTest, RetiresSupportedNopEncodings) {
   const std::array words{0x80000000u, 0xc0001000u, 0u, 0xffff1000u};
   submit(words, true);
@@ -383,6 +553,148 @@ TEST_F(Pm4PacketProcessorTest, WaitBlocksLaterMemoryEffectsUntilItsConditionPass
   EXPECT_EQ(service(), Pm4TestStatus::Ready);
   EXPECT_EQ(memory->load<uint32_t>(kOutput + 4), 0xdeadbeefu);
   EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, ReleaseInterruptObservesPayloadBeforeABlockedTail) {
+  for (uint32_t selection : {1u, 2u}) {
+    SCOPED_TRACE(selection);
+    const uint32_t gate = kOutput + 16;
+    memory->store<uint64_t>(kOutput, 0);
+    memory->store<uint32_t>(gate, 0);
+    const std::array words{0xc0064900u, 0x528u, (selection << 29) | (2u << 24),
+                           kOutput,     0u,     0x12345678u,
+                           0x87654321u, 47u,    0xc0053c00u,
+                           0x13u,       gate,   0u,
+                           1u,          ~0u,    0u};
+    queue.process_id = 19;
+    uint32_t interrupts = 0;
+    InterruptSubscription subscription([&](uint32_t process, uint32_t event) {
+      EXPECT_EQ(process, 19u);
+      EXPECT_EQ(event, 47u);
+      EXPECT_EQ(memory->load<uint64_t>(kOutput),
+                selection == 1 ? UINT64_C(0x12345678) : UINT64_C(0x8765432112345678));
+      EXPECT_FALSE(completed);
+      ++interrupts;
+    });
+    queue.interrupt_sink = subscription.sink();
+    completed = false;
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+    EXPECT_EQ(interrupts, 1u);
+    EXPECT_FALSE(completed);
+    memory->store<uint32_t>(gate, 1);
+    EXPECT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(interrupts, 1u);
+    EXPECT_TRUE(completed);
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, WaitReadsReadOnlyMemory) {
+  memory->store<uint32_t>(kOutput, 1);
+  memory->protect(kOutput, {.readable = true});
+  const std::array words{0xc0053c00u, 0x13u, kOutput, 0u, 1u, ~0u, 0u};
+  submit(words);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, ReleaseWritesWriteOnlyMemory) {
+  memory->protect(kOutput, {.writable = true});
+  const std::array words{0xc0064900u, 0x528u, 1u << 29, kOutput, 0u, 31u, 0u, 0u};
+  submit(words);
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 31u);
+  EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, UnavailableWaitReadRetainsThePacketUntilMemoryIsAvailable) {
+  const std::array words{0xc0053c00u, 0x13u, kOutput, 0u, 1u, ~0u, 0u};
+  memory->store<uint32_t>(kOutput, 1);
+  memory->make_read_unavailable(kOutput);
+  submit(words, true);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), 0u);
+  EXPECT_FALSE(completed);
+  memory->make_reads_available();
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(queue.read_pointer_journal.cursor(), words.size());
+  EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, ReleaseWithoutInterruptStillPublishesData) {
+  uint32_t interrupts = 0;
+  InterruptSubscription subscription([&](uint32_t, uint32_t) { ++interrupts; });
+  queue.interrupt_sink = subscription.sink();
+  for (uint32_t control : {0u, 3u}) {
+    SCOPED_TRACE(control);
+    memory->store<uint32_t>(kOutput, 0);
+    const std::array words{0xc0064900u, 0x528u, (1u << 29) | (control << 24), kOutput, 0u, 31u,
+                           0u,          47u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Ready);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 31u);
+    EXPECT_EQ(interrupts, 0u);
+  }
+}
+
+TEST_F(Pm4PacketProcessorTest, ReleaseInterruptWithoutDataDoesNotAccessTheAddress) {
+  uint32_t interrupts = 0;
+  queue.process_id = 19;
+  InterruptSubscription subscription([&](uint32_t process, uint32_t event) {
+    EXPECT_EQ(process, 19u);
+    EXPECT_EQ(event, 47u);
+    ++interrupts;
+  });
+  queue.interrupt_sink = subscription.sink();
+  for (uint32_t control : {1u, 4u}) {
+    SCOPED_TRACE(control);
+    const std::array words{0xc0064900u, 0x528u, control << 24, ~0u, ~0u, 0u, 0u, 47u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  }
+  EXPECT_EQ(interrupts, 2u);
+}
+
+TEST_F(Pm4PacketProcessorTest, FailedReleasePublicationDoesNotNotify) {
+  uint32_t interrupts = 0;
+  InterruptSubscription subscription([&](uint32_t, uint32_t) { ++interrupts; });
+  queue.interrupt_sink = subscription.sink();
+  const std::array words{0xc0064900u, 0x528u, (1u << 29) | (2u << 24), 0x4000u, 0u, 31u, 0u, 47u};
+  submit(words);
+  EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+  EXPECT_EQ(interrupts, 0u);
+}
+
+TEST_F(Pm4PacketProcessorTest, ReleaseInterruptIsNotReplayedAfterCursorPublicationRetry) {
+  uint32_t interrupts = 0;
+  InterruptSubscription subscription([&](uint32_t, uint32_t) { ++interrupts; });
+  queue.interrupt_sink = subscription.sink();
+  const std::array words{0xc0064900u, 0x528u, (1u << 29) | (2u << 24), kOutput, 0u, 31u, 0u, 47u};
+  submit(words, true);
+  memory->make_store_unavailable_once(kReadPointer);
+  EXPECT_EQ(service(), Pm4TestStatus::Blocked);
+  EXPECT_EQ(interrupts, 1u);
+  EXPECT_TRUE(queue.read_pointer_journal.publication_pending());
+  EXPECT_EQ(service(), Pm4TestStatus::Ready);
+  EXPECT_EQ(interrupts, 1u);
+  EXPECT_TRUE(completed);
+}
+
+TEST_F(Pm4PacketProcessorTest, RejectsConditionalReleaseInterruptsBeforeEffects) {
+  uint32_t interrupts = 0;
+  InterruptSubscription subscription([&](uint32_t, uint32_t) { ++interrupts; });
+  queue.interrupt_sink = subscription.sink();
+  for (uint32_t control : {5u, 6u, 7u}) {
+    SCOPED_TRACE(control);
+    queue.faulted = false;
+    queue.commands.submissions.clear();
+    const std::array words{0xc0064900u, 0x528u, (1u << 29) | (control << 24), kOutput, 0u, 31u,
+                           0u,          47u};
+    submit(words);
+    EXPECT_EQ(service(), Pm4TestStatus::Faulted);
+    EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+    EXPECT_EQ(interrupts, 0u);
+  }
 }
 
 TEST_F(Pm4PacketProcessorTest, DispatchPausesInterpretationUntilCpRetiresIt) {

@@ -58,7 +58,7 @@ int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 int64_t ncclParamGdrCopySyncEnable() { return g_loadParam("GDRCOPY_SYNC_ENABLE", 1); }
 int64_t ncclParamGdrCopyFlushEnable() { return g_loadParam("GDRCOPY_FLUSH_ENABLE", 0); }
 
-// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPlugin, which compiles net.cc.
+// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPluginNet, which compiles net.cc.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport
@@ -359,3 +359,29 @@ ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* 
 #include "transport.h"
 struct ncclTransport netTransport = {};
 
+// ppc64le TOC references survive --gc-sections, so plugin device-count
+// functions referenced as function pointers in topo.cc need definitions
+// even though the code path that stores them is dead.  Use weak symbols
+// so tests that supply their own strong definitions (e.g. gin-plugin-init-test)
+// win without a duplicate-symbol error.
+#if defined(__powerpc64__) || defined(__PPC64__)
+#include "gin.h"
+#include "net.h"
+extern "C" {
+__attribute__((weak)) int ncclNetIb_devices(int* ndev) { *ndev = 0; return 0; }
+__attribute__((weak)) int ncclNetGdrCopy_devices(int* ndev) { *ndev = 0; return 0; }
+__attribute__((weak)) int ncclNetSocket_devices(int* ndev) { *ndev = 0; return 0; }
+__attribute__((weak)) int ncclGinDeviceCount(void) { return 0; }
+__attribute__((weak)) int ncclGinCustomAllReduceDeviceCount(void) { return 0; }
+}
+// topo.cc stores ncclNetGetDevCount / ncclGinGetDevCount / etc. as function
+// pointers in netInfo; the TOC entry survives --gc-sections on POWER even
+// when the code path is dead.  Weak stubs let rccl-UnitTestsMicroGraphDev
+// (which links the real topo.cc but not graph_fakes.cc) resolve them.
+__attribute__((weak)) ncclResult_t ncclNetGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclCollNetGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclGinGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclRmaGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclNetSetVirtDevCount(int, int) { return ncclSuccess; }
+__attribute__((weak)) ncclResult_t ncclCollNetSetVirtDevCount(int, int) { return ncclSuccess; }
+#endif

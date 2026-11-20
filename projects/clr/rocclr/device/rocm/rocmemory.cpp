@@ -25,8 +25,10 @@
 #include "platform/external_memory.hpp"
 
 #ifdef _WIN32
+#include "device/rocm/rocd3d9interop.hpp"
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d9.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
 #endif
@@ -81,8 +83,6 @@ Memory::~Memory() {
 
 bool Memory::allocateMapMemory(size_t allocationSize) {
   assert(mapMemory_ == nullptr);
-
-  void* mapData = nullptr;
 
   amd::Memory* mapMemory = dev().findMapTarget(owner()->getSize());
   if (mapMemory == nullptr) {
@@ -311,18 +311,21 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
 
   // Check if this is D3D interop (vs GL interop)
   amd::InteropObject* interopObj = owner()->getInteropObj();
+
+  const bool querySrd = isImage;
+
   // SRD and size are only needed for images; pass nullptr for plain buffers.
-  void* srdPtr = isImage ? amdImageDesc_->data : nullptr;
-  UINT srdSize = isImage ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
+  void* srdPtr = querySrd ? amdImageDesc_->data : nullptr;
+  UINT srdSize = querySrd ? MaxMetadataSizeDwords * sizeof(uint32_t) : 0;
   size_t sizeHint = 0;
   // The *Interop::Export calls below fill a full driver SRD into data[0..7], so mark the descriptor
   // as carrying an SRD (version 1) before interopMapBuffer, which then skips the metadata query.
-  if (isImage) amdImageDesc_->version = 1;
+  if (querySrd) amdImageDesc_->version = 1;
   if (interopObj->asD3D11Object()) {
     // D3D11 interop
     D3D11Object* d3d11Obj = interopObj->asD3D11Object();
     if (!D3D11Interop::Export(this, d3d11Obj, &handle, &offset,
-                              srdPtr, isImage ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
+                              srdPtr, querySrd ? &srdSize : nullptr, &mapFlags, &sizeHint)) {
       LogError("D3D11Interop::Export failed for buffer");
       return false;
     }
@@ -332,6 +335,13 @@ bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
     if (!D3D10Interop::Export(this, d3d10Obj, &handle, &offset,
                               srdPtr, isImage ? &srdSize : nullptr, &mapFlags)) {
       LogError("D3D10Interop::Export failed for buffer");
+      return false;
+    }
+  } else if (interopObj->asD3D9Object()) {
+    D3D9Object* d3d9Obj = interopObj->asD3D9Object();
+    if (!D3D9Interop::Export(this, d3d9Obj, &handle, &offset,
+                             srdPtr, isImage ? &srdSize : nullptr, &mapFlags)) {
+      LogError("D3D9Interop::Export failed for buffer");
       return false;
     }
   } else if (interopObj->asGLObject()) {
@@ -405,7 +415,6 @@ void Memory::destroyInteropBuffer() {
 }
 
 bool Memory::pinSystemMemory(void* hostPtr, size_t size) {
-  size_t pinAllocSize;
   const static bool SysMem = true;
   amd::Memory* amdMemory = nullptr;
   amd::Memory* amdParent = owner()->parent();
@@ -715,7 +724,7 @@ void Memory::mgpuCacheWriteBack(VirtualGPU& gpu) {
   // Make synchronization
   if (owner()->getHostMem() != nullptr) {
     //! \note Ignore pinning result
-    bool ok = pinSystemMemory(owner()->getHostMem(), owner()->getSize());
+    (void)pinSystemMemory(owner()->getHostMem(), owner()->getSize());
     owner()->cacheWriteBack(&gpu);
   }
 }
@@ -841,7 +850,7 @@ void Buffer::destroy() {
       }
     }
 
-    if (needUnlockHostMem) {
+    if (needUnlockHostMem && HostLockOwner()) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
         if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
@@ -1185,8 +1194,36 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     owner()->setHostMem(deviceMemory_);
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-      deviceMemory_ =
-          dev().hostLock(owner()->getHostMem(), owner()->getSize(), getHostMemorySegment(memFlags));
+      // HIP's context always spans every device, so one device can lock every agent in a
+      // single call and the rest reuse that mapping; OpenCL's context can be a genuine
+      // subset, so it keeps locking per-device.
+      const bool shareLock = amd::IS_HIP && owner()->getContext().devices().size() > 1;
+
+      // addDeviceMemory() holds owner()->lockMemoryOps() for this whole call, so the first
+      // device to reach here for a given owner is always fully initialized by the time any
+      // other device gets here.
+      roc::Memory* first =
+          shareLock ? static_cast<roc::Memory*>(owner()->getOriginalDeviceMemory()) : nullptr;
+
+      if (first != nullptr && first != this && first->HostLockAllAgents()) {
+        // Reuse the first device's mapping; it remains the sole unlock owner.
+        assert(first->HostLockOwner() && "An all-agent lock must have an unlock owner!");
+        deviceMemory_ = reinterpret_cast<void*>(first->virtualAddress());
+        assert(!HostLockOwner() && "Only the locking device may unlock the range!");
+      } else {
+        // Only the first device for this owner ever attempts the group lock, so a failed
+        // attempt is never retried by a sibling.
+        const bool tryAllAgents = shareLock && (first == nullptr || first == this);
+        deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                       getHostMemorySegment(memFlags), tryAllAgents);
+        const bool lockedAllAgents = tryAllAgents && deviceMemory_ != nullptr;
+        if (deviceMemory_ == nullptr && tryAllAgents) {
+          // Group lock failed; fall back to locking just this device.
+          deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                         getHostMemorySegment(memFlags));
+        }
+        setHostLockState(deviceMemory_ != nullptr, lockedAllAgents);
+      }
     } else {
       deviceMemory_ = owner()->getHostMem();
     }
@@ -1197,50 +1234,49 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   return (success = (deviceMemory_ != nullptr));
 }
 
-// Resolve an imported VMM buffer's owning agent from its physical memory handle, since
-// pointer_info reports a null owner for imports. Returns false for non-VMM memory.
-static bool vmmOwningAgent(const Memory* self, hsa_agent_t* agent) {
-  amd::Memory* owner = self->owner();
-  if (owner == nullptr || !owner->vmmImported() || owner->getUserData().phys_mem_obj == nullptr) {
-    return false;
-  }
-  hsa_amd_vmem_alloc_handle_t handle{owner->getUserData().phys_mem_obj->getUserData().hsa_handle};
-  hsa_amd_vmem_handle_info_t info = {};
-  info.size = sizeof(info);
-  if (Hsa::vmem_get_vmem_info(handle, &info) != HSA_STATUS_SUCCESS || info.agent.handle == 0) {
-    return false;
-  }
-  *agent = info.agent;
-  return true;
-}
+// Resolve the agent that owns the backing pages, which for imported memory is a peer device.
+// A mapped VMM range asks its physical handle, since pointer_info reports no owner for a handle
+// imported from another process. Other memory (IPC-opened) asks pointer_info, keyed off a valid
+// agentOwner because ROCr does not always tag IPC memory with HSA_EXT_POINTER_TYPE_IPC. A fabric
+// import reports no owner either way and falls back to this device.
+void Memory::refreshOwningAgent() {
+  hsa_agent_t agent = {};
+  amd::Memory* phys = (owner() != nullptr) ? owner()->getUserData().phys_mem_obj : nullptr;
 
-// For VMM-imported memory, resolve the owner from the allocation handle (vmem_get_vmem_info):
-// pointer_info is not sufficient there, as it reports a null owner for imports. All other memory
-// uses pointer_info.
-void Memory::refreshOwningAgentFromPointerInfo() {
-  if (deviceMemory_ == nullptr) {
-    return;
+  if (phys != nullptr) {
+    hsa_amd_vmem_alloc_handle_t handle{phys->getUserData().hsa_handle};
+    hsa_amd_vmem_handle_info_t handle_info = {};
+    handle_info.size = sizeof(handle_info);
+    if (Hsa::vmem_get_vmem_info(handle, &handle_info) == HSA_STATUS_SUCCESS) {
+      agent = handle_info.agent;
+    }
+  } else {
+    assert(deviceMemory_ != nullptr && "refreshOwningAgent called before memory was backed!");
+    hsa_amd_pointer_info_t ptr_info = {};
+    ptr_info.size = sizeof(ptr_info);
+    if (hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &ptr_info, nullptr, nullptr,
+                             nullptr) == HSA_STATUS_SUCCESS) {
+      agent = ptr_info.agentOwner;
+    }
   }
 
-  hsa_agent_t agent;
-  if (!vmmOwningAgent(this, &agent)) {
-    hsa_amd_pointer_info_t info = {};
-    info.size = sizeof(info);
-    hsa_status_t err = hsa_amd_pointer_info(reinterpret_cast<address>(deviceMemory_), &info,
-                                            nullptr, nullptr, nullptr);
-
-    // info.agentOwner is the agent that actually owns the backing pages (a peer device for
-    // IPC memory). Note ROCr does not always tag IPC-opened memory with
-    // HSA_EXT_POINTER_TYPE_IPC, so key off a valid agentOwner rather than the pointer type.
-    agent = (err == HSA_STATUS_SUCCESS && info.agentOwner.handle != 0) ? info.agentOwner
-                                                                       : dev().getBackendDevice();
-  }
-  setOwningAgent(agent);
+  // Always set an agent: computeAndSetOwningAgent() calls this with nothing cached, and
+  // getOwningAgent() feeds the copy agents in rocblit.
+  setOwningAgent(agent.handle != 0 ? agent : dev().getBackendDevice());
 }
 
 // Helper function to compute and cache the owning agent
 void Buffer::computeAndSetOwningAgent() {
   hsa_agent_t agent;
+
+  // Memory backed by another device's pages is owned by that device. A mapped VMM range belongs
+  // to its physical handle's agent rather than the VA reservation it is carved from, so this
+  // must precede the sub-buffer inheritance below.
+  if (owner() != nullptr &&
+      (owner()->getUserData().phys_mem_obj != nullptr || owner()->ipcShared())) {
+    refreshOwningAgent();
+    return;
+  }
 
   // Sub-buffers must inherit agent from parent, not recompute it
   if (owner() != nullptr && owner()->parent() != nullptr) {
@@ -1253,11 +1289,6 @@ void Buffer::computeAndSetOwningAgent() {
     }
     // Fallback if parent not available (shouldn't happen)
     LogWarning("Sub-buffer parent not available for agent inheritance");
-  }
-
-  if (owner() != nullptr && (owner()->ipcShared() || owner()->vmmImported())) {
-    refreshOwningAgentFromPointerInfo();
-    return;
   }
 
   if (kind_ == MEMORY_KIND_ARENA || kind_ == MEMORY_KIND_HOST) {
@@ -1533,8 +1564,10 @@ bool Image::createInteropImage() {
     }
   }
 #ifdef _WIN32
-  // Handle D3D interop images (D3D11/D3D10 supported)
-  else if (owner()->getInteropObj()->asD3D11Object() || owner()->getInteropObj()->asD3D10Object()) {
+  // Handle D3D interop images (D3D11/D3D10/D3D9 supported)
+  else if (owner()->getInteropObj()->asD3D11Object() ||
+           owner()->getInteropObj()->asD3D10Object() ||
+           owner()->getInteropObj()->asD3D9Object()) {
     // For D3D, we use targetType=0 and miplevel from D3D object
     // The createInteropBuffer will detect D3D object type and handle appropriately
     if (!createInteropBuffer(0, 0)) {
@@ -1636,11 +1669,14 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
 
   if (originalDeviceMemory_ == nullptr) {
     originalDeviceMemory_ = dev().hostAlloc(alloc_size, 1, Device::MemorySegment::kNoAtomics);
-    if (originalDeviceMemory_ != nullptr) {
-      kind_ = MEMORY_KIND_HOST;
-      if (dev().settings().apuSystem_) {
-        const_cast<Device&>(dev()).updateFreeMemory(alloc_size, false);
-      }
+    if (originalDeviceMemory_ == nullptr) {
+      LogPrintfError("Fail to allocate image memory of size 0x%zx in device or host memory",
+                     alloc_size);
+      return false;
+    }
+    kind_ = MEMORY_KIND_HOST;
+    if (dev().settings().apuSystem_) {
+      const_cast<Device&>(dev()).updateFreeMemory(alloc_size, false);
     }
   } else {
     const_cast<Device&>(dev()).updateFreeMemory(alloc_size, false);
@@ -1780,7 +1816,7 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
         // There are corner cases which still need workaround.
         const size_t kAlignments[] = {16, 32, 64, 128, 256};
         size_t tryPitch;
-        for (int i = 0; i < sizeof(kAlignments) / sizeof(kAlignments[0]); i++) {
+        for (size_t i = 0; i < sizeof(kAlignments) / sizeof(kAlignments[0]); i++) {
           tryPitch = amd::alignUp(ownerImage.getWidth(), kAlignments[i]) * elementSize;
           if (tryPitch >= rowPitch) {
             break;
@@ -1940,7 +1976,7 @@ void Image::destroy() {
   delete copyImageBuffer_;
 
   if (hsaImageObject_.handle != 0 && ownsHsaImageObject_) {
-    hsa_status_t status = Hsa::image_destroy(dev().getBackendDevice(), hsaImageObject_);
+    [[maybe_unused]] hsa_status_t status = Hsa::image_destroy(dev().getBackendDevice(), hsaImageObject_);
     assert(status == HSA_STATUS_SUCCESS);
   }
   // Don't destroy memory if it's a view. Parent will destroy the original allocation.

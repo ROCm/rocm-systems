@@ -280,11 +280,18 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       uint16_t base_lo = 0;
       uint16_t base_width = 0;
       const bool loads_through_kernarg =
-          inst.mnemonic().starts_with("s_load_b") && inst.num_src_operands() >= 1 &&
-          pair_operand(inst.src_operand(0), base_lo, base_width) && state.pointer.contains(base_lo);
+          (inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B32 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B64 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B96 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B128 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B256 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B512) &&
+          inst.num_src_operands() >= 1 && pair_operand(inst.src_operand(0), base_lo, base_width) &&
+          state.pointer.contains(base_lo);
       uint16_t copy_lo = 0;
       uint16_t copy_width = 0;
-      const bool copies_pointer = inst.mnemonic() == "s_mov_b64" && inst.num_src_operands() == 1 &&
+      const bool copies_pointer = inst.amdgpu_operation() == amdgpu::Operation::S_MOV_B64 &&
+                                  inst.num_src_operands() == 1 &&
                                   pair_operand(inst.src_operand(0), copy_lo, copy_width) &&
                                   copy_width == 2 && state.pointer.contains(copy_lo);
 
@@ -296,7 +303,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       kill_defs(inst, state);
 
       // A call clobbers everything the ABI does not preserve, direct or indirect alike.
-      if ((flags & INDIRECT_CALL) != 0 || inst.mnemonic().starts_with("s_call")) {
+      if ((flags & INDIRECT_CALL) != 0) {
         std::erase_if(state.pointer, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
         std::erase_if(state.loaded, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
       }
@@ -424,7 +431,8 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
       if (decoded.succeeded()) {
         const std::unique_ptr<Instruction> &slot_inst = decoded.value();
         if (slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
-            slot_inst->mnemonic() == "s_branch" && slot_inst->branch_offset_bytes()) {
+            slot_inst->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
+            slot_inst->branch_offset_bytes()) {
           continue;
         }
       }
@@ -1219,8 +1227,10 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         continue;
       const Instruction *term = block->terminator();
       if (term != nullptr && term->size() == sizeof(uint32_t)) {
-        const std::string_view mnemonic = term->mnemonic();
-        if (mnemonic == "s_setpc_b64" || mnemonic == "s_set_pc_i64")
+
+        const amdgpu::Operation operation = term->amdgpu_operation();
+        if (operation == amdgpu::Operation::S_SETPC_B64 ||
+            operation == amdgpu::Operation::S_SET_PC_I64)
           candidates.emplace_back(
               block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
       }
@@ -1273,25 +1283,28 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         while (cursor > 0) {
           --cursor;
           const Instruction &inst = *ordered[cursor];
-          const std::string_view lane_mnemonic = inst.mnemonic();
+
+          const amdgpu::Operation lane_operation = inst.amdgpu_operation();
           // The lane identity here is a low selector only. Anything that moves the VGPR bank makes
           // that selector name a different physical register, so the comparison below stops meaning
           // what it says and the proof has to give up.
-          if (lane_mnemonic == "s_set_vgpr_msb" || lane_mnemonic == "s_setreg_b32" ||
-              lane_mnemonic == "s_setreg_imm32_b32")
+          if (lane_operation == amdgpu::Operation::S_SET_VGPR_MSB ||
+              lane_operation == amdgpu::Operation::S_SETREG_B32 ||
+              lane_operation == amdgpu::Operation::S_SETREG_IMM32_B32)
             return false;
           // A call only endangers the stash if the callee is allowed to write the lane's register.
           // The ABI keeps callee-saved VGPRs across a call, which is exactly what makes the
           // non-leaf save/call/restore shape legitimate, so those survive; a caller-saved register
           // may be overwritten inside the callee and fails closed.
           const bool is_call = (inst.flags() & INDIRECT_CALL) != 0 ||
-                               lane_mnemonic == "s_call_i64" || lane_mnemonic == "s_swap_pc_i64" ||
-                               lane_mnemonic == "s_swappc_b64";
+                               lane_operation == amdgpu::Operation::S_CALL_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAPPC_B64;
           if (is_call && !is_callee_saved_vgpr(vgpr))
             return false;
           const Operand *vdst = inst.dst_operand(0);
-          const bool writes_lane =
-              lane_mnemonic == "v_writelane_b32" && vdst != nullptr && vdst->encoding_value() >= 0;
+          const bool writes_lane = lane_operation == amdgpu::Operation::V_WRITELANE_B32 &&
+                                   vdst != nullptr && vdst->encoding_value() >= 0;
           if (writes_lane && static_cast<uint16_t>(vdst->encoding_value()) == vgpr) {
             const Operand *ssrc = inst.src_operand(0);
             const Operand *written_lane = inst.src_operand(1);
@@ -1363,9 +1376,11 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       // has no callee-saved SGPRs that a translated body may rely on here, so any call between the
       // definition and the use invalidates the value. The call instruction's own destination list
       // does not mention it, which is why this is checked before the operand walk.
-      const std::string_view sgpr_mnemonic = inst.mnemonic();
-      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_mnemonic == "s_call_i64" ||
-          sgpr_mnemonic == "s_swap_pc_i64" || sgpr_mnemonic == "s_swappc_b64")
+
+      const amdgpu::Operation sgpr_operation = inst.amdgpu_operation();
+      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_operation == amdgpu::Operation::S_CALL_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAPPC_B64)
         return Effect::kRedefines;
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
@@ -1389,7 +1404,7 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         return Effect::kNone;
       // The nested provenance query runs with this off: a lane restore is exactly what it is
       // trying to justify, so letting it count one would be circular.
-      if (!allow_lane_restore || inst.mnemonic() != "v_readlane_b32")
+      if (!allow_lane_restore || inst.amdgpu_operation() != amdgpu::Operation::V_READLANE_B32)
         return Effect::kRedefines;
       // Only a read of the exact lane this body saved the same register into restores the caller's
       // value. Reading some other lane, or another register's lane, produces a value this analysis
@@ -2061,217 +2076,207 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     return;
   }
 
-  try {
-    AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
-    if (!output.is_valid()) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification could not parse the final code object");
-      return;
-    }
-    if (!has_supported_executable_section_layout(output)) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification requires exactly one allocated executable section "
-          "named .text");
-      return;
-    }
-    if (output.allocated_executable_sections().empty()) {
-      result.rewrite_discharge_verified = true;
-      return;
+  AmdGpuCodeObject output(result.elf_bytes.data(), result.elf_bytes.size());
+  if (!output.is_valid()) {
+    append_rewrite_discharge_error(
+        result.diagnostics, "rewrite-discharge verification could not parse the final code object");
+    return;
+  }
+  if (!has_supported_executable_section_layout(output)) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification requires exactly one allocated executable section "
+        "named .text");
+    return;
+  }
+  if (output.allocated_executable_sections().empty()) {
+    result.rewrite_discharge_verified = true;
+    return;
+  }
+
+  const IsaGpuTargetDescription *host_target =
+      default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
+  auto decoder = host_target == nullptr
+                     ? Decoder::create(host_arch_)
+                     : Decoder::create(default_isa_target_registry(), host_target->public_id);
+  if (!decoder) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification has no decoder for the final architecture");
+    return;
+  }
+
+  const Section *text = output.text_sections().front();
+  if (text->size() == 0) {
+    result.rewrite_discharge_verified = true;
+    return;
+  }
+  const auto image = std::span<const uint8_t>(result.elf_bytes);
+  const auto text_bytes =
+      std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+  if (text_bytes.size() % sizeof(uint32_t) != 0) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification found a partial instruction word in final output",
+        text_bytes.size() - text_bytes.size() % sizeof(uint32_t));
+    return;
+  }
+
+  KernelDescriptorTranslator descriptor_parser(host_arch_, host_arch_);
+  const auto descriptor_translations = descriptor_parser.translate_image(
+      image, text->sectionOffset(), text->size(), KernelDescriptorTranslationOptions{},
+      text->sectionHeaderIndex());
+  auto block_leaders = kernel_block_leaders(descriptor_translations, text_bytes);
+
+  for (const RelocationFunctionTable &table : discover_relocation_function_tables(output)) {
+    for (const RelocationFunctionPointer &entry : table.entries)
+      block_leaders.push_back(entry.target_text_offset);
+  }
+
+  const auto relocation_leaders = text_relocation_block_leaders(image, *text);
+  if (!relocation_leaders) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification could not recover final executable entries");
+    return;
+  }
+  block_leaders.insert(block_leaders.end(), relocation_leaders->begin(), relocation_leaders->end());
+  std::ranges::sort(block_leaders);
+  block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
+
+  // Most residual predicates inspect only one decoded instruction. Scan those
+  // with constant live memory and retain the full CFG path only when a rule
+  // explicitly requires basic-block neighbors. Besides reducing peak RSS,
+  // delaying CFG construction preserves the existing contextual behavior for
+  // tensor, cluster-load, and IU8-WMMA sequence checks.
+  std::vector<TranslationDiagnostic> streaming_diagnostics;
+  const size_t instruction_word_count = text->size() / sizeof(uint32_t);
+  internal::RewriteDischargeInstructionDecoder instruction_decoder(*decoder);
+  if (!instruction_decoder.has_valid_lookahead_bound()) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification decoder reported an invalid lookahead bound");
+    return;
+  }
+  size_t instruction_word_index = 0;
+  uint64_t instruction_offset = 0;
+  size_t next_block_leader = 0;
+  bool invalid_block_leader = false;
+  bool needs_basic_block = false;
+  while (instruction_word_index < instruction_word_count) {
+    if (next_block_leader < block_leaders.size() &&
+        block_leaders[next_block_leader] < instruction_offset) {
+      invalid_block_leader = true;
+      break;
     }
 
-    const IsaGpuTargetDescription *host_target =
-        default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
-    auto decoder = host_target == nullptr
-                       ? Decoder::create(host_arch_)
-                       : Decoder::create(default_isa_target_registry(), host_target->public_id);
-    if (!decoder) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification has no decoder for the final architecture");
-      return;
+    uint32_t first_word = 0;
+    std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
+    if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
+      ++instruction_word_index;
+      instruction_offset += sizeof(uint32_t);
+      continue;
     }
 
-    const Section *text = output.text_sections().front();
-    if (text->size() == 0) {
-      result.rewrite_discharge_verified = true;
-      return;
-    }
-    const auto image = std::span<const uint8_t>(result.elf_bytes);
-    const auto text_bytes =
-        std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
-    if (text_bytes.size() % sizeof(uint32_t) != 0) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification found a partial instruction word in final output",
-          text_bytes.size() - text_bytes.size() % sizeof(uint32_t));
-      return;
+    if (next_block_leader < block_leaders.size() &&
+        block_leaders[next_block_leader] == instruction_offset) {
+      ++next_block_leader;
     }
 
-    KernelDescriptorTranslator descriptor_parser(host_arch_, host_arch_);
-    const auto descriptor_translations = descriptor_parser.translate_image(
-        image, text->sectionOffset(), text->size(), KernelDescriptorTranslationOptions{},
-        text->sectionHeaderIndex());
-    auto block_leaders = kernel_block_leaders(descriptor_translations, text_bytes);
-
-    for (const RelocationFunctionTable &table : discover_relocation_function_tables(output)) {
-      for (const RelocationFunctionPointer &entry : table.entries)
-        block_leaders.push_back(entry.target_text_offset);
-    }
-
-    const auto relocation_leaders = text_relocation_block_leaders(image, *text);
-    if (!relocation_leaders) {
-      append_rewrite_discharge_error(
-          result.diagnostics,
-          "rewrite-discharge verification could not recover final executable entries");
-      return;
-    }
-    block_leaders.insert(block_leaders.end(), relocation_leaders->begin(),
-                         relocation_leaders->end());
-    std::ranges::sort(block_leaders);
-    block_leaders.erase(std::ranges::unique(block_leaders).begin(), block_leaders.end());
-
-    // Most residual predicates inspect only one decoded instruction. Scan those
-    // with constant live memory and retain the full CFG path only when a rule
-    // explicitly requires basic-block neighbors. Besides reducing peak RSS,
-    // delaying CFG construction preserves the existing contextual behavior for
-    // tensor, cluster-load, and IU8-WMMA sequence checks.
-    std::vector<TranslationDiagnostic> streaming_diagnostics;
-    const size_t instruction_word_count = text->size() / sizeof(uint32_t);
-    internal::RewriteDischargeInstructionDecoder instruction_decoder(*decoder);
-    if (!instruction_decoder.has_valid_lookahead_bound()) {
+    std::unique_ptr<Instruction> inst;
+    util::StringDiagnostic decode_error;
+    const auto decode_status = instruction_decoder.decode(
+        text_bytes.subspan(instruction_offset), instruction_offset, inst, decode_error.emitter());
+    if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound) {
       append_rewrite_discharge_error(
           result.diagnostics,
           "rewrite-discharge verification decoder reported an invalid lookahead bound");
       return;
     }
-    size_t instruction_word_index = 0;
-    uint64_t instruction_offset = 0;
-    size_t next_block_leader = 0;
-    bool invalid_block_leader = false;
-    bool needs_basic_block = false;
-    while (instruction_word_index < instruction_word_count) {
-      if (next_block_leader < block_leaders.size() &&
-          block_leaders[next_block_leader] < instruction_offset) {
-        invalid_block_leader = true;
-        break;
-      }
-
-      uint32_t first_word = 0;
-      std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
-      if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
-        ++instruction_word_index;
-        instruction_offset += sizeof(uint32_t);
-        continue;
-      }
-
-      if (next_block_leader < block_leaders.size() &&
-          block_leaders[next_block_leader] == instruction_offset) {
-        ++next_block_leader;
-      }
-
-      std::unique_ptr<Instruction> inst;
-      util::StringDiagnostic decode_error;
-      const auto decode_status = instruction_decoder.decode(
-          text_bytes.subspan(instruction_offset), instruction_offset, inst, decode_error.emitter());
-      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidLookaheadBound) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification decoder reported an invalid lookahead bound");
-        return;
-      }
-      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidEncoding) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification failed to decode final output: " +
-                decode_error.message(),
-            instruction_offset);
-        return;
-      }
-      if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidInstructionSize) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification decoded an invalid instruction size in final output",
-            instruction_offset);
-        return;
-      }
-      const size_t instruction_size = static_cast<size_t>(inst->size());
-      const size_t decoded_words = instruction_size / sizeof(uint32_t);
-      if (decode_status == internal::RewriteDischargeDecodeStatus::TruncatedInstruction) {
-        append_rewrite_discharge_error(
-            result.diagnostics,
-            "rewrite-discharge verification found a truncated instruction in final output",
-            instruction_offset, std::string(inst->mnemonic()));
-        return;
-      }
-      if (semantic_translator_->residual_rewrite_needs_basic_block(*inst))
-        needs_basic_block = true;
-      if (semantic_translator_->instruction_local_residual_rewrite_applies(*inst)) {
-        append_rewrite_discharge_error(streaming_diagnostics,
-                                       "registered rewrite remains actionable in final output",
-                                       inst->src_loc(), std::string(inst->mnemonic()));
-      }
-      instruction_word_index += decoded_words;
-      instruction_offset += instruction_size;
-    }
-
-    invalid_block_leader |= next_block_leader != block_leaders.size();
-    invalid_block_leader |= instruction_offset != text_bytes.size();
-    if (invalid_block_leader) {
+    if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidEncoding) {
       append_rewrite_discharge_error(
           result.diagnostics,
-          "rewrite-discharge verification found an invalid final executable entry");
+          "rewrite-discharge verification failed to decode final output: " + decode_error.message(),
+          instruction_offset);
       return;
     }
-
-    if (!needs_basic_block) {
-      const bool found_residual = !streaming_diagnostics.empty();
-      result.diagnostics.insert(result.diagnostics.end(),
-                                std::make_move_iterator(streaming_diagnostics.begin()),
-                                std::make_move_iterator(streaming_diagnostics.end()));
-      result.rewrite_discharge_verified = !found_residual;
-      return;
-    }
-
-    util::StringDiagnostic decode_error;
-    FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result = BasicBlock::build_cfg(
-        output, *decoder, host_arch_,
-        {.decode_policy = BasicBlock::DecodePolicy::FullSection, .entries = block_leaders},
-        decode_error.emitter());
-    if (block_result.failed()) {
-      append_rewrite_discharge_error(
-          result.diagnostics, "rewrite-discharge verification failed to decode final output: " +
-                                  decode_error.message());
-      return;
-    }
-    std::vector<std::unique_ptr<BasicBlock>> blocks = std::move(block_result).value();
-    if (has_invalid_block_leader(blocks, block_leaders, text->size())) {
+    if (decode_status == internal::RewriteDischargeDecodeStatus::InvalidInstructionSize) {
       append_rewrite_discharge_error(
           result.diagnostics,
-          "rewrite-discharge verification found an invalid final executable entry");
+          "rewrite-discharge verification decoded an invalid instruction size in final output",
+          instruction_offset);
       return;
     }
-
-    bool found_residual = false;
-    for (const auto &block : blocks) {
-      for (const Instruction &inst : block->instructions()) {
-        if (!semantic_translator_->residual_rewrite_applies(inst))
-          continue;
-        found_residual = true;
-        append_rewrite_discharge_error(result.diagnostics,
-                                       "registered rewrite remains actionable in final output",
-                                       inst.src_loc(), std::string(inst.mnemonic()));
-      }
+    const size_t instruction_size = static_cast<size_t>(inst->size());
+    const size_t decoded_words = instruction_size / sizeof(uint32_t);
+    if (decode_status == internal::RewriteDischargeDecodeStatus::TruncatedInstruction) {
+      append_rewrite_discharge_error(
+          result.diagnostics,
+          "rewrite-discharge verification found a truncated instruction in final output",
+          instruction_offset, std::string(inst->mnemonic()));
+      return;
     }
+    if (semantic_translator_->residual_rewrite_needs_basic_block(*inst))
+      needs_basic_block = true;
+    if (semantic_translator_->instruction_local_residual_rewrite_applies(*inst)) {
+      append_rewrite_discharge_error(streaming_diagnostics,
+                                     "registered rewrite remains actionable in final output",
+                                     inst->src_loc(), std::string(inst->mnemonic()));
+    }
+    instruction_word_index += decoded_words;
+    instruction_offset += instruction_size;
+  }
 
-    result.rewrite_discharge_verified = !found_residual;
-  } catch (const std::exception &error) {
+  invalid_block_leader |= next_block_leader != block_leaders.size();
+  invalid_block_leader |= instruction_offset != text_bytes.size();
+  if (invalid_block_leader) {
     append_rewrite_discharge_error(
         result.diagnostics,
-        std::string("rewrite-discharge verification failed to decode final output: ") +
-            error.what());
+        "rewrite-discharge verification found an invalid final executable entry");
+    return;
   }
+
+  if (!needs_basic_block) {
+    const bool found_residual = !streaming_diagnostics.empty();
+    result.diagnostics.insert(result.diagnostics.end(),
+                              std::make_move_iterator(streaming_diagnostics.begin()),
+                              std::make_move_iterator(streaming_diagnostics.end()));
+    result.rewrite_discharge_verified = !found_residual;
+    return;
+  }
+
+  util::StringDiagnostic decode_error;
+  FailureOr<std::vector<std::unique_ptr<BasicBlock>>> block_result = BasicBlock::build_cfg(
+      output, *decoder, host_arch_,
+      {.decode_policy = BasicBlock::DecodePolicy::FullSection, .entries = block_leaders},
+      decode_error.emitter());
+  if (block_result.failed()) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification failed to decode final output: " + decode_error.message());
+    return;
+  }
+  std::vector<std::unique_ptr<BasicBlock>> blocks = std::move(block_result).value();
+  if (has_invalid_block_leader(blocks, block_leaders, text->size())) {
+    append_rewrite_discharge_error(
+        result.diagnostics,
+        "rewrite-discharge verification found an invalid final executable entry");
+    return;
+  }
+
+  bool found_residual = false;
+  for (const auto &block : blocks) {
+    for (const Instruction &inst : block->instructions()) {
+      if (!semantic_translator_->residual_rewrite_applies(inst))
+        continue;
+      found_residual = true;
+      append_rewrite_discharge_error(result.diagnostics,
+                                     "registered rewrite remains actionable in final output",
+                                     inst.src_loc(), std::string(inst.mnemonic()));
+    }
+  }
+
+  result.rewrite_discharge_verified = !found_residual;
 }
 
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
@@ -2435,6 +2440,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   util::FailureOr<uint32_t> host_endpgm = build_s_endpgm(host_arch_, &host_builder_error);
   if (host_endpgm.failed())
     return leave_unchanged();
+  if (guest_arch_ != host_arch_ && (!encoding_translate_ || !legalization_lookup_)) {
+    append_error(result.diagnostics, DiagnosticKind::Legalization,
+                 "no instruction translator for this guest and host architecture pair");
+    return leave_unchanged();
+  }
 
   if (is_gfx1250_b0_to_a0())
     decoder = std::make_unique<Gfx1250B0ToA0CanonicalizingDecoder>(std::move(decoder));
@@ -3407,23 +3417,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // entry at +256, which hardware enters with unknown EXEC) and pass it to
       // LivenessAnalysis so EXEC-masked vector defs can be promoted to kills where
       // EXEC is provably full, freeing more scratch registers. Reference issue #9733.
-      // The EXEC analysis must use the liveness wave size (the LivenessAnalysis
-      // constructor requires a match), so a Wave32 ExecMaskAnalysis cannot be
-      // paired with the B0-to-A0 liveness below while it runs at 64.
-      //
-      // B0-to-A0 liveness keeps the decoded operand widths instead of gfx1250's
-      // Wave32, so that its translated output stays stable; narrowing it is #14566.
-      // This 64 is an output-stability policy, not the width the code executes at.
-      // It is conservative today because the only CDNA5 wave mask decoded as a pair
-      // is the VOPD3 v_dual_cndmask_b32 selector, a source: keeping the SGPR above
-      // it live is safe. CDNA5 wave-mask destinations already decode as one SGPR;
-      // a pair-decoded destination would kill the SGPR above it, which is not safe.
-      constexpr uint8_t kB0ToA0DecodedWidthLivenessWaveSize = 64;
-      const uint8_t liveness_wave_size = is_gfx1250_b0_to_a0_profile
-                                             ? kB0ToA0DecodedWidthLivenessWaveSize
-                                             : scope.translation->guest_wavefront_size;
-      liveness = LivenessAnalysis(KernelBlockScope(scope.blocks), liveness_wave_size,
-                                  /*exec=*/nullptr, liveness_options, scope_analysis_edges);
+      liveness =
+          LivenessAnalysis(KernelBlockScope(scope.blocks), scope.translation->guest_wavefront_size,
+                           /*exec=*/nullptr, liveness_options, scope_analysis_edges);
     }
 
     std::unique_ptr<Gfx1250VgprMsbAnalysis> wmma_completion_wait_vgpr_msb;
@@ -3512,7 +3508,8 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
         }
         const bool reachable_skip_over_pool =
-            preceding_terminator != nullptr && preceding_terminator->mnemonic() == "s_branch" &&
+            preceding_terminator != nullptr &&
+            preceding_terminator->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
             source_instruction_by_offset.contains(pool_end) && preceding_branch_target >= 0 &&
             static_cast<uint64_t>(preceding_branch_target) == pool_end;
         if (!reachable_header && !reachable_slot && !reachable_skip_over_pool)
@@ -4180,8 +4177,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // all_reduce run emitted 104,831 identical lines, burying the
         // diagnostics that do name a specific instruction. The record is
         // per-translation, so each code object still reports its own gaps.
-        if (leg == nullptr && is_gfx1250_b0_to_a0() &&
-            gfx1250_b0_to_a0_is_deferred_family(inst.mnemonic()) &&
+        if (leg == nullptr && is_gfx1250_b0_to_a0() && gfx1250_b0_to_a0_is_deferred_family(inst) &&
             reported_deferred_families_.emplace(inst.mnemonic()).second) {
           append_warning(result.diagnostics, DiagnosticKind::Legalization,
                          "gfx1250 translation passes through '" + std::string(inst.mnemonic()) +

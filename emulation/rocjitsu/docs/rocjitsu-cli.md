@@ -1,4 +1,4 @@
-# Rocjitsu CLI and Transport Layer Design
+# rocjitsu CLI and Transport Layer Design
 
 ## Overview
 
@@ -24,11 +24,10 @@ the simulated GPU. It operates in four modes:
 Daemon mode supports vLLM's multiprocessing spawn, torchrun, torch.distributed,
 and NCCL --- workloads where multiple processes share a single simulated GPU.
 
-Daemon mode currently rejects dma-buf export with `EOPNOTSUPP`; its RPC protocol
-does not transfer exported descriptors. HIP VMM allocation (`hipMemCreate`)
-depends on that export even with `hipMemHandleTypeNone`, so ROCr may report it
-as out of memory. Use local mode for VMM allocation and its shareable-handle APIs.
-Ordinary daemon `hipMalloc`, copies, and kernel dispatch remain supported.
+Daemon mode transfers KFD dma-buf exports to clients. HIP VMM allocation,
+shareable-handle import and export, mapping, and access use remote DRM render
+files. GEM_VA sends the backing descriptor to the daemon, which maps it in the
+client's simulated GPU page table and retains it until unmap or client close.
 
 For HIP IPC between daemon clients (`hipIpcGetMemHandle` and
 `hipIpcOpenMemHandle`), set `HSA_ENABLE_IPC_MODE_LEGACY=1` before launching the
@@ -64,13 +63,13 @@ the others requires a separate queue/process recovery mechanism.
 ### The fork boundary
 
 A child created with `fork()` before the parent has started a GPU backend can
-initialize its own rocJITsu context. This supports Python forkserver workers.
+initialize its own rocjitsu context. This supports Python forkserver workers.
 The child handler replaces unused interposer bookkeeping and the host mapping
 lock, while preserving the invocation metadata used to find the configuration
 and daemon. It does not acquire or destroy inherited locks.
 
 **After the parent starts a backend, forked children must `exec` before using
-rocJITsu.** The child may inherit locks held by threads that no longer exist, so
+rocjitsu.** The child may inherit locks held by threads that no longer exist, so
 GPU endpoint opens fail with `ENODEV` until `exec` initializes a fresh context.
 This restriction applies to local and daemon clients, including after their GPU
 descriptors have been closed. Inheriting real GPU descriptors also prevents
@@ -175,7 +174,7 @@ destroys the topology root (VirtualMachine), which destroys the driver.
 | Local | `rocjitsu -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (server) | `rocjitsu --daemon -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (client) | LD_PRELOAD interposer | RemoteDriver (RPC stub) | In daemon process |
-| VFIO-user server | `rocjitsu --config ... --vfio-socket ...` (repeat per local GPU) | Guest AMDGPU driver through PCI/VFIO | rocJITsu process |
+| VFIO-user server | `rocjitsu --config ... --vfio-socket ...` (repeat per local GPU) | Guest AMDGPU driver through PCI/VFIO | rocjitsu process |
 
 ## RPC Protocol
 
@@ -204,6 +203,7 @@ All messages use a fixed 16-byte header followed by an opcode-specific payload:
 | `RPC_MMAP` | C->D->C | `RpcMmapRequest` / `RpcMmapResponse` | Optional |
 | `RPC_MUNMAP` | C->D->C | `RpcMunmapRequest` | No |
 | `RPC_IOCTL` | C->D->C | `RpcIoctlRequest` + raw args + inlined arrays | Optional |
+| `RPC_GEM_VA` | C->D->C | `RpcGemVaRequest` | On MAP |
 
 ### Embedded Pointer Serialization
 
@@ -228,6 +228,12 @@ Two RPC response forms carry backing descriptors with different lifetimes:
   backing. `RemoteDriver::mmap` closes the received alias on every exit, including
   size-check and mapping failures. If the reply has no descriptor, it borrows
   the stored allocation or import descriptor and leaves that descriptor open.
+- `RPC_GEM_VA` MAP requests: the client sends the PRIME-imported backing to the
+  daemon. The daemon retains its mapping until UNMAP or process close, after its
+  GPU page-table entries have been removed.
+- Successful KFD dma-buf export replies include the allocation's mapping flags
+  after the ioctl arguments, so a later PRIME import preserves the GPU cache
+  policy even if the KFD allocation is freed first.
 
 ### Thread Safety
 

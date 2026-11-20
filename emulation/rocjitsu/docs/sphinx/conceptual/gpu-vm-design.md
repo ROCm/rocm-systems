@@ -1,12 +1,12 @@
 ---
 myst:
     html_meta:
-        "description": "GPU virtual machine design in rocJITsu, covering SoC component hierarchy, command processor dispatch, wavefront execution, memory hierarchy, MTYPE coherency, and supported ISA targets."
-        "keywords": "rocJITsu, GPU, virtual machine, SoC, XCD, shader engine, compute unit, command processor, wavefront, memory hierarchy, cache, MTYPE, coherency, ROCm"
+        "description": "GPU virtual machine design in rocjitsu, covering SoC component hierarchy, command processor dispatch, wavefront execution, memory hierarchy, MTYPE coherency, and supported ISA targets."
+        "keywords": "rocjitsu, GPU, virtual machine, SoC, XCD, shader engine, compute unit, command processor, wavefront, memory hierarchy, cache, MTYPE, coherency, ROCm"
 ---
 # GPU virtual machine design
 
-rocJITsu models a complete GPU system-on-chip (SoC) as a hierarchy of
+rocjitsu models a complete GPU system-on-chip (SoC) as a hierarchy of
 simulation components. This page describes how those components are
 organized, how work flows from an AQL dispatch packet through the
 command processor to wavefront execution on compute units, and how the
@@ -76,9 +76,11 @@ failure.
 SDMA queues use the separate SoC-owned SDMA scheduler, ring consumer, and
 packet processor; no SDMA packet logic is part of the CP. A completion tracker
 inside each XCD monitors per-dispatch workgroup
-retirement and fires completion signals in submission order. When a
-hardware queue becomes idle, the tracker writes the queue-inactive
-signal.
+retirement and fires completion signals in submission order. When a hardware
+queue becomes idle, the tracker writes the event ID to its mailbox when present,
+delivers the targeted interrupt for a nonzero event ID, then delivers the generic
+interrupt. ROCr uses the queue-inactive signal's value for queue errors, scratch
+management, and teardown.
 
 In the public API, `rj_vm_run` drives the simulation to completion,
 while `rj_vm_step` advances the simulation by one tick. The VM creation

@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <cstdint>
@@ -27,6 +28,13 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+// Include immintrin.h before the macro so gdrwrap.h's wc_store_fence() reaches ObserveSfence() on x86_64.
+static void ObserveSfence();
+#if defined(__x86_64__)
+#include <immintrin.h>
+#define _mm_sfence() ObserveSfence()
+#endif
 
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
@@ -52,6 +60,15 @@
 // non-null ncclGdrCopy selects net.cc's GDRCopy arms.
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 gdr_t ncclGdrCopy = nullptr;
+
+// The send connection a fence is checked against, and whether a fence ran while its GDRCopy sync word held the
+// initial credit.
+static sendNetResources* g_fenceWatch = nullptr;
+static bool g_creditFenced = false;
+
+static void ObserveSfence() {
+  if (g_fenceWatch && g_fenceWatch->gdcSync && *g_fenceWatch->gdcSync == (uint64_t)-NCCL_STEPS) g_creditFenced = true;
+}
 
 namespace {
 
@@ -666,6 +683,7 @@ TEST_F(NetAttrsMicrotest, SetNetAttrs_PluginWithoutHints_LeavesCacheUntouched) {
 TEST_F(NetAttrsMicrotest, SetXferAttrs_SendCollective_PinsSendPeersFlowsAndAlgo) {
   proxyState_.netAttr = NCCL_NET_ATTR_INIT;
   args_.nPeers = 2;
+  args_.minPeers = 2;
   args_.nChannels = 4;
   args_.collAPI = ncclFuncAllReduce;
   args_.algorithm = NCCL_ALGO_RING;
@@ -800,7 +818,7 @@ class NetAllocMicrotestBase : public NetMicrotestBase {
       return hipSuccess;
     };
     g_ncclP2pAllocateShareableBuffer = [this](size_t n, int, ncclIpcDesc* desc, void** p, int, ncclMemManager*,
-                                              ncclMemType_t) {
+                                              ncclMemType_t, bool) {
       ++shareableAllocs_;
       *p = Alloc(n);
       memset(desc, 0xAB, sizeof(*desc));
@@ -944,7 +962,7 @@ TEST_F(NetSharedBuffersMicrotest, Init_DeviceBufferWithCuMem_AllocatesShareable)
 
 TEST_F(NetSharedBuffersMicrotest, Init_AllocationFails_ReturnsError) {
   ScopedHook alloc(g_ncclP2pAllocateShareableBuffer,
-                   [](size_t, int, ncclIpcDesc*, void**, int, ncclMemManager*, ncclMemType_t) {
+                   [](size_t, int, ncclIpcDesc*, void**, int, ncclMemManager*, ncclMemType_t, bool) {
                      return ncclSystemError;
                    });
 
@@ -1057,6 +1075,181 @@ TEST_F(NetSharedBuffersMicrotest, ProxySharedInit_ReservesSendPoolForConnectionR
   bool wsl = access("/dev/dxg", F_OK) == 0;
   EXPECT_EQ(State(2, 0).hostBuff != nullptr, wsl);
   EXPECT_EQ(State(2, 0).cudaBuff != nullptr, !wsl);
+}
+
+// ---------------------------------------------------------------------------
+// Huge-page host pool (sharedHostBuffAllocHuge / sharedHostBuffFreeHuge): a 2 MiB-aligned anonymous mmap pinned with
+// hipHostRegister. mmap, madvise and munmap are real; only the HIP registration calls are faked.
+// ---------------------------------------------------------------------------
+
+class NetSharedHostHugePagesMicrotest : public NetSharedBuffersMicrotest {
+ protected:
+  static constexpr size_t kHugePage = 2UL << 20;
+  // One channel of 128 KiB chunks over NCCL_SHARED_STEPS (16) makes the pool exactly one huge page.
+  static constexpr int kHugeChunk = 1 << 17;
+
+  void* devAlias_ = reinterpret_cast<void*>(0x7f0000200000UL);
+  hipError_t registerResult_ = hipSuccess;
+  hipError_t devPtrResult_ = hipSuccess;
+  int registers_ = 0, unregisters_ = 0;
+  void* registeredPtr_ = nullptr;
+  void* unregisteredPtr_ = nullptr;
+  size_t registeredSize_ = 0;
+  unsigned registeredFlags_ = 0;
+
+  void SetUp() override {
+    NetSharedBuffersMicrotest::SetUp();
+    proxyState_.p2pChunkSize = kHugeChunk;
+    g_hipHostRegister = [this](void* p, size_t n, unsigned flags) {
+      ++registers_;
+      registeredPtr_ = p;
+      registeredSize_ = n;
+      registeredFlags_ = flags;
+      return registerResult_;
+    };
+    g_hipHostUnregister = [this](void* p) {
+      ++unregisters_;
+      unregisteredPtr_ = p;
+      return hipSuccess;
+    };
+    g_hipHostGetDevicePointer = [this](void** dev, void*, unsigned) {
+      *dev = devAlias_;
+      return devPtrResult_;
+    };
+  }
+
+  // msync fails with ENOMEM on a range that is not mapped.
+  static bool IsMapped(void* p, size_t n) { return msync(p, n, MS_ASYNC) == 0; }
+};
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_PoolIsOneHugePage_RegistersAlignedMappingAndExposesDevicePointer) {
+  char *gpu = nullptr, *cpu = nullptr;
+  ssize_t size = 0;
+
+  ASSERT_EQ(Init(/*cuda=*/0, 1, 0, 1, /*nChannels=*/1, &gpu, &cpu, &size), ncclSuccess);
+
+  ASSERT_NE(cpu, nullptr);
+  EXPECT_EQ(size, (ssize_t)kHugePage);
+  EXPECT_EQ(hostAllocs_, 0);
+  EXPECT_EQ(registers_, 1);
+  EXPECT_EQ(registeredPtr_, cpu);
+  EXPECT_EQ(registeredSize_, kHugePage);
+  unsigned expectedFlags = hipHostRegisterPortable | hipHostRegisterMapped;
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+  expectedFlags |= hipExtHostRegisterUncached;
+#endif
+  EXPECT_EQ(registeredFlags_, expectedFlags);
+  EXPECT_EQ((uintptr_t)cpu % kHugePage, 0u);
+  EXPECT_EQ(cpu[0], 0);
+  EXPECT_EQ(cpu[kHugePage - 1], 0);
+  EXPECT_EQ(State(1, 0).hostBuff, cpu);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, kHugePage);
+  EXPECT_EQ((void*)State(1, 0).hostBuffDev, devAlias_);
+  EXPECT_EQ((void*)gpu, devAlias_);  // the GPU gets the registered alias, the NIC keeps the host pointer
+  EXPECT_NE((void*)gpu, (void*)cpu);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_SecondUser_ReusesRegisteredPoolUntilLastRelease) {
+  char *first = nullptr, *second = nullptr;
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &first), ncclSuccess);
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &second), ncclSuccess);
+
+  EXPECT_EQ(second, first);
+  EXPECT_EQ(registers_, 1);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+  EXPECT_EQ(unregisters_, 0);
+  EXPECT_TRUE(IsMapped(first, kHugePage));
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+  EXPECT_EQ(unregisters_, 1);
+  EXPECT_FALSE(IsMapped(first, kHugePage));
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Destroy_HugePool_UnregistersAndUnmapsWithoutHostFree) {
+  char* cpu = nullptr;
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &cpu), ncclSuccess);
+  ASSERT_EQ(registers_, 1);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+
+  EXPECT_EQ(unregisters_, 1);
+  EXPECT_EQ(unregisteredPtr_, cpu);
+  EXPECT_EQ(hostFrees_, 0);
+  EXPECT_FALSE(IsMapped(cpu, kHugePage));
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Destroy_ProcessShutdown_LeavesMappingToOs) {
+  char* cpu = nullptr;
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, nullptr, &cpu), ncclSuccess);
+  rcclShutdownFlag().store(true, std::memory_order_release);
+
+  ncclResult_t res = Destroy(1, 0);
+  rcclShutdownFlag().store(false, std::memory_order_release);
+
+  ASSERT_EQ(res, ncclSuccess);
+  EXPECT_EQ(unregisters_, 0);
+  EXPECT_TRUE(IsMapped(cpu, kHugePage));
+  EXPECT_EQ(munmap(cpu, kHugePage), 0);  // production leaves this to process exit; the test must not leak it
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_HugePagesDisabled_UsesHostMalloc) {
+  ScopedHook param(g_loadParam, ParamOverride({{"RCCL_NET_SHARED_HOST_HUGEPAGES", 0}}));
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(registers_, 0);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(gpu, cpu);
+
+  ASSERT_EQ(Destroy(1, 0), ncclSuccess);
+  EXPECT_EQ(hostFrees_, 1);
+  EXPECT_EQ(unregisters_, 0);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_PoolSmallerThanHugePage_UsesHostMalloc) {
+  proxyState_.p2pChunkSize = kChunk;  // 1 channel * 16 steps * 4 KiB = 64 KiB
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(registers_, 0);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(gpu, cpu);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_RegisterFails_FallsBackToHostMallocAndReleasesMapping) {
+  registerResult_ = hipErrorInvalidValue;
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  ASSERT_EQ(registers_, 1);
+  EXPECT_EQ(unregisters_, 0);  // nothing was registered, so nothing to unregister
+  EXPECT_FALSE(IsMapped(registeredPtr_, kHugePage));
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(State(1, 0).hostBuffDev, State(1, 0).hostBuff);
+  EXPECT_EQ(gpu, cpu);
+}
+
+TEST_F(NetSharedHostHugePagesMicrotest, Init_DevicePointerFails_UnregistersAndFallsBackToHostMalloc) {
+  devPtrResult_ = hipErrorInvalidValue;
+  char *gpu = nullptr, *cpu = nullptr;
+
+  ASSERT_EQ(Init(0, 1, 0, 1, 1, &gpu, &cpu), ncclSuccess);
+
+  ASSERT_EQ(registers_, 1);
+  EXPECT_EQ(unregisters_, 1);
+  EXPECT_EQ(unregisteredPtr_, registeredPtr_);
+  EXPECT_FALSE(IsMapped(registeredPtr_, kHugePage));
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(State(1, 0).hostBuffMapSize, 0u);
+  EXPECT_EQ(gpu, cpu);
 }
 
 // ---------------------------------------------------------------------------
@@ -2550,12 +2743,13 @@ TEST_F(NetSendProxyConnectMicrotest, DedicatedGdrShareable_AllocatesIpcAlignedBa
   sendNetResources* r = AddConn(0, 1);
   conns_[0].sameProcess = 0;
   ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
-    *h = *d = Alloc(n);
+    EXPECT_EQ(d, nullptr);  // the proxy maps its SHM bank for the CPU only
+    *h = Alloc(n);
     return ncclSuccess;
   });
   size_t allocated = 0;
   ScopedHook alloc(g_ncclP2pAllocateShareableBuffer, [&](size_t n, int, ncclIpcDesc*, void** p, int,
-                                                         ncclMemManager*, ncclMemType_t) {
+                                                         ncclMemManager*, ncclMemType_t, bool) {
     allocated = n;
     *p = Alloc(n);
     return ncclSuccess;
@@ -2582,7 +2776,8 @@ TEST_F(NetSendProxyConnectMicrotest, RemoteProxy_ZeroesShmControlWords) {
   sendNetResources* r = AddConn();
   conns_[0].sameProcess = 0;
   ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
-    *h = *d = Alloc(n);
+    EXPECT_EQ(d, nullptr);  // the proxy maps its SHM bank for the CPU only
+    *h = Alloc(n);
     memset(*h, 0xFF, n);
     return ncclSuccess;
   });
@@ -2684,6 +2879,24 @@ TEST_F(NetSendProxyConnectMicrotest, GdrCopy_HeadLivesInGdcMemory) {
   EXPECT_EQ(r->sendMem->head, 0u);
   EXPECT_EQ(resp_.mems[NCCL_NET_MAP_GDCMEM].cpuPtr, reinterpret_cast<char*>(r->gdcSync));
   EXPECT_EQ(resp_.mems[NCCL_NET_MAP_GDCMEM].size, (ssize_t)sizeof(uint64_t));
+}
+
+// The initial credit is written through the GDRCopy WC mapping, so wc_store_fence() must follow it.
+TEST_F(NetSendProxyConnectMicrotest, GdrCopy_InitialCreditIsFencedOut) {
+#if !defined(__x86_64__)
+  GTEST_SKIP() << "wc_store_fence() is observed through _mm_sfence(), x86_64 only";
+#endif
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  sendNetResources* r = AddConn(/*shared=*/1);
+  g_fenceWatch = r;
+  g_creditFenced = false;
+
+  ncclResult_t res = Connect();
+  g_fenceWatch = nullptr;
+
+  ASSERT_EQ(res, ncclSuccess);
+  ASSERT_NE(r->gdcSync, nullptr);
+  EXPECT_TRUE(g_creditFenced) << "initial credit written to the GDRCopy sync word without wc_store_fence()";
 }
 
 TEST_F(NetSendProxyConnectMicrotest, GdrCopyNotApplicable_HeadStaysInHostMemory) {
@@ -2808,6 +3021,20 @@ TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufPoolBuffer_ExportedAndClosedOnIt
   EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
   EXPECT_EQ(net_.regMrDmaBufs[0].offset, 0u);
   EXPECT_EQ(fcntl(exports_[0].fd, F_GETFD), -1);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufRegistrationFails_ClosesExportedFd) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  sendNetResources* r = AddConn(/*shared=*/1, ncclTopoGdrModeDefault);
+  r->useDmaBuf = 1;
+  net_.regMrDmaBufResult = ncclSystemError;
+
+  EXPECT_EQ(Connect(), ncclSystemError);
+
+  ASSERT_EQ(exports_.size(), 1u);
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
+  EXPECT_FALSE(FdOpen(exports_[0].fd));
 }
 
 TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufPoolBesideStagingBank_ExportedSeparately) {
@@ -3104,7 +3331,7 @@ TEST_F(NetRecvProxyConnectMicrotest, DedicatedGdrCuMem_AllocatesShareableBank) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   size_t allocated = 0;
   ScopedHook alloc(g_ncclP2pAllocateShareableBuffer, [&](size_t n, int, ncclIpcDesc*, void** p, int,
-                                                         ncclMemManager*, ncclMemType_t) {
+                                                         ncclMemManager*, ncclMemType_t, bool) {
     allocated = n;
     *p = Alloc(n);
     return ncclSuccess;
@@ -3355,6 +3582,20 @@ TEST_F(NetRecvProxyConnectMicrotest, CuMemDmaBufPoolBuffer_ExportedAndClosedOnIt
   EXPECT_EQ(fcntl(exports_[0].fd, F_GETFD), -1);
 }
 
+TEST_F(NetRecvProxyConnectMicrotest, CuMemDmaBufRegistrationFails_ClosesExportedFd) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  recvNetResources* r = AddRecvConn(/*shared=*/1, ncclTopoGdrModeDefault);
+  r->useDmaBuf = 1;
+  net_.regMrDmaBufResult = ncclSystemError;
+
+  EXPECT_EQ(Connect(), ncclSystemError);
+
+  ASSERT_EQ(exports_.size(), 1u);
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
+  EXPECT_FALSE(FdOpen(exports_[0].fd));
+}
+
 TEST_F(NetRecvProxyConnectMicrotest, CuMemDmaBufPoolBesideStagingBank_ExportedSeparately) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   proxyState_.allocP2pNetLLBuffers = true;
@@ -3444,7 +3685,8 @@ TEST_F(NetSendProxyFreeMicrotest, RemoteProxy_ClosesShmAndReleasesShareableBank)
   AddConn(0, 1);
   conns_[0].sameProcess = 0;
   ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
-    *h = *d = Alloc(n);
+    EXPECT_EQ(d, nullptr);  // the proxy maps its SHM bank for the CPU only
+    *h = Alloc(n);
     return ncclSuccess;
   });
   ASSERT_EQ(Connect(), ncclSuccess);
@@ -5033,7 +5275,7 @@ TEST_F(NetRecvProgressMicrotest, Post_SharedRegistered_WaitsForKernelThenPostsUs
 
   Fifo(sub.base).size = 0;  // the kernel has started
   ASSERT_EQ(Progress(), ncclSuccess);
-  Fifo(sub.base).size = -1;
+  EXPECT_EQ(Fifo(sub.base).size, -1);  // the gate consumes the kernel's flag
   ASSERT_EQ(Progress(), ncclSuccess);
 
   ASSERT_EQ(net_.irecvs.size(), 2u);
@@ -5132,7 +5374,7 @@ TEST_F(NetRecvProgressMicrotest, PostFirstPass_PinsTransferHints) {
   EXPECT_EQ(net_.lastAttr.recvCommAttr.maxFlowsPerPeer, 3);
 }
 
-TEST_F(NetRecvProgressMicrotest, Receive_Completed_ReleasesFifoSlotAndRecordsSize) {
+TEST_F(NetRecvProgressMicrotest, Receive_Completed_KeepsFifoSlotAndRecordsSize) {
   ncclProxySubArgs& sub = AddSub(1);
   Fifo(res_.step).size = 99;  // the slot of the op's first step
 
@@ -5142,7 +5384,7 @@ TEST_F(NetRecvProgressMicrotest, Receive_Completed_ReleasesFifoSlotAndRecordsSiz
   EXPECT_EQ(net_.tested[0], sub.recvRequestsCache[0]);  // requests are indexed by the op-relative step
   EXPECT_EQ(sub.received, 1u);
   EXPECT_EQ(sub.transSize, 64u);
-  EXPECT_EQ(Fifo(sub.base).size, -1);
+  EXPECT_EQ(Fifo(sub.base).size, 99);  // only the registered-buffer gate resets the slot
   EXPECT_EQ(sub.requests[0], nullptr);
   EXPECT_TRUE(net_.iflushes.empty());
 }

@@ -4,21 +4,26 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// ddaReduceScatterFabricLL on one GPU: the host plays the peers by writing LL lines into coherent host scratch.
-// Built twice: rccl-UnitTestsFixtures defines DWORDX4_INTRINSICS_FORCE_OFF (dword re-read), rccl-UnitTests not (b128).
+// ddaReduceScatterFabricLL and ddaReduceScatterFabricSpreadLL on one GPU: the host plays the peers by writing LL lines
+// into coherent host scratch. Built twice: rccl-UnitTestsFixtures defines DWORDX4_INTRINSICS_FORCE_OFF (dword re-read),
+// rccl-UnitTests not (b128).
 
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <random>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <vector>
 
 #include "DdaLLHostPeers.hpp"
 #include "DeviceTestBase.hpp"
 #include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll_spread.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting {
@@ -216,6 +221,242 @@ protected:
   hipStream_t stream_ = nullptr;
 };
 
+// The spread kernel's tests run at kRanks too unless they call useRanks(), on more epoch cells than their widest grid.
+constexpr unsigned kEpochCells = 32;
+constexpr size_t kShardBytes = kRecvCount * sizeof(float);
+constexpr size_t kShardWords = kShardBytes / sizeof(uint32_t);
+constexpr int kLastRank = kRanks - 1;  // every peer of the last rank wraps past rank 0
+constexpr unsigned kOneBlock = 1;  // all 1025 packets in 7 LDS passes of 170
+constexpr unsigned kThreeBlocks = 3;  // slices of 344 packets, the last one partial
+constexpr unsigned kLaunchGrid = 22;  // the launcher's grid: 25 blocks for 6150 packets, trimmed to 48-packet slices
+constexpr unsigned kIdleGrid = 25;  // the same grid untrimmed, so blocks 22 to 24 own no packets
+static_assert(dda::common::kDdaLLRsSpreadThreads == kThreads, "the spread kernel runs on the shard kernel's blocks");
+
+template <typename T>
+const char* typeName() {
+  if constexpr (std::is_same_v<T, float>) {
+    return "float";
+  } else if constexpr (std::is_same_v<T, bf16>) {
+    return "bf16";
+  } else if constexpr (std::is_same_v<T, half>) {
+    return "half";
+  } else {
+    static_assert(!std::is_same_v<T, T>, "add a name for this type");
+  }
+}
+
+// ddaReduceScatterFabricSpreadLL against the shard kernel: the same lines and sendbuff must give the same result bits.
+class DdaReduceScatterFabricSpreadLL : public DeviceTestBase {
+protected:
+  void SetUp() override {
+    DeviceTestBase::SetUp();
+    peers_.Init(nRanks_, dda::common::ddaLLRsBankBytes(nRanks_));
+    HIP_CHECK(hipMalloc(&dSend_, nRanks_ * kShardBytes));
+    HIP_CHECK(hipMalloc(&dRecv_, kShardBytes));
+    HIP_CHECK(hipMalloc(&dEpoch_, kEpochCells * sizeof(uint32_t)));
+    HIP_CHECK(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
+  }
+
+  void TearDown() override {
+    HIP_EXPECT(hipStreamDestroy(stream_));
+    HIP_EXPECT(hipFree(dEpoch_));
+    HIP_EXPECT(hipFree(dRecv_));
+    HIP_EXPECT(hipFree(dSend_));
+    peers_.Release();
+  }
+
+  // Rebuilds every rank's scratch and my sendbuff for nRanks ranks.
+  void useRanks(int nRanks) {
+    peers_.Release();
+    HIP_CHECK(hipFree(dSend_));
+    nRanks_ = nRanks;
+    peers_.Init(nRanks_, dda::common::ddaLLRsBankBytes(nRanks_));
+    HIP_CHECK(hipMalloc(&dSend_, nRanks_ * kShardBytes));
+  }
+
+  volatile uint32_t* line(int owner, int sender, size_t pk) {
+    LLPacket16* base = static_cast<LLPacket16*>(peers_.Host(owner));
+    return reinterpret_cast<volatile uint32_t*>(&base[sender * dda::common::kDdaLLRsSlotStridePkts + pk]);
+  }
+
+  // Random words, so a misplaced packet or a reordered fold changes the result bits. Halves pack two 16-bit values.
+  void randomInputs(bool halves, uint32_t seed) {
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<float> value(-1.0f, 1.0f);
+    std::uniform_int_distribution<int> scale(-12, 12);
+    auto draw = [&] { return bitsOf(std::ldexp(value(rng), scale(rng))); };
+    auto word = [&] {
+      const uint32_t lo = draw();
+      return halves ? (lo >> 16) | (draw() & 0xffff0000u) : lo;
+    };
+    send_.resize(nRanks_ * kShardWords);
+    for (uint32_t& w : send_) {
+      w = word();
+    }
+    copy_.assign(nRanks_, std::vector<uint32_t>(kShardWords));
+    for (std::vector<uint32_t>& words : copy_) {
+      for (uint32_t& w : words) {
+        w = word();
+      }
+    }
+  }
+
+  // Cleared lines, a clear abort flag, epoch cells one before kFlag, sendbuff from send_ and an untouched recvbuff.
+  void reset() {
+    for (int owner = 0; owner < nRanks_; ++owner) {
+      for (int sender = 0; sender < nRanks_; ++sender) {
+        std::memset(const_cast<uint32_t*>(line(owner, sender, 0)), 0, kPackets * sizeof(LLPacket16));
+      }
+    }
+    *peers_.AbortFlag() = 0;
+    const std::vector<uint32_t> epoch(kEpochCells, kFlag - 1);
+    HIP_CHECK(hipMemcpy(dEpoch_, epoch.data(), kEpochCells * sizeof(uint32_t), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(dSend_, send_.data(), nRanks_ * kShardBytes, hipMemcpyHostToDevice));
+    const std::vector<uint32_t> recv(kShardWords, bitsOf(kUntouched));
+    HIP_CHECK(hipMemcpy(dRecv_, recv.data(), kShardBytes, hipMemcpyHostToDevice));
+  }
+
+  // The peer's copy of my shard, packets below end, into its slot in my scratch.
+  void publishPeer(int peer, size_t end = SIZE_MAX) {
+    for (size_t pk = 0; pk < kPackets && pk < end; ++pk) {
+      DdaLLHostPeers::PublishLine(line(self_, peer, pk), copy_[peer][2 * pk], copy_[peer][2 * pk + 1], kFlag);
+    }
+  }
+
+  void publishHalf(int peer, int half) {
+    for (size_t pk = 0; pk < kPackets; ++pk) {
+      DdaLLHostPeers::PublishHalf(line(self_, peer, pk), half, copy_[peer][2 * pk + half], kFlag);
+    }
+  }
+
+  void publishAll(size_t end = SIZE_MAX) {
+    for (int peer = 0; peer < nRanks_; ++peer) {
+      if (peer != self_) {
+        publishPeer(peer, end);
+      }
+    }
+  }
+
+  // True once my lines to the last peer, the last ones each block sends, are stored, so nearly every thread polls.
+  bool phase1Done() {
+    const int peer = (self_ + nRanks_ - 1) % nRanks_;
+    for (size_t pk = 0; pk < kPackets; ++pk) {
+      volatile uint32_t* w = line(peer, self_, pk);
+      if (w[1] != kFlag || w[3] != kFlag) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Waits for phase 1, then expects the kernel still polling.
+  void expectStillPolling(const char* what) {
+    const auto deadline = std::chrono::steady_clock::now() + kWatchdog;
+    while (!phase1Done() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::yield();
+    }
+    std::this_thread::sleep_for(kSettle);
+    EXPECT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << what;
+  }
+
+  bool finishes() {
+    return peers_.Finishes(stream_, [this] { publishAll(); }, kWatchdog);
+  }
+
+  // Launches kernel over T as rank self_ on grid blocks of kThreads, with recvbuff at recv.
+  template <typename T, typename Kernel>
+  void launch(Kernel kernel, unsigned grid, uint32_t* recv) {
+    kernel<<<dim3(grid), dim3(kThreads), 0, stream_>>>(
+      peers_.DevPeers<T>(), reinterpret_cast<T*>(recv), reinterpret_cast<const T*>(dSend_), kShardBytes / sizeof(T),
+      self_, nRanks_, dEpoch_, static_cast<int>(kEpochCells), dda::common::ddaLLRsBankBytes(nRanks_),
+      DdaKernelParams{peers_.AbortFlag()});
+    ASSERT_EQ(hipGetLastError(), hipSuccess);
+  }
+
+  void launchSpread(unsigned grid, uint32_t* recv) {
+    launch<float>(&dda::common::ddaReduceScatterFabricSpreadLL<float, 0>, grid, recv);
+  }
+
+  std::vector<uint32_t> words(const uint32_t* d) {
+    std::vector<uint32_t> out(kShardWords);
+    EXPECT_EQ(hipMemcpy(out.data(), d, kShardBytes, hipMemcpyDeviceToHost), hipSuccess);
+    return out;
+  }
+
+  // Fresh inputs as rank self, ref_ from the shard kernel on its own grid, then a reset() for the kernel under test.
+  template <typename T>
+  void reference(int self, uint32_t seed) {
+    self_ = self;
+    randomInputs(sizeof(T) == 2, seed);
+    reset();
+    publishAll();
+    ASSERT_NO_FATAL_FAILURE(launch<T>(&dda::common::ddaReduceScatterFabricLL<T, 0>, kBlocks, dRecv_));
+    ASSERT_TRUE(peers_.Finishes(stream_, [] {}, kWatchdog)) << "shard kernel reference did not finish";
+    ref_ = words(dRecv_);
+    reset();
+  }
+
+  // The shard kernel's result bits below packet validPkts, untouched words from there.
+  void expectRecv(const uint32_t* d, size_t validPkts) {
+    const std::vector<uint32_t> out = words(d);
+    for (size_t i = 0; i < kShardWords; ++i) {
+      if (i / 2 < validPkts) {
+        ASSERT_EQ(out[i], ref_[i]) << "word " << i;
+      } else {
+        ASSERT_EQ(out[i], bitsOf(kUntouched)) << "an aborted block wrote word " << i;
+      }
+    }
+  }
+
+  // Every peer's slot for me holds my sendbuff shard for that peer, flagged, packet for packet.
+  void expectSent() {
+    for (int peer = 0; peer < nRanks_; ++peer) {
+      if (peer == self_) {
+        continue;
+      }
+      for (size_t pk = 0; pk < kPackets; ++pk) {
+        volatile uint32_t* w = line(peer, self_, pk);
+        const size_t s = static_cast<size_t>(peer) * kShardWords + 2 * pk;
+        ASSERT_TRUE(w[0] == send_[s] && w[1] == kFlag && w[2] == send_[s + 1] && w[3] == kFlag)
+          << "peer " << peer << " packet " << pk;
+      }
+    }
+  }
+
+  // Every block, idle or aborted, bumps the cells it owns, so all kEpochCells cells end at kFlag.
+  void expectEpochAdvanced() {
+    std::vector<uint32_t> epoch(kEpochCells);
+    ASSERT_EQ(hipMemcpy(epoch.data(), dEpoch_, kEpochCells * sizeof(uint32_t), hipMemcpyDeviceToHost), hipSuccess);
+    for (unsigned e = 0; e < kEpochCells; ++e) {
+      EXPECT_EQ(epoch[e], kFlag) << "epoch cell " << e;
+    }
+  }
+
+  // One run over T as rank self on grid blocks with every line fresh: the shard kernel's bits, the sends and the epoch.
+  template <typename T>
+  void spreadCase(int self, unsigned grid) {
+    SCOPED_TRACE(::testing::Message() << typeName<T>() << ", self " << self << ", grid " << grid);
+    ASSERT_NO_FATAL_FAILURE(reference<T>(self, static_cast<uint32_t>(self * 7919 + grid)));
+    publishAll();
+    ASSERT_NO_FATAL_FAILURE(launch<T>(&dda::common::ddaReduceScatterFabricSpreadLL<T, 0>, grid, dRecv_));
+    ASSERT_TRUE(finishes()) << "spread kernel did not finish with every line fresh";
+    ASSERT_NO_FATAL_FAILURE(expectRecv(dRecv_, kPackets));
+    ASSERT_NO_FATAL_FAILURE(expectSent());
+    expectEpochAdvanced();
+  }
+
+  DdaLLHostPeers peers_;
+  int nRanks_ = kRanks;
+  int self_ = kSelf;
+  std::vector<uint32_t> send_;  // my sendbuff, one shard per rank
+  std::vector<std::vector<uint32_t>> copy_;  // copy_[peer] is that peer's copy of my shard
+  std::vector<uint32_t> ref_;  // the shard kernel's recvbuff
+  uint32_t* dSend_ = nullptr;
+  uint32_t* dRecv_ = nullptr;
+  uint32_t* dEpoch_ = nullptr;
+  hipStream_t stream_ = nullptr;
+};
+
 } // namespace
 
 TEST_F(DdaReduceScatterFabricLL, LinesPublishedBeforeLaunchAreReduced) {
@@ -359,6 +600,115 @@ TEST_F(DdaReduceScatterFabricLL, ReReadPathIsB128) {
     GTEST_SKIP() << arch << " has no b128 builtin in this build, so the dword fallback ran";
   }
   EXPECT_TRUE(b128) << "b128 builtins are available on " << arch << " but the kernel took the dword path";
+}
+
+// Float, bf16 and half as rank 1 and as the last rank, on one block (7 LDS passes), three blocks (a partial last
+// slice), the launcher's grid and the untrimmed grid with idle blocks.
+TEST_F(DdaReduceScatterFabricSpreadLL, MatchesShardKernelBitwise) {
+  for (const int self : {kSelf, kLastRank}) {
+    for (const unsigned grid : {kOneBlock, kThreeBlocks, kLaunchGrid, kIdleGrid}) {
+      ASSERT_NO_FATAL_FAILURE(spreadCase<float>(self, grid));
+    }
+  }
+  ASSERT_NO_FATAL_FAILURE(spreadCase<bf16>(kSelf, kOneBlock));
+  ASSERT_NO_FATAL_FAILURE(spreadCase<bf16>(kLastRank, kLaunchGrid));
+  ASSERT_NO_FATAL_FAILURE(spreadCase<half>(kSelf, kThreeBlocks));
+}
+
+// Rank counts the launcher spreads on, with blocks that take more than one LDS pass: 344-packet slices in passes of 64
+// at 16 ranks, and at 32 ranks the 48-packet slices of a 2 MiB launch capped at 192 blocks, in passes of 32.
+TEST_F(DdaReduceScatterFabricSpreadLL, MatchesShardKernelBitwiseOnSpreadRanks) {
+  static_assert(dda::common::kDdaLLRsSpreadMinRanks <= 16, "both rank counts must take the spread kernel");
+  ASSERT_NO_FATAL_FAILURE(useRanks(16));
+  ASSERT_NO_FATAL_FAILURE(spreadCase<float>(9, kThreeBlocks));
+  ASSERT_NO_FATAL_FAILURE(useRanks(32));
+  ASSERT_NO_FATAL_FAILURE(spreadCase<float>(31, kLaunchGrid));
+}
+
+// Two peers publish once the kernel polls and the other three later, so every block re-reads until all are fresh.
+TEST_F(DdaReduceScatterFabricSpreadLL, WaitsForLateLines) {
+  ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 1));
+  ASSERT_NO_FATAL_FAILURE(launchSpread(kLaunchGrid, dRecv_));
+  expectStillPolling("finished on stale lines");
+  publishPeer((kSelf + 1) % kRanks);
+  publishPeer((kSelf + 3) % kRanks);
+  std::this_thread::sleep_for(kSettle);
+  EXPECT_EQ(hipStreamQuery(stream_), hipErrorNotReady) << "finished with three peers stale";
+  publishAll();
+  ASSERT_TRUE(finishes()) << "kernel never saw the late lines";
+  ASSERT_NO_FATAL_FAILURE(expectRecv(dRecv_, kPackets));
+  ASSERT_NO_FATAL_FAILURE(expectSent());
+  expectEpochAdvanced();
+}
+
+// One peer's lines carry a single fresh half, so the kernel keeps polling until the other half lands.
+TEST_F(DdaReduceScatterFabricSpreadLL, TornLineWaitsForBothHalves) {
+  const int torn = (kSelf + 2) % kRanks;
+  for (const int fresh : {0, 1}) {
+    SCOPED_TRACE(::testing::Message() << "fresh half " << fresh);
+    ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 2 + fresh));
+    for (int peer = 0; peer < kRanks; ++peer) {
+      if (peer != kSelf && peer != torn) {
+        publishPeer(peer);
+      }
+    }
+    publishHalf(torn, fresh);
+    ASSERT_NO_FATAL_FAILURE(launchSpread(kThreeBlocks, dRecv_));
+    expectStillPolling("finished with one half of a line stale");
+    publishHalf(torn, 1 - fresh);
+    ASSERT_TRUE(finishes()) << "kernel never saw the second half land";
+    ASSERT_NO_FATAL_FAILURE(expectRecv(dRecv_, kPackets));
+  }
+}
+
+// An abort with only row 1 published, which the fold threads poll, so only the abort broadcast keeps them off recvbuff.
+TEST_F(DdaReduceScatterFabricSpreadLL, AbortLeavesRecvbuffAndAdvancesEpoch) {
+  ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 4));
+  publishPeer((kSelf + 1) % kRanks);
+  *peers_.AbortFlag() = 1;
+  ASSERT_NO_FATAL_FAILURE(launchSpread(kLaunchGrid, dRecv_));
+  ASSERT_TRUE(finishes()) << "kernel ignored the abort flag";
+  ASSERT_NO_FATAL_FAILURE(expectRecv(dRecv_, 0));
+  ASSERT_NO_FATAL_FAILURE(expectSent());
+  expectEpochAdvanced();
+}
+
+// One block in LDS passes of 170 packets: pass 0 finishes on its published lines, pass 1 waits and then aborts.
+TEST_F(DdaReduceScatterFabricSpreadLL, AbortInALaterPassKeepsTheFinishedPass) {
+  const size_t passPkts = dda::common::ddaLLRsSpreadPassPkts(kRanks);
+  ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 5));
+  publishAll(passPkts);
+  ASSERT_NO_FATAL_FAILURE(launchSpread(kOneBlock, dRecv_));
+  expectStillPolling("finished with pass 1 stale");
+  *peers_.AbortFlag() = 1;
+  ASSERT_TRUE(finishes()) << "kernel ignored the abort flag";
+  ASSERT_NO_FATAL_FAILURE(expectRecv(dRecv_, passPkts));
+  expectEpochAdvanced();
+}
+
+// In place, recvbuff is my shard of sendbuff: the sends read the other shards and the fold reads mine before writing.
+TEST_F(DdaReduceScatterFabricSpreadLL, InPlaceMatchesOutOfPlace) {
+  ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 6));
+  publishAll();
+  uint32_t* mine = dSend_ + static_cast<size_t>(kSelf) * kShardWords;
+  ASSERT_NO_FATAL_FAILURE(launchSpread(kThreeBlocks, mine));
+  ASSERT_TRUE(finishes()) << "spread kernel did not finish in place";
+  ASSERT_NO_FATAL_FAILURE(expectRecv(mine, kPackets));
+  ASSERT_NO_FATAL_FAILURE(expectSent());
+  expectEpochAdvanced();
+}
+
+// Epoch cells at 0xffffffff wrap to the 0 sentinel, which ddaNextLLEpoch skips to kFlag, so the run is unchanged.
+TEST_F(DdaReduceScatterFabricSpreadLL, EpochWrapSkipsTheZeroSentinel) {
+  ASSERT_NO_FATAL_FAILURE(reference<float>(kSelf, 7));
+  const std::vector<uint32_t> epoch(kEpochCells, 0xffffffffu);
+  ASSERT_EQ(hipMemcpy(dEpoch_, epoch.data(), kEpochCells * sizeof(uint32_t), hipMemcpyHostToDevice), hipSuccess);
+  publishAll();
+  ASSERT_NO_FATAL_FAILURE(launchSpread(kLaunchGrid, dRecv_));
+  ASSERT_TRUE(finishes()) << "spread kernel did not finish across the epoch wrap";
+  ASSERT_NO_FATAL_FAILURE(expectRecv(dRecv_, kPackets));
+  ASSERT_NO_FATAL_FAILURE(expectSent());
+  expectEpochAdvanced();
 }
 
 } // namespace RcclUnitTesting

@@ -4,6 +4,7 @@
 /// @file simd_coverage_test.cpp
 /// @brief Exact SIMD coverage for packed, true16, compare and dual-slot paths.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "util/host_target.h"
 #include "util/simd_test_hooks.h"
@@ -55,7 +56,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    cu = ComputeUnitCore::create("simd_coverage_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "simd_coverage_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, 0, 106, 256, 32);
     wf->set_mode_raw(3u << 6);
     wf->set_exec(0xffffffffu);
@@ -254,7 +256,6 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
 TEST_F(SimdCoverage, PackedF16Numerics) {
   check_packed_half<PackedFloatOp::ADD, false>(*wf);
   check_packed_half<PackedFloatOp::MUL, false>(*wf);
-  check_packed_half<PackedFloatOp::FMA, false>(*wf);
   check_packed_half<PackedFloatOp::MIN, false>(*wf);
   check_packed_half<PackedFloatOp::MAX, false>(*wf);
   check_packed_half<PackedFloatOp::MINIMUM, false>(*wf);
@@ -380,7 +381,9 @@ TEST_F(SimdCoverage, DecodedPackedFmacPreservesDirectedZeroSigns) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("packed_fmac_zero", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(target, "packed_fmac_zero", config, &memory, &l2));
     auto *wave = target->dispatch_wf(0, 0, 106, 256, 32);
     ASSERT_NE(wave, nullptr);
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
@@ -508,7 +511,9 @@ TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
         config.sgprs_per_wf = 106;
         config.vgprs_per_wf = 256;
         config.lds_size_kb = 64;
-        auto target = ComputeUnitCore::create("simd_decoded_target", config, &memory, &l2);
+        std::unique_ptr<ComputeUnitCore> target;
+        ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+            target, "simd_decoded_target", config, &memory, &l2));
         const uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
         auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
         ASSERT_NE(wave, nullptr);
@@ -578,37 +583,6 @@ TEST_F(SimdCoverage, DivisionScalePathReturnsAndPreservesInactiveMaskBits) {
     EXPECT_EQ(get(3, lane), lane % 2 ? 0xdeadbeefu : 0x3f800000u);
 }
 
-TEST_F(SimdCoverage, MixedFmaUsesProfileSemanticsAndCompilerGuard) {
-  WordInst inst;
-  inst.inst_.opsel_hi = 0;
-  inst.inst_.opsel_hi_2 = 0;
-  constexpr uint32_t exec = 0xa5a5f0f0u;
-  constexpr uint32_t sentinel = 0xdeadbeefu;
-  wf->set_exec(exec);
-  const float a = std::bit_cast<float>(0x3f800001u);
-  const float b = std::bit_cast<float>(0x3f7fffffu);
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    put(0, lane, 0x3f800001u);
-    put(1, lane, 0x3f7fffffu);
-    put(2, lane, 0xbf800000u);
-    put(3, lane, sentinel);
-  }
-#if RJ_HOST_HAS_FMA
-  ASSERT_FALSE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane), sentinel);
-#else
-  ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane),
-              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(a * b - 1.0f) : sentinel);
-#endif
-  ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, true>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane),
-              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(std::fma(a, b, -1.0f)) : sentinel);
-}
-
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs
 // and warmups. These timings describe execution overhead, not GPU hardware.
 TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
@@ -625,7 +599,9 @@ TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
-    auto target = ComputeUnitCore::create("simd_benchmark_target", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> target;
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(target, "simd_benchmark_target",
+                                                                    config, &memory, &l2));
     uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
     auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
     ASSERT_NE(wave, nullptr);

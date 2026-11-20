@@ -13,13 +13,15 @@ rocprofv3 --pmc SQ_WAVES,SQ_INSTS_VALU,GRBM_COUNT \
 ```
 
 On a kernel that launches 512 waves, each pass reads `SQ_WAVES` as 512. The view used to report
-1536. Identical readings now report that value once, so this reports 512. Readings that are not
-identical, such as hardware instances of one counter, are still summed. A counter collected once
-is unchanged. A run that never replayed is unchanged when each counter name is collected once.
+1536. It now sums the hardware instances of one pass, then averages over the passes that collected
+the counter, so this reports 512. A counter collected on only some passes is averaged over those
+passes. A pass with no row for the counter, such as a pass dedicated to another service, is not in
+the denominator. A run that never replayed leaves every row untagged, so the view still sums
+hardware instances.
 
-The three readings stay in `rocpd_pmc_event`. A query against that table still lists 512, 512, and
-512. For a deterministic counter those readings are the same number, so the view reports
-that number instead of adding the copies.
+The individual readings stay in `rocpd_pmc_event`. A row from a pass after the first carries
+`replay_pass` in `extdata`, and a row without it belongs to pass 0. The `pmc_events` view reports
+that index. This is rocpd schema 3.0.6 and later.
 
 `counters_collection` stays one row per dispatch per counter. That is the file most people read.
 Keeping a row per pass, with its own timestamps, would be a larger schema change, and it is not
