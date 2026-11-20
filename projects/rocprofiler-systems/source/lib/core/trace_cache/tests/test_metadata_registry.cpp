@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <optional>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <vector>
 
 namespace rocprofsys::trace_cache
 {
@@ -18,6 +19,8 @@ constexpr std::size_t   k_second_thread_id = 7;
 constexpr std::size_t   k_thread_id        = 42;
 constexpr std::uint64_t k_code_object_id   = 7;
 constexpr std::uint64_t k_kernel_symbol_id = 9;
+constexpr std::uint64_t k_first_resume_ns  = 1'000;
+constexpr std::uint64_t k_second_resume_ns = 2'000;
 }  // namespace
 
 TEST(metadata_registry_test, ensure_track_keeps_first_registration)
@@ -69,6 +72,17 @@ TEST(metadata_registry_test, add_queue_stream_string_ignore_duplicates)
     EXPECT_EQ(registry.get_queue_list().size(), 1U);
     EXPECT_EQ(registry.get_stream_list().size(), 1U);
     EXPECT_EQ(registry.get_string_list().size(), 2U);
+}
+
+TEST(metadata_registry_test, get_sampling_resumes_returns_added_times_in_order)
+{
+    metadata_registry registry;
+    registry.add_sampling_resume(k_first_resume_ns);
+    registry.add_sampling_resume(k_second_resume_ns);
+
+    auto const resumes = registry.get_sampling_resumes();
+
+    EXPECT_EQ(resumes, (std::vector{ k_first_resume_ns, k_second_resume_ns }));
 }
 
 TEST(metadata_registry_test, add_pmc_code_object_kernel_symbol_ignore_duplicates)

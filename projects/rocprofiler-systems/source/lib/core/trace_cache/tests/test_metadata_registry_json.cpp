@@ -126,6 +126,32 @@ TEST_F(metadata_registry_json_test_interface, track_thread_id_survives_round_tri
     EXPECT_EQ(tracks[0].thread_id, k_thread_id);
 }
 
+TEST_F(metadata_registry_json_test_interface, sampling_resumes_survive_round_trip)
+{
+    metadata_registry saved;
+    set_test_process(saved);
+    saved.add_sampling_resume(k_start);
+    saved.add_sampling_resume(k_end);
+
+    metadata_registry loaded;
+    ASSERT_TRUE(round_trip(saved, loaded));
+
+    auto const resumes = loaded.get_sampling_resumes();
+    EXPECT_EQ(resumes, (std::vector{ k_start, k_end }));
+}
+
+TEST_F(metadata_registry_json_test_interface, no_sampling_resumes_round_trip_to_none)
+{
+    metadata_registry saved;
+    set_test_process(saved);
+
+    metadata_registry loaded;
+    ASSERT_TRUE(round_trip(saved, loaded));
+
+    auto const resumes = loaded.get_sampling_resumes();
+    EXPECT_TRUE(resumes.empty());
+}
+
 TEST_F(metadata_registry_json_test_interface, track_without_thread_id_survives_round_trip)
 {
     metadata_registry saved;

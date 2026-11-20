@@ -351,6 +351,12 @@ to_json(const metadata_registry&                   _registry,
         result["streams"].push_back(static_cast<long long>(stream));
     }
 
+    auto const sampling_resumes = _registry.get_sampling_resumes();
+    for(auto const resume_ns : sampling_resumes)
+    {
+        result["sampling_resumes"].push_back(resume_ns);
+    }
+
     auto const string_list = _registry.get_string_list();
     for(const auto& str : string_list)
     {
@@ -428,6 +434,10 @@ from_json(metadata_registry& _registry, std::vector<std::shared_ptr<agent>>& _ag
         _registry.add_stream(static_cast<std::uint64_t>(handle));
     });
 
+    fill_from_json("sampling_resumes", [&_registry](const auto& item) {
+        _registry.add_sampling_resume(item.template get<std::uint64_t>());
+    });
+
     fill_from_json("strings", [&_registry](const auto& item) {
         _registry.add_string(item.template get<std::string>());
     });
@@ -496,6 +506,13 @@ void
 metadata_registry::add_string(const std::string_view string_value)
 {
     detail::insert_if_absent(m_strings, string_value);
+}
+
+void
+metadata_registry::add_sampling_resume(std::uint64_t resume_ns)
+{
+    m_sampling_resumes.wlock(
+        [resume_ns](auto& resumes) { resumes.push_back(resume_ns); });
 }
 
 info::process
@@ -568,6 +585,12 @@ metadata_registry::get_string_list() const
     std::vector<std::string_view> result;
     m_strings.rlock(assign_set_to_vector(result));
     return result;
+}
+
+std::vector<std::uint64_t>
+metadata_registry::get_sampling_resumes() const
+{
+    return m_sampling_resumes.rlock([](const auto& resumes) { return resumes; });
 }
 
 void

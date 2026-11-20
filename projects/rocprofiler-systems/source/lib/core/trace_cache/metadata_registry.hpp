@@ -279,6 +279,7 @@ struct metadata_registry
     void add_queue(const std::uint64_t& queue_handle);
     void add_stream(const std::uint64_t& stream_handle);
     void add_string(const std::string_view string_value);
+    void add_sampling_resume(std::uint64_t resume_ns);
 
     info::process              get_process_info() const;
     std::optional<info::pmc>   get_pmc_info(const std::string_view& unique_name) const;
@@ -289,6 +290,7 @@ struct metadata_registry
     std::vector<std::uint64_t> get_queue_list() const;
     std::vector<std::uint64_t> get_stream_list() const;
     std::vector<std::string_view> get_string_list() const;
+    std::vector<std::uint64_t>    get_sampling_resumes() const;
 
     bool save_to_file(const std::string&                         filepath,
                       const std::vector<std::shared_ptr<agent>>& _agents) const;
@@ -325,6 +327,8 @@ private:
 
     common::synchronized<std::set<std::uint64_t>, state::thread> m_streams;
     common::synchronized<std::set<std::uint64_t>, state::thread> m_queues;
+
+    common::synchronized<std::vector<std::uint64_t>, state::thread> m_sampling_resumes;
     common::synchronized<
         std::unordered_set<std::string, info::string_hash, std::equal_to<>>,
         state::thread>
