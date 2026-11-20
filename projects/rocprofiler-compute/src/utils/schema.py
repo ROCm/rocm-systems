@@ -48,6 +48,7 @@ class Workload:
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     roofline_html_path: Optional[str] = None
+    mem_chart_html_path: Optional[str] = None
     path: str = field(default_factory=str)
     # Consolidated marker rows after matching operator calls across passes.
     ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)

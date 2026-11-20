@@ -763,6 +763,9 @@ def show_all(
                     membw_result,
                     chart_width=_max_line_width(chart_output),
                 )
+            panel_content += saved_report_text(
+                runs, "mem_chart_html_path", "memory chart"
+            )
 
         # Roofline printing is handled separately above in show_roofline.
         # With --debug-table-view, roofline tables (401/402) render as normal tables.
