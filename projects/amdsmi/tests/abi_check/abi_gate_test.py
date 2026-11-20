@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import abi_gate
@@ -735,13 +736,65 @@ class GateTest(unittest.TestCase):
         self.commit("review baseline for new SONAME")
         self.assertFalse(self.run_gate()["blocking"])
 
+    def elf_workflow(self, tmp, event="pull_request"):
+        # Exercise the workflow's actual shell step; no PR build scripts run here.
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("workflow tests need PyYAML")
+        root = Path(__file__).resolve().parents[4]
+        workflow = root / ".github/workflows/amdsmi-manylinux-build.yml"
+        if not workflow.is_file():
+            self.skipTest("workflow tests need a rocm-systems checkout")
+        job = yaml.safe_load(workflow.read_text())["jobs"]["check-system-elf"]
+        self.assertEqual(job["needs"], "build-amdsmi-wheels")
+        checkout, download, compare = job["steps"]
+        self.assertTrue(checkout["uses"].startswith("actions/checkout@"))
+        self.assertTrue(
+            checkout["with"]["ref"].startswith("${{ github.event.pull_request.base.sha ||")
+        )
+        self.assertTrue(download["uses"].startswith("actions/download-artifact@"))
+        self.assertEqual(download["with"]["path"], "${{ runner.temp }}/abi-input")
+        return subprocess.run(
+            ["bash", "-c", compare["run"]],
+            cwd=self.repo,
+            env={
+                **os.environ,
+                "RUNNER_TEMP": tmp,
+                "GITHUB_STEP_SUMMARY": os.path.join(tmp, "summary"),
+                "GITHUB_EVENT_NAME": event,
+            },
+            capture_output=True,
+            text=True,
+        )
+
+    def test_elf_workflow_missing_base_baseline(self):
+        checker = "projects/amdsmi/tests/abi_check/abi_gate.py"
+        self.write(checker, Path(abi_gate.__file__).read_text())
+        self.commit("checker only; no baseline shipped yet")
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self.elf_workflow(tmp)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("comparison not run", (Path(tmp) / "summary").read_text())
+            for event in ("push", "workflow_dispatch"):
+                with self.subTest(event=event):
+                    result = self.elf_workflow(tmp, event)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn("could not read shipped baseline", result.stderr)
+            self.write(abi_gate.SHIPPED, "{}")
+            self.commit("tracked but invalid baseline")
+            result = self.elf_workflow(tmp)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("invalid shipped ABI baseline", result.stderr)
+
     @unittest.skipUnless(
         sys.platform.startswith("linux") and shutil.which("cc") and shutil.which("readelf"),
         "requires ELF tools",
     )
     def test_shipped_elf_tracks_defined_exports_versions_and_soname(self):
         with tempfile.TemporaryDirectory() as tmp:
-            lib = os.path.join(tmp, "lib.so")
+            os.mkdir(os.path.join(tmp, "abi-input"))
+            lib = os.path.join(tmp, "abi-input", "libamd_smi.so")
             script = os.path.join(tmp, "lib.map")
 
             def build(version, symbols, major=27):
@@ -769,6 +822,16 @@ class GateTest(unittest.TestCase):
             baseline = abi_gate.capture(self.repo, self.base, lib)
             elf = baseline["elf"]
             self.assertEqual(elf["exports"], ["amdsmi_old_api@@AMDSMI_1"])
+            checker = "projects/amdsmi/tests/abi_check/abi_gate.py"
+            self.write(checker, Path(abi_gate.__file__).read_text())
+            self.write(abi_gate.SHIPPED, json.dumps(baseline))
+            self.commit("trusted policy")
+            trusted = self.rev()
+            self.write(checker, "raise RuntimeError('unexpected candidate checker')\n")
+            candidate = {**baseline, "elf": {**elf, "exports": ["amdsmi_added@@AMDSMI_2"]}}
+            self.write(abi_gate.SHIPPED, json.dumps(candidate))
+            self.commit("candidate policy differs from trusted policy")
+            self.git("checkout", "-q", trusted)
             for version, symbols, major, expected in (
                 ("AMDSMI_1", ["amdsmi_old_api", "amdsmi_added"], 27, []),
                 ("AMDSMI_1", ["amdsmi_added"], 27, ["missing export amdsmi_old_api@@AMDSMI_1"]),
@@ -785,6 +848,10 @@ class GateTest(unittest.TestCase):
                     self.assertEqual(
                         abi_gate.shipped_elf_errors(elf, abi_gate.elf_contract(lib)), expected
                     )
+                    result = self.elf_workflow(tmp)
+                    self.assertEqual(result.returncode, int(bool(expected)), result.stderr)
+                    for message in expected or ["PASS"]:
+                        self.assertIn(message, result.stdout)
             with self.assertRaisesRegex(abi_gate.GateError, "expects libamd_smi.so.27"):
                 abi_gate.capture(self.repo, self.base, lib)
 

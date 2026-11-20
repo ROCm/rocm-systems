@@ -60,9 +60,14 @@ new getter still passes; `acknowledge` cannot waive a shipped binary break. The
 base/release comparisons still cover doc semantics, which the snapshot omits.
 
 The header job reads the snapshot from git. A PR replacing it under the same
-SONAME must preserve the base snapshot's obligations as well. The manylinux
-wheel job checks its ESMI-on **system** library with `readelf`; it does not
-load that ELF, check the private wheel library or require libclang. The workflows
+SONAME must preserve the base snapshot's obligations as well. Each manylinux
+build uploads its ESMI-on **system** ELF. A fresh runner checks it
+with `readelf`; it never loads the ELF or runs PR build scripts. On a PR, both
+`abi_gate.py` and `shipped.json` come from the event's base SHA. On a push to
+develop they come from the pushed SHA; a manual dispatch uses the default branch.
+If a PR base does not yet track the baseline, the job reports that no ELF
+comparison ran; it does **not** use the PR's baseline or checker instead. A
+push or dispatch without a baseline fails. The workflows
 target `develop` and `release/**` PRs. Older release branches need a backport
 with their own last-shipped baseline. This does not configure required checks.
 
@@ -95,8 +100,11 @@ regenerate it from a failing PR to make the check pass. For an intentional
 major bump, change the library and header major together, document migration,
 and acknowledge any PR/base breaks as below. Capture the new major's baseline
 from the pinned release candidate in a follow-up commit on that PR; verify it
-again against the promoted package. Keep the old baseline on its maintenance
-branch. The old and new contracts may differ only across the SONAME boundary.
+again against the promoted package. The PR ELF check will still report the
+SONAME mismatch against the old base. Release owners must review and coordinate
+that transition; changing the snapshot in the same PR is not a binary-check
+override. Keep the old baseline on its maintenance branch. The old and new
+contracts may differ only across the SONAME boundary.
 
 ## When a break is intended
 
@@ -135,4 +143,5 @@ change locally:
     --base origin/develop --new WORKTREE --release auto
 ```
 
-`abi_gate_test.py` runs from pre-commit when these files change.
+`abi_gate_test.py` runs from pre-commit when these files change. To run its
+workflow tests directly, also install `PyYAML` in the test environment.
