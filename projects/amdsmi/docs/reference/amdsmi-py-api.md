@@ -439,6 +439,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_device_cuid` function:
 
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - A required CUID property could not be read
 - `AMDSMI_STATUS_NO_DATA` - The node has no usable machine ID
 - `AMDSMI_STATUS_INSUFFICIENT_SIZE` - Buffer provided is not of large enough size
 
@@ -537,6 +538,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_cuid_info` function:
 
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NO_PERM` - A required CUID property could not be read
 - `AMDSMI_STATUS_NO_DATA` - The node has no usable machine ID
 
 Example:
