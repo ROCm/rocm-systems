@@ -16,6 +16,7 @@ from conftest import ProfileModeImportGuard
 import utils
 from rocprof_compute_soc.metric_library import loader
 from utils.analysis_views import (
+    get_arch_alias_to_panel_id,
     iter_view_rows,
     load_views,
     view_metric_errors,
@@ -251,6 +252,27 @@ def test_view_metric_errors():
         "vl1d.stalled_on_l2_data: no view shows it",
         "compute.valu_flops_f16: no row shows its 'peak_empirical'",
     ]
+
+
+def test_an_arch_reads_only_the_aliases_of_its_own_views():
+    """The alias of a view one arch has and another lacks is unknown on the other."""
+    archs = list(loader.METRIC_LIBRARY_PARENT_ARCH)
+    aliases = {
+        arch: {
+            view.get("alias"): panel_id for panel_id, view in load_views(arch).items()
+        }
+        for arch in archs
+    }
+    alias, panel_id, arch, other_arch = next(
+        (alias, panel_id, arch, other_arch)
+        for arch in archs
+        for alias, panel_id in aliases[arch].items()
+        if alias
+        for other_arch in archs
+        if alias not in aliases[other_arch]
+    )
+    assert get_arch_alias_to_panel_id(arch)[alias] == str(panel_id // 100)
+    assert alias not in get_arch_alias_to_panel_id(other_arch)
 
 
 def test_imports_only_profile_mode_dependencies(monkeypatch):

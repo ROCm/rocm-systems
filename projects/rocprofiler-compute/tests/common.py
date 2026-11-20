@@ -17,8 +17,8 @@ from threading import Thread
 from typing import Set
 from unittest.mock import Mock
 
-import config
 from memory_chart.loader import Layouts, PanelConfigs
+from rocprof_compute_soc.metric_library import loader
 from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -44,13 +44,11 @@ SUPPORTED_ARCHS = {
 
 
 def memory_chart_archs() -> list[str]:
-    """Analysis-config archs that have a memory chart panel."""
+    """Metric library archs whose views have a memory chart panel."""
     return sorted(
-        path.name
-        for path in config.analysis_configs_dir.iterdir()
-        if path.is_dir()
-        and path.name.startswith("gfx")
-        and PanelConfigs.for_arch(path.name)
+        arch
+        for arch in loader.METRIC_LIBRARY_PARENT_ARCH
+        if PanelConfigs.for_arch(arch)
     )
 
 

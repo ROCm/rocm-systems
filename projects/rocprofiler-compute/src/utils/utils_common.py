@@ -699,6 +699,11 @@ def build_metric_details(
     return dict(_iter_metric_list_rows(expanded_configs))
 
 
+def panel_id_of(table_id: int) -> int:
+    """Return the panel id of a table config id, e.g. 1802 -> 1800."""
+    return table_id // 100 * 100
+
+
 def format_table_id(config_id: int) -> str:
     """Return the "block.table" id of a table config id, e.g. 1802 -> "18.2"."""
     return f"{config_id // 100}.{config_id % 100}"
@@ -806,28 +811,6 @@ def get_uuid() -> str:
     return uuid.uuid4().hex[:8]
 
 
-def convert_filter_blocks_to_panel_ids(
-    filter_blocks: List[str], arch: Optional[str] = None
-) -> Set[int]:
-    """Inverse of convert_metric_id_to_panel_info: map metric ids like
-    "2" or "11.1" to the set of file_id integers (e.g. {200, 1100}).
-    Tokens that are not metric ids are looked up as panel aliases (e.g.
-    "lds", "roofline") for the given arch.
-    """
-    alias_map: dict[str, str] = (
-        get_arch_alias_to_panel_id(arch)
-        if arch and any(not METRIC_ID_RE.match(str(bid)) for bid in filter_blocks)
-        else {}
-    )
-    resolved: set[int] = set()
-    for bid in filter_blocks:
-        metric_id = resolve_block_token(str(bid), alias_map)
-        if metric_id is None:
-            console_error(f"Invalid --block value {str(bid)!r}.{INVALID_BLOCK_HINT}")
-        resolved.add(int(convert_metric_id_to_panel_info(metric_id)[0]))
-    return resolved
-
-
 def convert_metric_id_to_panel_info(
     metric_id: str,
 ) -> Tuple[str, Optional[int], Optional[int]]:
@@ -908,30 +891,6 @@ def mapping_field_errors(
         if field not in required and field not in optional
     )
     return errors
-
-
-def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:
-    """Return panel_id_str -> alias from the config template for arch.
-
-    Empty or missing aliases stay as "". Returns {} when no template matches.
-    """
-    template_path = config_template_path_for_arch(arch)
-    if template_path is None:
-        return {}
-    panel_yaml = load_yaml(template_path) or {}
-    panels = panel_yaml.get("panels") or []
-    return {
-        str(panel["panel_id"]): (panel.get("panel_alias") or "") for panel in panels
-    }
-
-
-def get_arch_alias_to_panel_id(arch: str) -> Dict[str, str]:
-    """Inverse of get_arch_panel_id_to_alias for resolving --block
-    <alias> tokens: alias -> panel_id_str. Skips panels with empty or
-    None aliases so unknown aliases naturally raise KeyError on lookup."""
-    return {
-        alias: pid for pid, alias in get_arch_panel_id_to_alias(arch).items() if alias
-    }
 
 
 def get_job_rank_and_size() -> Tuple[Optional[str], Optional[int]]:
