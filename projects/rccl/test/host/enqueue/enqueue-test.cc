@@ -1925,7 +1925,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_TopoGetAlgoTimeFailure_Propagates) 
             updateCollCostTable(cc.get(), &task, 1 << 20, 0, 0, 1, 0, tbl.ptr()));
 }
 
-TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeLargeAllReduce_RingNotPenalised) {
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeAllReduce_RingNotPenalised) {
   // With DDA LL128 on, the ring is exempt at any size, including just below the ceiling.
   constexpr size_t kCeiling = 256ULL << 20;
   for (int nRanks : {kFp8RingPenaltyRanks + 1, 16, 32}) {

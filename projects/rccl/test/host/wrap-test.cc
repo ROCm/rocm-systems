@@ -6140,10 +6140,11 @@ class RegisteredAr {
     comm_->rankToNode = rankToNode_.data();
   }
 
-  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum) {
+  rcclCollDecision Select(size_t bytes, bool capturing, bool query = true, ncclRedOp_t op = ncclSum,
+                          ncclDataType_t dtype = ncclFloat32) {
     capturing_ = capturing;
     rcclCollDecision decision{};
-    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / sizeof(float), ncclFloat32, op,
+    EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm_, nullptr, nullptr, bytes / ncclTypeSize(dtype), dtype, op,
                                                 /*stream=*/nullptr, query, /*graphCapturingHint=*/capturing,
                                                 &decision));
     return decision;
@@ -6458,7 +6459,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredEagerCeCapFollowsCeChunk) 
       });
 }
 
-// Capture re-routes only where the planner runs Ring (fp8 plans Tree); the cap is Ring's packed channels and
+// Capture re-routes only where the planner runs Ring (fp8 too); the cap is Ring's packed channels and
 // max(nWarps, 3) warps.
 TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlannedKernel) {
   RUN_ISOLATED_TEST(
@@ -6479,6 +6480,9 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredCaptureCapFollowsThePlanne
         d = ar.Select(16 * kMiB, true);
         EXPECT_EQ(24u, d.ddaCap.blocks) << "the channels the packed plan launches";
         EXPECT_EQ(24u, d.nMaxChannels);
+        d = ar.Select(16 * kMiB, true, true, ncclSum, ncclFloat8e4m3);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo) << "fp8 re-routes like float32";
+        EXPECT_EQ(24u, d.ddaCap.blocks);
       });
 }
 

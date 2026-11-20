@@ -546,10 +546,8 @@ int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info
 // Ranks at or below this are not penalized. An FP8 ring above it gets 1024 unless exempted.
 constexpr int kFp8RingPenaltyRanks = 8;
 
-// FP8 Ring gets a 1024x cost penalty when there are more than 8 ranks.
-// The exception is a single-node gfx1250 AllReduce with DDA LL128 enabled. There, DDA is
-// tried first, so if we get here DDA couldn't run, and Ring should be judged normally.
-// Pass rcclDdaLL128Threshold() as ddaLl128Ceiling. 0 means DDA LL128 is off: no exception.
+// 1024 for an FP8 ring above kFp8RingPenaltyRanks, except a single-node gfx1250 AllReduce
+// with DDA LL128 on (ddaLl128Ceiling, from rcclDdaLL128Threshold(), is nonzero).
 inline float rcclFp8RingCostFactor(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes,
                                    size_t ddaLl128Ceiling, const char* arch) {
   if ((dtype != ncclFloat8e4m3 && dtype != ncclFloat8e5m2) || nRanks <= kFp8RingPenaltyRanks) return 1.0f;
