@@ -332,39 +332,39 @@ ruff format .
 Metric equations in YAML config files follow a canonical format. The canonical
 implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 
-**Scope.** Equation formatting applies to YAML files under
-`src/rocprof_compute_soc/`:
+**Scope.** The formatter checks these YAML files under `src/rocprof_compute_soc/`:
 
 - `analysis_configs/gfx*/*.yaml` (panel configs)
 - `metric_library/<arch>/*.yaml`, including `collectables.yaml`
-- `analysis_configs/collectables/<arch>_collectables.yaml`
+- `analysis_configs/collectables/<arch>_collectables.yaml` (panel collectables)
 
-Template files (`*_template.yaml`) and build artifacts are excluded. In the panel
-and metric library files, only values under these keys are equations: `value`,
-`avg`, `min`, `max`, `std dev`, `expr`, `peak`, `formula`, `peak_empirical`.
-Table headers use the same keys for column titles and are not checked. In the panel
+It skips template files (`*_template.yaml`) and build artifacts. In the panel configs
+and metric library files, the equations are the values of these keys: `value`, `avg`,
+`min`, `max`, `std dev`, `expr`, `peak`, `formula` and `peak_empirical`. Table headers
+use the same keys for column titles, so the formatter skips them. In the panel
 collectables files, every top-level value is an equation.
 
 **Rules.**
 
-- **Operator spacing** — all binary operators (`+`, `-`, `*`, `/`) have exactly
-  one space on each side: `SUM(x) / SUM(y)`.
-- **Constant factoring** — when the single argument of an aggregation (`SUM`,
-  `AVG`, `MIN`, `MAX`) is multiplied by a number, factor it out:
-  `128 * SUM(x)`, not `SUM(x * 128)`. Addition and division inside aggregations
-  are left as-is.
-- **Minimal parentheses** — remove parentheses made redundant by operator
-  precedence (`a + b + c`, not `(a + b) + c`), but keep them around a right
-  operand of equal precedence and wherever they set the evaluation order
-  (`a - (b - c)`, `a + (b + c)`, `(a + b) * c`).
-- **Unary negation** — negation of a compound expression keeps its parentheses:
-  `-(a + b)`, not `-a + b`.
-- **Left as written** — per-channel templates such as `TCC_HIT[::_1]` are not
-  parsed. A cell with no value is written `None`.
+- Operator spacing: each binary operator (`+`, `-`, `*`, `/`) has one space on each
+  side, as in `SUM(x) / SUM(y)`.
+- Constant factoring: a number that multiplies the single argument of an aggregation
+  (`SUM`, `AVG`, `MIN`, `MAX`) moves out of the call, so `SUM(x * 128)` becomes
+  `128 * SUM(x)`. A sum or a quotient inside an aggregation stays as written.
+- Minimal parentheses: the formatter removes parentheses that operator precedence
+  makes redundant, so `(a + b) + c` becomes `a + b + c`. A right operand of the same
+  precedence keeps its parentheses, and so does an operand whose parentheses change
+  the order of evaluation. `a - (b - c)`, `a + (b + c)` and `(a + b) * c` stay as
+  written.
+- Unary minus: a minus sign before an operation keeps its parentheses, so `-(a + b)`
+  does not become `-a + b`.
+- Left as written: the formatter does not parse per-channel templates such as
+  `TCC_HIT[::_1]`. A cell without a value is written `None`.
 
-The formatter reports an equation it cannot parse (unknown characters, unmatched
-parentheses, a missing operand) with its key and the parser message, and leaves
-it unchanged; fix it by hand.
+The formatter reports each equation that it cannot parse, such as one with an
+unknown character, an unmatched parenthesis or a missing operand. The report gives
+the key of the equation and the parser message. The formatter leaves the equation
+unchanged, so fix it by hand.
 
 **Enforcement.** The `yaml-format-fix` pre-commit hook runs
 `tools/format_yaml.py --fix` on staged config files and auto-corrects equations

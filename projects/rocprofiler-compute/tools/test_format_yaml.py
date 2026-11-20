@@ -9,8 +9,8 @@ import textwrap
 import pytest
 from format_yaml import check_file, normalize_equation
 
-# A panel with one equation that needs formatting and one equation
-# with a dangling operator.
+# A panel with one equation that needs formatting and one equation with a
+# dangling operator
 PANEL_WITH_BROKEN_EQUATION = textwrap.dedent("""\
     Panel Config:
       id: 400
@@ -24,8 +24,8 @@ PANEL_WITH_BROKEN_EQUATION = textwrap.dedent("""\
               value: SUM(SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + ) / SUM(SQ_LDS_IDX_ACTIVE)
 """)
 
-# A per-channel table and a simple-box table, each with a dangling operator in a
-# metric entry; their headers hold display text under the same keys
+# A per-channel table and a simple-box table. Each has a metric with a dangling
+# operator, and a header with display text under the equation keys.
 PANEL_WITH_STD_DEV_AND_EXPR = textwrap.dedent("""\
     Panel Config:
       id: 1800
@@ -50,7 +50,8 @@ PANEL_WITH_STD_DEV_AND_EXPR = textwrap.dedent("""\
               expr: 100 * TCP_PENDING_STALL_CYCLES_sum /
 """)
 
-# Panel collectables: top-level name: formula pairs, with one formula to format
+# Panel collectables. Each top-level key names a formula, and one formula needs
+# formatting.
 COLLECTABLES = textwrap.dedent("""\
     # Named formulas that metric formulas use as $name.
     GRBM_GUI_ACTIVE_PER_XCD: GRBM_GUI_ACTIVE / $num_xcd

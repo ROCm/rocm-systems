@@ -2,7 +2,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""YAML metric equation formatter for rocprofiler-compute pre-commit hook."""
+"""Write the metric equations of the panel configs, panel collectables and metric
+library YAML files in one form, which CONTRIBUTING.md describes."""
 
 import argparse
 import re
@@ -53,24 +54,25 @@ EQUATION_KEYS = {
     "peak_empirical",
 }
 
-# Key of a metric_table's column titles, which use the equation keys for display text
+# Key of the column titles of a metric_table. The titles use the equation keys, but
+# they are not equations.
 HEADER_KEY = "header"
 
-# Aggregation functions where constants should be factored out
+# Aggregation functions whose constant factor moves out of the call
 AGGREGATION_FUNCTIONS = {"SUM", "MIN", "MAX", "AVG"}
 
-# Operator precedence for parentheses minimization
+# Precedence of each binary operator, which decides where parentheses are needed
 OPERATOR_PRECEDENCE = {"+": 1, "-": 1, "*": 2, "/": 2}
 
-# Channel placeholder of a per-channel template, such as TCC_HIT[::_1]; analyze
-# expands the template once per channel, so the formatter leaves it as written
+# Marks a per-channel template such as TCC_HIT[::_1]. Analyze expands the template
+# once for each channel, so the formatter leaves it as written.
 CHANNEL_PLACEHOLDER = "::_"
 
 
 def normalize_equation(equation: str) -> str:
-    """Parse, normalize, and serialize a metric equation string.
+    """Return the equation in the form of the YAML files.
 
-    Raises ValueError when the equation cannot be parsed.
+    Raises ValueError if the equation does not parse.
     """
     if CHANNEL_PLACEHOLDER in equation:
         return equation
@@ -114,7 +116,7 @@ def _factor_constant(call: "FunctionCallNode") -> "ASTNode":
 def _serialize_ast(
     node: "ASTNode", parent_op: Optional[str] = None, is_right: bool = False
 ) -> str:
-    """Serialize AST to string with minimal parentheses."""
+    """Write a syntax tree as an equation with only the parentheses it needs."""
     if isinstance(node, NumberNode):
         return node.value
     if isinstance(node, (IdentifierNode, VariableNode)):
@@ -154,8 +156,8 @@ def _needs_parentheses(op: str, parent_op: Optional[str], is_right: bool) -> boo
 def extract_metric_equations(
     data: Dict[str, Any], path: str = ""
 ) -> List[Tuple[str, str]]:
-    """Return (key path, equation) of each equation field in YAML data, skipping
-    table headers."""
+    """Return (key path, equation) for each equation in YAML data. Table headers
+    are skipped."""
     equations = []
 
     if isinstance(data, dict):
@@ -320,7 +322,8 @@ class Token:
 
 
 class Tokenizer:
-    """Tokenize metric equations into tokens."""
+    """Split a metric equation into numbers, names, operators, parentheses and
+    commas."""
 
     SINGLE_CHARACTER_TOKENS = {
         "+": TokenType.OPERATOR,
@@ -433,7 +436,7 @@ class FunctionCallNode(ASTNode):
 
 
 class Parser:
-    """Recursive descent parser for metric equations."""
+    """Build the syntax tree of a metric equation."""
 
     def __init__(self, tokens: List[Token]) -> None:
         self.tokens = tokens
