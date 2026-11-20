@@ -7,28 +7,19 @@
 Invoked by run_rocdecode.py after the CTest suite, and runnable on its own for
 local debugging. Three things happen here:
 
-  1. Fetch the conformance stream corpus. It is not redistributable, so it lives
-     in a private S3 bucket rather than alongside the public build artifacts.
-     Repeat runs reuse the extracted copy.
+  1. Fetch the conformance stream corpus. Repeat runs reuse the extracted copy.
   2. Build the videoDecode sample, which is what actually decodes the streams.
   3. Run testScripts/run_rocDecode_Conformance.py once per codec and collect the
      results. That script does the decoding and MD5 comparison; this one supplies
      it with a corpus, a binary and somewhere to write, and turns the per-codec
      exit codes into a single verdict.
 
-A run with no AWS credentials skips rather than fails. In CI the credentials are
-short-lived, from a role assumed through GitHub's OIDC provider; pull requests
-from forks are not issued a token, so that case is expected.
+A run that cannot fetch the corpus skips rather than fails. Pull requests from
+forks are expected to take that path.
 
 Environment variables:
   ROCM_PATH                     ROCm install prefix override.
-  ROCDECODE_CONFORMANCE_DIR     Corpus location (also the fetch destination).
-  ROCDECODE_CONFORMANCE_BUCKET  S3 bucket holding the corpus zips.
-  ROCDECODE_CONFORMANCE_KEYS    Comma-separated object keys of the corpus zips.
-  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN /
-  AWS_DEFAULT_REGION            Read via boto3's default credential chain, and
-                                what aws-actions/configure-aws-credentials
-                                exports after assuming the role.
+  ROCDECODE_CONFORMANCE_DIR     Corpus location.
 """
 
 import argparse
@@ -162,19 +153,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--bucket",
         default=os.getenv("ROCDECODE_CONFORMANCE_BUCKET", DEFAULT_BUCKET),
-        help="S3 bucket holding the corpus zips (default: %(default)s).",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--keys",
         default=os.getenv("ROCDECODE_CONFORMANCE_KEYS", ",".join(DEFAULT_KEYS)),
-        help="Comma-separated object keys of the corpus zips "
-        "(default: %(default)s).",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--region",
         default=os.getenv("AWS_DEFAULT_REGION", DEFAULT_REGION),
-        help="Bucket region (default: %(default)s). Corrected automatically if "
-        "S3 reports the bucket lives elsewhere.",
+        help=argparse.SUPPRESS,
     )
     return parser.parse_args()
 
@@ -310,14 +299,7 @@ def fetch_feasibility() -> Optional[str]:
         return message
 
     if boto3.Session().get_credentials() is None:
-        return (
-            "no AWS credentials available.\n"
-            "\n"
-            "The stream corpus lives in a private bucket, which CI reaches by\n"
-            "assuming a role through GitHub's OIDC provider. Pull requests from\n"
-            "forks are not issued a token, so this is expected on fork PRs and\n"
-            "is not a failure."
-        )
+        return "PRs from forks cannot fetch the conformance corpus."
     return None
 
 
@@ -339,15 +321,13 @@ def make_client(region: str, bucket: str):
         headers = exc.response.get("ResponseMetadata", {}).get("HTTPHeaders", {})
         actual = headers.get("x-amz-bucket-region")
         if actual and actual != region:
-            logging.info(
-                f"++ bucket {bucket} is in {actual}, not {region}; reconnecting"
-            )
+            logging.info(f"++ corpus is in {actual}, not {region}; reconnecting")
             return boto3.client("s3", region_name=actual)
         # head_bucket also fails when the caller may read the object but not the
         # bucket itself, which is a legitimate least-privilege policy. Carry on
         # and let the download report any real problem.
         code = exc.response.get("Error", {}).get("Code")
-        logging.info(f"++ head_bucket on {bucket} failed ({code}); continuing")
+        logging.info(f"++ head_bucket failed ({code}); continuing")
         return client
 
 
@@ -439,7 +419,7 @@ def download_corpus(
         for key, (_, size) in heads.items():
             archive_path = Path(scratch) / Path(key).name
             logging.info(
-                f"++ Downloading s3://{bucket}/{key} ({size / (1024 ** 2):.1f} MiB)"
+                f"++ Downloading {Path(key).name} ({size / (1024 ** 2):.1f} MiB)"
             )
             with archive_path.open("wb") as handle:
                 client.download_fileobj(bucket, key, handle)
@@ -487,25 +467,13 @@ def fetch_corpus(
             response = client.head_object(Bucket=bucket, Key=key)
             heads[key] = (response["ETag"].strip('"'), int(response["ContentLength"]))
     except NoCredentialsError:
-        raise CorpusUnavailable(
-            "no AWS credentials available.\n"
-            "\n"
-            "The stream corpus lives in a private bucket, which CI reaches by\n"
-            "assuming a role through GitHub's OIDC provider. Pull requests from\n"
-            "forks are not issued a token, so this is expected on fork PRs and\n"
-            "is not a failure."
-        )
+        raise CorpusUnavailable("PRs from forks cannot fetch the conformance corpus.")
     except ClientError as exc:
         if not auth_failure(exc):
             raise
         code = exc.response.get("Error", {}).get("Code")
         raise CorpusUnavailable(
-            f"the available AWS credentials cannot read s3://{bucket} ({code}).\n"
-            "\n"
-            "The stream corpus lives in a private bucket. A fork PR gets no\n"
-            "repository secrets, and a runner that supplies its own ambient\n"
-            "identity gets refused rather than going unauthenticated, so this\n"
-            "is expected on fork PRs and is not a failure."
+            f"PRs from forks cannot fetch the conformance corpus ({code})."
         )
 
     # One line per object, so changing any of them invalidates the cached copy.
@@ -540,7 +508,7 @@ def fetch_corpus(
             raise
         code = exc.response.get("Error", {}).get("Code")
         raise CorpusUnavailable(
-            f"the available AWS credentials cannot download from s3://{bucket} ({code})."
+            f"PRs from forks cannot fetch the conformance corpus ({code})."
         )
     marker.write_text(want)
 
@@ -548,7 +516,7 @@ def fetch_corpus(
     if not found:
         expected = ", ".join(sorted(CODEC_DIR_PREFIXES.values()))
         raise RuntimeError(
-            f"Extracted {len(keys)} archive(s) from s3://{bucket} into {dest} but "
+            f"Extracted {len(keys)} archive(s) into {dest} but "
             f"found no folder named for [{expected}] containing Streams/ and "
             "MD5/. The archive layout is not what this script expects."
         )

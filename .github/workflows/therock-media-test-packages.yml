@@ -39,13 +39,8 @@ jobs:
       amdgpu_families: ${{ inputs.amdgpu_families }}
       test_runs_on: ${{ inputs.test_runs_on }}
       platform: "linux"
-      # Read-only access to the private bucket holding the rocDecode conformance
-      # stream corpus, via GitHub OIDC -- no long-lived access keys anywhere.
-      # The role trusts repo:ROCm/rocm-systems:* and is defined in TheRock-Infra
-      # at projects/self-service-s3/customer/knagesh-media-test.tf.
-      #
-      # Pull requests from forks get no token, so the sweep skips itself there
-      # rather than failing. See the credential step in therock-test-component.yml.
+      # Pull requests from forks skip the sweep rather than failing. See the
+      # credential step in therock-test-component.yml.
       aws_role_to_assume: "arn:aws:iam::317668459450:role/therock-knagesh-media-test-s3-oidc"
       aws_region: "us-east-1"
       # The conformance sweep downloads and unpacks a multi-GiB corpus, builds

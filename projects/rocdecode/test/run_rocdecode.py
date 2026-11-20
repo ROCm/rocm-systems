@@ -137,13 +137,13 @@ def execute_conformance(env: Dict[str, str], script_dir: Path, build_dir: Path) 
     """Run the conformance sweep as a separate phase after CTest.
 
     Deliberately not a CTest test: the sweep decodes several hundred streams per
-    codec and depends on a corpus fetched from a private bucket at runtime, which
-    makes it a poor fit for the installed CMake suite. Running it here means one
-    entry point still covers both.
+    codec and depends on a corpus fetched at runtime, which makes it a poor fit
+    for the installed CMake suite. Running it here means one entry point still
+    covers both.
 
-    A missing runner, or a run with no credentials to reach the corpus, is not a
-    failure -- the sweep reports that itself and exits 0. A real conformance
-    failure raises, the same way a CTest failure does in execute_tests.
+    A missing runner, or a run that cannot fetch the corpus, is not a failure --
+    the sweep reports that itself and exits 0. A real conformance failure
+    raises, the same way a CTest failure does in execute_tests.
     """
     runner = script_dir / "run_conformance_sweep.py"
     if not runner.is_file():

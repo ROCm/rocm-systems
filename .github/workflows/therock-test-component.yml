@@ -27,11 +27,9 @@ on:
         type: string
         default: "ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98"
       aws_role_to_assume:
-        # IAM role assumed through GitHub's OIDC provider before the test step,
-        # for components whose test script reads from a private S3 bucket. Empty
-        # for every component that needs no AWS access, which is the default:
-        # the credential step is then skipped entirely. A role ARN is not a
-        # secret, so this is a plain input rather than a secret.
+        # IAM role assumed before the test step, for components whose test
+        # script needs AWS access. Empty by default, which skips the credential
+        # step entirely.
         type: string
         default: ""
       aws_region:
@@ -144,10 +142,8 @@ jobs:
           fi
 
       # Last step before the test, so the whole session lifetime is available to
-      # it. Skipped for pull requests from forks: GitHub withholds `id-token:
-      # write` there, so there is no token to exchange. A component that needs
-      # the bucket is expected to cope with that -- the rocDecode conformance
-      # sweep prints a skip banner and exits 0.
+      # it. Skipped for pull requests from forks, where the rocDecode
+      # conformance sweep prints a skip banner and exits 0.
       - name: Configure AWS credentials
         if: ${{ inputs.aws_role_to_assume != '' && !github.event.pull_request.head.repo.fork }}
         uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
