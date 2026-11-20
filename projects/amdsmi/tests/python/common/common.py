@@ -718,16 +718,21 @@ def print_legend():
 
 
 def print_unittest_help():
-    """Print unittest's -h output with its built-in Examples epilog stripped.
+    """Print unittest's -h output without its -k option and built-in Examples epilog.
 
     unittest (via argparse) appends its own Examples block; we capture stdout,
     remove everything from the last 'Examples:' onward, and reprint — leaving
     our print_amdsmi_path_help() as the sole Examples section at the bottom.
     """
+
+    class _HelpProgram(unittest.TestProgram):
+        # Not None, so unittest (3.7+) leaves out its own -k, which the runner implements.
+        testNamePatterns = ()
+
     buf = io.StringIO()
     try:
         with contextlib.redirect_stdout(buf):
-            unittest.main(argv=[sys.argv[0] or "unit_tests.py", "--help"])
+            _HelpProgram(argv=[sys.argv[0] or "unit_tests.py", "--help"])
     except SystemExit:
         pass
     output = buf.getvalue()

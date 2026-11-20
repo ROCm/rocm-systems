@@ -2,10 +2,10 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Runner test selection with ``-k``/``--keyword`` and ``-x``/``--exclude``.
+"""Runner test selection with ``-k``/``--keyword`` and ``-x``/``--exclude``, and its help.
 
-Each case lists a throwaway suite through ``common.run_test_dir``, so it sees the selection a
-runner script makes for those arguments.
+Each selection case lists a throwaway suite through ``common.run_test_dir``, so it sees the
+selection a runner script makes for those arguments.
 """
 
 import contextlib
@@ -112,3 +112,12 @@ class TestRunnerFilters(unittest.TestCase):
 
     def test_exclude_takes_no_wildcards(self) -> None:
         self.assertEqual(self._list("-x", "test_t*"), [_ONE, _TWO] + self.unloaded)
+
+    def test_help_leaves_keyword_to_the_runner(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            common.print_unittest_help()
+        common.print_amdsmi_path_help(file=out)
+        self.assertIn("--buffer", out.getvalue())
+        self.assertNotIn("TESTNAMEPATTERNS", out.getvalue())
+        self.assertIn("-k, --keyword PAT", out.getvalue())
