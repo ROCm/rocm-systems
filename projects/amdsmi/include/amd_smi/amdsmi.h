@@ -3941,7 +3941,9 @@ typedef struct {
  *  Every PCI function with a CUID is listed. A NIC's UnitID is its PCI
  *  function number, so the functions of one card have distinct CUIDs even
  *  where they report one serial number. Two components whose CUIDs coincide
- *  anyway are both left out, since such a CUID identifies neither.
+ *  anyway are both left out, since such a CUID identifies neither. A component
+ *  whose metadata cannot be read after enumeration is also omitted. Success
+ *  describes the readable CUIDs, not proof that every physical device was read.
  *
  *  Every CUID is temporary (::amdsmi_cuid_info_t::auxiliary is set), so the
  *  primary CUIDs are empty.
