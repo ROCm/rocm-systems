@@ -18,7 +18,7 @@ pip install pre-commit
 uv tool install pre-commit
 ```
 
-### Setting up pre-commit as a pre commit git hook 
+### Setting up pre-commit as a pre commit git hook
 
 ```sh
 pre-commit install
@@ -32,7 +32,7 @@ This is your best option to ensure that code is correctly formatted and linted b
 
 If you've run the `pre-commit install` command above, git will automatically run the default set of checks before each commit.
 
-### Run the default checks on staged files 
+### Run the default checks on staged files
 
 ```sh
 pre-commit
