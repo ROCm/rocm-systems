@@ -5,12 +5,13 @@
 
 use super::*;
 use rocddi::device::gpu::queue::{
-    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, decode_kfd_queue_exception,
+    replace_scratch_owner,
 };
 
 /// Queue error callback detached from the registry lock before invocation.
 struct PendingCallback {
-    /// Application callback to invoke synchronously.
+    /// Application or default callback to invoke synchronously.
     callback: unsafe extern "C" fn(Status, *mut HsaQueue, *mut c_void),
     /// HSA status derived from native error details.
     status: Status,
@@ -21,12 +22,41 @@ struct PendingCallback {
 }
 
 impl PendingCallback {
+    /// Selects application policy or the session's default error handler.
+    fn new(
+        callback: QueueErrorCallback,
+        report_errors: bool,
+        status: Status,
+        queue: usize,
+        data: CallbackArg,
+    ) -> Option<Self> {
+        Some(Self {
+            callback: callback.or_else(|| {
+                report_errors.then_some(default_queue_error as unsafe extern "C" fn(_, _, _))
+            })?,
+            status,
+            queue,
+            data,
+        })
+    }
+
     /// Invokes detached callback work while the worker retains queue lifetime.
     fn invoke(self) {
-        let _scope = CallbackScope::enter();
         // SAFETY: Queue destruction joins this worker before callback data expires.
-        unsafe { (self.callback)(self.status, self.queue as *mut HsaQueue, self.data.as_ptr()) };
+        CallbackScope::run(|| unsafe {
+            (self.callback)(self.status, self.queue as *mut HsaQueue, self.data.as_ptr())
+        });
     }
+}
+
+/// Captures an unhandled AQL error without waiting on application stderr.
+unsafe extern "C" fn default_queue_error(
+    _status: Status,
+    _queue: *mut HsaQueue,
+    _data: *mut c_void,
+) {
+    // Even an unlocked stderr write can block indefinitely on a full pipe.
+    crate::core_dump::fatal_abort();
 }
 
 /// Result of processing one queue event before native rearming.
@@ -37,9 +67,19 @@ struct QueueEventOutcome {
     rearm: bool,
 }
 
-/// Maps a native queue error code to an HSA status.
+/// Maps the legacy CP inactive-signal payload to an HSA status.
 pub(super) fn queue_error_status(error: u64) -> Status {
-    match decode_aql_queue_exception(error) {
+    exception_status(decode_aql_queue_exception(error))
+}
+
+/// Maps the separate KFD error-event payload to an HSA status.
+pub(super) fn queue_exception_status(error: u64) -> Status {
+    exception_status(decode_kfd_queue_exception(error))
+}
+
+/// Translates a decoded native queue exception into the public HSA ABI.
+fn exception_status(exception: AqlQueueException) -> Status {
+    match exception {
         AqlQueueException::Scratch { .. } | AqlQueueException::Unknown => ERROR,
         AqlQueueException::IncompatibleArguments => INCOMPATIBLE_ARGUMENTS,
         AqlQueueException::InvalidAllocation => INVALID_ALLOCATION,
@@ -48,6 +88,7 @@ pub(super) fn queue_error_status(error: u64) -> Status {
         AqlQueueException::InvalidPacketFormat => INVALID_PACKET_FORMAT,
         AqlQueueException::InvalidArgument => INVALID_ARGUMENT,
         AqlQueueException::OutOfRegisters => OUT_OF_REGISTERS,
+        AqlQueueException::InvalidDispatchParameters => INVALID_DISPATCH_PARAMETERS,
         AqlQueueException::MemoryApertureViolation => MEMORY_APERTURE_VIOLATION,
         AqlQueueException::IllegalInstruction => ILLEGAL_INSTRUCTION,
         AqlQueueException::Exception => EXCEPTION,
@@ -56,31 +97,31 @@ pub(super) fn queue_error_status(error: u64) -> Status {
 
 /// Prepares a callback for a queue event without holding the registry lock.
 fn pending_callback(
-    runtime: &crate::runtime::HsaState,
+    runtime: &crate::session::HsaSession,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
     let queue = runtime.queue_state.queues.get(&key)?;
-    Some(PendingCallback {
-        callback: queue.callback?,
+    PendingCallback::new(
+        queue.callback,
+        runtime.config.queue_fault_message_enabled,
         status,
-        queue: queue.public_handle,
-        data: queue.callback_data,
-    })
+        queue.public_handle,
+        queue.callback_data,
+    )
 }
 
 /// Prepares the user error callback after a queue fault.
 fn pending_error_callback(
-    runtime: &mut crate::runtime::HsaState,
+    runtime: &mut crate::session::HsaSession,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
     if status == MEMORY_FAULT {
         // Publish the affected queue so a running system event worker can
         // attach the process fault's address and reason.
-        let details = runtime.vm_fault_details;
-        let defer_to_system = runtime.system_event_worker.is_some()
-            && !runtime.system_event_failed.load(Ordering::Acquire);
+        let details = runtime.events.fault_details();
+        let defer_to_system = runtime.events.observing();
         let queue = runtime.queue_state.queues.get_mut(&key)?;
         queue.vm_faulted = true;
         if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
@@ -166,7 +207,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         cooperative,
     ) = {
         let queue = runtime.queue_state.queues.get(&key)?;
-        let index = runtime.gpu_index(queue.agent)?;
+        let index = runtime.agents.gpu_index(queue.agent)?;
         let Some((private_segment_size, dispatch_id, lanes_per_group)) =
             dispatch_private_segment(queue)
         else {
@@ -176,8 +217,8 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
             });
         };
         (
-            runtime.gpus[index].device.clone(),
-            runtime.gpus[index].info(),
+            runtime.agents.gpus[index].device.clone(),
+            runtime.agents.gpus[index].info(),
             queue.public_handle,
             private_segment_size,
             dispatch_id,
@@ -420,88 +461,96 @@ pub(super) fn queue_event_worker(
     let mut reclaim_check = std::time::Instant::now();
     let mut reclaim_enabled = true;
     while !stop.load(Ordering::Acquire) && alive.load(Ordering::Acquire) {
-        let Some(_lease) = crate::runtime::enter_runtime_service() else {
+        let Some(token) = crate::admission::enter_runtime_service() else {
             thread::sleep(Duration::from_millis(1));
             continue;
         };
-        let error = signal.load_error();
-        let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
-            observer_failure_checked = true;
-            let mut guard = match lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
-            };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
-                return;
-            };
-            if queue.vm_fault_callback_state.take_after_system_failure() {
-                pending_callback(runtime, key, MEMORY_FAULT)
+        if crate::admission::ApiLeaseScope::run(token, || {
+            let error = signal.load_error();
+            let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
+                observer_failure_checked = true;
+                let mut guard = match lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return std::ops::ControlFlow::Break(()),
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    return std::ops::ControlFlow::Break(());
+                };
+                let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
+                    return std::ops::ControlFlow::Break(());
+                };
+                if queue.vm_fault_callback_state.take_after_system_failure() {
+                    pending_callback(runtime, key, MEMORY_FAULT)
+                } else {
+                    None
+                }
+            } else if error != 0 && error_armed {
+                reclaim_enabled = false;
+                error_armed = false;
+                let mut guard = match lock() {
+                    Ok(guard) => guard,
+                    Err(_) => return std::ops::ControlFlow::Break(()),
+                };
+                let Some(runtime) = guard.as_mut() else {
+                    return std::ops::ControlFlow::Break(());
+                };
+                if !runtime.queue_state.queues.contains_key(&key) {
+                    return std::ops::ControlFlow::Break(());
+                }
+                let callback =
+                    pending_error_callback(runtime, key, queue_exception_status(error as u64));
+                signal.release_error();
+                callback
             } else {
-                None
-            }
-        } else if error != 0 && error_armed {
-            reclaim_enabled = false;
-            error_armed = false;
-            let mut guard = match lock() {
-                Ok(guard) => guard,
-                Err(_) => return,
+                if error == 0 {
+                    error_armed = true;
+                }
+                let observed = signal.load_inactive();
+                if observed == 0 {
+                    inactive_armed = true;
+                    None
+                } else if inactive_armed {
+                    inactive_armed = false;
+                    handle_queue_event(key, observed).and_then(|outcome| {
+                        inactive_armed = outcome.rearm;
+                        reclaim_enabled &= outcome.rearm;
+                        outcome.callback
+                    })
+                } else {
+                    None
+                }
             };
-            let Some(runtime) = guard.as_mut() else {
-                return;
-            };
-            if !runtime.queue_state.queues.contains_key(&key) {
-                return;
+            if let Some(callback) = callback {
+                if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
+                    return std::ops::ControlFlow::Break(());
+                }
+                callback.invoke();
             }
-            let callback = pending_error_callback(runtime, key, queue_error_status(error as u64));
-            signal.release_error();
-            callback
-        } else {
-            if error == 0 {
-                error_armed = true;
+            if reclaim_enabled && reclaim_check.elapsed() >= Duration::from_millis(25) {
+                reclaim_check = std::time::Instant::now();
+                if !reclaim_and_notify(
+                    || reclaim_idle_scratch(key, stop),
+                    |status| {
+                        let callback = lock()
+                            .ok()
+                            .and_then(|guard| pending_callback(guard.as_ref()?, key, status));
+                        if let Some(callback) = callback {
+                            callback.invoke();
+                        }
+                    },
+                    stop,
+                    alive,
+                ) {
+                    return std::ops::ControlFlow::Break(());
+                }
             }
-            let observed = signal.load_inactive();
-            if observed == 0 {
-                inactive_armed = true;
-                None
-            } else if inactive_armed {
-                inactive_armed = false;
-                handle_queue_event(key, observed).and_then(|outcome| {
-                    inactive_armed = outcome.rearm;
-                    reclaim_enabled &= outcome.rearm;
-                    outcome.callback
-                })
-            } else {
-                None
-            }
-        };
-        if let Some(callback) = callback {
-            if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
-                return;
-            }
-            callback.invoke();
+            thread::sleep(Duration::from_micros(20));
+            std::ops::ControlFlow::Continue(())
+        })
+        .is_break()
+        {
+            return;
         }
-        if reclaim_enabled && reclaim_check.elapsed() >= Duration::from_millis(25) {
-            reclaim_check = std::time::Instant::now();
-            if !reclaim_and_notify(
-                || reclaim_idle_scratch(key, stop),
-                |status| {
-                    let callback = lock()
-                        .ok()
-                        .and_then(|guard| pending_callback(guard.as_ref()?, key, status));
-                    if let Some(callback) = callback {
-                        callback.invoke();
-                    }
-                },
-                stop,
-                alive,
-            ) {
-                return;
-            }
-        }
-        thread::sleep(Duration::from_micros(20));
     }
 }
 
@@ -510,6 +559,143 @@ pub(super) fn queue_event_worker(
 mod tests {
     use super::*;
     use rocddi::ErrorKind;
+
+    /// Observations recorded without unwinding through the C callback boundary.
+    struct CallbackProbe {
+        status: Status,
+        queue: usize,
+        in_callback: bool,
+    }
+
+    unsafe extern "C" fn record_error(status: Status, queue: *mut HsaQueue, data: *mut c_void) {
+        // SAFETY: The test retains exclusive probe storage until invoke returns.
+        let probe = unsafe { &mut *data.cast::<CallbackProbe>() };
+        probe.status = status;
+        probe.queue = queue as usize;
+        probe.in_callback = CallbackScope::active();
+    }
+
+    #[test]
+    fn explicit_queue_callback_preserves_arguments_and_overrides_default_policy() {
+        for report_errors in [false, true] {
+            let mut probe = CallbackProbe {
+                status: SUCCESS,
+                queue: 0,
+                in_callback: false,
+            };
+            let mut queue_storage = [0u64; 16];
+            let queue = queue_storage.as_mut_ptr() as usize;
+            // SAFETY: The probe remains live until synchronous invocation ends.
+            let data = unsafe { CallbackArg::new((&raw mut probe).cast()) };
+            PendingCallback::new(Some(record_error), report_errors, MEMORY_FAULT, queue, data)
+                .unwrap()
+                .invoke();
+            assert_eq!(probe.status, MEMORY_FAULT);
+            assert_eq!(probe.queue, queue);
+            assert!(probe.in_callback);
+            assert!(!CallbackScope::active());
+        }
+        // SAFETY: The null argument has no storage to retain.
+        let data = unsafe { CallbackArg::new(std::ptr::null_mut()) };
+        assert!(PendingCallback::new(None, false, MEMORY_FAULT, 0, data).is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn default_queue_error_aborts_instead_of_dropping_notification() {
+        use std::io::Write;
+        use std::os::fd::{AsRawFd, FromRawFd};
+        use std::os::unix::process::ExitStatusExt;
+        use std::process::Stdio;
+        use std::time::Instant;
+
+        const CHILD: &str = "ROCDDI_TEST_DEFAULT_QUEUE_ABORT";
+        if std::env::var_os(CHILD).is_some() {
+            let limit = libc::rlimit {
+                rlim_cur: 0,
+                rlim_max: 0,
+            };
+            // SAFETY: These calls affect only this test subprocess. Suppress
+            // host core files and core-pattern helpers for the expected abort.
+            unsafe {
+                assert_eq!(libc::setrlimit(libc::RLIMIT_CORE, &raw const limit), 0);
+                assert_eq!(libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0), 0);
+            }
+            // SAFETY: The default handler does not dereference either pointer.
+            let data = unsafe { CallbackArg::new(std::ptr::null_mut()) };
+            PendingCallback::new(None, true, MEMORY_FAULT, 0, data)
+                .unwrap()
+                .invoke();
+            return;
+        }
+        for blocked_stderr in [false, true] {
+            let (_reader, stderr) = if blocked_stderr {
+                let mut descriptors = [-1; 2];
+                // SAFETY: The writable array has room for both new descriptors.
+                assert_eq!(
+                    unsafe {
+                        libc::pipe2(descriptors.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK)
+                    },
+                    0
+                );
+                // SAFETY: Each successful pipe descriptor is transferred once.
+                let (reader, mut writer) = unsafe {
+                    (
+                        std::fs::File::from_raw_fd(descriptors[0]),
+                        std::fs::File::from_raw_fd(descriptors[1]),
+                    )
+                };
+                loop {
+                    if let Err(error) = writer.write(&[0; 4096]) {
+                        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
+                        break;
+                    }
+                }
+                // SAFETY: This test owns the live descriptor. Restore blocking
+                // writes before passing it to the child, retaining the unread
+                // reader until the child exits so stderr cannot drain or EPIPE.
+                let flags = unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_GETFL) };
+                assert!(flags >= 0);
+                assert_eq!(
+                    unsafe {
+                        libc::fcntl(writer.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK)
+                    },
+                    0
+                );
+                (Some(reader), Stdio::from(writer))
+            } else {
+                (None, Stdio::null())
+            };
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "queue::event::tests::default_queue_error_aborts_instead_of_dropping_notification",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .stdout(Stdio::null())
+                .stderr(stderr)
+                .spawn()
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let status = loop {
+                if let Some(status) = child.try_wait().unwrap() {
+                    break Some(status);
+                }
+                if Instant::now() >= deadline {
+                    child.kill().unwrap();
+                    child.wait().unwrap();
+                    break None;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            assert_eq!(
+                status.and_then(|status| status.signal()),
+                Some(libc::SIGABRT),
+                "default handler failed to abort with blocked_stderr={blocked_stderr}"
+            );
+        }
+    }
 
     fn error(kind: ErrorKind) -> rocddi::Error {
         rocddi::Error::Operation {

@@ -3,14 +3,14 @@
 
 //! AMD HSA ELF identity, target compatibility, and symbol interpretation.
 
-use rocddi::topology::GpuInfo;
-use rocelf::constants::{
+use crate::elf::constants::{
     ELF_MACHINE_AMDGPU, ELF_OS_ABI_AMDGPU_HSA, ELF_TYPE_DYN, ELF_TYPE_EXEC, SECTION_DYNSYM,
     SECTION_FLAG_AMDGPU_HSA_AGENT, SECTION_FLAG_AMDGPU_HSA_READONLY, SECTION_FLAG_WRITE,
     SECTION_SYMTAB, SYMBOL_BINDING_GLOBAL, SYMBOL_COMMON, SYMBOL_TYPE_AMDGPU_HSA_INDIRECT_FUNCTION,
     SYMBOL_TYPE_COMMON, SYMBOL_TYPE_OBJECT, SYMBOL_UNDEFINED,
 };
-use rocelf::{Layout, read_u16, read_u32};
+use crate::elf::{Layout, read_u16, read_u32};
+use rocddi::topology::GpuInfo;
 
 use crate::Error;
 
@@ -148,8 +148,8 @@ pub enum FloatRoundingMode {
 /// Execution properties interpreted from the supported code-object format.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CodeObjectContract {
-    /// Required HSA profile.
-    pub profile: Profile,
+    /// Declared HSA profile, or `None` when the format imposes no requirement.
+    pub profile: Option<Profile>,
     /// Required default floating-point rounding mode.
     pub rounding: FloatRoundingMode,
 }
@@ -164,7 +164,7 @@ impl CodeObjectContract {
             FloatRoundingMode::Default => FloatRoundingMode::Near,
             mode => mode,
         };
-        if self.profile != profile
+        if self.profile.is_some_and(|required| required != profile)
             || (self.rounding != FloatRoundingMode::Default && self.rounding != rounding)
         {
             return Err(Error::IncompatibleTarget);
@@ -194,17 +194,18 @@ impl<'a> CodeObject<'a> {
 
     /// Returns the checked ELF header.
     #[must_use]
-    pub fn layout(&self) -> Layout {
+    pub(crate) fn layout(&self) -> Layout {
         self.layout
     }
 
     /// Returns the execution contract of a modern AMDGPU HSA code object.
     #[must_use]
     pub fn contract(&self) -> CodeObjectContract {
-        // V3 and later use the AMDGPU base-profile ABI. Legacy HSAIL notes and
-        // amd_kernel_code_t are rejected by parse_code_object_layout below.
+        // V3 and later do not declare the legacy HSAIL profile. The executable
+        // may use either profile; the GPU ABI does not impose a BASE-only
+        // executable policy. V1/V2 objects are rejected by the parser below.
         CodeObjectContract {
-            profile: Profile::Base,
+            profile: None,
             rounding: FloatRoundingMode::Near,
         }
     }
@@ -214,7 +215,11 @@ impl<'a> CodeObject<'a> {
     /// # Errors
     /// Returns `InvalidObject` for malformed or unrepresentable load segments.
     pub fn load_size(&self) -> Result<usize, Error> {
-        let plan = rocelf::LoadPlan::new(self.bytes, self.layout, super::image::CODE_ALIGNMENT)?;
+        let plan = crate::elf::LoadPlan::new(
+            self.bytes,
+            self.layout,
+            super::loaded_image::CODE_ALIGNMENT,
+        )?;
         usize::try_from(plan.virtual_end() - plan.virtual_base()).map_err(|_| Error::InvalidObject)
     }
 
@@ -257,7 +262,7 @@ impl<'a> CodeObject<'a> {
 /// # Errors
 /// Returns `InvalidObject` for a malformed or non-HSA ELF object.
 fn parse_code_object_layout(bytes: &[u8]) -> Result<Layout, Error> {
-    let layout = rocelf::parse_elf64(bytes)?;
+    let layout = crate::elf::parse_elf64(bytes)?;
     if layout.os_abi != ELF_OS_ABI_AMDGPU_HSA
         || !matches!(layout.kind, ELF_TYPE_EXEC | ELF_TYPE_DYN)
         || layout.machine != ELF_MACHINE_AMDGPU
@@ -530,7 +535,7 @@ fn parse_symbols(
     layout: Layout,
     order: SymbolTableOrder,
 ) -> Result<Vec<Symbol>, Error> {
-    let entries = rocelf::amdgpu_symbols(bytes, layout, &order.section_types())?;
+    let entries = crate::elf::amdgpu_symbols(bytes, layout, &order.section_types())?;
     let gfx_major = TARGETS
         .iter()
         .find(|(id, _, _)| *id == layout.flags & AMDGPU_MACHINE_MASK)
@@ -561,7 +566,7 @@ fn parse_symbols(
             && symbol.symbol_type != SYMBOL_TYPE_COMMON;
         let (segment, is_const) = variable_metadata(symbol.section_flags);
         if kind == SymbolKind::Kernel
-            && (symbol.symbol_type == rocelf::constants::SYMBOL_TYPE_AMDGPU_HSA_KERNEL
+            && (symbol.symbol_type == crate::elf::constants::SYMBOL_TYPE_AMDGPU_HSA_KERNEL
                 || (is_definition && symbol.kernel_descriptor.is_none()))
         {
             return Err(Error::InvalidObject);
@@ -660,29 +665,19 @@ mod tests {
     }
 
     #[test]
-    fn modern_contract_rejects_mismatched_executable_policy() {
+    fn modern_contract_accepts_either_executable_profile() {
         let bytes = modern_object(AMDGPU_MACHINE_GFX1201);
         let contract = CodeObject::parse(&bytes).unwrap().contract();
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Default)
-                .is_ok()
-        );
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Near)
-                .is_ok()
-        );
-        assert!(
-            contract
-                .validate(Profile::Base, FloatRoundingMode::Zero)
-                .is_err()
-        );
-        assert!(
-            contract
-                .validate(Profile::Full, FloatRoundingMode::Near)
-                .is_err()
-        );
+        assert_eq!(contract.profile, None);
+        for profile in [Profile::Base, Profile::Full] {
+            assert!(
+                contract
+                    .validate(profile, FloatRoundingMode::Default)
+                    .is_ok()
+            );
+            assert!(contract.validate(profile, FloatRoundingMode::Near).is_ok());
+            assert!(contract.validate(profile, FloatRoundingMode::Zero).is_err());
+        }
     }
 
     #[test]
@@ -701,7 +696,7 @@ mod tests {
         let object = CodeObject::parse(&bytes).unwrap();
         // Segment [0x180, 0x281) occupies [0x100, 0x281) at code alignment.
         assert_eq!(object.load_size().unwrap(), 0x181);
-        let plan = rocelf::LoadPlan::new(&bytes, object.layout(), 256).unwrap();
+        let plan = crate::elf::LoadPlan::new(&bytes, object.layout(), 256).unwrap();
         assert_eq!(plan.allocation_size(), 0x200);
         let mut image = vec![0xcc; plan.allocation_size()];
         plan.write_amdgpu_image(0x1000, &mut image, |_| None)
@@ -754,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn variable_metadata_matches_rocr_section_flag_interpretation() {
+    fn variable_metadata_interprets_section_flags() {
         assert_eq!(variable_metadata(0), (VariableSegment::Global, false));
         assert_eq!(
             variable_metadata(SECTION_FLAG_WRITE),
@@ -766,3 +761,11 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod format_tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::panic)]
+mod corpus_tests;

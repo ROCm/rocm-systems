@@ -1,0 +1,1 @@
+* Fixed GIN proxy traffic on AINIC hosts running over the generic IB RMA backend when `NCCL_NET` is `ROCM-IB` or unset, although the data path uses IB-CAST. The internal RMA backend is now IB-CAST whenever the data path uses the IB-CAST NET plugin, with the generic IB backend as a fallback if IB-CAST cannot initialize. Set `NCCL_NET=IB` to keep the generic IB backend.

@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "How to select, edit, and use a JSON configuration file to define a simulated GPU topology in rocJITsu, including multi-GPU setups and C API usage."
-        "keywords": "rocJITsu, ROCm, GPU topology, JSON configuration, simulation, rj_vm_create, multi-GPU, CDNA, RDNA"
+        "description": "How to select, edit, and use a JSON configuration file to define a simulated GPU topology in rocjitsu, including multi-GPU setups and C API usage."
+        "keywords": "rocjitsu, ROCm, GPU topology, JSON configuration, simulation, rj_vm_create, multi-GPU, CDNA, RDNA"
 ---
 
 # Configure a simulated GPU topology
 
-rocJITsu uses a declarative JSON configuration file to describe the simulated GPU hardware: the component hierarchy, link connectivity, simulation parameters, and device properties exposed through the emulated sysfs topology. This page explains how to choose a configuration, adjust its key fields, build a multi-GPU configuration, and create a virtual machine from C code.
+rocjitsu uses a declarative JSON configuration file to describe the simulated GPU hardware: the component hierarchy, link connectivity, simulation parameters, and device properties exposed through the emulated sysfs topology. This page explains how to choose a configuration, adjust its key fields, build a multi-GPU configuration, and create a virtual machine from C code.
 
 For a full description of the JSON schema and its FlatBuffers validation, see [JSON topology configuration](/conceptual/json-configuration.md).
 
@@ -72,7 +72,7 @@ explicit stop request).
 
 ### `num_threads`
 
-The number of Simdojo engine partitions. rocJITsu assigns whole XCD subtrees to
+The number of Simdojo engine partitions. rocjitsu assigns whole XCD subtrees to
 these partitions and clamps the value to the aggregate XCD count. Set to `1` to
 keep all XCDs on one engine partition.
 
@@ -107,7 +107,7 @@ without a table uses serial defaults for unspecified knobs.
 
 Use `rocjitsu --config <path> --thread-budget-table` to show expected allocations
 without starting a VM. `rocjitsu --cpu-thread-budget N` replaces the JSON ceiling
-for that launch. Mirage embeds the native tables in its RocJITsu backend.
+for that launch. Mirage embeds the native tables in its rocjitsu backend.
 
 ### `exec_mode`
 
@@ -135,7 +135,7 @@ configuration used by the RCCL collective tests. To extend it:
 
 ## Create a VM from C code
 
-The rocJITsu C API provides file and string creators, each with a node-aware
+The rocjitsu C API provides file and string creators, each with a node-aware
 variant:
 
 -   `rj_vm_create` --- accepts a file path to a JSON config.
@@ -155,8 +155,8 @@ initialization depth:
 | Mode | Behavior |
 | --- | --- |
 | `RJ_VM_MODE_DEFAULT` | Standalone simulation. The caller drives execution through `rj_vm_step` or `rj_vm_run`. Topology and driver are not initialized. |
-| `RJ_VM_MODE_LOCAL` | Single-process serving via LD_PRELOAD interposer. The engine runs indefinitely, and the driver is opened so that a host runtime can issue ioctls. |
-| `RJ_VM_MODE_DAEMON` | Multi-process serving. Same as local mode, plus GPU allocations are backed by memfds for cross-process sharing. |
+| `RJ_VM_MODE_LOCAL` | Single-process serving through the C API or LD_PRELOAD interposer. Topology is generated, the driver is opened for in-process KFD commands, and the engine has no tick limit. Creation does not start execution: a C API host drives the engine through `rj_vm_step` or `rj_vm_run`. C API use does not require the interposer. |
+| `RJ_VM_MODE_DAEMON` | Multi-process serving. Same as local mode, plus GPU allocations have shareable backing handles (memfds or opaque tokens) for cross-process sharing. |
 
 ### Create from a file path
 

@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
@@ -39,6 +40,7 @@ enum class DecodedMemorySpace : uint8_t {
   LOCAL,   ///< Explicit local data share (DS).
   SCRATCH, ///< Explicit scratch/private memory.
   FLAT,    ///< Generic FLAT memory, resolved through the apertures.
+  GDS,     ///< Device-wide global data share or streamout register.
 };
 
 /// @brief Report name for a route. Stable; consumers key output on it.
@@ -66,10 +68,13 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
     return "global";
   case DecodedMemorySpace::LOCAL:
     return "local";
+
   case DecodedMemorySpace::SCRATCH:
     return "scratch";
   case DecodedMemorySpace::FLAT:
     return "flat";
+  case DecodedMemorySpace::GDS:
+    return "gds";
   case DecodedMemorySpace::UNKNOWN:
     break;
   }
@@ -103,6 +108,10 @@ struct ImageSampleFootprint {
 struct MemoryAccessObservation {
   /// @brief Instruction mnemonic; points at static storage.
   std::string_view mnemonic;
+  /// @brief Decoded operation identity, independent of its display spelling.
+  Operation operation = Operation::Unknown;
+  /// @brief Decoded addressing family before dynamic aperture resolution.
+  MemoryAddressing addressing = MemoryAddressing::None;
   uint64_t pc = 0;              ///< PC of the issuing wavefront.
   uint32_t compute_unit_id = 0; ///< Component id of the compute unit that issued it.
   uint32_t dispatch_id = 0;
@@ -171,12 +180,12 @@ struct MemoryAccessObservation {
   /// @details Normally a snapshot of EXEC, but an ISA exception may replace it:
   /// a CDNA5 DS transpose load issues with every lane regardless of EXEC.
   uint64_t active_lane_mask = 0;
-  /// @brief The architectural EXEC mask before an instruction-specific
-  ///        all-lane execution rule was applied.
+  /// @brief The architectural EXEC mask before instruction-specific lane rules.
   ///
   /// @details This normally equals @ref active_lane_mask. It differs for ISA
   /// operations such as CDNA5 transpose loads that execute with more lanes
-  /// than the incoming EXEC mask selects. It is always limited to
+  /// than the incoming EXEC mask selects, or GFX10 accesses suppressed by an
+  /// unallocated destination. It is always limited to
   /// @ref wavefront_size lanes.
   uint64_t architectural_exec_lane_mask = 0;
   /// @brief Lanes whose address resolved for routing. Address-generation bounds
@@ -185,11 +194,13 @@ struct MemoryAccessObservation {
   uint64_t valid_lane_mask = 0;
   /// @brief Lanes producing a nominal pipeline request, before backing checks.
   ///
-  /// @details Differs from @ref valid_lane_mask only for the wave64 transpose
-  /// loads that issue through the low half -- a `WMMA_TR_B8`, or a global
-  /// `TR16_B128` -- where one lane fetches on behalf of several. Every other
-  /// access, transpose or not, requests from every valid lane.
+  /// @details Wave64 transpose loads can fetch on behalf of more than one lane.
+  /// GFX10 ordered count selects only the first valid lane for its contribution.
   uint64_t request_lane_mask = 0;
+  /// GFX10 ordered count sends one wave-level GDS request at addresses[0], even
+  /// with empty EXEC or an unallocated destination. request_lane_mask identifies
+  /// its single VGPR contribution, if any. This mask identifies its VGPR writes.
+  std::optional<uint64_t> ordered_count_result_lane_mask;
   /// @brief Lanes whose addresses are swizzled scratch; see
   ///        @ref scratch_element_stride_bytes. A FLAT wave can mix these with
   ///        global lanes.
@@ -214,19 +225,17 @@ struct MemoryAccessObservation {
   /// non-FLAT instructions.
   uint64_t flat_dds_lane_mask = 0;
   /// @brief Ordinary FLAT LDS requests rejected in full by allocation bounds.
-  /// @details A subset of @ref flat_local_lane_mask. The addresses and nominal
-  /// request/counter participation remain intact. RDNA4 captures this at issue;
-  /// other architectures and non-FLAT instructions leave it zero. This reports
-  /// functional rejection and makes no statement about timing or bank traffic.
+  /// @details A subset of @ref flat_local_lane_mask. Addresses and nominal
+  /// counter participation remain intact. RDNA1 through RDNA3.5 reject a lane
+  /// when its whole transfer does not fit. On other targets the mask identifies
+  /// lanes with no complete element in the allocation.
   uint64_t flat_local_oob_lane_mask = 0;
-  /// @brief Captured exclusive LDS allocation end for RDNA4 FLAT requests.
-  /// @details Effective addresses below this bound can retain a valid prefix.
-  /// Ordinary transfers retain complete memory elements (DWORDs for multiword
-  /// transfers); atomics require their complete element. The bound includes the
-  /// workgroup base and remains fixed across retries. It is the modeled
-  /// `lds_base + lds_size`, including the current 256-byte scheduler rounding;
-  /// PM4 sizes may already be 512-byte multiples before that rounding. Target
-  /// allocation and encoding granules remain unmodeled. Unset for other paths.
+  /// @brief Exclusive allocation end for an ordinary FLAT LDS request.
+  /// @details The captured workgroup limit includes the LDS base and scheduler
+  /// rounding and stays fixed across retries. The observation clamps this limit
+  /// to the backing size. Exclude @ref flat_local_oob_lane_mask before counting
+  /// complete elements below this bound. Atomics require their whole element.
+  /// Unset when no lane requests ordinary LDS through FLAT.
   std::optional<uint64_t> flat_local_allocation_end;
   /// @brief Byte stride between consecutive elements of a scratch lane. Zero
   ///        when the access is contiguous, which every non-scratch access is.
@@ -250,6 +259,7 @@ struct MemoryAccessObservation {
   /// @brief Address each lane accesses, @ref wavefront_size entries.
   ///
   /// @details Only entries selected by @ref valid_lane_mask are meaningful.
+  /// Streamout register operations leave this span and the byte-request masks empty.
   /// Ordinary FLAT LDS lanes report effective allocation addresses on either
   /// route, which can still be outside the LDS backing. CDNA5 DDS lanes also
   /// undergo LDS-base arithmetic, but their values identify neither a DDS
@@ -276,9 +286,10 @@ struct MemoryAccessObservation {
   ///        @ref valid_lane_mask; otherwise there are @ref elements_per_lane masks.
   std::span<const uint64_t> element_lane_masks;
   /// @brief Addresses of the second access of a DS dual-access instruction.
-  ///        Empty unless the instruction has one.
+  ///        Empty when the target issues only the first address set.
   ///
-  /// @details The second access moves the same bytes per lane through the same
+  /// @details Equal-offset GFX10 paired DS instructions issue a single access.
+  /// The second access, when present, moves the same bytes per lane through the same
   /// lanes as the first, so an instruction with a non-empty set here moves
   /// twice @ref bytes_per_lane().
   std::span<const uint64_t> secondary_addresses;
@@ -291,6 +302,23 @@ struct MemoryAccessObservation {
   /// uses the ordinary per-lane addresses span, empty footprints, and a zero
   /// request_lane_mask while retaining the instruction's completion counter.
   std::span<const ImageSampleFootprint> image_sample_footprints;
+
+  /// Workgroup range intersected with the LDS backing for CDNA2 DS,
+  /// LDS-to-buffer sources and ordinary FLAT LDS requests. For FLAT, exclude
+  /// @ref flat_local_oob_lane_mask from @ref flat_local_lane_mask before
+  /// applying retained_bytes() to each LDS address set. Global lanes of a
+  /// mixed FLAT instruction use their own backing.
+  std::optional<LdsAllocationRange> lds_allocation;
+  /// Issue-time LDS source addresses for LDS-to-buffer stores. Apply the
+  /// allocation bound to each requesting lane's payload of bytes_per_lane()
+  /// bytes. addresses continues to describe its global destination.
+  std::span<const uint32_t> lds_source_addresses;
+
+  /// Lanes with a suppressed native DS access, including the CDNA1 SRC2 read.
+  /// Allocation bounds and coincident offsets suppress byte effects while
+  /// nominal requests and register/counter dependencies remain observable.
+  uint64_t ds_suppressed_lanes = 0;
+  uint64_t ds2_suppressed_lanes = 0;
 
   /// @brief Nominal bytes each participating lane requests through one address
   ///        set, before backing rejection. Double it when @ref
