@@ -27,7 +27,14 @@ HIP_TEST_CASE(Unit_Device_nextafter_nextafterf_Negative_RTC) {
   NegativeTestRTCWrapper<8>(kNextAfter);
 }
 
-MATH_TERNARY_WITHIN_ULP_TEST_DEF(fma, std::fma, 0, 1)
+MATH_TERNARY_KERNEL_DEF(fma)
+HIP_TEMPLATE_TEST_CASE(Unit_Device_fma_Accuracy_Positive, float, double) {
+  // fma must round directly to the result type. A wider host fma followed by
+  // conversion can double-round when the exact result is close to a midpoint.
+  TestType (*ref)(TestType, TestType, TestType) = std::fma;
+  const auto ulp = std::is_same_v<float, TestType> ? 0 : 1;
+  TernaryFloatingPointTest(fma_kernel<TestType>, ref, ULPValidatorBuilderFactory<TestType>(ulp));
+}
 HIP_TEST_CASE(Unit_Device_fma_fmaf_Negative_RTC) { NegativeTestRTCWrapper<12>(kFma); }
 
 __global__ void fdividef_kernel(float* const ys, const size_t num_xs, float* const x1s,

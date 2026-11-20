@@ -14,7 +14,12 @@ HIP_TEST_CASE(Unit_Device_fmod_fmodf_Negative_RTC) { NegativeTestRTCWrapper<8>(k
 MATH_BINARY_WITHIN_ULP_TEST_DEF(remainder, std::remainder, 0, 0)
 HIP_TEST_CASE(Unit_Device_remainder_remainder_Negative_RTC) { NegativeTestRTCWrapper<8>(kRemainder); }
 
-MATH_BINARY_WITHIN_ULP_TEST_DEF(fdim, std::fdim, 0, 0)
+MATH_BINARY_KERNEL_DEF(fdim)
+HIP_TEMPLATE_TEST_CASE(Unit_Device_fdim_Accuracy_Positive, float, double) {
+  // Use the result precision to avoid rounding the subtraction twice.
+  TestType (*ref)(TestType, TestType) = std::fdim;
+  BinaryFloatingPointTest(fdim_kernel<TestType>, ref, ULPValidatorBuilderFactory<TestType>(0));
+}
 HIP_TEST_CASE(Unit_Device_fdim_fdimf_Negative_RTC) { NegativeTestRTCWrapper<8>(kFdim); }
 
 MATH_UNARY_WITHIN_ULP_TEST_DEF(trunc, std::trunc, 0, 0)
@@ -86,19 +91,43 @@ template <typename T> __global__ void remquo_kernel(std::pair<T, int>* const ys,
 }
 
 template <typename T> std::pair<T, int> remquo_wrapper(T x1, T x2) {
-  std::pair<T, int> ret;
+  std::pair<T, int> ret{};
   ret.first = std::remquo(x1, x2, &ret.second);
   return ret;
 }
 
+template <typename T> class RemquoValidator : public MatcherBase<std::pair<T, int>> {
+ public:
+  RemquoValidator(std::pair<T, int> target, bool negative_quotient)
+      : target_{target}, negative_quotient_{negative_quotient} {}
+
+  bool match(const std::pair<T, int>& value) const override {
+    // The quotient is unspecified for a domain error. Otherwise only its sign
+    // and at least three low bits are portable between the host and device.
+    if (std::isnan(target_.first)) return std::isnan(value.first);
+    const bool sign_matches = value.second == 0 || (value.second < 0) == negative_quotient_;
+    return value.first == target_.first && sign_matches && value.second % 8 == target_.second % 8;
+  }
+
+  std::string describe() const override {
+    std::ostringstream message;
+    message << "has remainder " << target_.first << " and signed quotient bits "
+            << target_.second % 8;
+    return message.str();
+  }
+
+ private:
+  std::pair<T, int> target_;
+  bool negative_quotient_;
+};
+
 HIP_TEMPLATE_TEST_CASE(Unit_Device_remquo_Accuracy_Positive, float, double) {
   using RT = RefType_t<TestType>;
   std::pair<RT, int> (*ref)(RT, RT) = remquo_wrapper;
-  const auto ulp_builder = ULPValidatorBuilderFactory<TestType>(0);
-  const auto eq_builder = EqValidatorBuilderFactory<int>();
-
-  BinaryFloatingPointTest(remquo_kernel<TestType>, ref,
-                          PairValidatorBuilderFactory<TestType, int>(ulp_builder, eq_builder));
+  const auto validator_builder = [](std::pair<TestType, int> target, TestType x, TestType y) {
+    return std::make_unique<RemquoValidator<TestType>>(target, std::signbit(x) != std::signbit(y));
+  };
+  BinaryFloatingPointTest(remquo_kernel<TestType>, ref, validator_builder);
 }
 
 HIP_TEST_CASE(Unit_Device_remquo_remquof_Negative_RTC) { NegativeTestRTCWrapper<24>(kRemquo); }
