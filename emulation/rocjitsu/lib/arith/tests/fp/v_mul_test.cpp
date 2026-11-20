@@ -38,6 +38,22 @@ TEST(FpMulF16W64Gfx11, Arithmetic) {
       rj_arith_v_mul_f16_w64, [](double x, double y) { return x * y; }, /*gfx12=*/false);
 }
 
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpMulF16W32Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_mul_f16_w32_gfx10, [](double x, double y) { return x * y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpMulF16W64Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_mul_f16_w64_gfx10, [](double x, double y) { return x * y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
+      /*half_exact=*/false);
+}
+
 namespace {
 
 // Selected gfx1201 default-mode FP exception contributions.
@@ -236,12 +252,15 @@ TEST(FpMulF32, DirectedRounding) {
   check_mul_rounding<64>(rj_arith_v_mul_f32_w64_gfx12);
 }
 
-// Compatibility preserves intermediate overflow; Loose can keep the finite wide product.
-TEST(FpMulF16, CompatibilityOmodRounding) {
+// Hardware rounds to FP16 before OMOD, so 65504 * 2 halves to infinity (or, rounding toward
+// zero or down, to 65504 / 2); Loose can keep the finite wide product. Expected results are
+// gfx1201 captures (rj-valu-audit-local hw-r9700-wide v_mul_f16__div2, 2026-11-18).
+TEST(FpMulF16, OmodRounding) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
     for (auto call : {rj_arith_v_mul_f16_w32, rj_arith_v_mul_f16_w32_gfx12}) {
-      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                                 RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
         for (uint64_t rounding :
              {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
           Registers<3, 32> r;
@@ -288,7 +307,8 @@ TEST(FpMulF16, TinyAfterRounding) {
       {0x9873, 0x2b31, 0, RJ_ARITH_ALU_OMOD_HALF, {0x8400, not_captured, not_captured, 0x8000}},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
       for (const auto &test : cases) {
         for (unsigned rounding = 0; rounding < 4; ++rounding) {
           if (test.expected[rounding] == not_captured) {
@@ -448,18 +468,62 @@ const CapturedGfx11 mul_f64_lanes[] = {
 
 } // namespace
 
-// Compatibility reproduces captured gfx1100 FP16 MUL lanes.
+// Compatibility and strict exact reproduce captured gfx1100 FP16 MUL lanes.
 TEST(FpMulF16Gfx11, CapturedSignalingNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 clamped FP16 MUL NaN lanes.
+// Compatibility and strict exact reproduce captured gfx1100 clamped FP16 MUL NaN lanes.
 TEST(FpMulF16Gfx11, CapturedClampedNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_clamp_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_clamp_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_clamp_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_clamp_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) Track C hw1100-wide corpus, 2026-11-18, dispatch MODE with DX10_CLAMP
+// set and FP16 output denormals flushed (OMOD active on gfx11): 1.5 * 65504 overflows FP16
+// before div:2 and halves to infinity. A kernel that halves the wide product first fails.
+const CapturedGfx11 mul_f16_omod_lanes[] = {
+    {"OverflowBeforeHalving", RJ_ARITH_ALU_OMOD_HALF, 0x150, 0x530d3e00, 0x848d7bff, 0, 0xa5a57c00},
+};
+
+// gfx1201 (RX 9070 XT, rj-valu-audit-local hw, 2026-11-05; directed-rounding and FP16_OVFL
+// rows from the R9700 hw-r9700-wide corpus, 2026-11-18), FP16 denormals kept. The first NaN
+// source wins and is quieted; 1.5 * 65504 overflows before div:2 except when rounding down,
+// where the product rounds to 65504 and halves to 32752; FP16_OVFL saturates 65504 * 1 mul:2
+// instead of producing infinity; high-half selectors keep the low destination half.
+const CapturedGfx11 mul_f16_gfx12_lanes[] = {
+    {"FirstSignalingNanQuieted", 0, 0xf0, 0xd6f47c01, 0xb2b87e00, 0, 0xa5a57e01},
+    {"FirstNegativeNanWins", 0, 0xf0, 0x0badfe00, 0x8b8f7e00, 0, 0xa5a5fe00},
+    {"SecondNan", 0, 0xf0, 0x42620400, 0x62bb7e00, 0, 0xa5a57e00},
+    {"SecondSignalingNanQuieted", 0, 0xf0, 0x740b0400, 0xcc677c01, 0, 0xa5a57e01},
+    {"OverflowBeforeHalving", RJ_ARITH_ALU_OMOD_HALF, 0xf0, 0x530d3e00, 0x848d7bff, 0, 0xa5a57c00},
+    {"OverflowBeforeHalvingRoundUp", RJ_ARITH_ALU_OMOD_HALF, 0xf5, 0x530d3e00, 0x848d7bff, 0,
+     0xa5a57c00},
+    {"RoundedDownThenHalved", RJ_ARITH_ALU_OMOD_HALF, 0xfa, 0x530d3e00, 0x848d7bff, 0, 0xa5a577ff},
+    {"Fp16OvflSaturatesMul2", RJ_ARITH_ALU_OMOD_2, 0x8000f0, 0x7f7c7bff, 0xa29a3c00, 0, 0xa5a57bff},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+     0x07010000, 0x57460000, 0, 0x225ea5a5},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce the captured gfx1100 OMOD overflow lane.
+TEST(FpMulF16Gfx11, CapturedOmodOverflow) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_omod_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_omod_lanes);
+}
+
+// Compatibility and strict exact reproduce captured gfx1201 FP16 MUL lanes.
+TEST(FpMulF16Gfx12, CapturedNanPriorityRoundingAndOmod) {
+  using rocjitsu::arith::test::check_captured_gfx12_exact;
+  check_captured_gfx12_exact<32, 16>(rj_arith_v_mul_f16_w32_gfx12, mul_f16_gfx12_lanes);
+  check_captured_gfx12_exact<64, 16>(rj_arith_v_mul_f16_w64_gfx12, mul_f16_gfx12_lanes);
 }
 
 // Compatibility and strict exact reproduce captured gfx1100 FP64 MUL NaN lanes.
