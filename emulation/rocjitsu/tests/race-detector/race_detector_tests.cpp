@@ -2582,6 +2582,34 @@ TEST(RaceDetector, SplitBarrier_WaitedBeforeSignalOrdersReaderAfterWait) {
   EXPECT_EQ(b.raceCount(), 0);
 }
 
+TEST(RaceDetector, SplitBarrier_ThresholdSelectsWhichProducerIsAcquired) {
+  for (int threshold : {1, 2}) {
+    for (int first : {0, 1}) {
+      SCOPED_TRACE(threshold);
+      SCOPED_TRACE(first);
+      RaceTestBuilder b(/*numWaves=*/3, /*vgprs=*/8, /*sgprs=*/8, kWave32);
+      dsWrite(b, 0, kX);
+      dsWrite(b, 1, kY);
+      b.waitDscnt(0, 0);
+      b.waitDscnt(1, 0);
+      const auto ready = RaceTestBuilder::namedRound(1, 0);
+      b.signal(first, ready);
+      if (threshold == 2)
+        b.signal(1 - first, ready);
+      b.completeRound(ready, {2});
+      b.waitPassed(2, ready);
+
+      // Both writes completed, but threshold one releases only the first
+      // producer. Reversing signal order changes which read races.
+      b.checkLdsRead(2, 0, kX, 4);
+      EXPECT_EQ(b.raceCount(), threshold == 1 && first == 1 ? 1 : 0);
+      b.clearViolations();
+      b.checkLdsRead(2, 0, kY, 4);
+      EXPECT_EQ(b.raceCount(), threshold == 1 && first == 0 ? 1 : 0);
+    }
+  }
+}
+
 // The write completes after the round, so nothing released it.
 TEST(RaceDetector, SplitBarrier_CompletedAfterRoundCompletesRaces) {
   RaceTestBuilder b(/*numWaves=*/2, /*vgprs=*/8, /*sgprs=*/8, kWave32);
