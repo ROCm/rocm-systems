@@ -529,6 +529,14 @@ if(ROCJITSU_ENABLE_INTERPOSER)
     set_tests_properties(RocjitsuAttachTargetCliTest PROPERTIES TIMEOUT 120)
 endif()
 add_test(
+    NAME RocjitsuAttachTargetCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_attach_target_cli.py -v
+)
+set_tests_properties(RocjitsuAttachTargetCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
