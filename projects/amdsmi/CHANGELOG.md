@@ -36,6 +36,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed `amd-smi` failures on non-x86 systems where the library is built without ESMI (EPYC CPU) support**.  
   - `amd-smi` no longer tries to initialize CPU monitoring on such builds, and the Python CPU APIs now raise `AmdSmiLibraryException` with `AMDSMI_STATUS_NOT_SUPPORTED` instead of `AttributeError`. CPU affinity is reported again instead of N/A, and the Go shim builds without ESMI.
+- **Fixed `amdsmi_init()` printing `Exception caught: rsmi_init.` on systems without ROCm**.
+  - On a system without KFD (`/sys/class/kfd` missing), `amdsmi_init()` with `AMDSMI_INIT_AMD_GPUS` now returns `AMDSMI_STATUS_DRIVER_NOT_LOADED` without printing, instead of `AMDSMI_STATUS_NOT_INIT`. Libraries that use AMD SMI as an optional dependency, such as hwloc, no longer print to stderr on machines without AMD GPUs.
+  - Other initialization error handling is unchanged.
 
 - **Fixed `amd-smi set --ampp-configure=@<path>` lowercasing its file path**.  
   - The `=` form of `--ampp-configure` incorrectly lowercased its `@<path>` value, breaking case-sensitive paths. It now preserves case, matching the space-separated form.
@@ -104,6 +107,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added a receipt timestamp to `amd-smi event` records**.
   - `AmdSmiEventReader.read()` now attaches a `timestamp` (Unix epoch seconds) to every event record, and the `event` subcommand surfaces it as a `TIMESTAMP` field so events can be correlated across streams.
   - Human-readable output renders one indented block per event (including `TIMESTAMP`); `--csv` writes the header once followed by a row per event, and `--json` emits newline-delimited JSON (one object per line).
+
+- **Added `amdsmi_get_gpu_cpu_links()` to report a GPU's directly-connected CPU link(s) (package id and link type)**.  
+  - On MI450, `amd-smi xgmi --metric` and `--link-status` now show a `CPU(PKG<n>)` column per connected CPU package; `--metric`'s JSON/CSV output carries the same data in a new `cpu_links` field, separate from the existing `links` array.
 
 - **Added Component Unified ID (CUID) reporting APIs**.  
   - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.

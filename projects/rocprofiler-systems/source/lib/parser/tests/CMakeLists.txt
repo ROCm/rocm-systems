@@ -7,6 +7,9 @@ add_library(
     test_schema.cpp
     test_schema_validator.cpp
     test_value_text.cpp
+    test_config_store.cpp
+    test_source_parsers.cpp
+    test_file_preset.cpp
 )
 
 target_link_libraries(

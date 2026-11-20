@@ -35,7 +35,6 @@
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
 #include "core/library_checker.hpp"
-#include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output/output_summary.hpp"
 #include "core/process_environment_info.hpp"

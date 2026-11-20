@@ -3,8 +3,8 @@
 
 #include "library/components/pthread_create_gotcha.hpp"
 #include "common/clocks.hpp"
+#include "common/spin_mutex.hpp"
 #include "core/config.hpp"
-#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -26,6 +26,7 @@
 #include "logger/debug.hpp"
 
 #include <dlfcn.h>
+#include <mutex>
 #include <ostream>
 #include <pthread.h>
 #include <string_view>
@@ -49,8 +50,8 @@ auto  shutdown_dtor = scope::destructor{ []() { pthread_create_gotcha::shutdown(
 
 using native_handle_set_t = std::set<pthread_create_gotcha::native_handle_t>;
 
-auto native_handles       = native_handle_set_t{};
-auto native_handles_mutex = locking::atomic_mutex{};
+auto native_handles         = native_handle_set_t{};
+auto g_native_handles_mutex = spin_mutex{};
 
 // Shared across the parent interceptor and the child wrapper so the thread-limit
 // warning is emitted exactly once per process, regardless of which gate trips first.
@@ -252,7 +253,7 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
 
     // store the handle
     {
-        auto const _lk = locking::atomic_lock{ native_handles_mutex };
+        auto const handles_lock = std::lock_guard{ g_native_handles_mutex };
         native_handles.emplace(_self);
     }
 
@@ -262,7 +263,7 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
             return;
         }
         // remove the handle even if original function aborts
-        auto const                 _lk      = locking::atomic_lock{ native_handles_mutex };
+        auto const                 handles_lock = std::lock_guard{ g_native_handles_mutex };
         native_handles.erase(pthread_self());
     } };
     (void) _remover;
@@ -273,7 +274,7 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     // remove the handle
     if(::pthread_equal(_self, pthread_self()) == 0)
     {
-        auto const _lk = locking::atomic_lock{ native_handles_mutex };
+        auto const handles_lock = std::lock_guard{ g_native_handles_mutex };
         native_handles.erase(_self);
     }
 

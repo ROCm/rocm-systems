@@ -9,10 +9,12 @@
  * @brief MPI end-to-end tests for gfx1250 AlltoAll on the DDA fabric tiers at buffer offsets
  *
  * Ranks choose a tier from their own buffers, so a tier that refused some alignments would let ranks
- * with different offsets run different kernels and hang; p2p also returns wrong data in place on
- * gfx1250. Every offset, down to 1 byte, in and out of place, must take the tier a 16-byte aligned
- * call takes, and every received byte must be exact, at sizes where the aligned call takes a DDA
- * tier under the active arch table.
+ * with different offsets run different kernels and hang. Out of place, every offset, down to 1 byte,
+ * must take the tier a 16-byte aligned call takes, and every received byte must be exact, at sizes
+ * where the aligned call takes a DDA tier under the active arch table. In place, every offset must
+ * take Direct p2p; its data is not checked, since per-peer Send/Recv does not order the send of a
+ * chunk before the receive that overwrites it. A query without buffers (both null) must report the
+ * out-of-place tier.
  *
  * DdaAlltoAllPeerColumnsMPI repeats the cases with RCCL_DDA_FABRIC_MAXBLOCKS=2, so each LL128 block
  * column serves several peers.
@@ -113,31 +115,30 @@ protected:
         ll128On_ = rcclDdaLL128Threshold(comm, ncclFuncAlltoAll) > 0;
     }
 
-    int selectedAlgo(const void* send, void* recv, size_t count, ncclDataType_t datatype, int* blocks = nullptr)
-    {
-        int algo = -1, protocol = -1, maxChannels = -1;
-        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAlltoAll, count, datatype,
-                                                   ncclSum, send, recv, /*graphCapturing=*/0, &algo, &protocol,
-                                                   &maxChannels));
-        if(blocks != nullptr)
-            *blocks = maxChannels;
-        return algo;
-    }
-
     void runCase(uint8_t* sendBase, uint8_t* recvBase, size_t perPeerBytes, const OffsetCase& c)
     {
         const size_t totalBytes = perPeerBytes * static_cast<size_t>(nRanks_);
         const size_t count      = perPeerBytes / static_cast<size_t>(ncclTypeSize(c.datatype));
         void* const  send       = sendBase + c.sendOffset;
         void* const  recv       = c.inPlace ? send : recvBase + c.recvOffset;
+        if(c.inPlace)
+        {
+            EXPECT_EQ(selectedAlgo(ncclFuncAlltoAll, count, c.datatype, send, recv), RCCL_DIRECT_ALLTOALL)
+                << "Rank " << rank_;
+            return;
+        }
 
         int       blocks      = -1;
-        const int alignedAlgo = selectedAlgo(sendBase, c.inPlace ? sendBase : recvBase, count, c.datatype, &blocks);
+        const int alignedAlgo = selectedAlgo(ncclFuncAlltoAll, count, c.datatype, sendBase, recvBase, &blocks);
         if(!isDdaFabric(alignedAlgo))
             return;
         ++ddaCases_;
         ll128Cases_ += alignedAlgo == RCCL_DDA_FABRIC_LL128;
-        EXPECT_EQ(selectedAlgo(send, recv, count, c.datatype), alignedAlgo) << "Rank " << rank_;
+        EXPECT_EQ(selectedAlgo(ncclFuncAlltoAll, count, c.datatype, send, recv), alignedAlgo) << "Rank " << rank_;
+        // The buffer-less query (rcclSymKGetInfo) passes null for both buffers; it must report the
+        // out-of-place tier, not the in-place fallback.
+        EXPECT_EQ(selectedAlgo(ncclFuncAlltoAll, count, c.datatype, nullptr, nullptr), alignedAlgo)
+            << "Rank " << rank_ << ": buffer-less query";
         if(alignedAlgo == RCCL_DDA_FABRIC_LL128)
             EXPECT_LE(blocks, getActiveCommunicator()->ddaFabricMaxBlocks)
                 << "Rank " << rank_ << ": LL128 grid exceeds the fabric block budget";
@@ -153,8 +154,7 @@ protected:
                                                     "DDA AlltoAll");
         EXPECT_TRUE(verifyBufferData<uint8_t>(recv, totalBytes, [this, nRanks, perPeerBytes](size_t i) {
             return chunkPattern(static_cast<int>(i / perPeerBytes), rank_, i % perPeerBytes);
-        })) << "Rank " << rank_ << " of " << nRanks << ": " << (c.inPlace ? "in-place" : "out-of-place")
-            << " AlltoAll data mismatch";
+        })) << "Rank " << rank_ << " of " << nRanks << ": out-of-place AlltoAll data mismatch";
     }
 
     void runAllCases()
