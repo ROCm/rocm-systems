@@ -63,11 +63,13 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_policy_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist, instead of accepting the policy, and `rdci policy` exits with the status of a failed set.
 
-- A process that uses AMD SMI itself keeps working AMD SMI handles after it starts RDC in embedded mode. Loading RDC shut AMD SMI down and initialized it again, which invalidated the handles of the host process.
+- A process that uses AMD SMI itself keeps working AMD SMI handles after it starts RDC in embedded mode. Loading RDC shut AMD SMI down and initialized it again, which invalidated the handles of the host process. Such a process must pass `AMDSMI_INIT_AMD_CPUS` in its first `amdsmi_init()` call for RDC to read CPU fields.
 
 - `rdc_start_embedded()` returns `RDC_ST_FAIL_LOAD_MODULE`, and `rdcd` exits with an error, when AMD SMI fails to initialize. Both aborted the process.
 
-- GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values.
+- GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values. `rdci config` sets and clears the settings of a group that holds such a GPU on the other GPUs, instead of stopping at it; after a set, that GPU gets the settings once AMD SMI identifies it.
+
+- The node topology check of `rdci diag` reports the link weight between each pair of GPUs in the group. It reported each GPU's weight to itself.
 
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
@@ -81,7 +83,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdcd` no longer crashes during `rdci diag`, and later diagnostic runs and profiler fields keep working. Repeated `rdci diag` runs also no longer use up GPU memory in `rdcd`.
   - After the first `rdci diag`, `rdcd` keeps the ROCm runtime loaded until it stops, as it already does after the first profiler field read, so changing the GPU partition mode needs `rdcd` stopped. `rdci diag` requests now run one at a time.
 
-- The node topology diagnostic checks each pair of GPUs, instead of each GPU against itself, and names the GPUs by index.
+- The node topology diagnostic names the GPUs of each pair by index.
 
 - The GPU parameters diagnostic reports each GPU's messages under that GPU and compares the critical voltage limits.
 

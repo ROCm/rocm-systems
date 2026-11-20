@@ -279,13 +279,16 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
-# rdc_gpu_table_tests: the flat GPU table and RDC's AMD SMI session against fake
-# AMD SMI calls. Compiles SmiUtils.cc, so it needs neither librdc nor a GPU, and
-# links no amd_smi: test_gpu_table.cc defines the amdsmi calls that file makes.
+# rdc_gpu_table_tests: the flat GPU table, RDC's AMD SMI session and the groups of
+# its GPUs against fake AMD SMI calls. Compiles SmiUtils.cc, RdcGroupSettingsImpl.cc
+# and RdcPartitionImpl.cc, so it needs neither librdc nor a GPU, and links no
+# amd_smi: test_gpu_table.cc defines the amdsmi calls those files make.
 add_executable(
     rdc_gpu_table_tests
     ${SRC_DIR}/test_gpu_table.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcPartitionImpl.cc
 )
 target_include_directories(
     rdc_gpu_table_tests
@@ -322,21 +325,26 @@ install(
 )
 
 # rdc_status_tests: the statuses the health calls return for a GPU group that does
-# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc and
-# RdcGroupSettingsImpl.cc instead of linking librdc, so it needs no GPU;
-# librdc_bootstrap provides the logger and rdc_status_string().
+# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc,
+# RdcGroupSettingsImpl.cc and SmiUtils.cc instead of linking librdc, so it needs no
+# GPU; librdc_bootstrap provides the logger and rdc_status_string(), amd_smi the
+# calls SmiUtils.cc makes (the tests make none).
 add_executable(
     rdc_status_tests
     ${SRC_DIR}/test_status_codes.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
 )
 target_include_directories(
     rdc_status_tests
     PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
 )
-target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
-set_target_properties(rdc_status_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap amd_smi GTest::gtest_main pthread)
+set_target_properties(
+    rdc_status_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
 add_test(NAME rdc_status_tests COMMAND rdc_status_tests)
 install(
     TARGETS rdc_status_tests
