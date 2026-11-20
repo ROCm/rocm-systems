@@ -171,13 +171,28 @@ void CounterSampler::sample_counter_values(const std::vector<std::string>& count
   }
   out.resize(counter_sizes_.at(counter_cached->second.handle));
   counter_ = counter_cached->second;
-  rocprofiler_start_context(ctx_);
+  sample_context(out, duration);
+}
+
+void CounterSampler::sample_context(std::vector<rocprofiler_record_counter_t>& out,
+                                    uint64_t duration) {
+  // A context that a failed stop left counting holds the counters: stop it before the start.
+  int active = 0;
+  if (rocprofiler_context_is_active(ctx_, &active) == ROCPROFILER_STATUS_SUCCESS && active != 0) {
+    RocprofilerCall([&]() { return rocprofiler_stop_context(ctx_); },
+                    "stop of a context left counting", __FILE__, __LINE__);
+  }
+  RocprofilerCall([&]() { return rocprofiler_start_context(ctx_); }, "start context", __FILE__,
+                  __LINE__);
   size_t out_size = out.size();
   // Wait for sampling window to collect metrics
   usleep(duration);
-  rocprofiler_sample_device_counting_service(ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE, out.data(),
-                                             &out_size);
-  rocprofiler_stop_context(ctx_);
+  const rocprofiler_status_t sampled = rocprofiler_sample_device_counting_service(
+      ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE, out.data(), &out_size);
+  // Stopped whether the sample worked or not; a failure of either fails the read.
+  const rocprofiler_status_t stopped = rocprofiler_stop_context(ctx_);
+  RocprofilerCall([&]() { return sampled; }, "sample device counting service", __FILE__, __LINE__);
+  RocprofilerCall([&]() { return stopped; }, "stop context", __FILE__, __LINE__);
   out.resize(out_size);
 }
 
@@ -214,9 +229,14 @@ void CounterSampler::set_profile(rocprofiler_context_id_t ctx,
 }
 
 size_t CounterSampler::get_counter_size(rocprofiler_counter_id_t counter) {
-  rocprofiler_counter_info_v1_t info;
-  rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_1,
-                                 static_cast<void*>(&info));
+  // A failed query fails the read: what it left in info is not the counter's size.
+  rocprofiler_counter_info_v1_t info = {};
+  RocprofilerCall(
+      [&]() {
+        return rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_1,
+                                              static_cast<void*>(&info));
+      },
+      "Could not query info for counter", __FILE__, __LINE__);
   return info.dimensions_instances_count;
 }
 
@@ -454,18 +474,8 @@ void CounterSampler::sample_counters_with_packing(const std::vector<std::string>
     records.resize(profile.expected_size);
 
     counter_ = profile.config;
-
-    rocprofiler_start_context(ctx_);
-    size_t out_size = records.size();
-
-    // Wait for sampling window
-    usleep(duration);
-
-    rocprofiler_sample_device_counting_service(ctx_, {}, ROCPROFILER_COUNTER_FLAG_NONE,
-                                               records.data(), &out_size);
+    sample_context(records, duration);
     total_sample_calls++;
-    rocprofiler_stop_context(ctx_);
-    records.resize(out_size);
 
     // Decode records and aggregate values
     for (const auto& record : records) {

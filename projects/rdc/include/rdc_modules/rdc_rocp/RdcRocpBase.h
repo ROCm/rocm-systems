@@ -107,14 +107,21 @@ class RdcRocpBase {
    */
   rdc_status_t map_entity_to_profiler();
 
-  void init_rocp_if_not();
+  /**
+   * @brief Starts the profiler at the first read: hsa_init(), the agents and their
+   * samplers, the entity map and the supported fields. Runs once, and every later call
+   * returns the first one's status, so a profiler that cannot start fails each read.
+   */
+  rdc_status_t init_rocp_if_not();
 
   std::vector<rocprofiler_agent_v0_t> agents = {};
   std::vector<std::shared_ptr<CounterSampler>> samplers = {};
   std::map<rdc_field_t, const char*> field_to_metric = {};
   std::map<uint32_t, uint32_t> entity_to_prof_map = {};
 
-  bool m_is_initialized = false;
+  bool m_is_initialized = false;           // init_rocp_if_not() ran
+  rdc_status_t m_init_status = RDC_ST_OK;  // and returned this
+  bool m_hsa_initialized = false;          // its hsa_init() succeeded
 
   // Rate fields: divided by the sample time (the fixed collection window, not wall clock).
   std::unordered_set<rdc_field_t> eval_fields = {
