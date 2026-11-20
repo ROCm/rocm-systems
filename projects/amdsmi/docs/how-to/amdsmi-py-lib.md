@@ -115,20 +115,12 @@ Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
 (py_version_match)=
 ### Use the module that ships with the library
 
-The Python module and `libamd_smi.so` are released together. Import the module
-from the same installation that provides the library, not a copy from another
-release. A module from an older release can fail as soon as it is imported
-against a newer library. For example, library major version 27 (ROCm 10.0 and
-later) removed `amdsmi_set_gpu_clk_range()` and `amdsmi_gpu_driver_reload()`,
-so the `amdsmi` 7.0.2 wheel on PyPI fails at import against it:
-
-```text
-AttributeError: .../libamd_smi.so.27: undefined symbol: amdsmi_set_gpu_clk_range
-```
-
-PyTorch imports `amdsmi` during `import torch` on ROCm, so this error can
-surface there. See [Packaging and install paths](../packaging.md) for where
-each installation method places the module and the library.
+Import the Python module from the same installation as `libamd_smi.so`.
+The current system-package loader checks the library version before using it.
+Older wrappers, including the community PyPI releases through 7.0.2, may
+instead fail at import with `AttributeError` when a required symbol is missing.
+See [Packaging and install paths](../packaging.md) for the loader search order
+and the module location for each installation method.
 
 (py_exceptions)=
 ## Exceptions
