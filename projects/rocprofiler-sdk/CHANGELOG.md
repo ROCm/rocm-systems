@@ -6,6 +6,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
+- `rocprofv3 --att` can be combined with `--replay-mode kernel`. Dispatch thread trace is collected on one extra replay pass, with counter collection stopped for that pass, so a multi-group counter run no longer has to be repeated to capture a thread trace of the same dispatch. `--att-no-intercept`, `--att-consecutive-kernels`, `--selected-regions` with `--att`, PC sampling, and `--spm` are still rejected. With `--att` and no `--kernel-iteration-range`, the first launch of each kernel is the one that is replayed.
   - `rocprofv3 --doctor` setup check:
     - New `rocprofv3 --doctor` option that inspects the ROCprofiler-SDK installation and system configuration and reports what would prevent profiling from working, with a fix for each problem.
     - Covers 10 check groups: installation, driver/device, runtime stack, counter collection, environment variables, container/virtualization, Python environment, filesystem, companion tools, and optional live smoke tests.

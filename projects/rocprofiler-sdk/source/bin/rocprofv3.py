@@ -810,7 +810,8 @@ For attachment profiling of running processes:
             "'kernel' collects all counter groups within a single application run via in-process "
             "kernel replay: each dispatch is replayed once per counter group, with device-memory "
             "snapshot/restore between passes, instead of re-running the whole application per "
-            "group. Requires --pmc and --kernel-replay-beta-enabled. "
+            "group. --att adds one more pass that collects thread trace and no counters. "
+            "Requires --pmc and --kernel-replay-beta-enabled. "
             "'application' (default) re-runs the whole application once per counter group."
         ),
         choices=("kernel", "application"),
@@ -1495,11 +1496,12 @@ def has_set_attr(obj, key):
 def services_conflicting_with_kernel_replay(args, environ=None):
     """Services that kernel replay cannot collect correctly in the same run.
 
-    Kernel replay re-runs each dispatch once per counter group. Counter collection is the only
-    pass-aware service: the tool hands the SDK a pass count derived from the counter groups and
-    picks a different group on each pass. Every other service is simply left enabled for the whole
-    replay loop, so it instruments all of the passes and reports them under the one dispatch id the
-    replay reuses -- N thread traces, or N sets of PC samples, where the run asked for one.
+    Kernel replay re-runs each dispatch once per counter group, then, when dispatch thread trace
+    is requested, once more with counters stopped and thread trace started. That is the only
+    non-counter service the CLI can confine to a single pass. PC sampling ignores per-pass context
+    toggles. SPM is not selected per pass here. Device thread trace (--att-consecutive-kernels,
+    --selected-regions) and quick-scan (--att-no-intercept) do not consult the per-pass override,
+    so they would trace every pass under the one dispatch id replay reuses.
 
     Returns the display names of the conflicting services, in the order they are reported.
     """
@@ -1507,7 +1509,16 @@ def services_conflicting_with_kernel_replay(args, environ=None):
     conflicts = []
 
     if getattr(args, "advanced_thread_trace", None):
-        conflicts.append("--att")
+        if getattr(args, "att_no_intercept", None):
+            conflicts.append("--att-no-intercept")
+        # argparse stores this as a string. "0" is the default and means dispatch
+        # thread trace. Only a count above zero is device mode, which cannot stay
+        # on one replay pass.
+        consecutive = getattr(args, "att_consecutive_kernels", None)
+        if consecutive not in (None, False, 0, "0"):
+            conflicts.append("--att-consecutive-kernels")
+        if getattr(args, "selected_regions", None):
+            conflicts.append("--selected-regions with --att")
 
     if (
         getattr(args, "pc_sampling_beta_enabled", None)
@@ -2316,9 +2327,10 @@ def run(app_args, args, **kwargs):
             fatal_error(
                 "--replay-mode kernel cannot be combined with "
                 + " or ".join(replay_conflicts)
-                + ". Kernel replay only varies counter groups from one pass to the next; "
-                "every other service stays on for all of the passes and would report each "
-                "kernel once per pass. Collect them in a separate run."
+                + ". Kernel replay collects each counter group on its own pass and, with --att, "
+                "thread trace on one extra pass. These options stay active on every pass or do "
+                "not honor per-pass context control, so they would report each kernel once per "
+                "pass. Collect them in a separate run."
             )
 
         # Route counter collection through the in-process kernel-replay service. The SDK derives

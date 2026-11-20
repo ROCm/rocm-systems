@@ -159,7 +159,8 @@ struct config : output_config
 
     // Route counter collection through in-process kernel replay: collect every --pmc counter group
     // in a single application run by replaying each dispatch once per group (device-memory
-    // snapshot/restore between passes). The pass count is the number of counter groups.
+    // snapshot/restore between passes). The pass count is the number of counter groups, plus one
+    // when dispatch thread trace is collected on its own final pass.
     bool kernel_replay = get_env("ROCPROF_KERNEL_REPLAY", false);
 
     int         mpi_size              = get_mpi_size();

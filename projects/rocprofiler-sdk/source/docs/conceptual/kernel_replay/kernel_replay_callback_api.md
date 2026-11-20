@@ -15,8 +15,9 @@ narrower slice of it through its own command-line option.
 Decoupling replay from counter collection is the point of the design: a tool can use replay for
 hardware counters, kernel timing statistics, PC sampling, thread trace, SPM, or anything else, and
 it decides per pass which of its services are active. ``rocprofv3`` wires replay to dispatch counter
-collection only; SPM, PC sampling, and thread trace require a custom tool (see
-:ref:`kernel-replay-sdk-api` and the ``samples/kernel_replay/`` examples).
+collection and, with ``--att``, one extra pass of dispatch thread trace. SPM, PC sampling, and the
+other thread-trace modes require a custom tool (see :ref:`kernel-replay-sdk-api` and the
+``samples/kernel_replay/`` examples).
 
 Replay is **not** a dedicated counting service mutually exclusive with ordinary dispatch counting.
 There is no `rocprofiler_configure_kernel_replay_counting_service()`, no pass-count environment
@@ -293,8 +294,11 @@ rocprofv3 --pmc <counters...> --replay-mode kernel --kernel-replay-beta-enabled 
 - `--replay-mode kernel` requires `--pmc` and `--kernel-replay-beta-enabled`, and the CLI fails with a diagnostic if either is missing.
 - The tool library creates the kernel replay context when the flag is given, and not otherwise.
 - There is no pass-count knob. The tool derives the pass count from the number of counter groups
-  collectable on the dispatch's agent and returns it from `replay_pass_count`.
-- The flag does not wire `replay_continue` or the localized start/stop context callbacks.
+  collectable on the dispatch's agent and returns it from `replay_pass_count`. `--att` adds one
+  pass after those groups.
+- The flag does not wire `replay_continue`. With `--att`, the tool uses the localized start/stop
+  callbacks so counter passes leave thread trace stopped and the final pass stops counters and
+  starts dispatch thread trace. Other per-pass arrangements remain custom-tool work.
 - Without the flag, multiple `--pmc` groups continue to use application replay, where the whole
   application is re-run once per group.
 

@@ -274,6 +274,6 @@ Used by the script for "% of peak" (decimal TB/s, AMD Instinct spec sheets; also
 | No `pass_N` output or empty report | The kernel filter matched nothing (the regex is searched in the demangled name, or the mangled/truncated name with `-M`/`-T`), or the app failed in a later pass. |
 | All counters zero on Radeon | Set the performance level to `STABLE_STD`. |
 | Counter values vary between passes | The workload is not deterministic; fix the input or use `--replay-mode kernel --kernel-replay-beta-enabled`. |
-| `--pmc` rejected together with `--spm`, `--att-activity`, or `--att-perfcounters` | Collect those in a separate run. Kernel replay also refuses `--att`, PC sampling, and `--spm`. |
+| `--pmc` rejected together with `--spm`, `--att-activity`, or `--att-perfcounters` | Collect those in a separate run. Kernel replay also refuses PC sampling and `--spm`. `--att` is allowed: thread trace is collected on one extra pass. |
 | Multi-pass with `--pid` or `--collection-period` rejected | Not supported; use a launched run, or `pmc_groups` rotation in an input file. |
 | YAML input file fails to load | `pip install pyyaml`, or use a JSON input file. |

@@ -107,8 +107,8 @@ After CONFIG ``PHASE_ENTER`` returns, the SDK calls ``replay_pass_count`` if it 
   which is deferred until after the loop, is never fired.
 
 ``rocprofv3`` returns the number of ``--pmc`` groups collectable on
-``dispatch_info.agent_id``. A custom tool can return any of the cases above and may set
-``replay_continue`` for early exit or an indefinite loop.
+``dispatch_info.agent_id``, plus one when ``--att`` adds a thread-trace pass. A custom tool can
+return any of the cases above and may set ``replay_continue`` for early exit or an indefinite loop.
 
 Using replay with dispatch counting
 -----------------------------------

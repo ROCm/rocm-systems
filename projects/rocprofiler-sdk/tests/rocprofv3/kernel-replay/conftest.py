@@ -76,6 +76,20 @@ def pytest_addoption(parser):
         help="1-based launches of --selected-kernel, among those in the kernel trace, that the kernel filters must select",
     )
     parser.addoption(
+        "--thread-trace",
+        action="store_true",
+        default=False,
+        help="the run used --att, so each profiled dispatch runs one extra pass that "
+        "collects exactly one thread trace and no counter row",
+    )
+    parser.addoption(
+        "--expected-counters",
+        action="store",
+        nargs="+",
+        default=None,
+        help="union of the counters across the run's groups (defaults to the five-group set)",
+    )
+    parser.addoption(
         "--expected-pass-counts",
         action="store",
         default=None,
@@ -127,6 +141,16 @@ def expected_passes(request):
 @pytest.fixture
 def expected_dispatch_count(request):
     return request.config.getoption("--expected-dispatch-count")
+
+
+@pytest.fixture
+def expect_thread_trace(request):
+    return request.config.getoption("--thread-trace")
+
+
+@pytest.fixture
+def expected_counters(request):
+    return request.config.getoption("--expected-counters")
 
 
 @pytest.fixture

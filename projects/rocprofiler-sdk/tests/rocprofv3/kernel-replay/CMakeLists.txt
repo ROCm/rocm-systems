@@ -221,6 +221,102 @@ rocprofiler_add_integration_validate_test(
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
     FIXTURES_REQUIRED rocprofv3-test-kernel-replay-selected-regions-data)
 
+# Dispatch thread trace as the last replay pass. With --att, passes 0..N-1 collect the N
+# counter groups with thread trace stopped, and pass N traces the dispatch with counters
+# stopped. Counter records must still number their groups 0..N-1 with no row for the trace
+# pass, and each dispatch must be traced exactly once rather than once per pass. Needs the
+# trace decoder, like the other thread trace tests.
+rocprofiler_sdk_find_trace_decoder()
+
+set(KERNEL_REPLAY_ATT_DISABLED ON)
+if(attdecoder_FOUND)
+    set(KERNEL_REPLAY_ATT_DISABLED OFF)
+endif()
+
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-att-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path
+        ${attdecoder_LIB_DIR} --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT --pmc SQ_WAVES
+        SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled
+        --output-format json -d ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att -o out --
+        $<TARGET_FILE:kernel-replay> 1048576 1
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay;thread-trace"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    DISABLED ${KERNEL_REPLAY_ATT_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-att-data)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-att-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att/out_results.json
+         --passes
+         2
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --expected-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         GRBM_COUNT
+         GRBM_GUI_ACTIVE
+         --thread-trace
+         -x
+    TIMEOUT 120
+    LABELS "kernel-replay;thread-trace"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    DISABLED ${KERNEL_REPLAY_ATT_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-att-data)
+
+# With --att and no --kernel-iteration-range only each kernel's first launch is profiled.
+# The app launches its three kernels three times each, and the HIP runtime adds one copy
+# kernel for hipMemcpyToSymbol, so four dispatches are a kernel's first launch. The later
+# launches must be neither traced nor replayed (one kernel-trace record each), and each
+# profiled launch runs once per counter group plus once for thread trace.
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-kernel-replay-att-first-iteration-generate
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path
+        ${attdecoder_LIB_DIR} --pmc SQ_WAVES SQ_INSTS_VALU GRBM_COUNT --pmc SQ_WAVES
+        SQ_INSTS_VALU GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled
+        --kernel-trace --output-format json -d
+        ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att-first-iteration -o out --
+        $<TARGET_FILE:kernel-replay> 65536 3
+    DEPENDS kernel-replay
+    TIMEOUT 120
+    LABELS "kernel-replay;thread-trace"
+    ENVIRONMENT "${rocprofv3-generate-env}"
+    DISABLED ${KERNEL_REPLAY_ATT_DISABLED}
+    FIXTURES_SETUP rocprofv3-test-kernel-replay-att-first-iteration-data)
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-kernel-replay-att-first-iteration-validate BUNDLE_TESTS
+    TEST_PATHS validate.py
+    COPY conftest.py
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-att-first-iteration/out_results.json
+         --passes
+         2
+         --expected-dispatch-count
+         4
+         --common-counters
+         SQ_WAVES
+         SQ_INSTS_VALU
+         --thread-trace
+         -k
+         "dispatch_id_constant_across_replay_passes or expected_logical_dispatch_count or each_pass_collects_distinct_batch or one_thread_trace_per_dispatch or thread_trace_pass_has_no_counter_row or thread_trace_runs_one_extra_pass or unselected_dispatches_run_once or common_counters_constant_across_passes"
+    TIMEOUT 120
+    LABELS "kernel-replay;thread-trace"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    DISABLED ${KERNEL_REPLAY_ATT_DISABLED}
+    FIXTURES_REQUIRED rocprofv3-test-kernel-replay-att-first-iteration-data)
+
 # The app checks that host-pinned and fine-grained device saxpy launches each apply their
 # update once. Pass counts also verify replay was declined: correct output alone cannot
 # distinguish a run-once dispatch from one replayed with restored inputs. Numeric dispatch
