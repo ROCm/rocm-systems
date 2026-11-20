@@ -8,7 +8,7 @@ useful regressions but do not pass this gate.
 ## Topology and driver contract
 
 Run four independent nodes on one physical host. In VFIO mode, each node is
-its own QEMU guest and rocJITsu VMM. Each node has at least two modeled GPUs
+its own QEMU guest and rocjitsu VMM. Each node has at least two modeled GPUs
 and runs one RCCL process per GPU, for at least eight ranks in one
 communicator. In emulated KFD mode, run the equivalent four isolated node
 projections, at least two GPUs and one process per GPU on each node. Give each
@@ -43,7 +43,7 @@ hardware models reached through the stock register, packet, and discovery
 interfaces.
 
 The QEMU/VFIO run must also use stock QEMU and libvfio-user peer transport
-interfaces. A rocJITsu-specific extension to `VFIO_USER_DMA_MAP` does not
+interfaces. A rocjitsu-specific extension to `VFIO_USER_DMA_MAP` does not
 satisfy this gate. Peer BAR access must retain its local fabric effects and
 fail-closed lifetime checks through a standard transport path. A NET-only
 fallback does not satisfy this requirement.
@@ -74,7 +74,7 @@ python3 scripts/run-rccl-pod-emulated.py \
 ### Capture source and runtime provenance
 
 Immediately before building the binaries for a fresh run, save the source
-revision, tracked changes, and untracked rocJITsu source files. Run these
+revision, tracked changes, and untracked rocjitsu source files. Run these
 commands from `emulation/rocjitsu`, then repeat the capture after the build;
 set `pod_capture_dir=/tmp/rocjitsu-pod-evidence/source-after-build` for the
 second capture so it does not overwrite the first. If the source state changed,
@@ -96,7 +96,7 @@ tar -C ../.. --null \
 ```
 
 Archive any other untracked source named by `source-status.txt` if it affects
-the build; the tar command above covers only rocJITsu's untracked files.
+the build; the tar command above covers only rocjitsu's untracked files.
 
 The controllers hash their executable, manifest, and logs in `result.json`;
 the emulated controller also hashes itself and its node helper. Hash the VFIO
@@ -172,7 +172,7 @@ are dropped. Bound each rank, guest, VMM, and the complete run; require clean
 rank and guest teardown, zero launcher status, and no remaining VFIO sockets.
 Record the exact manifest, guest network layout, commands and environment,
 driver source/package and module hashes, firmware and user-space versions,
-QEMU and rocJITsu binary hashes, seed, message sizes, iteration count,
+QEMU and rocjitsu binary hashes, seed, message sizes, iteration count,
 per-rank case results, channel evidence, route totals, and complete logs.
 
 The two-host cluster run and cacheable peer-coherence qualification are later

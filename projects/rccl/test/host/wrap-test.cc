@@ -7974,6 +7974,76 @@ TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_EmptyEnvIsUnset) {
       });
 }
 
+// With the peer-parallel kernels the LL128 one-shot AllReduce runs to the arch table's ddaArLL128OneShotRankBytes over
+// nRanks, at most RCCL_DDA_LL128_ONESHOT_THRESHOLD's 4 MiB default; a table without the entry, or no table (as under
+// RCCL_IGNORE_ARCH_TABLE), keeps that default at every rank count.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_TableRankBytesOverNRanksElseEnvDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_TableRankBytesOverNRanksElseEnvDefault",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        const struct {
+          int nRanks;
+          size_t cap;
+        } cases[] = {{2, 2 * kMiB}, {3, 4 * kMiB / 3}, {4, 1 * kMiB}, {8, 512 * kKiB},
+                     {16, 256 * kKiB}, {32, 128 * kKiB}, {1, 4 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.nRanks;
+          EXPECT_EQ(c.cap, rcclDdaLL128OneShotThreshold(comm)) << "nRanks " << c.nRanks;
+        }
+        comm->nRanks = 2;
+        table.ddaArLL128OneShotRankBytes = 16 * kMiB;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "never past the env default";
+        comm->nRanks = 8;
+        table.ddaArLL128OneShotRankBytes = 0;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "table without the entry";
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "no table";
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(nullptr)) << "no comm";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_DDA_LL128_AR_PEER_PARALLEL=0 keeps the one-warp-per-slice kernels, and with them the flat 4 MiB one-shot cap.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_PeerParallelOffKeepsTheEnvDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_PeerParallelOffKeepsTheEnvDefault",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+        g_loadParam = ForceParam("RCCL_DDA_LL128_AR_PEER_PARALLEL", int64_t(0));
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        comm->nRanks = 32;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user-set RCCL_DDA_LL128_ONESHOT_THRESHOLD is the cap at every rank count.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_EnvIsTheCapAtEveryRankCount) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_EnvIsTheCapAtEveryRankCount",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL128_ONESHOT_THRESHOLD", "2097152");
+        g_loadParam = ForceParam("RCCL_DDA_LL128_ONESHOT_THRESHOLD", int64_t(2) << 20);
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        for (int nRanks : {4, 8, 32}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(2 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "nRanks " << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ===========================================================================
 // AICOMRCCL-1756: rank-scaled gfx1250 DDA tiers, Tree for small AllReduce,
 // Ring protocol ranges and the ReduceScatter channel cap.
@@ -10839,8 +10909,9 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPla
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    // Use a local copy with Broadcast caps zeroed to isolate the no-tier case from real table values.
     const rcclArchThresholds* real =
-      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, real);
     rcclArchThresholds table = *real;
     table.ddaLLMax[ncclFuncBroadcast] = 0;
@@ -10863,8 +10934,9 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceh
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    // Use a local copy with Broadcast caps zeroed to isolate the no-tier case from real table values.
     const rcclArchThresholds* real =
-      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, real);
     rcclArchThresholds table = *real;
     table.ddaLLMax[ncclFuncBroadcast] = 0;
@@ -10920,6 +10992,39 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaL
   });
 }
 
+// Real SPX table with RCCL_DDA_BC unset: a non-zero ddaLL128Max[Broadcast] enables the two-shot
+// tier. 256 KiB (well below the cap) picks LL128; cap + 16 bytes (above the cap) falls back to Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap", []() {
+    // llMax=-1 and ll128Max=-1 leave both RCCL_DDA_LL_THRESHOLD and RCCL_DDA_LL128_THRESHOLD
+    // unset so the selector uses the table caps rather than an env override.
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds =
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(ll128Cap, 0u);
+
+    rcclCollDecision d = PoisonedDecision();
+    // 256 KiB is well below the cap: two-shot LL128 selected.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, 256 * 1024 / sizeof(float), ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+
+    d = PoisonedDecision();
+    // cap + 16 bytes is above the cap: Ring.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
+                                  0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
 // Out of the box on DPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
 TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTierByCap", []() {
@@ -10929,20 +11034,57 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
     ncclComm* comm = MakeBroadcastComm();
     comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
     const struct {
       size_t bytes;
       int algo;
     } cases[] = {
-      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
-      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024 + 16, NCCL_ALGO_RING},
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
     };
     for (const auto& c : cases) {
       rcclCollDecision d = PoisonedDecision();
       EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
       EXPECT_EQ(c.algo, d.algo) << c.bytes;
     }
+    DeleteCommWithArch(comm);
+  });
+}
+
+// Real DPX table with RCCL_DDA_BC unset: a non-zero ddaLL128Max[Broadcast] enables the two-shot
+// tier. 256 KiB (well below the cap) picks LL128; cap + 16 bytes (above the cap) falls back to Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap", []() {
+    // llMax=-1 and ll128Max=-1 leave both RCCL_DDA_LL_THRESHOLD and RCCL_DDA_LL128_THRESHOLD
+    // unset so the selector uses the table caps rather than an env override.
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds =
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(ll128Cap, 0u);
+
+    rcclCollDecision d = PoisonedDecision();
+    // 256 KiB is well below the cap: two-shot LL128 selected.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, 256 * 1024 / sizeof(float), ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+
+    d = PoisonedDecision();
+    // cap + 16 bytes is above the cap: Ring.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
+                                  0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
     DeleteCommWithArch(comm);
   });
 }
@@ -10956,14 +11098,18 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTierByCap) {
     ncclComm* comm = MakeBroadcastComm();
     comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
     const struct {
       size_t bytes;
       int algo;
     } cases[] = {
-      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
-      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024 + 16, NCCL_ALGO_RING},
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
     };
     for (const auto& c : cases) {
       rcclCollDecision d = PoisonedDecision();
