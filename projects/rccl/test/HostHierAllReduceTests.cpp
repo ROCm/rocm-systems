@@ -9,9 +9,11 @@
 #include "comm.h"
 #include "hier_host.h"
 #include "nccl.h"
+#include "rccl_arch_thresholds.h"
 
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -46,6 +48,10 @@ struct HostHierMockComm
         comm.rank     = rank;
         setHosts(hostOf);
         comm.hostHierState = rcclHostHierUnprobed;
+        // The table of the partition mode that puts this many ranks on each host.
+        const bool spx = std::count(hostOf.begin(), hostOf.end(), hostOf.empty() ? 0 : hostOf[0]) == 4;
+        comm.archThresholds
+            = rcclGetArchThresholds(archBuf, spx ? RCCL_TUNING_PARTITION_SPX : RCCL_TUNING_PARTITION_DPX);
     }
 
     HostHierMockComm(const HostHierMockComm&)            = delete;
@@ -152,6 +158,17 @@ TEST(HostHierLayout, CachedOnFirstProbe)
 
     mock.setHosts({0, 0, 0, 1, 1, 1, 1, 1});
     EXPECT_EQ(layout, rcclHostHierGetLayout(mock.get()));
+}
+
+// The fused kernel takes its intra-host and inter-host peers from hostRanks.
+TEST(HostHierLayout, HostRanksOfInterleavedHosts)
+{
+    HostHierMockComm mock({0, 1, 0, 1, 0, 1, 0, 1}, /*rank=*/5);
+    ASSERT_NE(nullptr, rcclHostHierGetLayout(mock.get()));
+    ASSERT_NE(nullptr, mock.comm.hostHier);
+    const int* hostRanks = mock.comm.hostHier->hostRanks;
+    ASSERT_NE(nullptr, hostRanks);
+    EXPECT_EQ(std::vector<int>({0, 2, 4, 6, 1, 3, 5, 7}), std::vector<int>(hostRanks, hostRanks + 8));
 }
 
 TEST(HostHierLayout, NoLayoutIsCachedToo)
@@ -328,6 +345,23 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
                     << "two MNNVL cliques";
             }
+            for(int nHosts : {4, 8})
+            {
+                HostHierMockComm mock(blockHosts(nHosts, 4), 0);
+                mock.comm.archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
+                    << nHosts << " hosts of four ranks with the DPX table";
+            }
+            // The mock comm has no DDA fabric, so the fused kernel never runs on it.
+            for(size_t bytes : {4 * kMiB, 8 * kMiB - 64, 32 * kMiB, 128 * kMiB - 64})
+            {
+                EXPECT_FALSE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, no fused kernel";
+                EXPECT_FALSE(eligible(blockHosts(2, 8), bytes / 2, ncclBfloat16)) << bytes << " B bf16, no fused kernel";
+                EXPECT_TRUE(eligible(blockHosts(2, 8), bytes, ncclFloat8e4m3)) << bytes << " B fp8 on two hosts";
+                EXPECT_TRUE(eligible(blockHosts(4, 8), floats(bytes))) << bytes << " B on four hosts";
+            }
+            for(size_t bytes : {2 * kMiB, 8 * kMiB, 16 * kMiB, 128 * kMiB})
+                EXPECT_TRUE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts";
         })
         .withTimeout(std::chrono::seconds(30))
         .withNumGpus(0);

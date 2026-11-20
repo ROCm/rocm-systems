@@ -15,6 +15,7 @@ set(_MICRO_DDA_DEFS
   DDA_ALL_GATHER_FABRIC_LL128_CC_PATH="${_MICRO_DDA_DIR}/all_gather/dda_all_gather_fabric_ll128.cu.cpp"
   DDA_ALL_GATHER_IPC_CC_PATH="${_MICRO_DDA_DIR}/all_gather/dda_all_gather_ipc.cu.cpp"
   DDA_ALL_REDUCE_FABRIC_CC_PATH="${_MICRO_DDA_DIR}/all_reduce/dda_all_reduce_fabric.cu.cpp"
+  DDA_ALL_REDUCE_FABRIC_HIER_CC_PATH="${_MICRO_DDA_DIR}/all_reduce/dda_all_reduce_fabric_hier.cu.cpp"
   DDA_ALL_REDUCE_FABRIC_LL_CC_PATH="${_MICRO_DDA_DIR}/all_reduce/dda_all_reduce_fabric_ll.cu.cpp"
   DDA_ALL_REDUCE_FABRIC_LL128_CC_PATH="${_MICRO_DDA_DIR}/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp"
   DDA_ALL_REDUCE_IPC_CC_PATH="${_MICRO_DDA_DIR}/all_reduce/dda_all_reduce_ipc.cu.cpp"
@@ -78,6 +79,10 @@ rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllGatherIpc all_gather/dda-all-
   SOURCES ${_MICRO_DDA_COLL_SOURCES})
 
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllReduceFabric all_reduce/dda-all-reduce-fabric-test.cc
+  KERNELS
+  SOURCES ${_MICRO_DDA_COLL_SOURCES})
+
+rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllReduceFabricHier all_reduce/dda-all-reduce-fabric-hier-test.cc
   KERNELS
   SOURCES ${_MICRO_DDA_COLL_SOURCES})
 

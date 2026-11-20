@@ -63,10 +63,9 @@ __device__ __forceinline__ uint4 hierSumSlots(const T* first, size_t slotStride,
   return sum;
 }
 
-// A bank holds [P host slots | N inter-host slots | P gathered slots], each `roundCount / P` elements even when the last
-// round is shorter: barriers only order blocks with the same index, so every block must touch the same scratch
-// addresses in every round. A round's bank is reused two rounds later, after the barriers of the round in between have
-// ordered every reader.
+// A bank holds [P host slots | N inter-host slots | P gathered slots]. Slots are `roundCount / P` wide even in a short
+// last round, so each block uses the same scratch every round: barriers only order blocks with the same index. A
+// round's bank is reused two rounds later, after the barriers of the round in between have ordered every reader.
 template <typename T, int P_CT, int N_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)

@@ -73,8 +73,10 @@ ncclResult_t ncclAllReduceDdaFabricLL128(const void* sendbuff, void* recvbuff, s
 
 // Host-hierarchical sum in one kernel on the fabric path: reduce within the host, across hosts, then gather within the
 // host. intraRanks lists the comm ranks of this host by local rank; interRanks the ranks with this local rank by host.
-bool ncclAllReduceDdaFabricHierEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                        ncclDataType_t datatype, ncclRedOp_t op, int nHosts, int ranksPerHost);
+// Eligibility depends only on inputs that match on every rank, so all ranks take the kernel or none does; the caller
+// passes 16-byte-aligned buffers.
+bool ncclAllReduceDdaFabricHierEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                                        int nHosts, int ranksPerHost);
 
 ncclResult_t ncclAllReduceDdaFabricHier(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                         ncclComm* comm, cudaStream_t stream, int nHosts, int ranksPerHost,

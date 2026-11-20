@@ -14,6 +14,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "param.h"
+#include "rccl_arch_thresholds.h"
 #include "recorder.h"
 
 #include <algorithm>
@@ -86,6 +87,33 @@ bool opSplitsAcrossStages(ncclRedOp_t op, ncclDataType_t datatype) {
   default:
     return false;
   }
+}
+
+bool fusedKernelRuns(struct ncclComm* comm, const struct rcclHostLayout& layout, size_t count, ncclDataType_t datatype,
+                     ncclRedOp_t op) {
+  const int64_t fused = rcclParamHostHierAllReduceFused();
+  if (fused == 0) return false;
+  if (fused == -1 &&
+      !rcclHostHierAllReduceFusedWindow(layout.nHosts, layout.ranksPerHost, count * ncclTypeSize(datatype))) {
+    return false;
+  }
+  return ncclAllReduceDdaFabricHierEligible(comm, count, datatype, op, layout.nHosts, layout.ranksPerHost);
+}
+
+// The three collectives gained over the default path on two hosts with 8 ranks only at 1-2, 8-16 and 128-512 MiB in
+// fp32 sum; the auto window between those sizes needs the fused kernel. fp8, which the kernel does not take, gained
+// across the window on the three collectives.
+bool needsFusedKernel(const struct rcclHostLayout& layout, ncclDataType_t datatype, size_t bytes) {
+  constexpr size_t MiB = size_t{1} << 20;
+  if (layout.nHosts != 2 || layout.ranksPerHost != 8) return false;
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) return false;
+  return (bytes > 2 * MiB && bytes < 8 * MiB) || (bytes > 16 * MiB && bytes < 128 * MiB);
+}
+
+// Every rank of a comm reads the same table (rcclSetTuningPartition), so this matches on all of them.
+bool spxTuningTable(const struct ncclComm* comm) {
+  return comm->archName != nullptr && comm->archThresholds != nullptr &&
+         comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_SPX);
 }
 
 } // namespace
@@ -311,7 +339,11 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
   if (forced) return true;
   if (!rcclHostHierAllReduceAutoType(layout->ranksPerHost, datatype, op)) return false;
-  return rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, count * ncclTypeSize(datatype));
+  const size_t bytes = count * ncclTypeSize(datatype);
+  if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes)) return false;
+  // The 4-ranks-per-host windows were measured in SPX; a DPX comm with half of each host's ranks keeps the default path.
+  if (layout->ranksPerHost == 4 && !spxTuningTable(comm)) return false;
+  return !needsFusedKernel(*layout, datatype, bytes) || fusedKernelRuns(comm, *layout, count, datatype, op);
 }
 
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -319,35 +351,46 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   if (comm->hostHierState != rcclHostHierReady) return ncclInternalError;
   struct rcclHostHier* h = comm->hostHier;
   const struct rcclHostLayout& layout = h->layout;
-  const int64_t fused = rcclParamHostHierAllReduceFused();
-  if ((fused == 1 || (fused == -1 && rcclHostHierAllReduceFusedWindow(layout.nHosts, layout.ranksPerHost,
-                                                                     count * ncclTypeSize(datatype)))) &&
-      ncclAllReduceDdaFabricHierEligible(comm, sendbuff, recvbuff, count, datatype, op, layout.nHosts,
-                                         layout.ranksPerHost)) {
-    std::vector<int> inter(layout.nHosts);
-    for (int host = 0; host < layout.nHosts; host++) {
-      inter[host] = h->hostRanks[host * layout.ranksPerHost + layout.localRank];
-    }
-    return ncclAllReduceDdaFabricHier(sendbuff, recvbuff, count, datatype, comm, stream, layout.nHosts,
-                                      layout.ranksPerHost, layout.hostIndex, layout.localRank,
-                                      h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data());
-  }
-  const size_t chunk = count / h->layout.ranksPerHost;
+  const bool fused = fusedKernelRuns(comm, layout, count, datatype, op);
+  const size_t bytes = count * ncclTypeSize(datatype);
+  const size_t chunk = count / layout.ranksPerHost;
   const size_t chunkBytes = chunk * ncclTypeSize(datatype);
   const bool doInter = h->inter != nullptr;
   // The inter-host AllReduce runs out of place: in place it is several times slower.
   const size_t stride = (chunkBytes + 255) & ~size_t{255};
-  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes));
-  char* rsOut = static_cast<char*>(h->scratch);
-  char* agIn = doInter ? rsOut + stride : rsOut;
+  const size_t stageBytes = fused ? 0 : doInter ? stride + chunkBytes : chunkBytes;
+  // The fused kernel and some algorithms of the child collectives are chosen from each rank's own buffer alignment, so
+  // a rank whose buffers are not 16-byte aligned copies them through scratch instead of taking a path its peers do
+  // not take.
+  const bool aligned = ((reinterpret_cast<uintptr_t>(sendbuff) | reinterpret_cast<uintptr_t>(recvbuff)) & 15) == 0;
+  const size_t copyBytes = aligned ? 0 : (bytes + 255) & ~size_t{255};
+  NCCLCHECK(reserveScratch(comm, h, copyBytes + stageBytes));
+  char* const copy = static_cast<char*>(h->scratch);
+  const void* in = aligned ? sendbuff : copy;
+  void* out = aligned ? recvbuff : copy;
+  if (!aligned) CUDACHECK(cudaMemcpyAsync(copy, sendbuff, bytes, cudaMemcpyDeviceToDevice, stream));
 
-  // The parent AllReduce is already recorded.
-  rccl::Recorder::instance().skip(true);
-  ncclResult_t res = ncclSuccess;
-  NCCLCHECKGOTO(ncclReduceScatter(sendbuff, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
-  if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
-  NCCLCHECKGOTO(ncclAllGather(agIn, recvbuff, chunk, datatype, h->intra, stream), res, exit);
-exit:
-  rccl::Recorder::instance().skip(false);
-  return res;
+  if (fused) {
+    std::vector<int> inter(layout.nHosts);
+    for (int host = 0; host < layout.nHosts; host++) {
+      inter[host] = h->hostRanks[host * layout.ranksPerHost + layout.localRank];
+    }
+    NCCLCHECK(ncclAllReduceDdaFabricHier(in, out, count, datatype, comm, stream, layout.nHosts, layout.ranksPerHost,
+                                         layout.hostIndex, layout.localRank,
+                                         h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data()));
+  } else {
+    char* rsOut = copy + copyBytes;
+    char* agIn = doInter ? rsOut + stride : rsOut;
+    // The parent AllReduce is already recorded.
+    rccl::Recorder::instance().skip(true);
+    ncclResult_t res = ncclSuccess;
+    NCCLCHECKGOTO(ncclReduceScatter(in, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
+    if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
+    NCCLCHECKGOTO(ncclAllGather(agIn, out, chunk, datatype, h->intra, stream), res, exit);
+  exit:
+    rccl::Recorder::instance().skip(false);
+    if (res != ncclSuccess) return res;
+  }
+  if (!aligned) CUDACHECK(cudaMemcpyAsync(recvbuff, copy, bytes, cudaMemcpyDeviceToDevice, stream));
+  return ncclSuccess;
 }

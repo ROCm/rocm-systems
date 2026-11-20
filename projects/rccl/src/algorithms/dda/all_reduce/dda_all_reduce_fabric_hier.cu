@@ -79,10 +79,12 @@ ncclResult_t launchHier(const void* sendbuff, void* recvbuff, size_t count, nccl
 
 } // namespace
 
-bool ncclAllReduceDdaFabricHierEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                        ncclDataType_t datatype, ncclRedOp_t op, int nHosts, int ranksPerHost) {
+bool ncclAllReduceDdaFabricHierEligible(ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op,
+                                        int nHosts, int ranksPerHost) {
   const size_t elemSize = hierElemSize(datatype);
   if (comm == nullptr || op != ncclSum || elemSize == 0 || count == 0) return false;
+  // The gates of rcclDdaEnabled: an abort can leave barrier slots unconsumed.
+  if (!rcclParamDdaEnable() || comm->config.launchOrderImplicit == 1 || comm->ddaDisabledAfterAbort) return false;
   if (comm->ddaFabricMemHandler == nullptr || comm->ddaFabricBarrierState == nullptr || comm->ddaScratch == nullptr ||
       comm->ddaPeerPtrsDev == nullptr) {
     return false;
@@ -91,7 +93,6 @@ bool ncclAllReduceDdaFabricHierEligible(ncclComm* comm, const void* sendbuff, vo
       ranksPerHost > dda::common::kHierFusedMaxRanksPerHost) {
     return false;
   }
-  if (!dda::common::ddaUserBuffers16ByteAligned(sendbuff, recvbuff)) return false;
   const size_t granule = static_cast<size_t>(ranksPerHost) * (16 / elemSize);
   return count % granule == 0 && hierRoundCount(comm, count, elemSize, ranksPerHost, nHosts) >= granule;
 }

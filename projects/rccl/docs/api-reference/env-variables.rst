@@ -529,14 +529,18 @@ collected in the following table.
           operation (``ncclAvg`` only on floating-point types). It is not used
           inside a group or a graph capture, while ``NCCL_ALGO`` is set, or
           while a backend is forced. The first eligible call splits the
-          communicator, so all ranks must use the same value.
+          communicator, so all ranks must use the same value. A rank whose
+          buffers are not 16-byte aligned copies them through scratch.
       - | ``-1``: Auto (default). On gfx1250 when every rank is in one MNNVL
           clique, used on buffers outside registered windows with these
           layouts, message sizes and operations. With eight ranks per host: 2
           to 128 MiB on two hosts, 2 MiB to 1 GiB on four hosts and 2 MiB to
           2 GiB on eight hosts, for ``ncclSum`` on ``ncclFloat32``,
           ``ncclFloat16``, ``ncclBfloat16``, ``ncclFloat8e4m3`` and
-          ``ncclFloat8e5m2``. With four ranks per host: 2 to 32 MiB on four
+          ``ncclFloat8e5m2``. On two hosts, FP32, FP16 and BF16 messages
+          between 2 and 8 MiB and between 16 and 128 MiB use it only where the
+          fused kernel runs (see ``RCCL_HOST_HIER_ALLREDUCE_FUSED``). With four
+          ranks per host, only with the SPX tuning table: 2 to 32 MiB on four
           hosts and 2 to 256 MiB on eight hosts, for ``ncclSum`` on every
           type, ``ncclProd`` on every type except FP8, ``ncclMax`` and
           ``ncclMin`` on every type except FP8, ``ncclInt8`` and
@@ -549,11 +553,11 @@ collected in the following table.
         | Runs host-hierarchical AllReduce (see ``RCCL_HOST_HIER_ALLREDUCE``) as
           one DDA fabric kernel instead of three collectives on split
           communicators. The kernel pushes each stage into peer scratch and
-          needs DDA fabric on the communicator, ``ncclSum`` on
-          ``ncclFloat32``, ``ncclFloat16`` or ``ncclBfloat16``, 16-byte
-          aligned buffers, at most 16 hosts and 16 ranks per host, and a count
-          that splits into 16-byte pieces per local rank. Otherwise the three
-          collectives run. All ranks must use the same value.
+          needs DDA fabric on the communicator with ``RCCL_DDA_ENABLE`` set,
+          ``ncclSum`` on ``ncclFloat32``, ``ncclFloat16`` or ``ncclBfloat16``,
+          at most 16 hosts and 16 ranks per host, and a count that splits into
+          16-byte pieces per local rank. Otherwise the three collectives run.
+          All ranks must use the same value.
       - | ``-1``: Auto (default). Used on one or two hosts with eight ranks
           per host for messages from 4 to 128 MiB.
         | ``0``: Disabled.

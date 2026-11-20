@@ -25,11 +25,13 @@
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "TestChecks.hpp"
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "comm.h"
 #include "hier_host.h"
 #include "rccl_common.h"
 
 #include <gtest/gtest.h>
+#include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 
 #include <algorithm>
@@ -90,7 +92,8 @@ RunResult runAllReduce(ncclComm_t                             comm,
                        bool                                   inPlace,
                        bool                                   grouped,
                        const std::function<T(size_t)>&        input,
-                       const std::function<bool(size_t, T)>& check)
+                       const std::function<bool(size_t, T)>& check,
+                       size_t                                 offsetBytes = 0)
 {
     RunResult      result;
     std::vector<T> host(count);
@@ -98,19 +101,20 @@ RunResult runAllReduce(ncclComm_t                             comm,
         host[i] = input(i);
 
     const size_t bytes = count * sizeof(T);
-    DeviceBuffer send, recv;
-    if((result.hip = hipMalloc(&send.ptr, bytes)) != hipSuccess)
+    DeviceBuffer sendAlloc, recvAlloc;
+    if((result.hip = hipMalloc(&sendAlloc.ptr, bytes + offsetBytes)) != hipSuccess)
         return result;
-    if(!inPlace && (result.hip = hipMalloc(&recv.ptr, bytes)) != hipSuccess)
+    if(!inPlace && (result.hip = hipMalloc(&recvAlloc.ptr, bytes + offsetBytes)) != hipSuccess)
         return result;
-    void* out = inPlace ? send.ptr : recv.ptr;
-    if((result.hip = hipMemcpy(send.ptr, host.data(), bytes, hipMemcpyHostToDevice)) != hipSuccess)
+    void* in  = static_cast<char*>(sendAlloc.ptr) + offsetBytes;
+    void* out = inPlace ? in : static_cast<char*>(recvAlloc.ptr) + offsetBytes;
+    if((result.hip = hipMemcpy(in, host.data(), bytes, hipMemcpyHostToDevice)) != hipSuccess)
         return result;
 
     if(grouped)
         result.nccl = ncclGroupStart();
     if(result.nccl == ncclSuccess)
-        result.nccl = ncclAllReduce(send.ptr, out, count, datatype, op, comm, stream);
+        result.nccl = ncclAllReduce(in, out, count, datatype, op, comm, stream);
     if(grouped)
     {
         ncclResult_t end = ncclGroupEnd();
@@ -208,6 +212,16 @@ protected:
             [this](size_t i) { return static_cast<float>((rank_ + i) % 16); },
             [this](size_t i, float v) { return v == rankSumMod(i, 16); });
     }
+
+    // With RCCL_HOST_HIER_ALLREDUCE_FUSED cached as 1, a call the fused kernel takes leaves the three collectives'
+    // scratch unallocated, so a silent fallback to them fails here.
+    bool skippedFusedKernel(size_t count, ncclDataType_t datatype)
+    {
+        return rcclParamHostHierAllReduceFused() == 1 &&
+               ncclAllReduceDdaFabricHierEligible(comm(), count, datatype, ncclSum, layout_.nHosts,
+                                                  layout_.ranksPerHost) &&
+               comm()->hostHier->scratch != nullptr;
+    }
 };
 
 TEST_F(HostHierAllReduceMPITest, Fp32SumOutOfPlace)
@@ -215,6 +229,7 @@ TEST_F(HostHierAllReduceMPITest, Fp32SumOutOfPlace)
     RunResult run = fp32Sum(countFor(128 * 1024), false);
     ASSERT_RUN_OK(run);
     ASSERT_MPI_TRUE(builtChildComms());
+    ASSERT_MPI_FALSE(skippedFusedKernel(countFor(128 * 1024), ncclFloat32));
 }
 
 TEST_F(HostHierAllReduceMPITest, Fp32SumInPlace)
@@ -222,6 +237,51 @@ TEST_F(HostHierAllReduceMPITest, Fp32SumInPlace)
     RunResult run = fp32Sum(countFor(128 * 1024), true);
     ASSERT_RUN_OK(run);
     ASSERT_MPI_TRUE(builtChildComms());
+    ASSERT_MPI_FALSE(skippedFusedKernel(countFor(128 * 1024), ncclFloat32));
+}
+
+// Rank 0's buffers are 4 bytes off 16-byte alignment while its peers' are aligned: every rank still takes the same
+// path.
+TEST_F(HostHierAllReduceMPITest, UnalignedBuffersOnOneRank)
+{
+    for(bool inPlace : {false, true})
+    {
+        RunResult run = runAllReduce<float>(
+            comm(), getActiveStream(), countFor(128 * 1024), ncclFloat32, ncclSum, inPlace, false,
+            [this](size_t i) { return static_cast<float>((rank_ + i) % 16); },
+            [this](size_t i, float v) { return v == rankSumMod(i, 16); }, rank_ == 0 ? sizeof(float) : 0);
+        ASSERT_RUN_OK(run);
+        ASSERT_MPI_TRUE(builtChildComms());
+    }
+}
+
+// 8 MiB, inside the window where auto mode picks the fused kernel on one or two hosts of 8 ranks.
+TEST_F(HostHierAllReduceMPITest, Fp16SumFusedWindow)
+{
+    if(3 * nRanks_ > 2048)
+        GTEST_SKIP() << "fp16 sums are exact only up to 2048";
+    const size_t count = countFor((size_t{4} << 20) / layout_.ranksPerHost);
+    RunResult    run   = runAllReduce<__half>(
+        comm(), getActiveStream(), count, ncclFloat16, ncclSum, false, false,
+        [this](size_t i) { return __float2half(static_cast<float>((rank_ + i) % 4)); },
+        [this](size_t i, __half v) { return __half2float(v) == rankSumMod(i, 4); });
+    ASSERT_RUN_OK(run);
+    ASSERT_MPI_TRUE(builtChildComms());
+    ASSERT_MPI_FALSE(skippedFusedKernel(count, ncclFloat16));
+}
+
+TEST_F(HostHierAllReduceMPITest, Bf16SumFusedWindow)
+{
+    if(3 * nRanks_ > 256)
+        GTEST_SKIP() << "bf16 sums are exact only up to 256";
+    const size_t count = countFor((size_t{4} << 20) / layout_.ranksPerHost);
+    RunResult    run   = runAllReduce<uint16_t>(
+        comm(), getActiveStream(), count, ncclBfloat16, ncclSum, false, false,
+        [this](size_t i) { return toBf16(static_cast<float>((rank_ + i) % 4)); },
+        [this](size_t i, uint16_t v) { return fromBf16(v) == rankSumMod(i, 4); });
+    ASSERT_RUN_OK(run);
+    ASSERT_MPI_TRUE(builtChildComms());
+    ASSERT_MPI_FALSE(skippedFusedKernel(count, ncclBfloat16));
 }
 
 TEST_F(HostHierAllReduceMPITest, Bf16Sum)
@@ -295,12 +355,14 @@ TEST_F(HostHierAllReduceMPITest, GrowingSizesReuseChildComms)
 // The pattern repeats every 13 elements, so data landing a power-of-two distance away does not match by chance.
 TEST_F(HostHierAllReduceMPITest, ShortLastRound)
 {
-    RunResult run = runAllReduce<float>(
-        comm(), getActiveStream(), countFor((size_t{13} << 22) / layout_.ranksPerHost), ncclFloat32, ncclSum, false,
-        false, [this](size_t i) { return static_cast<float>((rank_ + i) % 13); },
+    const size_t count = countFor((size_t{13} << 22) / layout_.ranksPerHost);
+    RunResult    run   = runAllReduce<float>(
+        comm(), getActiveStream(), count, ncclFloat32, ncclSum, false, false,
+        [this](size_t i) { return static_cast<float>((rank_ + i) % 13); },
         [this](size_t i, float v) { return v == rankSumMod(i, 13); });
     ASSERT_RUN_OK(run);
     ASSERT_MPI_TRUE(builtChildComms());
+    ASSERT_MPI_FALSE(skippedFusedKernel(count, ncclFloat32));
 }
 
 TEST_F(HostHierAllReduceMPITest, UnevenCountUsesDefaultPath)
