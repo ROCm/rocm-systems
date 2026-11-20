@@ -6,6 +6,7 @@
 
 import os
 import re
+import subprocess
 import unittest
 import warnings
 
@@ -31,6 +32,39 @@ def _dkms_version_of_running_kernel():
     if version and 'PACKAGE_NAME="amdgpu"' in lines and f'PACKAGE_VERSION="{version}"' in lines:
         return version
     return None
+
+
+def _kmod_versions_of_running_kernel():
+    """The VERSION-RELEASE of each amdgpu-kmod package rpm has for the running kernel.
+
+    Empty when rpm or its database is not there. Like the library, rpm is asked only where its
+    database has a packages file: a query creates a database where there is none.
+    """
+
+    def rpm(*args):
+        try:
+            done = subprocess.run(
+                ["/usr/bin/rpm", *args],
+                env={"LC_ALL": "C", "HOME": "/"},
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                universal_newlines=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return done.stdout.splitlines() if done.returncode == 0 else None
+
+    dbpath = rpm("--eval", "%{_dbpath}")
+    if not dbpath or len(dbpath) != 1 or not dbpath[0].startswith("/"):
+        return []
+    if not any(
+        os.path.isfile(os.path.join(dbpath[0], name))
+        for name in ("Packages", "Packages.db", "rpmdb.sqlite")
+    ):
+        return []
+    return rpm("-q", "--qf", "%{VERSION}-%{RELEASE}\n", f"amdgpu-kmod-{os.uname().release}") or []
 
 
 class TestGpuIdentity(unittest.TestCase):
@@ -119,14 +153,15 @@ class TestGpuIdentity(unittest.TestCase):
 
     def test_get_gpu_driver_info_v2(self):
         self.common.print_func_name("")
+        # Asked before the library's time-limited rpm query, to warm the cache for it.
+        kmod_versions = _kmod_versions_of_running_kernel()
         self.common.Test_API_Per_GPU(
             amdsmi_get_gpu_driver_info_v2=amdsmi.amdsmi_get_gpu_driver_info_v2
         )
 
         # A.B.C[.D] for the module, A.B.C[.D]-<build>[.<distro>] for the package.
-        dkms = re.fullmatch(
-            r"(\d+\.\d+\.\d+)(?:\.\d+)*-(\d+)(?:\..*)?", _dkms_version_of_running_kernel() or ""
-        )
+        package_format = re.compile(r"(\d+\.\d+\.\d+)(?:\.\d+)*-(\d+)(?:\..*)?")
+        dkms = package_format.fullmatch(_dkms_version_of_running_kernel() or "")
         answered = 0
         for gpu in self.common.processors:
             try:
@@ -155,11 +190,24 @@ class TestGpuIdentity(unittest.TestCase):
             self.assertEqual(
                 info["amdgpu_driver_version"], (module.group(2) or "N/A") if module else "N/A"
             )
+            # The builds rpm lists for amdgpu-kmod with the kernel version of the loaded module.
+            kmod_builds = {
+                kmod.group(2)
+                for kmod in map(package_format.fullmatch, kmod_versions)
+                if module and kmod and kmod.group(1) == module.group(1)
+            }
             if module and dkms and dkms.group(1) == module.group(1):
                 # DKMS recorded a package with the kernel version of the loaded module.
                 self.assertEqual(info["driver_package"], "amdgpu-dkms")
                 self.assertEqual(info["driver_build_version"], dkms.group(2))
                 self.assertEqual(info["driver_full_version"], f"{version}-{dkms.group(2)}")
+            elif len(kmod_builds) == 1:
+                # No DKMS package of the module, and rpm has one amdgpu-kmod build of it. Several
+                # would give none: which of them is loaded is not known.
+                (kmod_build,) = kmod_builds
+                self.assertEqual(info["driver_package"], "amdgpu-kmod")
+                self.assertEqual(info["driver_build_version"], kmod_build)
+                self.assertEqual(info["driver_full_version"], f"{version}-{kmod_build}")
             else:
                 # A package is reported only together with its build.
                 self.assertEqual(
