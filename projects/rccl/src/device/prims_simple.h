@@ -233,8 +233,10 @@ class Primitives<T, RedOp, Fan, Direct,
     if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
-      // To be revisited for correctness and performance on gfx1250
-      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0"), nworkers, barriers);
+      // To be revisited for correctness and performance on gfx1250. s_wait_dscnt keeps the
+      // release side of what the LDS atomic used to give, for an LDS reader added later.
+      barrier_generic(asm volatile("s_wait_loadcnt 0x0\n\ts_wait_storecnt 0x0\n\ts_wait_dscnt 0x0"), nworkers,
+                      barriers);
 #else
       barrier_generic(asm volatile("s_waitcnt lgkmcnt(0) vmcnt(0)"), nworkers, barriers);
 #endif

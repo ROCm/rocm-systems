@@ -34,10 +34,11 @@ inline __device__ bool storeFreeStepBarrier(bool fifoSend, int nthreads, int thr
 #if RCCL_STORE_FREE_STEP_BARRIER
   if (fifoSend) return false;
   if (nthreads != WARP_SIZE) {
-    // LDS-scope fences only, and stepSync() adds no acquire of its own: a workgroup-scope one
+    // LDS-scope fences only, and sync<kStep> adds no acquire of its own: a workgroup-scope one
     // would wait for the step's stores.
     __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-    barriers.stepSync([] { __atomic_signal_fence(__ATOMIC_SEQ_CST); }, nthreads, nthreads, threadsPerBlock);
+    barriers.sync</*kStep=*/true>([] { __atomic_signal_fence(__ATOMIC_SEQ_CST); }, nthreads, nthreads,
+                                 threadsPerBlock);
     __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
   }
   return true;

@@ -8,6 +8,8 @@
 #ifndef RCCL_SUB_BARRIER_H_
 #define RCCL_SUB_BARRIER_H_
 
+#include <cassert>
+
 // The primitives' sub-block barrier, which synchronizes the workers of one group rather than the
 // whole workgroup. Two implementations live here, picked by RCCL_HAVE_NAMED_BARRIERS (device.h):
 // gfx1250 uses hardware named barriers, everything else spins on a shared-memory counter.
@@ -19,17 +21,16 @@
 // ARRIVE_ORDER/WAIT_ORDER order the software arrive/spin on BARRIERS_PTR. A workgroup-scope release
 // there drains every outstanding store (s_wait_storecnt on gfx1250), so callers that order memory
 // with their own fences pass __ATOMIC_RELAXED.
-#define barrier_generic_ordered(__THREAD_FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, ARRIVE_ORDER, WAIT_ORDER) \
+#define barrier_generic_ordered(FENCE, NWORKERS, BARRIER_NEXT, BARRIERS_PTR, ARRIVE_ORDER, WAIT_ORDER) \
   do { \
     if (nthreads == threadsPerBlock) { \
-      __THREAD_FENCE; \
+      FENCE; \
       __builtin_amdgcn_s_barrier(); \
     } else { \
-      /**const int w = threadIdx.x/WARP_SIZE //unused variable - compiler warning**/; \
       const int wid = threadIdx.x % WARP_SIZE; \
       if (wid == 0) { \
         (BARRIER_NEXT) += (NWORKERS) / WARP_SIZE; \
-        __THREAD_FENCE; \
+        FENCE; \
         __scoped_atomic_fetch_add((BARRIERS_PTR), 1, (ARRIVE_ORDER), __MEMORY_SCOPE_WRKGRP); \
         int spins = 0; \
         int rate_limit = 50; \
@@ -86,25 +87,25 @@ struct rcclSubBarrier {
   int slot;
   __device__ __forceinline__ void bindGroup(int group) { slot = group; }
   __device__ __forceinline__ void bindPat() { slot = RCCL_PAT_NAMED_BARRIER; }
-  // The signal also sets the expected wave count, so groups of different widths can reuse a slot.
-  // s_barrier_wait 1 waits on the last barrier this wave joined.
-  __device__ __forceinline__ void arriveWait(int nworkers) {
-    __builtin_amdgcn_s_barrier_join(rcclNamedBarrier(slot));
-    __builtin_amdgcn_s_barrier_signal_var(rcclNamedBarrier(slot), nworkers / WARP_SIZE);
-    __builtin_amdgcn_s_barrier_wait(1);
-  }
-  template <typename Fence>
+  // kStep drops the trailing acquire: a step barrier brings its own LDS-scope fences and a
+  // workgroup-scope acquire here would wait for the step's stores.
+  template <bool kStep = false, typename Fence>
   __device__ __forceinline__ void sync(Fence fence, int nworkers, int nthreads, int threadsPerBlock) {
     fence();
-    if (nthreads == threadsPerBlock) __builtin_amdgcn_s_barrier();
-    // Stands in for the acquire load the spin loop had; adds no instructions on gfx1250.
-    else arriveWait(nworkers), __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
-  }
-  template <typename Fence>
-  __device__ __forceinline__ void stepSync(Fence fence, int nworkers, int nthreads, int threadsPerBlock) {
-    fence();
-    if (nthreads == threadsPerBlock) __builtin_amdgcn_s_barrier();
-    else arriveWait(nworkers);
+    if (nthreads == threadsPerBlock) {
+      __builtin_amdgcn_s_barrier();
+    } else {
+      // A wave signals as a whole, so a group that owned part of one would signal for all of it.
+      // Every group split is a multiple of WARP_SIZE today; this catches one that stops being so.
+      assert(nworkers % WARP_SIZE == 0);
+      // The signal also sets the expected wave count, so groups of different widths can reuse a
+      // slot. s_barrier_wait 1 waits on the last barrier this wave joined.
+      __builtin_amdgcn_s_barrier_join(rcclNamedBarrier(slot));
+      __builtin_amdgcn_s_barrier_signal_var(rcclNamedBarrier(slot), nworkers / WARP_SIZE);
+      __builtin_amdgcn_s_barrier_wait(1);
+      // Stands in for the acquire load the spin loop had; adds no instructions on gfx1250.
+      if constexpr (!kStep) __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+    }
   }
 #else
   uint64_t* counter;
@@ -112,19 +113,22 @@ struct rcclSubBarrier {
   __device__ __forceinline__ void bindGroup(int group) { counter = &ncclShmem.groups[group].barrier; next = 0; }
   // PAT uses the same barrier for each group.
   __device__ __forceinline__ void bindPat() { counter = &ncclShmem.barrier_pat; next = 0; }
-  template <typename Fence>
+  // kStep's caller orders memory with its own fences, so the arrive/spin on the counter can be
+  // relaxed; otherwise the release here is what drains the outstanding stores.
+  template <bool kStep = false, typename Fence>
   __device__ __forceinline__ void sync(Fence fence, int nworkers, int nthreads, int threadsPerBlock) {
-    barrier_generic_ordered(fence(), nworkers, next, counter, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE);
-  }
-  template <typename Fence>
-  __device__ __forceinline__ void stepSync(Fence fence, int nworkers, int nthreads, int threadsPerBlock) {
-    barrier_generic_ordered(fence(), nworkers, next, counter, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+    if constexpr (kStep) {
+      barrier_generic_ordered(fence(), nworkers, next, counter, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+    } else {
+      barrier_generic_ordered(fence(), nworkers, next, counter, __ATOMIC_RELEASE, __ATOMIC_ACQUIRE);
+    }
   }
 #endif
 };
 
-#define barrier_generic(__THREAD_FENCE, NWORKERS, BARRIER) \
-  (BARRIER).sync([&] { __THREAD_FENCE; }, NWORKERS, nthreads, threadsPerBlock)
+// Takes nthreads and threadsPerBlock from the caller's scope, as every Primitives member has them.
+#define barrier_generic(FENCE, NWORKERS, BARRIER) \
+  (BARRIER).sync([&] { FENCE; }, NWORKERS, nthreads, threadsPerBlock)
 
 // Hardware barriers need no reset between batches; the spin counters do.
 __device__ __forceinline__ void rcclResetSubBarriers(int tid) {

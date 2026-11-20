@@ -18,7 +18,6 @@ import json
 RESOURCE_KEYS = [
     'vgpr_count', 'agpr_count', 'sgpr_count',
     'private_segment_fixed_size', 'group_segment_fixed_size',
-    'num_named_barrier',
 ]
 
 
