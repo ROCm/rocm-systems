@@ -519,7 +519,7 @@ Field | Content
 `primary` | Primary CUID as a UUIDv8 string. Always empty in this release: a temporary CUID has no primary. An empty value is not an error
 `derived` | The component's CUID as a UUIDv8 string: its DerivedID when it has a permanent CUID, otherwise its temporary CUID (always, in this release). Names the component without disclosing its serial
 `component_type` | The component's type, reported beside the CUID rather than decoded from it, by name: `PLATFORM`, `CPU`, `GPU`, `NIC`, `NPU`, `STORAGE`, `MEMORY`, `GENPCIE`, `GENC`, `RACKTRAY`, `RACK`, `OTHER`, or `UNKNOWN`
-`source` | Which stage of the staged lookup answered: `DRIVER`, `LIBRARY` or `UNKNOWN`. Always `LIBRARY` in this release
+`source` | Which stage of the staged lookup answered: `DRIVER`, `LIBRARY` or `UNKNOWN`. `LIBRARY` in this release, or `UNKNOWN` if the source could not be read
 `auxiliary` | `True` for a temporary CUID (always, in this release; amd-smi shows it as `temporary`), built from the machine ID and world-readable device information. Such a value changes when the machine ID changes and is not unique across nodes
 
 Every CUID is temporary: built from the machine ID and world-readable device
@@ -570,7 +570,13 @@ each CPU package, each AMD GPU and GPU partition, each NPU, and each NIC
 function, ordered by component type, then BDF, then device path, with the
 numbers in a path compared as numbers. Needs no processor handle. The node is rediscovered on every call, so a component added
 or removed since the last one is reflected. Every CUID is temporary, so
-`primary` is empty.
+`primary` is empty. This returns readable CUIDs, not a complete hardware inventory.
+A component whose required temporary-flag read fails is omitted, including
+on permission, file, PCI and format errors. A missing machine ID (`NO_DATA`),
+an invalid argument (`INVAL`) or a short internal property buffer (`UNEXPECTED_SIZE`)
+fails the call. Type and source are best effort (`UNKNOWN`), as are BDF and path
+(empty) and vendor ID (zero). Failure to read a temporary CUID's primary also
+leaves it empty without dropping the row.
 
 Input parameters: `None`
 
@@ -596,6 +602,9 @@ Exceptions that can be thrown by `amdsmi_get_cuid_components` function:
 - `AMDSMI_STATUS_NO_PERM` - Permission denied while enumerating the inventory
 - `AMDSMI_STATUS_NO_DATA` - The node has no usable machine ID
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Built without CUID support
+- `AMDSMI_STATUS_INVAL` - Invalid argument
+- `AMDSMI_STATUS_UNEXPECTED_SIZE` - An internal CUID property buffer was too small
+- `AMDSMI_STATUS_RETRY` - The inventory outgrew the buffer in three attempts within **one native call**. Python and Rust still repeat the count/fill calls on `INSUFFICIENT_SIZE` when their caller array is too small; there is no three-attempt limit across those calls
 - `AMDSMI_STATUS_API_FAILED` - API call failed
 
 Example:

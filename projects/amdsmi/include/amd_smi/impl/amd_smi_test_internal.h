@@ -15,9 +15,9 @@
 // for each of |total| components, keeping in |found| those it fills. A
 // component whose fill fails is left out; AMDSMI_STATUS_NO_DATA (no
 // machine-id), AMDSMI_STATUS_INVAL and AMDSMI_STATUS_INSUFFICIENT_SIZE fail
-// the call with |found| empty. Declared here so the unit tests can make one
-// component fail, which no fake sysfs tree can do between the listing and the
-// read.
+// the call with |found| empty (a short internal buffer becomes UNEXPECTED_SIZE). Declared here so
+// the unit tests can make one component fail, which no fake sysfs tree can do between the listing
+// and the read.
 amdsmi_status_t amdsmi_cuid_collect_components(
     uint32_t total, const std::function<amdsmi_status_t(uint32_t, amdsmi_cuid_component_t*)>& fill,
     std::vector<amdsmi_cuid_component_t>* found);

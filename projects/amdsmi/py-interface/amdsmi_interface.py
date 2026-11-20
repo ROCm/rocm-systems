@@ -3246,7 +3246,10 @@ def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
     node is rediscovered on every call, so a component added or removed since
     the last one is reflected.
 
-    Every CUID is temporary, so the primary CUIDs are empty.
+    Every CUID is temporary, so the primary CUIDs are empty. Failures local
+    to one component omit it; type, source, BDF, path and vendor ID are best
+    effort. A node-wide missing machine ID, invalid argument or short internal
+    property buffer fails the listing.
 
     Returns:
         List[Dict[str, Any]]: one dictionary per component, with the keys of
@@ -3258,6 +3261,8 @@ def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
 
     Raises:
         AmdSmiLibraryException: If the library reports an error, including
+            AMDSMI_STATUS_RETRY on growth during one native enumeration,
+            AMDSMI_STATUS_NO_PERM when handle enumeration is denied,
             AMDSMI_STATUS_NO_DATA when the node has no usable machine ID, and
             AMDSMI_STATUS_NOT_SUPPORTED when built without CUID or against a
             libamd_smi.so that predates the call.

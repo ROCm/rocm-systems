@@ -3850,8 +3850,8 @@ typedef struct {
   //! Component Type of the component, reported beside the CUID; not decoded
   //! from it.
   amdsmi_cuid_component_type_t component_type;
-  //! Which stage of the staged lookup answered. Always
-  //! ::AMDSMI_CUID_SOURCE_LIBRARY in this release.
+  //! Which stage of the staged lookup answered. ::AMDSMI_CUID_SOURCE_LIBRARY
+  //! in this release, or ::AMDSMI_CUID_SOURCE_UNKNOWN if the source query fails.
   amdsmi_cuid_source_t source;
   //! Non-zero for a temporary CUID, payload bit 117; always 1 in this
   //! release. amd-smi reports it as `temporary`. The identity was built
@@ -3896,6 +3896,7 @@ typedef struct {
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
  *          no CUID exists for this device, or for a partition whose UnitID
  *          cannot be determined,
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read a required field,
  *          ::AMDSMI_STATUS_NO_DATA when the node has no usable machine ID,
  *          without which no CUID can be formed, non-zero on other failures
  */
@@ -3942,8 +3943,21 @@ typedef struct {
  *  function number, so the functions of one card have distinct CUIDs even
  *  where they report one serial number. Two components whose CUIDs coincide
  *  anyway are both left out, since such a CUID identifies neither. A component
- *  whose metadata cannot be read after enumeration is also omitted. Success
+ *  whose required metadata cannot be read after enumeration is also omitted. Success
  *  describes the readable CUIDs, not proof that every physical device was read.
+ *  The temporary flag is required. A local failure reading a required field
+ *  omits that row, including permission, file, PCI and format errors. NO_DATA
+ *  (no machine ID) and INVAL fail the call instead, as does a short internal
+ *  property buffer (UNEXPECTED_SIZE). Type and source may be UNKNOWN; BDF and
+ *  path may be empty and vendor ID zero. For a temporary CUID, a failed
+ *  primary read also leaves that field empty without dropping the row.
+ *
+ *  On Linux/glibc the CUID gate coordinates ordinary, non-reentrant calls
+ *  across fork after initialization. Finish library loading and initialization
+ *  before starting concurrent calls or forking. Do not fork from inside a
+ *  guarded call or a signal handler interrupting it, or call these APIs in
+ *  atfork handlers. This is not an async-signal-safe API or a guarantee of
+ *  fairness or a time bound.
  *
  *  Every CUID is temporary (::amdsmi_cuid_info_t::auxiliary is set), so the
  *  primary CUIDs are empty.
@@ -3964,7 +3978,9 @@ typedef struct {
  *          which fails every component rather than leaving the list empty,
  *          ::AMDSMI_STATUS_INSUFFICIENT_SIZE when @p components is too small
  *          (the first N entries, N being the input *@p count, are written),
- *          ::AMDSMI_STATUS_RETRY if the inventory keeps growing during enumeration,
+ *          ::AMDSMI_STATUS_NO_PERM when handle enumeration itself is denied,
+ *          ::AMDSMI_STATUS_RETRY if three handle-enumeration attempts in this
+ *          native call could not keep up with a growing inventory,
  *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support,
  *          non-zero on other failures
  */
