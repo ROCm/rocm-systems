@@ -34,7 +34,7 @@ from rocprof_compute_soc.metric_library import loader
 from utils.equation_format import normalize_equation
 from utils.metrics.expression import build_eval_string
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import config_arch_members
+from utils.utils_common import config_arch_members, mapping_field_errors
 from utils.utils_counter_defs import counter_to_block
 
 # Categories named after panels, not hardware.
@@ -584,17 +584,10 @@ def _field_errors(
     """Report a missing required field and an unknown field of a mapping entry."""
     if not isinstance(entry, dict):
         return [f"[{source}] {item}: must be a mapping"]
-    errors = [
-        f"[{source}] {item}: '{field}' is required"
-        for field in required
-        if field not in entry
+    return [
+        f"[{source}] {item}: {error}"
+        for error in mapping_field_errors(entry, required, optional)
     ]
-    errors.extend(
-        f"[{source}] {item}: '{field}' is not a known field"
-        for field in entry
-        if field not in required and field not in optional
-    )
-    return errors
 
 
 def _text_errors(

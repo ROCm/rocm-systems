@@ -12,6 +12,7 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_utils_common
@@ -98,6 +99,7 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -208,6 +210,7 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -318,6 +321,7 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_analysis_views
       - test_parser
       - test_argparser
       - test_analyze_commands
