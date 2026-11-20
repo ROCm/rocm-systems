@@ -73,6 +73,7 @@ same domain for timing, PC sampling, or thread trace.
   per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
   performance problems visible in the implementation, and how the cost behaves as device capacity
   outpaces host-link bandwidth across accelerator generations.
+- **[rocpd schema](kernel_replay_rocpd_schema.md)** — `counters_collection` reports a repeated counter once when every replay pass reads the same value. Readings that differ are still summed. The individual readings remain in `rocpd_pmc_event`.
 - **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
   checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
 - **[Downstream tools](kernel_replay_downstream_tools.md)** — what it would take for
