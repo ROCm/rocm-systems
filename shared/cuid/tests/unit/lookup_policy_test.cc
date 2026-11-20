@@ -511,6 +511,11 @@ TEST(cuidtstUnprivileged, NpuNeedsAmdxdna) {
       ASSERT_EQ(symlink((root + "/drivers/" + c.driver).c_str(), (fn + "/driver").c_str()), 0);
     amdcuid_npu_info info{};
     EXPECT_EQ(CuidNpu::discover_single(&info, fn), c.want) << c.bdf;
-    if (c.want == AMDCUID_STATUS_SUCCESS) EXPECT_EQ(info.bdf, c.bdf);
+    if (c.want == AMDCUID_STATUS_SUCCESS) {
+      EXPECT_EQ(info.bdf, c.bdf);
+      uint16_t unit = UINT16_MAX;
+      EXPECT_EQ(CuidNpu(info).get_unit_id(unit), AMDCUID_STATUS_SUCCESS);
+      EXPECT_EQ(unit, 0);
+    }
   }
 }
