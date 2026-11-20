@@ -17,6 +17,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 
 #include <gtest/gtest.h>
@@ -845,6 +846,126 @@ TEST_P(DbiVskipReplacementSim, KernelEntryUsesDispatchStateDespiteAVskipEnabledB
                                         kProbeClobber, 1, *entry));
 }
 
+class DbiPreloadReplacementSim : public DbiReplacementSim {};
+
+TEST_P(DbiPreloadReplacementSim, FirmwareEntryDoesNotInheritExecFromTheSkippedPrefix) {
+  const ReplacementSimTarget &target = GetParam();
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+  const util::FailureOr<uint32_t> full_exec = build_s_mov_b64(126, 193, target.arch);
+  const util::FailureOr<uint32_t> copy_lane = build_v_mov_b32_src(3, 4, target.arch);
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(full_exec.succeeded());
+  ASSERT_TRUE(copy_lane.succeeded());
+  const std::array<uint32_t, 2> write_lane =
+      target.arch == ROCJITSU_CODE_ARCH_CDNA3
+          ? cdna3::build_vop3(cdna3::kVWritelaneB32Vop3,
+                              {.vdst = 1,
+                               .src0 = scalar_positive_inline_u32(kReplacementInput),
+                               .src1 = scalar_positive_inline_u32(63)})
+          : cdna4::build_vop3(cdna4::kVWritelaneB32Vop3,
+                              {.vdst = 1,
+                               .src0 = scalar_positive_inline_u32(kReplacementInput),
+                               .src1 = scalar_positive_inline_u32(63)});
+  const std::array<uint32_t, 2> read_lane =
+      target.arch == ROCJITSU_CODE_ARCH_CDNA3
+          ? cdna3::build_vop3(cdna3::kVReadlaneB32Vop3,
+                              {.vdst = 4, .src0 = 257, .src1 = scalar_positive_inline_u32(63)})
+          : cdna4::build_vop3(cdna4::kVReadlaneB32Vop3,
+                              {.vdst = 4, .src0 = 257, .src1 = scalar_positive_inline_u32(63)});
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+  const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
+  ASSERT_TRUE(clobber.is_valid());
+  struct Case {
+    bool preload;
+    bool replace_prefix;
+    uint32_t private_bytes;
+  };
+  constexpr std::array<Case, 4> cases = {
+      Case{.preload = true, .replace_prefix = false, .private_bytes = kInitialPrivateBytes},
+      Case{.preload = true, .replace_prefix = true, .private_bytes = kInitialPrivateBytes},
+      Case{.preload = true, .replace_prefix = true, .private_bytes = 0},
+      Case{.preload = false, .replace_prefix = false, .private_bytes = 0}};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(test_case.preload);
+    SCOPED_TRACE(test_case.replace_prefix);
+    SCOPED_TRACE(test_case.private_bytes);
+    std::vector<uint32_t> words(256 / sizeof(uint32_t), nop.value());
+    words.front() = test_case.replace_prefix ? nop.value() : full_exec.value();
+    words.insert(words.end(), setup_.begin(), setup_.end());
+    // v_writelane defines lane 63 even when the one-work-item dispatch leaves it
+    // inactive. Only the descriptor entry executes the full-EXEC prefix.
+    words.insert(words.end(), write_lane.begin(), write_lane.end());
+    const uint64_t anchor = words.size() * sizeof(uint32_t);
+    words.push_back(nop.value());
+    words.push_back(test::make_mov_vgpr_inline(1, kOriginalInput));
+    words.insert(words.end(), read_lane.begin(), read_lane.end());
+    words.push_back(copy_lane.value());
+    ASSERT_NO_FATAL_FAILURE(finish_kernel(words));
+    std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+        words, test_case.private_bytes, test::kCallableProbeGranulatedSgprCount, target.machine);
+    if (test_case.preload) {
+      const AmdGpuCodeObject original(image.data(), image.size());
+      const Section &text = *original.text_sections().front();
+      const std::vector<KernelDescriptorInfo> kernels =
+          scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+      ASSERT_EQ(kernels.size(), 1u);
+      amdhsa::kernel_descriptor_t descriptor = kernels.front().descriptor;
+      descriptor.kernarg_size = sizeof(uint32_t);
+      RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT,
+                         1);
+      RJ_AMDHSA_BITS_SET(descriptor.kernarg_preload, amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+      std::memcpy(image.data() + kernels.front().descriptor_file_offset, &descriptor,
+                  sizeof(descriptor));
+    }
+    image = test::with_descriptor_metadata(image, target.arch);
+    ASSERT_FALSE(image.empty());
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    Instrumentor instrumentor(source, target.arch);
+    if (test_case.replace_prefix) {
+      const std::array<uint32_t, 1> replacement_words = {full_exec.value()};
+      instrumentor.add_point(replacement(0, nop.value(), replacement_words));
+    }
+    InstrumentationPoint point = probe_at(anchor, clobber);
+    point.force_full_exec = true;
+    instrumentor.add_point(std::move(point));
+    const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+    ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    ASSERT_EQ(source.image_size(), pristine.size());
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    if (test_case.preload && test_case.private_bytes == 0) {
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+      EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+        return error.find("fixed scratch to spill into") != std::string::npos;
+      }));
+      continue;
+    }
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    EXPECT_EQ(result.sites.size(), test_case.replace_prefix ? 2u : 1u);
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    test::DbiSim simulator;
+    // The descriptor remains Wave64. A one-work-item dispatch supplies partial
+    // EXEC; selecting +256 models the preloading firmware's alternate entry.
+    ASSERT_NO_FATAL_FAILURE(simulator.initialize(target.sim_arch, 1));
+    simulator.set_entry_offset(test_case.preload ? 256 : 0);
+    const std::optional<std::vector<uint8_t>> output = simulator.run_and_read_memory(
+        test::section_words(candidate, ".text"), test::patched_private_segment_size(candidate),
+        kOutputAddress, sizeof(uint32_t));
+    ASSERT_TRUE(output) << "replacement kernel did not halt";
+    ASSERT_EQ(output->size(), sizeof(uint32_t));
+    uint32_t observed = 0;
+    std::memcpy(&observed, output->data(), sizeof(observed));
+    EXPECT_EQ(observed, test_case.preload ? kReplacementInput : kOriginalInput);
+  }
+}
+
 TEST_P(DbiReplacementSim, InteriorDescriptorEntryKeepsObservationExecAnalysisConservative) {
   ObservationProgram program;
   ASSERT_NO_FATAL_FAILURE(make_observation_program(ObservationDefinition::Full, 0, program, true));
@@ -1017,6 +1138,11 @@ TEST_P(DbiVectorRelativeSim, CallableProbeRejectsReplacementIntroducingHiddenVgp
 }
 
 INSTANTIATE_TEST_SUITE_P(Gfx1200, DbiVectorRelativeSim, ::testing::Values(kRdna4));
+
+INSTANTIATE_TEST_SUITE_P(Cdna, DbiPreloadReplacementSim, ::testing::Values(kCdna3, kCdna4),
+                         [](const ::testing::TestParamInfo<ReplacementSimTarget> &info) {
+                           return std::string(info.param.sim_arch);
+                         });
 
 INSTANTIATE_TEST_SUITE_P(Cdna, DbiVskipReplacementSim, ::testing::Values(kCdna3, kCdna4),
                          [](const ::testing::TestParamInfo<ReplacementSimTarget> &info) {

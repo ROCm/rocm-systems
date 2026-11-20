@@ -611,6 +611,11 @@ The analysis sets `LivenessAnalysisOptions::exec_masked_defs_kill`, so a masked 
 
 Callable probes enter with VSKIP proven clear. Dispatch establishes that state
 for KernelEntry probes; other sites require a proof on the effective guest CFG.
+When the decoded text has no VSKIP writer, resolved local calls also preserve
+this state if their return links remain intact. The bounded proof follows scalar
+copies and constant-lane saves/restores of the incoming return pair, including
+non-leaf callees; unknown transfers, damaged links, and recursive summaries
+remain unproven. This proves only VSKIP, not interprocedural register liveness.
 Probe bodies that may enable VSKIP are rejected because the call envelope also
 requires vector instructions to execute. Probe live-in analysis seeds its entry
 with this callable precondition, independently of its EXEC policy.
@@ -901,7 +906,9 @@ dispatch entries with backedges, and treats unknown entries, possible enables,
 and calls conservatively. Explicit clears can restore the proof. Partial or unknown EXEC remains conservative;
 EXEC precision is disabled for unmodeled calls, transfers, or descriptor entries.
 Dispatch-only KernelEntry reads are local to their entry probe, rather than reads
-on guest backedges. Adding a queued point invalidates the cached liveness.
+on guest backedges. Kernarg-preload descriptors retain conservative EXEC liveness:
+firmware may dispatch at entry + 256, whose mask cannot inherit instructions in
+the skipped prefix. Adding a queued point invalidates the cached liveness.
 Sources must fit the original ordinary VGPR allocation before register growth;
 growth also reserves observed inputs beyond the original metadata's used count.
 Register-backup destinations must avoid live values,
