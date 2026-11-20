@@ -146,6 +146,12 @@
       - | 0: Disable DXG detection.
         | 1: Enable DXG detection, allowing ROCr to detect that it is running in WSL2.
 
+    * - | ``HSA_SVM_GRANULARITY``
+        | Migration granularity applied the first time ``hsa_amd_svm_attributes_set`` registers an address reserved with ``hsa_amd_vmem_address_reserve``, when that call does not include ``HSA_AMD_SVM_ATTRIB_MIGRATION_GRANULARITY``. The value is log2 of the number of pages (9 is 2 MiB when the page size is 4 KiB). A later attribute update on that reservation leaves the granularity in place, and an explicit granularity in the call takes precedence.
+      - Unset
+      - | Unset, empty, or outside 0-63: leave the driver's default granularity in place.
+        | 0-63: use that granularity on the first registration of the reserved address.
+
 Hardware Debugging Environment Variables
 ----------------------------------------
 
