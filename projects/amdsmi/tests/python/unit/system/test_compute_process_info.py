@@ -16,7 +16,18 @@ from unittest import mock
 _PACKAGE_DIR = Path(__file__).resolve().parents[4] / "py-interface"
 
 
-def _load_source_package() -> types.ModuleType:
+def _load_package():
+    """The in-tree py-interface, which carries the local changes, or else the
+    installed amdsmi package, as in the installed test tree CI runs, which has no
+    py-interface; None when neither imports."""
+    if not _PACKAGE_DIR.is_dir():
+        try:
+            from amdsmi import amdsmi_interface, amdsmi_wrapper
+        except ImportError:
+            return None
+        return types.SimpleNamespace(
+            amdsmi_interface=amdsmi_interface, amdsmi_wrapper=amdsmi_wrapper
+        )
     package = types.ModuleType("amdsmi_compute_process_info_under_test")
     package.__path__ = [str(_PACKAGE_DIR)]
     sys.modules[package.__name__] = package
@@ -25,7 +36,7 @@ def _load_source_package() -> types.ModuleType:
     return package
 
 
-amdsmi = _load_source_package() if _PACKAGE_DIR.is_dir() else None
+amdsmi = _load_package()
 
 
 class _Library:
@@ -54,7 +65,7 @@ class TestComputeProcessInfo(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if amdsmi is None:
-            raise unittest.SkipTest(f"amdsmi py-interface source not found at {_PACKAGE_DIR}")
+            raise unittest.SkipTest(f"amdsmi not found at {_PACKAGE_DIR} nor installed")
 
     def _read(self, library):
         with mock.patch.object(
@@ -106,7 +117,7 @@ class TestComputeProcessGpus(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if amdsmi is None:
-            raise unittest.SkipTest(f"amdsmi py-interface source not found at {_PACKAGE_DIR}")
+            raise unittest.SkipTest(f"amdsmi not found at {_PACKAGE_DIR} nor installed")
 
     def _read(self, library):
         with mock.patch.object(
