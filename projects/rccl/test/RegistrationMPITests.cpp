@@ -558,7 +558,7 @@ class UBR_DirectAllGather : public RegistrationTestBase
 protected:
     using T = RegTestConfig::DefaultType;
 
-    // Direct AllGather is pinned only when the launcher/config sets NCCL_LAUNCH_ORDER_IMPLICIT=1
+    // Direct AllGather is pinned only when the launcher/config sets RCCL_DDA_ENABLE=0
     // and RCCL_DIRECT_ALLGATHER_THRESHOLD past every swept size; verified below (GTEST_SKIP if not).
     static constexpr unsigned long long kMinDirectAllGatherThreshold = 2147483648ULL;
 
@@ -569,9 +569,9 @@ protected:
             return;
         }
 
-        const char* launchOrder = getenv("NCCL_LAUNCH_ORDER_IMPLICIT");
-        if (!launchOrder || std::string(launchOrder) != "1") {
-            GTEST_SKIP() << "Requires NCCL_LAUNCH_ORDER_IMPLICIT=1 so the DDA "
+        const char* ddaEnable = getenv("RCCL_DDA_ENABLE");
+        if (!ddaEnable || std::string(ddaEnable) != "0") {
+            GTEST_SKIP() << "Requires RCCL_DDA_ENABLE=0 so the DDA "
                             "fast-path is disabled and rcclSelectAllGatherAlgo() "
                             "can select the Direct AllGather path under test. Set "
                             "it in the test config env_variables.";
