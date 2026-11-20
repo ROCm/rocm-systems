@@ -114,6 +114,146 @@ foreach(_rank RANGE 0 1)
     endif()
 endforeach()
 
+set(_adopted_dir "${TEST_OUTPUT_DIR}/adopted")
+file(MAKE_DIRECTORY "${_adopted_dir}")
+set(_adopted_worker_script "${_adopted_dir}/worker.py")
+file(
+    WRITE "${_adopted_worker_script}"
+    [=[
+import os
+import signal
+import sys
+import time
+
+rank = sys.argv[1]
+parent = int(sys.argv[2])
+out = os.environ["RJ_GRID_OUT"]
+signals = 0
+
+
+def record(name, value):
+    with open(os.path.join(out, f"{name}-{rank}"), "w", encoding="utf-8") as handle:
+        handle.write(f"{value}\n")
+
+
+def handle_shutdown(signum, _frame):
+    global signals
+    signals += 1
+    if signals > 1:
+        record("duplicate", signum)
+        sys.exit(70)
+    time.sleep(0.5)
+    record("flushed", signum)
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, handle_shutdown)
+signal.signal(signal.SIGINT, handle_shutdown)
+record("worker", os.getpid())
+
+for _ in range(100):
+    if os.getppid() != parent:
+        record("adopted", os.getppid())
+        break
+    time.sleep(0.05)
+else:
+    record("not-adopted", os.getppid())
+
+while True:
+    time.sleep(1)
+]=]
+)
+
+set(_adopted_rank_script "${_adopted_dir}/rank.sh")
+file(
+    WRITE "${_adopted_rank_script}"
+    [=[
+#!/bin/sh
+/bin/sh -c '"$1" "$2" "$3" "$$" &' sh "$PYTHON_EXECUTABLE" "$RJ_WORKER_SCRIPT" "$RANK"
+trap 'printf "term\n" > "$RJ_GRID_OUT/term-$RANK"; exit 0' TERM INT
+printf "%s\n" "$$" > "$RJ_GRID_OUT/pid-$RANK"
+while :; do
+    sleep 1
+done
+]=]
+)
+
+set(_adopted_driver_script "${_adopted_dir}/driver.sh")
+file(
+    WRITE "${_adopted_driver_script}"
+    [=[
+#!/bin/sh
+"$RJ_EXECUTABLE" --profile mi350x --num-nodes 1 --nproc-per-node 2 \
+    --env "RJ_GRID_OUT=$RJ_GRID_OUT" \
+    --env "RJ_WORKER_SCRIPT=$RJ_WORKER_SCRIPT" \
+    --env "PYTHON_EXECUTABLE=$PYTHON_EXECUTABLE" \
+    -- /bin/sh "$RJ_RANK_SCRIPT" > "$RJ_GRID_OUT/launcher.out" 2> "$RJ_GRID_OUT/launcher.err" &
+launcher=$!
+
+i=0
+while [ "$i" -lt 100 ]; do
+    if [ -s "$RJ_GRID_OUT/pid-0" ] && [ -s "$RJ_GRID_OUT/pid-1" ] && \
+       [ -s "$RJ_GRID_OUT/worker-0" ] && [ -s "$RJ_GRID_OUT/worker-1" ] && \
+       [ -s "$RJ_GRID_OUT/adopted-0" ] && [ -s "$RJ_GRID_OUT/adopted-1" ]; then
+        break
+    fi
+    i=$((i + 1))
+    sleep 0.1
+done
+
+if [ ! -s "$RJ_GRID_OUT/adopted-0" ] || [ ! -s "$RJ_GRID_OUT/adopted-1" ]; then
+    kill -TERM "$launcher" 2>/dev/null
+    wait "$launcher" 2>/dev/null
+    echo "workers were not adopted before cancellation" >&2
+    cat "$RJ_GRID_OUT/launcher.err" >&2
+    exit 20
+fi
+
+# Give the launcher polling loop time to discover the already-reparented workers
+# before cancellation, so this covers adopted children tracked before shutdown.
+sleep 0.5
+kill -TERM "$launcher"
+wait "$launcher"
+status=$?
+if [ "$status" -ne 143 ]; then
+    echo "launcher exited with $status, expected 143" >&2
+    cat "$RJ_GRID_OUT/launcher.err" >&2
+    exit 21
+fi
+
+if [ -e "$RJ_GRID_OUT/duplicate-0" ] || [ -e "$RJ_GRID_OUT/duplicate-1" ]; then
+    echo "adopted worker received duplicate shutdown signal" >&2
+    exit 22
+fi
+if [ ! -s "$RJ_GRID_OUT/flushed-0" ] || [ ! -s "$RJ_GRID_OUT/flushed-1" ]; then
+    echo "adopted worker did not finish shutdown flush" >&2
+    exit 23
+fi
+]=]
+)
+
+execute_process(
+    COMMAND
+        "${CMAKE_COMMAND}" -E env
+        "ROCJITSU_RUNTIME_DIR=${TEST_RUNTIME_DIR}/adopted"
+        "RJ_EXECUTABLE=${TEST_EXECUTABLE}" "RJ_GRID_OUT=${_adopted_dir}"
+        "RJ_RANK_SCRIPT=${_adopted_rank_script}"
+        "RJ_WORKER_SCRIPT=${_adopted_worker_script}"
+        "PYTHON_EXECUTABLE=${PYTHON_EXECUTABLE}" /bin/sh
+        "${_adopted_driver_script}"
+    RESULT_VARIABLE _adopted_result
+    OUTPUT_VARIABLE _adopted_stdout
+    ERROR_VARIABLE _adopted_stderr
+    TIMEOUT 25
+)
+
+if(NOT "${_adopted_result}" STREQUAL "0")
+    message(
+        FATAL_ERROR
+        "process-grid adopted-worker signal test failed with ${_adopted_result}\nstdout:\n${_adopted_stdout}\nstderr:\n${_adopted_stderr}"
+    )
+endif()
+
 set(_subreaper_dir "${TEST_OUTPUT_DIR}/subreaper")
 file(MAKE_DIRECTORY "${_subreaper_dir}")
 set(_subreaper_driver "${_subreaper_dir}/driver.py")
