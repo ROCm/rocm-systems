@@ -61,6 +61,15 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_UBYTE
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_UBYTE
+                                        : amdgpu::Operation::FLAT_LOAD_UBYTE);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2))
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -127,6 +136,15 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_SBYTE
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_SBYTE
+                                        : amdgpu::Operation::FLAT_LOAD_SBYTE);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2))
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -193,6 +211,15 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_USHORT
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_USHORT
+                                        : amdgpu::Operation::FLAT_LOAD_USHORT);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2))
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -259,6 +286,15 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_SSHORT
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_SSHORT
+                                        : amdgpu::Operation::FLAT_LOAD_SSHORT);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2))
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -325,6 +361,15 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_DWORD
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_DWORD
+                                        : amdgpu::Operation::FLAT_LOAD_DWORD);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2))
+    flags_ |= MEMORY_TO_LDS;
 }
 
 namespace detail {
@@ -390,6 +435,13 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_DWORDX2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_DWORDX2
+                                        : amdgpu::Operation::FLAT_LOAD_DWORDX2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -453,6 +505,13 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_DWORDX3
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_DWORDX3
+                                        : amdgpu::Operation::FLAT_LOAD_DWORDX3);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -516,6 +575,13 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_DWORDX4
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_DWORDX4
+                                        : amdgpu::Operation::FLAT_LOAD_DWORDX4);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -580,6 +646,13 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_BYTE
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_BYTE
+                                        : amdgpu::Operation::FLAT_STORE_BYTE);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -644,6 +717,14 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_BYTE_D16_HI
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_BYTE_D16_HI
+                                        : amdgpu::Operation::FLAT_STORE_BYTE_D16_HI);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -708,6 +789,13 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_SHORT
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_SHORT
+                                        : amdgpu::Operation::FLAT_STORE_SHORT);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -772,6 +860,14 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_SHORT_D16_HI
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_SHORT_D16_HI
+                                        : amdgpu::Operation::FLAT_STORE_SHORT_D16_HI);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -835,6 +931,13 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_DWORD
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_DWORD
+                                        : amdgpu::Operation::FLAT_STORE_DWORD);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -898,6 +1001,13 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_DWORDX2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_DWORDX2
+                                        : amdgpu::Operation::FLAT_STORE_DWORDX2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -961,6 +1071,13 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_DWORDX3
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_DWORDX3
+                                        : amdgpu::Operation::FLAT_STORE_DWORDX3);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1024,6 +1141,13 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_STORE_DWORDX4
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_STORE_DWORDX4
+                                        : amdgpu::Operation::FLAT_STORE_DWORDX4);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -1087,6 +1211,14 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_UBYTE_D16
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_UBYTE_D16
+                                        : amdgpu::Operation::FLAT_LOAD_UBYTE_D16);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1157,6 +1289,14 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_UBYTE_D16_HI
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_UBYTE_D16_HI
+                                        : amdgpu::Operation::FLAT_LOAD_UBYTE_D16_HI);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1227,6 +1367,14 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_SBYTE_D16
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_SBYTE_D16
+                                        : amdgpu::Operation::FLAT_LOAD_SBYTE_D16);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1297,6 +1445,14 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_SBYTE_D16_HI
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_SBYTE_D16_HI
+                                        : amdgpu::Operation::FLAT_LOAD_SBYTE_D16_HI);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1367,6 +1523,14 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_SHORT_D16
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_SHORT_D16
+                                        : amdgpu::Operation::FLAT_LOAD_SHORT_D16);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1437,6 +1601,14 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_LOAD_SHORT_D16_HI
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_LOAD_SHORT_D16_HI
+                                        : amdgpu::Operation::FLAT_LOAD_SHORT_D16_HI);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -1513,6 +1685,13 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SWAP
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SWAP
+                                        : amdgpu::Operation::FLAT_ATOMIC_SWAP);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1582,6 +1761,13 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_CMPSWAP
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP
+                                        : amdgpu::Operation::FLAT_ATOMIC_CMPSWAP);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1651,6 +1837,13 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_ADD
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_ADD
+                                        : amdgpu::Operation::FLAT_ATOMIC_ADD);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1720,6 +1913,13 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SUB
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SUB
+                                        : amdgpu::Operation::FLAT_ATOMIC_SUB);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1789,6 +1989,13 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SMIN
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SMIN
+                                        : amdgpu::Operation::FLAT_ATOMIC_SMIN);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1858,6 +2065,13 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_UMIN
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_UMIN
+                                        : amdgpu::Operation::FLAT_ATOMIC_UMIN);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1927,6 +2141,13 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SMAX
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SMAX
+                                        : amdgpu::Operation::FLAT_ATOMIC_SMAX);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1996,6 +2217,13 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_UMAX
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_UMAX
+                                        : amdgpu::Operation::FLAT_ATOMIC_UMAX);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2065,6 +2293,13 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_AND
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_AND
+                                        : amdgpu::Operation::FLAT_ATOMIC_AND);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2134,6 +2369,13 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_OR
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_OR
+                                        : amdgpu::Operation::FLAT_ATOMIC_OR);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2203,6 +2445,13 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_XOR
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_XOR
+                                        : amdgpu::Operation::FLAT_ATOMIC_XOR);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2272,6 +2521,13 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_INC
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_INC
+                                        : amdgpu::Operation::FLAT_ATOMIC_INC);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2341,6 +2597,13 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_DEC
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_DEC
+                                        : amdgpu::Operation::FLAT_ATOMIC_DEC);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2410,6 +2673,13 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SWAP_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SWAP_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_SWAP_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2479,6 +2749,13 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_CMPSWAP_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_CMPSWAP_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2548,6 +2825,13 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_ADD_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_ADD_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_ADD_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2617,6 +2901,13 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SUB_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SUB_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_SUB_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2686,6 +2977,13 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SMIN_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SMIN_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_SMIN_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2755,6 +3053,13 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_UMIN_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_UMIN_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_UMIN_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2824,6 +3129,13 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_SMAX_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_SMAX_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_SMAX_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2893,6 +3205,13 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_UMAX_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_UMAX_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_UMAX_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2962,6 +3281,13 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_AND_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_AND_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_AND_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3031,6 +3357,13 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_OR_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_OR_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_OR_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3100,6 +3433,13 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_XOR_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_XOR_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_XOR_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3169,6 +3509,13 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_INC_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_INC_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_INC_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3238,6 +3585,13 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(inst_.seg == 1   ? amdgpu::Operation::SCRATCH_ATOMIC_DEC_X2
+                       : inst_.seg == 2 ? amdgpu::Operation::GLOBAL_ATOMIC_DEC_X2
+                                        : amdgpu::Operation::FLAT_ATOMIC_DEC_X2);
+  set_amdgpu_memory(inst_.seg == 1   ? amdgpu::MemoryAddressing::Scratch
+                    : inst_.seg == 2 ? amdgpu::MemoryAddressing::Global
+                                     : amdgpu::MemoryAddressing::Flat,
+                    amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3303,6 +3657,8 @@ GlobalAtomicAddF32Flat::GlobalAtomicAddF32Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3372,6 +3728,8 @@ GlobalAtomicPkAddF16Flat::GlobalAtomicPkAddF16Flat(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
                        : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::GLOBAL_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {

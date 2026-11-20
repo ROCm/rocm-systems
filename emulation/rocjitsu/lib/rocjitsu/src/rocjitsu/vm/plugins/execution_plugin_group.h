@@ -308,6 +308,34 @@ public:
     });
   }
 
+  void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuMemoryCancellationObserver *>(entry.plugin.get()))
+            observer->onAmdgpuMemoryAccessCancelled(inst, wf);
+        }
+      }
+    });
+  }
+
+  void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) {
+    if (!observes_memory_routing_)
+      return;
+    dispatch_wave_hot_hook(&wf, [&](bool cached) {
+      for (size_t index = 0; index != plugins_.size(); ++index) {
+        auto &entry = plugins_[index];
+        if (entry.observes_memory_routing && plugin_observes_hot_hooks(index, &wf, cached)) {
+          if (auto *observer = dynamic_cast<AmdgpuMixedFlatLdsObserver *>(entry.plugin.get()))
+            observer->onAmdgpuMixedFlatLdsAccess(inst, wf);
+        }
+      }
+    });
+  }
+
   void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) {
     if (!observes_memory_routing_)
       return;
@@ -567,22 +595,19 @@ public:
   }
 
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
-    // Immortal singleton: the shared_ptr is heap-allocated and deliberately never
-    // deleted, so its control block outlives process teardown. In local-mode
-    // (LD_PRELOAD interposer) the simulation engine runs on a detached thread that
-    // is still executing when exit() drives static/atexit destructors on the main
-    // thread. A plain function-local `static shared_ptr` would have its control
-    // block destroyed by a __cxa_atexit handler during __run_exit_handlers while the
-    // engine thread is mid-startup() copying this default plugin group into a
-    // CompletionTracker/ComputeUnit — a data race on the refcount that surfaced as a
-    // use-after-free SIGSEGV in _Sp_counted_base::_M_release under `ctest -jN`.
-    // Leaking the control block removes that teardown race; the OS reclaims the
-    // memory at process death. Matches the interposer singleton's never-destructed
-    // design for the same reason.
+#if defined(RJ_DISABLE_INTERPOSER)
+    // Explicit hosts finish VM teardown before unloading the library.
+    static auto instance = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    return instance;
+#else
+    // The interposer may defer joining its engine until HIP/ROCr close their
+    // KFD references, after static destructors run. Retain the default group
+    // through that process-teardown interval.
     static std::shared_ptr<ExecutionPluginGroup> *instance =
         new std::shared_ptr<ExecutionPluginGroup>(
             std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{}));
     return *instance;
+#endif
   }
 
 private:

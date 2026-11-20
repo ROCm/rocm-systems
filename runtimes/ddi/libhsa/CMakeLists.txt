@@ -31,6 +31,14 @@ if(BUILD_TESTING)
             LABELS "host;abi" SKIP_RETURN_CODE 77 TIMEOUT 30
             ENVIRONMENT "ROCR_VISIBLE_DEVICES="
             ENVIRONMENT_MODIFICATION "HSA_TOOLS_LIB=unset:")
+        add_executable(hsa_callback_shutdown tests/gpu/callback_shutdown_smoke.c)
+        target_compile_features(hsa_callback_shutdown PRIVATE c_std_11)
+        target_link_libraries(hsa_callback_shutdown PRIVATE rocm_runtime::hsa_shared)
+        add_test(NAME hsa.callback_shutdown COMMAND hsa_callback_shutdown)
+        set_tests_properties(hsa.callback_shutdown PROPERTIES
+            LABELS "host;abi" SKIP_RETURN_CODE 77 TIMEOUT 30
+            ENVIRONMENT "ROCR_VISIBLE_DEVICES="
+            ENVIRONMENT_MODIFICATION "HSA_TOOLS_LIB=unset:")
         add_test(NAME hsa.profiler_publication
             COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/abi/check_profiler.py"

@@ -49,6 +49,26 @@ public:
                                           const amdgpu::WaitFields &fields) = 0;
 };
 
+/// @brief Reports cancellation of an individual previously routed memory issue.
+/// @details Delivery requires observes_memory_routing() and a matching hot-hook subscription
+/// for the wavefront. The instruction and wavefront are borrowed for this call, which precedes
+/// deletion of the cancelled instruction. Whole-wave cancellation uses
+/// ExecutionPlugin::onAmdgpuWavefrontCancelled() for cleanup.
+class AmdgpuMemoryCancellationObserver {
+public:
+  virtual ~AmdgpuMemoryCancellationObserver() = default;
+  virtual void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
+};
+
+/// @brief Observes the LDS portion of a mixed FLAT access after its global lanes succeed.
+/// @details Requires memory-routing observation and a matching wave hot-hook subscription.
+/// The instruction and wavefront are borrowed for the duration of the callback.
+class AmdgpuMixedFlatLdsObserver {
+public:
+  virtual ~AmdgpuMixedFlatLdsObserver() = default;
+  virtual void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) = 0;
+};
+
 /// Observes conditional image returns after translation succeeds, before shader execution resumes.
 class AmdgpuImageFeedbackObserver {
 public:

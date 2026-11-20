@@ -36,8 +36,7 @@ void KernelLoggingPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const 
 }
 
 void KernelLoggingPlugin::record_mma(const Instruction &inst, uint32_t dispatch_id) {
-  bool is_mfma = inst.is_mfma() || inst.mnemonic().starts_with("v_wmma_");
-  if (is_mfma) {
+  if (inst.is_mfma() || inst.is_matrix()) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (mfma_printed_.insert(dispatch_id).second)
       sink().write(std::format("[rocjitsu] mfma detected in dispatch {}\n", dispatch_id));
