@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 from packaging.version import Version
 
-from utils.inject_roctx._backends import torch_trace_collector as loader
+from ml_api_tracing.inject_roctx.backends import torch_trace_collector as loader
 
 
 class FakeNativeFunction:

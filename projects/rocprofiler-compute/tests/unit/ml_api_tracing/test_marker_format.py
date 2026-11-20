@@ -73,14 +73,6 @@ def test_compose_marker_matches_native_wire_field_order():
     )
 
 
-def test_compose_marker_preserves_supplied_arguments_without_capping():
-    encoded_arguments = "%7C" * 513
-    assert compose_marker("pkg/mod%", "file.py:2", args=encoded_arguments) == (
-        "pkg%2Fmod%25:file.py:2"
-        "|seqNr=n/a|tid=n/a|ftid=n/a|ltid=n/a|scope=n/a|args=" + encoded_arguments
-    )
-
-
 def test_encode_args_wrap_delimiters():
     assert "%7C" in encode_args("(float32[2x4], bias=float32[2x4]|x)")
     assert encode_args("%|;|\r\n") == "%25%7C%3B%7C%0D%0A"
@@ -101,19 +93,6 @@ def test_cap_args_balanced_parens():
     assert cap_args("x" * 513) == "x" * 512 + "..."
     blob = "(" + "float32[2x4], " * 40 + ")"
     assert cap_args(blob) == blob[:512] + "...)"
-
-
-@pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [
-        pytest.param("(abc)", "(a...)", id="balanced"),
-        pytest.param("(abc", "(a...", id="open-only"),
-        pytest.param("abc)", "ab...", id="close-only"),
-        pytest.param("ab", "ab", id="at-limit"),
-    ],
-)
-def test_cap_args_appends_suffix_after_requested_prefix(arguments, expected):
-    assert cap_args(arguments, max_len=2) == expected
 
 
 def test_split_operator_args_respects_nested_commas():

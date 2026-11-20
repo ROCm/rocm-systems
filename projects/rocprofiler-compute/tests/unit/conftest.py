@@ -40,26 +40,6 @@ def db_session():
 
 
 @pytest.fixture
-def user_region_with_nested_addmm_and_outside_relu():
-    """User region1 wraps addmm; relu is a sibling root outside the region."""
-    addmm = CallTreeNode(name="aten::addmm", backend="torch")
-    addmm.kernels["addmm_kernel"] = KernelStats(
-        launches=1,
-        total_duration_ns=50.0,
-        pmc_group_keys=[(1, "addmm_kernel", 0, 0, 0)],
-    )
-    region1 = CallTreeNode(name="region1", backend="user")
-    region1.children = [addmm]
-    relu = CallTreeNode(name="aten::relu", backend="torch")
-    relu.kernels["relu_kernel"] = KernelStats(
-        launches=1,
-        total_duration_ns=10.0,
-        pmc_group_keys=[(2, "relu_kernel", 0, 0, 0)],
-    )
-    return {"1": [region1, relu]}
-
-
-@pytest.fixture
 def mixed_user_region_forest():
     """Mixed user subtree with repeated statistical keys and outside Torch work."""
     torch_child = CallTreeNode(

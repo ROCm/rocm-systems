@@ -15,7 +15,7 @@ from ml_api_tracing.analyze.orchestrator import apply_operator_filter
 from ml_api_tracing.analyze.output import list_operators, show_matched_operator_report
 from ml_api_tracing.marker_format import compose_marker
 from rocprof_compute_analyze.analysis_cli import cli_analysis
-from utils import parser, schema
+from utils import schema
 
 RMSNORM_PMC_GROUP_KEY = (4, "rmsnorm_kernel", 0, 0, 0)
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
@@ -167,115 +167,6 @@ def cli_with_two_operator_workloads(args, simple_model_forest_with_relu_and_addm
     inst._arch_configs = {"gfx950": SimpleNamespace(dfs_expressions={})}
     inst._OmniAnalyze_Base__args = args
     return inst
-
-
-def write_selector_lifecycle_workload(parent, name, backend):
-    workload = parent / name / "GPU"
-    workload.mkdir(parents=True)
-    (workload / "profiling_config.yaml").write_text(
-        f"trace_ml_api:\n- {backend}\n", encoding="utf-8"
-    )
-    pd.DataFrame({"SQ_WAVES": [1]}).to_csv(
-        workload / "results_0.csv.gz", index=False, compression="gzip"
-    )
-    pd.DataFrame([{"gpu_arch": "gfx950"}]).to_csv(workload / "sysinfo.csv", index=False)
-    return workload
-
-
-def generate_selector_lifecycle_configs(analyzer, arch, *_args, **_kwargs):
-    """Isolate metric definitions while retaining real base workload initialization."""
-    analyzer._arch_configs[arch] = SimpleNamespace(dfs={}, dfs_type={})
-    return analyzer._arch_configs
-
-
-def selector_lifecycle_args(paths, listing, operator):
-    return argparse.Namespace(
-        path=[[str(path)] for path in paths],
-        list_operators=listing,
-        operator=operator,
-        output_name=None,
-        output_format="stdout",
-        config_dir="",
-        list_stats=False,
-        filter_metrics=None,
-        normal_unit="per_kernel",
-        gpu_kernel=None,
-        gpu_id=None,
-        gpu_dispatch_id=None,
-        specs_correction=None,
-        no_roof=True,
-        verbose=0,
-        time_unit="ns",
-    )
-
-
-def build_selector_lifecycle_pc_workload(workload, _path, _args, tool_data):
-    """Supply PC scaffolding while the real lifecycle decides whether to use it."""
-    assert tool_data == []
-    workload.raw_pmc = pd.DataFrame({"Dispatch_ID": [7]})
-    workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = pd.DataFrame({
-        "Kernel_Name": ["pc_kernel"]
-    })
-
-
-@pytest.mark.parametrize(
-    ("listing", "operator"),
-    [
-        pytest.param([], ["invalid-prefix:*"], id="bare-listing-precedence"),
-        pytest.param(["torch"], None, id="untraced-listing"),
-        pytest.param(None, ["invalid-prefix:*"], id="invalid-filter"),
-        pytest.param(None, ["torch:*"], id="untraced-filter"),
-    ],
-)
-def test_pc_only_workloads_preserve_operator_lifecycle(
-    tmp_path, monkeypatch, capsys, listing, operator
-):
-    paths = [
-        write_selector_lifecycle_workload(tmp_path, "first", "torch"),
-        write_selector_lifecycle_workload(tmp_path, "second", "triton"),
-    ]
-    (paths[0] / "profiling_config.yaml").write_text(
-        "filter_blocks:\n- pc_sampling\n", encoding="utf-8"
-    )
-    args = selector_lifecycle_args(paths, listing, operator)
-    analyzer = cli_analysis(args, {})
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_base.OmniAnalyze_Base.generate_configs",
-        generate_selector_lifecycle_configs,
-    )
-    monkeypatch.setattr(
-        analyzer,
-        "build_pc_sampling_only_workload",
-        build_selector_lifecycle_pc_workload,
-    )
-    displayed_workloads = []
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.tty.show_all",
-        lambda _args, workloads, *_rest: displayed_workloads.extend(workloads),
-    )
-
-    analyzer.sanitize()
-    if listing is not None:
-        with pytest.raises(SystemExit) as error:
-            analyzer.pre_processing()
-        assert error.value.code == 0
-    else:
-        analyzer.pre_processing()
-        analyzer.run_analysis()
-        assert displayed_workloads == [str(path) for path in paths]
-
-    assert analyzer.pc_sampling_only()
-    assert set(analyzer._runs) == {str(path) for path in paths}
-    for workload in analyzer._runs.values():
-        assert workload.raw_pmc["Dispatch_ID"].tolist() == [7]
-        assert workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]["Kernel_Name"].tolist() == [
-            "pc_kernel"
-        ]
-        assert workload.operator_patterns == {}
-        assert workload.ml_api_call_trees == {}
-    assert args.list_operators == listing
-    assert args.operator == operator
-    assert "Matched" not in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

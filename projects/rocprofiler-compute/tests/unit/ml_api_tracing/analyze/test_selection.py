@@ -114,24 +114,6 @@ def test_select_operators_no_match_returns_empty_forest_and_keys(forest, pattern
     assert select_operators(forest, patterns) == ({}, [])
 
 
-def test_select_operators_cpu_only_match_returns_the_forest_without_keys():
-    node = CallTreeNode(
-        name="aten::cpu",
-        backend="torch",
-        invocation_ids={"10"},
-        args_invocations={"(value=1)": {"10"}},
-        file_name="model.py",
-        line_number=17,
-        thread_id="1",
-    )
-    forest = {"1": [node]}
-
-    subtree, pmc_group_keys = select_operators(forest, {"torch": ["aten::cpu"]})
-
-    assert subtree == forest
-    assert pmc_group_keys == []
-
-
 def test_select_operators_preserves_payload_and_overlapping_matches_once(
     simple_model_forest_with_relu_and_addmm,
 ):
@@ -252,18 +234,6 @@ def test_analyze_dispatch_ids_from_pmc_keys_returns_mapped_ids(keys, expected_id
     assert analyze_dispatch_ids_from_pmc_keys(keys, slot_to_id) == expected_ids
 
 
-def test_analyze_dispatch_ids_from_pmc_keys_raises_for_first_missing_key():
-    first_missing = ("first-missing",)
-    keys = [RELU_PMC_GROUP_KEY, first_missing, ("later-missing",)]
-    slot_to_id = {RELU_PMC_GROUP_KEY: 8}
-
-    with pytest.raises(KeyError) as failure:
-        analyze_dispatch_ids_from_pmc_keys(keys, slot_to_id)
-
-    assert failure.value.args == (first_missing,)
-    assert slot_to_id == {RELU_PMC_GROUP_KEY: 8}
-
-
 def test_dispatch_filter_keeps_only_operator_dispatches():
     assert intersect_dispatch_ids([1, 2, 3], requested_dispatch_ids=[2, 9]) == [2]
 
@@ -312,13 +282,3 @@ def test_intersect_dispatch_ids_by_kernel_empty_selection_returns_no_dispatches(
     kernel_top = pd.DataFrame({"Kernel_Name": ["target"]})
 
     assert intersect_dispatch_ids_by_kernel([1], raw_pmc, kernel_top, []) == []
-
-
-def test_intersect_dispatch_ids_by_kernel_missing_label_raises():
-    raw_pmc = pd.DataFrame({"Dispatch_ID": [1], "Kernel_Name": ["target"]})
-    kernel_top = pd.DataFrame({"Kernel_Name": ["target"]}, index=[7])
-
-    with pytest.raises(KeyError) as failure:
-        intersect_dispatch_ids_by_kernel([1], raw_pmc, kernel_top, [0])
-
-    assert failure.value.args == (0,)

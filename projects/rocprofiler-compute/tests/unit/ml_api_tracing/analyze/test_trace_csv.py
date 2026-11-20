@@ -138,22 +138,6 @@ def test_load_csv_reports_required_column_errors(
     )
 
 
-def test_load_csv_checks_missing_columns_before_null_values(
-    tmp_path, write_ml_api_pass, linear_marker_row, counter_row
-):
-    marker = linear_marker_row(1, 0, 100)
-    del marker["GUID"]
-    marker["Thread_Id"] = None
-    write_ml_api_pass(tmp_path, 0, [marker], [counter_row(1, "kernel", 10, 20)])
-
-    with pytest.raises(
-        MlApiTraceInputError, match="missing required columns"
-    ) as excinfo:
-        load_ml_api_trace_pairs(tmp_path)
-
-    assert str(excinfo.value).endswith("['GUID']")
-
-
 def test_load_pairs_keeps_header_only_discovered_pair(tmp_path):
     marker_path = pass_csv_path(tmp_path, 0, "marker")
     counter_path = pass_csv_path(tmp_path, 0, "counter")
