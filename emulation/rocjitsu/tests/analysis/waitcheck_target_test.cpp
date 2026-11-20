@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -19,6 +22,9 @@ namespace rocjitsu::waitcheck_detail {
 namespace {
 
 using Target = WaitcheckTarget;
+using amdgpu::MemoryAddressing;
+using amdgpu::MemoryKind;
+using amdgpu::Operation;
 
 std::unique_ptr<Instruction> decode(std::span<const uint32_t> words, rj_code_arch_t arch) {
   auto decoder = Decoder::create(arch);
@@ -110,6 +116,15 @@ TEST(WaitcheckTarget, DependencyWaitExpressionsUseTheTargetMnemonic) {
   }
 }
 
+TEST(WaitcheckTarget, Cdna5RejectsDirectAndParameterLdsInstructions) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  for (auto opcode : {rdna4::kDsDirectLoadVdsdir, rdna4::kDsParamLoadVdsdir}) {
+    const auto words = rdna4::build_vdsdir(opcode, {.vdst = 2});
+    util::StringDiagnostic error;
+    EXPECT_TRUE(decoder->decode_window(words, 0, error.emitter()).failed());
+  }
+}
+
 TEST(WaitcheckTarget, Rdna3LdsDirectLoadsProduceExportEvents) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
     for (uint32_t word : {0xce000000u, 0xce100000u}) {
@@ -138,7 +153,7 @@ TEST(WaitcheckTarget, Rdna3LdsDirectLoadsProduceExportEvents) {
 TEST(WaitcheckTarget, LdsDirectEmbeddedWaitFieldsFollowTheirEncodingGeneration) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool legacy = uses_legacy_waitcnt(waitcnt_model(arch).value());
+    const bool legacy = amdgpu::uses_legacy_waitcnt(amdgpu::waitcnt_model(arch).value());
     for (uint32_t opcode : {0xce000000u, 0xce100000u}) {
       for (uint32_t count : {0u, 3u, 15u}) {
         // WAITVDST/WAIT_VA_VDST occupies bits 16-19 on both generations.
@@ -177,7 +192,7 @@ TEST(WaitcheckTarget, DependencyBoundsExcludeTheNoWaitEncoding) {
       const auto sentinel = std::move(sentinel_result).value();
       if (sentinel) {
         EXPECT_EQ(Target::maximum_dependency_wait(arch, counter).value() + 1, *sentinel)
-            << static_cast<int>(arch) << ' ' << wait_counter_name(counter);
+            << static_cast<int>(arch) << ' ' << amdgpu::wait_counter_name(counter);
       }
     }
   }
@@ -228,15 +243,22 @@ TEST(WaitcheckTarget, Rdna4StoreSeparatesCompletionAndDataLifetime) {
   EXPECT_TRUE(data->check_defs);
 }
 
-// Classification is intentionally independent of decoding. These names cover
-// async producers whose ordering obligations differ from ordinary register loads.
-class NamedInstruction : public Instruction {
+// Classification consumes decoded facts; this fixture intentionally gives every
+// instruction the same display name so names cannot supply missing metadata.
+class MetadataInstruction : public Instruction {
 public:
-  explicit NamedInstruction(std::string_view name) : Instruction(name, nullptr) {}
+  explicit MetadataInstruction(Operation operation,
+                               MemoryAddressing addressing = MemoryAddressing::None,
+                               MemoryKind kind = MemoryKind::None, uint64_t flags = 0)
+      : Instruction("metadata-test", nullptr) {
+    flags_ = flags;
+    set_amdgpu_operation(operation);
+    set_amdgpu_memory(addressing, kind);
+  }
 };
 
 TEST(WaitcheckTarget, AsyncLoadUpdatesBothMemoryAndAsyncCounters) {
-  NamedInstruction inst("global_load_async_to_lds_b32");
+  MetadataInstruction inst(Operation::GLOBAL_LOAD_ASYNC_TO_LDS_B32);
   auto events_result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA5);
   ASSERT_TRUE(events_result.succeeded());
   const auto events = std::move(events_result).value();
@@ -249,8 +271,8 @@ TEST(WaitcheckTarget, AsyncLoadUpdatesBothMemoryAndAsyncCounters) {
 }
 
 TEST(WaitcheckTarget, TensorOperationsHaveOnlyTensorEvents) {
-  for (auto name : {"tensor_load_to_lds", "tensor_store_from_lds"}) {
-    NamedInstruction inst(name);
+  for (Operation operation : {Operation::TENSOR_LOAD_TO_LDS, Operation::TENSOR_STORE_FROM_LDS}) {
+    MetadataInstruction inst(operation);
     auto events_result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA5);
     ASSERT_TRUE(events_result.succeeded());
     const auto events = std::move(events_result).value();
@@ -262,10 +284,10 @@ TEST(WaitcheckTarget, TensorOperationsHaveOnlyTensorEvents) {
 }
 
 TEST(WaitcheckTarget, UnsupportedArchitecturesDoNotInheritSplitCounters) {
-  NamedInstruction inst("s_nop");
+  MetadataInstruction inst(Operation::S_NOP);
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
-    EXPECT_TRUE(waitcnt_model(arch).failed());
+    EXPECT_TRUE(amdgpu::waitcnt_model(arch).failed());
     EXPECT_TRUE(Target::maximum_dependency_wait(arch, WaitCounterKind::Load).failed());
     EXPECT_TRUE(wait_expression(WaitCounterKind::Load, 0, arch).failed());
     EXPECT_TRUE(Target::classify_events(inst, arch).failed());
@@ -299,8 +321,9 @@ TEST(WaitcheckTarget, AtomicsDistinguishRegisterResultsFromMemoryDestinations) {
       ASSERT_TRUE(events_result.succeeded());
       const auto events = std::move(events_result).value();
       ASSERT_FALSE(events.empty()) << static_cast<int>(arch);
-      EXPECT_EQ(events[0].counter, returns ? WaitCounterKind::Load
-                                           : vmem_store_wait_counter(waitcnt_model(arch).value()));
+      EXPECT_EQ(events[0].counter,
+                returns ? WaitCounterKind::Load
+                        : amdgpu::vmem_store_wait_counter(amdgpu::waitcnt_model(arch).value()));
       EXPECT_EQ(events[0].kind,
                 returns ? WaitEventKind::VmemNoSamplerLoad : WaitEventKind::VmemStore);
       EXPECT_EQ(events[0].registers,
@@ -311,6 +334,7 @@ TEST(WaitcheckTarget, AtomicsDistinguishRegisterResultsFromMemoryDestinations) {
 }
 
 TEST(WaitcheckTarget, ImageAtomicsUseTheEncodedReturnControl) {
+  constexpr uint8_t kDeviceScope = 2;
   struct Case {
     rj_code_arch_t arch;
     uint32_t opcode;
@@ -322,13 +346,15 @@ TEST(WaitcheckTarget, ImageAtomicsUseTheEncodedReturnControl) {
                         Case{ROCJITSU_CODE_ARCH_RDNA3, 0xf0300100u, 14},
                         Case{ROCJITSU_CODE_ARCH_RDNA3_5, 0xf0300100u, 14},
                         Case{ROCJITSU_CODE_ARCH_RDNA4, 0xd0430000u, 0}}) {
-    for (bool returns : {false, true}) {
+    const bool split = c.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    for (uint8_t return_control = 0; return_control < (split ? 8 : 2); ++return_control) {
+      const uint8_t th = split ? return_control : 0;
+      const bool returns = split ? (th & amdgpu::GFX12_TH_ATOMIC_RETURN) != 0 : return_control != 0;
       SCOPED_TRACE(static_cast<int>(c.arch));
-      SCOPED_TRACE(returns);
-      const bool split = c.arch == ROCJITSU_CODE_ARCH_RDNA4;
-      const std::array<uint32_t, 3> words{c.opcode | (returns && !split ? 1u << c.glc_bit : 0u),
-                                          split ? (returns ? 0x00100000u : 0u) : 1u,
-                                          split ? 1u : 0u};
+      SCOPED_TRACE(return_control);
+      const std::array<uint32_t, 3> words{
+          c.opcode | (returns && !split ? 1u << c.glc_bit : 0u),
+          split ? (uint32_t{th} << 20) | (uint32_t{kDeviceScope} << 18) : 1u, split ? 1u : 0u};
       auto inst = decode(words, c.arch);
       ASSERT_NE(inst, nullptr);
       EXPECT_TRUE(inst->is_memory_wait_producer());
@@ -336,9 +362,9 @@ TEST(WaitcheckTarget, ImageAtomicsUseTheEncodedReturnControl) {
       ASSERT_TRUE(events_result.succeeded());
       const auto events = std::move(events_result).value();
       ASSERT_FALSE(events.empty());
-      EXPECT_EQ(events[0].counter, returns
-                                       ? WaitCounterKind::Load
-                                       : vmem_store_wait_counter(waitcnt_model(c.arch).value()));
+      EXPECT_EQ(events[0].counter,
+                returns ? WaitCounterKind::Load
+                        : amdgpu::vmem_store_wait_counter(amdgpu::waitcnt_model(c.arch).value()));
       EXPECT_EQ(events[0].check_uses, returns);
       EXPECT_TRUE(std::ranges::none_of(
           events, [](const auto &event) { return event.counter == WaitCounterKind::Exp; }));
@@ -350,16 +376,32 @@ TEST(WaitcheckTarget, ScalarMemoryFamiliesAccountForCounterOnlyOperations) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
         ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    for (std::string_view name :
-         {"s_atomic_add", "s_buffer_atomic_swap", "s_scratch_load_dword", "s_scratch_store_dword",
-          "s_dcache_discard", "s_dcache_wb", "s_gl1_inv", "s_memtime", "s_memrealtime",
-          "s_get_barrier_state", "s_get_waveid_in_workgroup"}) {
-      NamedInstruction inst(name);
+    struct Case {
+      Operation operation;
+      MemoryAddressing addressing;
+      MemoryKind kind;
+    };
+    const Case cases[] = {
+        {Operation::S_ATOMIC_ADD, MemoryAddressing::Scalar, MemoryKind::Atomic},
+        {Operation::S_BUFFER_ATOMIC_SWAP, MemoryAddressing::Scalar, MemoryKind::Atomic},
+        {Operation::S_SCRATCH_LOAD_DWORD, MemoryAddressing::Scratch, MemoryKind::Load},
+        {Operation::S_SCRATCH_STORE_DWORD, MemoryAddressing::Scratch, MemoryKind::Store},
+        {Operation::S_DCACHE_DISCARD, MemoryAddressing::Scalar, MemoryKind::Cache},
+        {Operation::S_DCACHE_WB, MemoryAddressing::Scalar, MemoryKind::Cache},
+        {Operation::S_GL1_INV, MemoryAddressing::Scalar, MemoryKind::Cache},
+        {Operation::S_MEMTIME, MemoryAddressing::Scalar, MemoryKind::Load},
+        {Operation::S_MEMREALTIME, MemoryAddressing::Scalar, MemoryKind::Load},
+        {Operation::S_GET_BARRIER_STATE, MemoryAddressing::None, MemoryKind::None},
+        {Operation::S_GET_WAVEID_IN_WORKGROUP, MemoryAddressing::None, MemoryKind::None},
+    };
+    for (const Case &entry : cases) {
+      SCOPED_TRACE(static_cast<unsigned>(entry.operation));
+      MetadataInstruction inst(entry.operation, entry.addressing, entry.kind, SMEM);
       auto events_result = Target::classify_events(inst, arch);
       ASSERT_TRUE(events_result.succeeded());
       const auto events = std::move(events_result).value();
-      ASSERT_FALSE(events.empty()) << name;
-      EXPECT_EQ(events[0].counter, smem_wait_counter(waitcnt_model(arch).value()));
+      ASSERT_FALSE(events.empty());
+      EXPECT_EQ(events[0].counter, amdgpu::smem_wait_counter(amdgpu::waitcnt_model(arch).value()));
       EXPECT_EQ(events[0].kind, WaitEventKind::Smem);
       EXPECT_EQ(events[0].registers, TrackedRegisterSource::None);
     }
@@ -562,24 +604,34 @@ TEST(WaitcheckTarget, PrefetchesDoNotContributeCompletionEntries) {
                     ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
                     ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
                     ROCJITSU_CODE_ARCH_RDNA4})
-    for (auto name : {"s_prefetch_inst", "s_prefetch_data", "s_buffer_prefetch_data",
-                      "global_prefetch_b8", "flat_prefetch_b8"}) {
-      NamedInstruction inst(name);
+    for (Operation operation :
+         {Operation::S_PREFETCH_INST, Operation::S_PREFETCH_DATA, Operation::S_BUFFER_PREFETCH_DATA,
+          Operation::GLOBAL_PREFETCH_B8, Operation::FLAT_PREFETCH_B8}) {
+      SCOPED_TRACE(static_cast<unsigned>(operation));
+      MetadataInstruction inst(
+          operation,
+          operation == Operation::GLOBAL_PREFETCH_B8 ? MemoryAddressing::Global
+          : operation == Operation::FLAT_PREFETCH_B8 ? MemoryAddressing::Flat
+                                                     : MemoryAddressing::Scalar,
+          MemoryKind::Prefetch,
+          operation == Operation::GLOBAL_PREFETCH_B8 || operation == Operation::FLAT_PREFETCH_B8
+              ? VMEM
+              : SMEM);
       auto events = Target::classify_events(inst, arch);
       ASSERT_TRUE(events.succeeded());
-      EXPECT_TRUE(events.value().empty()) << name;
+      EXPECT_TRUE(events.value().empty());
     }
 }
 
 TEST(WaitcheckTarget, ImageQueriesUseTheirLoadOrSampleQueue) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    NamedInstruction resinfo("image_get_resinfo");
+    MetadataInstruction resinfo(Operation::IMAGE_GET_RESINFO);
     auto loads = Target::classify_events(resinfo, arch);
     ASSERT_TRUE(loads.succeeded());
     ASSERT_FALSE(loads.value().empty());
     EXPECT_EQ(loads.value()[0].counter, WaitCounterKind::Load);
-    NamedInstruction lod("image_get_lod");
+    MetadataInstruction lod(Operation::IMAGE_GET_LOD);
     auto samples = Target::classify_events(lod, arch);
     ASSERT_TRUE(samples.succeeded());
     ASSERT_FALSE(samples.value().empty());
@@ -625,8 +677,8 @@ TEST(WaitcheckTarget, LegacyExportAndMessagesContributeEvents) {
   ASSERT_EQ(events.size(), 1u);
   EXPECT_EQ(events[0].counter, WaitCounterKind::Exp);
   EXPECT_TRUE(events[0].check_exec_defs);
-  for (std::string_view name : {"s_sendmsg", "s_sendmsghalt"}) {
-    NamedInstruction message(name);
+  for (Operation operation : {Operation::S_SENDMSG, Operation::S_SENDMSGHALT}) {
+    MetadataInstruction message(operation);
     auto messages_result = Target::classify_events(message, ROCJITSU_CODE_ARCH_CDNA4);
     ASSERT_TRUE(messages_result.succeeded());
     const auto messages = std::move(messages_result).value();
@@ -637,8 +689,56 @@ TEST(WaitcheckTarget, LegacyExportAndMessagesContributeEvents) {
   }
 }
 
+TEST(WaitcheckTarget, ShaderExportTargetsSelectSeparateCompletionFifos) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    const auto depth =
+        arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportMrt : WaitEventKind::ExportZ;
+    const auto blend = arch == ROCJITSU_CODE_ARCH_RDNA4 ? WaitEventKind::ExportDualSourceBlend
+                                                        : WaitEventKind::ExportMrt;
+    for (const auto &[target, kind] : std::array{
+             std::pair{0u, WaitEventKind::ExportMrt}, std::pair{7u, WaitEventKind::ExportMrt},
+             std::pair{8u, depth}, std::pair{12u, WaitEventKind::ExportPosition},
+             std::pair{16u, WaitEventKind::ExportPosition},
+             std::pair{20u, WaitEventKind::ExportPrimitive}, std::pair{21u, blend},
+             std::pair{22u, blend}}) {
+      SCOPED_TRACE(target);
+      const auto words = arch == ROCJITSU_CODE_ARCH_RDNA4
+                             ? rdna4::build_vexport({.en = 15,
+                                                     .tgt = static_cast<uint8_t>(target),
+                                                     .done = 1,
+                                                     .vsrc1 = 1,
+                                                     .vsrc2 = 2,
+                                                     .vsrc3 = 3})
+                             : std::array<uint32_t, 2>{0xf800080fu | (target << 4), 0x03020100u};
+      auto inst = decode(words, arch);
+      ASSERT_NE(inst, nullptr);
+      auto events = Target::classify_events(*inst, arch);
+      ASSERT_TRUE(events.succeeded());
+      ASSERT_EQ(events.value().size(), 1u);
+      EXPECT_EQ(events.value().front().kind, kind);
+    }
+    MetadataInstruction opaque(Operation::EXP);
+    const auto events = Target::classify_events(opaque, arch);
+    ASSERT_TRUE(events.succeeded());
+    ASSERT_EQ(events.value().size(), 1u);
+    EXPECT_EQ(events.value().front().kind, WaitEventKind::Export);
+  }
+}
+
+TEST(WaitcheckTarget, FlatAndOrdinaryStoresUseTheSameHardwareCompletionEvent) {
+  for (auto model : {WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
+    const auto ordinary = Target::normalized_hardware_event_kind(WaitCounterKind::Store,
+                                                                 WaitEventKind::VmemStore, model);
+    for (auto kind : {WaitEventKind::FlatStore, WaitEventKind::GlobalWb})
+      EXPECT_EQ(Target::normalized_hardware_event_kind(WaitCounterKind::Store, kind, model),
+                ordinary);
+  }
+}
+
 TEST(WaitcheckTarget, FlatStoresKeepTheirIdentityOnBothCounters) {
-  NamedInstruction inst("flat_store_dword");
+  MetadataInstruction inst(Operation::FLAT_STORE_DWORD, MemoryAddressing::Flat, MemoryKind::Store);
   auto events_result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_TRUE(events_result.succeeded());
   const auto events = std::move(events_result).value();
@@ -649,8 +749,10 @@ TEST(WaitcheckTarget, FlatStoresKeepTheirIdentityOnBothCounters) {
 }
 
 TEST(WaitcheckTarget, DirectToLdsIsNotAVgprResultOnBothCdnaTargets) {
-  const std::array<uint32_t, 2> words{0xe05d1000u, 0x80100008u};
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    // CDNA3 supports buffer_load_dword lds. CDNA4 also supports buffer_load_dwordx4 lds.
+    const uint32_t load = arch == ROCJITSU_CODE_ARCH_CDNA3 ? 0xe0511000u : 0xe05d1000u;
+    const std::array<uint32_t, 2> words{load, 0x80100008u};
     std::unique_ptr<Instruction> inst = decode(words, arch);
     ASSERT_NE(inst, nullptr);
     auto events_result = Target::classify_events(*inst, arch);
@@ -680,8 +782,44 @@ TEST(WaitcheckTarget, GdsProtectsAddressAndDataSourcesUntilExpcnt) {
     EXPECT_EQ(events[1].registers, TrackedRegisterSource::VectorUses);
     EXPECT_TRUE(events[1].check_defs);
   }
-  NamedInstruction always_gds("ds_ordered_count");
-  EXPECT_EQ(Target::classify_events(always_gds, ROCJITSU_CODE_ARCH_CDNA4).value().size(), 2u);
+  MetadataInstruction always_gds(Operation::DS_ORDERED_COUNT, MemoryAddressing::Gds,
+                                 MemoryKind::Other);
+  auto events_result = Target::classify_events(always_gds, ROCJITSU_CODE_ARCH_CDNA3);
+  ASSERT_TRUE(events_result.succeeded());
+  const auto events = std::move(events_result).value();
+  ASSERT_EQ(events.size(), 2u);
+  EXPECT_EQ(events[1].counter, WaitCounterKind::Exp);
+  EXPECT_EQ(events[1].registers, TrackedRegisterSource::VectorUses);
+  EXPECT_TRUE(events[1].check_defs);
+  EXPECT_TRUE(events[1].check_exec_defs);
+}
+
+TEST(WaitcheckTarget, Cdna4GdsUsesOnlyLgkmcnt) {
+  auto expect_ds_only = [](const Instruction &inst) {
+    SCOPED_TRACE(inst.mnemonic());
+    auto events_result = Target::classify_events(inst, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_TRUE(events_result.succeeded());
+    const auto events = std::move(events_result).value();
+    ASSERT_EQ(events.size(), 1u);
+    EXPECT_EQ(events[0].counter, WaitCounterKind::Ds);
+    EXPECT_EQ(events[0].kind, WaitEventKind::Gds);
+    EXPECT_EQ(events[0].registers, TrackedRegisterSource::Defs);
+  };
+  // CDNA4 reserves GDS=1 (ISA Table 57). Exercise defensive classification,
+  // not supported executable GDS instructions.
+  for (const std::array<uint32_t, 2> words :
+       {std::array<uint32_t, 2>{0xd86d0000u, 1u},        // ds_read_b32 v0, v1 gds.
+        std::array<uint32_t, 2>{0xd81b0000u, 0x201u},    // ds_write_b32 v1, v2 gds.
+        std::array<uint32_t, 2>{0xd8010000u, 0x201u}}) { // ds_add_u32 v1, v2 gds.
+    std::unique_ptr<Instruction> inst = decode(words, ROCJITSU_CODE_ARCH_CDNA4);
+    ASSERT_NE(inst, nullptr);
+    expect_ds_only(*inst);
+  }
+  // This synthetic operation is absent from the CDNA4 instruction set; it
+  // exercises implicit GDS without consulting a GDS bit.
+  MetadataInstruction always_gds(Operation::DS_ORDERED_COUNT, MemoryAddressing::Gds,
+                                 MemoryKind::Other);
+  expect_ds_only(always_gds);
 }
 
 TEST(WaitcheckTarget, TimestampAndBarrierStateHaveScalarResults) {

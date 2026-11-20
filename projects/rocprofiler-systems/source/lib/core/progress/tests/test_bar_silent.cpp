@@ -108,11 +108,10 @@ TEST_F(bar_silent_test, on_finish_is_idempotent)
     SUCCEED();  // Must not assert / double-write / re-acquire mutex twice.
 }
 
-TEST_F(bar_silent_test, on_set_total_does_not_write)
+TEST_F(bar_silent_test, on_advance_does_not_write)
 {
     {
-        bar b{ "label", 0, m_opts };
-        b.on_set_total(500);
+        bar b{ "label", 500, m_opts };
         b.on_advance(250);
     }
     EXPECT_EQ(file_size_after_close(), 0u);

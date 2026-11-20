@@ -16,13 +16,14 @@
 /// hook returns an HSA error instead of retrying the original reader, because
 /// the original ELF may target a different GPU ISA.
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/binary_translator.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/config/dbt_guest_config.h"
@@ -31,6 +32,7 @@
 #include "rocjitsu/hooks/virtual_lds.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/arena_alloc.h"
+#include "util/diagnostic.h"
 #include "util/intrusive_list.h"
 #include "util/log.h"
 
@@ -47,7 +49,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <dirent.h>
-#include <exception>
 #include <execinfo.h>
 #include <fcntl.h>
 #include <limits>
@@ -68,18 +69,11 @@
 #include <utility>
 #include <vector>
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
-
 // Test seams live outside the anonymous namespace so the test-only translation
 // unit can reach them, but they stay at hidden visibility: only
 // librocjitsu_hooks_testing.so exports a C entry point for them.
 namespace rocjitsu::hooks {
 namespace {
-
 std::mutex g_topology_nodes_root_mutex;
 std::optional<std::string> g_topology_nodes_root_for_test;
 
@@ -103,7 +97,6 @@ void set_topology_nodes_root_for_test(const char *root) {
 } // namespace rocjitsu::hooks
 
 namespace {
-
 using rocjitsu::AmdGpuCodeObject;
 using rocjitsu::arch_for_elf_mach;
 using rocjitsu::arch_lds_bytes;
@@ -367,13 +360,16 @@ void restore_signal_backtrace_handlers() {
 
 /// @brief Load and validate DBT hook configuration from the runtime config file.
 [[nodiscard]] std::optional<HookConfig> parse_config() {
-  std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest;
-  try {
-    dbt_guest = rocjitsu::config::load_dbt_guest_config_from_runtime_config();
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n", error.what());
+  util::StringDiagnostic diagnostic;
+  auto maybe_dbt_guest =
+      rocjitsu::config::load_dbt_guest_config_from_runtime_config(diagnostic.emitter());
+  if (maybe_dbt_guest.failed()) {
+    std::fprintf(stderr, "[rocjitsu-hooks] failed to load runtime config: %s\n",
+                 diagnostic.message().c_str());
     return std::nullopt;
   }
+  std::optional<rocjitsu::config::DbtGuestConfig> dbt_guest = std::move(maybe_dbt_guest.value());
+
   if (!dbt_guest) {
     std::fprintf(stderr, "[rocjitsu-hooks] runtime config is required for the DBT HSA hook\n");
     return std::nullopt;
@@ -583,6 +579,8 @@ void trace_virtual_lds_kernarg(uint64_t packet_id, const void *kernarg, size_t s
     return "kernel-skipped";
   case DiagnosticKind::ResidualRewrite:
     return "residual-rewrite";
+  case DiagnosticKind::InternalError:
+    return "internal-error";
   }
   return "unknown";
 }
@@ -830,7 +828,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 
 /// @brief Warn for file-backed readers, which the MVP cannot translate safely.
 hsa_status_t HSA_API rj_code_object_reader_create_from_file(
-    hsa_file_t file, hsa_code_object_reader_t *code_object_reader);
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) noexcept;
 
 /// @brief Remove tracked reader bytes and forward reader destruction.
 hsa_status_t HSA_API rj_code_object_reader_destroy(hsa_code_object_reader_t code_object_reader);
@@ -845,7 +843,7 @@ hsa_status_t HSA_API rj_iterate_agents(hsa_status_t (*callback)(hsa_agent_t agen
 /// @brief Translate guest code objects and load the translated ELF on the host agent.
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
-    const char *options, hsa_loaded_code_object_t *loaded_code_object);
+    const char *options, hsa_loaded_code_object_t *loaded_code_object) noexcept;
 
 /// @brief Preserve guest ISA iteration so framework fatbin selection picks guest images.
 hsa_status_t HSA_API rj_agent_iterate_isas(hsa_agent_t agent,
@@ -1059,7 +1057,7 @@ void clear_virtual_lds_dispatch_queues();
   X(amd_queue_intercept_register, amd_ext_,                                                        \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_register_fn),      \
                         &AmdExtTable::hsa_amd_queue_intercept_register_fn),                        \
-    hsa_amd_queue_intercept_register_fn, hsa_amd_queue_intercept_register_fn_t)
+    hsa_amd_queue_intercept_register_fn, decltype(&hsa_amd_queue_intercept_register))
 
 /// @brief HSA table entries patched by the DBT hook.
 ///
@@ -1121,75 +1119,75 @@ void clear_virtual_lds_dispatch_queues();
     rj_executable_load_agent_code_object, decltype(hsa_executable_load_agent_code_object) *)       \
   X(amd_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                                 \
     hsa_amd_memory_pool_get_info_fn, rj_amd_memory_pool_get_info,                                  \
-    hsa_amd_memory_pool_get_info_fn_t)                                                             \
+    decltype(&hsa_amd_memory_pool_get_info))                                                       \
   X(amd_agent_iterate_memory_pools, amd_ext_, amd_ext_ != nullptr, true,                           \
     hsa_amd_agent_iterate_memory_pools_fn, rj_amd_agent_iterate_memory_pools,                      \
-    hsa_amd_agent_iterate_memory_pools_fn_t)                                                       \
+    decltype(&hsa_amd_agent_iterate_memory_pools))                                                 \
   X(amd_memory_pool_allocate, amd_ext_, amd_ext_ != nullptr, true,                                 \
     hsa_amd_memory_pool_allocate_fn, rj_amd_memory_pool_allocate,                                  \
-    hsa_amd_memory_pool_allocate_fn_t)                                                             \
+    decltype(&hsa_amd_memory_pool_allocate))                                                       \
   X(amd_memory_pool_free, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_pool_free_fn,        \
-    rj_amd_memory_pool_free, hsa_amd_memory_pool_free_fn_t)                                        \
+    rj_amd_memory_pool_free, decltype(&hsa_amd_memory_pool_free))                                  \
   X(amd_profiling_set_profiler_enabled, amd_ext_, amd_ext_ != nullptr, true,                       \
     hsa_amd_profiling_set_profiler_enabled_fn, rj_amd_profiling_set_profiler_enabled,              \
-    hsa_amd_profiling_set_profiler_enabled_fn_t)                                                   \
+    decltype(&hsa_amd_profiling_set_profiler_enabled))                                             \
   X(amd_profiling_get_dispatch_time, amd_ext_, amd_ext_ != nullptr, true,                          \
     hsa_amd_profiling_get_dispatch_time_fn, rj_amd_profiling_get_dispatch_time,                    \
-    hsa_amd_profiling_get_dispatch_time_fn_t)                                                      \
+    decltype(&hsa_amd_profiling_get_dispatch_time))                                                \
   X(amd_profiling_convert_tick_to_system_domain, amd_ext_, amd_ext_ != nullptr, true,              \
     hsa_amd_profiling_convert_tick_to_system_domain_fn,                                            \
     rj_amd_profiling_convert_tick_to_system_domain,                                                \
-    hsa_amd_profiling_convert_tick_to_system_domain_fn_t)                                          \
+    decltype(&hsa_amd_profiling_convert_tick_to_system_domain))                                    \
   X(amd_agent_memory_pool_get_info, amd_ext_, amd_ext_ != nullptr, true,                           \
     hsa_amd_agent_memory_pool_get_info_fn, rj_amd_agent_memory_pool_get_info,                      \
-    hsa_amd_agent_memory_pool_get_info_fn_t)                                                       \
+    decltype(&hsa_amd_agent_memory_pool_get_info))                                                 \
   X(amd_agents_allow_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_agents_allow_access_fn,  \
-    rj_amd_agents_allow_access, hsa_amd_agents_allow_access_fn_t)                                  \
+    rj_amd_agents_allow_access, decltype(&hsa_amd_agents_allow_access))                            \
   X(amd_memory_async_copy, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_async_copy_fn,      \
-    rj_amd_memory_async_copy, hsa_amd_memory_async_copy_fn_t)                                      \
+    rj_amd_memory_async_copy, decltype(&hsa_amd_memory_async_copy))                                \
   X(amd_memory_async_copy_on_engine, amd_ext_, amd_ext_ != nullptr, true,                          \
     hsa_amd_memory_async_copy_on_engine_fn, rj_amd_memory_async_copy_on_engine,                    \
-    hsa_amd_memory_async_copy_on_engine_fn_t)                                                      \
+    decltype(&hsa_amd_memory_async_copy_on_engine))                                                \
   X(amd_memory_async_copy_rect, amd_ext_, amd_ext_ != nullptr, true,                               \
     hsa_amd_memory_async_copy_rect_fn, rj_amd_memory_async_copy_rect,                              \
-    hsa_amd_memory_async_copy_rect_fn_t)                                                           \
+    decltype(&hsa_amd_memory_async_copy_rect))                                                     \
   X(amd_memory_copy_engine_status, amd_ext_, amd_ext_ != nullptr, true,                            \
     hsa_amd_memory_copy_engine_status_fn, rj_amd_memory_copy_engine_status,                        \
-    hsa_amd_memory_copy_engine_status_fn_t)                                                        \
+    decltype(&hsa_amd_memory_copy_engine_status))                                                  \
   X(amd_memory_lock, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_lock_fn,                  \
-    rj_amd_memory_lock, hsa_amd_memory_lock_fn_t)                                                  \
+    rj_amd_memory_lock, decltype(&hsa_amd_memory_lock))                                            \
   X(amd_memory_lock_to_pool, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_lock_to_pool_fn,  \
-    rj_amd_memory_lock_to_pool, hsa_amd_memory_lock_to_pool_fn_t)                                  \
+    rj_amd_memory_lock_to_pool, decltype(&hsa_amd_memory_lock_to_pool))                            \
   X(amd_svm_prefetch_async, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_svm_prefetch_async_fn,    \
-    rj_amd_svm_prefetch_async, hsa_amd_svm_prefetch_async_fn_t)                                    \
+    rj_amd_svm_prefetch_async, decltype(&hsa_amd_svm_prefetch_async))                              \
   X(amd_pointer_info, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_pointer_info_fn,                \
-    rj_amd_pointer_info, hsa_amd_pointer_info_fn_t)                                                \
+    rj_amd_pointer_info, decltype(&hsa_amd_pointer_info))                                          \
   X(amd_vmem_set_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_vmem_set_access_fn,          \
-    rj_amd_vmem_set_access, hsa_amd_vmem_set_access_fn_t)                                          \
+    rj_amd_vmem_set_access, decltype(&hsa_amd_vmem_set_access))                                    \
   X(amd_vmem_get_access, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_vmem_get_access_fn,          \
-    rj_amd_vmem_get_access, hsa_amd_vmem_get_access_fn_t)                                          \
+    rj_amd_vmem_get_access, decltype(&hsa_amd_vmem_get_access))                                    \
   X(amd_agent_set_async_scratch_limit, amd_ext_, amd_ext_ != nullptr, true,                        \
     hsa_amd_agent_set_async_scratch_limit_fn, rj_amd_agent_set_async_scratch_limit,                \
-    hsa_amd_agent_set_async_scratch_limit_fn_t)                                                    \
+    decltype(&hsa_amd_agent_set_async_scratch_limit))                                              \
   X(amd_memory_get_preferred_copy_engine, amd_ext_, amd_ext_ != nullptr, true,                     \
     hsa_amd_memory_get_preferred_copy_engine_fn, rj_amd_memory_get_preferred_copy_engine,          \
-    hsa_amd_memory_get_preferred_copy_engine_fn_t)                                                 \
+    decltype(&hsa_amd_memory_get_preferred_copy_engine))                                           \
   X(amd_memory_fill, amd_ext_, amd_ext_ != nullptr, true, hsa_amd_memory_fill_fn,                  \
-    rj_amd_memory_fill, hsa_amd_memory_fill_fn_t)                                                  \
+    rj_amd_memory_fill, decltype(&hsa_amd_memory_fill))                                            \
   X(amd_memory_async_batch_copy, amd_ext_,                                                         \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_memory_async_batch_copy_fn),       \
                         &AmdExtTable::hsa_amd_memory_async_batch_copy_fn),                         \
     true, hsa_amd_memory_async_batch_copy_fn, rj_amd_memory_async_batch_copy,                      \
-    hsa_amd_memory_async_batch_copy_fn_t)                                                          \
+    decltype(&hsa_amd_memory_async_batch_copy))                                                    \
   X(amd_agent_preload, amd_ext_,                                                                   \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_agent_preload_fn),                 \
                         &AmdExtTable::hsa_amd_agent_preload_fn),                                   \
-    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, hsa_amd_agent_preload_fn_t)              \
+    true, hsa_amd_agent_preload_fn, rj_amd_agent_preload, decltype(&hsa_amd_agent_preload))        \
   X(amd_queue_intercept_create, amd_ext_,                                                          \
     api_table_has_field(amd_ext_, offsetof(AmdExtTable, hsa_amd_queue_intercept_create_fn),        \
                         &AmdExtTable::hsa_amd_queue_intercept_create_fn),                          \
     true, hsa_amd_queue_intercept_create_fn, rj_amd_queue_intercept_create,                        \
-    hsa_amd_queue_intercept_create_fn_t)
+    decltype(&hsa_amd_queue_intercept_create))
 
 /// @brief Process-local HSA API table patch state for the rocjitsu DBT tool.
 ///
@@ -1991,7 +1989,7 @@ private:
 
   /// @brief Collected memory pools for one HSA agent.
   struct PoolList {
-    hsa_amd_memory_pool_get_info_fn_t get_info = nullptr;
+    decltype(&hsa_amd_memory_pool_get_info) get_info = nullptr;
     std::vector<PoolInfo> pools;
   };
 
@@ -2219,7 +2217,7 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_memory(
 }
 
 hsa_status_t HSA_API rj_code_object_reader_create_from_file(
-    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) {
+    hsa_file_t file, hsa_code_object_reader_t *code_object_reader) noexcept {
   auto *original = layer().create_from_file();
   if (original == nullptr)
     return HSA_STATUS_ERROR;
@@ -2232,29 +2230,21 @@ hsa_status_t HSA_API rj_code_object_reader_create_from_file(
     // the same DBT path as memory-backed framework code objects.
     struct stat statbuf {};
     if (file >= 0 && fstat(file, &statbuf) == 0 && statbuf.st_size > 0) {
-      std::shared_ptr<std::vector<uint8_t>> owned;
-      try {
-        owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
-      } catch (const std::bad_alloc &) {
-        // The HSA tools ABI cannot propagate C++ allocation failures. Fall
-        // through to the existing diagnostic and let ROCR keep the reader.
+      auto owned = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(statbuf.st_size));
+
+      size_t done = 0;
+      while (done < owned->size()) {
+        const ssize_t read =
+            pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
+        if (read <= 0)
+          break;
+        done += static_cast<size_t>(read);
       }
-      if (owned) {
-        size_t done = 0;
-        while (done < owned->size()) {
-          const ssize_t read =
-              pread(file, owned->data() + done, owned->size() - done, static_cast<off_t>(done));
-          if (read <= 0)
-            break;
-          done += static_cast<size_t>(read);
-        }
-        if (done == owned->size() &&
-            CodeObjectReaderRegistry::instance().store(*code_object_reader, owned->data(),
-                                                       owned->size(), owned)) {
-          log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
-                      static_cast<unsigned long long>(code_object_reader->handle), owned->size());
-          return status;
-        }
+      if (done == owned->size() && CodeObjectReaderRegistry::instance().store(
+                                       *code_object_reader, owned->data(), owned->size(), owned)) {
+        log_message(kLogDebug, "registered file-backed reader=%llu bytes=%zu",
+                    static_cast<unsigned long long>(code_object_reader->handle), owned->size());
+        return status;
       }
     }
     std::fprintf(stderr,
@@ -2418,7 +2408,7 @@ struct BatchCopyAgentShape {
 ///
 /// @details `hsa_amd_memory_copy_op_t` stores scalar and list fields in unions.
 /// Current ROCR uses a scalar `src_agent` for every supported operation and uses
-/// `dst_agent_list` for multi-entry/broadcast forms. `src_agent_list` is
+/// `dst_agent_list` for multi-entry, broadcast, and rect forms. `src_agent_list` is
 /// documented as reserved, so probing it as a pointer misclassifies ordinary
 /// scalar source-agent handles as caller-owned arrays.
 BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
@@ -2434,6 +2424,7 @@ BatchCopyAgentShape batch_copy_agent_shape(const hsa_amd_memory_copy_op_t &op) {
         .dst_list = op.num_entries > 0,
     };
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
+  case HSA_AMD_MEMORY_COPY_OP_RECT:
     return BatchCopyAgentShape{
         .src_scalar = true,
         .dst_scalar = false,
@@ -2715,7 +2706,7 @@ public:
   /// @brief Rewrite a contiguous packet batch delivered by ROCR's intercept queue.
   void rewrite_intercept_packets(hsa_queue_t *queue, const void *pkts, uint64_t pkt_count,
                                  uint64_t user_pkt_index,
-                                 hsa_amd_queue_intercept_packet_writer_t writer) {
+                                 hsa_amd_queue_intercept_packet_writer writer) {
     if (writer == nullptr || pkts == nullptr || pkt_count == 0)
       return;
     static_assert(sizeof(hsa_kernel_dispatch_packet_t) == 64,
@@ -3313,7 +3304,7 @@ void clear_virtual_lds_dispatch_queues() { VirtualLdsDispatchQueueRegistry::inst
 
 /// @brief ROCR intercept-queue callback that rewrites virtual-LDS packets pre-submit.
 void virtual_lds_packet_interceptor(const void *pkts, uint64_t pkt_count, uint64_t user_pkt_index,
-                                    void *data, hsa_amd_queue_intercept_packet_writer_t writer) {
+                                    void *data, hsa_amd_queue_intercept_packet_writer writer) {
   auto *queue = static_cast<hsa_queue_t *>(data);
   static std::atomic<uint32_t> intercept_trace_count{0};
   if (intercept_trace_count.fetch_add(1, std::memory_order_relaxed) < 128) {
@@ -3885,7 +3876,7 @@ hsa_status_t HSA_API rj_amd_agent_memory_pool_get_info(hsa_agent_t agent,
     // ROCR converts the AMD pool handle back to an internal region before
     // answering agent/pool access queries. Keep null synthetic handles from
     // crossing that ABI boundary; they are invalid AMD memory pools.
-    return HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
   }
   hsa_agent_t mapped = mapped_agent(agent);
   hsa_amd_memory_pool_t mapped_pool = mapped_memory_pool(memory_pool);
@@ -4183,7 +4174,7 @@ hsa_status_t HSA_API rj_amd_agent_preload(hsa_agent_t agent, uint64_t flags) {
 
 hsa_status_t HSA_API rj_executable_load_agent_code_object(
     hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t code_object_reader,
-    const char *options, hsa_loaded_code_object_t *loaded_code_object) {
+    const char *options, hsa_loaded_code_object_t *loaded_code_object) noexcept {
   auto *original_load = layer().load_agent_code_object();
   if (original_load == nullptr)
     return HSA_STATUS_ERROR;
@@ -4324,19 +4315,9 @@ hsa_status_t HSA_API rj_executable_load_agent_code_object(
     return HSA_STATUS_ERROR;
   }
 
-  rocjitsu::TranslatedCodeObject translated;
-  try {
-    BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
-                                translator_options);
-    translated = translator.translate(source_object);
-  } catch (const std::exception &error) {
-    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an exception: %s\n",
-                 error.what());
-    return HSA_STATUS_ERROR;
-  } catch (...) {
-    std::fprintf(stderr, "[rocjitsu-hooks] code-object translation threw an unknown exception\n");
-    return HSA_STATUS_ERROR;
-  }
+  BinaryTranslator translator(source_target.arch, config->target.arch, config->target.mach,
+                              translator_options);
+  rocjitsu::TranslatedCodeObject translated = translator.translate(source_object);
 
   print_diagnostics(stderr, translated.diagnostics, config->log_level > kLogDisabled);
   if (translated.elf_bytes.empty() || has_error_diagnostic(translated.diagnostics)) {
@@ -4427,33 +4408,35 @@ extern "C" RJ_HOOK_EXPORT bool OnLoad(HsaApiTable *table, uint64_t runtime_versi
   (void)failed_tool_count;
   (void)failed_tool_names;
 
-  auto config = parse_config();
-  if (!config)
-    return false;
-  const bool signal_backtrace = config->signal_backtrace;
-  // The mapper is a process-wide singleton, so it outlives the layer. uninstall()
-  // clears it, but a discovery already in flight then republishes a kFinal miss
-  // behind that clear -- and nothing clears it again. Repeat the clear here so such
-  // a verdict cannot latch a permanent all-GPU suppression into this install.
-  clear_agent_mapper();
-  if (!layer().install(table, std::move(*config)))
-    return false;
-  // Virtual-LDS resource management lives in its own hook component. Give it
-  // only the original runtime entries so allocations cannot recurse through
-  // the wrappers installed above.
-  rocjitsu::hooks::set_virtual_lds_runtime_api({
-      .iterate_agents = layer().iterate_agents(),
-      .signal_create = layer().signal_create(),
-      .signal_destroy = layer().signal_destroy(),
-      .signal_load_scacquire = layer().signal_load_scacquire(),
-      .iterate_memory_pools = layer().amd_agent_iterate_memory_pools(),
-      .memory_pool_get_info = layer().amd_memory_pool_get_info(),
-      .memory_pool_allocate = layer().amd_memory_pool_allocate(),
-      .memory_pool_free = layer().amd_memory_pool_free(),
-      .agents_allow_access = layer().amd_agents_allow_access(),
-  });
-  maybe_install_signal_backtrace(signal_backtrace);
-  return true;
+  return [&]() noexcept {
+    auto config = parse_config();
+    if (!config)
+      return false;
+    const bool signal_backtrace = config->signal_backtrace;
+    // The mapper is a process-wide singleton, so it outlives the layer. uninstall()
+    // clears it, but a discovery already in flight then republishes a kFinal miss
+    // behind that clear -- and nothing clears it again. Repeat the clear here so such
+    // a verdict cannot latch a permanent all-GPU suppression into this install.
+    clear_agent_mapper();
+    if (!layer().install(table, std::move(*config)))
+      return false;
+    // Virtual-LDS resource management lives in its own hook component. Give it
+    // only the original runtime entries so allocations cannot recurse through
+    // the wrappers installed above.
+    rocjitsu::hooks::set_virtual_lds_runtime_api({
+        .iterate_agents = layer().iterate_agents(),
+        .signal_create = layer().signal_create(),
+        .signal_destroy = layer().signal_destroy(),
+        .signal_load_scacquire = layer().signal_load_scacquire(),
+        .iterate_memory_pools = layer().amd_agent_iterate_memory_pools(),
+        .memory_pool_get_info = layer().amd_memory_pool_get_info(),
+        .memory_pool_allocate = layer().amd_memory_pool_allocate(),
+        .memory_pool_free = layer().amd_memory_pool_free(),
+        .agents_allow_access = layer().amd_agents_allow_access(),
+    });
+    maybe_install_signal_backtrace(signal_backtrace);
+    return true;
+  }();
 }
 
 /// @brief ROCR HSA tools unload entry point.

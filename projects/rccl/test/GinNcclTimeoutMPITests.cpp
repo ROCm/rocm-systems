@@ -334,7 +334,7 @@ class LsaBarrierTimeoutMPITest : public MPITestBase {
         ncclComm_t comm = getActiveCommunicator();
         ncclResult_t devRc = createLsaDevComm(comm, nBarriers, devCommOut);
         if (devRc != ncclSuccess) {
-            skipReason_ = std::string("LSA devComm requires symmetric memory (cuMem, kernel >= 6.8); "
+            skipReason_ = std::string("LSA devComm requires symmetric memory (cuMem/VMM); "
                                       "ncclDevCommCreate returned ") + ncclGetErrorString(devRc);
             return false;
         }

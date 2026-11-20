@@ -207,8 +207,6 @@ future design.
 - View-model trace indices remain coupled to Plotly trace insertion order.
 - The subtitle reports canonical bounds. A viewport may display wider padded
   bounds, by design.
-- Terminal `plotext` output still fits its axes to kernel data. Stabilizing it
-  is future work.
 - Browser-side controller behavior is covered by review and manual checks for
   now. The next step is to agree on a testing methodology for JavaScript
   features, including how a Node runtime is provided in CI, and then add

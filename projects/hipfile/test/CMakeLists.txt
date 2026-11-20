@@ -4,6 +4,11 @@
 
 include(HipFileAddExecutable)
 
+# Check that hipfile.h is valid C11 and C++11
+if(HIPFILE_BUILD_AMD_DETAIL)
+    add_subdirectory(header)
+endif()
+
 set(SHARED_SOURCE_FILES
     common/magic-word.cpp
 )
@@ -43,7 +48,7 @@ else()
         system/amd/io-data-modification-kernel.hip
     )
     list(APPEND SHARED_SOURCE_FILES common/ais-capability.cpp)
-    list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH})
+    list(APPEND TEST_SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_AMD_TEST_PATH})
 endif()
 
 # hipfile_tests holds the platform-portable unit tests. Today those sources only
@@ -80,6 +85,7 @@ hipfile_add_test_executable(
     SYSINCLS ${TEST_SYSINCLS}
 )
 target_link_libraries(hipfile_system_tests PRIVATE GTest::gtest)
+target_link_libraries(hipfile_system_tests PRIVATE GTest::gmock)
 # -pthread is critical for sanitizer builds via TheRock
 # NEVER REMOVE IT
 target_compile_options(hipfile_system_tests PRIVATE -pthread)
@@ -130,6 +136,49 @@ set_tests_properties(hipfile_ais_compat PROPERTIES
     FIXTURES_REQUIRED hipfile_ais_compat
     LABELS "unit;hipfile"
 )
+# ----------------------------------------
+
+# _FORTIFY_SOURCE flags
+#
+# Configures a small project that checks which configurations
+# hipfile_get_fortify_flags() fortifies. Single-config and multi-config
+# generators take different paths, so the project is configured with the
+# build's own generator and, if Ninja is available, with the Ninja generator
+# of the other kind. --fresh discards the cache from an earlier run.
+# ----------------------------------------
+add_test(NAME hipfile_fortify_source
+    COMMAND ${CMAKE_COMMAND} --fresh
+        -G "${CMAKE_GENERATOR}"
+        -S "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fortify-source"
+        -B "${CMAKE_CURRENT_BINARY_DIR}/fortify-source"
+)
+set_tests_properties(hipfile_fortify_source PROPERTIES
+    LABELS "unit;hipfile"
+)
+
+if(CMAKE_GENERATOR MATCHES "^Ninja")
+    set(_ninja "${CMAKE_MAKE_PROGRAM}")
+else()
+    find_program(_ninja NAMES ninja ninja-build NO_CACHE)
+endif()
+if(_ninja)
+    get_property(_is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(_is_multi_config)
+        set(_other_generator "Ninja")
+    else()
+        set(_other_generator "Ninja Multi-Config")
+    endif()
+    add_test(NAME hipfile_fortify_source_other_generator
+        COMMAND ${CMAKE_COMMAND} --fresh
+            -G "${_other_generator}"
+            -D "CMAKE_MAKE_PROGRAM=${_ninja}"
+            -S "${CMAKE_CURRENT_SOURCE_DIR}/cmake/fortify-source"
+            -B "${CMAKE_CURRENT_BINARY_DIR}/fortify-source-other-generator"
+    )
+    set_tests_properties(hipfile_fortify_source_other_generator PROPERTIES
+        LABELS "unit;hipfile"
+    )
+endif()
 # ----------------------------------------
 
 # Temporary Test Files

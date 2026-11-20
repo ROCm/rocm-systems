@@ -1,0 +1,47 @@
+# CTest categories for host-only src/nccl_device/ microtests.
+#
+# Suites start with their source unit's stem. The exception is the requirement
+# builders' NcclDeviceRequirements* suite, one for five units.
+test_categories:
+  quick: &micro_nccl_device_quick
+    description: "Smoke - host-only src/nccl_device/ micro-tests, sub-second."
+    test_patterns:
+      - "Core*"
+      - "NcclDeviceRequirements*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *micro_nccl_device_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *micro_nccl_device_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *micro_nccl_device_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600
+    standard: 600
+    comprehensive: 600
+    full: 600

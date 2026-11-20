@@ -10,6 +10,20 @@
 
 namespace mma_test {
 using namespace rocjitsu;
+
+// Policy-only instructions deliberately have no executable callback or mnemonic
+// identity. Qualification must come from the explicitly supplied metadata.
+class PolicyInstruction final : public Instruction {
+public:
+  explicit PolicyInstruction(amdgpu::Operation operation,
+                             amdgpu::Operation secondary = amdgpu::Operation::Unknown,
+                             uint64_t flags = 0)
+      : Instruction("policy_test", nullptr) {
+    set_amdgpu_operation(operation, secondary);
+    flags_ = flags;
+  }
+};
+
 // Exercise the production ticket API with caller-owned instructions. Keep the
 // last instruction on the issuer and join every accepted job before returning.
 inline unsigned execute_independent(amdgpu::matrix_coexecution::SharedPool &pool,

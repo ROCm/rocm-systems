@@ -14,10 +14,12 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaMPITestHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
 #include "TestChecks.hpp"
 #include "comm.h" // internal: struct ncclComm::ddaFabricBarrierState
+#include "rccl_common.h" // internal: rcclGetCollImplInfo
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
@@ -36,6 +38,9 @@ namespace DdaFabricMPI
 // Opt-in CI strictness: when set to 1, a non-gfx1250 device or an uninitialized fabric DDA fails instead of skipping.
 constexpr const char* kRequireFabricEnvVar = "UT_DDA_FABRIC_REQUIRE_INIT";
 
+// Block count a selection query leaves in place when it reports none.
+constexpr int kMaxChannelsUnset = -1;
+
 // Every rank must call this; a rank-local env difference still yields one FAIL-or-SKIP decision for the job.
 inline bool fabricInitRequired()
 {
@@ -47,12 +52,7 @@ inline bool fabricInitRequired()
 
 inline bool isGfx1250Device()
 {
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-    {
-        return false;
-    }
-    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
+    return DdaMPITestHelpers::isGfx1250Device();
 }
 
 inline size_t countOccurrences(const std::string& haystack, const char* needle)
@@ -175,11 +175,25 @@ protected:
         return mpiCoordinatedSkipReason(!DdaFabricMPI::isGfx1250Device(), reason);
     }
 
-    // After createTestCommunicator(): without MNNVL, or on a multi-clique comm, fabric DDA never initializes.
-    std::string fabricInitSkipReason()
+    // After comm init (default: createTestCommunicator()'s): without MNNVL, or on a multi-clique comm, fabric DDA
+    // never initializes.
+    std::string fabricInitSkipReason(ncclComm_t comm = nullptr)
     {
-        return mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
-                                        "DDA fabric path did not initialize");
+        if(comm == nullptr)
+            comm = getActiveCommunicator();
+        return mpiCoordinatedSkipReason(comm->ddaFabricBarrierState == nullptr, "DDA fabric path did not initialize");
+    }
+
+    // Algorithm the host selection picks for this call on the active comm; blocks, when given, gets its block count.
+    int selectedAlgo(ncclFunc_t func, size_t count, ncclDataType_t datatype, const void* send, void* recv,
+                     int* blocks = nullptr)
+    {
+        int algo = NCCL_ALGO_UNDEF, protocol = NCCL_PROTO_UNDEF, maxChannels = DdaFabricMPI::kMaxChannelsUnset;
+        EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), func, count, datatype, ncclSum, send, recv,
+                                                   /*graphCapturing=*/0, &algo, &protocol, &maxChannels));
+        if(blocks != nullptr)
+            *blocks = maxChannels;
+        return algo;
     }
 
     size_t countLogNeedle(const char* needle) const

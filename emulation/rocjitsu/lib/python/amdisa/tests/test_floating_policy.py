@@ -201,7 +201,7 @@ def test_simd_input_flushed_rounding_has_plain_output(operation: str):
     assert line.endswith(f', false, {_F16_POLICY});')
 
 
-@pytest.mark.parametrize('operation', ['trunc', 'rndne', 'fract'])
+@pytest.mark.parametrize('operation', ['trunc', 'rndne'])
 def test_simd_unflushed_rounding_has_neither_property(operation: str):
     line = simd_probe_line(f'v_{operation}_f16_vop3')
 

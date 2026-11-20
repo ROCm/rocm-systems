@@ -129,13 +129,31 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
     hsa_queue_t* queue = NULL;  // command queue
     hsa_signal_t signal = {0};  // completion signal
 
-    // get queue size
-    uint32_t queue_size = 0;
-    err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
-    throw_if_error(err);
+    // host side buffers (sys_data, dup_sys_data, cpuResult) on system memory and the
+    // device side buffer (gpuResult); kernArgs is allocated below too
+    int* sys_data = NULL;
+    int* dup_sys_data = NULL;
+    int* cpuResult = NULL;
+    int* gpuResult = NULL;
 
-    // create queue
-    err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue);
+    // Release what this test creates on every path out of it, a failed step's exception
+    // included.
+    ScopeExit release([&]() {
+      for (void* buffer : {static_cast<void*>(sys_data), static_cast<void*>(dup_sys_data),
+                           static_cast<void*>(cpuResult), static_cast<void*>(gpuResult),
+                           static_cast<void*>(kernArgs)}) {
+        if (buffer != NULL) {
+          hsa_memory_free(buffer);
+        }
+      }
+      kernArgs = NULL;
+      if (signal.handle != 0) {
+        hsa_signal_destroy(signal);
+      }
+    });
+
+    // The module's queue for this GPU (AcquireDiagQueue()), which this test does not destroy.
+    err = AcquireDiagQueue(gpuAgent, &queue);
     throw_if_error(err);
 
     // Get System Memory Pool on the cpuAgent to allocate host side buffers
@@ -150,11 +168,6 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
 
     // Allocate the host side buffers
     // (sys_data,dup_sys_data,cpuResult,kernArg) on system memory
-    int* sys_data = NULL;
-    int* dup_sys_data = NULL;
-    int* cpuResult = NULL;
-    int* gpuResult = NULL;
-
     err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
                                        reinterpret_cast<void**>(&cpuResult));
     throw_if_error(err);
@@ -291,29 +304,6 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
     if (verbosity() > 0) {
       RDC_LOG(RDC_DEBUG, "gpu has written to system memory successfully");
     }
-
-    if (sys_data) {
-      hsa_memory_free(sys_data);
-    }
-    if (dup_sys_data) {
-      hsa_memory_free(dup_sys_data);
-    }
-    if (cpuResult) {
-      hsa_memory_free(cpuResult);
-    }
-    if (gpuResult) {
-      hsa_memory_free(gpuResult);
-    }
-    if (kernArgs) {
-      hsa_memory_free(kernArgs);
-    }
-    if (signal.handle) {
-      hsa_signal_destroy(signal);
-    }
-    if (queue) {
-      hsa_queue_destroy(queue);
-    }
-
   } else {
     if (verbosity() > 0) {
       RDC_LOG(RDC_DEBUG, "Test not applicable as system is not large bar, skipping");
@@ -348,8 +338,15 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
       auto pool_sz = pool_i.size / gran_sz;
       auto max_alloc_size = pool_sz / 2;
       unsigned int max_element = max_alloc_size / sizeof(unsigned int);
-      unsigned int* gpu_data;
-      unsigned int* sys_data;
+      unsigned int* gpu_data = nullptr;
+      unsigned int* sys_data = nullptr;
+      // Free both buffers on every path out of this block, a failed step's exception included.
+      ScopeExit release([&]() {
+        if (gpu_data != nullptr) {
+          hsa_amd_memory_pool_free(gpu_data);
+        }
+        free(sys_data);
+      });
       sys_data = (unsigned int*)malloc(max_alloc_size);
       memset(sys_data, 0, max_alloc_size);
       for (unsigned int i = 1; i <= max_element; ++i) {
@@ -384,8 +381,6 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
         }
       }
       RDC_LOG(RDC_DEBUG, "CPU have read & write to GPU memory successfully");
-      err = hsa_amd_memory_pool_free(gpu_data);
-      free(sys_data);
     } else {
       if (verbosity() > 0) {
         RDC_LOG(RDC_DEBUG, "Test not applicable as system is not large bar, Skipping.");

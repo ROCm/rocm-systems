@@ -8,11 +8,11 @@
 #include "sym_kernels.h"
 #if defined(__HIP_PLATFORM_AMD__)
 #include "symmetric/kernel.h"
-#include "symmetric/primitives.h"
+#include "symmetric/symk.h"
 #include "symmetric/gin_scratch__types.h"
 #else
 #include "kernel.cuh"
-#include "primitives.cuh"
+#include "symk.cuh"
 #include "gin_scratch__types.h"
 #endif
 

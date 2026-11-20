@@ -35,10 +35,25 @@ IF (BUILD_UNIT_TESTS)
     add_subdirectory(unit_tests)
 ENDIF()
 
+# Regression test for rocprofiler-register integration: verifies ROCSHMEM_ROCPROFILER_REGISTER was
+# defined at compile time. Catches the regression at both link time and runtime. No MPI or GPU required.
+if(USE_ROCPROFILER_REGISTER AND TARGET rocprofiler-register::rocprofiler-register)
+    add_subdirectory(rocprofiler_register)
+endif()
+
 # Print top-level test summary if CTest is enabled
 if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
-    # Get all tests from this directory and subdirectories
-    get_directory_property(all_tests TESTS)
+    # Count tests registered in subdirectories (get_directory_property TESTS
+    # only returns tests from the current directory scope, not subdirs).
+    set(all_tests "")
+    if(BUILD_FUNCTIONAL_TESTS)
+        get_directory_property(_ft_tests DIRECTORY functional_tests TESTS)
+        list(APPEND all_tests ${_ft_tests})
+    endif()
+    if(BUILD_UNIT_TESTS)
+        get_directory_property(_ut_tests DIRECTORY unit_tests TESTS)
+        list(APPEND all_tests ${_ut_tests})
+    endif()
     list(LENGTH all_tests total_tests)
 
     message(STATUS "")
@@ -65,6 +80,11 @@ if(BUILD_CTESTS AND (BUILD_FUNCTIONAL_TESTS OR BUILD_UNIT_TESTS))
     message(STATUS "  ROCSHMEM_BACKEND_TYPE=ipc ctest -L quick")
     message(STATUS "  ROCSHMEM_BACKEND_TYPE=ro ctest -L standard")
     message(STATUS "  ROCSHMEM_BACKEND_TYPE=gda ctest -L comprehensive")
+    message(STATUS "")
+    message(STATUS "Type Coverage (quick/standard run minimal types, comprehensive/full run all types):")
+    message(STATUS "  ROCSHMEM_TEST_TYPES=full ctest -L standard        # all types on standard tests")
+    message(STATUS "  ROCSHMEM_TEST_TYPES=int:half ctest -R teamreduction")
+    message(STATUS "  ctest -L types_full      # only the full-type (_typesfull) tests")
     message(STATUS "")
     message(STATUS "Or run from subdirectories:")
     if(BUILD_FUNCTIONAL_TESTS)

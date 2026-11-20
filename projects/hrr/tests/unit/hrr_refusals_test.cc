@@ -29,14 +29,7 @@
 hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* pl);
 hipError_t playback_hipMemcpy2D(PlaybackContext& ctx, const uint8_t* pl);
 
-namespace {
-
-hipError_t dispatch(PlaybackContext& ctx, hrr_api_id_t id, const uint8_t* record) {
-  REQUIRE(hrr_playback_dispatch[id] != nullptr);
-  return hrr_playback_dispatch[id](ctx, record);
-}
-
-}  // namespace
+using hrr_test::dispatch;
 
 /**
  * Test Description

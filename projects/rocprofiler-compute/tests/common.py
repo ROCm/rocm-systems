@@ -1,18 +1,24 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import copy
 import gzip
 import inspect
+import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
+import uuid
 from pathlib import Path
 from threading import Thread
 from typing import Set
 from unittest.mock import Mock
 
+import config
+from memory_chart.loader import Layouts, PanelConfigs
 from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -21,19 +27,47 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+SINGLE_PASS_SET = "launch_stats"
+
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-    "gfx940": {"mi300": ["MI300A_A0"]},
-    "gfx941": {"mi300": ["MI300X_A0"]},
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
     "gfx950": {"mi350": ["MI350"]},
     "gfx1150": {"rdna35_point_1": ["RDNA35_POINT_1"]},
     "gfx1151": {"rdna35_halo": ["RDNA35_HALO"]},
     "gfx1152": {"rdna35_point_2": ["RDNA35_POINT_2"]},
     "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
+    "gfx1201": {"navi48_1": ["NAVI48_1"], "navi48_2": ["NAVI48_2"]},
     "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
+
+
+def memory_chart_archs() -> list[str]:
+    """Analysis-config archs that have a memory chart panel."""
+    return sorted(
+        path.name
+        for path in config.analysis_configs_dir.iterdir()
+        if path.is_dir()
+        and path.name.startswith("gfx")
+        and PanelConfigs.for_arch(path.name)
+    )
+
+
+def memory_chart_layout_data(arch: str) -> dict:
+    """The parsed layout file of an arch's memory chart."""
+    return json.loads(Layouts.for_arch(arch).path.read_text(encoding="utf-8"))
+
+
+def with_metric_change(data: dict, metric: str, **fields) -> dict:
+    """A copy of layout *data* with *fields* set on every item and arrow whose
+    metric_id is *metric*."""
+    data = copy.deepcopy(data)
+    items = [item for block in data["blocks"] for item in block.get("content", [])]
+    for entry in (*items, *data["arrows"]):
+        if entry["metric_id"] == metric:
+            entry.update(fields)
+    return data
 
 
 def check_resource_allocation():
@@ -110,6 +144,12 @@ def get_output_dir(suffix="_output", clean_existing=True, param_id=None):
         if Path(output_dir).exists():
             shutil.rmtree(output_dir)
     return output_dir
+
+
+def unique_output_param_id(prefix):
+    """Return a get_output_dir param_id that no other pytest worker or run uses."""
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    return f"{prefix}_{worker}_{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex}"
 
 
 def clean_output_dir(cleanup, output_dir):

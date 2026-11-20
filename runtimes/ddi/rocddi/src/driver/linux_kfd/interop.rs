@@ -26,7 +26,7 @@ impl LinuxKfdDriver {
     }
 
     pub(crate) fn supports_system_dma_buf_import(device: &DeviceState) -> bool {
-        device.supports_system_dma_buf_import()
+        device.vm.system_dma_buf_import
     }
 
     /// Imports a borrowed DMA-BUF as a virtual-memory owner.
@@ -38,11 +38,39 @@ impl LinuxKfdDriver {
         descriptor: BorrowedFd<'_>,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::import(descriptor.as_raw_fd())
+        self.with_context_resources(|resources| {
+            let kfd = resources.kfd()?;
+            KfdVirtualMemory::import_with_kfd(descriptor.as_raw_fd(), &kfd, |gpu_id| {
+                resources.bindings.svm_identity(gpu_id).ok()
+            })
+        })
     }
 
     pub(crate) fn export_virtual_memory(memory: &KfdVirtualMemory) -> Result<DmaBuf, Error> {
         memory.export_dma_buf()
+    }
+
+    pub(crate) fn fabric_virtual_memory_ready(memory: &KfdVirtualMemory) -> Result<bool, Error> {
+        memory.fabric_ready()
+    }
+
+    pub(crate) fn export_fabric_virtual_memory(
+        memory: &KfdVirtualMemory,
+    ) -> Result<[u8; 16], Error> {
+        memory.export_fabric_handle()
+    }
+
+    pub(crate) fn import_fabric_virtual_memory(
+        &self,
+        device: &DeviceState,
+        fabric: [u8; 16],
+    ) -> Result<Owned<KfdVirtualMemory>, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        let render = device.vm.render()?;
+        let dma_buf = drm::import_fabric_handle(render, fabric)
+            .map_err(|source| native_error("DRM UALink fabric import", source))?;
+        KfdVirtualMemory::import(dma_buf.as_raw_fd())
     }
 
     pub(crate) fn import_dma_buf(
@@ -81,14 +109,9 @@ impl LinuxKfdDriver {
                 "system import requires a device",
             )
         })?;
-        if !peers.iter().all(|peer| owner.shares_vm(peer)) {
-            return Err(error(
-                ErrorKind::Unsupported,
-                "system import requires one native GPU address domain",
-            ));
-        }
         LinuxAllocation::import_system_dma_buf(
             owner.vm.clone(),
+            peers.iter().map(|peer| peer.vm.clone()),
             descriptor,
             source_offset,
             byte_length,
@@ -130,10 +153,10 @@ impl LinuxKfdDriver {
         size: u64,
     ) -> Result<Owned<LinuxAllocation>, Error> {
         self.ensure_open()?;
-        let words = handle.words();
+        let words = handle.words;
         let owner = devices
             .iter()
-            .find(|device| device.vm.gpu_id() == words[7])
+            .find(|device| device.vm.gpu_id == words[7])
             .ok_or_else(|| {
                 error(
                     ErrorKind::InvalidArgument,
@@ -152,39 +175,6 @@ impl LinuxKfdDriver {
         allocation: &LinuxAllocation,
     ) -> Result<KfdIpcMemoryHandle, Error> {
         allocation.export_ipc_memory()
-    }
-
-    pub(crate) fn set_kfd_svm_attributes(
-        &self,
-        address: u64,
-        size: u64,
-        attributes: &[KfdSvmAttribute],
-    ) -> Result<(), Error> {
-        self.ensure_open()?;
-        if attributes.is_empty() {
-            return Ok(());
-        }
-        let mut native = self.encode_svm_attributes(attributes)?;
-        self.kfd()?
-            .svm_attributes(address, size, uapi::SVM_OP_SET_ATTR, native.as_mut_slice())
-            .map_err(|source| native_error("AMDKFD_IOC_SVM set attributes", source))
-    }
-
-    pub(crate) fn get_kfd_svm_attributes(
-        &self,
-        address: u64,
-        size: u64,
-        attributes: &mut [KfdSvmAttribute],
-    ) -> Result<(), Error> {
-        self.ensure_open()?;
-        if attributes.is_empty() {
-            return Ok(());
-        }
-        let mut native = self.encode_svm_attributes(attributes)?;
-        self.kfd()?
-            .svm_attributes(address, size, uapi::SVM_OP_GET_ATTR, native.as_mut_slice())
-            .map_err(|source| native_error("AMDKFD_IOC_SVM get attributes", source))?;
-        self.decode_svm_attributes(attributes, native.as_slice())
     }
 
     pub(crate) fn retain_kfd_signal_event_page(
@@ -206,7 +196,13 @@ impl LinuxKfdDriver {
         let event_page_handle = event_page
             .map(|page| page.signal_event_page_handle(&device.vm))
             .transpose()?;
-        KfdSignalEvent::create(device.vm.kfd_owner(), event_page_handle, page_offered)
+        let lease = self.admission.lease()?;
+        KfdSignalEvent::create(
+            device.vm.kfd_owner(),
+            lease,
+            event_page_handle,
+            page_offered,
+        )
     }
 
     pub(crate) fn destroy_kfd_signal_event(event: &mut KfdSignalEvent) -> Result<(), Error> {

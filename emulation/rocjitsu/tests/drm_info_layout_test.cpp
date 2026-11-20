@@ -3,7 +3,7 @@
 
 /// @file drm_info_layout_test.cpp
 /// @brief Verifies the drm_amdgpu_info_device layout relied on by the
-///        interposer against rocJITsu's vendored DRM UAPI definition.
+///        interposer against the shared DRM UAPI header in runtimes/api-headers.
 
 #include <gtest/gtest.h>
 
@@ -13,7 +13,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_NESTED_ANON_TYPES
-#include <libdrm/amdgpu_drm.h>
+#include <uapi/linux/drm/amdgpu_drm.h>
 RJ_DIAGNOSTIC_POP
 
 namespace {

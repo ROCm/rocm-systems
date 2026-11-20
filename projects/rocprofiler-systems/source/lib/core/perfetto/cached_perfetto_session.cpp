@@ -30,12 +30,16 @@ namespace
 std::uint32_t
 rank_from_env() noexcept
 {
-    for(const char* env_name :
-        { "ROCPROFSYS_PROCESS_FILTER_ID", "MPI_RANKID", "PMI_RANK", "MV2_COMM_WORLD_RANK",
-          "OMPI_COMM_WORLD_RANK", "SLURM_PROCID" })
+    const auto read_rank = [](std::string_view env_name) {
+        return get_env<std::int64_t>(std::string{ env_name }.c_str(), -1);
+    };
+    if(const auto value = read_rank("ROCPROFSYS_PROCESS_FILTER_ID"); value >= 0)
     {
-        const auto value = get_env<std::int64_t>(env_name, -1);
-        if(value >= 0)
+        return static_cast<std::uint32_t>(value);
+    }
+    for(const auto env_name : k_mpi_rank_env_names)
+    {
+        if(const auto value = read_rank(env_name); value >= 0)
         {
             return static_cast<std::uint32_t>(value);
         }

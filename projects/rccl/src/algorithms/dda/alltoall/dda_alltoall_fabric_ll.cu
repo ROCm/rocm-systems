@@ -19,45 +19,30 @@
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 
 namespace {
 
-using dda::common::kDdaLLA2ASlotStridePkts;
+using dda::common::ddaBankSize;
+using dda::common::ddaLLBlocksPerPeer;
+using dda::common::ddaLLPeerSlotPkts;
 using dda::common::kDdaLLMaxBytes;
-using dda::common::LLPacket16;
 using nccl_dda_detail::kDdaLLAgMaxBlocksPerPeer;
 
-// LL scratch: 2 banks * nRanks slots * kDdaLLA2ASlotStridePkts * 16B.
-static inline size_t ddaLLA2AScratchSize(int nRanks) {
-  return (size_t)2 * (size_t)nRanks * kDdaLLA2ASlotStridePkts * sizeof(LLPacket16);
-}
-
-// Adaptive block-per-peer fan-out. One block per peer for small chunks; larger
-// ones split a peer's packet range across blocksPerPeer blocks. 256 pkts/block
-// is one packet per thread at 256 threads.
-constexpr size_t kDdaLLA2APktsPerBlock = 256;
-
-static inline int ddaLLA2ABlocksPerPeer(size_t perChunkBytes) {
-  const size_t nPk = perChunkBytes >> 3; // 8 payload bytes per packet
-  if (nPk <= kDdaLLA2APktsPerBlock) {
-    return 1;
-  }
-  size_t bpp = (nPk + kDdaLLA2APktsPerBlock - 1) / kDdaLLA2APktsPerBlock;
-  if (bpp > (size_t)kDdaLLAgMaxBlocksPerPeer) {
-    bpp = (size_t)kDdaLLAgMaxBlocksPerPeer;
-  }
-  return (int)bpp;
-}
-
 // Single source of the launch geometry: grid.x = peer (nRanks), grid.y = the
-// per-peer packet split; 256 threads/block.
+// per-peer packet split; 256 threads/block, so 256 pkts/block is one packet per thread.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricLLGeom(ncclComm* comm, size_t perChunkBytes) {
   const unsigned threads = 256;
-  const int blocksPerPeer = ddaLLA2ABlocksPerPeer(perChunkBytes);
-  return std::make_pair(dim3((unsigned)comm->nRanks, (unsigned)blocksPerPeer), dim3(threads));
+  // A gather block polls a slot written by a peer block of another index, so the whole grid must be
+  // co-resident: blocks per peer are capped at the comm-wide CU budget's share. A peer always keeps
+  // one block, so past nRanks > ddaFabricMaxBlocks the grid is nRanks blocks, above the budget.
+  const unsigned blocksPerPeer =
+    ddaLLBlocksPerPeer(perChunkBytes, comm->nRanks, (size_t)kDdaLLAgMaxBlocksPerPeer,
+                       (size_t)std::max(comm->ddaFabricMaxBlocks, 0));
+  return std::make_pair(dim3((unsigned)comm->nRanks, blocksPerPeer), dim3(threads));
 }
 
 template <typename T>
@@ -76,26 +61,28 @@ static ncclResult_t ncclAllToAllDdaFabricLLTyped(
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
+  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
   INFO(NCCL_COLL, "DDA fabric AllToAll LL: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, params);
     break;
   }
 
@@ -122,7 +109,7 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -135,7 +122,8 @@ bool ncclAllToAllDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, void*
   if (perChunkBytes * 2 > kDdaLLMaxBytes) {
     return false;
   }
-  if (ddaLLA2AScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // One packet carries 8B of payload, so each peer's chunk has to fit the slot the bank gives it.
+  if ((perChunkBytes >> 3) > ddaLLPeerSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) {
     return false;
   }
 
@@ -149,7 +137,7 @@ uint32_t ncclAllToAllDdaFabricLLBlocks(ncclComm* comm, size_t count, ncclDataTyp
 
 ncclResult_t ncclAllToAllDdaFabricLL(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                      ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   // All-to-all moves raw bytes, so instantiate once for int8_t and scale the

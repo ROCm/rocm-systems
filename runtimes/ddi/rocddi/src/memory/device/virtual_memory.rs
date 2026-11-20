@@ -1,19 +1,38 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Virtual-address reservations, detached memory, mappings, and interval ownership.
+#![cfg_attr(
+    windows,
+    allow(
+        clippy::forget_non_drop,
+        reason = "resource Drop glue is absent until a native provider is installed"
+    )
+)]
 
-use super::{DeviceAccess, MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemoryInfo};
+//! Virtual-address reservations, detached memory, mappings, and interval ownership.
+//!
+//! Session retirement rejects new reservations, mappings, and permission
+//! changes while preserving unmap and release, including failed-cleanup retries.
+
+use super::{
+    DeviceAccess, MemoryKind, VirtualAddressInfo, VirtualMapRequest, VirtualMemoryInfo,
+    VirtualMemoryOptions,
+};
 use crate::device::Device;
 use crate::driver::{self, AddressSpaceInfo, CachedInfo, VirtualMemoryOperations};
+use crate::memory::constraints::{CheckedRange, RangeTail};
 use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
+use crate::os::ProcessIdentity;
 use crate::{Error, ErrorKind};
 use std::sync::Mutex;
 
+/// One occupied host range within a virtual-address reservation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct HostInterval {
+    /// First byte in the reserved process address space.
     address: u64,
+    /// Number of occupied bytes.
     size: u64,
 }
 
@@ -27,6 +46,7 @@ impl HostInterval {
 /// Serializes host page-table replacement in one VA reservation. A failed
 /// unmap keeps its interval occupied until retry succeeds.
 pub(crate) struct HostIntervals {
+    /// Host ranges kept occupied until native unmap succeeds.
     ranges: Mutex<Vec<HostInterval>>,
 }
 
@@ -60,14 +80,18 @@ impl HostIntervals {
     }
 }
 
+/// An occupied range together with the address space in which it is mapped.
 struct DeviceInterval<S: AddressSpaceInfo> {
+    /// Activated device state used to identify the native address space.
     device: S,
+    /// Bytes occupied within that address space.
     range: HostInterval,
 }
 
 /// Serializes mappings within each native device address space. Different
 /// device VMs may map the same process reservation at the same address.
 pub(crate) struct DeviceIntervals<S: AddressSpaceInfo> {
+    /// Device ranges grouped by their native address-space identity.
     ranges: Mutex<Vec<DeviceInterval<S>>>,
 }
 
@@ -109,12 +133,18 @@ pub(crate) struct DriverVirtualAddress<D: VirtualMemoryOperations>
 where
     D::DeviceState: AddressSpaceInfo,
 {
-    // The reservation owner is dropped before the shared driver instance.
+    /// Reservation owner dropped before the shared driver instance.
     pub(crate) inner: Shared<Owned<D::VirtualAddress>>,
+    /// Prevents overlapping host mappings within this reservation.
     host_intervals: Shared<HostIntervals>,
+    /// Prevents overlapping mappings within each device address space.
     device_intervals: Shared<DeviceIntervals<D::DeviceState>>,
+    /// Keeps the creating driver alive through reservation cleanup.
     driver: Shared<D>,
+    /// Cached address, extent, and mapping granularity.
     info: VirtualAddressInfo,
+    /// Rejects inherited mappings before their interval mutexes are entered.
+    process: ProcessIdentity,
 }
 
 impl<D: VirtualMemoryOperations> DriverVirtualAddress<D>
@@ -130,8 +160,12 @@ where
         alignment: u64,
         address: u64,
     ) -> Result<Self, Error> {
+        let _operation = driver.admission().enter()?;
         // Allocate metadata before reserving native address space so a
         // metadata failure cannot strand a successful driver reservation.
+        let process = ProcessIdentity::capture().map_err(|source| {
+            crate::os::native_error("virtual reservation process identity", source)
+        })?;
         let owner = Shared::try_new_uninit()?;
         let host_intervals = Shared::new(HostIntervals::new())?;
         let device_intervals = Shared::new(DeviceIntervals::new())?;
@@ -141,6 +175,7 @@ where
             owner.write(inner),
             host_intervals,
             device_intervals,
+            process,
         ))
     }
 
@@ -149,6 +184,7 @@ where
         inner: Shared<Owned<D::VirtualAddress>>,
         host_intervals: Shared<HostIntervals>,
         device_intervals: Shared<DeviceIntervals<D::DeviceState>>,
+        process: ProcessIdentity,
     ) -> Self {
         let info = inner.cached_info();
         Self {
@@ -157,7 +193,25 @@ where
             device_intervals,
             driver,
             info,
+            process,
         }
+    }
+
+    fn ensure_process(&self) -> Result<(), Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual reservation belongs to another process",
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_locked_host_intervals_for_test<R>(&self, test: impl FnOnce() -> R) -> R {
+        let _held = self
+            .host_intervals
+            .ranges
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        test()
     }
 
     pub(crate) fn info(&self) -> VirtualAddressInfo {
@@ -165,6 +219,7 @@ where
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        self.ensure_process()?;
         let inner = Shared::get_mut(&mut self.inner).ok_or(Error::Operation {
             kind: ErrorKind::Busy,
             detail: "virtual-address reservation has live mappings",
@@ -173,8 +228,26 @@ where
     }
 }
 
+impl<D: VirtualMemoryOperations> Drop for DriverVirtualAddress<D>
+where
+    D::DeviceState: AddressSpaceInfo,
+{
+    fn drop(&mut self) {
+        if self.process.check().is_err() {
+            // Keep every inherited owner alive in the child. Dropping the
+            // last strong reference could invoke native or allocator cleanup.
+            std::mem::forget(self.inner.clone());
+            std::mem::forget(self.host_intervals.clone());
+            std::mem::forget(self.device_intervals.clone());
+            std::mem::forget(self.driver.clone());
+            std::mem::forget(self.process.clone());
+        }
+    }
+}
+
 /// Owns a process virtual-address reservation used by detached memory mappings.
 pub struct VirtualAddress {
+    /// Concrete driver reservation and interval bookkeeping.
     pub(crate) inner: driver::VirtualAddressState,
 }
 
@@ -240,9 +313,13 @@ impl VirtualAddress {
 
 /// Shared detached-backing ownership for any virtual-memory driver.
 pub(crate) struct DriverVirtualMemory<D: VirtualMemoryOperations> {
-    // Keep the driver instance alive until backing cleanup completes.
+    /// Physical backing shared by mappings until native cleanup completes.
     pub(crate) inner: Shared<Owned<D::VirtualMemory>>,
+    /// Keeps the creating driver alive until backing cleanup completes.
     driver: Shared<D>,
+    /// Creating process checked before native work and inherited cleanup.
+    process: ProcessIdentity,
+    /// Cached physical extent and backing identity.
     info: VirtualMemoryInfo,
 }
 
@@ -250,21 +327,38 @@ impl<D: VirtualMemoryOperations> DriverVirtualMemory<D>
 where
     D::DeviceState: AddressSpaceInfo,
 {
-    pub(crate) fn new(driver: Shared<D>, inner: Shared<Owned<D::VirtualMemory>>) -> Self {
+    pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        self.driver.admission().enter()
+    }
+
+    pub(crate) fn new(
+        driver: Shared<D>,
+        inner: Shared<Owned<D::VirtualMemory>>,
+        process: ProcessIdentity,
+    ) -> Self {
         let info = inner.cached_info();
         Self {
             inner,
             driver,
+            process,
             info,
         }
+    }
+
+    fn ensure_process(&self) -> Result<(), Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual-memory backing belongs to another process",
+        })
     }
 
     pub(crate) fn info(&self) -> VirtualMemoryInfo {
         self.info
     }
 
-    pub(crate) fn driver_state(&self) -> &D::VirtualMemory {
-        &self.inner
+    pub(crate) fn driver_state(&self) -> Result<&D::VirtualMemory, Error> {
+        self.ensure_process()?;
+        Ok(&self.inner)
     }
 
     pub(crate) fn map_host(
@@ -275,6 +369,9 @@ where
         size: u64,
         permissions: DeviceAccess,
     ) -> Result<DriverVirtualHostMapping<D>, Error> {
+        let _operation = self.admit()?;
+        self.ensure_process()?;
+        reservation.ensure_process()?;
         if !Shared::ptr_eq(&self.driver, &reservation.driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -307,11 +404,12 @@ where
         };
         drop(ranges);
         Ok(DriverVirtualHostMapping {
-            inner,
+            inner: Some(inner),
             driver: Some(self.driver.clone()),
             reservation: Some(reservation.inner.clone()),
             backing: Some(self.inner.clone()),
             host_intervals: Some(reservation.host_intervals.clone()),
+            process: reservation.process.clone(),
             address,
             size,
         })
@@ -324,6 +422,9 @@ where
         reservation: &DriverVirtualAddress<D>,
         request: VirtualMapRequest,
     ) -> Result<DriverVirtualDeviceMapping<D>, Error> {
+        let _operation = self.admit()?;
+        self.ensure_process()?;
+        reservation.ensure_process()?;
         let VirtualMapRequest {
             address,
             offset,
@@ -369,11 +470,12 @@ where
         };
         drop(ranges);
         Ok(DriverVirtualDeviceMapping {
-            inner,
+            inner: Some(inner),
             driver: Some(self.driver.clone()),
             reservation: Some(reservation.inner.clone()),
             backing: Some(self.inner.clone()),
             device_intervals: Some(reservation.device_intervals.clone()),
+            process: reservation.process.clone(),
             device_state: Some(state.clone()),
             address,
             size,
@@ -381,6 +483,7 @@ where
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        self.ensure_process()?;
         let inner = Shared::get_mut(&mut self.inner).ok_or(Error::Operation {
             kind: ErrorKind::Busy,
             detail: "virtual-memory backing has live mappings",
@@ -389,8 +492,21 @@ where
     }
 }
 
+impl<D: VirtualMemoryOperations> Drop for DriverVirtualMemory<D> {
+    fn drop(&mut self) {
+        if self.process.check().is_err() {
+            // The backing may still refer to parent-owned GPU state, and its
+            // final release may call a retained frontend allocator.
+            std::mem::forget(self.inner.clone());
+            std::mem::forget(self.driver.clone());
+            std::mem::forget(self.process.clone());
+        }
+    }
+}
+
 /// Owns detached physical backing used by virtual-memory mappings.
 pub struct VirtualMemory {
+    /// Concrete driver owner of the detached physical backing.
     pub(crate) inner: driver::VirtualMemoryState,
 }
 
@@ -440,13 +556,23 @@ pub(crate) struct DriverVirtualDeviceMapping<D: VirtualMemoryOperations>
 where
     D::DeviceState: AddressSpaceInfo,
 {
-    inner: Owned<D::VirtualDeviceMapping>,
+    /// Native mapping owner whose cleanup can be retried.
+    inner: Option<Owned<D::VirtualDeviceMapping>>,
+    /// Creating driver retained until native unmap succeeds.
     driver: Option<Shared<D>>,
+    /// Reservation retained while the device mapping exists.
     reservation: Option<Shared<Owned<D::VirtualAddress>>>,
+    /// Physical backing retained while the device mapping exists.
     backing: Option<Shared<Owned<D::VirtualMemory>>>,
+    /// Interval occupancy released only after successful unmap.
     device_intervals: Option<Shared<DeviceIntervals<D::DeviceState>>>,
+    /// Creating process checked before the interval lock.
+    process: ProcessIdentity,
+    /// Native address-space identity used for interval release.
     device_state: Option<D::DeviceState>,
+    /// First mapped device byte.
     address: u64,
+    /// Mapped byte extent.
     size: u64,
 }
 
@@ -455,12 +581,20 @@ where
     D::DeviceState: AddressSpaceInfo,
 {
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual device mapping belongs to another process",
+        })?;
         let mut ranges = self
             .device_intervals
             .as_ref()
             .map(|intervals| intervals.lock())
             .transpose()?;
-        D::free_virtual_device_mapping(&mut self.inner)?;
+        let inner = self.inner.as_mut().ok_or(Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual device mapping is no longer live",
+        })?;
+        D::free_virtual_device_mapping(inner)?;
         if let (Some(ranges), Some(device)) = (&mut ranges, &self.device_state) {
             DeviceIntervals::release(ranges, device, self.address, self.size);
         }
@@ -479,25 +613,37 @@ where
     D::DeviceState: AddressSpaceInfo,
 {
     fn drop(&mut self) {
-        if self.free().is_err() {
-            if let Some(intervals) = self.device_intervals.take() {
-                std::mem::forget(intervals);
+        if self.process.check().is_err() {
+            // Neither the native destructor nor its retained allocator may
+            // run in a child that inherited the parent's mapping.
+            if let Some(inner) = self.inner.take() {
+                std::mem::forget(inner);
             }
-            if let Some(reservation) = self.reservation.take() {
-                std::mem::forget(reservation);
+            if let Some(device_state) = self.device_state.take() {
+                std::mem::forget(device_state);
             }
-            if let Some(backing) = self.backing.take() {
-                std::mem::forget(backing);
-            }
-            if let Some(driver) = self.driver.take() {
-                std::mem::forget(driver);
-            }
+            std::mem::forget(self.process.clone());
+        } else if self.free().is_ok() {
+            return;
+        }
+        if let Some(intervals) = self.device_intervals.take() {
+            std::mem::forget(intervals);
+        }
+        if let Some(reservation) = self.reservation.take() {
+            std::mem::forget(reservation);
+        }
+        if let Some(backing) = self.backing.take() {
+            std::mem::forget(backing);
+        }
+        if let Some(driver) = self.driver.take() {
+            std::mem::forget(driver);
         }
     }
 }
 
 /// Owns one virtual-memory mapping in an activated device VM.
 pub struct VirtualDeviceMapping {
+    /// Concrete driver mapping and retryable cleanup state.
     pub(crate) inner: driver::VirtualDeviceMappingState,
 }
 
@@ -514,23 +660,85 @@ impl VirtualDeviceMapping {
 
 /// Shared host-mapping ownership, including retryable native cleanup.
 pub(crate) struct DriverVirtualHostMapping<D: VirtualMemoryOperations> {
-    inner: Owned<D::VirtualHostMapping>,
+    /// Native mapping owner whose cleanup can be retried.
+    inner: Option<Owned<D::VirtualHostMapping>>,
+    /// Creating driver retained until native unmap succeeds.
     driver: Option<Shared<D>>,
+    /// Reservation retained while the host mapping exists.
     reservation: Option<Shared<Owned<D::VirtualAddress>>>,
+    /// Physical backing retained while the host mapping exists.
     backing: Option<Shared<Owned<D::VirtualMemory>>>,
+    /// Interval occupancy released only after successful unmap.
     host_intervals: Option<Shared<HostIntervals>>,
+    /// Creating process checked before the interval lock.
+    process: ProcessIdentity,
+    /// First mapped host byte.
     address: u64,
+    /// Mapped byte extent.
     size: u64,
 }
 
 impl<D: VirtualMemoryOperations> DriverVirtualHostMapping<D> {
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "foreign diagnostic mapping",
+        })?;
+        let inner = self
+            .inner
+            .as_ref()
+            .filter(|_| self.host_intervals.is_some())
+            .ok_or(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "virtual host map has retired",
+            })?;
+        D::diagnostic_virtual_host_mapping(inner)
+    }
+
+    pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual host mapping belongs to another process",
+        })?;
+        if self.host_intervals.is_none() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "virtual host mapping is no longer live",
+            });
+        }
+        let _operation = self
+            .driver
+            .as_ref()
+            .ok_or(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "virtual host mapping is no longer live",
+            })?
+            .admission()
+            .enter()?;
+        let inner = self.inner.as_mut().ok_or(Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual host mapping is no longer live",
+        })?;
+        D::set_virtual_host_mapping_permissions(inner, permissions)
+    }
+
     pub(crate) fn free(&mut self) -> Result<(), Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual host mapping belongs to another process",
+        })?;
         let mut ranges = self
             .host_intervals
             .as_ref()
             .map(|intervals| intervals.lock())
             .transpose()?;
-        D::free_virtual_host_mapping(&mut self.inner)?;
+        let inner = self.inner.as_mut().ok_or(Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "virtual host mapping is no longer live",
+        })?;
+        D::free_virtual_host_mapping(inner)?;
         if let Some(ranges) = &mut ranges {
             HostIntervals::release(ranges, self.address, self.size);
         }
@@ -545,29 +753,57 @@ impl<D: VirtualMemoryOperations> DriverVirtualHostMapping<D> {
 
 impl<D: VirtualMemoryOperations> Drop for DriverVirtualHostMapping<D> {
     fn drop(&mut self) {
-        if self.free().is_err() {
-            if let Some(intervals) = self.host_intervals.take() {
-                std::mem::forget(intervals);
+        if self.process.check().is_err() {
+            // A child must not invoke the native mapping destructor or its
+            // retained allocator callback after a rejected explicit free.
+            if let Some(inner) = self.inner.take() {
+                std::mem::forget(inner);
             }
-            if let Some(reservation) = self.reservation.take() {
-                std::mem::forget(reservation);
-            }
-            if let Some(backing) = self.backing.take() {
-                std::mem::forget(backing);
-            }
-            if let Some(driver) = self.driver.take() {
-                std::mem::forget(driver);
-            }
+            std::mem::forget(self.process.clone());
+        } else if self.free().is_ok() {
+            return;
+        }
+        if let Some(intervals) = self.host_intervals.take() {
+            std::mem::forget(intervals);
+        }
+        if let Some(reservation) = self.reservation.take() {
+            std::mem::forget(reservation);
+        }
+        if let Some(backing) = self.backing.take() {
+            std::mem::forget(backing);
+        }
+        if let Some(driver) = self.driver.take() {
+            std::mem::forget(driver);
         }
     }
 }
 
 /// Owns one virtual-memory mapping in the process host page tables.
 pub struct VirtualHostMapping {
+    /// Concrete driver mapping and retryable cleanup state.
     pub(crate) inner: driver::VirtualHostMappingState,
 }
 
 impl VirtualHostMapping {
+    /// Borrows a live host mapping for fatal diagnostic reads.
+    ///
+    /// # Errors
+    /// Rejects retired or unsupported backing and foreign processes.
+    pub fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.inner.diagnostic_memory()
+    }
+
+    /// Changes process-wide CPU page permissions on a live host map.
+    ///
+    /// # Errors
+    /// Reports invalid permissions or a native protection failure without
+    /// releasing the mapping.
+    pub fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
+        self.inner.set_permissions(permissions)
+    }
+
     /// Removes the host mapping while preserving the encompassing address
     /// reservation for reuse.
     ///
@@ -613,17 +849,17 @@ pub(crate) fn validate_virtual_mapping(
                 kind: ErrorKind::DriverContract,
                 detail: "virtual-address reservation extent overflows",
             })?;
-    let backing_end = offset.checked_add(size).ok_or(Error::Operation {
-        kind: ErrorKind::InvalidArgument,
-        detail: "virtual-memory backing offset overflows",
-    })?;
-    if size == 0
-        || address % granularity != 0
-        || offset % granularity != 0
-        || size % granularity != 0
+    if address % granularity != 0
         || address < reservation.address
         || mapping_end > reservation_end
-        || backing_end > memory.size
+        || CheckedRange::new(
+            memory.size,
+            offset,
+            size,
+            granularity,
+            RangeTail::WholeUnits,
+        )
+        .is_none()
     {
         return Err(Error::Operation {
             kind: ErrorKind::InvalidArgument,
@@ -645,11 +881,9 @@ impl Device {
         &self,
         kind: MemoryKind,
         size: u64,
-        pinned: bool,
-        uncached: bool,
+        options: VirtualMemoryOptions,
     ) -> Result<VirtualMemory, Error> {
-        self.driver_state
-            .create_virtual_memory(kind, size, pinned, uncached)
+        self.driver_state.create_virtual_memory(kind, size, options)
     }
 
     /// Maps a subrange of detached physical backing into this device's VM at a
@@ -737,7 +971,85 @@ mod tests {
     }
 
     #[test]
+    fn virtual_mapping_ranges_must_fit_both_owners() {
+        let memory = VirtualMemoryInfo {
+            size: 0x4000,
+            mapping_granularity: 0x1000,
+            physical_backing_id: [1, 2],
+            placement: None,
+        };
+        let reservation = VirtualAddressInfo {
+            address: 0x1_0000,
+            size: 0x8000,
+            mapping_granularity: 0x1000,
+        };
+
+        assert!(validate_virtual_mapping(memory, reservation, 0x1_1000, 0x2000, 0x2000).is_ok());
+        for (address, offset, size) in [
+            (0x1_1001, 0x2000, 0x1000),
+            (0x1_1000, 0x2001, 0x1000),
+            (0x1_1000, 0x2000, 0),
+            (0x0_f000, 0, 0x1000),
+            (0x1_7000, 0, 0x2000),
+            (0x1_1000, 0x3000, 0x2000),
+        ] {
+            assert_eq!(
+                validate_virtual_mapping(memory, reservation, address, offset, size)
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn virtual_mapping_uses_the_stricter_owner_granularity() {
+        let memory = VirtualMemoryInfo {
+            size: 0x2_0000,
+            mapping_granularity: 0x1_0000,
+            physical_backing_id: [1, 2],
+            placement: None,
+        };
+        let reservation = VirtualAddressInfo {
+            address: 0x10_0000,
+            size: 0x4_0000,
+            mapping_granularity: 0x1000,
+        };
+
+        assert!(validate_virtual_mapping(memory, reservation, 0x10_0000, 0, 0x1_0000).is_ok());
+        assert_eq!(
+            validate_virtual_mapping(memory, reservation, 0x10_1000, 0, 0x1_0000)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+
+        let invalid = VirtualMemoryInfo {
+            mapping_granularity: 0,
+            ..memory
+        };
+        assert_eq!(
+            validate_virtual_mapping(invalid, reservation, 0x10_0000, 0, 0x1_0000)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::DriverContract
+        );
+
+        let invalid = VirtualAddressInfo {
+            address: reservation.address + 1,
+            ..reservation
+        };
+        assert_eq!(
+            validate_virtual_mapping(memory, invalid, 0x10_0000, 0, 0x1_0000)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::DriverContract
+        );
+    }
+
+    #[test]
     #[ignore = "requires a qualified GPU and live DRM virtual-memory mapping"]
+    #[cfg(target_os = "linux")]
     fn live_device_mapping_rejects_overlap_and_reuses_freed_interval() {
         use crate::session::{DriverContextLifetime, Session};
 
@@ -757,10 +1069,10 @@ mod tests {
         let device = session.activate(&endpoint.unwrap()).unwrap();
         let size = 2 * 1024 * 1024;
         let mut first_memory = device
-            .create_virtual_memory(MemoryKind::System, size, false, false)
+            .create_virtual_memory(MemoryKind::System, size, VirtualMemoryOptions::default())
             .unwrap();
         let mut second_memory = device
-            .create_virtual_memory(MemoryKind::System, size, false, false)
+            .create_virtual_memory(MemoryKind::System, size, VirtualMemoryOptions::default())
             .unwrap();
         let granularity = first_memory
             .info()
@@ -820,6 +1132,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     #[ignore = "requires a qualified GPU and live KFD virtual-memory mapping"]
     fn live_host_mapping_rejects_overlap_and_reuses_freed_interval() {
         use crate::session::{DriverContextLifetime, Session};
@@ -838,10 +1151,10 @@ mod tests {
         let device = session.activate(&endpoint).unwrap();
         let mut reservation = VirtualAddress::reserve(&[&device], 4096, 4096, 0).unwrap();
         let mut first_memory = device
-            .create_virtual_memory(MemoryKind::System, 4096, false, false)
+            .create_virtual_memory(MemoryKind::System, 4096, VirtualMemoryOptions::default())
             .unwrap();
         let mut second_memory = device
-            .create_virtual_memory(MemoryKind::System, 4096, false, false)
+            .create_virtual_memory(MemoryKind::System, 4096, VirtualMemoryOptions::default())
             .unwrap();
         let address = reservation.info().address;
         let mut first = first_memory
@@ -876,80 +1189,5 @@ mod tests {
         drop(reservation);
         drop(device);
         session.destroy().unwrap();
-    }
-
-    #[test]
-    fn virtual_mapping_ranges_must_fit_both_owners() {
-        let memory = VirtualMemoryInfo {
-            size: 0x4000,
-            mapping_granularity: 0x1000,
-            physical_backing_id: [1, 2],
-        };
-        let reservation = VirtualAddressInfo {
-            address: 0x1_0000,
-            size: 0x8000,
-            mapping_granularity: 0x1000,
-        };
-
-        assert!(validate_virtual_mapping(memory, reservation, 0x1_1000, 0x2000, 0x2000).is_ok());
-        for (address, offset, size) in [
-            (0x1_1001, 0x2000, 0x1000),
-            (0x1_1000, 0x2001, 0x1000),
-            (0x1_1000, 0x2000, 0),
-            (0x0_f000, 0, 0x1000),
-            (0x1_7000, 0, 0x2000),
-            (0x1_1000, 0x3000, 0x2000),
-        ] {
-            assert_eq!(
-                validate_virtual_mapping(memory, reservation, address, offset, size)
-                    .unwrap_err()
-                    .kind(),
-                ErrorKind::InvalidArgument
-            );
-        }
-    }
-
-    #[test]
-    fn virtual_mapping_uses_the_stricter_owner_granularity() {
-        let memory = VirtualMemoryInfo {
-            size: 0x2_0000,
-            mapping_granularity: 0x1_0000,
-            physical_backing_id: [1, 2],
-        };
-        let reservation = VirtualAddressInfo {
-            address: 0x10_0000,
-            size: 0x4_0000,
-            mapping_granularity: 0x1000,
-        };
-
-        assert!(validate_virtual_mapping(memory, reservation, 0x10_0000, 0, 0x1_0000).is_ok());
-        assert_eq!(
-            validate_virtual_mapping(memory, reservation, 0x10_1000, 0, 0x1_0000)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::InvalidArgument
-        );
-
-        let invalid = VirtualMemoryInfo {
-            mapping_granularity: 0,
-            ..memory
-        };
-        assert_eq!(
-            validate_virtual_mapping(invalid, reservation, 0x10_0000, 0, 0x1_0000)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::DriverContract
-        );
-
-        let invalid = VirtualAddressInfo {
-            address: reservation.address + 1,
-            ..reservation
-        };
-        assert_eq!(
-            validate_virtual_mapping(memory, invalid, 0x10_0000, 0, 0x1_0000)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::DriverContract
-        );
     }
 }

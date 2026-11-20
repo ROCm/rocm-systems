@@ -16,6 +16,9 @@ namespace rocjitsu {
 namespace {
 using namespace waitcheck_detail;
 using Ops = WaitcheckStateOps;
+using amdgpu::MemoryAddressing;
+using amdgpu::MemoryKind;
+using amdgpu::Operation;
 
 bool has_committed_generations(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
@@ -66,11 +69,14 @@ bool scratch_vector_address_enabled(const Instruction &inst, rj_code_arch_t arch
 
 RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, uint32_t wave_size) {
   RegisterEffects effects;
-  const auto name = inst.mnemonic();
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   const bool scalar_address = [&] {
-    if (!name.starts_with("global_") && !name.starts_with("scratch_"))
+    if ((addressing != MemoryAddressing::Global && addressing != MemoryAddressing::Scratch) ||
+        (inst.flags() & SMEM))
       return false;
     for (int i = 1; i < inst.num_src_operands(); ++i) {
+      if (!inst.tracks_explicit_source(i))
+        continue;
       const auto *op = inst.src_operand(i);
       if (op) {
         const auto ref = op->to_register_ref();
@@ -80,44 +86,31 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
     }
     return false;
   }();
-  if (!Ops::is_cdna4_mubuf_lds_load(inst, arch)) {
+  if (!Ops::is_cdna_lds_dma_load(inst, arch)) {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
       const auto *op = inst.dst_operand(i);
       if (!op)
         continue;
-      if (auto ref = op->to_register_ref()) {
-        // Compare, carry-out and divide-scale scalar destinations are wave
-        // masks; encoded operands can retain their maximum two-SGPR width.
-        const bool carry_out = name == "v_add_co_u32" || name == "v_add_co_ci_u32" ||
-                               name == "v_sub_co_u32" || name == "v_sub_co_ci_u32" ||
-                               name == "v_subrev_co_u32" || name == "v_subrev_co_ci_u32" ||
-                               name == "v_mad_co_u64_u32" || name == "v_mad_co_i64_i32" ||
-                               name == "v_mad_u64_u32" || name == "v_mad_i64_i32";
-        const bool wave_mask = (i == 0 && name.starts_with("v_cmp")) ||
-                               (i == 1 && (carry_out || name.starts_with("v_div_scale_")));
-        if (wave_mask && ref->cls == RegClass::SGPR)
-          ref->width = wave_size / 32;
-        effects.defs.expand(*ref);
-      }
+      if (auto ref = WaitcheckTarget::register_operand(*op, arch))
+        effects.defs.expand(inst.wave_sized_destination(*op, *ref, wave_size));
     }
   }
   inst.implicit_defs(effects.defs);
   for (int i = 0; i < inst.num_src_operands(); ++i) {
+    if (!inst.tracks_explicit_source(i))
+      continue;
     const auto *op = inst.src_operand(i);
     if (!op)
       continue;
-    auto ref = op->to_register_ref();
+    auto ref = WaitcheckTarget::register_operand(*op, arch);
     if (!ref)
       continue;
-    if (i == 0 && name.starts_with("scratch_") && !scratch_vector_address_enabled(inst, arch))
+    if (i == 0 && addressing == MemoryAddressing::Scratch && !(inst.flags() & SMEM) &&
+        !scratch_vector_address_enabled(inst, arch))
       continue;
     if (i == 0 && scalar_address && ref->cls == RegClass::VGPR)
       ref->width = 1;
-    if (i == 2 && ref->cls == RegClass::SGPR &&
-        (name.starts_with("v_cndmask_") || name == "v_add_co_ci_u32" || name == "v_sub_co_ci_u32" ||
-         name == "v_subrev_co_ci_u32"))
-      ref->width = wave_size / 32;
-    effects.uses.expand(*ref);
+    effects.uses.expand(wave_sized_register(*op, *ref, wave_size));
   }
   inst.implicit_uses(effects.uses);
   if (inst.flags() & WRITES_EXEC)
@@ -127,11 +120,13 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
 
 std::optional<std::string_view> deferred_reason(const Instruction &inst,
                                                 std::span<const ClassifiedEvent> events) {
-  const auto name = inst.mnemonic();
+  const Operation operation = inst.amdgpu_operation();
   // RegisterSet deliberately omits trap temporaries. Stop before silently
   // dropping either a pending result or one of its consumers.
   for (int i = 0; i < inst.num_src_operands() + inst.num_dst_operands(); ++i) {
     const bool destination = i >= inst.num_src_operands();
+    if (!destination && !inst.tracks_explicit_source(i))
+      continue;
     const auto *op =
         destination ? inst.dst_operand(i - inst.num_src_operands()) : inst.src_operand(i);
     if (!op)
@@ -141,24 +136,43 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
       return "trap-temporary registers are not tracked";
     // Selector-encoded VCC, FLAT_SCRATCH and XNACK_MASK destinations are
     // not all represented by the ordinary-register operand projection.
-    if (destination && inst.is_memory_op() && name.starts_with("s_") && !op->is_fieldless() &&
-        op->size_bits() > 0 && !ref)
+    if (destination && inst.is_memory_op() && (inst.flags() & (SALU | SMEM)) &&
+        !op->is_fieldless() && op->size_bits() > 0 && !ref)
       return "scalar-memory destination is not represented by register tracking";
   }
   if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst))
     return "control flow requires CFG analysis";
-  if (name == "s_set_vgpr_msb" || name.starts_with("s_setreg") ||
-      name.starts_with("s_set_gpr_idx") || name == "s_setvskip" ||
-      name.starts_with("s_waitcnt_depctr") || name == "s_wait_alu") {
+  switch (operation) {
+  case Operation::S_SET_VGPR_MSB:
+  case Operation::S_SETREG_B32:
+  case Operation::S_SETREG_IMM32_B32:
+  case Operation::S_SET_GPR_IDX_IDX:
+  case Operation::S_SET_GPR_IDX_ON:
+  case Operation::S_SET_GPR_IDX_OFF:
+  case Operation::S_SET_GPR_IDX_MODE:
+  case Operation::S_SETVSKIP:
+  case Operation::S_WAITCNT_DEPCTR:
+  case Operation::S_WAIT_ALU:
     // Dependency waits themselves are handled by the transfer layer, below.
     if (!inst.is_waitcnt())
       return "scheduling or register-mode state is not analyzed";
+    break;
+  default:
+    break;
   }
-  if (name.starts_with("v_movrel") || name.starts_with("v_swaprel") || name.starts_with("s_movrel"))
+  if (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION | RELATIVE_VGPR_SOURCE |
+                      RELATIVE_VGPR_DESTINATION))
     return "relative-register operands are not analyzed";
-  if (name.find("_d16") != std::string_view::npos || name.starts_with("v_dual_"))
+  if (inst.has_d16_memory_data() || inst.amdgpu_secondary_operation() != Operation::Unknown)
     return "partial-register or dual-issue semantics are not analyzed";
-  if (name.starts_with("image_") || name.find("atomic") != std::string_view::npos)
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  // Ordinary DS read-modify-write operations use the same operand tracking as
+  // DS loads/stores. Barrier atomics have separate ordering semantics.
+  const bool ds = addressing == MemoryAddressing::Lds || addressing == MemoryAddressing::Gds;
+  if (addressing == MemoryAddressing::Image ||
+      (inst.amdgpu_memory_kind() == MemoryKind::Atomic && !ds) ||
+      operation == Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64 ||
+      operation == Operation::DS_ATOMIC_BARRIER_ARRIVE_RTN_B64)
     return "image and atomic operand semantics are not analyzed";
   for (const auto &event : events) {
     if (event.check_counter_parity_order)
@@ -171,15 +185,15 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
     return "barrier ordering is not analyzed";
   if (inst.is_memory_op() && events.empty())
     return "memory instruction has no event policy";
-  if (name.starts_with("s_") && events.empty() && !inst.is_waitcnt() &&
-      !is_program_path_terminator(inst) && name != "s_nop" && name != "s_delay_alu" &&
-      inst.num_src_operands() == 0 && inst.num_dst_operands() == 0)
+  if ((inst.flags() & (SALU | SMEM)) && events.empty() && !inst.is_waitcnt() &&
+      !is_program_path_terminator(inst) && operation != Operation::S_NOP &&
+      operation != Operation::S_DELAY_ALU && inst.num_src_operands() == 0 &&
+      inst.num_dst_operands() == 0)
     return "unmodeled scalar control instruction";
   return std::nullopt;
 }
 
-RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffects &effects,
-                                const Instruction &inst) {
+RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffects &effects) {
   switch (event.registers) {
   case TrackedRegisterSource::None:
     return {};
@@ -189,23 +203,27 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
     return effects.uses;
   case TrackedRegisterSource::VectorUses:
     return vector_registers(effects.uses);
-  case TrackedRegisterSource::StoreDataUses: {
-    const auto name = inst.mnemonic();
-    const int index = name.starts_with("buffer_") || name.starts_with("tbuffer_") ? 0 : 1;
-    RegisterSet regs;
-    if (const auto *op = inst.src_operand(index)) {
-      if (auto ref = op->to_register_ref())
-        regs.expand(*ref);
-    }
-    return regs;
-  }
   }
   return {};
 }
 
 bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
                  rj_code_arch_t arch) {
-  if (!has_ordered_vmem_writeback(arch))
+  if (amdgpu::has_ordered_lds_direct_writeback(arch) && event.counter == WaitCounterKind::Exp &&
+      event.kind == WaitEventKind::LdsDirect) {
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Exp && other.kind == WaitEventKind::LdsDirect;
+    });
+  }
+  // LDS instructions stay in order with other LDS instructions from the same
+  // wave. GDS and SMEM are separate event kinds that are not ordered with LDS.
+  // Only DS-counter results qualify: expert scheduling also tracks DS sources
+  // on VmVsrc, and result ordering does not end those source lifetimes.
+  if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds)
+    return std::ranges::any_of(current, [](const auto &other) {
+      return other.counter == WaitCounterKind::Ds && other.kind == WaitEventKind::Ds;
+    });
+  if (!amdgpu::has_ordered_vmem_writeback(arch))
     return false;
   if (event.kind == WaitEventKind::FlatLoad) {
     if (event.counter != WaitCounterKind::Load)
@@ -246,7 +264,7 @@ public:
     RegisterSet async_defs;
     for (const auto &event : events) {
       if (event.registers == TrackedRegisterSource::Defs)
-        async_defs |= registers_for_event(event, effects, inst);
+        async_defs |= registers_for_event(event, effects);
       if (add_event(event, effects, inst, offset).failed())
         return util::Result::failure();
     }
@@ -301,7 +319,7 @@ private:
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
-    event.regs = registers_for_event(classification, effects, inst);
+    event.regs = registers_for_event(classification, effects);
     event.produces_regs = has_committed_generations(arch_) &&
                           classification.registers == TrackedRegisterSource::Defs &&
                           event.regs == vector_registers(event.regs);
@@ -325,9 +343,19 @@ private:
         ++age;
     }
     ages[static_cast<size_t>(event.kind)] = 0;
+    const bool ordered_exp =
+        event.counter == WaitCounterKind::Exp && amdgpu::has_typed_export_waits(arch_) &&
+        (event.kind == WaitEventKind::ExportMrt || event.kind == WaitEventKind::ExportZ ||
+         event.kind == WaitEventKind::ExportPosition ||
+         event.kind == WaitEventKind::ExportPrimitive ||
+         event.kind == WaitEventKind::ExportDualSourceBlend ||
+         event.kind == WaitEventKind::LdsDirect);
     for (auto &pending : state_.pending[idx]) {
       if (pending.min_younger < max_wait.value())
         ++pending.min_younger;
+      if (ordered_exp && pending.kind == event.kind &&
+          pending.min_younger_in_fifo < max_wait.value())
+        ++pending.min_younger_in_fifo;
     }
     // Counter-only operations must age older requests without accumulating a
     // dependency record of their own (notably long sequences of stores).
@@ -404,7 +432,7 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
   if ((options.wave_size != 32 && options.wave_size != 64) ||
       (has_committed_generations(arch) && options.wave_size != 64))
     return emit_error.emit() << "invalid waitcheck wave size";
-  if (options.expert_scheduling && !waitcheck_detail::supports_expert_scheduling(arch))
+  if (options.expert_scheduling && !amdgpu::supports_expert_scheduling(arch))
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";
   WaitcheckStreamReport report;
   StreamAnalyzer analyzer{arch, options, report};
