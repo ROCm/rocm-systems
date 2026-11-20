@@ -5,6 +5,7 @@
 load_pc_sampling_data, correct_sys_info, utils_analysis filter resolution, and
 utils_common.expand_placeholder_ranges."""
 
+import logging
 from collections import ChainMap, OrderedDict
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +16,7 @@ import pytest
 
 from pc_sampling.pc_sampling_analysis import load_pc_sample_records
 from utils import schema
+from utils.metrics.expression import build_metric_value_string
 from utils.parser import (
     apply_filters,
     apply_kernel_filter,
@@ -917,3 +919,31 @@ def test_evaluate_kernel_tables_evaluates_each_kernel_on_its_own_rows(
 
     assert list(evaluate_kernel_tables(arch_config, workload, pmc, [201])) == [1]
     assert calls == [([201], [10, 12], [[10, 12]])]
+
+
+def test_evaluate_kernel_tables_logs_missing_inputs_at_debug_level(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The workload's evaluation already warned about missing counters and system
+    values, so evaluating each kernel again logs them at debug level only."""
+    arch_config = _two_block_config()
+    build_dfs(
+        arch_config, filter_metrics=None, sys_info=_sys_info(), profiling_config={}
+    )
+    build_metric_value_string(arch_config.dfs, arch_config.dfs_type, "per_kernel")
+    # The dispatches lack COUNTER_A and COUNTER_B, and sysinfo lacks cur_mclk and others
+    pmc = pd.DataFrame({"Kernel_Name": ["a", "a"]})
+    workload = schema.Workload()
+    workload.dfs = {1: pd.DataFrame({"Kernel_Name": ["a"]})}
+    workload.filter_kernel_ids = []
+    workload.sys_info = pd.DataFrame([{**_sys_info(), "gpu_arch": "gfx950"}])
+    workload.pass_tables = {}
+
+    with caplog.at_level(logging.DEBUG):
+        evaluated = evaluate_kernel_tables(arch_config, workload, pmc, [201])
+
+    assert evaluated[0].tables[201]["Avg"].tolist() == ["N/A", "N/A"]
+    debug = [r.getMessage() for r in caplog.records if r.levelno == logging.DEBUG]
+    assert any("KeyError: 'COUNTER_A'" in message for message in debug)
+    assert any("cur_mclk is not available" in message for message in debug)
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

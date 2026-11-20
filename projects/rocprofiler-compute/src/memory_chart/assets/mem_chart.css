@@ -39,6 +39,8 @@
 .mem-cat-neutral { --mem-category: var(--mem-neutral); }
 
 .mem-chart-heading { margin: 0; font-size: 18px; }
+/* Kernels have no color on this page, so their rows have no swatch */
+.mem-chart-kernels .report-swatch { display: none; }
 .mem-chart-selection { color: var(--report-muted); font-size: 13px; }
 
 .mem-chart-main {
