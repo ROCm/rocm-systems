@@ -5,9 +5,19 @@ import ast
 import json
 import re
 import warnings
-from collections import defaultdict
+from collections import ChainMap, defaultdict
 from pathlib import Path
-from typing import Any, DefaultDict, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import (
+    Any,
+    DefaultDict,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import numpy as np
 import pandas as pd
@@ -75,8 +85,8 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import EVAL_BUILTINS, ValuDualIssueDetector
-from utils.metrics.expression import build_eval_string, transform_expression
-from utils.metrics.metric_evaluator import counter_table_index, table_holds
+from utils.metrics.expression import transform_expression
+from utils.metrics.metric_evaluator import collectables_per_table, counter_table_index
 from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.roofline_calc import (
     SUPPORTED_DATATYPES,
@@ -86,6 +96,7 @@ from utils.utils_analysis import (
     PEAK_COL_PREFERENCE,
     VALUE_COL_PREFERENCE,
     impute_counters_iteration_multiplex,
+    pass_tables_on_rows,
 )
 from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
 from utils.utils_counter_defs import (
@@ -1100,19 +1111,14 @@ class db_analysis(OmniAnalyze_Base):
 
     @staticmethod
     def calc_builtin_vars(
-        pmc_df: pd.DataFrame,
+        pmc_df: Union[pd.DataFrame, ChainMap],
         sys_info: dict,
-        expressions: list[str],
+        collectable_names: Set[str],
     ) -> None:
-        """Evaluate the collectables that expressions use, on pmc_df, each after
-        the collectables it uses. A collectable whose counters pmc_df does not
-        hold is left out. Mutates sys_info in place."""
-        collectables = Collectables.of_arch(sys_info["gpu_arch"])
-        _, used = extract_counters_and_variables("\n".join(expressions), collectables)
-        for name, formula in collectables.items():
-            if name in used and table_holds(
-                build_eval_string(formula), pmc_df, collectables
-            ):
+        """Evaluate the named collectables on pmc_df, each after the
+        collectables it uses. Mutates sys_info in place."""
+        for name, formula in Collectables.of_arch(sys_info["gpu_arch"]).items():
+            if name in collectable_names:
                 sys_info[name] = db_analysis.evaluate(
                     name, formula, pmc_df, sys_info, parse=True
                 )
@@ -1122,24 +1128,36 @@ class db_analysis(OmniAnalyze_Base):
         pmc_df: pd.DataFrame,
         sys_info: dict,
         expression_df: pd.DataFrame,
-        pass_tables: Optional[list[pd.DataFrame]] = None,
+        pass_tables: Optional[List[ChainMap]] = None,
     ) -> pd.Series:
         """Evaluate each expression row.
 
         A row reads the first table in pass_tables that has all of its
         counters. When none has them all, it reads pmc_df.
         """
+        row_values = expression_df["value"].tolist()
         expressions = [
-            v
-            for v in expression_df["value"].tolist()
-            if isinstance(v, str) and v and v != "None"
+            v for v in row_values if isinstance(v, str) and v and v != "None"
         ]
+        build_in_vars = Collectables.of_arch(sys_info["gpu_arch"])
+        _, used_collectables = extract_counters_and_variables(
+            "\n".join(expressions), build_in_vars
+        )
         # Pass tables first, pmc_df last. Each gets its own built-in variables.
         tables = [*(pass_tables or []), pmc_df]
+        # Pick the table each row reads before evaluating any collectable, so
+        # that each table evaluates only the collectables its rows need
+        table_index_of_row = [
+            counter_table_index(value, tables, build_in_vars) for value in row_values
+        ]
+        collectables_by_table = collectables_per_table(
+            row_values, table_index_of_row, tables, build_in_vars, used_collectables
+        )
         table_sys_infos = [sys_info.copy() for _table in tables[:-1]] + [sys_info]
-        for table, table_sys_info in zip(tables, table_sys_infos):
-            db_analysis.calc_builtin_vars(table, table_sys_info, expressions)
-        build_in_vars = Collectables.of_arch(sys_info["gpu_arch"])
+        for table, table_sys_info, collectable_names in zip(
+            tables, table_sys_infos, collectables_by_table
+        ):
+            db_analysis.calc_builtin_vars(table, table_sys_info, collectable_names)
         # On pmc_df a collectable takes its value from the first pass table that
         # holds its counters, so it never mixes counters from two passes
         for pass_sys_info in reversed(table_sys_infos[:-1]):
@@ -1150,14 +1168,15 @@ class db_analysis(OmniAnalyze_Base):
             })
 
         values = []
-        for row in expression_df.itertuples(index=False):
-            index = counter_table_index(row.value, tables, build_in_vars)
+        for row, table_index in zip(
+            expression_df.itertuples(index=False), table_index_of_row
+        ):
             values.append(
                 db_analysis.evaluate(
                     f"{row.metric_id} - {row.value_name}",
                     row.value,
-                    tables[index],
-                    table_sys_infos[index],
+                    tables[table_index],
+                    table_sys_infos[table_index],
                 )
             )
         return pd.Series(values, index=expression_df.index)
@@ -1220,7 +1239,7 @@ class db_analysis(OmniAnalyze_Base):
 
         for workload_path in self._pmc_df_per_workload.keys():
             pmc_df = self._pmc_df_per_workload[workload_path]
-            pass_tables = self._pass_tables_per_workload[workload_path].values()
+            pass_tables = self._pass_tables_per_workload[workload_path]
             expression_template = self._metric_expression_data_per_workload[
                 workload_path
             ]
@@ -1249,9 +1268,7 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_pmc_df,
                     sys_info.copy(),
                     kernel_expression_df,
-                    pass_tables=[
-                        table.loc[kernel_pmc_df.index] for table in pass_tables
-                    ],
+                    pass_tables=pass_tables_on_rows(pass_tables, kernel_pmc_df),
                 )
                 new_kernel_rows.extend(
                     db_analysis._derive_pct_of_peak_values(
@@ -1278,7 +1295,7 @@ class db_analysis(OmniAnalyze_Base):
                 pmc_df,
                 sys_info.copy(),
                 workload_expression_df,
-                pass_tables=[table.loc[pmc_df.index] for table in pass_tables],
+                pass_tables=pass_tables_on_rows(pass_tables, pmc_df),
             )
             db_analysis.validate_dual_issue_metrics(
                 pmc_df,
@@ -1593,7 +1610,7 @@ class db_analysis(OmniAnalyze_Base):
                 ],
                 columns=["metric_id", "value_name", "value"],
             )
-            pass_tables = self._pass_tables_per_workload[workload_path].values()
+            pass_tables = self._pass_tables_per_workload[workload_path]
             roofline_rows = []
             for kernel_name in top_kernels:
                 kernel_pmc_df = pmc_df[pmc_df["Kernel_Name"] == kernel_name]
@@ -1601,9 +1618,7 @@ class db_analysis(OmniAnalyze_Base):
                     kernel_pmc_df,
                     sys_info.copy(),
                     expression_df,
-                    pass_tables=[
-                        table.loc[kernel_pmc_df.index] for table in pass_tables
-                    ],
+                    pass_tables=pass_tables_on_rows(pass_tables, kernel_pmc_df),
                 )
                 roofline_rows.append({
                     "kernel_name": kernel_name,

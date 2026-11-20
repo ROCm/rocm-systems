@@ -79,13 +79,14 @@ class IOLink {
  private:
   uint32_t node_indx_;
   uint32_t link_indx_;
-  IO_LINK_TYPE type_;
-  uint32_t node_from_;
-  uint32_t node_to_;
-  uint32_t flags_;
-  uint64_t weight_;
-  uint64_t min_bandwidth_;
-  uint64_t max_bandwidth_;
+  // Zero until Initialize() reads them, so a failed Initialize() leaves none indeterminate.
+  IO_LINK_TYPE type_ = IOLINK_TYPE_UNDEFINED;
+  uint32_t node_from_ = 0;
+  uint32_t node_to_ = 0;
+  uint32_t flags_ = 0;
+  uint64_t weight_ = 0;
+  uint64_t min_bandwidth_ = 0;
+  uint64_t max_bandwidth_ = 0;
   std::map<std::string, uint64_t> properties_;
   LINK_DIRECTORY_TYPE link_dir_type_;
   rsmi_p2p_capability_t link_cap_;

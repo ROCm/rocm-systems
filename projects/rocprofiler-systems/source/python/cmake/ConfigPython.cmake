@@ -108,14 +108,3 @@ if(ROCPROFSYS_BUILD_PYTHON AND NOT TARGET pybind11)
                                           VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION
     )
 endif()
-
-execute_process(
-    COMMAND
-        ${PYTHON_EXECUTABLE} -c
-        "import time ; print('{} {}'.format(time.ctime(), time.tzname[0]))"
-    OUTPUT_VARIABLE ROCPROFSYS_INSTALL_DATE
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET
-)
-
-string(REPLACE "  " " " ROCPROFSYS_INSTALL_DATE "${ROCPROFSYS_INSTALL_DATE}")

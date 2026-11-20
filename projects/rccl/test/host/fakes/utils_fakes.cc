@@ -60,7 +60,17 @@ ASSERT_HOOK_MATCHES_PROD(g_getBusId, getBusId);
 
 ncclResult_t getBusId(int cudaDev, int64_t* busId) { return g_getBusId(cudaDev, busId); }
 
-void ResetUtilsFakes() { g_getBusId = DefaultGetBusId; }
+static ncclResult_t DefaultInt64ToBusId(int64_t, char*) {
+  FailLoudUnfaked("utils_fakes", "int64ToBusId");
+}
+std::function<ncclResult_t(int64_t, char*)> g_int64ToBusId = DefaultInt64ToBusId;
+ASSERT_HOOK_MATCHES_PROD(g_int64ToBusId, int64ToBusId);
+ncclResult_t int64ToBusId(int64_t id, char* busId) { return g_int64ToBusId(id, busId); }
+
+void ResetUtilsFakes() {
+  g_getBusId = DefaultGetBusId;
+  g_int64ToBusId = DefaultInt64ToBusId;
+}
 
 // ncclMemoryStackConstruct is inline and leaves bumper == end == 0, so the first
 // ncclMemoryStackAlloc on a constructed stack always lands here, and callers
