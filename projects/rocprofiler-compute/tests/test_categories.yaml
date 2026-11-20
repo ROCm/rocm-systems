@@ -59,6 +59,7 @@ test_categories:
       - test_memory_chart_loader
       - test_memory_chart_units
       - test_memory_chart_render
+      - test_memory_chart_html
       - test_membw_engine
       - test_membw_summary
       - test_membw_guidance
@@ -150,6 +151,7 @@ test_categories:
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
+      - test_mem_chart_html_analyze
       - test_roofline_main
       - test_report_shell
       - test_rocpd_data
@@ -179,6 +181,7 @@ test_categories:
       - test_memory_chart_loader
       - test_memory_chart_units
       - test_memory_chart_render
+      - test_memory_chart_html
       - test_membw_engine
       - test_membw_summary
       - test_membw_guidance
@@ -284,6 +287,7 @@ test_categories:
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
+      - test_mem_chart_html_analyze
       - test_roofline_main
       - test_report_shell
       - test_rocpd_data
@@ -313,6 +317,7 @@ test_categories:
       - test_memory_chart_loader
       - test_memory_chart_units
       - test_memory_chart_render
+      - test_memory_chart_html
       - test_membw_engine
       - test_membw_summary
       - test_membw_guidance
@@ -418,6 +423,7 @@ test_categories:
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
+      - test_mem_chart_html_analyze
       - test_roofline_main
       - test_report_shell
       - test_rocpd_data
@@ -447,6 +453,7 @@ test_categories:
       - test_memory_chart_loader
       - test_memory_chart_units
       - test_memory_chart_render
+      - test_memory_chart_html
       - test_membw_engine
       - test_membw_summary
       - test_membw_guidance
