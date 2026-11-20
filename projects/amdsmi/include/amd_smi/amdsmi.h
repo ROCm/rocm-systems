@@ -1362,7 +1362,9 @@ typedef struct {
  * @brief Installed amdgpu driver package that has the kernel version of the
  * loaded driver
  *
- * @cond @tag{gpu_bm_linux} @tag{guest_1vf} @tag{guest_mvf} @endcond
+ * New values may be added; code that switches on it needs a default case.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{guest_1vf} @tag{guest_mvf} @endcond
  */
 typedef enum {
   AMDSMI_DRIVER_PACKAGE_NONE = 0,  //!< No matching installed package was found
@@ -1378,7 +1380,7 @@ typedef enum {
  * The library zero-fills the whole struct, reserved included, before it
  * writes the fields it has.
  *
- * @cond @tag{gpu_bm_linux} @tag{guest_1vf} @tag{guest_mvf} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @tag{guest_1vf} @tag{guest_mvf} @endcond
  */
 typedef struct {
   char driver_version[AMDSMI_MAX_STRING_LENGTH];         //!< amdgpu module version, such as
@@ -8216,6 +8218,7 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
  *  @ingroup tagSoftwareVersion
  *
  *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{guest_mvf}
+ *  @platform{guest_windows}
  *
  *  @details Returns the same status as ::amdsmi_get_gpu_driver_info(), and the
  *  same driver_version, driver_date and driver_name. The amdgpu module version
@@ -8237,8 +8240,10 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
  *  amdgpu-dkms package matches, the first call in a process runs /usr/bin/rpm
  *  to look for amdgpu-kmod and waits up to about 5 seconds for it. An rpm that
  *  has not answered by then is left to finish, and no amdgpu-kmod package is
- *  reported. The process keeps that answer until it exits, also after a
- *  package upgrade; amdgpu-dkms is read on every call.
+ *  reported. A found amdgpu-kmod package, or an answer that none is installed,
+ *  is kept until the process exits, also after a package upgrade. A failed
+ *  lookup is asked again after 5 seconds, and not while that rpm still runs.
+ *  amdgpu-dkms is read on every call.
  *
  *  @note The WSL backend has no amdgpu version or driver package to report;
  *  driver_full_version is then the WDDM driver version.

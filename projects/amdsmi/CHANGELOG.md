@@ -61,12 +61,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The `BUILD_CUID` CMake option now takes `AUTO` (default), `ON` or `OFF`. It was off by default.
 
 - **Added `amdsmi_get_gpu_driver_info_v2()` to report the amdgpu driver build and package**.  
-  - Returns the fields of `amdsmi_get_gpu_driver_info()` and the kernel and amdgpu parts of the driver version. When the installed `amdgpu-dkms` or `amdgpu-kmod` package matches the loaded driver, it also returns that package, its build, and the full version such as `6.19.14.31400000-2370381`. Includes Python and Rust bindings.
+  - Returns the driver name, version and date, plus the installed ``amdgpu-dkms`` or ``amdgpu-kmod`` package and its build, for example ``6.19.14.31400000-2370381``. Also available from Python and Rust.
 
 ### Changed
 
 - **`amd-smi` now shows the driver package build in the amdgpu version**.  
-  - `amd-smi`, `amd-smi version`, and `amd-smi static --driver` report the version as `6.19.14.31400000-2370381` and name the driver package when the installed `amdgpu-dkms` or `amdgpu-kmod` package matches the loaded driver. Scripts that parse the amdgpu version now get the `-<build>` suffix, and `amd-smi static --csv` has a new `package` column after `os_kernel_version`.
+  - ``amd-smi``, ``amd-smi version`` and ``amd-smi static --driver`` show the version as ``6.19.14.31400000-2370381`` and name the package. Scripts that match the version exactly now see the ``-<build>`` suffix, and the output gains new keys: ``amdgpu_package`` in ``amd-smi version``, ``package`` in ``amd-smi static --driver`` (also a CSV column after ``os_kernel_version``, so the columns that follow it in a combined ``amd-smi static`` CSV move by one), and five fields in the ``amdgpu version`` object of ``amd-smi default --json``.
 
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.

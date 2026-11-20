@@ -5305,9 +5305,9 @@ pub fn amdsmi_get_gpu_driver_info(
 /// package, and the full version that joins module version and build. A string that is not
 /// available is empty, except `driver_version`, which is `N/A` as in [`AmdsmiDriverInfoT`].
 ///
-/// When no amdgpu-dkms package matches, the first call in a process runs `/usr/bin/rpm` to look
-/// for amdgpu-kmod and can wait up to about 5 seconds for it. The process keeps that answer until
-/// it exits.
+/// A call may wait up to about 5 seconds for `rpm`, as described for
+/// `amdsmi_get_gpu_driver_info_v2()` in `amdsmi.h`. An answer from `rpm` is kept until the
+/// process exits. A failed lookup is asked again after 5 seconds.
 ///
 /// An amdgpu-kmod driver has a three-part version such as `6.16.13` and an empty
 /// `amdgpu_driver_version`. On WSL both version fields hold the WDDM driver version.

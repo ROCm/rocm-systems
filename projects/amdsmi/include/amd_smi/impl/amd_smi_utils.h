@@ -11,10 +11,12 @@
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <iosfwd>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -328,6 +330,7 @@ auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
 inline constexpr auto kAmdgpuDkmsRoot = std::string_view{"/var/lib/dkms/amdgpu"};
 inline constexpr auto kRpmPath = std::string_view{"/usr/bin/rpm"};
 inline constexpr auto kRpmQueryTimeout = std::chrono::milliseconds{5000};
+inline constexpr auto kKmodRetryInterval = std::chrono::seconds{5};
 
 /**
  *  @brief Select the DKMS package built for a running kernel.
@@ -357,7 +360,8 @@ auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_
  *
  *  @details Runs ``<rpm_path> --eval '%{_dbpath}'`` and then, only when that
  *  directory holds a packages file (Packages, Packages.db or rpmdb.sqlite),
- *  ``<rpm_path> -q --qf '%{VERSION}-%{RELEASE}\n' amdgpu-kmod-<release>``.
+ *  ``<rpm_path> -qa --qf '%{VERSION}-%{RELEASE}\n' amdgpu-kmod-<release>``,
+ *  which lists nothing, and exits 0, when that package is not installed.
  *  The first command is a check before the query, which makes rpm create a
  *  database where it finds none; it does not guarantee that rpm writes
  *  nothing. Both run without a shell, with LC_ALL=C and HOME=/ as their whole
@@ -368,21 +372,59 @@ auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_
  *  @param[in] release Kernel release from uname; kmod package names embed it.
  *  @param[out] kmod_versions Cleared on entry. Set to one ``VERSION-<build>``
  *              for each installed version, where build is the leading digits
- *              of RELEASE (6.16.13.000000-2412345).
+ *              of RELEASE (6.16.13.000000-2412345). Empty when the package
+ *              is not installed.
  *  @param[in] timeout Limit for both commands together, up to the exit of
  *             rpm. An rpm that is still running then is left to end by
- *             itself: it is not signalled, killed or waited for again.
+ *             itself and is not signalled or killed. While it runs, this
+ *             function starts no other rpm and reports
+ *             ::AMDSMI_STATUS_NOT_SUPPORTED; the first call after it has
+ *             ended reaps it.
  *
- *  @retval ::AMDSMI_STATUS_SUCCESS when rpm listed the installed versions.
- *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED when the package is not installed, a
- *          listed version has no build, or rpm gave no complete answer in
- *          time.
+ *  @retval ::AMDSMI_STATUS_SUCCESS when rpm listed the installed versions, also
+ *          when it listed none.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED when a listed version has no build,
+ *          or rpm failed or gave no complete answer in time.
  *  @retval ::AMDSMI_STATUS_INVAL if @p kmod_versions is null.
  */
 auto smi_amdgpu_get_kmod_versions(std::string_view rpm_path, std::string_view release,
                                   std::vector<std::string>* kmod_versions,
                                   std::chrono::milliseconds timeout = kRpmQueryTimeout)
     -> amdsmi_status_t;
+
+/**
+ *  @brief Keeps the answer of smi_amdgpu_get_kmod_versions() for one kernel
+ *  release, asking rpm again only when that is worth it.
+ *
+ *  @details A list that rpm gave is kept until the object ends: the package
+ *  of a running kernel does not change, and rpm is slow to start. That holds
+ *  for an empty list too: no package installed is an answer. A failed lookup,
+ *  such as an rpm that was busy, is asked again after @p retry_after.
+ *  Thread safe. rpm runs once at a time and without the lock. A caller that
+ *  has no answer for @p release waits for it. One that has only a stale
+ *  failure gets that at once while another caller asks rpm, and asks rpm
+ *  itself otherwise.
+ */
+class KmodVersionCache {
+ public:
+  explicit KmodVersionCache(std::string_view rpm_path,
+                            std::chrono::milliseconds retry_after = kKmodRetryInterval);
+
+  /** @brief The versions for @p release, empty when rpm gave none. */
+  auto versions(std::string_view release) -> std::vector<std::string>;
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable refreshed_;
+  std::string rpm_path_;
+  std::chrono::milliseconds retry_after_;
+  std::string release_;
+  std::vector<std::string> versions_;
+  std::chrono::steady_clock::time_point asked_at_{};
+  bool has_answer_ = false;
+  bool is_found_ = false;
+  bool is_refreshing_ = false;
+};
 
 /**
  *  @brief Fill the version and package fields of @p info.

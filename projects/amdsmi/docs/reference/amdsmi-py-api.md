@@ -735,8 +735,10 @@ When the loaded driver has an amdgpu version (`A.B.C` or `A.B.C.D`) that no
 `amdgpu-dkms` package matches, the first call in a process runs `/usr/bin/rpm`
 to look for `amdgpu-kmod` and waits up to about 5 seconds for it. An rpm that
 has not answered by then is left to finish, and no `amdgpu-kmod` package is
-reported. The process keeps that answer until it exits, also after a package
-upgrade; `amdgpu-dkms` is read on every call.
+reported. A found ``amdgpu-kmod`` package, or an answer that none is installed,
+is kept until the process exits, also after a package upgrade. A failed lookup
+is asked again after 5 seconds, and not while that rpm still runs.
+``amdgpu-dkms`` is read on every call.
 
 A driver from an `amdgpu-kmod` package has a three-part version such as
 `6.16.13`, so its `amdgpu_driver_version` is `N/A`. On WSL `driver_version` and

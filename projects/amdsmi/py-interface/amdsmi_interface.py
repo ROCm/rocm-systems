@@ -4497,9 +4497,9 @@ def amdsmi_get_gpu_driver_info_v2(processor_handle: processor_handle_t) -> Dict[
     kernel version of the loaded driver. Without one, driver_package and
     driver_build_version are "N/A" and driver_full_version is driver_version.
 
-    When no amdgpu-dkms package matches, the first call in a process runs
-    /usr/bin/rpm to look for amdgpu-kmod and can wait up to about 5 seconds for
-    it. The process keeps that answer until it exits.
+    A call may wait up to about 5 seconds for rpm, as described for
+    amdsmi_get_gpu_driver_info_v2() in amdsmi.h. An answer from rpm is kept
+    until the process exits. A failed lookup is asked again after 5 seconds.
 
     An amdgpu-kmod driver has a three-part version such as 6.16.13 and no
     amdgpu_driver_version. On WSL both version values are the WDDM driver
