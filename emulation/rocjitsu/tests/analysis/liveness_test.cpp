@@ -22,11 +22,14 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vbuffer.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/mubuf.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -48,6 +51,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -91,6 +95,11 @@ private:
 
 class TestInstruction : public Instruction {
 public:
+  TestInstruction(amdgpu::Operation operation, std::string_view mnemonic)
+      : TestInstruction(mnemonic) {
+    set_amdgpu_operation(operation);
+  }
+
   // `literal_src`, when set, appends one literal source operand carrying the
   // given value via literal64_value() — models an instruction's literal64
   // (SIMM) immediate, e.g. the all-ones source of `s_mov_b64 exec, <lit>`.
@@ -206,6 +215,8 @@ enum class TestOpcode : uint32_t {
   WriteExecHiHalf = 23,
   WriteExecHiHalfZero = 25,
   PartialDefSgpr4 = 24,
+  SetregWithoutHwreg = 26,
+  SetregImmWithoutHwreg = 27,
 };
 
 class TestDecoder : public Decoder {
@@ -293,6 +304,10 @@ public:
       return new TestInstruction("test_partial_def_s4", {{RegClass::SGPR, 4, 1}}, {}, 0,
                                  std::nullopt, {}, std::nullopt, std::nullopt,
                                  /*def_size_bits=*/16);
+    case TestOpcode::SetregWithoutHwreg:
+      return new TestInstruction(amdgpu::Operation::S_SETREG_B32, "s_setreg_b32");
+    case TestOpcode::SetregImmWithoutHwreg:
+      return new TestInstruction(amdgpu::Operation::S_SETREG_IMM32_B32, "s_setreg_imm32_b32");
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
@@ -914,7 +929,7 @@ TEST(LivenessAnalysis, Gfx12GlobalTransposeKillsOnlyTheWaveSizedResult) {
   }
 }
 
-TEST(GeneratedInstDefUse, Gfx10SubvectorLoopReadsSavedMaskOnlyAtEnd) {
+TEST(GeneratedInstDefUse, Gfx10SubvectorLoopTracksSavedMaskReadsByTarget) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
     auto decoder = Decoder::create(arch);
     for (const auto op : {27u, 28u}) {
@@ -925,7 +940,8 @@ TEST(GeneratedInstDefUse, Gfx10SubvectorLoopReadsSavedMaskOnlyAtEnd) {
       ASSERT_EQ(inst.value()->mnemonic(), end ? "s_subvector_loop_end" : "s_subvector_loop_begin");
       const InstDefUse accesses(*inst.value(), 64);
       EXPECT_TRUE(accesses.defs.contains({RegClass::SGPR, 4, 1}));
-      EXPECT_EQ(accesses.uses.contains({RegClass::SGPR, 4, 1}), end);
+      EXPECT_EQ(accesses.uses.contains({RegClass::SGPR, 4, 1}),
+                end || arch == ROCJITSU_CODE_ARCH_RDNA1);
     }
   }
 }
@@ -5784,6 +5800,17 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
   EXPECT_NE(*free_vgpr, 0);
 }
 
+TEST(VgprMsbHwregSlice, MatchesTheBankFieldBitsForEveryEncoding) {
+  for (uint32_t encoding = 0; encoding <= 0xffffu; ++encoding) {
+    const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(encoding);
+    bool overlaps = false;
+    for (uint32_t bit = 12; bit <= 19; ++bit)
+      overlaps |= slice.id == amdgpu::MODE_HWREG && bit >= slice.begin &&
+                  bit < static_cast<uint32_t>(slice.begin) + slice.width;
+    ASSERT_EQ(amdgpu::hwreg_slice_overlaps_vgpr_msb(encoding), overlaps) << encoding;
+  }
+}
+
 TEST(LivenessAnalysis, Gfx1250VgprMsbResolvesPhysicalRegisterBank) {
   // src0=2 and dst=2 select physical VGPR bank 2. The VOP1 source encoding
   // still contains v1, but liveness must identify the architectural register
@@ -5916,6 +5943,95 @@ TEST(LivenessAnalysis, Gfx1250SwmmacTiedCAndNarrowResultResolveDestinationBank) 
   auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 24, 8});
   ASSERT_TRUE(maybe_is_live_2.succeeded());
   EXPECT_FALSE(maybe_is_live_2.value());
+}
+
+TEST(LivenessAnalysis, Gfx12D16SamplesUseThePreservedDestinationHalf) {
+  const auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  for (uint8_t mask : {0u, 1u, 3u}) {
+    for (bool packed : {false, true}) {
+      for (bool lwe : {false, true}) {
+        rdna4::VsampleBuilderFields fields{};
+        fields.lwe = lwe;
+        fields.tfe = 1;
+        fields.dim = 1;
+        fields.dmask = mask;
+        fields.d16 = packed;
+        fields.vdata = 8;
+        fields.vaddr1 = 1;
+        const auto words = rdna4::build_vsample(rdna4::kImageSampleLzVsample, fields);
+        const auto inst = decoder->decode_window(words);
+        ASSERT_TRUE(inst.succeeded());
+        const InstDefUse uses(*inst.value(), 32);
+        const RegisterRef data{RegClass::VGPR, 8, 1};
+        EXPECT_TRUE(uses.defs.contains(data));
+        EXPECT_EQ(uses.uses.contains(data), packed && mask != 3);
+        const RegisterRef status{RegClass::VGPR,
+                                 static_cast<uint16_t>(8 + ((!packed && mask == 3) ? 2 : 1)), 1};
+        EXPECT_EQ(uses.conditional_vgpr_def, mask || lwe ? std::optional{status} : std::nullopt);
+      }
+    }
+  }
+}
+
+TEST(LivenessAnalysis, ReturningImageAtomicTfeRetainsLiveStatusAtFullExec) {
+  for (auto target :
+       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA4}) {
+    const bool gfx12 = target == ROCJITSU_CODE_ARCH_RDNA4;
+    auto decoder = Decoder::create(target);
+    for (bool returns : {false, true}) {
+      for (bool tfe : {false, true}) {
+        for (bool read_status : {false, true}) {
+          std::vector<uint32_t> words;
+          if (gfx12) {
+            const auto image =
+                rdna4::build_vimage(rdna4::kImageAtomicAddUintVimage, {.dim = 1,
+                                                                       .dmask = 1,
+                                                                       .vdata = 8,
+                                                                       .th = uint8_t(returns),
+                                                                       .tfe = uint8_t(tfe),
+                                                                       .vaddr1 = 1});
+            const auto full = rdna4::build_sop1(rdna4::kSMovB32Sop1, {.ssrc0 = 193, .sdst = 126});
+            const auto wait = rdna4::build_sopp(rdna4::kSWaitLoadcntSopp);
+            const auto read = rdna4::build_vop1(
+                rdna4::kVMovB32Vop1,
+                {.src0 = static_cast<uint16_t>(256 + (read_status ? 9 : 8)), .vdst = 50});
+            const auto end = rdna4::build_sopp(rdna4::kSEndpgmSopp);
+            words = {full[0], image[0], image[1], image[2], wait[0], read[0], end[0]};
+          } else {
+            rdna1::MimgBuilderFields fields{};
+            fields.dim = fields.dmask = fields.unorm = 1;
+            fields.glc = returns;
+            fields.tfe = tfe;
+            fields.vdata = 8;
+            const auto image = rdna1::build_mimg(rdna1::kImageAtomicFminMimg, fields);
+            const auto full = rdna1::build_sop1(rdna1::kSMovB32Sop1, {.ssrc0 = 193, .sdst = 126});
+            const auto wait = rdna1::build_sopp(rdna1::kSWaitcntSopp, {.simm16 = 0x3f70});
+            const auto read = rdna1::build_vop1(
+                rdna1::kVMovB32Vop1,
+                {.src0 = static_cast<uint16_t>(256 + (read_status ? 9 : 8)), .vdst = 50});
+            const auto end = rdna1::build_sopp(rdna1::kSEndpgmSopp);
+            words = {full[0], image[0], image[1], wait[0], read[0], end[0]};
+          }
+          TestCodeObject co(std::move(words));
+          auto blocks = build_valid_blocks(co, *decoder, target);
+          ASSERT_EQ(blocks.size(), 1u);
+          const auto &inst = *std::next(blocks.front()->instructions().begin());
+          SCOPED_TRACE(inst.disassemble());
+          auto scope = block_scope(blocks);
+          auto exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), 32);
+          ASSERT_EQ(exec->before(inst), ExecState::Full);
+          LivenessAnalysis liveness(KernelBlockScope(scope), 32, std::move(exec));
+          const auto live = liveness.live_before(inst);
+          ASSERT_TRUE(live.succeeded());
+          const InstDefUse du(inst, 32);
+          const RegisterRef status{RegClass::VGPR, 9, 1};
+          EXPECT_EQ(du.defs.contains(status), returns && tfe);
+          EXPECT_EQ(du.conditional_vgpr_def.has_value(), returns && tfe);
+          EXPECT_EQ(live.value()->contains(status), read_status);
+        }
+      }
+    }
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250D16LoadDoesNotReadDestination) {
@@ -6628,6 +6744,43 @@ TEST(LivenessAnalysis, Gfx1250AdjacentSetVgprMsbAcrossFallthroughBlockIsIgnored)
   auto maybe_is_live_2 = liveness.is_live_before(*instruction, {RegClass::VGPR, 769, 1});
   ASSERT_TRUE(maybe_is_live_2.succeeded());
   EXPECT_FALSE(maybe_is_live_2.value());
+}
+
+TEST(LivenessAnalysis, Gfx1250MissingHwregOperandMarksBanksAmbiguous) {
+  // A synthetic decoder models a malformed instruction whose missing HWREG
+  // destination cannot prove that the known entry banks survive the write.
+  for (const TestOpcode opcode :
+       {TestOpcode::SetregWithoutHwreg, TestOpcode::SetregImmWithoutHwreg}) {
+    SCOPED_TRACE(static_cast<uint32_t>(opcode));
+    // A zero-word synthetic NOP would be skipped as gfx1250 alignment padding.
+    const TestCodeObject object({static_cast<uint32_t>(opcode),
+                                 static_cast<uint32_t>(TestOpcode::UseVgpr0),
+                                 static_cast<uint32_t>(TestOpcode::End)});
+    TestDecoder decoder;
+    const std::vector<std::unique_ptr<BasicBlock>> blocks =
+        build_valid_blocks(object, decoder, ROCJITSU_CODE_ARCH_CDNA5);
+    ASSERT_EQ(blocks.size(), 1u);
+    ASSERT_EQ(blocks.front()->num_instructions(), 3u);
+    const std::vector<BasicBlock *> scope = block_scope(blocks);
+    const LivenessAnalysisOptions options = {.arch = ROCJITSU_CODE_ARCH_CDNA5,
+                                             .entry_block = scope.front(),
+                                             .additional_entry_blocks = {}};
+    const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
+    LivenessAnalysis liveness(KernelBlockScope(scope), 64, std::make_unique<ExecMaskAnalysis>(exec),
+                              options);
+    const Instruction &write = *blocks.front()->instructions().begin();
+    const Instruction &next = *std::next(blocks.front()->instructions().begin());
+    ASSERT_EQ(write.dst_operand(0), nullptr);
+    for (const amdgpu::VgprMsbRole role : {amdgpu::VgprMsbRole::Src0, amdgpu::VgprMsbRole::Src1,
+                                           amdgpu::VgprMsbRole::Src2, amdgpu::VgprMsbRole::Dst}) {
+      const FailureOr<std::optional<uint8_t>> before = liveness.vgpr_msb_bank_before(write, role);
+      ASSERT_TRUE(before.succeeded());
+      ASSERT_EQ(before.value(), 0);
+      const FailureOr<std::optional<uint8_t>> after = liveness.vgpr_msb_bank_before(next, role);
+      ASSERT_TRUE(after.succeeded());
+      EXPECT_EQ(after.value(), std::nullopt);
+    }
+  }
 }
 
 TEST(LivenessAnalysis, Gfx1250TruncatedLiteralModeWriteMarksBanksAmbiguous) {
@@ -8617,8 +8770,235 @@ TEST(GeneratedInstDefUse, Gfx1150ExportTracksEnabledChannelsAndRowSource) {
   }
 }
 
+TEST(GeneratedInstDefUse, Gfx1150ImageLivenessFollowsVaddrSelectors) {
+  struct Case {
+    uint16_t opcode;
+    uint8_t dim;
+    bool a16;
+    uint8_t count;
+  };
+  // The fifth GFX11 NSA selector starts the consecutive tail of a longer tuple.
+  constexpr std::array<uint16_t, 12> scattered{23, 29, 30, 11, 41, 42, 43, 44, 45, 46, 47, 48};
+  const Case cases[]{
+      {rdna3_5::kImageLoadPckMimg, 1, false, 2},
+      {rdna3_5::kImageLoadMipPckMimg, 1, false, 3},
+      {rdna3_5::kImageLoadMipPckMimg, 2, false, 4},
+      {rdna3_5::kImageLoadPckMimg, 2, true, 2},
+      {rdna3_5::kImageAtomicAddMimg, 1, false, 2},
+      {rdna3_5::kImageSampleCMimg, 1, false, 3},      // comparison and 2D coordinates
+      {rdna3_5::kImageSampleCDClOMimg, 2, false, 12}, // offset, comparison, 6 gradients, xyz, clamp
+      {rdna3_5::kImageSampleCDClOG16Mimg, 2, true, 8}, // 4 gradient words, packed coordinates
+  };
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+  for (const auto &test : cases) {
+    for (bool nsa : {false, true}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << test.opcode << " nsa=" << nsa);
+      const auto image = rdna3_5::build_mimg(
+          test.opcode,
+          {.nsa = nsa, .dim = test.dim, .dmask = 1, .a16 = test.a16, .vaddr = 23, .vdata = 100});
+      std::vector<uint32_t> words{image[0], image[1]};
+      if (nsa)
+        words.push_back(29u | (30u << 8) | (11u << 16) | (41u << 24));
+      words.push_back(rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0]);
+      TestCodeObject co(std::move(words));
+      auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA3_5);
+      ASSERT_EQ(blocks.size(), 1u);
+      auto scope = block_scope(blocks);
+      LivenessAnalysis liveness(KernelBlockScope(scope), 32);
+      const Instruction &inst = *blocks.front()->instructions().begin();
+      InstDefUse def_use(inst, 32);
+      auto live = liveness.live_before(inst);
+      ASSERT_TRUE(live.succeeded());
+      ASSERT_NE(live.value(), nullptr);
+      amdgpu::RegisterModifiers modifiers{};
+      inst.amdgpu_register_modifiers(modifiers);
+      const unsigned coordinate_words = modifiers.image_a16
+                                            ? (modifiers.image_coordinate_count + 1) / 2
+                                            : modifiers.image_coordinate_count;
+      ASSERT_EQ(modifiers.image_prefix_words + coordinate_words, test.count);
+      std::bitset<96> expected;
+      for (unsigned i = 0; i < test.count; ++i) {
+        const uint16_t reg = nsa ? scattered[i] : 23 + i;
+        expected.set(reg);
+        EXPECT_EQ(modifiers.image_coordinates[i], reg);
+      }
+      for (uint16_t reg = 0; reg < expected.size(); ++reg) {
+        const RegisterRef ref{RegClass::VGPR, reg, 1};
+        EXPECT_EQ(def_use.uses.contains(ref), expected.test(reg)) << reg;
+        EXPECT_EQ(live.value()->contains(ref), expected.test(reg)) << reg;
+      }
+    }
+  }
+}
+
+TEST(GeneratedInstDefUse, Gfx10GetLodTracksCubeFacesButSkipsArrayLayersAtIssue) {
+  struct Dimension {
+    uint8_t dim, coordinates, issue_coordinates;
+  };
+  // GET_LOD reads the cube face for its derivative quad and skips array layer selectors.
+  constexpr Dimension dims[] = {{0, 1, 1}, {1, 2, 2}, {2, 3, 3}, {3, 3, 3}, {4, 2, 1}, {5, 3, 2}};
+  constexpr std::array packed_text{", v2, ", ", v[2:3], ", ", v[2:4], "};
+  constexpr std::array nsa_text{", v2, ", ", [v2, v7], ", ", [v2, v7, v11], "};
+  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (const auto dim : dims) {
+      for (const bool a16 : {false, true}) {
+        const unsigned words = a16 ? (dim.coordinates + 1) / 2 : dim.coordinates;
+        for (const bool nsa : {false, true}) {
+          if (nsa && words == 1)
+            continue;
+          SCOPED_TRACE(testing::Message() << "arch=" << arch << " dim=" << +dim.dim
+                                          << " a16=" << a16 << " nsa=" << nsa);
+          const auto op = rdna1::build_mimg(
+              rdna1::kImageGetLodMimg,
+              {.nsa = nsa, .dim = dim.dim, .dmask = 3, .vaddr = 2, .ssamp = 2, .a16 = a16});
+          const std::array encoding{op[0], op[1], 0x0b07u};
+          const std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoding.data()));
+          ASSERT_NE(inst, nullptr);
+          EXPECT_NE(inst->disassemble().find((nsa ? nsa_text : packed_text)[words - 1]),
+                    std::string::npos)
+              << inst->disassemble();
+          const InstDefUse def_use(*inst, 32);
+          for (uint16_t reg = 2; reg <= 11; ++reg) {
+            const bool used =
+                nsa ? reg == 2 || reg == 7 || (words == 3 && reg == 11) : reg < 2 + words;
+            EXPECT_EQ(def_use.uses.contains({RegClass::VGPR, reg, 1}), used) << reg;
+          }
+          amdgpu::RegisterModifiers issue{};
+          inst->amdgpu_register_modifiers(issue);
+          EXPECT_TRUE(issue.gfx10_lod_query_quad);
+          EXPECT_EQ(issue.image_a16, a16);
+          EXPECT_EQ(issue.image_coordinate_count, dim.issue_coordinates);
+        }
+      }
+    }
+  }
+}
+
+TEST(GeneratedInstDefUse, Gfx1150D16SampleKeepsPackedDataHalfLive) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  ASSERT_NE(decoder, nullptr);
+  for (uint8_t dmask : {0u, 3u, 7u}) {
+    for (unsigned flags = 0; flags < 4; ++flags) {
+      const bool tfe = flags & 1, lwe = flags & 2;
+      SCOPED_TRACE(testing::Message() << "dmask=" << unsigned{dmask} << " flags=" << flags);
+      // image_sample_o v[100:102], [v23, v29, v30], s[0:7], s[8:11]
+      // dmask:0x7 dim:SQ_RSRC_IMG_2D tfe d16 packs XY in v100, Z in v101.lo,
+      // and writes its optional full-width feedback to v102.
+      const auto words = rdna3_5::build_mimg(rdna3_5::kImageSampleOMimg, {.nsa = 1,
+                                                                          .dim = 1,
+                                                                          .dmask = dmask,
+                                                                          .d16 = 1,
+                                                                          .vaddr = 23,
+                                                                          .vdata = 100,
+                                                                          .tfe = tfe,
+                                                                          .lwe = lwe,
+                                                                          .ssamp = 2});
+      TestCodeObject co(
+          {words[0], words[1], 0x1e1d, rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0]});
+      auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA3_5);
+      ASSERT_EQ(blocks.size(), 1u);
+      auto scope = block_scope(blocks);
+      LivenessAnalysis liveness(KernelBlockScope(scope), 32);
+      const auto &inst = *blocks.front()->instructions().begin();
+      InstDefUse du(inst, 32);
+      auto live = liveness.live_before(inst);
+      ASSERT_TRUE(live.succeeded());
+      ASSERT_NE(live.value(), nullptr);
+      const unsigned data_words = dmask == 7 ? 2 : 1;
+      for (unsigned i = 0; i < 3; ++i) {
+        const RegisterRef ref{RegClass::VGPR, static_cast<uint16_t>(100 + i), 1};
+        const bool preserves_half = (dmask == 7 && i == 1) || (dmask == 0 && i == 0);
+        EXPECT_EQ(du.defs.contains(ref), i < data_words + (lwe || (tfe && dmask)));
+        EXPECT_EQ(du.uses.contains(ref), preserves_half);
+        EXPECT_EQ(live.value()->contains(ref), preserves_half);
+      }
+    }
+  }
+}
+
 // A use after s_waitcnt must keep resident lanes' incoming status live even
 // with full EXEC. A shader that discards feedback should not acquire a read.
+TEST(GeneratedInstDefUse, Gfx1150ImageFeedbackIsConditionalAtFullExec) {
+  struct Case {
+    uint16_t opcode;
+    uint8_t dmask, data_words;
+    bool tfe, lwe, has_status;
+    bool atomic = false, returns = true;
+  };
+  const Case cases[]{
+      {rdna3_5::kImageLoadMimg, 3, 2, true, false, true},
+      {rdna3_5::kImageLoadPckMimg, 1, 1, true, false, true},
+      {rdna3_5::kImageSampleLzOMimg, 3, 2, true, true, true},
+      {rdna3_5::kImageSampleLzOMimg, 0, 1, true, false, false},
+      {rdna3_5::kImageSampleLzOMimg, 0, 1, false, true, true},
+      {rdna3_5::kImageSampleLzOMimg, 0, 1, true, true, true},
+      {rdna3_5::kImageSampleLzOMimg, 3, 2, false, false, false},
+      {rdna3_5::kImageGather4Mimg, 1, 4, false, true, true},
+      {rdna3_5::kImageGetLodMimg, 3, 2, false, true, false},
+      {rdna3_5::kImageGetResinfoMimg, 1, 1, false, false, false},
+      {rdna3_5::kImageAtomicAddMimg, 1, 1, true, false, true, true, true},
+      {rdna3_5::kImageAtomicAddMimg, 1, 1, false, false, false, true, true},
+      {rdna3_5::kImageAtomicAddMimg, 1, 1, true, false, false, true, false},
+  };
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3_5);
+  for (const auto &test : cases) {
+    for (bool r128 : {false, true}) {
+      for (bool read_status : {false, true}) {
+        SCOPED_TRACE(testing::Message()
+                     << "opcode=" << test.opcode << " dmask=" << +test.dmask << " tfe=" << test.tfe
+                     << " lwe=" << test.lwe << " returns=" << test.returns << " r128=" << r128
+                     << " read_status=" << read_status);
+        constexpr uint8_t data = 20;
+        const uint16_t status = data + test.data_words;
+        const auto image = rdna3_5::build_mimg(test.opcode, {.dim = 1,
+                                                             .dmask = test.dmask,
+                                                             .glc = test.atomic && test.returns,
+                                                             .r128 = r128,
+                                                             .vdata = data,
+                                                             .tfe = test.tfe,
+                                                             .lwe = test.lwe});
+        std::vector<uint32_t> words{
+            rdna3_5::build_sop1(rdna3_5::kSMovB32Sop1, {.ssrc0 = 193, .sdst = 126})[0], image[0],
+            image[1], rdna3_5::build_sopp(rdna3_5::kSWaitcntSopp)[0]};
+        for (uint16_t reg = data; reg < status + read_status; ++reg)
+          words.push_back(rdna3_5::build_vop1(
+              rdna3_5::kVMovB32Vop1, {.src0 = static_cast<uint16_t>(256 + reg), .vdst = 50})[0]);
+        words.push_back(rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0]);
+        TestCodeObject co(std::move(words));
+        auto blocks = build_valid_blocks(co, *decoder, ROCJITSU_CODE_ARCH_RDNA3_5);
+        ASSERT_EQ(blocks.size(), 1u);
+        const auto insts = insts_of(*blocks.front());
+        ASSERT_GE(insts.size(), 5u);
+        const Instruction &inst = *insts[1];
+        // LLVM's assembly tuple counts TFE even for DMASK=0 and ignores LWE.
+        const unsigned printed_words = test.data_words + test.tfe;
+        const std::string printed =
+            printed_words == 1 ? " v20,"
+                               : " v[20:" + std::to_string(data + printed_words - 1) + "],";
+        EXPECT_NE(inst.disassemble().find(printed), std::string::npos) << inst.disassemble();
+        auto scope = block_scope(blocks);
+        auto exec = std::make_unique<ExecMaskAnalysis>(KernelBlockScope(scope), 32);
+        ASSERT_EQ(exec->before(inst), ExecState::Full);
+        LivenessAnalysis liveness(KernelBlockScope(scope), 32, std::move(exec));
+        auto live = liveness.live_before(inst);
+        ASSERT_TRUE(live.succeeded());
+        const InstDefUse du(inst, 32);
+        for (uint16_t reg = data; reg < status; ++reg) {
+          const RegisterRef ref{RegClass::VGPR, reg, 1};
+          EXPECT_EQ(du.defs.contains(ref), test.returns);
+          EXPECT_EQ(live.value()->contains(ref), test.atomic); // atomics read their payload
+        }
+        const RegisterRef feedback{RegClass::VGPR, status, 1};
+        EXPECT_EQ(du.defs.contains(feedback), test.has_status);
+        EXPECT_FALSE(du.uses.contains(feedback));
+        EXPECT_EQ(live.value()->contains(feedback), read_status);
+      }
+    }
+  }
+}
 
 TEST(GeneratedInstDefUse, D16TbufferLoadDoesNotReadDestinationWithSramEcc) {
   auto inst = decode_cdna3({0xE8040000U, 0x00000500U}); // tbuffer_load_format_d16_x, vdata=5

@@ -1030,6 +1030,15 @@ TEST_F(AbortDdaMPITest, IncompleteCollective_DdaBroadcastLl)
                            {{"RCCL_DDA_BC", "1"}, {"RCCL_DDA_LL_THRESHOLD", "262144"}}});
 }
 
+// 128K floats = 512 KiB: above the LL cap, below the LL128 cap; root 0 launches, rank np-1 does not.
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaBroadcastLl128)
+{
+    runIncompleteDdaAbort({ncclFuncBroadcast, 131072, kDdaLL128, NCCL_PROTO_LL128,
+                           {{"RCCL_DDA_BC", "1"},
+                            {"RCCL_DDA_LL_THRESHOLD", "262144"},
+                            {"RCCL_DDA_LL128_THRESHOLD", "4194304"}}});
+}
+
 /** DDA IPC (gfx942/gfx950, one node, exactly 8 ranks): every collective waits in IpcGpuBarrier. */
 class RevokeDdaIpcMPITest : public MPITestBase
 {

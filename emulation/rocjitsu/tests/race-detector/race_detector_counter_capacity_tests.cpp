@@ -559,16 +559,19 @@ TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
   }
 }
 
-// RDNA4 has split counters, but its capacity is not modeled: it has no combined
-// counters and no split capacities.
-TEST(RaceDetector, CounterCapacity_Rdna4ModelsNoCapacity) {
+TEST(RaceDetector, CounterCapacity_Rdna4ModelsItsSplitCounters) {
+  using amdgpu::WaitCounterType;
   constexpr auto capacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_RDNA4);
   EXPECT_EQ(capacities.vmcnt, 0);
   EXPECT_EQ(capacities.lgkmcnt, 0);
-  for (const auto counter : {amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterType::STORECNT,
-                             amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT,
-                             amdgpu::WaitCounterType::ASYNCCNT, amdgpu::WaitCounterType::TENSORCNT})
-    EXPECT_EQ(capacities.split(counter), 0) << static_cast<int>(counter);
+  for (const auto counter : {WaitCounterType::LOADCNT, WaitCounterType::STORECNT,
+                             WaitCounterType::DSCNT, WaitCounterType::SAMPLECNT})
+    EXPECT_EQ(capacities.split(counter), 63);
+  EXPECT_EQ(capacities.split(WaitCounterType::KMCNT), 31);
+  EXPECT_EQ(capacities.split(WaitCounterType::BVHCNT), 7);
+  EXPECT_EQ(capacities.split(WaitCounterType::EXPCNT), 7);
+  EXPECT_EQ(capacities.split(WaitCounterType::ASYNCCNT), 0);
+  EXPECT_EQ(capacities.split(WaitCounterType::TENSORCNT), 0);
 }
 
 // A full counter of two-token events is detected even though the wave holds
