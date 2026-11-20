@@ -896,6 +896,20 @@ in the following table.
         | Values ``> MAXCHANNELS`` set through ``ncclConfig_t`` are rejected
         | with ``ncclInvalidArgument`` at communicator initialization.
 
+    * - | ``RCCL_SATURATE_P2P_NCHANNELS``
+        | Tiles the P2P channel pool across the peers in one round.
+        | The per-peer count becomes the largest power of two that does not
+        | exceed the channel pool divided by the configured peer limit
+        | (``ncclConfig_t::maxP2pPeers`` when set, otherwise the communicator
+        | size).
+        | Unset is on for gfx1250 and off elsewhere. ``0`` leaves the tuned
+        | count. Any other value, including ``-1``, turns tiling on.
+        | On multi-node gfx942, a value other than unset or ``0`` also skips
+        | the remote ``ncclAlltoAll`` cap of 2 channels per peer. Unset and
+        | ``0`` still apply that cap.
+      - | Integer.
+        | Default: unset (``-2``), on for gfx1250 and off elsewhere.
+
     * - | ``NCCL_P2P_MAX_PEERS``
         | Sets the maximum number of peers a rank communicates with concurrently
         | over P2P. This overrides the value of the ``maxP2pPeers`` field in
@@ -1899,3 +1913,27 @@ threshold table introduced for gfx1250.
         | ``2``: Forced. Wherever the collective has a TDM kernel, it is selected
           regardless of predicted time or message size. Intended for A/B
           measurement, not production.
+
+    * - | ``NCCL_SYM_AG_HIER_CTAS``
+        | Block count for the hierarchical LSA AllGather
+          (``AllGather_HierLsaST``). ``0`` follows the size schedule: 64 blocks
+          when the gathered size (``nRanks`` times the bytes per rank) is below
+          1 GiB, and 72 from 1 GiB up, raised to ``NCCL_MIN_CTAS`` when that is
+          higher. A positive value uses that count for every size, clamped to
+          ``MAXCHANNELS``. ``NCCL_SYM_CTAS``, when set, is used instead, capped
+          at this limit. The launch can still drop blocks that do not fill a
+          package group. Set the same value on every rank; on a partitioned
+          communicator, initialization fails when ranks differ.
+      - | ``0``: Size schedule, 64 or 72 blocks (default).
+        | ``N``: Use ``N`` blocks for every size.
+
+    * - | ``NCCL_SYM_AG_HIER_CHUNK_BYTES``
+        | Largest chunk one block of ``AllGather_HierLsaST`` or
+          ``AllGather_HierLsaTmaST`` pushes before the
+          next chunk can overlap it. ``0`` uses 256 KiB. A positive value
+          replaces that, clamped to 1 GiB. Read once when the communicator is
+          created, so it applies to every later collective on that communicator.
+          Set the same value on every rank; on a partitioned communicator,
+          initialization fails when ranks differ.
+      - | ``0``: 256 KiB (default).
+        | ``N`` (bytes): Cap each pushed chunk at ``N`` bytes.

@@ -78,6 +78,7 @@ struct DdaKnob
 };
 const DdaKnob kDdaKnobs[] = {
     {"RCCL_DDA_LL", rcclParamDdaLL, 1},
+    {"RCCL_DDA_LL128", rcclParamDdaLL128, kDdaThresholdUnset},
     {"RCCL_DDA_LL_THRESHOLD", rcclParamDdaLLThreshold, kDdaThresholdUnset},
     {"RCCL_DDA_LL_ONESHOT_THRESHOLD", rcclParamDdaLLOneShotThreshold, 1 << 20},
     {"RCCL_DDA_LL128_ONESHOT_THRESHOLD", rcclParamDdaLL128OneShotThreshold, 4 << 20},
@@ -489,7 +490,7 @@ TEST_F(DdaFp8MPI_LL128, AllGather)
     });
 }
 
-// 256 KiB per peer gives each block several slices to move, and stays under the SPX 8 MiB LL128
+// 256 KiB per peer gives each block several slices to move, and stays under the SPX 16 MiB LL128
 // ceiling at 32 ranks.
 TEST_F(DdaFp8MPI_LL128, AllToAll)
 {
@@ -521,8 +522,9 @@ TEST_F(DdaFp8MPI_LL128TwoShot, AllReduce)
 }
 
 // ---------------------------------------------------------------------------
-// VMM (SIMPLE): RCCL_DDA_LL=0 takes out both packet tiers, and a 64 MiB DDA
-// threshold opens the VMM tier for the collectives the gfx1250 table caps at 0.
+// VMM (SIMPLE): RCCL_DDA_LL=0 and RCCL_DDA_LL128=0 take out the packet tiers, and
+// a 64 MiB DDA threshold opens the VMM tier for the collectives the gfx1250 table
+// caps at 0.
 // AllReduce runs once under the 256 KiB flat/tree split and once over it.
 // ---------------------------------------------------------------------------
 
@@ -531,7 +533,7 @@ class DdaFp8MPI_Vmm : public DdaFp8MPITest
 protected:
     std::vector<std::pair<const char*, int64_t>> tierEnv() const override
     {
-        return {{"RCCL_DDA_LL", 0}, {"RCCL_DDA_THRESHOLD", 64 << 20}};
+        return {{"RCCL_DDA_LL", 0}, {"RCCL_DDA_LL128", 0}, {"RCCL_DDA_THRESHOLD", 64 << 20}};
     }
 };
 

@@ -369,7 +369,7 @@ fn system_event_worker_with(
                         return std::ops::ControlFlow::Break(());
                     }
                     if !handled {
-                        std::process::abort();
+                        crate::core_dump::fatal_abort();
                     }
                 }
                 Ok(Some(DeviceEvent::GpuHardwareException(exception))) => {
@@ -403,7 +403,7 @@ fn system_event_worker_with(
                         return std::ops::ControlFlow::Break(());
                     }
                     if !handled {
-                        std::process::abort();
+                        crate::core_dump::fatal_abort();
                     }
                 }
                 Ok(None) => {
