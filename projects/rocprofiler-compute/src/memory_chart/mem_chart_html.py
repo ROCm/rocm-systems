@@ -8,7 +8,7 @@ analyze shows in the terminal.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from membw_analysis.models import MemBwAnalysisResult
 from membw_analysis.summary import stalls_at, status_line
@@ -20,7 +20,7 @@ from memory_chart.units import (
     numeric,
     unit_of,
 )
-from utils.html_report.report_shell import build_page
+from utils.html_report.report_shell import build_page, truncate_kernel_name
 from utils.utils_common import build_metric_details
 
 MODEL_ID = "mem-chart-model"
@@ -70,9 +70,14 @@ def chart_view(
 
 
 def mem_chart_document(
-    gpu_arch: str, heading: str, panel: Dict[str, Any], aggregate: Dict[str, Any]
+    gpu_arch: str,
+    heading: str,
+    panel: Dict[str, Any],
+    aggregate: Dict[str, Any],
+    kernels: Sequence[Tuple[str, Dict[str, Any]]] = (),
 ) -> str:
-    """The page for the chart of an arch, showing the aggregate view.
+    """The page for the chart of an arch: the aggregate view, and a view per kernel
+    as (kernel name, view) in kernel list order.
 
     Each metric on the page carries its panel config name and description.
     """
@@ -93,7 +98,13 @@ def mem_chart_document(
             {"category": category, "label": label}
             for _, label, category in LEGEND_ENTRIES
         ],
-        "views": {"aggregate": aggregate},
+        "views": {
+            "aggregate": aggregate,
+            "kernels": [
+                {"name": name, "label": truncate_kernel_name(name), "view": view}
+                for name, view in kernels
+            ],
+        },
     }
     return build_page(
         _ASSETS_DIR, "mem_chart", title=heading, model_id=MODEL_ID, model=model

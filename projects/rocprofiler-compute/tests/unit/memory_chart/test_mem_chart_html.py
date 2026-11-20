@@ -9,8 +9,11 @@ import pytest
 from memory_chart.loader import Layouts, PanelConfigs
 from memory_chart.mem_chart_html import MODEL_ID, chart_view, mem_chart_document
 from memory_chart.units import panel_units
+from utils.html_report.report_shell import truncate_kernel_name
 
 MEMORY_CHART_ARCHS = common.memory_chart_archs()
+# Longer than the kernel list shows
+LONG_KERNEL_NAME = "kernel_b" * 40
 
 
 @pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
@@ -89,7 +92,11 @@ def test_document_describes_each_value_and_groups_the_arrows():
 
     model = common.embedded_model(
         mem_chart_document(
-            "gfx950", common.MEMORY_CHART_TITLE, PanelConfigs.for_arch("gfx950"), view
+            "gfx950",
+            common.MEMORY_CHART_TITLE,
+            PanelConfigs.for_arch("gfx950"),
+            view,
+            [("kernel_a", view), (LONG_KERNEL_NAME, view)],
         ),
         MODEL_ID,
     )
@@ -102,6 +109,13 @@ def test_document_describes_each_value_and_groups_the_arrows():
     assert set(model["metrics"]) == layout.metrics()
     assert model["metrics"]["3.1.1"]["name"] == "VGPRs"
     assert all(metric["description"] for metric in model["metrics"].values())
+    # The kernel list shows names shortened as the roofline page does
+    assert [
+        (kernel["name"], kernel["label"]) for kernel in model["views"]["kernels"]
+    ] == [
+        ("kernel_a", "kernel_a"),
+        (LONG_KERNEL_NAME, truncate_kernel_name(LONG_KERNEL_NAME)),
+    ]
     # Arrows to blocks attached above or below are drawn vertically, not in edges
     assert sorted(grouped) == [
         i for i, arrow in enumerate(layout.arrows) if blocks[arrow.target].row == 0

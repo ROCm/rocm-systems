@@ -23,6 +23,20 @@
       <section id="mem-chart-guidance" class="mem-chart-guidance"
                aria-label="Memory bandwidth guidance"></section>
     </main>
+    <div class="report-panel-wrap">
+      <aside class="report-panel mem-chart-kernels" aria-label="Kernels">
+        <div class="report-panel-title">
+          <span class="report-panel-title-label">Kernels
+            <span id="mem-chart-kernel-count" class="report-panel-count"></span>
+          </span>
+          <button type="button" id="mem-chart-show-all"
+                  class="report-btn report-btn-sm">Show all</button>
+        </div>
+        <p class="report-panel-help">Click a kernel to show its values; click it
+          again or Show all to show all kernels together.</p>
+        <ul id="mem-chart-kernel-list" class="report-panel-list"></ul>
+      </aside>
+    </div>
   </div>
   <noscript>This memory chart needs JavaScript.</noscript>
 </div>
