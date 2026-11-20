@@ -11,17 +11,30 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx1150_compare_input.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/ordered_count.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string_view>
+#include <vector>
 
 namespace rocjitsu::amdgpu {
 
@@ -1985,7 +1998,29 @@ void MemoryWaitScoreboard::xcnt_ordered_write(RegisterRef reg, uint64_t lanes, u
          static_cast<uint32_t>(issued_[static_cast<size_t>(WaitCounterKind::X)] - through));
 }
 
-void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) {
+bool MemoryWaitScoreboard::counts_memory_counter(const Instruction &inst, const Wavefront &wave,
+                                                 WaitCounterKind counter) {
+  // Replay-source lifetime is independent of completion-counter occupancy.
+  if (counter == WaitCounterKind::X)
+    return true;
+  const MemoryIssueInfo *info = inst.amdgpu_memory_issue_info();
+  if (!info)
+    return true;
+  const rj_code_arch_t arch = wave.cu().arch();
+  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+    return true;
+  if (!info->exec_masked || wave.memory_exec(inst) != 0)
+    return true;
+  const MemoryIssueInfo counted = info->for_exec_zero(arch, inst.mnemonic());
+  const WaitcntModel model = waitcnt_model(arch).value();
+  return std::ranges::any_of(
+      counted.counter_obligations(), [&](MemoryCounterObligation obligation) {
+        return canonical_wait_counter(obligation.wait_counter_type(), model) == counter;
+      });
+}
+
+void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch,
+                                  const Wavefront *wave) {
   using namespace waitcheck_detail;
   // Most kernels wait well before a queue is full. Avoid classifying the
   // incoming instruction twice unless some ordered class can force progress.
@@ -2002,6 +2037,8 @@ void MemoryWaitScoreboard::before(const Instruction &inst, rj_code_arch_t arch) 
     const auto events = WaitcheckTarget::classify_events(inst, arch);
     if (events.succeeded())
       for (const auto &event : events.value()) {
+        if (wave && !counts_memory_counter(inst, *wave, event.counter))
+          continue;
         // Fixed-domain FLAT reserves both counter slots before reading its address.
         // Targets with address-dependent counters apply capacity after routing.
         if (!flat_issues_both_counter_domains(arch) &&

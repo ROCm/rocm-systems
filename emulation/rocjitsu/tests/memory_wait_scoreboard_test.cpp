@@ -13,6 +13,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -30,20 +32,46 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include "gfx11_mimg_test_common.h"
 
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <format>
 #include <fstream>
+#include <functional>
+#include <initializer_list>
+#include <ios>
 #include <iterator>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace {
 constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
@@ -2607,6 +2635,231 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
     }
   }
+}
+
+TEST(MemoryWaitExecutionTest, BufferTypeMismatchRetainsLoadcntWithoutWritingData) {
+  using namespace rocjitsu::amdhsa;
+  const util::FailureOr<uint32_t> maximum =
+      WaitCounterPolicy::maximum_dependency_wait(ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Load);
+  ASSERT_TRUE(maximum.succeeded());
+  const unsigned capacity = maximum.value() + 1;
+  // Exercise admission at capacity, occupancy before a later admission, and
+  // occupancy used by a partial wait. A wait allowing both loads keeps the
+  // first result pending, even when the second load produces no data.
+  for (std::string_view scenario : {"admission", "retention", "partial wait", "insufficient wait"})
+    for (uint32_t type : {0u, 2u})
+      for (bool zero_exec : {false, true})
+        for (bool xcnt : {false, true}) {
+          SCOPED_TRACE(std::format("scenario={} type={} zero_exec={} xcnt={}", scenario, type,
+                                   zero_exec, xcnt));
+          std::vector<uint32_t> code;
+          constexpr uint32_t sentinel = 0xfeedabcd;
+          append_instruction(code,
+                             cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 255, .vdst = 64}));
+          code.push_back(sentinel);
+          append_instruction(code,
+                             cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 100}));
+          append_instruction(code, cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 0, .sdst = 8}));
+          append_instruction(code,
+                             cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 192, .sdst = 10}));
+          append_instruction(code,
+                             cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 255, .sdst = 11}));
+          code.push_back(type << 30);
+          auto load = [&](uint8_t dest) {
+            append_instruction(code,
+                               cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
+                                                    {.saddr = 0, .vdst = dest, .vaddr = 100}));
+          };
+          const unsigned initial_loads = scenario == "admission"   ? capacity
+                                         : scenario == "retention" ? capacity - 1
+                                                                   : 1;
+          for (unsigned i = 0; i < initial_loads; ++i)
+            load(i);
+          if (zero_exec)
+            append_instruction(code,
+                               cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 128, .sdst = 126}));
+          append_instruction(
+              code, cdna5::build_vbuffer(cdna5::kBufferLoadB32Vbuffer,
+                                         {.soffset = kModernNullSelector, .vdata = 64, .rsrc = 8}));
+          if (zero_exec)
+            append_instruction(code,
+                               cdna5::build_sop1(cdna5::kSMovB64Sop1, {.ssrc0 = 193, .sdst = 126}));
+          if (type != 0 || zero_exec)
+            append_instruction(code,
+                               cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 320, .vdst = 67}));
+          if (scenario == "retention")
+            load(65);
+          else if (scenario == "partial wait")
+            append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 1}));
+          else if (scenario == "insufficient wait")
+            append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 2}));
+          append_instruction(code,
+                             cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 256, .vdst = 66}));
+          append_instruction(code, S_ENDPGM_GFX12);
+          uint32_t properties = 0;
+          RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+          Gfx1250Sim sim;
+          // XCNT selects the general issue path; off selects the simple-result path.
+          ASSERT_NO_FATAL_FAILURE(
+              sim.initialize(memory_wait_test_config("warn", xcnt ? "warn" : "off")));
+          write_global_u32(*sim.memory, 0x400000, 0x12345678);
+          const uint64_t kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 128, 2,
+                                                   false, false, false, properties, 16);
+          test::AqlQueue queue(sim.memory, sim.cp());
+          queue.dispatch(kernel, 32, 32, 0x400000);
+          step_until_halted(*sim.engine, *sim.cu());
+          ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
+          EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(66, 0), 0x12345678u);
+          EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(64, 0),
+                    type == 0 && !zero_exec ? 0x12345678u : sentinel);
+          if (type != 0 || zero_exec) {
+            EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(67, 0), sentinel);
+          }
+          EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(),
+                    scenario == "insufficient wait" ? 1u : 0u);
+        }
+}
+
+TEST(MemoryWaitExecutionTest, ExecZeroAsyncBarrierDoesNotAdmitOrOccupyAsynccnt) {
+  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr WaitCounterKind counter = WaitCounterKind::Async;
+  const util::FailureOr<uint32_t> maximum =
+      WaitCounterPolicy::maximum_dependency_wait(arch, counter);
+  ASSERT_TRUE(maximum.succeeded());
+  const uint32_t capacity = maximum.value() + 1;
+  for (uint32_t pending : {1u, capacity})
+    for (uint64_t exec : {0u, 1u}) {
+      SCOPED_TRACE(std::format("pending={} exec={}", pending, exec));
+      GpuMemory memory("async_barrier_memory");
+      L2Cache l2("async_barrier_l2");
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 32;
+      std::unique_ptr<ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "async_barrier_cu", config, &memory, &l2));
+      Wavefront *wave = cu->dispatch_wf(0, 0x100, 128, 32);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(exec);
+      std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+      const auto words = cdna5::build_vds(cdna5::kDsAtomicAsyncBarrierArriveB64Vds, {});
+      util::StringDiagnostic error;
+      DecodeResult inst = decoder->decode_window(words, 0, error.emitter());
+      ASSERT_TRUE(inst.succeeded()) << error.message();
+      MemoryWaitScoreboard &state = wave->ensure_memory_wait_scoreboard();
+      for (uint32_t index = 0; index < pending; ++index)
+        state.issue(counter);
+      // CDNA5 ISA 3.2.2.1 permits skipping this LDS instruction when EXEC and
+      // DScnt are zero, even with ASYNCcnt nonzero. Check admission separately
+      // from issue so dropping only one of them cannot hide the other's effect.
+      state.before(*inst.value(), arch, wave);
+      EXPECT_EQ(state.outstanding(counter), exec == 0 ? pending : std::min(pending, capacity - 1));
+      cu->track_memory_wait(*inst.value(), *wave);
+      EXPECT_EQ(state.outstanding(counter), exec == 0 ? pending : std::min(pending + 1, capacity));
+    }
+}
+
+TEST(MemoryWaitExecutionTest, ExecZeroIssueCountsForPartialWaitsAndCapacity) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA3,
+        ROCJITSU_CODE_ARCH_RDNA4})
+    for (bool lds : {false, true})
+      for (std::string_view scenario : {"admission", "retention", "partial wait"})
+        for (bool issue_masked : {false, true}) {
+          SCOPED_TRACE(std::format("arch={} lds={} scenario={} issue_masked={}", unsigned(arch),
+                                   lds, scenario, issue_masked));
+          GpuMemory memory("exec_zero_memory");
+          L2Cache l2("exec_zero_l2");
+          ComputeUnitCore::Config config{};
+          config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+          config.arch = arch;
+          config.num_wf_slots = 1;
+          config.sgprs_per_wf = 128;
+          config.vgprs_per_wf = 32;
+          std::unique_ptr<ComputeUnitCore> cu;
+          ASSERT_NO_FATAL_FAILURE(
+              rocjitsu::test::initialize_compute_unit(cu, "exec_zero_cu", config, &memory, &l2));
+          Wavefront *wave = cu->dispatch_wf(0, 0x100, 128, 32);
+          ASSERT_NE(wave, nullptr);
+          std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+          auto issue = [&](uint8_t dest) {
+            std::vector<uint32_t> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+              append_instruction(words, lds ? cdna1::build_ds(cdna1::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna1::build_flat(cdna1::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA2)
+              append_instruction(words, lds ? cdna2::build_ds(cdna2::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna2::build_flat(cdna2::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA3)
+              append_instruction(words, lds ? cdna3::build_ds(cdna3::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna3::build_flat(cdna3::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA4)
+              append_instruction(words, lds ? cdna4::build_ds(cdna4::kDsReadB32Ds, {.vdst = dest})
+                                            : cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_RDNA3)
+              append_instruction(words, lds ? rdna3::build_ds(rdna3::kDsLoadB32Ds, {.vdst = dest})
+                                            : rdna3::build_flat(rdna3::kFlatLoadB32Flat,
+                                                                {.seg = 2, .vdst = dest}));
+            else if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              if (lds)
+                append_instruction(words, cdna5::build_vds(cdna5::kDsLoadB32Vds, {.vdst = dest}));
+              else
+                append_instruction(
+                    words, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.vdst = dest}));
+            } else {
+              if (lds)
+                append_instruction(words, rdna4::build_vds(rdna4::kDsLoadB32Vds, {.vdst = dest}));
+              else
+                append_instruction(
+                    words, rdna4::build_vglobal(rdna4::kGlobalLoadB32Vglobal, {.vdst = dest}));
+            }
+            util::StringDiagnostic error;
+            DecodeResult inst = decoder->decode_window(words, 0, error.emitter());
+            ASSERT_TRUE(inst.succeeded()) << error.message();
+            MemoryWaitScoreboard &state = wave->ensure_memory_wait_scoreboard();
+            state.before(*inst.value(), arch, wave);
+            cu->track_memory_wait(*inst.value(), *wave);
+            wave->pc += words.size() * sizeof(uint32_t);
+          };
+          const WaitCounterKind counter = lds ? WaitCounterKind::Ds : WaitCounterKind::Load;
+          const util::FailureOr<uint32_t> maximum =
+              WaitCounterPolicy::maximum_dependency_wait(arch, counter);
+          ASSERT_TRUE(maximum.succeeded());
+          const unsigned capacity = maximum.value() + 1;
+          const unsigned initial_issues = scenario == "admission"   ? capacity
+                                          : scenario == "retention" ? capacity - 1
+                                                                    : 1;
+          wave->set_exec(1);
+          ASSERT_NO_FATAL_FAILURE(issue(2));
+          for (unsigned i = 1; i < initial_issues; ++i)
+            ASSERT_NO_FATAL_FAILURE(issue(3));
+          wave->set_exec(0);
+          if (issue_masked) {
+            ASSERT_NO_FATAL_FAILURE(issue(4));
+          }
+          // A full-counter issue can admit without retaining its own slot.
+          // The following active issue distinguishes those two behaviors.
+          wave->set_exec(1);
+          if (scenario == "retention") {
+            ASSERT_NO_FATAL_FAILURE(issue(5));
+          }
+          MemoryWaitScoreboard &state = wave->ensure_memory_wait_scoreboard();
+          if (scenario == "partial wait")
+            state.wait(counter, 1);
+          unsigned reports = 0;
+          state.bind(0x1000, &reports,
+                     [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+          state.access({RegClass::VGPR, 2, 1}, 1, 0xf, false);
+          EXPECT_EQ(reports, issue_masked ? 0u : 1u);
+        }
 }
 
 TEST(MemoryWaitExecutionTest, ReusedInstructionResolvesCurrentSourceAndDestinationBanks) {

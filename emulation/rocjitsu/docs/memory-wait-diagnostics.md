@@ -117,6 +117,13 @@ cannot establish FIFO completion of an older result. RDNA1 and RDNA2 GDS returns
 their own ordered LGKM class. Scalar-memory results, GDS results on other
 targets, and legacy CDNA FLAT results require a zero wait.
 
+A gfx1250 buffer load with a mismatched resource TYPE returns no data, but
+retains its ordered LOADcnt position for admission and partial waits. Its
+destination remains unchanged and acquires no new register dependency.
+EXEC-zero vector issues retain the counter positions guaranteed on gfx1250 and
+RDNA. CDNA1–4 also retain ordinary VMEM and LDS positions behind pending
+operations; an empty EXEC mask alone does not remove those positions.
+
 Completion dependencies survive ordinary branches and CU scheduling; branches
 implicitly drain XCNT. State is reset when a wave slot is freed and is not serialized
 in checkpoints. The checker does not compare memory addresses or check overlapping
