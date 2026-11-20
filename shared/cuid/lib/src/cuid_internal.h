@@ -34,7 +34,7 @@ typedef struct {
 } amdcuid_cuid_public_fields_nic;
 
 typedef struct {
-  uint16_t vendor_id;
+  uint16_t vendor_id;  // Reserved: Stage 1 defines no platform vendor ID.
 } amdcuid_cuid_public_fields_platform;
 
 typedef struct {
