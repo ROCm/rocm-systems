@@ -22,6 +22,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 
 enum Reply {
+    Xnack(i32, Option<i32>),
     SetScratch(Option<i32>),
     Allocate(u64, Option<i32>),
     DmaBufInfo(u64, u32, u32, &'static [u8], Option<i32>),
@@ -65,6 +66,8 @@ struct Fixture {
 
 fn node() -> sysfs::KfdNode {
     sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
+        host_atomics: false,
         node: 1,
         gpu_id: 42,
         render_minor: Some(128),
@@ -166,11 +169,11 @@ impl Fixture {
         let observed_native_waits = native_waits.clone();
         let scratch_base = Arc::new(AtomicU64::new(0));
         let observed_scratch_base = scratch_base.clone();
-        let kfd = shared(sys::Kfd::with_hook(
+        let kfd = shared(connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(move |call| {
                 match call {
-                    sys::Call::Wait(args, event) if event.event_id == 19 => {
+                    connection::Call::Wait(args, event) if event.event_id == 19 => {
                         let state = hardware_signal.load(Ordering::Acquire);
                         if state == 0 {
                             args.result = uapi::WAIT_TIMEOUT;
@@ -182,7 +185,7 @@ impl Fixture {
                         }
                         return Ok(());
                     }
-                    sys::Call::Wait(args, event) if event.event_id == 20 => {
+                    connection::Call::Wait(args, event) if event.event_id == 20 => {
                         let errno = injected_memory_error.load(Ordering::Acquire);
                         if errno != 0 {
                             return Err(io::Error::from_raw_os_error(
@@ -199,14 +202,14 @@ impl Fixture {
                         }
                         return Ok(());
                     }
-                    sys::Call::WaitExceptions(args, events) => {
+                    connection::Call::WaitExceptions(args, events) => {
                         assert_eq!(args.count, 2);
                         assert_eq!([events[0].event_id, events[1].event_id], [19, 20]);
                         observed_native_waits.fetch_add(1, Ordering::Relaxed);
                         args.result = uapi::WAIT_TIMEOUT;
                         return Ok(());
                     }
-                    sys::Call::ResetEvent(args) if args.event_id == 19 => {
+                    connection::Call::ResetEvent(args) if args.event_id == 19 => {
                         let errno = injected_reset_error.swap(0, Ordering::AcqRel);
                         if errno != 0 {
                             return Err(io::Error::from_raw_os_error(
@@ -216,11 +219,11 @@ impl Fixture {
                         hardware_signal.store(0, Ordering::Release);
                         return Ok(());
                     }
-                    sys::Call::ResetEvent(args) if args.event_id == 20 => {
+                    connection::Call::ResetEvent(args) if args.event_id == 20 => {
                         loss_signal.store(false, Ordering::Release);
                         return Ok(());
                     }
-                    sys::Call::DestroyEvent(_) => return Ok(()),
+                    connection::Call::DestroyEvent(_) => return Ok(()),
                     _ => {}
                 }
                 let reply = pending
@@ -229,14 +232,14 @@ impl Fixture {
                     .pop_front()
                     .expect("unexpected native call");
                 let errno = match (call, reply) {
-                    (sys::Call::SetScratchBackingVa(args), Reply::SetScratch(errno)) => {
+                    (connection::Call::SetScratchBackingVa(args), Reply::SetScratch(errno)) => {
                         assert_eq!(args.gpu_id, 42);
                         assert_eq!(args.pad, 0);
                         assert_ne!(args.va_address, 0);
                         observed_scratch_base.store(args.va_address << 16, Ordering::Relaxed);
                         errno
                     }
-                    (sys::Call::Allocate(args), Reply::Allocate(handle, errno)) => {
+                    (connection::Call::Allocate(args), Reply::Allocate(handle, errno)) => {
                         assert_eq!(args.va % 65536, 0);
                         let page = os_memory::page_size().unwrap() as u64;
                         let expected_size = if expected_flags & uapi::USERPTR != 0 && !owned_userptr
@@ -261,7 +264,7 @@ impl Fixture {
                         errno
                     }
                     (
-                        sys::Call::DmaBufInfo(args, metadata),
+                        connection::Call::DmaBufInfo(args, metadata),
                         Reply::DmaBufInfo(size, gpu_id, flags, expected_metadata, errno),
                     ) => {
                         assert!(i32::try_from(args.descriptor).is_ok());
@@ -284,20 +287,23 @@ impl Fixture {
                         args.metadata_size = u32::try_from(expected_metadata.len()).unwrap();
                         errno
                     }
-                    (sys::Call::ImportDmaBuf(args), Reply::ImportDmaBuf(handle, gpu_id, errno)) => {
+                    (
+                        connection::Call::ImportDmaBuf(args),
+                        Reply::ImportDmaBuf(handle, gpu_id, errno),
+                    ) => {
                         assert_eq!(args.va % 65536, 0);
                         assert_eq!(args.gpu_id, gpu_id);
                         assert!(i32::try_from(args.descriptor).is_ok());
                         args.handle = handle;
                         errno
                     }
-                    (sys::Call::ExportDmaBuf(args), Reply::ExportDmaBuf(fd, errno)) => {
+                    (connection::Call::ExportDmaBuf(args), Reply::ExportDmaBuf(fd, errno)) => {
                         assert_eq!(args.handle, 17);
                         args.descriptor = u32::try_from(fd).unwrap();
                         errno
                     }
                     (
-                        sys::Call::IpcImportHandle(args),
+                        connection::Call::IpcImportHandle(args),
                         Reply::IpcImport(handle, offset, flags, errno),
                     ) => {
                         assert_eq!(args.va_addr % 4096, 0);
@@ -308,20 +314,23 @@ impl Fixture {
                         args.flags = flags;
                         errno
                     }
-                    (sys::Call::IpcExportHandle(args), Reply::IpcExport(handle, errno)) => {
+                    (connection::Call::IpcExportHandle(args), Reply::IpcExport(handle, errno)) => {
                         assert_eq!(args.handle, 17);
                         assert_eq!(args.gpu_id, 42);
                         assert_eq!(args.flags, expected_flags);
                         args.share_handle = handle;
                         errno
                     }
-                    (sys::Call::Ais(args), Reply::Ais(expected, output, errno)) => {
+                    (connection::Call::Ais(args), Reply::Ais(expected, output, errno)) => {
                         assert_eq!(args.requested_input(), expected);
                         args.set_completed_output(output);
                         errno
                     }
-                    (sys::Call::Map(args, devices), Reply::Map(before, after, errno))
-                    | (sys::Call::Unmap(args, devices), Reply::Unmap(before, after, errno)) => {
+                    (connection::Call::Map(args, devices), Reply::Map(before, after, errno))
+                    | (
+                        connection::Call::Unmap(args, devices),
+                        Reply::Unmap(before, after, errno),
+                    ) => {
                         assert_eq!(*devices, expected_devices.as_slice());
                         assert_eq!(args.handle, 17);
                         assert_eq!(args.success, before);
@@ -329,11 +338,11 @@ impl Fixture {
                         errno
                     }
                     (
-                        sys::Call::Map(args, devices),
+                        connection::Call::Map(args, devices),
                         Reply::MapDevices(expected, before, after, errno),
                     )
                     | (
-                        sys::Call::Unmap(args, devices),
+                        connection::Call::Unmap(args, devices),
                         Reply::UnmapDevices(expected, before, after, errno),
                     ) => {
                         assert_eq!(devices, &expected);
@@ -342,7 +351,12 @@ impl Fixture {
                         args.success = after;
                         errno
                     }
-                    (sys::Call::Free(args), Reply::Free(errno)) => {
+                    (connection::Call::XnackMode(args), Reply::Xnack(enabled, errno)) => {
+                        assert_eq!(args.xnack_enabled, -1);
+                        args.xnack_enabled = enabled;
+                        errno
+                    }
+                    (connection::Call::Free(args), Reply::Free(errno)) => {
                         assert_eq!(args.handle, 17);
                         errno
                     }
@@ -536,6 +550,66 @@ impl Fixture {
             "native cleanup stopped early"
         );
     }
+}
+
+#[test]
+fn xnack_query_reads_live_mode_and_rejects_lost_devices() {
+    use crate::device::{Device, DeviceResources};
+    use crate::driver::test_driver::TestDriver;
+    use crate::driver::{DeviceDriverState, Driver, EndpointSelector};
+    use crate::session::DriverContextLifetime;
+    use crate::topology::{EndpointKind, GpuInfo};
+
+    let fixture = Fixture::new([
+        Reply::Xnack(1, None),
+        Reply::Xnack(0, None),
+        Reply::Xnack(0, Some(errno::EIO)),
+    ]);
+    let driver = shared(super::super::LinuxKfdDriver::new());
+    let mut endpoint = TestDriver::new(
+        node().identity,
+        EndpointKind::Gpu {
+            info: GpuInfo::default(),
+        },
+        DriverContextLifetime::Session,
+    )
+    .open_endpoint(node().identity)
+    .unwrap();
+    endpoint.driver_instance = driver.driver_instance();
+    endpoint.selector = EndpointSelector::LinuxKfd {
+        native: node(),
+        access_targets: None,
+    };
+    let driver_state = DeviceDriverState::LinuxKfd {
+        driver,
+        state: super::super::DeviceState {
+            vm: fixture.vm.clone(),
+            native: node(),
+            asic_family_id: 0,
+            gpu_counter_frequency_hz: 0,
+        },
+    };
+    let device = Device {
+        resources: DeviceResources::for_activated(&endpoint, &driver_state).unwrap(),
+        driver_state,
+        endpoint,
+    };
+    let gpu = device.gpu().unwrap();
+    assert!(gpu.xnack_enabled().unwrap());
+    assert!(!gpu.xnack_enabled().unwrap());
+    assert_eq!(
+        gpu.xnack_enabled()
+            .unwrap_err()
+            .native_status()
+            .and_then(crate::NativeStatus::errno_code),
+        Some(errno::EIO)
+    );
+    fixture.hardware.store(2, Ordering::Release);
+    assert_eq!(
+        gpu.xnack_enabled().unwrap_err().kind(),
+        ErrorKind::DeviceLost
+    );
+    fixture.exhausted();
 }
 
 #[test]
@@ -768,6 +842,8 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
     let make_device = |gfx_target| super::super::DeviceState {
         vm: fixture.vm.clone(),
         native: sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
+            host_atomics: false,
             queues: sysfs::KfdQueueProperties {
                 gfx_target,
                 target_profile: crate::topology::GpuTargetProfile::from_kfd_target(gfx_target),
@@ -2642,18 +2718,18 @@ fn terminal_hardware_loss_survives_a_second_event_poll_error() {
 fn failed_memory_event_creation_reclaims_every_returned_event_id() {
     let destroyed = Arc::new(Mutex::new(Vec::new()));
     let observed = destroyed.clone();
-    let kfd = shared(sys::Kfd::with_hook(
+    let kfd = shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| match call {
-            sys::Call::CreateEvent(args) if args.event_type == uapi::HW_EXCEPTION => {
+            connection::Call::CreateEvent(args) if args.event_type == uapi::HW_EXCEPTION => {
                 args.event_id = 19;
                 Ok(())
             }
-            sys::Call::CreateEvent(args) if args.event_type == uapi::MEMORY_EXCEPTION => {
+            connection::Call::CreateEvent(args) if args.event_type == uapi::MEMORY_EXCEPTION => {
                 args.event_id = 20;
                 Err(io::Error::from_raw_os_error(errno::EIO))
             }
-            sys::Call::DestroyEvent(args) => {
+            connection::Call::DestroyEvent(args) => {
                 observed.lock().unwrap().push(args.event_id);
                 Ok(())
             }
@@ -2707,16 +2783,16 @@ fn warmed_native_address_and_allocation_limits_allocate_no_heap_storage() {
     fixture.exhausted();
 }
 
-fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared<sys::Kfd> {
-    shared(sys::Kfd::with_hook(
+fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared<connection::Kfd> {
+    shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| {
             match call {
-                sys::Call::Version(args) => {
+                connection::Call::Version(args) => {
                     args.major = 1;
                     args.minor = 23;
                 }
-                sys::Call::Apertures(args, entries) => {
+                connection::Call::Apertures(args, entries) => {
                     args.count = 2;
                     for (entry, gpu_id) in entries.iter_mut().zip([42, 43]) {
                         entry.gpu_id = gpu_id;
@@ -2724,27 +2800,27 @@ fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared
                         entry.gpuvm_limit = isize::MAX as u64;
                     }
                 }
-                sys::Call::CreateEvent(args) => {
+                connection::Call::CreateEvent(args) => {
                     args.event_id = match args.event_type {
                         uapi::HW_EXCEPTION => 19,
                         uapi::MEMORY_EXCEPTION => 20,
                         _ => panic!("unexpected exception event type"),
                     };
                 }
-                sys::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
-                sys::Call::AcquireVm(args) => {
+                connection::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
+                connection::Call::AcquireVm(args) => {
                     assert!(matches!(args.gpu_id, 42 | 43));
                     acquisitions.fetch_add(1, Ordering::Relaxed);
                     if busy {
                         return Err(io::Error::from_raw_os_error(errno::EBUSY));
                     }
                 }
-                sys::Call::RuntimeEnable(args) => {
+                connection::Call::RuntimeEnable(args) => {
                     assert!(matches!(args.mode_mask, 0 | 1));
                     assert_eq!(args.r_debug, 0);
                     assert_eq!(args.capabilities_mask, 0);
                 }
-                sys::Call::DestroyEvent(_) => {}
+                connection::Call::DestroyEvent(_) => {}
                 _ => panic!("unexpected initialization ioctl"),
             }
             Ok(())
@@ -2763,7 +2839,7 @@ fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop
             .map(|_| {
                 scope.spawn(|| {
                     bindings
-                        .device_with_render(&kfd, &native, |minor| {
+                        .device_with_render(&kfd, &native, None, None, |minor| {
                             assert_eq!(minor, 128);
                             File::open("/dev/null")
                         })
@@ -2784,7 +2860,9 @@ fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop
     assert_eq!(bindings.bindings.lock().unwrap().devices.len(), 1);
     let fresh = initialization_endpoint(acquisitions.clone(), false);
     let vm = bindings
-        .device_with_render(&fresh, &native, |_| panic!("reopened a bound render file"))
+        .device_with_render(&fresh, &native, None, None, |_| {
+            panic!("reopened a bound render file")
+        })
         .unwrap();
     assert_eq!(acquisitions.load(Ordering::Relaxed), 1);
     assert_eq!(std::ptr::from_ref(&*vm), retained_address);
@@ -2792,7 +2870,9 @@ fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop
     replacement.unique_id = Some(999);
     assert_eq!(
         bindings
-            .device_with_render(&fresh, &replacement, |_| panic!("opened replaced device"))
+            .device_with_render(&fresh, &replacement, None, None, |_| panic!(
+                "opened replaced device"
+            ))
             .err()
             .unwrap()
             .kind(),
@@ -2806,7 +2886,7 @@ fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() 
     let kfd = initialization_endpoint(Arc::new(AtomicUsize::new(0)), true);
     assert_eq!(
         bindings
-            .device_with_render(&kfd, &node(), |_| File::open("/dev/null"))
+            .device_with_render(&kfd, &node(), None, None, |_| File::open("/dev/null"))
             .err()
             .unwrap()
             .kind(),
@@ -2819,7 +2899,9 @@ fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() 
     let held = bindings.bindings.lock().unwrap();
     assert_eq!(
         bindings
-            .device_with_render(&kfd, &node(), |_| panic!("fork child opened render node"))
+            .device_with_render(&kfd, &node(), None, None, |_| panic!(
+                "fork child opened render node"
+            ))
             .err()
             .unwrap()
             .kind(),
@@ -2829,19 +2911,51 @@ fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() 
 }
 
 #[test]
-fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
+fn retained_primary_vm_cannot_reactivate_after_sticky_device_loss() {
+    let fixture = Fixture::new([]);
+    let bindings = VmBindings::new();
+    bindings
+        .bindings
+        .lock()
+        .unwrap()
+        .devices
+        .push(fixture.vm.clone());
+    fixture.hardware.store(2, Ordering::Release);
+    for _ in 0..2 {
+        assert_eq!(
+            bindings
+                .device_with_render(&fixture.vm.kfd_owner(), &node(), None, None, |_| {
+                    panic!("device loss reopened an existing render endpoint")
+                })
+                .err()
+                .unwrap()
+                .kind(),
+            ErrorKind::DeviceLost
+        );
+        // A later native wait reporting no new event must not clear the latch.
+        fixture.hardware.store(0, Ordering::Release);
+    }
+    fixture.exhausted();
+}
+
+#[test]
+fn runtime_reenable_reuses_exact_vm_and_allows_late_distinct_device_activation() {
     let mut bindings = VmBindings::new();
     let acquisitions = Arc::new(AtomicUsize::new(0));
     let mut kfd = initialization_endpoint(acquisitions.clone(), false);
     let native = node();
     let first = bindings
-        .device_with_render(&kfd, &native, |_| File::open("/dev/null"))
+        .device_with_render(&kfd, &native, None, None, |_| File::open("/dev/null"))
         .unwrap();
-    kfd.enable_runtime().unwrap();
+    kfd.disable_runtime().unwrap();
     let recreated = bindings
-        .device_with_render(&kfd, &native, |_| panic!("reopened the bound device"))
+        .device_with_render(&kfd, &native, None, None, |_| {
+            panic!("reopened the bound device")
+        })
         .unwrap();
     let second = sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
+        host_atomics: false,
         node: 2,
         gpu_id: 43,
         render_minor: Some(129),
@@ -2850,7 +2964,7 @@ fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
         ..native
     };
     let second = bindings
-        .device_with_render(&kfd, &second, |minor| {
+        .device_with_render(&kfd, &second, None, None, |minor| {
             assert_eq!(minor, 129);
             File::open("/dev/null")
         })
@@ -2872,10 +2986,10 @@ fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
 fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() {
     let destroys = Arc::new(AtomicUsize::new(0));
     let observed = destroys.clone();
-    let kfd = shared(sys::Kfd::with_hook(
+    let kfd = shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| {
-            if let sys::Call::DestroyEvent(_) = call {
+            if let connection::Call::DestroyEvent(_) = call {
                 let attempt = observed.fetch_add(1, Ordering::Relaxed);
                 if attempt == 0 {
                     Err(io::Error::from_raw_os_error(errno::EIO))

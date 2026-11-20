@@ -59,7 +59,9 @@
 #include "host_defines.h"
 #include "amd_hip_vector_types.h"  // float2 etc
 #include "amd_hip_fp16.h"          // __half_raw
-#include "math_fwd.h"              // ocml device functions
+#if defined(__clang__) && defined(__HIP__)
+#include "math_fwd.h"  // ocml device functions
+#endif
 #include "hip_assert.h"            // hip assertions
 #define __HIP_SCHAR_MAX SCHAR_MAX
 #define __HIP_SCHAR_MIN SCHAR_MIN
@@ -166,6 +168,8 @@ __FP8_HOST_DEVICE_STATIC__ void __is_interpret_supported(__hip_fp8_interpretatio
 #if HIP_FP8_TYPE_FNUZ
   __assert_fnuz_support(interp);
 #endif
+#else
+  (void)interp;
 #endif
 }
 
@@ -426,12 +430,12 @@ template <typename T, bool is_fnuz> __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__
     /* Max number in e5m2 57344*/
     const unsigned int ifmax = 0x47600000;
     const unsigned int ifmin = 0xC7600000;
-    fInf = reinterpret_cast<const float&>(ifInf);
-    fNegInf = reinterpret_cast<const float&>(ifNegInf);
-    fNaN = reinterpret_cast<const float&>(ifNaN);
-    fNeg0 = reinterpret_cast<const float&>(ifNeg0);
-    fmax = reinterpret_cast<const float&>(ifmax);
-    fmin = reinterpret_cast<const float&>(ifmin);
+    fInf = static_cast<T>(reinterpret_cast<const float&>(ifInf));
+    fNegInf = static_cast<T>(reinterpret_cast<const float&>(ifNegInf));
+    fNaN = static_cast<T>(reinterpret_cast<const float&>(ifNaN));
+    fNeg0 = static_cast<T>(reinterpret_cast<const float&>(ifNeg0));
+    fmax = static_cast<T>(reinterpret_cast<const float&>(ifmax));
+    fmin = static_cast<T>(reinterpret_cast<const float&>(ifmin));
   } else if (is_double) {
     const unsigned long long ifInf = 0x7FF0000000000000ull;
     const unsigned long long ifNegInf = 0xFFF0000000000000ull;
@@ -440,12 +444,12 @@ template <typename T, bool is_fnuz> __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__
     /* Max number in e5m2 57344*/
     const unsigned long long ifmax = 0x40EC000000000000ull;
     const unsigned long long ifmin = 0xC0EC000000000000ull;
-    fInf = reinterpret_cast<const double&>(ifInf);
-    fNegInf = reinterpret_cast<const double&>(ifNegInf);
-    fNaN = reinterpret_cast<const double&>(ifNaN);
-    fNeg0 = reinterpret_cast<const double&>(ifNeg0);
-    fmax = reinterpret_cast<const double&>(ifmax);
-    fmin = reinterpret_cast<const double&>(ifmin);
+    fInf = static_cast<T>(reinterpret_cast<const double&>(ifInf));
+    fNegInf = static_cast<T>(reinterpret_cast<const double&>(ifNegInf));
+    fNaN = static_cast<T>(reinterpret_cast<const double&>(ifNaN));
+    fNeg0 = static_cast<T>(reinterpret_cast<const double&>(ifNeg0));
+    fmax = static_cast<T>(reinterpret_cast<const double&>(ifmax));
+    fmin = static_cast<T>(reinterpret_cast<const double&>(ifmin));
   }
 
   if (x == 0) {
@@ -632,10 +636,10 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
 
   f2val.i32val[0] = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
                         ? (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_fp8_f32)
-                               ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
+                               ? __builtin_amdgcn_cvt_pk_fp8_f32(f2val.fval.x, f2val.fval.y, 0, false)
                                : 0u)
                         : (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_pk_bf8_f32)
-                               ? __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false)
+                               ? __builtin_amdgcn_cvt_pk_bf8_f32(f2val.fval.x, f2val.fval.y, 0, false)
                                : 0u);
 
   return static_cast<__hip_fp8x2_storage_t>(f2val.i16val[0]);
@@ -862,7 +866,9 @@ __FP8_HOST_STATIC__ __hip_fp8x2_storage_t
 __hip_cvt_bfloat16raw2_to_fp8x2(const __hip_bfloat162_raw hr, const __hip_saturation_t sat,
                                 const __hip_fp8_interpretation_t interp) {
 #endif
-  float2 f2 = __hip_bfloat162(hr);
+  float2 f2;
+  f2.x = __builtin_bit_cast(float, static_cast<unsigned int>(hr.x) << 16);
+  f2.y = __builtin_bit_cast(float, static_cast<unsigned int>(hr.y) << 16);
   return __hip_cvt_float2_to_fp8x2(f2, sat, interp);
 }
 
@@ -887,11 +893,15 @@ __FP8_HOST_STATIC__ __half_raw __hip_cvt_fp8_to_halfraw(const __hip_fp8_storage_
   if (interp == __HIP_E4M3_FNUZ || interp == __HIP_E5M2_FNUZ) {
     unsigned int we = interp == __HIP_E4M3_FNUZ ? 4 : 5;
     unsigned int wm = interp == __HIP_E4M3_FNUZ ? 3 : 2;
-    return __half_raw{internal::cast_from_f8<_Float16, true>(x, wm, we)};
+    __half_raw ret;
+    ret.x = __builtin_bit_cast(unsigned short, internal::cast_from_f8<_Float16, true>(x, wm, we));
+    return ret;
   } else {
     unsigned int we = interp == __HIP_E4M3 ? 4 : 5;
     unsigned int wm = interp == __HIP_E4M3 ? 3 : 2;
-    return __half_raw{internal::cast_from_f8<_Float16, false>(x, wm, we)};
+    __half_raw ret;
+    ret.x = __builtin_bit_cast(unsigned short, internal::cast_from_f8<_Float16, false>(x, wm, we));
+    return ret;
   }
 }
 
@@ -1033,7 +1043,7 @@ __FP8_HOST_DEVICE_STATIC__ T_int internal_cvt_e8m0_to_int_type(__hip_fp8_storage
   if (x == hip_detail::e8m0_NaN) {
     return 0;
   }
-  if (f >= __hip_internal::numeric_limits<T_int>::max()) {
+  if (f >= static_cast<float>(__hip_internal::numeric_limits<T_int>::max())) {
     return __hip_internal::numeric_limits<T_int>::max();
   }
   // e8m0 encodes only non-negative scales (2^-127..2^127) and NaN is handled

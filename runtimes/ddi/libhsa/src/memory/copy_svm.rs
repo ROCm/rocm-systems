@@ -5,6 +5,75 @@
 
 use super::*;
 
+/// Copies a complete range using the HSA memory owner's selected host/GPU route.
+///
+/// The caller is already admitted to the HSA generation. This operation retains
+/// registry backing and an in-flight lease before releasing the registry lock.
+/// An uncertain native outcome quarantines the generation and retains operands.
+///
+/// # Safety
+/// Both ranges must remain valid for `size` bytes through completion. The source
+/// must be readable and the destination writable under the HSA memory contract.
+/// If native retirement is uncertain, external backing must remain live until
+/// conclusive native teardown.
+pub(crate) unsafe fn copy(dst: *mut c_void, src: *const c_void, size: usize) -> Result<(), Status> {
+    let mut guard = lock()?;
+    let runtime = initialized_mut(&mut guard)?;
+    if !memory_copy_has_work(dst, src, size)? {
+        return Ok(());
+    }
+    let host_destination = host_copy_address(runtime, dst as usize, size, ACCESS_PERMISSION_WO);
+    let host_source = host_copy_address(runtime, src as usize, size, ACCESS_PERMISSION_RO);
+    if let (Ok(destination), Ok(source)) = (host_destination, host_source) {
+        // SAFETY: The caller retains both ranges. The registry lock retains
+        // owned backing through this overlapping host copy.
+        unsafe { std::ptr::copy(source as *const u8, destination as *mut u8, size) };
+        fence(Ordering::SeqCst);
+        return Ok(());
+    }
+    let resolved = resolve_sync_gpu_copy(
+        runtime,
+        dst as usize,
+        src as usize,
+        size,
+        host_destination,
+        host_source,
+    )?;
+    let _inflight = runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+    let mut retained = [None; 2];
+    for (slot, base) in retained.iter_mut().zip(resolved.borrowed_memory) {
+        if let Some(base) = base {
+            if let Err(status) = runtime.memory_state.retain_copy_borrow(base) {
+                for base in retained.into_iter().flatten() {
+                    runtime.memory_state.release_copy_borrow(base);
+                }
+                return Err(status);
+            }
+            *slot = Some(base);
+        }
+    }
+    let stop = runtime.control.operation_stop();
+    let health = runtime.control.health.clone();
+    drop(guard);
+
+    let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
+        Ok(SyncGpuCopyOutcome::Done) => (SUCCESS, false),
+        Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => {
+            (write_loaded_copy_destination(address, &bytes), false)
+        }
+        Err(failure) => (failure.status, failure.operands_may_be_live),
+    };
+    if may_be_live {
+        health.quarantine();
+    }
+    release_async_resources(&[], &retained, may_be_live);
+    if status == SUCCESS {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}
+
 /// Converts a pointer and size into a checked SVM address range.
 pub(crate) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64), Status> {
     if pointer.is_null() || size == 0 {
@@ -28,7 +97,7 @@ pub(crate) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64),
 
 /// Maps an HSA agent to its SVM location identifier.
 pub(crate) fn svm_location_from_agent(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     service: &MemoryAdvice,
     agent: HsaAgent,
     allow_null: bool,
@@ -36,26 +105,27 @@ pub(crate) fn svm_location_from_agent(
     if agent.handle == 0 && allow_null {
         return Ok(SvmLocation::UnspecifiedOrMixed);
     }
-    if runtime.is_cpu_agent(agent) {
+    if runtime.agents.is_cpu_agent(agent) {
         return Ok(SvmLocation::System);
     }
-    let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
+    let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
     Ok(SvmLocation::Device(
         service
-            .target(&runtime.gpus[index].device)
+            .target(&runtime.agents.gpus[index].device)
             .map_err(map_error)?,
     ))
 }
 
 /// Maps a native SVM location identifier back to an HSA agent.
 pub(crate) fn svm_agent_from_location(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     location: SvmLocation,
 ) -> Result<HsaAgent, Status> {
     match location {
         SvmLocation::System => Ok(HsaAgent { handle: CPU_AGENT }),
         SvmLocation::UnspecifiedOrMixed => Ok(HsaAgent { handle: 0 }),
         SvmLocation::Device(identity) => runtime
+            .agents
             .gpus
             .iter()
             .position(|gpu| gpu.endpoint.id == identity.endpoint_id())
@@ -68,14 +138,14 @@ pub(crate) fn svm_agent_from_location(
 
 /// Selects the provider of an explicit GPU, or requires a unique service.
 pub(crate) fn svm_service(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     agent: Option<HsaAgent>,
 ) -> Result<MemoryAdvice, Status> {
-    let session = runtime.session().ok_or(ERROR)?;
+    let session = runtime.native_session().ok_or(ERROR)?;
     if let Some(agent) = agent {
-        if let Some(index) = runtime.gpu_index(agent) {
+        if let Some(index) = runtime.agents.gpu_index(agent) {
             return session
-                .memory_advice_for(&runtime.gpus[index].device)
+                .memory_advice_for(&runtime.agents.gpus[index].device)
                 .map_err(map_error);
         }
     }
@@ -118,7 +188,7 @@ impl<'a> PendingAsyncRetention<'a> {
     }
 
     /// Retains memory while dependent work may use it.
-    fn retain_memory(&mut self, base: usize) -> Result<(), Status> {
+    pub(crate) fn retain_memory(&mut self, base: usize) -> Result<(), Status> {
         self.borrowed_memory
             .try_reserve(1)
             .map_err(|_| OUT_OF_RESOURCES)?;
@@ -135,8 +205,17 @@ impl<'a> PendingAsyncRetention<'a> {
 }
 
 impl MemoryState {
+    /// Managed SVM and VMEM subranges keep their complete reservation alive.
+    fn copy_borrow_key(&self, address: usize) -> usize {
+        self.vmem_reservations
+            .range(..=address)
+            .next_back()
+            .filter(|(_, reservation)| reservation.contains_range(address, 1))
+            .map_or(address, |(&base, _)| base)
+    }
     /// Retains copy borrow while dependent work may use it.
     pub(crate) fn retain_copy_borrow(&mut self, base: usize) -> Result<(), Status> {
+        let base = self.copy_borrow_key(base);
         if !self.async_copy_borrows.contains_key(&base) {
             self.async_copy_borrows
                 .try_reserve(1)
@@ -149,6 +228,7 @@ impl MemoryState {
 
     /// Releases the retained copy borrow reference.
     pub(crate) fn release_copy_borrow(&mut self, base: usize) {
+        let base = self.copy_borrow_key(base);
         if let Some(count) = self.async_copy_borrows.get_mut(&base) {
             *count -= 1;
             if *count == 0 {
@@ -160,7 +240,7 @@ impl MemoryState {
     /// Copies borrowed after validating its source and destination.
     pub(crate) fn copy_borrowed(&self, base: usize) -> bool {
         self.async_copy_borrows
-            .get(&base)
+            .get(&self.copy_borrow_key(base))
             .is_some_and(|count| *count != 0)
     }
 }
@@ -260,14 +340,12 @@ pub(crate) fn svm_prefetch_worker(
     service: MemoryAdvice,
     stop: Arc<AtomicBool>,
     dependencies: &[HsaSignal],
-    completion: HsaSignal,
     address: u64,
     size: u64,
     location: SvmLocation,
-) {
+) -> bool {
     if !wait_async_dependencies(dependencies, &stop) {
-        finish_async_signal(completion, false);
-        return;
+        return false;
     }
     let result = service.prefetch(
         address,
@@ -275,11 +353,11 @@ pub(crate) fn svm_prefetch_worker(
         location,
         rocddi::memory::advice::PrefetchCompletion::Migration,
     );
-    finish_async_signal(completion, result.is_ok());
+    result.is_ok()
 }
 
 /// Waits for async dependencies to complete.
-fn wait_async_dependencies(dependencies: &[HsaSignal], stop: &AtomicBool) -> bool {
+pub(crate) fn wait_async_dependencies(dependencies: &[HsaSignal], stop: &AtomicBool) -> bool {
     for &dependency in dependencies {
         loop {
             if stop.load(Ordering::Acquire) {
@@ -324,6 +402,8 @@ pub(crate) enum AsyncCopyRoute {
         index: usize,
         /// Native GPU copy operation for this route.
         entry: GpuCopyEntry,
+        /// Uses a private compute dispatch instead of the native SDMA sequence.
+        compute: bool,
     },
     /// Several ordered SDMA operations sharing one native sequence.
     GpuBatch {
@@ -402,6 +482,21 @@ pub(crate) struct BatchCopyControls {
 
 /// Native route selected for one synchronous HSA copy.
 pub(crate) enum SyncGpuCopyRoute {
+    /// Two GPU address spaces connected through bounded host staging.
+    Staged {
+        /// Device that can read the source mapping.
+        source_device: Box<Device>,
+        /// Device that can write the destination mapping.
+        destination_device: Box<Device>,
+        /// First source GPU address.
+        source: u64,
+        /// First destination GPU address.
+        destination: u64,
+        /// Total transfer size.
+        size: usize,
+        /// Copy mechanism selected independently for each GPU's staging leg.
+        compute: [bool; 2],
+    },
     /// Direct copy between GPU-addressable ranges.
     Direct {
         /// Activated device retained through this synchronous copy.
@@ -412,6 +507,8 @@ pub(crate) enum SyncGpuCopyRoute {
         source: u64,
         /// Number of bytes in this synchronous copy.
         size: u64,
+        /// Selects a private compute dispatch for this transfer.
+        compute: bool,
     },
     /// Copy from a CPU-only source through staging.
     FromHost {
@@ -421,6 +518,8 @@ pub(crate) enum SyncGpuCopyRoute {
         destination: u64,
         /// Source operand for this copy route.
         source: HostCopySource,
+        /// Selects private compute staging for this transfer.
+        compute: bool,
     },
     /// Copy into a CPU-only destination through staging.
     ToHost {
@@ -432,6 +531,8 @@ pub(crate) enum SyncGpuCopyRoute {
         source: u64,
         /// Number of bytes in this synchronous copy.
         size: usize,
+        /// Selects private compute staging for this transfer.
+        compute: bool,
     },
 }
 
@@ -485,7 +586,7 @@ pub(crate) struct CopyRouteFailure {
 
 impl CopyRouteFailure {
     /// Constructs a failure whose native operands are already retired.
-    fn retired(status: Status) -> Self {
+    pub(super) fn retired(status: Status) -> Self {
         Self {
             status,
             operands_may_be_live: false,
@@ -521,18 +622,23 @@ pub(crate) struct ResolvedAsyncCopy {
 
 /// Copies agent after validating its source and destination.
 fn copy_agent(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     requested: HsaAgent,
     description: Option<&PointerDescription>,
 ) -> Result<HsaAgent, Status> {
     let agent = if requested.handle == 0 {
         description.map_or(HsaAgent { handle: CPU_AGENT }, |description| {
-            description.owner
+            if description.pointer_type == POINTER_TYPE_SVM && description.owner.handle == 0 {
+                HsaAgent { handle: CPU_AGENT }
+            } else {
+                description.owner
+            }
         })
     } else {
         requested
     };
     runtime
+        .agents
         .is_agent(agent)
         .then_some(agent)
         .ok_or(INVALID_AGENT)
@@ -540,18 +646,18 @@ fn copy_agent(
 
 /// Selects copy GPU from the available runtime resources.
 pub(crate) fn selected_copy_gpu(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: &PointerDescription,
 ) -> Option<(usize, HsaAgent)> {
     std::iter::once(description.owner)
         .chain(description.accessible.iter().copied())
         .filter(|agent| description.accessible.contains(agent))
-        .find_map(|agent| runtime.gpu_index(agent).map(|index| (index, agent)))
+        .find_map(|agent| runtime.agents.gpu_index(agent).map(|index| (index, agent)))
 }
 
 /// Copies pointer description after validating its source and destination.
 pub(crate) fn copy_pointer_description(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     pointer: usize,
     size: usize,
 ) -> Result<Option<PointerDescription>, Status> {
@@ -572,7 +678,7 @@ pub(crate) fn copy_pointer_description(
 
 /// Resolves a GPU address to its allocation and accessible agent.
 pub(crate) fn gpu_copy_address(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: Option<&PointerDescription>,
     pointer: usize,
     size: usize,
@@ -600,12 +706,23 @@ pub(crate) fn gpu_copy_address(
 /// Resolves a caller-owned image backing range to this agent's GPU address.
 /// Image data lifetime remains the caller's responsibility under HSA.
 pub(crate) fn image_device_address(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     pointer: usize,
     size: usize,
     agent: HsaAgent,
     permission: u32,
 ) -> Result<u64, Status> {
+    image_copy_borrow(runtime, pointer, size, agent, permission).map(|(address, _)| address)
+}
+
+/// Resolves image backing and the owner to retain through native retirement.
+pub(crate) fn image_copy_borrow(
+    runtime: &HsaSession,
+    pointer: usize,
+    size: usize,
+    agent: HsaAgent,
+    permission: u32,
+) -> Result<(u64, usize), Status> {
     let description = copy_pointer_description(runtime, pointer, size)?;
     gpu_copy_address(
         runtime,
@@ -615,12 +732,12 @@ pub(crate) fn image_device_address(
         agent,
         permission,
     )
-    .map(|(address, _)| address)
+    .map(|(address, base)| (address, runtime.memory_state.copy_borrow_key(base)))
 }
 
 /// Prepares host copy source before publication or execution.
 fn prepare_host_copy_source(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: Option<&PointerDescription>,
     pointer: usize,
     host: usize,
@@ -649,7 +766,7 @@ fn prepare_host_copy_source(
 
 /// Prepares host copy destination before publication or execution.
 fn prepare_host_copy_destination(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: Option<&PointerDescription>,
     pointer: usize,
     host: usize,
@@ -666,7 +783,7 @@ fn prepare_host_copy_destination(
 
 /// Checks virtual memory permissions for a copy by the given agent.
 pub(crate) fn vmem_copy_access(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: &PointerDescription,
     agent: HsaAgent,
     required_access: u32,
@@ -689,19 +806,83 @@ pub(crate) fn vmem_copy_access(
     Ok(())
 }
 
+/// Frontend policy for the ordinary copy, forced SDMA, and batch contracts.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum CopyPreference {
+    /// Same-agent copies use compute; other routes prefer available SDMA.
+    Default,
+    /// The engine API requests SDMA, subject to environment overrides.
+    PreferSdma,
+    /// Rectangles and batch packet operations require native SDMA.
+    RequireSdma,
+}
+
+/// Applies SDMA overrides before the same-agent compute default.
+#[allow(
+    clippy::fn_params_excessive_bools,
+    reason = "policy overrides and independent native topology facts are exercised as a routing truth table"
+)]
+fn select_compute(
+    sdma_enabled: bool,
+    peer_sdma_enabled: bool,
+    peer: bool,
+    same_gpu: bool,
+    native_sdma: bool,
+    preference: CopyPreference,
+) -> Result<bool, Status> {
+    let sdma = sdma_enabled && (!peer || peer_sdma_enabled) && native_sdma;
+    if preference == CopyPreference::RequireSdma {
+        return if sdma { Ok(false) } else { Err(NOT_SUPPORTED) };
+    }
+    Ok(!sdma || (same_gpu && preference == CopyPreference::Default))
+}
+
+/// Selects a mechanism from immutable generation policy and native capability.
+fn copy_uses_compute(
+    runtime: &HsaSession,
+    index: usize,
+    source: HsaAgent,
+    destination: HsaAgent,
+    preference: CopyPreference,
+) -> Result<bool, Status> {
+    let peer = source != destination
+        && runtime.agents.gpu_index(source).is_some()
+        && runtime.agents.gpu_index(destination).is_some();
+    let same_gpu = source == destination && runtime.agents.gpu_index(source).is_some();
+    let device = &runtime.agents.gpus[index].device;
+    let native_sdma = device.gpu().is_ok_and(|gpu| gpu.supports_linear_copy());
+    let compute = select_compute(
+        runtime.config.sdma_enabled,
+        runtime.config.peer_sdma_enabled,
+        peer,
+        same_gpu,
+        native_sdma,
+        preference,
+    )?;
+    if compute && !compute_copy::supported(device) {
+        return Err(NOT_SUPPORTED);
+    }
+    Ok(compute)
+}
+
 /// Resolves async copy to a validated runtime resource.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "preserves the HSA source/destination/agent tuple with explicit route selection"
+)]
 fn resolve_async_copy(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     destination: usize,
     dst_agent: HsaAgent,
     source: usize,
     src_agent: HsaAgent,
     size: usize,
     copy_gpu_index: Option<usize>,
+    preference: CopyPreference,
 ) -> Result<ResolvedAsyncCopy, Status> {
     if size == 0 {
-        if (dst_agent.handle != 0 && !runtime.is_agent(dst_agent))
-            || (src_agent.handle != 0 && !runtime.is_agent(src_agent))
+        if (dst_agent.handle != 0 && !runtime.agents.is_agent(dst_agent))
+            || (src_agent.handle != 0 && !runtime.agents.is_agent(src_agent))
         {
             return Err(INVALID_AGENT);
         }
@@ -714,16 +895,10 @@ fn resolve_async_copy(
     let src_description = copy_pointer_description(runtime, source, size)?;
     let dst_agent = copy_agent(runtime, dst_agent, dst_description.as_ref())?;
     let src_agent = copy_agent(runtime, src_agent, src_description.as_ref())?;
-    let dst_gpu = runtime.gpu_index(dst_agent);
-    let src_gpu = runtime.gpu_index(src_agent);
+    let dst_gpu = runtime.agents.gpu_index(dst_agent);
+    let src_gpu = runtime.agents.gpu_index(src_agent);
     if let Some(index) = copy_gpu_index.or(src_gpu.or(dst_gpu)) {
-        if !runtime.gpus[index]
-            .device
-            .gpu()
-            .is_ok_and(|gpu| gpu.supports_linear_copy())
-        {
-            return Err(NOT_SUPPORTED);
-        }
+        let compute = copy_uses_compute(runtime, index, src_agent, dst_agent, preference)?;
         let gpu_agent = HsaAgent {
             handle: GPU_AGENT_BASE + index as u64,
         };
@@ -743,12 +918,13 @@ fn resolve_async_copy(
             gpu_agent,
             ACCESS_PERMISSION_RO,
         );
-        let device = Box::new(runtime.gpus[index].device.clone());
+        let device = Box::new(runtime.agents.gpus[index].device.clone());
         return match (gpu_destination, gpu_source) {
             (Ok((destination, dst_base)), Ok((source, src_base))) => Ok(ResolvedAsyncCopy {
                 route: AsyncCopyRoute::Gpu {
                     device,
                     index,
+                    compute,
                     entry: GpuCopyEntry::Linear {
                         destination,
                         source,
@@ -771,6 +947,7 @@ fn resolve_async_copy(
                     route: AsyncCopyRoute::Gpu {
                         device,
                         index,
+                        compute,
                         entry: GpuCopyEntry::FromHost {
                             destination,
                             source,
@@ -795,6 +972,7 @@ fn resolve_async_copy(
                     route: AsyncCopyRoute::Gpu {
                         device,
                         index,
+                        compute,
                         entry: GpuCopyEntry::ToHost {
                             destination,
                             source,
@@ -842,7 +1020,7 @@ fn resolve_async_copy(
 
 /// Resolves sync GPU copy to a validated runtime resource.
 pub(crate) fn resolve_sync_gpu_copy(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     destination: usize,
     source: usize,
     size: usize,
@@ -876,7 +1054,14 @@ pub(crate) fn resolve_sync_gpu_copy(
             )?;
             Ok(ResolvedSyncGpuCopy {
                 route: SyncGpuCopyRoute::FromHost {
-                    device: Box::new(runtime.gpus[index].device.clone()),
+                    device: Box::new(runtime.agents.gpus[index].device.clone()),
+                    compute: copy_uses_compute(
+                        runtime,
+                        index,
+                        HsaAgent { handle: CPU_AGENT },
+                        agent,
+                        CopyPreference::Default,
+                    )?,
                     destination,
                     source,
                 },
@@ -908,7 +1093,14 @@ pub(crate) fn resolve_sync_gpu_copy(
             )?;
             Ok(ResolvedSyncGpuCopy {
                 route: SyncGpuCopyRoute::ToHost {
-                    device: Box::new(runtime.gpus[index].device.clone()),
+                    device: Box::new(runtime.agents.gpus[index].device.clone()),
+                    compute: copy_uses_compute(
+                        runtime,
+                        index,
+                        agent,
+                        HsaAgent { handle: CPU_AGENT },
+                        CopyPreference::Default,
+                    )?,
                     destination,
                     source,
                     size,
@@ -925,9 +1117,65 @@ pub(crate) fn resolve_sync_gpu_copy(
                 HsaAgent { handle: 0 },
                 size,
                 None,
-            )?;
+                CopyPreference::Default,
+            );
+            let Ok(resolved) = resolved else {
+                let source_description =
+                    copy_pointer_description(runtime, source, size)?.ok_or(INVALID_ALLOCATION)?;
+                let destination_description = copy_pointer_description(runtime, destination, size)?
+                    .ok_or(INVALID_ALLOCATION)?;
+                let (source_index, source_agent) =
+                    selected_copy_gpu(runtime, &source_description).ok_or(INVALID_AGENT)?;
+                let (destination_index, destination_agent) =
+                    selected_copy_gpu(runtime, &destination_description).ok_or(INVALID_AGENT)?;
+                let (source, source_base) = gpu_copy_address(
+                    runtime,
+                    Some(&source_description),
+                    source,
+                    size,
+                    source_agent,
+                    ACCESS_PERMISSION_RO,
+                )?;
+                let (destination, destination_base) = gpu_copy_address(
+                    runtime,
+                    Some(&destination_description),
+                    destination,
+                    size,
+                    destination_agent,
+                    ACCESS_PERMISSION_WO,
+                )?;
+                return Ok(ResolvedSyncGpuCopy {
+                    route: SyncGpuCopyRoute::Staged {
+                        compute: [
+                            copy_uses_compute(
+                                runtime,
+                                source_index,
+                                source_agent,
+                                HsaAgent { handle: CPU_AGENT },
+                                CopyPreference::Default,
+                            )?,
+                            copy_uses_compute(
+                                runtime,
+                                destination_index,
+                                HsaAgent { handle: CPU_AGENT },
+                                destination_agent,
+                                CopyPreference::Default,
+                            )?,
+                        ],
+                        source_device: Box::new(runtime.agents.gpus[source_index].device.clone()),
+                        destination_device: Box::new(
+                            runtime.agents.gpus[destination_index].device.clone(),
+                        ),
+                        source,
+                        destination,
+                        size,
+                    },
+                    borrowed_memory: [Some(destination_base), Some(source_base)],
+                });
+            };
             let AsyncCopyRoute::Gpu {
                 device,
+                compute,
                 entry:
                     GpuCopyEntry::Linear {
                         destination,
@@ -942,6 +1190,7 @@ pub(crate) fn resolve_sync_gpu_copy(
             Ok(ResolvedSyncGpuCopy {
                 route: SyncGpuCopyRoute::Direct {
                     device,
+                    compute,
                     destination,
                     source,
                     size,
@@ -1066,12 +1315,52 @@ pub(crate) fn execute_sync_gpu_copy(
     stop: &AtomicBool,
 ) -> Result<SyncGpuCopyOutcome, CopyRouteFailure> {
     match route {
+        SyncGpuCopyRoute::Staged {
+            source_device,
+            destination_device,
+            source,
+            destination,
+            size,
+            compute,
+        } => {
+            let source_gpu = copy_gpu(&source_device)?;
+            let destination_gpu = copy_gpu(&destination_device)?;
+            staged_copy(size, |offset, bytes| {
+                // SAFETY: The frontend retained both checked GPU ranges. The
+                // DDI writes bytes only after retiring its native staging, and
+                // copies their contents into its own retained upload staging.
+                if compute[0] {
+                    compute_copy::copy_to_host(&source_device, bytes, source + offset as u64)?;
+                } else {
+                    unsafe { source_gpu.copy_to_host(bytes, source + offset as u64, stop) }
+                        .map_err(CopyRouteFailure::from)?;
+                }
+                if compute[1] {
+                    compute_copy::copy_from_host(
+                        &destination_device,
+                        destination + offset as u64,
+                        bytes,
+                    )
+                } else {
+                    unsafe {
+                        destination_gpu.copy_from_host(destination + offset as u64, bytes, stop)
+                    }
+                    .map_err(CopyRouteFailure::from)
+                }
+            })?;
+            Ok(SyncGpuCopyOutcome::Done)
+        }
         SyncGpuCopyRoute::Direct {
             device,
             destination,
             source,
             size,
+            compute,
         } => {
+            if compute {
+                compute_copy::copy(&device, destination, source, size)?;
+                return Ok(SyncGpuCopyOutcome::Done);
+            }
             let gpu = copy_gpu(&device)?;
             // SAFETY: HSA checked both mapped GPU ranges before retaining
             // their backing through this synchronous call.
@@ -1083,8 +1372,15 @@ pub(crate) fn execute_sync_gpu_copy(
             device,
             destination,
             source,
+            compute,
         } => {
-            copy_from_host_route(&device, destination, &source, stop)?;
+            if compute {
+                with_host_copy_source(&source, |host| {
+                    compute_copy::copy_from_host(&device, destination, host)
+                })?;
+            } else {
+                copy_from_host_route(&device, destination, &source, stop)?;
+            }
             Ok(SyncGpuCopyOutcome::Done)
         }
         SyncGpuCopyRoute::ToHost {
@@ -1092,8 +1388,38 @@ pub(crate) fn execute_sync_gpu_copy(
             destination,
             source,
             size,
-        } => copy_to_host_route(&device, &destination, source, size, stop),
+            compute,
+        } => {
+            if compute {
+                copy_to_host_destination(&destination, size, |host| {
+                    compute_copy::copy_to_host(&device, host, source)
+                })
+            } else {
+                copy_to_host_route(&device, &destination, source, size, stop)
+            }
+        }
     }
+}
+
+/// Copies one bounded chunk at a time, retiring its read before its write.
+fn staged_copy(
+    size: usize,
+    mut transfer: impl FnMut(usize, &mut [u8]) -> Result<(), CopyRouteFailure>,
+) -> Result<(), CopyRouteFailure> {
+    const CHUNK_BYTES: usize = 4 * 1024 * 1024;
+    let mut bytes = Vec::new();
+    let capacity = size.min(CHUNK_BYTES);
+    bytes
+        .try_reserve_exact(capacity)
+        .map_err(|_| CopyRouteFailure::retired(OUT_OF_RESOURCES))?;
+    bytes.resize(capacity, 0);
+    let mut offset = 0;
+    while offset < size {
+        let length = (size - offset).min(capacity);
+        transfer(offset, &mut bytes[..length])?;
+        offset += length;
+    }
+    Ok(())
 }
 
 /// Writes loaded copy destination to the validated destination.
@@ -1149,7 +1475,7 @@ fn execute_gpu_entries(
             GpuCopyEntry::Rect(rect) => {
                 // SAFETY: Preparation validated every selected row and keeps
                 // its mapped backing live until native retirement.
-                unsafe { sequence.copy_rect(rect) }
+                unsafe { copy_rect_with_options(&mut sequence, rect, options) }
                     .map(|()| SyncGpuCopyOutcome::Done)
                     .map_err(CopyRouteFailure::from)
             }
@@ -1237,6 +1563,46 @@ fn execute_gpu_entries(
     }
 }
 
+/// Lowers optional box controls onto its first and last row only.
+///
+/// # Safety
+/// Every row must be accessible to the sequence's GPU through retirement.
+unsafe fn copy_rect_with_options(
+    sequence: &mut GpuCopySequence<'_, '_>,
+    rect: CopyRect,
+    options: GpuCopyOptions,
+) -> Result<(), rocddi::device::gpu::CopyFailure> {
+    if options.wait.is_none() && options.signal.is_none() {
+        // SAFETY: The caller retained every validated row.
+        return unsafe { sequence.copy_rect(rect) };
+    }
+    for layer in 0..rect.depth {
+        for row in 0..rect.height {
+            let first = layer == 0 && row == 0;
+            let last = layer + 1 == rect.depth && row + 1 == rect.height;
+            // SAFETY: Preparation checked each complete rectangle extent. The
+            // linear row operations retain identical ordering and ownership.
+            unsafe {
+                sequence.copy_linear_with_options(
+                    rect.destination
+                        + u64::from(layer) * rect.destination_slice
+                        + u64::from(row) * rect.destination_pitch,
+                    rect.source
+                        + u64::from(layer) * rect.source_slice
+                        + u64::from(row) * rect.source_pitch,
+                    rect.width,
+                    GpuCopyOptions {
+                        wait: if first { options.wait } else { None },
+                        signal: if last { options.signal } else { None },
+                        ..GpuCopyOptions::default()
+                    },
+                )
+            }?;
+        }
+    }
+    Ok(())
+}
+
 /// Reads the host profiling clock without requiring a GPU or native correlation.
 fn system_copy_tick() -> Result<u64, CopyRouteFailure> {
     rocddi::host::clock::read().map_err(|error| CopyRouteFailure::retired(map_error(error)))
@@ -1249,6 +1615,54 @@ fn gpu_copy_profile(index: usize, ticks: Option<GpuCopyTimestamps>) -> Option<As
         start: ticks.start,
         end: ticks.end,
     })
+}
+
+/// Executes a validated host, GPU, or staging copy route.
+fn execute_compute_entry(
+    device: &Device,
+    entry: GpuCopyEntry,
+    profile_enabled: bool,
+) -> Result<Option<AsyncCopyProfile>, CopyRouteFailure> {
+    let start = profile_enabled.then(system_copy_tick).transpose()?;
+    let outcome = match entry {
+        GpuCopyEntry::Linear {
+            destination,
+            source,
+            size,
+        } => {
+            compute_copy::copy(device, destination, source, size)?;
+            SyncGpuCopyOutcome::Done
+        }
+        GpuCopyEntry::FromHost {
+            destination,
+            source,
+        } => {
+            with_host_copy_source(&source, |host| {
+                compute_copy::copy_from_host(device, destination, host)
+            })?;
+            SyncGpuCopyOutcome::Done
+        }
+        GpuCopyEntry::ToHost {
+            destination,
+            source,
+            size,
+        } => copy_to_host_destination(&destination, size, |host| {
+            compute_copy::copy_to_host(device, host, source)
+        })?,
+        _ => return Err(CopyRouteFailure::retired(NOT_SUPPORTED)),
+    };
+    if let SyncGpuCopyOutcome::LoadedDestination { address, bytes } = outcome {
+        let status = write_loaded_copy_destination(address, &bytes);
+        if status != SUCCESS {
+            return Err(CopyRouteFailure::retired(status));
+        }
+    }
+    let end = profile_enabled.then(system_copy_tick).transpose()?;
+    Ok(start.zip(end).map(|(start, end)| AsyncCopyProfile {
+        clock: AsyncCopyClock::System,
+        start,
+        end,
+    }))
 }
 
 /// Executes a validated host, GPU, or staging copy route.
@@ -1307,7 +1721,7 @@ fn execute_copy_route(
                 }
             };
             // SAFETY: The caller keeps ordinary host ranges live through
-            // completion. HsaState-owned memory is borrowed, and the registry
+            // completion. HsaSession-owned memory is borrowed, and the registry
             // lock keeps loaded mappings live for this copy. ptr::copy also
             // permits overlapping ranges.
             unsafe { std::ptr::copy(source_host as *const u8, destination_host as *mut u8, size) };
@@ -1328,15 +1742,22 @@ fn execute_copy_route(
             device,
             index,
             entry,
-        } => execute_gpu_entries(
-            &device,
-            std::iter::once(entry),
-            BatchCopyControls::default(),
-            sdma_engine,
-            profile_enabled,
-            stop,
-        )
-        .map(|ticks| gpu_copy_profile(index, ticks)),
+            compute,
+        } => {
+            if compute {
+                execute_compute_entry(&device, entry, profile_enabled)
+            } else {
+                execute_gpu_entries(
+                    &device,
+                    std::iter::once(entry),
+                    BatchCopyControls::default(),
+                    sdma_engine,
+                    profile_enabled,
+                    stop,
+                )
+                .map(|ticks| gpu_copy_profile(index, ticks))
+            }
+        }
         AsyncCopyRoute::GpuBatch {
             device,
             index,
@@ -1355,3 +1776,124 @@ fn execute_copy_route(
 }
 
 pub(crate) mod async_copy;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_policy_selects_compute_and_honors_forced_sdma_and_overrides() {
+        assert_eq!(
+            select_compute(true, true, false, true, true, CopyPreference::Default),
+            Ok(true)
+        );
+        assert_eq!(
+            select_compute(true, true, false, true, true, CopyPreference::PreferSdma),
+            Ok(false)
+        );
+        assert_eq!(
+            select_compute(true, true, true, false, true, CopyPreference::Default),
+            Ok(false)
+        );
+        assert_eq!(
+            select_compute(true, false, true, false, true, CopyPreference::PreferSdma),
+            Ok(true)
+        );
+        assert_eq!(
+            select_compute(false, true, false, false, true, CopyPreference::PreferSdma),
+            Ok(true)
+        );
+        assert_eq!(
+            select_compute(true, true, false, false, false, CopyPreference::Default),
+            Ok(true)
+        );
+        assert_eq!(
+            select_compute(false, true, false, false, true, CopyPreference::RequireSdma),
+            Err(NOT_SUPPORTED)
+        );
+        assert_eq!(
+            select_compute(true, false, false, false, true, CopyPreference::RequireSdma),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn staged_copy_preserves_payload_across_bounded_chunks_and_short_tail() {
+        let source: Vec<u8> = (0..9 * 1024 * 1024 + 37)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let mut destination = vec![0; source.len()];
+        let mut chunks = Vec::new();
+        assert!(
+            staged_copy(source.len(), |offset, bytes| {
+                assert!(bytes.len() <= 4 * 1024 * 1024);
+                bytes.copy_from_slice(&source[offset..offset + bytes.len()]);
+                destination[offset..offset + bytes.len()].copy_from_slice(bytes);
+                chunks.push((offset, bytes.len()));
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(source, destination);
+        assert!(chunks.len() >= 3);
+        assert_eq!(
+            chunks.last().map(|&(offset, length)| offset + length),
+            Some(source.len())
+        );
+    }
+
+    #[test]
+    fn staged_copy_stops_at_the_failed_leg_and_preserves_liveness_uncertainty() {
+        let mut transfers = 0;
+        let result = staged_copy(12 * 1024 * 1024, |_, _| {
+            transfers += 1;
+            if transfers == 2 {
+                Err(CopyRouteFailure {
+                    status: ERROR,
+                    operands_may_be_live: true,
+                })
+            } else {
+                Ok(())
+            }
+        });
+        let failure = result.err().unwrap();
+        assert_eq!(transfers, 2);
+        assert_eq!(failure.status, ERROR);
+        assert!(failure.operands_may_be_live);
+        assert!(
+            staged_copy(0, |_, _| {
+                transfers += 1;
+                Ok(())
+            })
+            .is_ok()
+        );
+        assert_eq!(transfers, 2);
+    }
+
+    #[test]
+    fn async_dependencies_wait_for_every_signal_and_observe_cancellation() {
+        let first = Arc::new(crate::signal::AmdSignal::user(1));
+        let second = Arc::new(crate::signal::AmdSignal::user(1));
+        let handles = [
+            HsaSignal {
+                handle: Arc::as_ptr(&first) as u64,
+            },
+            HsaSignal {
+                handle: Arc::as_ptr(&second) as u64,
+            },
+        ];
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            sender
+                .send(wait_async_dependencies(&handles, &AtomicBool::new(false)))
+                .unwrap();
+        });
+        first.value.store(0, Ordering::Release);
+        assert!(receiver.recv_timeout(Duration::from_millis(10)).is_err());
+        second.value.store(0, Ordering::Release);
+        assert!(receiver.recv_timeout(Duration::from_secs(1)).unwrap());
+        worker.join().unwrap();
+        assert!(!wait_async_dependencies(&handles, &AtomicBool::new(true)));
+    }
+}

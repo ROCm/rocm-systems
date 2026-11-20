@@ -782,8 +782,8 @@ class AsyncLaunchTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    // Not just this class's own SetUp: other TUs sharing this binary/thread (e.g. rccl_wrap.cc's
-    // rcclDdaEnabled reading ncclGroupDepth) can run next, especially under --gtest_shuffle.
+    // Not just this class's own SetUp: any test on this thread can run next, especially under
+    // --gtest_shuffle.
     ResetGroupThreadLocals();
     s_active = nullptr;
   }
@@ -1466,8 +1466,8 @@ TEST_F(MgmtTaskJobFuncTest, FailingTaskStopsDequeuingAndStillRunsItsOwnDestructo
 }
 
 // ncclCommGroupRegisterSymmetric: only the ceInitTaskQueue branch. rmaCeInitTaskQueue is not
-// covered because this binary links the real src/rma/rma_ce.cc, whose ncclRmaCeInit needs the
-// dev_runtime fixture; the other four queues need that fixture or new seams. Deferred.
+// covered because ncclRmaCeInit is a plain ::abort() stub here (collective_stubs.cc); the other
+// four queues need the dev_runtime fixture or new seams. Deferred.
 class GroupRegisterSymmetricCeInitTest : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_;
@@ -1972,6 +1972,7 @@ class GroupRegisterSymmetricDevCommTest : public ::testing::Test {
   ncclDevComm outDevComm_{};
   ncclDevCommCompat saved22902_{}, saved22907_{};
   static int newToOldCalls_;
+  int lsaRank0_ = 0;
 
   void SetUp() override {
     ResetCeFakes();
@@ -1996,7 +1997,8 @@ class GroupRegisterSymmetricDevCommTest : public ::testing::Test {
     sharedRes_ = std::make_unique<ncclSharedResources>();
     comm_->sharedRes = sharedRes_.get();
     comm_->nRanks = 1;
-    comm_->devrState.lsaSize = 1;
+    comm_->devrState.lsaDomainSize = comm_->devrState.lsaTeamSize = 1;
+    comm_->devrState.lsaDomainRankList = comm_->devrState.lsaTeamRankList = &lsaRank0_;
     comm_->devrState.cftSize = 1;    // ncclDevrInitOnce never ran; it would set both to >= 1
     comm_->devrState.cftMcSize = 1;
     comm_->devrState.granularity = 1;

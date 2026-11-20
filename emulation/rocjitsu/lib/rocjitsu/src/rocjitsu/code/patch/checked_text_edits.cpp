@@ -118,7 +118,7 @@ Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint
     if (decoded.failed() || decoded.value()->size() == 0)
       return reject(error, TextEditErrorCode::InvalidInstruction,
                     "replacement contains an invalid or truncated instruction", offset);
-    if (decoded.value()->mnemonic() == "s_clause")
+    if (decoded.value()->amdgpu_operation() == amdgpu::Operation::S_CLAUSE)
       return reject(error, TextEditErrorCode::Clause, "replacement may not introduce a clause",
                     offset);
     cursor += decoded.value()->size() / sizeof(uint32_t);
@@ -186,8 +186,10 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
                                         text.size() / sizeof(uint32_t));
   size_t cursor = 0;
   size_t boundary_index = 0;
+  const TextAlignmentGaps alignment_gaps(source_, architecture_);
   while (cursor < words.size()) {
-    if (is_text_padding_word(architecture_, words[cursor])) {
+    if (is_text_padding_word(architecture_, words[cursor]) ||
+        (words[cursor] == 0 && alignment_gaps.contains(cursor * sizeof(uint32_t)))) {
       ++cursor;
       continue;
     }

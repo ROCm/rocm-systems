@@ -103,6 +103,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"s_floor_f16", {0xBE806C00U, 0x00000000U}},
     {"s_trunc_f16", {0xBE806D00U, 0x00000000U}},
     {"s_rndne_f16", {0xBE806E00U, 0x00000000U}},
+    {"s_get_barrier_state", {0xBE805080U, 0x00000000U}},
     {"s_cmp_eq_i32", {0xBF000000U, 0x00000000U}},
     {"s_cmp_lg_i32", {0xBF010000U, 0x00000000U}},
     {"s_cmp_gt_i32", {0xBF020000U, 0x00000000U}},
@@ -1543,7 +1544,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"global_atomic_ordered_add_b64", {0xEE1CC000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1522;
+inline constexpr size_t NUM_ENCODINGS = 1523;
 
 } // namespace rocjitsu::rdna4::test_data
 
