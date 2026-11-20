@@ -15,7 +15,7 @@
             "tool_env": [
                 {
                     "key": "ROCPROFSYS_CONFIG_FILE",
-                    "value": "../../configs/sampling.cfg"
+                    "value": "../../configs/sampling_perfetto.cfg"
                 },
                 {
                     "key": "ROCPROFSYS_USE_MPI",
@@ -41,7 +41,7 @@
             "tool_env": [
                 {
                     "key": "ROCPROFSYS_CONFIG_FILE",
-                    "value": "../../configs/sampling.cfg"
+                    "value": "../../configs/sampling_perfetto.cfg"
                 },
                 {
                     "key": "ROCPROFSYS_USE_MPI",
@@ -67,7 +67,7 @@
             "tool_env": [
                 {
                     "key": "ROCPROFSYS_CONFIG_FILE",
-                    "value": "../../configs/sampling.cfg"
+                    "value": "../../configs/sampling_perfetto.cfg"
                 },
                 {
                     "key": "ROCPROFSYS_USE_MPI",
@@ -93,7 +93,7 @@
             "tool_env": [
                 {
                     "key": "ROCPROFSYS_CONFIG_FILE",
-                    "value": "../../configs/sampling.cfg"
+                    "value": "../../configs/sampling_perfetto.cfg"
                 },
                 {
                     "key": "ROCPROFSYS_USE_MPI",
