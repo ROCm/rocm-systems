@@ -142,15 +142,18 @@ void TestBase::check_queue_error(const QueueStatus* status) {
   }
 }
 
-void TestBase::before_doorbell(const QueueStatus* status) {
+void TestBase::before_doorbell(CheckQueue* queue) {
   // The hint of the waits to come is read while this check has dispatched nothing, so that a
   // frequency ROCr cannot report is this GPU's failure rather than a wait without a bound.
   (void)wait_hint();
-  check_queue_error(status);
+  check_queue_error(queue->status());
+  // From here until the wait for the kernel returns, work may be on the queue.
+  queue->dispatched();
 }
 
-void TestBase::wait_for_kernel(hsa_signal_t signal, const QueueStatus* status) {
-  wait_for(signal, status, true);
+void TestBase::wait_for_kernel(hsa_signal_t signal, CheckQueue* queue) {
+  wait_for(signal, queue->status(), true);
+  queue->completed();
 }
 
 void TestBase::wait_for_copy(hsa_signal_t signal) { wait_for(signal, nullptr, false); }

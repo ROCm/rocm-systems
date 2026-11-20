@@ -64,6 +64,11 @@
         << ") at " << __FILE__ << ":" << __LINE__;                           \
   } while (0)
 
+/* Exported by librccl.so (src/include/rocmwrap.h). Must be declared at file
+ * scope: a block-scope extern inside the unnamed namespace below would name
+ * (anonymous namespace)::ncclCuMemRuntimeSupported, which never links. */
+extern int ncclCuMemRuntimeSupported();
+
 namespace {
 
 /* -----------------------------------------------------------------------
@@ -88,7 +93,6 @@ std::string cuMemReason() {
   const char* cumem = std::getenv("NCCL_CUMEM_ENABLE");
   if (!cumem || std::strcmp(cumem, "1") != 0)
     return "Symmetric memory required (NCCL_CUMEM_ENABLE=1)";
-  extern int ncclCuMemRuntimeSupported();
   if (!ncclCuMemRuntimeSupported())
     return "Symmetric memory not supported on this platform (cuMem requires kernel dma-buf/P2PDMA support)";
   return "";
@@ -157,7 +161,10 @@ __global__ void k_ir_gin_barrier(int iters, struct ncclDevComm devComm) {
   ncclGinBarrierSession_C* session =
       reinterpret_cast<ncclGinBarrierSession_C*>(sbuf);
 
-  ncclGinBarrierSessionInit(session, coop, net, ncclTeamRail(devComm),
+  /* net is passed by pointer (NCCL 2.31.2, NVIDIA/nccl#2243): a by-value
+   * ncclGin_C could be spilled to an under-aligned slot by non-C++ frontends,
+   * faulting on the 8-byte read of its leading ncclDevComm reference. */
+  ncclGinBarrierSessionInit(session, coop, &net, ncclTeamRail(devComm),
                             devComm.railGinBarrier, /*index=*/0);
   for (int i = 0; i < iters; ++i) {
     ncclGinBarrierSessionSync(session, coop, cuda::memory_order_relaxed,
@@ -182,7 +189,7 @@ __global__ void k_ir_composite_barrier(int iters, struct ncclDevComm devComm) {
   ncclBarrierSessionInit(session, coop,
                          /*innerTeam=*/ncclTeamLsa(devComm),
                          /*outerTeam=*/ncclTeamRail(devComm),
-                         net,
+                         &net,
                          /*innerBarHandle=*/devComm.lsaBarrier,
                          /*outerBarHandle=*/devComm.railGinBarrier,
                          /*index=*/0,
@@ -269,13 +276,13 @@ static constexpr int kIters = 16;
  * ==================================================================== */
 TEST_F(IRGinBarrierMPITest, C1_GinBarrierSession_TwoRanks) {
   /* ncclDevCommCreate needs symmetric-memory (cuMem/VMM) support, which the
-   * runtime disables on hosts with Linux kernel < 6.8 or a HIP version below
+   * runtime disables on hosts without working VMM / DMA-BUF export or a HIP version below
    * the cuMem threshold (ROCm 7.0.2.x backport / HIP >= 7.12). Skip (not fail)
    * when a GIN device comm cannot be created on this host. */
   if (ncclResult_t r = makeGinDevComm(); r != ncclSuccess)
     GTEST_SKIP() << "ncclDevCommCreate failed (" << ncclGetErrorString(r)
                  << "): GIN device comm requires symmetric-memory (cuMem) "
-                    "support — Linux kernel >= 6.8 and HIP >= 7.12 / ROCm "
+                    "support — working VMM and HIP >= 7.12 / ROCm "
                     "7.0.2.x. Not available on this host.";
 
   k_ir_gin_barrier<<<1, 32, 0, stream_>>>(kIters, devComm_);
@@ -294,7 +301,7 @@ TEST_F(IRGinBarrierMPITest, C2_CompositeBarrierSession_TwoRanks) {
   if (ncclResult_t r = makeGinDevComm(); r != ncclSuccess)
     GTEST_SKIP() << "ncclDevCommCreate failed (" << ncclGetErrorString(r)
                  << "): GIN device comm requires symmetric-memory (cuMem) "
-                    "support — Linux kernel >= 6.8 and HIP >= 7.12 / ROCm "
+                    "support — working VMM and HIP >= 7.12 / ROCm "
                     "7.0.2.x. Not available on this host.";
 
   k_ir_composite_barrier<<<1, 32, 0, stream_>>>(kIters, devComm_);

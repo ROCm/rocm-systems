@@ -40,7 +40,6 @@ typedef struct BinarySearch {
         reader(context),
         executable(context),
         signal(context),
-        status(context),
         queue(context) {}
 
   // Binary Search parameters
@@ -83,8 +82,7 @@ typedef struct BinarySearch {
   CodeObjectReaderHolder reader;
   ExecutableHolder executable;
   SignalHolder signal;
-  QueueStatusHolder status;
-  QueueHolder queue;
+  CheckQueue queue;
 } BinarySearch;
 
 class ComputeQueueTest : public TestBase {

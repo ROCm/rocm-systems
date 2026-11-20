@@ -9,15 +9,15 @@ use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
-use rocddi::device::gpu::profiling::{
-    PcSamplingConfigurationSet, PcSamplingIntervalUnit, PcSamplingMethod, PcSamplingRequest,
-};
+use rocddi::device::gpu::profiling::{PcSamplingIntervalUnit, PcSamplingMethod, PcSamplingRequest};
 
 use crate::callback_arg::CallbackArg;
+use crate::events::CallbackScope;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, boundary, lock, map_error};
+use crate::lifecycle::lock;
+use crate::status::map_error;
 use session::{Resources, RetiredAssets, SessionHandle};
 
 /// HSA handles and uncertain cleanup for PC sampling sessions.
@@ -27,27 +27,34 @@ pub(crate) struct PcSamplingState {
     /// Sessions undergoing a native transition.
     busy: HashSet<u64>,
     /// Prevents reuse after uncertain native cleanup.
-    quarantine: Arc<AtomicBool>,
+    quarantine: Arc<crate::session::SessionHealth>,
     /// Trap assets retained until native users have stopped.
     retired: Vec<RetiredAssets>,
 }
 
 impl PcSamplingState {
-    pub(crate) fn new() -> Self {
+    /// Initializes an empty PC sampling session registry.
+    pub(crate) fn new(quarantine: Arc<crate::session::SessionHealth>) -> Self {
         Self {
             sessions: HashMap::new(),
             busy: HashSet::new(),
-            quarantine: Arc::new(AtomicBool::new(false)),
+            quarantine,
             retired: Vec::new(),
         }
     }
 
     /// Reports whether HSA already owns or is changing this agent's session.
-    fn agent_busy(&self, agent: HsaAgent) -> bool {
+    pub(crate) fn agent_busy(&self, agent: HsaAgent) -> bool {
         self.busy.contains(&agent.handle)
             || self.sessions.values().any(|owner| owner.agent == agent)
     }
 
+    /// Snapshots native sessions for callback quiescence outside the registry.
+    pub(crate) fn sessions_for_tool_unload(&self) -> Vec<Arc<SessionHandle>> {
+        self.sessions.values().cloned().collect()
+    }
+
+    /// Quarantines all sessions whose native handler may still be installed.
     pub(crate) fn quarantine_all(&self) {
         for session in self.sessions.values() {
             session.quarantine();
@@ -57,7 +64,7 @@ impl PcSamplingState {
     /// Releases every native sampling session before device teardown.
     /// Failure retains the remaining state with the whole HSA generation.
     pub(crate) fn shutdown(&mut self) -> bool {
-        if self.quarantine.load(Ordering::Acquire) {
+        if self.quarantine.is_quarantined() {
             self.quarantine_all();
             return false;
         }
@@ -76,19 +83,22 @@ impl PcSamplingState {
         true
     }
 
+    /// Drops assets whose native sampling sessions have retired.
     pub(crate) fn clear_retired(&mut self) {
         self.retired.clear();
     }
 }
 
-fn sampling_error(error: rocddi::Error) -> Status {
+/// Translates a native sampling error into an HSA status.
+pub(crate) fn sampling_error(error: rocddi::Error) -> Status {
     match error.kind() {
         rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
         _ => map_error(error),
     }
 }
 
-fn with_session(
+/// Runs a session operation while retaining its frontend owner.
+pub(crate) fn with_session(
     session: HsaPcSampling,
     operation: impl FnOnce(&SessionHandle) -> Status,
 ) -> Status {
@@ -114,7 +124,7 @@ fn with_session(
         else {
             return INVALID_ARGUMENT;
         };
-        let Some(token) = runtime.inflight.enter() else {
+        let Some(token) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         (owner, token)
@@ -123,29 +133,30 @@ fn with_session(
 }
 
 /// Validated C arguments shared by both PC sampling creation entry points.
-struct CreateArgs {
+pub(crate) struct CreateArgs {
     /// Optional native trace ID supplied for adopting an existing trace.
-    trace_id: Option<NonZeroU32>,
+    pub(crate) trace_id: Option<NonZeroU32>,
     /// HSA GPU agent that owns the session.
-    agent: HsaAgent,
+    pub(crate) agent: HsaAgent,
     /// Public sampling method selector.
-    method: u32,
+    pub(crate) method: u32,
     /// Public interval unit selector.
-    units: u32,
+    pub(crate) units: u32,
     /// Requested sampling interval in the selected units.
-    interval: usize,
+    pub(crate) interval: usize,
     /// Requested callback buffer size in bytes.
-    buffer_size: usize,
+    pub(crate) buffer_size: usize,
     /// Caller callback for delivered sample batches.
-    callback: PcSamplingDataReadyCallback,
+    pub(crate) callback: PcSamplingDataReadyCallback,
     /// Caller-owned callback argument.
-    callback_data: *mut c_void,
+    pub(crate) callback_data: *mut c_void,
     /// Caller output slot for the new HSA session handle.
-    output: *mut HsaPcSampling,
+    pub(crate) output: *mut HsaPcSampling,
 }
 
 #[allow(unsafe_code)]
-fn create_session(args: &CreateArgs) -> Status {
+/// Creates session and records its ownership.
+pub(crate) fn create_session(args: &CreateArgs) -> Status {
     if CallbackScope::active() {
         return INVALID_RUNTIME_STATE;
     }
@@ -173,7 +184,7 @@ fn create_session(args: &CreateArgs) -> Status {
         unit,
         interval: args.interval as u64,
     };
-    let (handle, device, info, page_size, quarantine, _token) = {
+    let (handle, device, info, page_size, quarantine, restore, _token) = {
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -181,17 +192,29 @@ fn create_session(args: &CreateArgs) -> Status {
         let Some(runtime) = guard.as_mut() else {
             return NOT_INITIALIZED;
         };
-        let Some(index) = runtime.gpu_index(args.agent) else {
+        if runtime.control.stop_workers.load(Ordering::Acquire) {
+            return INVALID_RUNTIME_STATE;
+        }
+        let Some(index) = runtime.agents.gpu_index(args.agent) else {
             return INVALID_AGENT;
         };
-        let info = runtime.gpus[index].info;
-        if !session::supported_gpu(info) {
+        let info = runtime.agents.gpus[index].info();
+        if !session::supported_gpu(&info) {
             return NOT_SUPPORTED;
         }
         if runtime.pc_sampling_state.agent_busy(args.agent) {
             return RESOURCE_BUSY;
         }
-        let Some(token) = runtime.inflight.enter() else {
+        let Some(restore) = runtime
+            .debugger
+            .as_ref()
+            .and_then(|debugger| debugger.restore_token(&runtime.agents.gpus[index].device))
+        else {
+            // A shared native context may belong to another adapter. Do not
+            // replace a trap binding whose restoration/lifetime we do not own.
+            return NOT_SUPPORTED;
+        };
+        let Some(token) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         let handle = match runtime.allocate_handle() {
@@ -201,10 +224,11 @@ fn create_session(args: &CreateArgs) -> Status {
         runtime.pc_sampling_state.busy.insert(args.agent.handle);
         (
             handle,
-            runtime.gpus[index].device.clone(),
+            runtime.agents.gpus[index].device.clone(),
             info,
-            runtime.host_page_size,
+            runtime.agents.host_page_size,
             runtime.pc_sampling_state.quarantine.clone(),
+            restore,
             token,
         )
     };
@@ -213,13 +237,14 @@ fn create_session(args: &CreateArgs) -> Status {
     let callback_data = unsafe { CallbackArg::new(args.callback_data) };
     let result = Resources::prepare(
         device,
-        info,
+        &info,
         request,
         args.trace_id,
         args.buffer_size,
         page_size,
         args.callback,
         callback_data,
+        restore,
     )
     .and_then(|resources| SessionHandle::create(resources, args.agent, &quarantine));
     let mut guard = match lock() {
@@ -229,7 +254,7 @@ fn create_session(args: &CreateArgs) -> Status {
                 if let Ok(retired) = owner.destroy() {
                     std::mem::forget(retired);
                 } else {
-                    quarantine.store(true, Ordering::Release);
+                    quarantine.quarantine();
                     owner.quarantine();
                     std::mem::forget(owner);
                 }
@@ -243,7 +268,7 @@ fn create_session(args: &CreateArgs) -> Status {
             if let Ok(retired) = owner.destroy() {
                 std::mem::forget(retired);
             } else {
-                quarantine.store(true, Ordering::Release);
+                quarantine.quarantine();
                 owner.quarantine();
                 std::mem::forget(owner);
             }
@@ -261,7 +286,8 @@ fn create_session(args: &CreateArgs) -> Status {
     SUCCESS
 }
 
-fn destroy_session(session: HsaPcSampling) -> Status {
+/// Destroys session and releases its owned resources.
+pub(crate) fn destroy_session(session: HsaPcSampling) -> Status {
     if CallbackScope::active() {
         return INVALID_RUNTIME_STATE;
     }
@@ -287,7 +313,7 @@ fn destroy_session(session: HsaPcSampling) -> Status {
         if runtime.pc_sampling_state.busy.contains(&owner.agent.handle) {
             return RESOURCE_BUSY;
         }
-        let Some(token) = runtime.inflight.enter() else {
+        let Some(token) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         runtime.pc_sampling_state.busy.insert(owner.agent.handle);
@@ -297,7 +323,7 @@ fn destroy_session(session: HsaPcSampling) -> Status {
     let mut guard = match lock() {
         Ok(guard) => guard,
         Err(status) => {
-            quarantine.store(true, Ordering::Release);
+            quarantine.quarantine();
             owner.quarantine();
             if let Ok(retired) = outcome {
                 std::mem::forget(retired);
@@ -310,7 +336,7 @@ fn destroy_session(session: HsaPcSampling) -> Status {
             std::mem::forget(retired);
             return SUCCESS;
         }
-        quarantine.store(true, Ordering::Release);
+        quarantine.quarantine();
         owner.quarantine();
         return INVALID_RUNTIME_STATE;
     };
@@ -332,206 +358,15 @@ fn destroy_session(session: HsaPcSampling) -> Status {
     }
 }
 
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_iterate_configuration")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub extern "C" fn hsa_ven_amd_pcs_iterate_configuration(
-    agent: HsaAgent,
-    configuration_callback: PcSamplingConfigurationCallback,
-    callback_data: *mut c_void,
-) -> Status {
-    boundary(|| {
-        let Some(callback) = configuration_callback else {
-            return INVALID_ARGUMENT;
-        };
-        let (device, _token) = {
-            let guard = match lock() {
-                Ok(guard) => guard,
-                Err(status) => return status,
-            };
-            let Some(runtime) = guard.as_ref() else {
-                return NOT_INITIALIZED;
-            };
-            let Some(index) = runtime.gpu_index(agent) else {
-                return INVALID_AGENT;
-            };
-            if !runtime.gpus[index].pc_sampling_supported {
-                return NOT_SUPPORTED;
-            }
-            if runtime.pc_sampling_state.agent_busy(agent) {
-                return SUCCESS;
-            }
-            let Some(token) = runtime.inflight.enter() else {
-                return OUT_OF_RESOURCES;
-            };
-            (runtime.gpus[index].device.clone(), token)
-        };
-        let configurations = match device
-            .gpu()
-            .and_then(|gpu| gpu.pc_sampling_configurations(PcSamplingConfigurationSet::Available))
-        {
-            Ok(configurations) => configurations,
-            Err(error) => return sampling_error(error),
-        };
-        let _scope = CallbackScope::enter();
-        for configuration in configurations {
-            let (Ok(minimum_interval), Ok(maximum_interval)) = (
-                usize::try_from(configuration.minimum_interval),
-                usize::try_from(configuration.maximum_interval),
-            ) else {
-                continue;
-            };
-            let record = HsaPcSamplingConfiguration {
-                method: match configuration.method {
-                    PcSamplingMethod::HostTrap => 0,
-                    PcSamplingMethod::Stochastic => 1,
-                },
-                units: match configuration.unit {
-                    PcSamplingIntervalUnit::Microseconds => 0,
-                    PcSamplingIntervalUnit::ClockCycles => 1,
-                    PcSamplingIntervalUnit::Instructions => 2,
-                },
-                minimum_interval,
-                maximum_interval,
-                flags: configuration.flags,
-            };
-            // SAFETY: The callback is synchronous and the record stays live
-            // through its return. The caller retains callback_data.
-            match unsafe { callback(&raw const record, callback_data) } {
-                SUCCESS => (),
-                INFO_BREAK => return SUCCESS,
-                status => return status,
-            }
-        }
-        SUCCESS
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_create")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-#[allow(clippy::too_many_arguments)]
-pub extern "C" fn hsa_ven_amd_pcs_create(
-    agent: HsaAgent,
-    method: u32,
-    units: u32,
-    interval: usize,
-    _latency: usize,
-    buffer_size: usize,
-    data_ready_callback: PcSamplingDataReadyCallback,
-    client_callback_data: *mut c_void,
-    pc_sampling: *mut HsaPcSampling,
-) -> Status {
-    boundary(|| {
-        create_session(&CreateArgs {
-            trace_id: None,
-            agent,
-            method,
-            units,
-            interval,
-            buffer_size,
-            callback: data_ready_callback,
-            callback_data: client_callback_data,
-            output: pc_sampling,
-        })
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_create_from_id")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-#[allow(clippy::too_many_arguments)]
-pub extern "C" fn hsa_ven_amd_pcs_create_from_id(
-    trace_id: u32,
-    agent: HsaAgent,
-    method: u32,
-    units: u32,
-    interval: usize,
-    _latency: usize,
-    buffer_size: usize,
-    data_ready_callback: PcSamplingDataReadyCallback,
-    client_callback_data: *mut c_void,
-    pc_sampling: *mut HsaPcSampling,
-) -> Status {
-    boundary(|| {
-        let Some(trace_id) = NonZeroU32::new(trace_id) else {
-            return INVALID_ARGUMENT;
-        };
-        create_session(&CreateArgs {
-            trace_id: Some(trace_id),
-            agent,
-            method,
-            units,
-            interval,
-            buffer_size,
-            callback: data_ready_callback,
-            callback_data: client_callback_data,
-            output: pc_sampling,
-        })
-    })
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_start")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub extern "C" fn hsa_ven_amd_pcs_start(pc_sampling: HsaPcSampling) -> Status {
-    boundary(|| with_session(pc_sampling, SessionHandle::start))
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_stop")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub extern "C" fn hsa_ven_amd_pcs_stop(pc_sampling: HsaPcSampling) -> Status {
-    boundary(|| with_session(pc_sampling, SessionHandle::stop))
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_flush")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub extern "C" fn hsa_ven_amd_pcs_flush(pc_sampling: HsaPcSampling) -> Status {
-    boundary(|| with_session(pc_sampling, SessionHandle::flush))
-}
-
-#[cfg_attr(
-    all(target_arch = "x86_64", not(test)),
-    unsafe(export_name = "__hsa_impl_hsa_ven_amd_pcs_destroy")
-)]
-#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
-pub extern "C" fn hsa_ven_amd_pcs_destroy(pc_sampling: HsaPcSampling) -> Status {
-    boundary(|| destroy_session(pc_sampling))
-}
-
-#[cfg(any(test, not(all(target_os = "linux", target_arch = "x86_64"))))]
-pub(crate) fn extension_table() -> [usize; 7] {
-    [
-        hsa_ven_amd_pcs_iterate_configuration as *const () as usize,
-        hsa_ven_amd_pcs_create as *const () as usize,
-        hsa_ven_amd_pcs_create_from_id as *const () as usize,
-        hsa_ven_amd_pcs_destroy as *const () as usize,
-        hsa_ven_amd_pcs_start as *const () as usize,
-        hsa_ven_amd_pcs_stop as *const () as usize,
-        hsa_ven_amd_pcs_flush as *const () as usize,
-    ]
-}
-
 #[cfg(test)]
+/// PC sampling status and C ABI checks.
 mod tests {
     use super::*;
+    use crate::api::pc_sampling::*;
     use std::mem::{offset_of, size_of};
 
     #[test]
+    /// Checks that native contention becomes the public resource-busy status.
     fn sampling_busy_uses_the_resource_busy_status() {
         let error = rocddi::Error::Operation {
             kind: rocddi::ErrorKind::Busy,
@@ -541,9 +376,12 @@ mod tests {
     }
 
     #[test]
+    /// Checks PC sampling entry-point signatures and record field offsets.
     fn entry_points_and_records_match_the_public_abi() {
+        /// Configuration-iteration entry-point signature.
         type Iterate =
             extern "C" fn(HsaAgent, PcSamplingConfigurationCallback, *mut c_void) -> Status;
+        /// Session-creation entry-point signature.
         type Create = extern "C" fn(
             HsaAgent,
             u32,
@@ -555,6 +393,7 @@ mod tests {
             *mut c_void,
             *mut HsaPcSampling,
         ) -> Status;
+        /// ID-based session-creation entry-point signature.
         type CreateFromId = extern "C" fn(
             u32,
             HsaAgent,
@@ -567,6 +406,7 @@ mod tests {
             *mut c_void,
             *mut HsaPcSampling,
         ) -> Status;
+        /// Start, stop, flush, and destroy entry-point signature.
         type Control = extern "C" fn(HsaPcSampling) -> Status;
 
         let _: Iterate = hsa_ven_amd_pcs_iterate_configuration;

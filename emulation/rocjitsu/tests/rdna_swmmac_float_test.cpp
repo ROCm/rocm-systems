@@ -43,3 +43,24 @@ TEST(RdnaSwmmacFloat, SparseIndicesAndModifiers) {
           {{0, 0x41fc0000u}, {255, 0x41fc0000u}});
   }
 }
+
+TEST(RdnaSwmmacFloat, Bf16TinyNegativeAccumulatorSubtractsFloorUnit) {
+  // gfx1201 wave32 captures: only compressed-A VGPR0's low half in lanes 0-15
+  // is nonzero, B and C are uniform and the sparse index is zero. The products'
+  // grid is below 2^-126, so the negative subnormal C subtracts one unit;
+  // dropping C would give 0x0c000000 and 0x0c80.
+  const auto input = [](uint32_t a, uint32_t b, uint32_t c) {
+    Registers registers = uniform_input({0, b | (b << 16), 0, c, 0});
+    for (uint32_t lane = 0; lane < 16; ++lane)
+      registers[0][lane] = a;
+    return registers;
+  };
+  for (bool scalar : {false, true}) {
+    ForceScalarGuard guard;
+    util::set_force_scalar_for_testing(scalar);
+    check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc514018u, 0x1c821100u}, 0xf0,
+          input(0x2900u, 0x2280u, 0x8000082du), {{0, 0x0bffffffu}, {255, 0x0bffffffu}});
+    check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc534018u, 0x1c821100u}, 0xf0,
+          input(0x3800u, 0x1400u, 0x80518051u), {{0, 0x0c7f0c7fu}, {127, 0x0c7f0c7fu}}, 128);
+  }
+}

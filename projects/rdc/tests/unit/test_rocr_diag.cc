@@ -53,6 +53,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -98,6 +99,22 @@ hsa_agent_t agent_handle(uint32_t agent) {
   return handle;
 }
 
+// The fake starts over, and so does what the module holds from an earlier step of the case: its
+// queues and its reference to ROCr are objects of the fake's old state, which rdc_diag_destroy()
+// gives back to that state before the reset forgets it, unless a GPU is in the abandon record.
+void reset_fake() {
+  (void)rdc_diag_destroy();
+  rdc_fake_hsa_reset();
+}
+
+// What a run leaves of ROCr: the module's own reference, which it holds across runs, as
+// rocprofiler-sdk cannot take a reload, and which rdc_diag_destroy() gives back.
+void expect_only_the_module_reference() {
+  EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+  EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+  EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+}
+
 // What the queue error callback of the case below recorded.
 hsa_status_t g_error_status = HSA_STATUS_SUCCESS;
 void* g_error_data = nullptr;
@@ -113,7 +130,7 @@ void queue_error(hsa_status_t status, hsa_queue_t*, void* data) {
 // of the process, as it does on the hardware (f22/exp/leaks_1.txt).
 TEST(FakeHsaControl, AShutdownWithALiveQueueLatchesTheNextInit) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     hsa_queue_t* queue = nullptr;
     ASSERT_EQ(hsa_queue_create(agent_handle(1), 128, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, 0, 0,
@@ -131,7 +148,7 @@ TEST(FakeHsaControl, AShutdownWithALiveQueueLatchesTheNextInit) {
 // A signal, a block or an executable left alive is not what arms it.
 TEST(FakeHsaControl, AShutdownWithOtherObjectsAliveDoesNotLatch) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     hsa_signal_t signal = {};
     ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
@@ -153,7 +170,7 @@ TEST(FakeHsaControl, AShutdownWithOtherObjectsAliveDoesNotLatch) {
 // reference and an abandoned object's unreleased one rest on.
 TEST(FakeHsaControl, AShutdownThatKeepsAReferenceDoesNotLatch) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     hsa_queue_t* queue = nullptr;
@@ -171,7 +188,7 @@ TEST(FakeHsaControl, AShutdownThatKeepsAReferenceDoesNotLatch) {
 // A block freed twice is counted, not a crash: the mapping stays after the free.
 TEST(FakeHsaControl, ABlockFreedTwiceIsReported) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     void* block = nullptr;
     ASSERT_EQ(hsa_amd_memory_pool_allocate(pool_handle(kStandardPool), 128, 0, &block),
@@ -188,7 +205,7 @@ TEST(FakeHsaControl, ABlockFreedTwiceIsReported) {
 // A free of a pointer the fake never issued is recorded and refused.
 TEST(FakeHsaControl, AFreeOfAPointerItNeverIssuedIsSeen) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     int own = 0;
     EXPECT_EQ(hsa_amd_memory_pool_free(&own), HSA_STATUS_ERROR_INVALID_ALLOCATION);
@@ -201,7 +218,7 @@ TEST(FakeHsaControl, AFreeOfAPointerItNeverIssuedIsSeen) {
 // new mapping would read as, so that what a check does not write shows.
 TEST(FakeHsaControl, AFreshBlockAndANewRingRead0x5A) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     void* block = nullptr;
     ASSERT_EQ(hsa_amd_memory_pool_allocate(pool_handle(kStandardPool), 256, 0, &block),
@@ -227,7 +244,7 @@ TEST(FakeHsaControl, AFreshBlockAndANewRingRead0x5A) {
 // for, as ROCr does, so that a text built from it carries no dirt.
 TEST(FakeHsaControl, AStatusItHasNoStringForGetsNone) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     const char* known = nullptr;
     EXPECT_EQ(hsa_status_string(HSA_STATUS_ERROR_OUT_OF_RESOURCES, &known), HSA_STATUS_SUCCESS);
     ASSERT_NE(known, nullptr);
@@ -245,7 +262,7 @@ TEST(FakeHsaControl, AStatusItHasNoStringForGetsNone) {
 // hands out no block.
 TEST(FakeHsaControl, AnAllocationAboveThePoolsMaximumIsRefused) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     void* block = reinterpret_cast<void*>(0x1);
     EXPECT_EQ(hsa_amd_memory_pool_allocate(pool_handle(kStandardPool), (64 * 1024) + 1, 0, &block),
@@ -259,7 +276,7 @@ TEST(FakeHsaControl, AnAllocationAboveThePoolsMaximumIsRefused) {
 // ROCr's are.
 TEST(FakeHsaControl, ACallWithNoLiveReferenceIsRefused) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     void* block = nullptr;
     EXPECT_EQ(hsa_amd_memory_pool_allocate(pool_handle(kStandardPool), 64, 0, &block),
               HSA_STATUS_ERROR_NOT_INITIALIZED);
@@ -272,7 +289,7 @@ TEST(FakeHsaControl, ACallWithNoLiveReferenceIsRefused) {
 // A handle the fake never issued is refused without being read.
 TEST(FakeHsaControl, AHandleItNeverIssuedIsRefused) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     hsa_device_type_t type = HSA_DEVICE_TYPE_CPU;
     EXPECT_EQ(hsa_agent_get_info(agent_handle(99), HSA_AGENT_INFO_DEVICE, &type),
@@ -301,7 +318,7 @@ TEST(FakeHsaControl, AHandleItNeverIssuedIsRefused) {
 // A write past a block lands in the redzone, which the free checks.
 TEST(FakeHsaControl, AWritePastABlockIsSeenByItsRedzone) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     void* block = nullptr;
     ASSERT_EQ(hsa_amd_memory_pool_allocate(pool_handle(kStandardPool), 16, 0, &block),
@@ -317,7 +334,7 @@ TEST(FakeHsaControl, AWritePastABlockIsSeenByItsRedzone) {
 // completes a dispatch at its third wait leaves the two before it at 1.
 TEST(FakeHsaControl, AWaitEndsAtItsHintAndTheThirdOneCompletesTheDispatch) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     // A thousand ticks a second, so that a hint of 50 is 50 ms.
     rdc_fake_hsa_set_timestamp_frequency(1000);
     rdc_fake_hsa_set_completion_wait(3);
@@ -368,7 +385,7 @@ TEST(FakeHsaControl, AWaitEndsAtItsHintAndTheThirdOneCompletesTheDispatch) {
 // is what orders the cases that run two checks at once.
 TEST(FakeHsaControl, AGateHoldsACallUntilItIsReleased) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     rdc_fake_hsa_gate("hsa_agent_get_info", 7, 0);
 
@@ -396,7 +413,7 @@ TEST(FakeHsaControl, AGateHoldsACallUntilItIsReleased) {
 // for its error handler.
 TEST(FakeHsaControl, AQueueErrorReachesTheCallbackAndIsJoinedByTheDestroy) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     int block = 0;
     hsa_queue_t* with_callback = nullptr;
@@ -429,7 +446,7 @@ TEST(FakeHsaControl, AQueueErrorReachesTheCallbackAndIsJoinedByTheDestroy) {
 // start of its page.
 TEST(FakeHsaControl, TheAliasedPagesAndTheKernelArgumentOffsetAreHandedOut) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     rdc_fake_hsa_set_alias_pages(1);
     void* block = nullptr;
@@ -459,7 +476,7 @@ TEST(FakeHsaControl, TheAliasedPagesAndTheKernelArgumentOffsetAreHandedOut) {
 // through it, which is the guard of the catch of what no ROCr call raises.
 TEST(FakeHsaControl, AFailureFiresOnTheCallItNamesAndAThrowLeavesTheFake) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail("hsa_init", 2, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     EXPECT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     EXPECT_EQ(hsa_init(), HSA_STATUS_ERROR_OUT_OF_RESOURCES);
@@ -621,7 +638,7 @@ rdc_diag_callback_t progress_callback() {
 // the entry point's argument check).
 TEST(RocrArguments, ANullResultIsRefused) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     uint32_t ids[1] = {0};
     EXPECT_EQ(rdc_diag_test_case_run(RDC_DIAG_COMPUTE_QUEUE, ids, 1, nullptr, 0, nullptr, nullptr),
               RDC_ST_BAD_PARAMETER);
@@ -633,7 +650,7 @@ TEST(RocrArguments, ANullResultIsRefused) {
 // F: F9 reads through a null gpu_index.
 TEST(RocrArguments, ANullGpuIndexIsRefused) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ResultPtr result = new_result();
     EXPECT_EQ(rdc_diag_test_case_run(RDC_DIAG_SYS_MEM_CHECK, nullptr, 2, nullptr, 0, result.get(),
                                      nullptr),
@@ -646,7 +663,7 @@ TEST(RocrArguments, ANullGpuIndexIsRefused) {
 // F: F9 writes the test cases through a null array.
 TEST(RocrArguments, AQueryWithoutAnArrayIsRefused) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     uint32_t count = 7;
     EXPECT_EQ(rdc_diag_test_cases_query(nullptr, &count), RDC_ST_BAD_PARAMETER);
     EXPECT_EQ(count, 0u);
@@ -662,7 +679,7 @@ TEST(RocrArguments, AQueryWithoutAnArrayIsRefused) {
 // status with the next GPU's).
 TEST(RocrArguments, AFailedCallIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     // The first and the third GPU carry a node no agent has, so that only the second one reaches
     // the call that fails.
     write_kernel_files();
@@ -693,7 +710,7 @@ TEST(RocrArguments, AFailedCallIsThatGpusFailure) {
 // std::exception only, so it leaves the entry point).
 TEST(RocrArguments, AnExceptionOfAnotherKindIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_node_id(0, 9);
     rdc_fake_hsa_set_node_id(2, 9);
@@ -721,7 +738,7 @@ TEST(RocrResults, ResultsAreWrittenByPosition) {
   RDC_ROCR_CASE({
     // No GPU can be mapped, so every row is written without an HSA call.
     for (uint32_t count : {1u, 2u, 128u}) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       rdc_fake_hsa_fail_node_id(UINT32_MAX, AMDSMI_STATUS_NOT_FOUND);
       std::vector<uint32_t> ids = flat_ids(count);
       ResultPtr result = new_result();
@@ -739,7 +756,7 @@ TEST(RocrResults, ResultsAreWrittenByPosition) {
     }
 
     // A group of a flat id and a partition id, which are the ids the rows carry.
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_node_id(UINT32_MAX, AMDSMI_STATUS_NOT_FOUND);
     uint32_t mixed[2] = {3, partition_id(1, 1)};
     ResultPtr result = new_result();
@@ -756,7 +773,7 @@ TEST(RocrResults, ResultsAreWrittenByPosition) {
 // struct (F: F9 indexes gpu_results[] by the entity id, so ids 128 to 199 land past it).
 TEST(RocrResults, AGroupLargerThanTheResultArrayIsClamped) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_node_id(UINT32_MAX, AMDSMI_STATUS_NOT_FOUND);
 
     // One block that holds the result and the 72 rows F9's indexing would reach past it, so that
@@ -797,7 +814,7 @@ TEST(RocrResults, AGroupLargerThanTheResultArrayIsClamped) {
 TEST(RocrResults, TheStatusIsTheHighestOfItsGpus) {
   RDC_ROCR_CASE({
     for (int failing_first = 1; failing_first >= 0; failing_first--) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_set_node_id(0, failing_first != 0 ? 1u : 9u);
       rdc_fake_hsa_set_node_id(1, failing_first != 0 ? 9u : 1u);
@@ -824,7 +841,7 @@ TEST(RocrResults, TheStatusIsTheHighestOfItsGpus) {
 // returns RDC_ST_BAD_PARAMETER and writes no result).
 TEST(RocrResults, AnEmptyGroupIsSkipped) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ResultPtr result = new_result();
     std::memset(result.get(), 0xAB, sizeof(rdc_diag_test_result_t));
     uint32_t ids[1] = {0};
@@ -845,7 +862,7 @@ TEST(RocrResults, AnEmptyGroupIsSkipped) {
 // show (F: F9 cuts its text mid-word at 4095 bytes).
 TEST(RocrTexts, TextsAreCutAtWholeUnits) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_node_id(UINT32_MAX, AMDSMI_STATUS_NOT_FOUND);
     std::vector<uint32_t> ids = flat_ids(128);
     ResultPtr result = new_result();
@@ -960,7 +977,7 @@ TEST(RocrTexts, EmptyUnitsAreNeitherKeptNorCounted) {
 TEST(RocrTexts, InfoStatesEachGpusOutcome) {
   RDC_ROCR_CASE({
     // A GPU whose pools are checked and whose next sub-test is stopped.
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_throw_int("hsa_amd_agents_allow_access", 0, 7);
     uint32_t stopped[1] = {0};
     ResultPtr result = new_result();
@@ -977,7 +994,7 @@ TEST(RocrTexts, InfoStatesEachGpusOutcome) {
         << msg;
 
     // A GPU ROCr does not list keeps its sentence's capital, as it is a name.
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_set_node_id(5, 9);
     uint32_t unlisted[1] = {5};
     result = new_result();
@@ -997,8 +1014,9 @@ TEST(RocrTexts, InfoStatesEachGpusOutcome) {
 // before it keep their rows (F: on F9 it leaves the entry point).
 TEST(RocrProgress, AProgressCallbackThatThrowsStopsTheCheck) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
-    // Every GPU carries a node no agent has, so each costs one ROCr load and leaves nothing.
+    reset_fake();
+    // Every GPU carries a node no agent has, so the run makes nothing but the module's
+    // reference to ROCr.
     rdc_fake_hsa_set_node_id(0, 9);
     rdc_fake_hsa_set_node_id(1, 9);
     rdc_fake_hsa_set_node_id(2, 9);
@@ -1020,17 +1038,17 @@ TEST(RocrProgress, AProgressCallbackThatThrowsStopsTheCheck) {
     EXPECT_EQ(text_of(result->gpu_results[0].gpu_result.msg), "ROCr does not list the GPU.");
     EXPECT_EQ(result->gpu_results[1].gpu_index, 0u);
     EXPECT_EQ(text_of(result->gpu_results[1].gpu_result.msg), "");
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
     EXPECT_EQ(rdc_fake_hsa_unbalanced_shutdowns(), 0u);
 
-    // ROCr is loaded afresh by the run after it, so nothing was left holding it.
+    // The module's reference is all the run left, and the run after it uses that one.
     const uint32_t loads = rdc_fake_hsa_load_count();
     ResultPtr again = new_result();
     ASSERT_EQ(
         rdc_diag_test_case_run(RDC_DIAG_COMPUTE_QUEUE, ids, 1, nullptr, 0, again.get(), nullptr),
         RDC_ST_OK);
-    EXPECT_EQ(rdc_fake_hsa_load_count(), loads + 1);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    EXPECT_EQ(rdc_fake_hsa_load_count(), loads);
+    expect_only_the_module_reference();
   });
 }
 
@@ -1038,7 +1056,7 @@ TEST(RocrProgress, AProgressCallbackThatThrowsStopsTheCheck) {
 // the group).
 TEST(RocrProgress, TheProgressCallbackNamesEachEntity) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_node_id(UINT32_MAX, AMDSMI_STATUS_NOT_FOUND);
     g_progress_lines.clear();
 
@@ -1059,7 +1077,7 @@ TEST(RocrProgress, TheProgressCallbackNamesEachEntity) {
 // dispatcher's own skip stands (M: T4's mutation zeroes the result first).
 TEST(RocrProgress, ATestCaseTheModuleDoesNotImplementWritesNothing) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ResultPtr result = new_result();
     result->status = RDC_DIAG_RESULT_SKIP;
     result->test_case = RDC_DIAG_NODE_TOPOLOGY;
@@ -1089,7 +1107,7 @@ TEST(RocrMapping, TheAgentsAreFoundByTheirKfdNode) {
     for (uint32_t entity = 0; entity < 2; entity++) {
       const uint32_t node = entity == 0 ? 2u : 1u;
       const uint32_t agent = node;  // the fake lists the CPU, then node 1, then node 2
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_set_node_id(entity, node);
 
@@ -1112,7 +1130,7 @@ TEST(RocrMapping, TheAgentsAreFoundByTheirKfdNode) {
 // goes straight to ROCr).
 TEST(RocrMapping, AGroupThatCannotBeMappedMakesNoHsaCall) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_node_id(UINT32_MAX, AMDSMI_STATUS_NOT_FOUND);
 
     uint32_t ids[2] = {0, 1};
@@ -1133,7 +1151,7 @@ TEST(RocrMapping, AGroupThatCannotBeMappedMakesNoHsaCall) {
 // costs (F: F9 reads the agent at the GPU's position).
 TEST(RocrMapping, ANodeNoAgentCarriesIsSkipped) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_set_node_id(0, 9);
 
     uint32_t ids[1] = {0};
@@ -1145,7 +1163,7 @@ TEST(RocrMapping, ANodeNoAgentCarriesIsSkipped) {
     EXPECT_EQ(result->status, RDC_DIAG_RESULT_SKIP);
     EXPECT_EQ(text_of(result->gpu_results[0].gpu_result.msg), "ROCr does not list the GPU.");
     EXPECT_EQ(rdc_fake_hsa_load_count(), 1u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
     EXPECT_EQ(rdc_fake_hsa_refused_calls(), 0u);
     EXPECT_EQ(rdc_fake_hsa_queue_count(), 0u);
   });
@@ -1158,7 +1176,7 @@ TEST(RocrMapping, ANodeNoAgentCarriesIsSkipped) {
 // 0 and the GPU is skipped as one ROCr does not list).
 TEST(RocrMapping, AFailedNodeReadIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_agent_info(UINT32_MAX, HSA_AMD_AGENT_INFO_DRIVER_NODE_ID,
                                  HSA_STATUS_ERROR_INVALID_ARGUMENT);
 
@@ -1172,11 +1190,12 @@ TEST(RocrMapping, AFailedNodeReadIsThatGpusFailure) {
     const std::string text = result->gpu_results[0].gpu_result.msg;
     EXPECT_NE(text.find("Fail to read the KFD node of an agent."), std::string::npos) << text;
     EXPECT_NE(text.find("4097"), std::string::npos) << text;
-    // The failure came before anything was made for the GPU, and the run gave ROCr up.
+    // The failure came before anything was made for the GPU, and the run left only the module's
+    // reference to ROCr.
     EXPECT_EQ(rdc_fake_hsa_queue_count(), 0u);
     EXPECT_EQ(rdc_fake_hsa_alloc_count(), 0u);
     EXPECT_EQ(rdc_fake_hsa_live_blocks(), 0u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
   });
 }
 
@@ -1184,7 +1203,7 @@ TEST(RocrMapping, AFailedNodeReadIsThatGpusFailure) {
 // where entity 2 reads past the agents it lists; M otherwise).
 TEST(RocrMapping, EachMappingFailureHasItsOwnText) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_node_id(0, AMDSMI_STATUS_NOT_FOUND);
     rdc_fake_hsa_fail_node_id(1, AMDSMI_STATUS_NOT_SUPPORTED);
     rdc_fake_hsa_set_node_id(2, 9);  // the fake lists two GPU agents, with nodes 1 and 2
@@ -1276,9 +1295,11 @@ __attribute__((noinline, no_sanitize_address)) void dirty_stack() {
   }
 }
 
-// Every object the fake issued for a run was released: its queues and signals destroyed, its
-// blocks freed, its executables and their readers destroyed.
+// Every object the fake issued for a run was released once the module gave back what it holds
+// across runs, which rdc_diag_destroy() does: its queues and signals destroyed, its blocks freed,
+// its executables and their readers destroyed.
 void expect_everything_released() {
+  EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
   const std::vector<std::string> log = destroy_log();
   EXPECT_EQ(rdc_fake_hsa_live_blocks(), 0u) << joined(log);
   EXPECT_EQ(released(log, "queue"), rdc_fake_hsa_queue_count()) << joined(log);
@@ -1327,14 +1348,14 @@ void expect_missing_kernel(const char* text) {
 
 // --- the lifetimes of what a check makes ------------------------------------------------------
 
-// A kernel that is not installed is that GPU's skip, and nothing of that check is left alive:
-// under F22 it has made nothing by then, as the case after this one states, so what this one
-// says is that no descriptor and no reference is kept and that the next run is normal (F: F9
-// makes its queue, its signal and its buffers first and leaves them alive, so its hsa_shut_down()
-// latches ROCr and the next run's hsa_init() fails).
+// A kernel that is not installed is that GPU's skip, and nothing of that check is left alive: under
+// F22 it has made nothing by then, as the case after this one states, so what this one says is that
+// no descriptor and no reference of its own is kept and that the next run is normal (F: F9 makes
+// its queue, its signal and its buffers first; develop before #13878 leaves them alive, so its
+// hsa_shut_down() latches ROCr and the next run's hsa_init() fails).
 TEST(RocrLifetimes, AMissingKernelReleasesWhatItMadeInOrder) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     const size_t descriptors = open_descriptors();
 
     uint32_t ids[1] = {0};
@@ -1368,7 +1389,7 @@ TEST(RocrLifetimes, AMissingKernelReleasesWhatItMadeInOrder) {
 // mutation puts the load back after them).
 TEST(RocrLifetimes, AMissingKernelMakesNothingAtAll) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
 
     const OneGpu gpu = run_one_gpu(RDC_DIAG_COMPUTE_QUEUE);
     EXPECT_EQ(gpu.status, RDC_DIAG_RESULT_SKIP) << gpu.text;
@@ -1385,9 +1406,10 @@ TEST(RocrLifetimes, AMissingKernelMakesNothingAtAll) {
 }
 
 // A failure at each step of a check, the first HSA call after the test object's hsa_init() among
-// them, and an exception of another kind: everything made by then is released, no descriptor is
-// kept, and the next run is normal (F: on F9 whatever was made stays alive, so its shutdown
-// latches ROCr and every later hsa_init() fails).
+// them, and an exception of another kind: everything made by then but the GPU's queue, on which
+// nothing was dispatched, is released, the queue is kept for the GPU's next check, no descriptor is
+// kept, and the next run is normal (F: on develop before #13878 whatever was made stays alive, so
+// its shutdown latches ROCr and every later hsa_init() fails).
 TEST(RocrLifetimes, AThrowAtEachStepReleasesWhatWasMade) {
   RDC_ROCR_CASE({
     const char* const steps[] = {"hsa_iterate_agents",
@@ -1398,7 +1420,7 @@ TEST(RocrLifetimes, AThrowAtEachStepReleasesWhatWasMade) {
                                  "hsa_amd_agents_allow_access"};
     for (const char* step : steps) {
       for (int thrown = 0; thrown < 2; thrown++) {
-        rdc_fake_hsa_reset();
+        reset_fake();
         write_kernel_files();
         const size_t descriptors = open_descriptors();
         if (thrown == 0) {
@@ -1414,6 +1436,9 @@ TEST(RocrLifetimes, AThrowAtEachStepReleasesWhatWasMade) {
                   RDC_ST_OK)
             << step;
         EXPECT_EQ(result->status, RDC_DIAG_RESULT_FAIL) << step;
+        if (rdc_fake_hsa_queue_count() > 0) {
+          EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 0) << step;
+        }
 
         expect_everything_released();
         EXPECT_EQ(rdc_fake_hsa_live_references(), 0u) << step;
@@ -1422,18 +1447,22 @@ TEST(RocrLifetimes, AThrowAtEachStepReleasesWhatWasMade) {
         EXPECT_EQ(open_descriptors(), descriptors) << step;
 
         // The last step comes after the check made every kind of object, so the order of the
-        // log is F3's: the queue, the signal, the executable and its reader, the buffers last.
+        // log is F3's: the signal, the executable and its reader, the buffers last, then the test
+        // object's shutdown. The queue, on which nothing was dispatched, is the module's, which
+        // rdc_diag_destroy() destroys just before its own shutdown.
         if (std::string(step) == "hsa_amd_agents_allow_access") {
           const std::vector<std::string> log = destroy_log();
           const size_t shutdown = first_shutdown(log);
-          ASSERT_GT(shutdown, 4u) << joined(log);
-          EXPECT_EQ(log[0], "queue 0") << joined(log);
-          EXPECT_EQ(log[1], "signal 0") << joined(log);
-          EXPECT_EQ(log[2], "executable 0") << joined(log);
-          EXPECT_EQ(log[3], "reader 0") << joined(log);
-          for (size_t i = 4; i < shutdown; i++) {
+          ASSERT_GT(shutdown, 3u) << joined(log);
+          EXPECT_EQ(log[0], "signal 0") << joined(log);
+          EXPECT_EQ(log[1], "executable 0") << joined(log);
+          EXPECT_EQ(log[2], "reader 0") << joined(log);
+          for (size_t i = 3; i < shutdown; i++) {
             EXPECT_EQ(log[i].compare(0, 5, "block"), 0) << joined(log);
           }
+          ASSERT_EQ(log.size(), shutdown + 3) << joined(log);
+          EXPECT_EQ(log[shutdown + 1], "queue 0") << joined(log);
+          EXPECT_EQ(log[shutdown + 2], log[shutdown]) << joined(log);
         }
 
         rdc_fake_hsa_clear_failures();
@@ -1449,11 +1478,12 @@ TEST(RocrLifetimes, AThrowAtEachStepReleasesWhatWasMade) {
   });
 }
 
-// A check loads ROCr once, whatever the number of GPUs it looks at and of test objects it makes
-// (F: F9 loads and unloads ROCr per test object).
+// A check loads ROCr once, whatever the number of GPUs it looks at and of test objects it makes,
+// and the module holds it until rdc_diag_destroy() (F: develop before #13878 loads and unloads ROCr
+// per test object).
 TEST(RocrLifetimes, TheRunLoadsRocrOnceForTheCheck) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     add_third_gpu();
     uint32_t ids[3] = {0, 1, 2};
     ResultPtr result = new_result();
@@ -1462,10 +1492,10 @@ TEST(RocrLifetimes, TheRunLoadsRocrOnceForTheCheck) {
         RDC_ST_OK);
     EXPECT_EQ(result->per_gpu_result_count, 3u);
     EXPECT_EQ(rdc_fake_hsa_load_count(), 1u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
 
     // A group of which only one GPU can be mapped costs the same one load.
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_node_id(1, AMDSMI_STATUS_NOT_FOUND);
     uint32_t mixed[2] = {0, 1};
     ResultPtr second = new_result();
@@ -1473,16 +1503,18 @@ TEST(RocrLifetimes, TheRunLoadsRocrOnceForTheCheck) {
         rdc_diag_test_case_run(RDC_DIAG_COMPUTE_QUEUE, mixed, 2, nullptr, 0, second.get(), nullptr),
         RDC_ST_OK);
     EXPECT_EQ(rdc_fake_hsa_load_count(), 1u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
   });
 }
 
 // A reference another module of the process holds, as the profiler module's, costs the checks no
-// load of their own and is still there after them, with nothing of theirs left alive (F: on F9
-// each run leaves its queue and its blocks alive, a leak per run).
+// load of their own and is still there after them. The checks of both runs share one queue per GPU,
+// which the module destroys in rdc_diag_destroy() with its own reference, and leave no block alive
+// (F: on develop before #13878 each run leaves its queue and its blocks alive, a leak per run).
 TEST(RocrLifetimes, AReferenceHeldAcrossTwoRunsCostsNoLoad) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
+    write_kernel_files();
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     ASSERT_EQ(rdc_fake_hsa_load_count(), 1u);
 
@@ -1495,24 +1527,34 @@ TEST(RocrLifetimes, AReferenceHeldAcrossTwoRunsCostsNoLoad) {
             << "run " << run;
         EXPECT_EQ(result->per_gpu_result_count, 2u) << "run " << run;
       }
-      // No load of their own, nothing left alive, and this case's reference still held.
+      // No load of their own and no block left alive; the module's reference beside this
+      // case's, and the one queue of each GPU, which the module keeps for the next check.
       EXPECT_EQ(rdc_fake_hsa_load_count(), 1u) << "run " << run;
-      EXPECT_EQ(rdc_fake_hsa_live_references(), 1u) << "run " << run;
+      EXPECT_EQ(rdc_fake_hsa_live_references(), 2u) << "run " << run;
       EXPECT_EQ(rdc_fake_hsa_latched(), 0) << "run " << run;
+      ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u) << "run " << run;
       for (uint32_t queue = 0; queue < rdc_fake_hsa_queue_count(); queue++) {
-        EXPECT_EQ(rdc_fake_hsa_queue_destroyed(queue), 1) << "run " << run << " queue " << queue;
+        EXPECT_EQ(rdc_fake_hsa_queue_destroyed(queue), 0) << "run " << run << " queue " << queue;
       }
       EXPECT_EQ(rdc_fake_hsa_live_blocks(), 0u) << "run " << run;
     }
+
+    // rdc_diag_destroy() destroys the queues and gives back the module's reference only.
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    for (uint32_t queue = 0; queue < rdc_fake_hsa_queue_count(); queue++) {
+      EXPECT_EQ(rdc_fake_hsa_queue_destroyed(queue), 1) << "queue " << queue;
+    }
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+    EXPECT_EQ(rdc_fake_hsa_latched(), 0);
   });
 }
 
-// The run's own hsa_init() failing is every GPU's failure, with no second try and no other HSA
-// call, and the next run tries again (F: F9 calls hsa_init() per test object, writes no per-GPU
-// result and reports another text).
+// The module's hsa_init(), which a run makes before its first HSA call, failing is every GPU's
+// failure, with no second try and no other HSA call, and the next run tries again (F: F9 writes no
+// per-GPU result and reports another text; develop before #13878 calls hsa_init() per test object).
 TEST(RocrLifetimes, AFailedRunWideInitFailsEveryGpuWithoutRetrying) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     add_third_gpu();
     rdc_fake_hsa_fail("hsa_init", 1, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
 
@@ -1553,7 +1595,7 @@ TEST(RocrLifetimes, AFailedRunWideInitFailsEveryGpuWithoutRetrying) {
 // reference, and its destructor releases one it never took).
 TEST(RocrLifetimes, AFailedTestObjectInitIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     add_third_gpu();
     // The run's own reference is the first call; the first GPU's test object makes the second.
@@ -1576,7 +1618,7 @@ TEST(RocrLifetimes, AFailedTestObjectInitIsThatGpusFailure) {
     ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u);
     EXPECT_EQ(rdc_fake_hsa_queue_agent(0), 2u);
     EXPECT_EQ(rdc_fake_hsa_queue_agent(1), 3u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
     EXPECT_EQ(rdc_fake_hsa_unbalanced_shutdowns(), 0u);
     expect_everything_released();
   });
@@ -1587,7 +1629,7 @@ TEST(RocrLifetimes, AFailedTestObjectInitIsThatGpusFailure) {
 // TestBase's destructor, which ends the process).
 TEST(RocrLifetimes, AFailedCleanUpCallIsThatGpusFailureAndTheRestIsReleased) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_fail("hsa_amd_memory_pool_free", 1, HSA_STATUS_ERROR_INVALID_ALLOCATION);
 
@@ -1601,7 +1643,9 @@ TEST(RocrLifetimes, AFailedCleanUpCallIsThatGpusFailureAndTheRestIsReleased) {
     EXPECT_NE(text.find("hsa_amd_memory_pool_free"), std::string::npos) << text;
     EXPECT_NE(text.find("4099"), std::string::npos) << text;
 
-    // The queue, the signal and the blocks the free did not refuse are released all the same.
+    // The signal and the blocks the free did not refuse are released all the same, and the queue
+    // when the module gives it back.
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
     const std::vector<std::string> log = destroy_log();
     EXPECT_EQ(released(log, "queue"), rdc_fake_hsa_queue_count()) << joined(log);
     EXPECT_EQ(released(log, "signal"), rdc_fake_hsa_signal_count() - rdc_fake_hsa_queue_count())
@@ -1616,7 +1660,7 @@ TEST(RocrLifetimes, AFailedCleanUpCallIsThatGpusFailureAndTheRestIsReleased) {
 // the GPU after it is checked as usual (F: on F9 that failure throws from a destructor).
 TEST(RocrLifetimes, AFailedShutdownIsThatGpusFailureAndTheNextGpuIsChecked) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     add_third_gpu();
     // This check makes one test object per GPU: the second GPU's is the second shutdown.
     rdc_fake_hsa_fail("hsa_shut_down", 2, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
@@ -1634,20 +1678,25 @@ TEST(RocrLifetimes, AFailedShutdownIsThatGpusFailureAndTheNextGpuIsChecked) {
     expect_missing_kernel(result->gpu_results[2].gpu_result.msg);
     EXPECT_EQ(rdc_fake_hsa_unbalanced_shutdowns(), 0u);
     EXPECT_EQ(rdc_fake_hsa_latched(), 0);
-    // The reference that shutdown did not release is the one left.
+    // The reference that shutdown did not release is left beside the module's.
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 2u);
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
     EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
   });
 }
 
-// A queue that cannot be destroyed abandons the rest: nothing the work on it can touch is freed
-// or destroyed, that test object keeps its reference to ROCr and no shutdown of its own takes
-// ROCr's count to zero, so ROCr is not latched (F: on F9 the shutdown with that queue alive makes
-// every later hsa_init() fail). The GPU is recorded, as it is at a deadline, so a later run
-// reports it and skips the others without an HSA call of its own.
+// A queue that cannot be destroyed abandons the rest: nothing the work on it can touch is freed or
+// destroyed, that test object keeps its reference to ROCr and no shutdown takes ROCr's count to
+// zero, so ROCr is not latched (F: on develop before #13878 the shutdown with that queue alive
+// makes every later hsa_init() fail). The GPU is recorded, as it is at a deadline, so a later run
+// reports it and skips the others without an HSA call of its own. A check destroys its GPU's queue
+// when its dispatch ended in a failure, which may leave work on it: here the dispatch's signal
+// reports one.
 TEST(RocrLifetimes, AFailedQueueDestroyAbandonsTheRest) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
+    rdc_fake_hsa_set_dispatch_signal_value(-1);
     rdc_fake_hsa_fail("hsa_queue_destroy", 0, HSA_STATUS_ERROR_INVALID_QUEUE);
 
     uint32_t ids[1] = {0};
@@ -1668,9 +1717,10 @@ TEST(RocrLifetimes, AFailedQueueDestroyAbandonsTheRest) {
     EXPECT_EQ(released(log, "signal 0"), 0u) << joined(log);
     EXPECT_EQ(rdc_fake_hsa_live_blocks(), rdc_fake_hsa_alloc_count()) << joined(log);
     EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 0);
-    // Only the run's own reference is given back, so ROCr's count never reaches zero.
-    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_shut_down"), 1u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+    // No reference is given back, the test object's nor the module's, so ROCr's count never
+    // reaches zero.
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_shut_down"), 0u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 2u);
     EXPECT_EQ(rdc_fake_hsa_latched(), 0);
 
     // The record disables the checks: that GPU is a failure in a later run, the other is
@@ -1690,16 +1740,22 @@ TEST(RocrLifetimes, AFailedQueueDestroyAbandonsTheRest) {
               std::string::npos)
         << second->gpu_results[1].gpu_result.msg;
     EXPECT_EQ(rdc_fake_hsa_call_log_size(), calls);
+
+    // Nor does rdc_diag_destroy() make a call: the module keeps ROCr loaded while a GPU is
+    // recorded.
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    EXPECT_EQ(rdc_fake_hsa_call_log_size(), calls);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 2u);
   });
 }
 
-// The run's own hsa_shut_down(), the last of a check, failing is logged and nothing else: every
-// GPU keeps its result and the check returns as it would have (M: T4's mutation makes that
-// destructor throw, which would end the process).
-TEST(RocrLifetimes, TheRunWideShutdownFailureIsLoggedOnly) {
+// The module's own hsa_shut_down(), which rdc_diag_destroy() makes after the last check, failing is
+// logged and nothing else: every GPU kept its result and rdc_diag_destroy() succeeds (M: a release
+// that throws there makes rdc_diag_destroy() fail).
+TEST(RocrLifetimes, TheModulesShutdownFailureIsLoggedOnly) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
-    // This check makes two test objects per GPU, so the run's own shutdown is the third of a
+    reset_fake();
+    // This check makes two test objects per GPU, so the module's own shutdown is the third of a
     // group of one GPU.
     rdc_fake_hsa_fail("hsa_shut_down", 3, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
 
@@ -1711,6 +1767,10 @@ TEST(RocrLifetimes, TheRunWideShutdownFailureIsLoggedOnly) {
     ASSERT_EQ(result->per_gpu_result_count, 1u);
     EXPECT_EQ(result->gpu_results[0].gpu_index, 0u);
     EXPECT_NE(result->status, RDC_DIAG_RESULT_FAIL);
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_shut_down"), 2u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
     EXPECT_EQ(rdc_fake_hsa_call_count("hsa_shut_down"), 3u);
     EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
     EXPECT_EQ(rdc_fake_hsa_latched(), 0);
@@ -1721,7 +1781,7 @@ TEST(RocrLifetimes, TheRunWideShutdownFailureIsLoggedOnly) {
 // (F: F9 writes that variable after every test object and calls srand()).
 TEST(RocrLifetimes, TheInterruptFlagAndTheRandomSequenceAreLeftAlone) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(::setenv("HSA_ENABLE_INTERRUPT", "1", 1), 0);
     ::srand(1);
     const int expected = ::rand();
@@ -1745,7 +1805,7 @@ TEST(RocrLifetimes, TheInterruptFlagAndTheRandomSequenceAreLeftAlone) {
 // std::string from the null pointer hsa_status_string left, which ends the process).
 TEST(RocrLifetimes, AStatusWithNoTextIsStillReported) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_fail("hsa_signal_create", 0, kStatusWithNoString);
 
@@ -1757,7 +1817,7 @@ TEST(RocrLifetimes, AStatusWithNoTextIsStillReported) {
     EXPECT_EQ(result->status, RDC_DIAG_RESULT_FAIL);
     const std::string text = result->gpu_results[0].gpu_result.msg;
     EXPECT_NE(text.find(std::to_string(kStatusWithNoString)), std::string::npos) << text;
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
   });
 }
 
@@ -1768,7 +1828,7 @@ TEST(RocrLifetimes, AStatusWithNoTextIsStillReported) {
 TEST(RocrCallbacks, NoCpuAgentIsThatGpusFailure) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : {RDC_DIAG_COMPUTE_QUEUE, RDC_DIAG_SYS_MEM_CHECK}) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       rdc_fake_hsa_clear_agents();
       const uint32_t gpu = rdc_fake_hsa_add_agent(1, 1, "gfx1030");
       rdc_fake_hsa_add_pool(gpu, HSA_AMD_SEGMENT_GLOBAL,
@@ -1794,7 +1854,7 @@ TEST(RocrCallbacks, NoCpuAgentIsThatGpusFailure) {
 TEST(RocrCallbacks, AFailureInsideAnAgentIterationIsThatGpusFailure) {
   RDC_ROCR_CASE({
     dirty_stack();
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_agent_info(UINT32_MAX, HSA_AGENT_INFO_DEVICE, HSA_STATUS_ERROR_INVALID_AGENT);
 
     uint32_t ids[1] = {0};
@@ -1817,7 +1877,7 @@ TEST(RocrCallbacks, AFailureInsideAPoolIterationIsThatGpusFailure) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : {RDC_DIAG_COMPUTE_QUEUE, RDC_DIAG_SYS_MEM_CHECK}) {
       dirty_stack();
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_fail_pool_info(UINT32_MAX, HSA_AMD_MEMORY_POOL_INFO_SEGMENT,
                                   HSA_STATUS_ERROR_INVALID_ARGUMENT);
@@ -1844,7 +1904,7 @@ TEST(RocrCallbacks, AFailureInsideAPoolIterationIsThatGpusFailure) {
 // with the call and the status (F: F9 reports both as "Fail to find pools.").
 TEST(RocrCallbacks, NoPoolIsASkipAndAFailingIterationIsAFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_clear_pools(kCpuAgent);
 
@@ -1857,7 +1917,7 @@ TEST(RocrCallbacks, NoPoolIsASkipAndAFailingIterationIsAFailure) {
     EXPECT_EQ(rdc_fake_hsa_alloc_count(), 0u);
     expect_everything_released();
 
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_fail("hsa_amd_agent_iterate_memory_pools", 0, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     ResultPtr second = new_result();
@@ -1877,7 +1937,7 @@ TEST(RocrCallbacks, NoPoolIsASkipAndAFailingIterationIsAFailure) {
 // M: T4's mutations drop that rule from GetGlobalMemoryPool and from GetKernArgMemoryPool).
 TEST(RocrCallbacks, ThePoolsThatDoNotAllowAllocationAreNotChosen) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     // The kernel files are written so that the sub-test that reads and writes GPU memory,
     // which is the one that chooses a global pool and a kernel argument pool, reaches its
     // choice: without them it skips at its load, which comes before its allocations.
@@ -1924,7 +1984,7 @@ TEST(RocrCallbacks, ThePoolsThatDoNotAllowAllocationAreNotChosen) {
 // is the one it takes (F: F9 takes the first match and fails at its first allocation).
 TEST(RocrCallbacks, TheFirstPoolThatAllowsAllocationIsChosen) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_clear_pools(kCpuAgent);
     const uint32_t refused_standard = rdc_fake_hsa_add_pool(
@@ -2139,12 +2199,12 @@ constexpr uint64_t kSecondRun = 2;
 
 // ROCr reports an operation that failed by a negative value on its signal, which satisfies the
 // wait: the value is that GPU's failure, everything the check made is released and no GPU is
-// recorded, so the next run checks it as it would have (F: on F9 the throw at the copy leaves
-// its signal and skips the clean-up, so the queue is alive at the shutdown and the next run's
-// hsa_init() fails).
+// recorded, so the next run checks it as it would have (F: on develop before #13878 the throw at
+// the copy leaves its signal and skips the clean-up, so the queue is alive at the shutdown and the
+// next run's hsa_init() fails).
 TEST(RocrWaits, ACopyWhoseSignalReportsAFailureIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_copy_mode(RDC_FAKE_COPY_FAILED);
 
@@ -2166,7 +2226,7 @@ TEST(RocrWaits, ACopyWhoseSignalReportsAFailureIsThatGpusFailure) {
 // way (F: F9's loop ends only on 0, so it spins until the case's time limit kills the child).
 TEST(RocrWaits, ADispatchSignalBelowZeroIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_dispatch_signal_value(-1);
 
@@ -2190,7 +2250,7 @@ TEST(RocrWaits, ADispatchSignalBelowZeroIsThatGpusFailure) {
 // so the case's time limit kills the child).
 TEST(RocrWaits, AQueueErrorDuringADispatchIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     add_gpu_with_node(3);
 
@@ -2266,7 +2326,7 @@ TEST(RocrWaits, AQueueErrorIsSeenBeforeTheDoorbell) {
                             {RDC_DIAG_SYS_MEM_CHECK, kSysMemKernArgAllocation}};
 
     for (const Check& one : checks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       // The check is held at the allocation of its kernel arguments, which follows
       // hsa_queue_create in both checks, and the error reaches its queue while it is held.
@@ -2299,7 +2359,7 @@ TEST(RocrWaits, AQueueErrorIsSeenBeforeTheDoorbell) {
 // the copy's wait read the block).
 TEST(RocrWaits, AQueueErrorDuringTheMemoryCopyIsSeenAfterIt) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     // The copy completes inside the third wait on its signal, so that the wait it is waited
     // for in has passes of its own: a wait that read the queue's status block would throw at
@@ -2348,19 +2408,20 @@ TEST(RocrWaits, AQueueErrorDuringTheMemoryCopyIsSeenAfterIt) {
 }
 
 // Each queue's error callback is given a block of the module's own, outside the stack of the
-// thread that made the queue, and the block of a queue a check abandoned is never freed: an
-// error ROCr reports after that run returned writes into memory that is still allocated, and
-// claims no second slot (M: T4's two mutations of the block, kept in the test object and freed
-// at an abandon, fail it, the first by the stack check and the second in the ASan leg).
+// thread that made the queue; both checks of a GPU use its one queue, and the block of a queue a
+// check abandoned is never freed: an error ROCr reports after that run returned writes into
+// memory that is still allocated, and claims no second slot (M: T4's two mutations of the block,
+// kept in the test object and freed at an abandon, fail it, the first by the stack check and the
+// second in the ASan leg).
 TEST(RocrWaits, EveryQueueHasItsOwnStatusBlockOutsideTheStacks) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
 
     EXPECT_EQ(run_one_gpu(RDC_DIAG_COMPUTE_QUEUE).status, RDC_DIAG_RESULT_PASS);
     EXPECT_EQ(run_one_gpu(RDC_DIAG_SYS_MEM_CHECK).status, RDC_DIAG_RESULT_PASS);
-    ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 1u);
     for (uint32_t queue = 0; queue < rdc_fake_hsa_queue_count(); queue++) {
       EXPECT_EQ(rdc_fake_hsa_queue_has_callback(queue), 1) << "queue " << queue;
       const void* const block = rdc_fake_hsa_queue_error_data(queue);
@@ -2368,10 +2429,9 @@ TEST(RocrWaits, EveryQueueHasItsOwnStatusBlockOutsideTheStacks) {
       EXPECT_TRUE(outside_this_stack(block)) << "queue " << queue;
     }
 
-    // The blocks of those two queues went with them, so whether their addresses differ says
-    // nothing. Two runs at once show that each queue has a block of its own: the queue of the
-    // run held at its doorbell keeps its block while the module takes one for the queue of the
-    // other run, and two blocks that are alive together are at different addresses.
+    // Each GPU's queue has a block of its own: a run on the second GPU, here while a run on the
+    // first is held at its doorbell, makes that GPU's queue and a block for it, and the module
+    // keeps both blocks alive, at different addresses.
     rdc_fake_hsa_gate("hsa_signal_store_relaxed", 1, 0);
     Running held(1, RDC_DIAG_SYS_MEM_CHECK, {0});
     ASSERT_EQ(rdc_fake_hsa_gate_wait("hsa_signal_store_relaxed", 1, 30000), 1);
@@ -2383,24 +2443,24 @@ TEST(RocrWaits, EveryQueueHasItsOwnStatusBlockOutsideTheStacks) {
     EXPECT_EQ(other.status(), RDC_ST_OK);
     EXPECT_EQ(held.result().status, RDC_DIAG_RESULT_PASS) << held.text(0);
     EXPECT_EQ(other.result().status, RDC_DIAG_RESULT_PASS) << other.text(0);
-    ASSERT_EQ(rdc_fake_hsa_queue_count(), 4u);
-    EXPECT_NE(rdc_fake_hsa_queue_error_data(2), rdc_fake_hsa_queue_error_data(3));
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u);
+    EXPECT_NE(rdc_fake_hsa_queue_error_data(0), rdc_fake_hsa_queue_error_data(1));
 
     // A check that could not stop its kernel keeps its queue and the block with it.
     EXPECT_EQ(rdc_rocr_test_set_wait_deadline_ms(kShortDeadlineMs), kModuleDeadlineMs);
     rdc_fake_hsa_set_kernel_mode(RDC_FAKE_KERNEL_NEVER);
     const OneGpu abandoned = run_one_gpu(RDC_DIAG_SYS_MEM_CHECK);
     EXPECT_EQ(abandoned.status, RDC_DIAG_RESULT_FAIL) << abandoned.text;
-    ASSERT_EQ(rdc_fake_hsa_queue_count(), 5u);
-    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(4), 0);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 0);
 
     // The error the fake raises on it now reaches the module's callback, which writes into that
     // block: a block that had been freed would be an ASan report.
     const std::atomic<hsa_status_t>* const kept =
-        static_cast<const std::atomic<hsa_status_t>*>(rdc_fake_hsa_queue_error_data(4));
+        static_cast<const std::atomic<hsa_status_t>*>(rdc_fake_hsa_queue_error_data(0));
     ASSERT_NE(kept, nullptr);
     EXPECT_EQ(kept->load(), HSA_STATUS_SUCCESS);
-    raise_queue_error_and_wait(4, kQueueError);
+    raise_queue_error_and_wait(0, kQueueError);
 
     // That error claimed no slot: the record still names one GPU.
     uint32_t ids[2] = {0, 1};
@@ -2428,7 +2488,7 @@ TEST(RocrWaits, EveryQueueHasItsOwnStatusBlockOutsideTheStacks) {
 // hsa_shut_down(); a frequency below ten ticks a second still leaves a hint of one tick (M).
 TEST(RocrWaits, AFailedTimestampFrequencyIsThatGpusFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_fail("hsa_system_get_info", 0, HSA_STATUS_ERROR_INVALID_ARGUMENT);
 
@@ -2439,7 +2499,7 @@ TEST(RocrWaits, AFailedTimestampFrequencyIsThatGpusFailure) {
     expect_everything_released();
     EXPECT_EQ(destroy_log().back(), "shut_down") << joined(destroy_log());
 
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_timestamp_frequency(0);
 
@@ -2453,7 +2513,7 @@ TEST(RocrWaits, AFailedTimestampFrequencyIsThatGpusFailure) {
     // The Compute Queue check reads the hint before it makes the copy's signal and starts the
     // copy, so a frequency it cannot read is this GPU's failure with nothing in flight: a throw
     // while the copy ran would unwind over the buffer the copy writes into.
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_fail("hsa_system_get_info", 0, HSA_STATUS_ERROR_INVALID_ARGUMENT);
 
@@ -2466,7 +2526,7 @@ TEST(RocrWaits, AFailedTimestampFrequencyIsThatGpusFailure) {
 
     // A frequency of fewer than ten ticks a second leaves a hint of one tick rather than none:
     // a hint of 0 is a wait that returns at once and spins to the deadline.
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_timestamp_frequency(5);
 
@@ -2479,14 +2539,14 @@ TEST(RocrWaits, AFailedTimestampFrequencyIsThatGpusFailure) {
 
 // --- the queues the checks create -------------------------------------------------------------
 
-// Each check creates a queue of the packets it needs, with no private and no group segment
-// reserved (F: the Compute Queue check asks for UINT32_MAX of each, which on an APU reserves
-// 2048 bytes per lane for every scratch slot of every compute unit, and the read and write
-// sub-test asks for the largest queue the agent has, 8 MiB of ring on ROCr).
+// Each GPU's queue holds the packets a check needs, with no private and no group segment reserved
+// (F: F9's queue asks for UINT32_MAX of each, which on an APU reserves 2048 bytes per lane for
+// every scratch slot of every compute unit; on develop before #13878 the read and write sub-test
+// asked for the largest queue the agent has, 8 MiB of ring on ROCr).
 TEST(RocrQueues, TheQueuesHoldThePacketsTheCheckNeedsAndNoScratch) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : kBothChecks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
 
       const OneGpu gpu = run_one_gpu(check);
@@ -2506,7 +2566,7 @@ TEST(RocrQueues, TheQueuesHoldThePacketsTheCheckNeedsAndNoScratch) {
 TEST(RocrQueues, AnAgentWhoseMaximumIs64GetsThatQueue) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : kBothChecks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_set_agent_queue_max(1, 64);
 
@@ -2520,13 +2580,13 @@ TEST(RocrQueues, AnAgentWhoseMaximumIs64GetsThatQueue) {
   });
 }
 
-// A failed query of that maximum is that GPU's failure, naming the call, with no queue of its
-// own, while the GPUs before and after it are checked as they would have been (F: F9's Compute
-// Queue check never asks, and its read and write sub-test throws and writes no per-GPU row).
+// A failed query of that maximum is that GPU's failure, naming the call, with no queue of its own,
+// while the GPUs before and after it are checked as they would have been (F: F9 never asks; on
+// develop before #13878 the read and write sub-test asked, threw and wrote no per-GPU row).
 TEST(RocrQueues, AFailedQueueMaximumQueryIsThatGpusFailure) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : kBothChecks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       add_third_gpu();
       write_kernel_files();
       const uint32_t second = 2;  // the agent the second GPU of this group is checked on
@@ -2559,7 +2619,7 @@ TEST(RocrQueues, AFailedQueueMaximumQueryIsThatGpusFailure) {
 TEST(RocrPackets, TheDispatchedPacketsCarryTheKernelsSegments) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : kBothChecks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
 
       const OneGpu gpu = run_one_gpu(check);
@@ -2579,7 +2639,7 @@ TEST(RocrPackets, TheDispatchedPacketsReservedFieldsAreZero) {
     for (rdc_diag_test_cases_t check : kBothChecks) {
       dirty_stack();
       ASSERT_TRUE(stack_dirt_is_visible()) << "the stack the check runs on is not dirty";
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
 
       const OneGpu gpu = run_one_gpu(check);
@@ -2599,7 +2659,7 @@ TEST(RocrPackets, TheDispatchedPacketsReservedFieldsAreZero) {
 // grid of 64 at an array sized for 2 sub-divisions).
 TEST(RocrSearch, TheInputHoldsTheValueAndIsDispatchedOnce) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
 
     const OneGpu gpu = run_one_gpu(RDC_DIAG_COMPUTE_QUEUE);
@@ -2623,7 +2683,7 @@ TEST(RocrSearch, TheInputHoldsTheValueAndIsDispatchedOnce) {
 // (F: F9 logs the miss at debug level and passes).
 TEST(RocrSearch, AnAnswerThatDoesNotHoldTheValueIsAFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_kernel_mode(RDC_FAKE_KERNEL_OUTPUT);
     rdc_fake_hsa_set_search_output(5, 1);
@@ -2652,7 +2712,7 @@ TEST(RocrSearch, AnAnswerOutsideTheSubDivisionsIsAFailure) {
                               {"0x20000000", RDC_FAKE_KERNEL_OUTPUT, 0x20000000},
                               {"nothing", RDC_FAKE_KERNEL_NOTHING, 0}};
     for (const Answer& answer : answers) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_set_kernel_mode(answer.mode);
       rdc_fake_hsa_set_search_output(answer.element0, 1);
@@ -2680,7 +2740,7 @@ TEST(RocrKernelArgs, EachSegmentIsTheImageTheKernelExpects) {
     for (rdc_diag_test_cases_t check : kBothChecks) {
       dirty_stack();
       ASSERT_TRUE(stack_dirt_is_visible()) << "the stack the check runs on is not dirty";
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
 
       const OneGpu gpu = run_one_gpu(check);
@@ -2717,7 +2777,7 @@ TEST(RocrKernelArgs, EachSegmentIsTheImageTheKernelExpects) {
 TEST(RocrKernelArgs, ALongerSegmentIsZeroedToItsEnd) {
   RDC_ROCR_CASE({
     dirty_stack();
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_kernel_info(kSearchKernel, 96, 16, 16, 64);
 
@@ -2740,7 +2800,7 @@ TEST(RocrKernelArgs, ALongerSegmentIsZeroedToItsEnd) {
 // builds compile out, so it dispatches a segment the kernel reads past).
 TEST(RocrKernelArgs, ASegmentShorterThanTheArgumentsIsAFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_kernel_info(kSearchKernel, 64, 16, 16, 64);
     const uint32_t kernarg_pool = rdc_fake_hsa_pool_of_agent(kCpuAgent, kKernArgPool);
@@ -2757,7 +2817,7 @@ TEST(RocrKernelArgs, ASegmentShorterThanTheArgumentsIsAFailure) {
     }
     expect_everything_released();
 
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     const OneGpu second = run_one_gpu(RDC_DIAG_COMPUTE_QUEUE);
     EXPECT_EQ(second.status, RDC_DIAG_RESULT_PASS) << second.text;
@@ -2770,7 +2830,7 @@ TEST(RocrKernelArgs, ASegmentShorterThanTheArgumentsIsAFailure) {
 TEST(RocrKernelArgs, AnAlignmentOfZeroIsTakenAsSixteen) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : kBothChecks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_set_kernel_info(nullptr, 80, 0, 16, 64);
 
@@ -2790,7 +2850,7 @@ TEST(RocrKernelArgs, AnAlignmentTheCheckCannotMeetIsAFailure) {
     const uint32_t alignments[] = {3, 8192};
     for (uint32_t alignment : alignments) {
       for (rdc_diag_test_cases_t check : kBothChecks) {
-        rdc_fake_hsa_reset();
+        reset_fake();
         write_kernel_files();
         rdc_fake_hsa_set_kernel_info(nullptr, 80, alignment, 16, 64);
         const uint32_t kernarg_pool = rdc_fake_hsa_pool_of_agent(kCpuAgent, kKernArgPool);
@@ -2816,7 +2876,7 @@ TEST(RocrKernelArgs, AnAlignmentTheCheckCannotMeetIsAFailure) {
 TEST(RocrKernelArgs, AMisalignedBlockIsAFailure) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : kBothChecks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_set_kernarg_offset(8);
 
@@ -2838,7 +2898,7 @@ TEST(RocrKernelArgs, AMisalignedBlockIsAFailure) {
 // so the second run frees the first run's block and never frees its own).
 TEST(RocrKernelArgs, TwoThreadsEachUseTheirOwnKernelArgumentBlock) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_gate("hsa_signal_store_relaxed", 1, 1);
 
@@ -2901,7 +2961,7 @@ TEST(RocrKernelArgs, TwoThreadsEachUseTheirOwnKernelArgumentBlock) {
 TEST(RocrBlocks, EveryBlockStaysInsideItsRedzone) {
   RDC_ROCR_CASE({
     for (rdc_diag_test_cases_t check : kBothChecks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
 
       const OneGpu gpu = run_one_gpu(check);
@@ -2923,7 +2983,7 @@ TEST(RocrPools, AnIterationThatMatchedNothingLeavesNoGarbageHandle) {
     // The CPU lists no pool, so the Compute Queue check has none to allocate from.
     dirty_stack();
     ASSERT_TRUE(stack_dirt_is_visible()) << "the stack the check runs on is not dirty";
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_clear_pools(kCpuAgent);
     OneGpu gpu = run_one_gpu(RDC_DIAG_COMPUTE_QUEUE);
@@ -2933,7 +2993,7 @@ TEST(RocrPools, AnIterationThatMatchedNothingLeavesNoGarbageHandle) {
 
     // The GPU lists no pool, so both access sub-tests skip, each saying which pool it wanted.
     dirty_stack();
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(1);
     gpu = run_one_gpu(RDC_DIAG_SYS_MEM_CHECK);
     EXPECT_NE(gpu.text.find("The GPU has no coarse-grained memory pool to check."),
@@ -2947,7 +3007,7 @@ TEST(RocrPools, AnIterationThatMatchedNothingLeavesNoGarbageHandle) {
     // A query that fails inside a pool iteration is that GPU's failure, and no handle it never
     // issued reaches the fake.
     dirty_stack();
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail_pool_info(UINT32_MAX, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE,
                                 HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     gpu = run_one_gpu(RDC_DIAG_SYS_MEM_CHECK);
@@ -2959,7 +3019,7 @@ TEST(RocrPools, AnIterationThatMatchedNothingLeavesNoGarbageHandle) {
     // the check: a failure there is that GPU's failure, with its status, rather than a branch
     // on the value the call did not write.
     dirty_stack();
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_fail("hsa_amd_agent_memory_pool_get_info", 1, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     gpu = run_one_gpu(RDC_DIAG_SYS_MEM_CHECK);
     EXPECT_EQ(gpu.status, RDC_DIAG_RESULT_FAIL) << gpu.text;
@@ -2978,7 +3038,7 @@ TEST(RocrPools, TheCpuAccessSubTestTakesTheFirstPoolItCanUse) {
     const uint32_t gpu_agent = 1;
 
     // A coarse-grained pool, then a fine-grained one: the coarse-grained pool is written.
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(gpu_agent);
     uint32_t wanted = rdc_fake_hsa_add_pool(gpu_agent, HSA_AMD_SEGMENT_GLOBAL,
                                             HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED,
@@ -2992,7 +3052,7 @@ TEST(RocrPools, TheCpuAccessSubTestTakesTheFirstPoolItCanUse) {
 
     // A coarse-grained pool that carries the kernel argument flag as well is still coarse-grained
     // memory the CPU can write: the flag is read as the bit it is.
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(gpu_agent);
     wanted = rdc_fake_hsa_add_pool(gpu_agent, HSA_AMD_SEGMENT_GLOBAL,
                                    HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED |
@@ -3004,7 +3064,7 @@ TEST(RocrPools, TheCpuAccessSubTestTakesTheFirstPoolItCanUse) {
 
     // Two coarse-grained pools whose first the CPU cannot reach: the sub-test runs on the second
     // (M, not an F: F9 keeps the last matching pool, which here is the one it can use).
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(gpu_agent);
     const uint32_t refused = rdc_fake_hsa_add_pool(gpu_agent, HSA_AMD_SEGMENT_GLOBAL,
                                                    HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED,
@@ -3043,7 +3103,7 @@ TEST(RocrPools, AGpuWithNoPoolTheCpuCanWriteIsASkipThatSaysWhy) {
          HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED, "The CPU cannot access the GPU's memory pool."}};
 
     for (const Listed& one : listed) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       const uint32_t gpu_agent = 1;
       rdc_fake_hsa_clear_pools(gpu_agent);
       const uint32_t pool = rdc_fake_hsa_add_pool(gpu_agent, HSA_AMD_SEGMENT_GLOBAL, one.flags,
@@ -3078,7 +3138,7 @@ TEST(RocrPools, EachAccessTheReadAndWriteSubTestNeedsHasItsOwnSkip) {
                                 "pool."}};
 
     for (const Refused& one : refused) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_set_pool_access(one.agent, rdc_fake_hsa_pool_of_agent(one.pool_of, one.nth_pool),
                                    HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED);
@@ -3093,15 +3153,16 @@ TEST(RocrPools, EachAccessTheReadAndWriteSubTestNeedsHasItsOwnSkip) {
   });
 }
 
-// A grant of access that fails is that GPU's failure, with every block the fake issued freed
-// (F: F9 leaks the host buffer and the pool block of its CPU-access sub-test).
+// A grant of access that fails is that GPU's failure, with every block the fake issued freed (F9
+// passes it; develop before #13878 leaks the host buffer and the pool block of its CPU-access
+// sub-test).
 TEST(RocrPools, AFailedGrantIsThatGpusFailure) {
   RDC_ROCR_CASE({
     // The first grant is the CPU-access sub-test's, and the sixth the read and write sub-test's
     // grant of the kernel argument block.
     const uint32_t grants[] = {1, 6};
     for (uint32_t nth : grants) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_fail("hsa_amd_agents_allow_access", nth, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
 
@@ -3118,7 +3179,7 @@ TEST(RocrPools, AFailedGrantIsThatGpusFailure) {
 // (F).
 TEST(RocrData, AReadBackShiftedByOneElementIsAFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_set_kernel_mode(RDC_FAKE_KERNEL_SHIFTED);
 
@@ -3137,7 +3198,7 @@ TEST(RocrData, AReadBackShiftedByOneElementIsAFailure) {
 // stdout rather than an outcome).
 TEST(RocrData, AliasedPagesAreSeenByTheReadBack) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_set_alias_pages(1);
 
     const OneGpu gpu = run_one_gpu(RDC_DIAG_SYS_MEM_CHECK);
@@ -3168,7 +3229,7 @@ uint32_t add_gpu_pool(uint64_t size, uint64_t max_size, int alloc_allowed = 1) {
 // 8.6 GB on this host's gfx1030, and says "Pool N test pass." whether it allocated or not).
 TEST(RocrSysMem, EachPoolThatAllowsAllocationIsAllocatedAndFreed) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(1);
     const uint32_t small = add_gpu_pool(64 * 1024, 64 * 1024);
     const uint32_t large = add_gpu_pool(1024ull * 1024 * 1024, 1024ull * 1024 * 1024);
@@ -3204,7 +3265,7 @@ TEST(RocrSysMem, EachPoolThatAllowsAllocationIsAllocatedAndFreed) {
 TEST(RocrSysMem, APoolTooSmallForASubTestIsNotTheOneItTakes) {
   RDC_ROCR_CASE({
     // The GPU's only pool cannot hand out the 4 KiB the read and write sub-test gives the kernel.
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_fake_hsa_clear_pools(1);
     const uint32_t gpu_pool = add_gpu_pool(64 * 1024, 2048);
@@ -3220,7 +3281,7 @@ TEST(RocrSysMem, APoolTooSmallForASubTestIsNotTheOneItTakes) {
     expect_everything_released();
 
     // The same of the CPU's pools, from which that sub-test takes its host buffers.
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     for (uint32_t n = 0; n < rdc_fake_hsa_pool_count(kCpuAgent); n++) {
       rdc_fake_hsa_set_pool_max(rdc_fake_hsa_pool_of_agent(kCpuAgent, n), 2048);
@@ -3239,7 +3300,7 @@ TEST(RocrSysMem, APoolTooSmallForASubTestIsNotTheOneItTakes) {
 // later pools go unchecked and the check writes no per-GPU row).
 TEST(RocrSysMem, AFailedPoolQueryIsThatPoolsFailure) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(1);
     add_gpu_pool(64 * 1024, 64 * 1024);
     const uint32_t refused = add_gpu_pool(64 * 1024, 64 * 1024);
@@ -3266,7 +3327,7 @@ TEST(RocrSysMem, AFailedPoolQueryIsThatPoolsFailure) {
 // the case dies of a segmentation fault, as the pool cases around it do).
 TEST(RocrSysMem, APoolWhoseBlockIsNotFreedSaysOnlyThatItWasAllocated) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(1);
     add_gpu_pool(64 * 1024, 64 * 1024);
     add_gpu_pool(64 * 1024, 64 * 1024);
@@ -3286,7 +3347,7 @@ TEST(RocrSysMem, APoolWhoseBlockIsNotFreedSaysOnlyThatItWasAllocated) {
     EXPECT_NE(gpu.text.find("Memory pool 2: allocated and freed 64 KiB."), std::string::npos)
         << gpu.text;
     EXPECT_EQ(rdc_fake_hsa_live_blocks(), 1u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
     EXPECT_EQ(rdc_fake_hsa_latched(), 0);
   });
 }
@@ -3297,7 +3358,7 @@ TEST(RocrSysMem, APoolWhoseBlockIsNotFreedSaysOnlyThatItWasAllocated) {
 // a pool whose free failed).
 TEST(RocrSysMem, TheOnlyPoolWhoseBlockIsNotFreedLeavesNothingChecked) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(1);
     add_gpu_pool(64 * 1024, 64 * 1024);
     // The first free of the run is that pool's: this sub-test runs before the two access
@@ -3312,7 +3373,7 @@ TEST(RocrSysMem, TheOnlyPoolWhoseBlockIsNotFreedLeavesNothingChecked) {
     EXPECT_NE(gpu.text.find("Memory pool 1: allocated 64 KiB."), std::string::npos) << gpu.text;
     // The block that was not freed is the only one the run left behind.
     EXPECT_EQ(rdc_fake_hsa_live_blocks(), 1u);
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    expect_only_the_module_reference();
   });
 }
 
@@ -3334,7 +3395,7 @@ TEST(RocrSysMem, APoolWithNoFreeMemoryIsASkipAndAnyOtherErrorIsAFailure) {
          "Fail to call hsa_amd_memory_pool_allocate() for memory pool 1."}};
 
     for (const Answer& answer : answers) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       rdc_fake_hsa_clear_pools(1);
       add_gpu_pool(64 * 1024, 64 * 1024);
       // The first allocation of the run is the pool sub-test's, which runs before the others.
@@ -3359,7 +3420,7 @@ TEST(RocrSysMem, APoolWithNoFreeMemoryIsASkipAndAnyOtherErrorIsAFailure) {
 // GPU n Pass." and writes no per-GPU text when it checked nothing).
 TEST(RocrSysMem, NoCountedPoolIsASkipThatSaysSo) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(1);
     add_gpu_pool(64 * 1024, 64 * 1024, 0);
 
@@ -3383,7 +3444,7 @@ TEST(RocrSysMem, NoCountedPoolIsASkipThatSaysSo) {
 // the check asks for 0 bytes and reports the refusal).
 TEST(RocrSysMem, APoolWhoseMaximumIsZeroIsNotCounted) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_clear_pools(1);
     add_gpu_pool(64 * 1024, 0);
 
@@ -3446,7 +3507,7 @@ size_t times_in(const std::string& text, const std::string& line) {
 TEST(RocrAbandon, AKernelThatNeverCompletesIsAbandonedAndRecorded) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     add_gpu_with_node(3);
     EXPECT_EQ(rdc_rocr_test_set_wait_deadline_ms(kShortDeadlineMs), kModuleDeadlineMs);
@@ -3476,7 +3537,10 @@ TEST(RocrAbandon, AKernelThatNeverCompletesIsAbandonedAndRecorded) {
     EXPECT_EQ(named_gpus(run.text(2)), std::vector<uint32_t>({1})) << run.text(2);
 
     // Nothing the kernel can touch was released: its queue, its signal, its executable and its
-    // reader are the ones that stayed, with the five blocks that dispatch reads and writes.
+    // reader are the ones that stayed, with the five blocks that dispatch reads and writes. The
+    // queue of the first GPU is the module's, which rdc_diag_destroy() destroys; the module keeps
+    // the other and ROCr loaded.
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
     const std::vector<std::string> destroys = destroy_log();
     EXPECT_EQ(rdc_fake_hsa_queue_destroyed(1), 0) << joined(destroys);
     EXPECT_EQ(released(destroys, "queue"), 1u) << joined(destroys);
@@ -3485,8 +3549,9 @@ TEST(RocrAbandon, AKernelThatNeverCompletesIsAbandonedAndRecorded) {
     EXPECT_EQ(released(destroys, "reader"), 1u) << joined(destroys);
     EXPECT_EQ(rdc_fake_hsa_live_blocks(), 5u) << joined(destroys);
 
-    // The abandoned object skipped its Close(), so ROCr keeps a reference and is not latched.
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+    // The abandoned object skipped its Close() and the module kept its reference, so ROCr keeps
+    // both and is not latched.
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 2u);
     EXPECT_EQ(rdc_fake_hsa_latched(), 0);
 
     // The pin's one line is its own text and nothing else.
@@ -3517,7 +3582,7 @@ TEST(RocrAbandon, AKernelThatNeverCompletesIsAbandonedAndRecorded) {
 TEST(RocrAbandon, ACopyThatNeverCompletesIsAbandoned) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     EXPECT_EQ(rdc_rocr_test_set_wait_deadline_ms(kShortDeadlineMs), kModuleDeadlineMs);
     rdc_fake_hsa_set_copy_mode(RDC_FAKE_COPY_NEVER);
@@ -3532,7 +3597,7 @@ TEST(RocrAbandon, ACopyThatNeverCompletesIsAbandoned) {
     EXPECT_EQ(released(destroys, "block"), 0u) << joined(destroys);
     EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 0) << joined(destroys);
     EXPECT_EQ(rdc_fake_hsa_live_blocks(), rdc_fake_hsa_alloc_count());
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 2u);
     EXPECT_EQ(rdc_fake_hsa_latched(), 0);
   });
 #else
@@ -3546,13 +3611,13 @@ TEST(RocrAbandon, ACopyThatNeverCompletesIsAbandoned) {
 TEST(RocrAbandon, ALaterRunFailsTheRecordedGpuAndSkipsTheOthers) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_rocr_test_set_wait_deadline_ms(kShortDeadlineMs);
     rdc_fake_hsa_set_kernel_mode(RDC_FAKE_KERNEL_NEVER);
     EXPECT_EQ(run_one_gpu(RDC_DIAG_SYS_MEM_CHECK).status, RDC_DIAG_RESULT_FAIL);
 
-    rdc_fake_hsa_reset();
+    reset_fake();
     uint32_t ids[2] = {0, 1};
     ResultPtr result = new_result();
     ASSERT_EQ(
@@ -3579,12 +3644,12 @@ TEST(RocrAbandon, ALaterRunFailsTheRecordedGpuAndSkipsTheOthers) {
 }
 
 // A run that is in flight reads the record before each of its GPUs, so one set while it waits on
-// its first GPU skips its next one; once both runs have returned, the only reference left is the
-// abandoned object's (M).
+// its first GPU skips its next one; once both runs have returned, the references left are the
+// abandoned object's and the module's (M).
 TEST(RocrAbandon, ARunInFlightSeesTheRecordAtItsNextGpu) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     add_gpu_with_node(3);
     rdc_rocr_test_set_wait_deadline_ms(kShortDeadlineMs);
@@ -3611,7 +3676,7 @@ TEST(RocrAbandon, ARunInFlightSeesTheRecordAtItsNextGpu) {
         << first.text(1);
     EXPECT_EQ(named_gpus(first.text(1)), std::vector<uint32_t>({2})) << first.text(1);
 
-    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 2u);
     EXPECT_EQ(rdc_fake_hsa_latched(), 0);
   });
 #else
@@ -3626,7 +3691,7 @@ TEST(RocrAbandon, ARunInFlightSeesTheRecordAtItsNextGpu) {
 TEST(RocrAbandon, ThreeRunsThatAbandonTheirGpusAreAllNamed) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     add_gpu_with_node(3);
     add_gpu_with_node(4);
@@ -3676,32 +3741,37 @@ TEST(RocrAbandon, ThreeRunsThatAbandonTheirGpusAreAllNamed) {
 #endif
 }
 
-// Two runs that abandon their work on the same GPU spend one slot, and the texts name it once
-// (M: no mutation of its own. The scan that finds a GPU already in the record is one of T4's
-// declared exceptions, because the claim loop's own return on that GPU's slot reaches the same
-// end, so what this case holds cannot be reverted on its own; mut.py's covered list says so).
-TEST(RocrAbandon, TwoRunsThatAbandonTheSameGpuSpendOneSlot) {
+// Two runs of one GPU take its queue in turn. The run that gets it after the other could not stop
+// its work on it fails with the record's text, puts nothing on that queue and spends no second
+// slot, and the texts name the GPU once (M: an acquire without its record check fails it).
+TEST(RocrAbandon, ARunThatGetsAnAbandonedQueueFailsAndSpendsNoSlot) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     rdc_rocr_test_set_wait_deadline_ms(kShortDeadlineMs);
     rdc_fake_hsa_set_kernel_mode(RDC_FAKE_KERNEL_NEVER);
 
-    // The second run is held at its own dispatch until the first run's claim is published.
-    rdc_fake_hsa_gate("hsa_signal_wait_scacquire", kSecondRun, 0);
-    Running second(kSecondRun, RDC_DIAG_SYS_MEM_CHECK, {0});
-    ASSERT_EQ(rdc_fake_hsa_gate_wait("hsa_signal_wait_scacquire", 1, 30000), 1);
-    Running first(kFirstRun, RDC_DIAG_SYS_MEM_CHECK, {0});
+    // The second run is held at the kernel it loads, before it asks for the GPU's queue, until
+    // the first run has abandoned its work on that queue.
+    rdc_fake_hsa_gate("hsa_code_object_reader_create_from_file", kSecondRun, 0);
+    Running second(kSecondRun, RDC_DIAG_COMPUTE_QUEUE, {0});
+    ASSERT_EQ(rdc_fake_hsa_gate_wait("hsa_code_object_reader_create_from_file", 1, 30000), 1);
+    Running first(kFirstRun, RDC_DIAG_COMPUTE_QUEUE, {0});
     first.join();
     EXPECT_EQ(first.status(), RDC_ST_OK);
     EXPECT_NE(first.text(0).find("The kernel did not complete in 300 ms."), std::string::npos)
         << first.text(0);
-    rdc_fake_hsa_gate_release("hsa_signal_wait_scacquire");
+    const uint32_t dispatches = rdc_fake_hsa_dispatch_count();
+    rdc_fake_hsa_gate_release("hsa_code_object_reader_create_from_file");
     second.join();
     EXPECT_EQ(second.status(), RDC_ST_OK);
-    EXPECT_NE(second.text(0).find("The kernel did not complete in 300 ms."), std::string::npos)
+    EXPECT_EQ(second.result().status, RDC_DIAG_RESULT_FAIL) << second.text(0);
+    EXPECT_NE(second.text(0).find("An earlier check could not stop its work on this GPU"),
+              std::string::npos)
         << second.text(0);
+    EXPECT_EQ(rdc_fake_hsa_dispatch_count(), dispatches);
+    EXPECT_EQ(rdc_fake_hsa_queue_count(), 1u);
 
     uint32_t ids[2] = {0, 1};
     ResultPtr result = new_result();
@@ -3723,7 +3793,7 @@ TEST(RocrAbandon, TwoRunsThatAbandonTheSameGpuSpendOneSlot) {
 TEST(RocrAbandon, AnAbandonWithNoSlotLeftIsLoggedAndIsStillAFailure) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     for (uint32_t node = 3; node <= 9; node++) {
       add_gpu_with_node(node);
@@ -3789,7 +3859,7 @@ TEST(RocrAbandon, AnAbandonWithNoSlotLeftIsLoggedAndIsStillAFailure) {
 // whole hint).
 TEST(RocrAbandon, ADispatchCompletedAtTheThirdWaitPassesAfterThreeWaits) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     write_kernel_files();
     // A thousand ticks a second, so that a tenth of a second is a hint of 100 of them.
     rdc_fake_hsa_set_timestamp_frequency(1000);
@@ -3829,7 +3899,7 @@ TEST(RocrAbandon, TheDeadlineTheModuleWaitsToIsTenSeconds) {
 // first, and its text is "fail to open <file>" with an errno).
 TEST(RocrKernelFiles, AMissingKernelIsThatSubTestsSkip) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     // Only the other check's kernel is installed, so this one's is the file that is missing.
     write_kernel_file("binary_search_kernels.hsaco");
     search_these_directories({"."});
@@ -3862,7 +3932,7 @@ TEST(RocrKernelFiles, AMissingKernelIsThatSubTestsSkip) {
 // first, so a file left in the daemon's working directory is loaded and run on the GPU).
 TEST(RocrKernelFiles, ADecoyInTheWorkingDirectoryIsNotLoaded) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     // No directory is named to the module, so it searches the list of its own, in both builds.
     write_kernel_file("binary_search_kernels.hsaco");
     const FileIdentity decoy = identity_of("binary_search_kernels.hsaco");
@@ -3882,7 +3952,7 @@ TEST(RocrKernelFiles, ADecoyInTheWorkingDirectoryIsNotLoaded) {
 TEST(RocrKernelFiles, TheFileInTheConfiguredDirectoryIsTheOneLoaded) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(::mkdir("kernels", 0700), 0) << std::strerror(errno);
     write_kernel_file("kernels/binary_search_kernels.hsaco");
     write_kernel_file("binary_search_kernels.hsaco");
@@ -3909,7 +3979,7 @@ TEST(RocrKernelFiles, TheFileInTheConfiguredDirectoryIsTheOneLoaded) {
 TEST(RocrKernelFiles, TheSearchListIsTriedInItsOrder) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     OneGpu gpu;
     const std::string log = run_at_debug_level(RDC_DIAG_COMPUTE_QUEUE, &gpu);
     EXPECT_EQ(gpu.status, RDC_DIAG_RESULT_SKIP) << gpu.text;
@@ -3948,7 +4018,7 @@ TEST(RocrKernelFiles, TheSearchListIsTriedInItsOrder) {
 // is a regular file, after which a reader is made from a FIFO).
 TEST(RocrKernelFiles, AFifoNamedLikeTheKernelFileIsPassedOver) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(::mkfifo("binary_search_kernels.hsaco", 0600), 0) << std::strerror(errno);
     // Where the module can be told where to look, it is told to look here; where it cannot, its
     // own list has the working directory in it.
@@ -3970,7 +4040,7 @@ TEST(RocrKernelFiles, AFifoNamedLikeTheKernelFileIsPassedOver) {
 TEST(RocrKernelFiles, ASymlinkLoopIsPassedOverAndOnItsOwnIsAFailure) {
 #if RDC_ROCR_TEST_HOOKS
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     ASSERT_EQ(::mkdir("first", 0700), 0) << std::strerror(errno);
     ASSERT_EQ(::mkdir("second", 0700), 0) << std::strerror(errno);
     ASSERT_EQ(::symlink("binary_search_kernels.hsaco", "first/binary_search_kernels.hsaco"), 0)
@@ -3989,7 +4059,7 @@ TEST(RocrKernelFiles, ASymlinkLoopIsPassedOverAndOnItsOwnIsAFailure) {
 
     // The loop alone is a file that is there and cannot be read, which is a failure, not a
     // kernel that was never installed.
-    rdc_fake_hsa_reset();
+    reset_fake();
     search_these_directories({"first"});
     OneGpu alone;
     // The debug lines of this run are captured as well: the logger of this child is at debug
@@ -4018,7 +4088,7 @@ TEST(RocrKernelFiles, AKernelFileThatCannotBeOpenedIsThatGpusFailure) {
                               {RDC_DIAG_SYS_MEM_CHECK, "gpuReadWrite_kernels.hsaco"}};
 
     for (const Checked& one : checks) {
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
 
       // The check runs twice with the descriptors free first, once to its Pass and once to a
@@ -4030,12 +4100,12 @@ TEST(RocrKernelFiles, AKernelFileThatCannotBeOpenedIsThatGpusFailure) {
       // std::exception makes, which a run that passes never reaches.
       const OneGpu warmed = run_one_gpu(one.check);
       EXPECT_EQ(warmed.status, RDC_DIAG_RESULT_PASS) << warmed.text;
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
       rdc_fake_hsa_fail("hsa_signal_create", 0, HSA_STATUS_ERROR_OUT_OF_RESOURCES);
       const OneGpu threw = run_one_gpu(one.check);
       EXPECT_EQ(threw.status, RDC_DIAG_RESULT_FAIL) << threw.text;
-      rdc_fake_hsa_reset();
+      reset_fake();
       write_kernel_files();
 
       // A kernel file that is there and cannot be opened is an error of the run, which the
@@ -4115,7 +4185,7 @@ TEST(RocrNames, AnAgentNameThatFillsItsBytesIsKeptToItsLength) {
     for (const Check& one : checks) {
       dirty_stack();
       ASSERT_TRUE(stack_dirt_is_visible()) << "the stack the check runs on is not dirty";
-      rdc_fake_hsa_reset();
+      reset_fake();
       rdc_fake_hsa_set_agent_name(1, "gfx1030", 0);
 
       const OneGpu gpu = run_one_gpu(one.check);
@@ -4141,7 +4211,7 @@ TEST(RocrNames, AnAgentNameThatFillsItsBytesIsKeptToItsLength) {
 // level, which is within every level, and prints a mismatch with fprintf(stdout)).
 TEST(RocrOutput, NothingIsWrittenToStdoutOrStderrAtTheDefaultLevel) {
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     // No kernel file is written anywhere the module looks, and the two pages of the CPU-access
     // buffer are one.
     rdc_fake_hsa_set_alias_pages(1);
@@ -4190,7 +4260,7 @@ TEST(RocrOutput, NothingIsWrittenToStdoutOrStderrAtTheDefaultLevel) {
 
   // The same run at debug level: the mismatch is in the logger's lines and nowhere else.
   RDC_ROCR_CASE({
-    rdc_fake_hsa_reset();
+    reset_fake();
     rdc_fake_hsa_set_alias_pages(1);
     ASSERT_EQ(::setenv("RDC_LOG", "DEBUG", 1), 0);
 
@@ -4211,5 +4281,298 @@ TEST(RocrOutput, NothingIsWrittenToStdoutOrStderrAtTheDefaultLevel) {
       EXPECT_NE(line.find(" DEBUG "), std::string::npos) << line;
       EXPECT_LT(line.find(" DEBUG "), line.find(mismatch)) << line;
     }
+  });
+}
+
+// --- what the module holds across runs ----------------------------------------------------------
+
+// The module loads ROCr at its first check and holds it, with one queue per GPU that each check of
+// that GPU uses in turn, until rdc_diag_destroy(), which destroys the queues and then gives ROCr
+// back: rocprofiler-sdk, which rdcd always loads, cannot take a ROCr reload and never destroys a
+// queue it intercepted, so a load or a queue per check ends rdcd or leaves a queue per run.
+TEST(RocrModule, RocrAndOneQueuePerGpuAreHeldUntilDestroy) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    write_kernel_files();
+
+    uint32_t ids[2] = {0, 1};
+    for (int run = 0; run < 2; run++) {
+      for (rdc_diag_test_cases_t check : kBothChecks) {
+        ResultPtr result = new_result();
+        ASSERT_EQ(rdc_diag_test_case_run(check, ids, 2, nullptr, 0, result.get(), nullptr),
+                  RDC_ST_OK);
+        EXPECT_EQ(result->status, RDC_DIAG_RESULT_PASS) << "run " << run;
+      }
+      EXPECT_EQ(rdc_fake_hsa_load_count(), 1u) << "run " << run;
+      EXPECT_EQ(rdc_fake_hsa_live_references(), 1u) << "run " << run;
+      ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u) << "run " << run;
+      EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 0) << "run " << run;
+      EXPECT_EQ(rdc_fake_hsa_queue_destroyed(1), 0) << "run " << run;
+      EXPECT_EQ(rdc_fake_hsa_live_blocks(), 0u) << "run " << run;
+    }
+    // Every check dispatched once per GPU, on that GPU's queue: the first GPU's is queue 0.
+    ASSERT_EQ(rdc_fake_hsa_dispatch_count(), 8u);
+    for (uint32_t dispatch = 0; dispatch < rdc_fake_hsa_dispatch_count(); dispatch++) {
+      EXPECT_EQ(rdc_fake_hsa_dispatch_queue(dispatch), dispatch % 2) << "dispatch " << dispatch;
+    }
+
+    // rdc_diag_destroy() destroys both queues before it gives ROCr back, and a second one has
+    // nothing left to release.
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    const std::vector<std::string> log = destroy_log();
+    ASSERT_GE(log.size(), 3u);
+    EXPECT_EQ(log[log.size() - 3].compare(0, 5, "queue"), 0) << joined(log);
+    EXPECT_EQ(log[log.size() - 2].compare(0, 5, "queue"), 0) << joined(log);
+    EXPECT_EQ(log.back(), "shut_down") << joined(log);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 1);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(1), 1);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+    EXPECT_EQ(rdc_fake_hsa_unbalanced_shutdowns(), 0u);
+    EXPECT_EQ(rdc_fake_hsa_latched(), 0);
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_queue_destroy"), 2u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+
+    // A check after rdc_diag_destroy() loads ROCr again and makes the GPU's queue again.
+    EXPECT_EQ(run_one_gpu(RDC_DIAG_COMPUTE_QUEUE).status, RDC_DIAG_RESULT_PASS);
+    EXPECT_EQ(rdc_fake_hsa_load_count(), 2u);
+    EXPECT_EQ(rdc_fake_hsa_queue_count(), 3u);
+    expect_everything_released();
+  });
+}
+
+// rdc_diag_destroy() before any check makes no HSA call: the module holds nothing yet.
+TEST(RocrModule, ADestroyBeforeAnyCheckMakesNoCall) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    EXPECT_EQ(rdc_diag_init(0), RDC_ST_OK);
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    EXPECT_EQ(rdc_fake_hsa_call_log_size(), 0u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+  });
+}
+
+// Two checks of one GPU from two runs take its queue in turn: the second puts nothing on it until
+// the first has ended, and both use the one queue.
+TEST(RocrModule, TwoChecksOfOneGpuTakeItsQueueInTurn) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    write_kernel_files();
+
+    // The first run is held at its first wait, with the GPU's queue lent to it.
+    rdc_fake_hsa_gate("hsa_signal_wait_scacquire", kFirstRun, 0);
+    Running first(kFirstRun, RDC_DIAG_COMPUTE_QUEUE, {0});
+    ASSERT_EQ(rdc_fake_hsa_gate_wait("hsa_signal_wait_scacquire", 1, 30000), 1);
+    const uint32_t dispatches = rdc_fake_hsa_dispatch_count();
+
+    // The second run loads its kernel before it asks for the queue; from there, 300 ms is long
+    // enough for it to dispatch had it been given the queue: a run of the fake takes a few
+    // milliseconds.
+    Running second(kSecondRun, RDC_DIAG_COMPUTE_QUEUE, {0});
+    for (int poll = 0; poll < 3000; poll++) {
+      if (rdc_fake_hsa_call_count("hsa_code_object_reader_create_from_file") >= 2) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_code_object_reader_create_from_file"), 2u);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_EQ(rdc_fake_hsa_dispatch_count(), dispatches);
+
+    rdc_fake_hsa_gate_release("hsa_signal_wait_scacquire");
+    first.join();
+    second.join();
+    EXPECT_EQ(first.result().status, RDC_DIAG_RESULT_PASS) << first.text(0);
+    EXPECT_EQ(second.result().status, RDC_DIAG_RESULT_PASS) << second.text(0);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 1u);
+    ASSERT_EQ(rdc_fake_hsa_dispatch_count(), 2u);
+    EXPECT_EQ(rdc_fake_hsa_dispatch_queue(0), 0u);
+    EXPECT_EQ(rdc_fake_hsa_dispatch_queue(1), 0u);
+    expect_everything_released();
+  });
+}
+
+// rdc_diag_destroy() waits for a run in flight before it destroys the queue that run uses.
+TEST(RocrModule, ADestroyWaitsForTheRunInFlight) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    write_kernel_files();
+    rdc_fake_hsa_gate("hsa_signal_wait_scacquire", kFirstRun, 0);
+    Running run(kFirstRun, RDC_DIAG_COMPUTE_QUEUE, {0});
+    ASSERT_EQ(rdc_fake_hsa_gate_wait("hsa_signal_wait_scacquire", 1, 30000), 1);
+
+    std::atomic<bool> started(false);
+    std::atomic<bool> destroyed(false);
+    std::thread destroy([&started, &destroyed]() {
+      started = true;
+      EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+      destroyed = true;
+    });
+    while (!started.load()) {
+      std::this_thread::yield();
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    EXPECT_FALSE(destroyed.load());
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 0);
+
+    rdc_fake_hsa_gate_release("hsa_signal_wait_scacquire");
+    run.join();
+    destroy.join();
+    EXPECT_TRUE(destroyed.load());
+    EXPECT_EQ(run.result().status, RDC_DIAG_RESULT_PASS) << run.text(0);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 1);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 0u);
+  });
+}
+
+// A check that ends with work that may still be on its GPU's queue, here at a dispatch whose
+// signal reports a failure, destroys the queue before it releases anything that work can touch,
+// and the GPU's next check makes another.
+TEST(RocrModule, AQueueLeftWithWorkIsDestroyedAndTheNextCheckMakesAnother) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    write_kernel_files();
+    rdc_fake_hsa_set_dispatch_signal_value(-1);
+    EXPECT_EQ(run_one_gpu(RDC_DIAG_COMPUTE_QUEUE).status, RDC_DIAG_RESULT_FAIL);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 1u);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 1);
+    // The queue goes first, before the signal the dispatch used (the first signal made, before
+    // the queue and its doorbell), the executable and its reader, and the blocks.
+    const std::vector<std::string> log = destroy_log();
+    const auto at = [&log](const std::string& prefix) {
+      return std::find_if(log.begin(), log.end(),
+                          [&prefix](const std::string& entry) {
+                            return entry.compare(0, prefix.size(), prefix) == 0;
+                          }) -
+             log.begin();
+    };
+    const auto size = static_cast<std::ptrdiff_t>(log.size());
+    ASSERT_LT(at("queue 0"), size) << joined(log);
+    for (const char* entry : {"signal 0", "executable", "reader", "block"}) {
+      ASSERT_LT(at(entry), size) << entry << ": " << joined(log);
+      EXPECT_LT(at("queue 0"), at(entry)) << entry << ": " << joined(log);
+    }
+
+    rdc_fake_hsa_set_dispatch_signal_value(0);
+    EXPECT_EQ(run_one_gpu(RDC_DIAG_COMPUTE_QUEUE).status, RDC_DIAG_RESULT_PASS);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(1), 0);
+    expect_everything_released();
+  });
+}
+
+// A queue the module holds that rdc_diag_destroy() cannot destroy is logged and records its GPU,
+// the other GPU's queue is destroyed all the same, and ROCr stays loaded with the kept queue's
+// status block, since ROCr may still call that queue's callback: rdc_diag_destroy() succeeds, a
+// second one has nothing left to release, and a later run fails that GPU without a dispatch.
+TEST(RocrModule, AQueueTheModuleCannotDestroyKeepsRocrLoaded) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    write_kernel_files();
+    uint32_t ids[2] = {0, 1};
+    ResultPtr result = new_result();
+    ASSERT_EQ(
+        rdc_diag_test_case_run(RDC_DIAG_COMPUTE_QUEUE, ids, 2, nullptr, 0, result.get(), nullptr),
+        RDC_ST_OK);
+    EXPECT_EQ(result->status, RDC_DIAG_RESULT_PASS);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u);
+
+    // The first destroy fails.
+    rdc_fake_hsa_fail("hsa_queue_destroy", 1, HSA_STATUS_ERROR_INVALID_QUEUE);
+    ::testing::internal::CaptureStdout();
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    const std::string log = ::testing::internal::GetCapturedStdout();
+    EXPECT_NE(log.find("Fail to call hsa_queue_destroy()."), std::string::npos) << log;
+    EXPECT_NE(log.find("ROCr stays loaded"), std::string::npos) << log;
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_queue_destroy"), 2u);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0) + rdc_fake_hsa_queue_destroyed(1), 1);
+    // The queues were made in the order of the GPUs, so the kept queue's index is its GPU's.
+    const uint32_t kept = rdc_fake_hsa_queue_destroyed(0) == 0 ? 0 : 1;
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_shut_down"), 2u);  // the test objects' own
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+    EXPECT_EQ(rdc_fake_hsa_latched(), 0);
+
+    // The block is still the queue's: an error ROCr reports now writes into allocated memory.
+    raise_queue_error_and_wait(kept, kQueueError);
+
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_queue_destroy"), 2u);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 1u);
+
+    const uint32_t dispatches = rdc_fake_hsa_dispatch_count();
+    ResultPtr later = new_result();
+    ASSERT_EQ(
+        rdc_diag_test_case_run(RDC_DIAG_COMPUTE_QUEUE, ids, 2, nullptr, 0, later.get(), nullptr),
+        RDC_ST_OK);
+    EXPECT_EQ(later->status, RDC_DIAG_RESULT_FAIL);
+    ASSERT_EQ(later->per_gpu_result_count, 2u);
+    const std::string recorded = later->gpu_results[kept].gpu_result.msg;
+    EXPECT_NE(recorded.find("An earlier check could not stop its work on this GPU"),
+              std::string::npos)
+        << recorded;
+    const std::string skipped = later->gpu_results[1 - kept].gpu_result.msg;
+    EXPECT_NE(skipped.find("The ROCr checks are disabled"), std::string::npos) << skipped;
+    EXPECT_NE(skipped.find("on GPU " + std::to_string(kept) + ";"), std::string::npos) << skipped;
+    EXPECT_EQ(rdc_fake_hsa_dispatch_count(), dispatches);
+  });
+}
+
+// A queue whose error ROCr reported after its check ended, and which the GPU's next check then
+// cannot destroy, abandons that GPU: the check fails naming the destroy and with the record's
+// text, makes no queue and dispatches nothing, the old queue keeps its block, and
+// rdc_diag_destroy() leaves that queue alone with ROCr loaded (M: an acquire that goes on to make
+// a queue after the failed destroy fails it).
+TEST(RocrModule, AnErroredQueueTheNextCheckCannotDestroyAbandonsItsGpu) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    write_kernel_files();
+    EXPECT_EQ(run_one_gpu(RDC_DIAG_COMPUTE_QUEUE).status, RDC_DIAG_RESULT_PASS);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 1u);
+    raise_queue_error_and_wait(0, kQueueError);
+
+    rdc_fake_hsa_fail("hsa_queue_destroy", 0, HSA_STATUS_ERROR_INVALID_QUEUE);
+    const uint32_t dispatches = rdc_fake_hsa_dispatch_count();
+    const OneGpu next = run_one_gpu(RDC_DIAG_COMPUTE_QUEUE);
+    EXPECT_EQ(next.status, RDC_DIAG_RESULT_FAIL);
+    EXPECT_NE(next.text.find("hsa_queue_destroy"), std::string::npos) << next.text;
+    EXPECT_NE(next.text.find("An earlier check could not stop its work on this GPU"),
+              std::string::npos)
+        << next.text;
+    EXPECT_EQ(rdc_fake_hsa_queue_count(), 1u);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 0);
+    EXPECT_EQ(rdc_fake_hsa_dispatch_count(), dispatches);
+
+    // The block is still the queue's: another error ROCr reports writes into allocated memory.
+    raise_queue_error_and_wait(0, HSA_STATUS_ERROR_INVALID_PACKET_FORMAT);
+
+    // The abandoned test object and the module keep their references, and rdc_diag_destroy()
+    // tries no destroy of that queue.
+    const uint32_t destroys = rdc_fake_hsa_call_count("hsa_queue_destroy");
+    EXPECT_EQ(rdc_diag_destroy(), RDC_ST_OK);
+    EXPECT_EQ(rdc_fake_hsa_call_count("hsa_queue_destroy"), destroys);
+    EXPECT_EQ(rdc_fake_hsa_live_references(), 2u);
+    EXPECT_EQ(rdc_fake_hsa_latched(), 0);
+  });
+}
+
+// An error ROCr reports on a GPU's queue after the check that used it ended suspends the queue:
+// the GPU's next check destroys it, makes another and passes (M: an acquire that keeps a queue
+// whatever its status fails it).
+TEST(RocrModule, AQueueErrorAfterItsCheckEndedIsReplacedByTheNextCheck) {
+  RDC_ROCR_CASE({
+    reset_fake();
+    write_kernel_files();
+    EXPECT_EQ(run_one_gpu(RDC_DIAG_COMPUTE_QUEUE).status, RDC_DIAG_RESULT_PASS);
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 1u);
+    raise_queue_error_and_wait(0, kQueueError);
+
+    const OneGpu next = run_one_gpu(RDC_DIAG_SYS_MEM_CHECK);
+    EXPECT_EQ(next.status, RDC_DIAG_RESULT_PASS) << next.text;
+    ASSERT_EQ(rdc_fake_hsa_queue_count(), 2u);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(0), 1);
+    EXPECT_EQ(rdc_fake_hsa_queue_destroyed(1), 0);
+    ASSERT_EQ(rdc_fake_hsa_dispatch_count(), 2u);
+    EXPECT_EQ(rdc_fake_hsa_dispatch_queue(1), 1u);
+    expect_everything_released();
   });
 }
