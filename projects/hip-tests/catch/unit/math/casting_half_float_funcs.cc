@@ -6,6 +6,9 @@
 
 #include "half_precision_common.hh"
 #include "casting_common.hh"
+#include "half_cast_reference.hh"
+
+#include <array>
 
 /**
  * @addtogroup HalfPrecisionCastingFloat HalfPrecisionCastingFloat
@@ -13,16 +16,123 @@
  * @ingroup MathTest
  */
 
+namespace {
+
+Float16 HalfFromBits(uint16_t bits) {
+  __half_raw raw{};
+  raw.x = bits;
+  return Float16{__half{raw}};
+}
+
+struct DirectedHalfCase {
+  float input;
+  uint16_t downward;
+  uint16_t upward;
+  uint16_t toward_zero;
+};
+
+// Literal binary16 endpoints keep these checks independent of the reference
+// algorithm. Include both signs at zero, subnormal/normal boundaries, ties and
+// overflow, as well as the original small positive regression values.
+constexpr DirectedHalfCase kDirectedHalfCases[] = {
+    {0.0f, 0x0000, 0x0000, 0x0000},
+    {-0.0f, 0x8000, 0x8000, 0x8000},
+    {0x1p-149f, 0x0000, 0x0001, 0x0000},
+    {-0x1p-149f, 0x8001, 0x8000, 0x8000},
+    {0x1p-126f, 0x0000, 0x0001, 0x0000},
+    {-0x1p-126f, 0x8001, 0x8000, 0x8000},
+    {0x1p-25f, 0x0000, 0x0001, 0x0000},
+    {-0x1p-25f, 0x8001, 0x8000, 0x8000},
+    {0x1p-24f, 0x0001, 0x0001, 0x0001},
+    {-0x1p-24f, 0x8001, 0x8001, 0x8001},
+    {0x1.8p-24f, 0x0001, 0x0002, 0x0001},
+    {-0x1.8p-24f, 0x8002, 0x8001, 0x8001},
+    {0x1.ff8p-15f, 0x03ff, 0x03ff, 0x03ff},
+    {-0x1.ff8p-15f, 0x83ff, 0x83ff, 0x83ff},
+    {0x1.ffcp-15f, 0x03ff, 0x0400, 0x03ff},
+    {-0x1.ffcp-15f, 0x8400, 0x83ff, 0x83ff},
+    {0x1p-14f, 0x0400, 0x0400, 0x0400},
+    {-0x1p-14f, 0x8400, 0x8400, 0x8400},
+    {0x1.002p-14f, 0x0400, 0x0401, 0x0400},
+    {-0x1.002p-14f, 0x8401, 0x8400, 0x8400},
+    {0x1.fffffep-1f, 0x3bff, 0x3c00, 0x3bff},
+    {-0x1.fffffep-1f, 0xbc00, 0xbbff, 0xbbff},
+    {1.0f, 0x3c00, 0x3c00, 0x3c00},
+    {-1.0f, 0xbc00, 0xbc00, 0xbc00},
+    {0x1.000002p0f, 0x3c00, 0x3c01, 0x3c00},
+    {-0x1.000002p0f, 0xbc01, 0xbc00, 0xbc00},
+    {0x1.002p0f, 0x3c00, 0x3c01, 0x3c00},
+    {-0x1.002p0f, 0xbc01, 0xbc00, 0xbc00},
+    {0x1.004p0f, 0x3c01, 0x3c01, 0x3c01},
+    {-0x1.004p0f, 0xbc01, 0xbc01, 0xbc01},
+    {0x1.006p0f, 0x3c01, 0x3c02, 0x3c01},
+    {-0x1.006p0f, 0xbc02, 0xbc01, 0xbc01},
+    {0x1.ffbffep15f, 0x7bfe, 0x7bff, 0x7bfe},
+    {-0x1.ffbffep15f, 0xfbff, 0xfbfe, 0xfbfe},
+    {65504.0f, 0x7bff, 0x7bff, 0x7bff},
+    {-65504.0f, 0xfbff, 0xfbff, 0xfbff},
+    {0x1.ffc002p15f, 0x7bff, 0x7c00, 0x7bff},
+    {-0x1.ffc002p15f, 0xfc00, 0xfbff, 0xfbff},
+    {65520.0f, 0x7bff, 0x7c00, 0x7bff},
+    {-65520.0f, 0xfc00, 0xfbff, 0xfbff},
+    {65536.0f, 0x7bff, 0x7c00, 0x7bff},
+    {-65536.0f, 0xfc00, 0xfbff, 0xfbff},
+    {std::numeric_limits<float>::max(), 0x7bff, 0x7c00, 0x7bff},
+    {std::numeric_limits<float>::lowest(), 0xfc00, 0xfbff, 0xfbff},
+    {std::numeric_limits<float>::infinity(), 0x7c00, 0x7c00, 0x7c00},
+    {-std::numeric_limits<float>::infinity(), 0xfc00, 0xfc00, 0xfc00},
+    {0.8859e-06f, 0x000e, 0x000f, 0x000e},
+    {1.5454e-07f, 0x0002, 0x0003, 0x0002},
+    {6.5955e-08f, 0x0001, 0x0002, 0x0001},
+    {2.7955e-08f, 0x0000, 0x0001, 0x0000},
+    {3.7956e-09f, 0x0000, 0x0001, 0x0000},
+    {4.8995e-10f, 0x0000, 0x0001, 0x0000},
+    {5.7997e-15f, 0x0000, 0x0001, 0x0000},
+    {6.2117e-20f, 0x0000, 0x0001, 0x0000},
+    {7.4999e-25f, 0x0000, 0x0001, 0x0000},
+    {8.9999e-30f, 0x0000, 0x0001, 0x0000},
+    {9.0001e-35f, 0x0000, 0x0001, 0x0000},
+};
+
+template <HalfRoundingMode Mode> void DirectedHalfBoundaryTest(kernel_sig<Float16, float> kernel) {
+  constexpr size_t count = std::size(kDirectedHalfCases);
+  std::array<float, count> input{};
+  std::array<uint16_t, count> expected{};
+  for (size_t i = 0; i < count; ++i) {
+    const auto& test = kDirectedHalfCases[i];
+    input[i] = test.input;
+    expected[i] = Mode == HalfRoundingMode::Downward ? test.downward
+                  : Mode == HalfRoundingMode::Upward ? test.upward
+                                                     : test.toward_zero;
+    INFO("Reference input: " << input[i]);
+    REQUIRE(RoundFloatToHalfBits(input[i], Mode) == expected[i]);
+  }
+
+  LinearAllocGuard<float> input_dev{LinearAllocs::hipMalloc, sizeof(input)};
+  LinearAllocGuard<Float16> output{LinearAllocs::hipMallocManaged, count * sizeof(Float16)};
+  HIP_CHECK(hipMemcpy(input_dev.ptr(), input.data(), sizeof(input), hipMemcpyHostToDevice));
+  kernel<<<1, 64>>>(output.ptr(), count, input_dev.ptr());
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+  for (size_t i = 0; i < count; ++i) {
+    INFO("Device input: " << input[i]);
+    REQUIRE(output.ptr()[i] == HalfFromBits(expected[i]));
+  }
+}
+
+}  // namespace
+
 #define CAST_FLOAT2HALF_TEST_DEF(kern_name, round_dir)                                             \
   CAST_KERNEL_DEF(kern_name, Float16, float)                                                       \
-  CAST_RND_REF_DEF(kern_name, Float16, float, round_dir)                                           \
+  Float16 kern_name##_ref(float arg) {                                                             \
+    return HalfFromBits(RoundFloatToHalfBits(arg, round_dir));                                     \
+  }                                                                                                \
                                                                                                    \
   HIP_TEST_CASE(Unit_Device_##kern_name##_Accuracy_Limited_Positive) {                             \
     Float16 (*ref)(float) = kern_name##_ref;                                                       \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
-                                  std::numeric_limits<float>::lowest(), 0.f);                      \
-    UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
-                                  0.0001f, std::numeric_limits<float>::max());                     \
+                                  std::numeric_limits<float>::lowest(),                            \
+                                  std::numeric_limits<float>::max());                              \
   }
 
 #define CAST_FLOAT2HALF_RN_TEST_DEF(kern_name)                                                     \
@@ -39,10 +149,8 @@
 /**
  * Test Description
  * ------------------------
- *    - Tests that checks `__float2half_rd` for all possible inputs apart from very small positive
- * values. Rounding behaviour is not correct for host functions for this range. The results are
- * compared against reference function which performs float cast to __half with FE_DOWNWARD rounding
- * mode.
+ *    - Checks `__float2half_rd` over the full finite float range against an independent
+ * binary16 downward rounding reference. Results must match exactly.
  *
  * Test source
  * ------------------------
@@ -51,7 +159,7 @@
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-CAST_FLOAT2HALF_TEST_DEF(__float2half_rd, FE_DOWNWARD)
+CAST_FLOAT2HALF_TEST_DEF(__float2half_rd, HalfRoundingMode::Downward)
 
 /**
  * Test Description
@@ -86,10 +194,8 @@ CAST_FLOAT2HALF_RN_TEST_DEF(__float2half)
 /**
  * Test Description
  * ------------------------
- *    - Tests that checks `__float2half_ru` for all possible inputs apart from very small positive
- * values. Rounding behaviour is not correct for host functions for this range. The results are
- * compared against reference function which performs float cast to __half with FE_UPWARD rounding
- * mode.
+ *    - Checks `__float2half_ru` over the full finite float range against an independent
+ * binary16 upward rounding reference. Results must match exactly.
  *
  * Test source
  * ------------------------
@@ -98,15 +204,13 @@ CAST_FLOAT2HALF_RN_TEST_DEF(__float2half)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-CAST_FLOAT2HALF_TEST_DEF(__float2half_ru, FE_UPWARD)
+CAST_FLOAT2HALF_TEST_DEF(__float2half_ru, HalfRoundingMode::Upward)
 
 /**
  * Test Description
  * ------------------------
- *    - Tests that checks `__float2half_rz` for all possible inputs apart from very small positive
- * values. Rounding behaviour is not correct for host functions for this range. The results are
- * compared against reference function which performs float cast to __half with FE_TOWARDZERO
- * rounding mode.
+ *    - Checks `__float2half_rz` over the full finite float range against an independent
+ * binary16 toward-zero rounding reference. Results must match exactly.
  *
  * Test source
  * ------------------------
@@ -115,12 +219,13 @@ CAST_FLOAT2HALF_TEST_DEF(__float2half_ru, FE_UPWARD)
  * ------------------------
  *    - HIP_VERSION >= 5.2
  */
-CAST_FLOAT2HALF_TEST_DEF(__float2half_rz, FE_TOWARDZERO)
+CAST_FLOAT2HALF_TEST_DEF(__float2half_rz, HalfRoundingMode::TowardZero)
 
 /**
  * Test Description
  * ------------------------
- *    - Sanity test that checks `__float2half_rd` for very small positive values.
+ *    - Checks `__float2half_rd` against exact binary16 endpoints for both signs at
+ * zero, subnormal/normal boundaries, ties, overflow and the original small positive inputs.
  *
  * Test source
  * ------------------------
@@ -130,27 +235,14 @@ CAST_FLOAT2HALF_TEST_DEF(__float2half_rz, FE_TOWARDZERO)
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_Device___float2half_rd_SmallVals_Sanity_Positive) {
-  const float input[] = {0.8859e-06f, 1.5454e-07f, 6.5955e-08f, 2.7955e-08f,
-                         3.7956e-09f, 4.8995e-10f, 5.7997e-15f, 6.2117e-20f,
-                         7.4999e-25f, 8.9999e-30f, 9.0001e-35f};
-  const Float16 reference[] = {8.34465e-07, 1.19209e-07, 5.96046e-08, 0, 0, 0, 0, 0, 0, 0, 0};
-  LinearAllocGuard<float> input_dev{LinearAllocs::hipMalloc, sizeof(float)};
-  LinearAllocGuard<Float16> out(LinearAllocs::hipMallocManaged, sizeof(Float16));
-
-
-  for (int i = 0; i < 11; ++i) {
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice));
-
-    __float2half_rd_kernel<<<1, 1>>>(out.ptr(), 1, input_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
-    REQUIRE(out.ptr()[0] == reference[i]);
-  }
+  DirectedHalfBoundaryTest<HalfRoundingMode::Downward>(__float2half_rd_kernel);
 }
 
 /**
  * Test Description
  * ------------------------
- *    - Sanity test that checks `__float2half_ru` for very small positive values.
+ *    - Checks `__float2half_ru` against exact binary16 endpoints for both signs at
+ * zero, subnormal/normal boundaries, ties, overflow and the original small positive inputs.
  *
  * Test source
  * ------------------------
@@ -160,29 +252,14 @@ HIP_TEST_CASE(Unit_Device___float2half_rd_SmallVals_Sanity_Positive) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_Device___float2half_ru_SmallVals_Sanity_Positive) {
-  const float input[] = {0.8859e-06f, 1.5454e-07f, 6.5955e-08f, 2.7955e-08f,
-                         3.7956e-09f, 4.8995e-10f, 5.7997e-15f, 6.2117e-20f,
-                         7.4999e-25f, 8.9999e-30f, 9.0001e-35f};
-  const Float16 reference[] = {8.9407e-07,  1.78814e-07, 1.19209e-07, 5.96046e-08,
-                               5.96046e-08, 5.96046e-08, 5.96046e-08, 5.96046e-08,
-                               5.96046e-08, 5.96046e-08, 5.96046e-08};
-  LinearAllocGuard<float> input_dev{LinearAllocs::hipMalloc, sizeof(float)};
-  LinearAllocGuard<Float16> out(LinearAllocs::hipMallocManaged, sizeof(Float16));
-
-
-  for (int i = 0; i < 11; ++i) {
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice));
-
-    __float2half_ru_kernel<<<1, 1>>>(out.ptr(), 1, input_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
-    REQUIRE(out.ptr()[0] == reference[i]);
-  }
+  DirectedHalfBoundaryTest<HalfRoundingMode::Upward>(__float2half_ru_kernel);
 }
 
 /**
  * Test Description
  * ------------------------
- *    - Sanity test that checks `__float2half_rz` for very small positive values.
+ *    - Checks `__float2half_rz` against exact binary16 endpoints for both signs at
+ * zero, subnormal/normal boundaries, ties, overflow and the original small positive inputs.
  *
  * Test source
  * ------------------------
@@ -192,21 +269,7 @@ HIP_TEST_CASE(Unit_Device___float2half_ru_SmallVals_Sanity_Positive) {
  *    - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_Device___float2half_rz_SmallVals_Sanity_Positive) {
-  const float input[] = {0.8859e-06f, 1.5454e-07f, 6.5955e-08f, 2.7955e-08f,
-                         3.7956e-09f, 4.8995e-10f, 5.7997e-15f, 6.2117e-20f,
-                         7.4999e-25f, 8.9999e-30f, 9.0001e-35f};
-  const Float16 reference[] = {8.34465e-07, 1.19209e-07, 5.96046e-08, 0, 0, 0, 0, 0, 0, 0, 0};
-  LinearAllocGuard<float> input_dev{LinearAllocs::hipMalloc, sizeof(float)};
-  LinearAllocGuard<Float16> out(LinearAllocs::hipMallocManaged, sizeof(Float16));
-
-
-  for (int i = 0; i < 11; ++i) {
-    HIP_CHECK(hipMemcpy(input_dev.ptr(), input + i, sizeof(float), hipMemcpyHostToDevice));
-
-    __float2half_rz_kernel<<<1, 1>>>(out.ptr(), 1, input_dev.ptr());
-    HIP_CHECK(hipDeviceSynchronize());
-    REQUIRE(out.ptr()[0] == reference[i]);
-  }
+  DirectedHalfBoundaryTest<HalfRoundingMode::TowardZero>(__float2half_rz_kernel);
 }
 
 CAST_KERNEL_DEF(__half2float, float, Float16)
