@@ -446,6 +446,7 @@ std::string GetAdjacentThunkLibraryPath(const std::string& library_name) {
       // each call) instead of failing the whole table load.
       HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = (HSAKMT_DEF(hsaKmtQueryDmaBufInfo)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueryDmaBufInfo");
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtImportExternalSemaphore");
+      HSAKMT_PFN(hsaKmtCreateExternalSemaphore) = (HSAKMT_DEF(hsaKmtCreateExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtCreateExternalSemaphore");
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtDestroyExternalSemaphore");
       HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueSignalExternalSemaphore");
       HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)rocr::os::GetExportAddress(thunk_handle, "hsaKmtQueueWaitExternalSemaphore");
@@ -621,6 +622,7 @@ LOAD_ERROR:
       HSAKMT_PFN(hsaKmtQueryDmaBufInfo) = (HSAKMT_DEF(hsaKmtQueryDmaBufInfo)*)(&hsaKmtQueryDmaBufInfo);
 #endif
       HSAKMT_PFN(hsaKmtImportExternalSemaphore) = (HSAKMT_DEF(hsaKmtImportExternalSemaphore)*)(&hsaKmtImportExternalSemaphore);
+      HSAKMT_PFN(hsaKmtCreateExternalSemaphore) = (HSAKMT_DEF(hsaKmtCreateExternalSemaphore)*)(&hsaKmtCreateExternalSemaphore);
       HSAKMT_PFN(hsaKmtDestroyExternalSemaphore) = (HSAKMT_DEF(hsaKmtDestroyExternalSemaphore)*)(&hsaKmtDestroyExternalSemaphore);
       HSAKMT_PFN(hsaKmtQueueSignalExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueSignalExternalSemaphore)*)(&hsaKmtQueueSignalExternalSemaphore);
       HSAKMT_PFN(hsaKmtQueueWaitExternalSemaphore) = (HSAKMT_DEF(hsaKmtQueueWaitExternalSemaphore)*)(&hsaKmtQueueWaitExternalSemaphore);

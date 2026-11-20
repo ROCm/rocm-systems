@@ -150,6 +150,11 @@ public:
   hsa_status_t ImportExternalSemaphore(uint32_t node_id, void* nt_handle,
                                        hsa_amd_external_semaphore_handle_type_t type,
                                        hsa_amd_external_semaphore_t* out_sem) const override;
+  hsa_status_t CreateExternalSemaphore(uint32_t node_id,
+                                       hsa_amd_external_semaphore_handle_type_t type,
+                                       uint64_t initial_value, bool timeline,
+                                       hsa_amd_external_semaphore_t* out_sem,
+                                       void** out_os_handle) const override;
   hsa_status_t DestroyExternalSemaphore(hsa_amd_external_semaphore_t sem) const override;
 
   hsa_status_t SignalExternalSemaphore(uint64_t queue_id, hsa_amd_external_semaphore_t sem,
