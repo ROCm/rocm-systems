@@ -832,18 +832,19 @@ int rj_arith_v_mul_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  const uint32_t *const *b, uint32_t *excp_flag_user);
 
 // FP64 arithmetic: two VGPRs per operand, holding each lane's low/high words.
-// Supports ALU ABS/NEG on present sources, OMOD and CLAMP, with loose semantics.
-// Mode 2 returns UNSUPPORTED_SEMANTICS; mode 3 returns UNSUPPORTED_FP_STATUS.
-// Compatibility resolves to Loose; dropping status alone does not enable exact FP64 arithmetic.
-// Guest RJ_ARITH_FP_ROUND_* controls finite arithmetic and output scaling in
-// Loose and Compatibility without changing host floating-point controls.
+// Supports ALU ABS/NEG on present sources, OMOD and CLAMP. One numeric model serves
+// Loose and bit-exact semantics: the gfx1201 and gfx1100 captures match it, so the
+// RDNA3 and _gfx12 entry points accept mode 2 and resolve Compatibility to mode 2.
+// Mode 3 returns UNSUPPORTED_FP_STATUS. The _gfx10 FMA entry (RDNA2) is loose-only.
+// Guest RJ_ARITH_FP_ROUND_* controls finite arithmetic and output scaling
+// without changing host floating-point controls.
 // Host nearest-even rounding and enabled denormals are required. Whole VGPR
 // aliases may cross operand halves; sources are read before destination writes.
 // ADD/MUL/FMA use APIs without _gfx12 for RDNA3 and _gfx12 variants for RDNA4.
 // RDNA3 ignores OMOD when output denormals are preserved or RJ_ARITH_FP_IEEE_MODE is
 // set; RDNA4 applies it regardless. These three families accept guest input/output
-// denormal flushing, also in Wave64. They remain loose-only: IEEE-mode support
-// does not promise exact NaN behavior or exception reporting.
+// denormal flushing, also in Wave64. NaN results take the first NaN source in
+// operand order, quieted; RDNA3 keeps signaling NaNs with IEEE clear.
 // Output flushing and OMOD test tininess after rounding: a MUL or FMA result that
 // reaches minimum normal only through subnormal rounding is still flushed.
 // CLAMP maps NaNs to +0; RDNA3 preserves NaNs with RJ_ARITH_FP_DX10_CLAMP_OFF.
@@ -889,6 +890,17 @@ int rj_arith_v_fma_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
 int rj_arith_v_fma_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c, uint32_t *trapsts);
+
+// RDNA2 FMA inherits the RDNA3 numeric model; strict exact is unsupported pending gfx10 captures.
+int rj_arith_v_fma_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *trapsts);
+
+int rj_arith_v_fma_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b, const uint32_t *const *c,
+                                 uint32_t *trapsts);
 int rj_arith_v_fma_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
@@ -1047,10 +1059,9 @@ int rj_arith_v_frexp_exp_i16_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // VGPR or an FP64 low/high pair. Returns zero for zeros, infinities and NaNs;
 // preserved finite nonzero inputs satisfy A = FREXP_MANT(A) * 2^D.
 // A ABS/NEG, OMOD and CLAMP are accepted but do not change the integer result.
-// D may alias either whole source VGPR. FP64 supports loose semantics only
-// and honors guest input flushing. IEEE and output flushing do not change the integer result.
-// FP32 supports exact semantics and guest input flushing; output flushing and
-// IEEE mode do not change its integer result. Flushed subnormals return zero.
+// D may alias either whole source VGPR. Both widths support exact semantics (Compatibility
+// resolves to mode 2) and guest input flushing; output flushing and IEEE mode do not change
+// the integer result. Flushed subnormals return zero.
 // Both RDNA3 widths accept DX10_CLAMP_OFF without changing the integer result.
 // Mode 3 FP status reporting is unsupported on both architectures.
 // FP status pointers are unused in modes 0..2; a null pointer does not enable mode 3.

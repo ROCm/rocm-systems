@@ -59,6 +59,25 @@ NORMALIZED_NAMES = {
     'V_CVT_NORM_U16_F16',
 }
 
+# Architecture suffix of the shared conversion entry points. RDNA3 owns the unsuffixed
+# entries and RDNA4 the _gfx12 entries; both accept bit-exact semantics. CDNA3/CDNA4 and
+# gfx1250 call loose-only entries until their captures are reviewed per instruction.
+CONVERSION_ARCH_SUFFIX = {
+    'rdna3': '',
+    'rdna4': '_gfx12',
+    'cdna3': '_gfx942',
+    'cdna4': '_gfx942',
+    'cdna5': '_gfx1250',
+}
+
+# Architecture suffix of the FP64 FMA entry points. RDNA2 has no capture yet, so it
+# calls the loose-only _gfx10 entry rather than the shared RDNA3 one.
+FMA64_ARCH_SUFFIX = {
+    'rdna2': '_gfx10',
+    'rdna3': '',
+    'rdna4': '_gfx12',
+}
+
 CONVERSION16_NAMES = {
     'V_CVT_F16_I16',
     'V_CVT_F16_U16',
@@ -513,11 +532,9 @@ def gen_packed_conversion(ctx: ExecuteContext) -> str | None:
         return None
     if len(dst) != 1 or len(src) != 2:
         return None
-    api = (
-        'rj_arith_'
-        + mnemonic.lower()
-        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
-    )
+    # RDNA entries accept bit-exact semantics; CDNA entries stay loose-only until their
+    # captures are reviewed.
+    api = 'rj_arith_' + mnemonic.lower() + CONVERSION_ARCH_SUFFIX[arch]
     lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
     if mnemonic == 'V_CVT_PK_RTZ_F16_F32':
         lines += [
@@ -561,11 +578,13 @@ def gen_normalized(ctx: ExecuteContext) -> str | None:
     half = mnemonic.endswith('_F16')
     if len(dst) != 1 or len(src) != (2 if packed else 1):
         return None
+    # Packed-half forms have RDNA4-specific entries; the other RDNA forms share one entry.
+    # CDNA entries stay loose-only until their captures are reviewed.
     api = 'rj_arith_' + mnemonic.lower()
-    if packed and half and arch in ('rdna4', 'cdna5'):
+    if packed and half and arch == 'rdna4':
         api += '_gfx12'
-    if not packed and arch in ('cdna3', 'cdna4'):
-        api += '_gfx942'
+    if arch != 'rdna3' and arch != 'rdna4':
+        api += CONVERSION_ARCH_SUFFIX[arch]
     lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
     if half:
         lines += [
@@ -647,12 +666,7 @@ def gen_conversion16(ctx: ExecuteContext) -> str | None:
     if len(dst) != 1 or len(src) != 1:
         return None
     output, source = mnemonic.split('_')[-2:]
-    suffix = (
-        '_gfx12'
-        if arch in ('rdna4', 'cdna5')
-        else '_gfx942' if arch in ('cdna3', 'cdna4') and output != 'F32' else ''
-    )
-    api = 'rj_arith_' + mnemonic.lower() + suffix
+    api = 'rj_arith_' + mnemonic.lower() + CONVERSION_ARCH_SUFFIX[arch]
     lines = [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
@@ -754,11 +768,10 @@ def gen_conversion32(ctx: ExecuteContext) -> str | None:
     to_float = mnemonic in ('V_CVT_F32_I32', 'V_CVT_F32_U32')
     fixed_round = mnemonic in ('V_CVT_NEAREST_I32_F32', 'V_CVT_FLOOR_I32_F32')
     reports = not to_float and not fixed_round
-    api = (
-        'rj_arith_'
-        + mnemonic.lower()
-        + ('_gfx12' if arch in ('rdna4', 'cdna5') and not fixed_round else '')
-    )
+    # Fixed-rounding forms share one RDNA entry; CDNA entries stay loose-only.
+    api = 'rj_arith_' + mnemonic.lower()
+    if not (fixed_round and arch == 'rdna4'):
+        api += CONVERSION_ARCH_SUFFIX[arch]
     # Conversion does not use DX10 clamp; only integer-to-float uses MODE rounding.
     ignored = 'RJ_ARITH_FP_DX10_CLAMP_OFF'
     if not to_float:
@@ -820,11 +833,7 @@ def gen_conversion64(ctx: ExecuteContext) -> str | None:
     output, source = mnemonic.split('_')[-2:]
     from_integer = source in ('I32', 'U32')
     to_double = output == 'F64'
-    api = (
-        'rj_arith_'
-        + mnemonic.lower()
-        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
-    )
+    api = 'rj_arith_' + mnemonic.lower() + CONVERSION_ARCH_SUFFIX[arch]
     lines = [
         '  uint64_t flags = wf.cu().arithmetic_flags();',
         '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
@@ -1348,11 +1357,8 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
     half = mnemonic == 'V_PACK_B32_F16'
     if len(dst) != 1 or len(src) != (2 if half else 3):
         return None
-    api = (
-        'rj_arith_'
-        + mnemonic.lower()
-        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
-    )
+    # Byte packing and the CDNA PACK entries stay loose-only until their captures are reviewed.
+    api = 'rj_arith_' + mnemonic.lower() + CONVERSION_ARCH_SUFFIX[arch]
     lines = ['  uint64_t flags = wf.cu().arithmetic_flags();']
     denorm = 'fp_denorm_mode_f16_f64' if half else 'fp_denorm_mode_f32'
     lines += [
@@ -1427,15 +1433,11 @@ def gen_float_fma64(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if (
-        arch not in ('rdna2', 'rdna3', 'rdna4')
-        or mnemonic != 'V_FMA_F64'
-        or not is_vop3
-    ):
+    if arch not in FMA64_ARCH_SUFFIX or mnemonic != 'V_FMA_F64' or not is_vop3:
         return None
     if len(dst) != 1 or len(src) != 3:
         return None
-    api = 'rj_arith_v_fma_f64' + ('_gfx12' if arch == 'rdna4' else '')
+    api = 'rj_arith_v_fma_f64' + FMA64_ARCH_SUFFIX[arch]
     return '\n'.join(
         [
             '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
