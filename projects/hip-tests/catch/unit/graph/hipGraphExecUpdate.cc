@@ -23,6 +23,8 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#include "stream_capture_common.hh"  // NOLINT
+
 __global__ void GraphExecUpdateStore(int* output, int value) { output[0] = value; }
 
 __global__ void GraphExecUpdateDelayStore(int* output, int value, unsigned long long ticks) {
@@ -1555,6 +1557,242 @@ HIP_TEST_CASE(Unit_hipGraphExecUpdate_RebuildWithDisabledNodeKeepsSync) {
     REQUIRE(values[2] == kProducerValue);
   }
 
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A graph captured from two forked streams is updated with a recapture of the same work in a
+ *    different order. Nodes pair by the stream that captured them and their position on that
+ *    stream, so reordering across streams updates successfully while moving work to the other
+ *    stream or reordering it within a stream does not.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecUpdate.cc
+ */
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_CapturedSiblingOrder) {
+  constexpr int kMemsetValue = 0x07070707;
+  LinearAllocGuard<int> kernel_out(LinearAllocs::hipMalloc, sizeof(int));
+  LinearAllocGuard<int> memset_out(LinearAllocs::hipMalloc, sizeof(int));
+  StreamGuard s0(Streams::withFlags, hipStreamNonBlocking);
+  StreamGuard s1(Streams::withFlags, hipStreamNonBlocking);
+  StreamGuard s2(Streams::withFlags, hipStreamNonBlocking);
+  EventsGuard events(3);
+
+  struct Layout {
+    hipStream_t kernel_stream;
+    hipStream_t memset_stream;
+    bool kernel_first;
+    bool s2_joins_first;
+  };
+  auto capture = [&](const Layout& layout) {
+    hipStream_t origin = s0.stream();
+    HIP_CHECK(hipStreamBeginCapture(origin, hipStreamCaptureModeGlobal));
+    HIP_CHECK(hipEventRecord(events[0], origin));
+    hipStream_t first_joiner = layout.s2_joins_first ? s2.stream() : s1.stream();
+    hipStream_t second_joiner = layout.s2_joins_first ? s1.stream() : s2.stream();
+    HIP_CHECK(hipStreamWaitEvent(first_joiner, events[0], 0));
+    HIP_CHECK(hipStreamWaitEvent(second_joiner, events[0], 0));
+    auto launch_kernel = [&] {
+      GraphExecUpdateStore<<<1, 1, 0, layout.kernel_stream>>>(kernel_out.ptr(), 1);
+      HIP_CHECK(hipGetLastError());
+    };
+    auto launch_memset = [&] {
+      HIP_CHECK(hipMemsetAsync(memset_out.ptr(), 7, sizeof(int), layout.memset_stream));
+    };
+    if (layout.kernel_first) {
+      launch_kernel();
+      launch_memset();
+    } else {
+      launch_memset();
+      launch_kernel();
+    }
+    HIP_CHECK(hipEventRecord(events[1], s1.stream()));
+    HIP_CHECK(hipEventRecord(events[2], s2.stream()));
+    HIP_CHECK(hipStreamWaitEvent(origin, events[1], 0));
+    HIP_CHECK(hipStreamWaitEvent(origin, events[2], 0));
+    hipGraph_t graph = nullptr;
+    HIP_CHECK(hipStreamEndCapture(origin, &graph));
+    return graph;
+  };
+
+  auto check_update = [&](const Layout& original, const Layout& updated,
+                          hipGraphExecUpdateResult expected) {
+    hipGraph_t original_graph = capture(original);
+    hipGraph_t updated_graph = capture(updated);
+    hipGraphExec_t exec = nullptr;
+    HIP_CHECK(hipGraphInstantiate(&exec, original_graph, nullptr, nullptr, 0));
+    hipGraphNode_t error_node = nullptr;
+    hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+    const hipError_t status = hipGraphExecUpdate(exec, updated_graph, &error_node, &result);
+    static_cast<void>(hipGetLastError());
+    REQUIRE(result == expected);
+    if (expected == hipGraphExecUpdateSuccess) {
+      REQUIRE(status == hipSuccess);
+      HIP_CHECK(hipMemsetAsync(kernel_out.ptr(), 0, sizeof(int), s0.stream()));
+      HIP_CHECK(hipMemsetAsync(memset_out.ptr(), 0, sizeof(int), s0.stream()));
+      HIP_CHECK(hipGraphLaunch(exec, s0.stream()));
+      HIP_CHECK(hipStreamSynchronize(s0.stream()));
+      int kernel_value = 0, memset_value = 0;
+      HIP_CHECK(hipMemcpy(&kernel_value, kernel_out.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(&memset_value, memset_out.ptr(), sizeof(int), hipMemcpyDeviceToHost));
+      REQUIRE(kernel_value == 1);
+      REQUIRE(memset_value == kMemsetValue);
+    } else {
+      REQUIRE(status == hipErrorGraphExecUpdateFailure);
+    }
+    HIP_CHECK(hipGraphExecDestroy(exec));
+    HIP_CHECK(hipGraphDestroy(updated_graph));
+    HIP_CHECK(hipGraphDestroy(original_graph));
+  };
+
+  const Layout two_streams{s1.stream(), s2.stream(), true, false};
+
+  SECTION("Siblings issued in the other order") {
+    check_update(two_streams, {s1.stream(), s2.stream(), false, false},
+                 hipGraphExecUpdateSuccess);
+  }
+  SECTION("Streams join the capture and issue in the other order") {
+    check_update(two_streams, {s1.stream(), s2.stream(), false, true},
+                 hipGraphExecUpdateSuccess);
+  }
+  SECTION("Work moved to the other stream") {
+    check_update(two_streams, {s2.stream(), s1.stream(), true, false},
+                 hipGraphExecUpdateErrorNodeTypeChanged);
+  }
+  SECTION("Work reordered within one stream") {
+    check_update({s1.stream(), s1.stream(), true, false},
+                 {s1.stream(), s1.stream(), false, false},
+                 hipGraphExecUpdateErrorNodeTypeChanged);
+  }
+}
+
+__global__ void RecaptureIncrement(int* counter) { atomicAdd(counter, 1); }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Two threads capture into one graph each iteration and the executable graph is updated with
+ *    every recapture, as GROMACS thread-MPI ranks do.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphExecUpdate.cc
+ */
+// If this test is flaky, debug the runtime race it exposes instead of disabling the test.
+HIP_TEST_CASE(Unit_hipGraphExecUpdate_MultiThreadRecapture) {
+  constexpr int kThreads = 2;
+  constexpr int kIterations = 50;
+  constexpr int kKernels = 16;
+
+  struct Rank {
+    StreamGuard local{Streams::withFlags, hipStreamNonBlocking};
+    StreamGuard remote{Streams::withFlags, hipStreamNonBlocking};
+    EventsGuard fork{1};
+    EventsGuard done{1};
+    EventsGuard halo{kKernels};
+    LinearAllocGuard<int> counters{LinearAllocs::hipMalloc, 2 * sizeof(int)};
+    LinearAllocGuard<int> scratch{LinearAllocs::hipMalloc, sizeof(int)};
+  };
+  std::vector<Rank> ranks(kThreads);
+  for (auto& rank : ranks) {
+    HIP_CHECK(hipMemset(rank.counters.ptr(), 0, 2 * sizeof(int)));
+  }
+  HIP_CHECK(hipDeviceSynchronize());
+  EventsGuard previous_step(1);
+  HIP_CHECK(hipEventRecord(previous_step, ranks[0].local.stream()));
+  HIP_CHECK(hipStreamSynchronize(ranks[0].local.stream()));
+
+  std::vector<hipEvent_t> published(kThreads);
+  ThreadBarrier barrier(kThreads);
+  hipGraph_t graph = nullptr;
+  hipGraphExec_t exec = nullptr;
+  int successful_updates = 0;
+
+  auto run_rank = [&](int r) {
+    Rank& rank = ranks[r];
+    Rank& peer = ranks[(r + 1) % kThreads];
+    hipStream_t local = rank.local.stream();
+    hipStream_t remote = rank.remote.stream();
+    int* local_counter = rank.counters.ptr();
+    int* remote_counter = rank.counters.ptr() + 1;
+
+    for (int iteration = 0; iteration < kIterations; ++iteration) {
+      if (!barrier.Wait()) return;
+      if (r == 0) {
+        HIP_CHECK_THREAD(hipStreamBeginCapture(local, hipStreamCaptureModeGlobal));
+        HIP_CHECK_THREAD(hipStreamWaitEvent(local, previous_step, hipEventWaitExternal));
+        HIP_CHECK_THREAD(hipEventRecord(rank.fork, local));
+        published[0] = rank.fork;
+      }
+      if (!barrier.Wait()) return;
+      if (r != 0) {
+        HIP_CHECK_THREAD(hipStreamWaitEvent(local, published[0], 0));
+      }
+      if (!barrier.Wait()) return;
+
+      HIP_CHECK_THREAD(hipEventRecord(rank.fork, local));
+      HIP_CHECK_THREAD(hipStreamWaitEvent(remote, rank.fork, 0));
+      HIP_CHECK_THREAD(hipMemsetAsync(rank.scratch.ptr(), 0, sizeof(int), remote));
+      for (int k = 0; k < kKernels; ++k) {
+        RecaptureIncrement<<<1, 1, 0, local>>>(local_counter);
+        RecaptureIncrement<<<1, 1, 0, remote>>>(remote_counter);
+        HIP_CHECK_THREAD(hipEventRecord(rank.halo[k], local));
+      }
+      if (!barrier.Wait()) return;
+
+      for (int k = 0; k < kKernels; ++k) {
+        HIP_CHECK_THREAD(hipStreamWaitEvent(remote, peer.halo.event_list()[k], 0));
+        RecaptureIncrement<<<1, 1, 0, remote>>>(remote_counter);
+        RecaptureIncrement<<<1, 1, 0, local>>>(local_counter);
+      }
+      HIP_CHECK_THREAD(hipGetLastError());
+      HIP_CHECK_THREAD(hipEventRecord(rank.done, remote));
+      HIP_CHECK_THREAD(hipStreamWaitEvent(local, rank.done, 0));
+      HIP_CHECK_THREAD(hipEventRecord(rank.done, local));
+      published[r] = rank.done;
+      if (!barrier.Wait()) return;
+
+      if (r == 0) {
+        for (int p = 1; p < kThreads; ++p) {
+          HIP_CHECK_THREAD(hipStreamWaitEvent(local, published[p], 0));
+        }
+        if (graph != nullptr) {
+          HIP_CHECK_THREAD(hipGraphDestroy(graph));
+        }
+        HIP_CHECK_THREAD(hipStreamEndCapture(local, &graph));
+        if (exec == nullptr) {
+          HIP_CHECK_THREAD(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+        } else {
+          hipGraphNode_t error_node = nullptr;
+          hipGraphExecUpdateResult result = hipGraphExecUpdateError;
+          HIP_CHECK_THREAD(hipGraphExecUpdate(exec, graph, &error_node, &result));
+          REQUIRE_THREAD(result == hipGraphExecUpdateSuccess);
+          ++successful_updates;
+        }
+        HIP_CHECK_THREAD(hipGraphLaunch(exec, local));
+        HIP_CHECK_THREAD(hipStreamSynchronize(local));
+      }
+    }
+  };
+
+  std::vector<std::thread> threads;
+  for (int r = 0; r < kThreads; ++r) {
+    threads.emplace_back(run_rank, r);
+  }
+  for (auto& t : threads) {
+    t.join();
+  }
+  HIP_CHECK_THREAD_FINALIZE();
+
+  REQUIRE(successful_updates == kIterations - 1);
+  for (auto& rank : ranks) {
+    int counters[2] = {};
+    HIP_CHECK(hipMemcpy(counters, rank.counters.ptr(), sizeof(counters), hipMemcpyDeviceToHost));
+    REQUIRE(counters[0] == kIterations * 2 * kKernels);
+    REQUIRE(counters[1] == kIterations * 2 * kKernels);
+  }
   HIP_CHECK(hipGraphExecDestroy(exec));
   HIP_CHECK(hipGraphDestroy(graph));
 }
