@@ -18,7 +18,6 @@ __all__ = [
     "Marker",
     "MarkerFlags",
     "MarkerKind",
-    "MarkerMetadata",
     "Occupancy",
     "OtherSimdInstruction",
     "Pc",
@@ -136,8 +135,7 @@ class MarkerFlags(IntFlag):
     EXIT_PREVIOUS = 0x1
     ENTER = 0x2
     NEW_WAVE = 0x4
-    INCOMPLETE = 0x8
-    LAST = 0x8
+    LAST = 0x4
 
 
 class RecordType(IntEnum):
@@ -240,52 +238,27 @@ class ShaderData:
     reserved: int
 
 
-@dataclass(frozen=True)
-class MarkerMetadata:
-    """Immutable marker declaration, shared by records from the same parse."""
+@dataclass
+class Marker:
+    """One decoded marker with its raw payload words.
 
-    size: int
-    code_object_id: int
+    ``name`` is ``None`` when the code object does not declare the marker.
+    ``payload_dropped`` counts declared payload words that were lost.
+    """
+
+    shaderdata: ShaderData
+    kernel_entry: Pc
     name: str | None
     source_location: str | None
     marker_id: int
     marker_kind: MarkerKind | int
-    payload_count: int
-    wave_size: int
-    reserved: bytes
-
-
-@dataclass
-class Marker:
-    """One logical marker and its owned Python payload words."""
-
-    size: int
-    shaderdata: ShaderData
-    kernel_entry: Pc
-    metadata: MarkerMetadata
-    payload: list[int]
     marker_flags: MarkerFlags
-    payload_count: int
+    payload: list[int]
+    payload_dropped: int
 
     @property
     def code_object_id(self) -> int:
-        return self.metadata.code_object_id
-
-    @property
-    def name(self) -> str | None:
-        return self.metadata.name
-
-    @property
-    def source_location(self) -> str | None:
-        return self.metadata.source_location
-
-    @property
-    def marker_id(self) -> int:
-        return self.metadata.marker_id
-
-    @property
-    def marker_kind(self) -> MarkerKind | int:
-        return self.metadata.marker_kind
+        return self.kernel_entry.code_object_id
 
 
 @dataclass

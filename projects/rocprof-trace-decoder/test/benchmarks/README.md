@@ -24,8 +24,8 @@ SIMDs. Payload words are interleaved across every slot. A synthetic code object
 supplies marker metadata. These patterns do not contain packed clocks or
 instructions requiring disassembly.
 
-Each input is parsed with an empty record filter (`disabled`), raw shaderdata
-only, buffered markers, immediate markers, and buffered markers plus raw
+Each input is parsed with every record type disabled (`disabled`), raw
+shaderdata only (`shaderdata`), markers only (`markers`), and markers plus raw
 shaderdata (`both`). The consumer reads marker IDs, code-object IDs, header
 values, and every payload word into a checked checksum. Counts and checksum
 must match the generated input or the benchmark fails.
@@ -54,7 +54,7 @@ LD_LIBRARY_PATH="build-marker-bench/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   build-marker-bench/test/benchmarks/marker_benchmark --mib 128 --seconds 1
 LD_LIBRARY_PATH="build-marker-bench/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
   build-marker-bench/test/benchmarks/marker_benchmark \
-    --pattern payload130 --delivery buffered --iterations 10
+    --pattern payload130 --delivery markers --iterations 10
 ```
 
 `--seconds` defaults to 0.25 seconds per case. `--iterations` overrides that

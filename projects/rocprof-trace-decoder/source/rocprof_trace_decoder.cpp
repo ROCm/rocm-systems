@@ -57,10 +57,9 @@ static_assert(
     "Unexpected rocprofiler_thread_trace_decoder_dispatch_t size"
 );
 static_assert(
-    sizeof(rocprofiler_thread_trace_decoder_marker_t) == 72,
+    sizeof(rocprofiler_thread_trace_decoder_marker_t) == 96,
     "Unexpected rocprofiler_thread_trace_decoder_marker_t size"
 );
-static_assert(sizeof(rocprofiler_thread_trace_decoder_marker_metadata_t) == 48);
 
 #define RADT(x) ROCPROFILER_THREAD_TRACE_DECODER_RECORD_##x
 
@@ -169,7 +168,7 @@ static rocprofiler_thread_trace_decoder_status_t parse_data_impl(
         {
             RecordFilter filter;
             filter.clear();
-            filter.set(RADT(MARKER), 0);
+            filter.set(RADT(MARKER), true);
             Stitcher calibration{_isa, nullptr, nullptr, filter};
             calibration.beginMarkerCalibration();
             CppReturnInfo ignored{};
@@ -399,50 +398,13 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
-ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_record_filter(
-    rocprof_trace_decoder_handle_t handle, const rocprofiler_thread_trace_decoder_record_filter_t* filter
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_record_enabled(
+    rocprof_trace_decoder_handle_t handle, rocprofiler_thread_trace_decoder_record_type_t type, int enabled
 )
 {
     auto hd = HandleData::get_write_handle(handle);
-    if (!hd.valid()) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if (!filter)
-    {
-        hd->record_filter.reset();
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
-    }
-    if (filter->size < sizeof(*filter) ||
-        filter->record_count > static_cast<uint64_t>(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST) ||
-        (filter->record_count != 0 && !filter->records))
-        return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    RecordFilter next{};
-    next.clear();
-    const auto* request_bytes = reinterpret_cast<const uint8_t*>(filter->records);
-    for (uint64_t i = 0; i < filter->record_count; ++i)
-    {
-        rocprofiler_thread_trace_decoder_record_request_t request{};
-        // Read the size first: a truncated request may only contain this field.
-        // Each entry supplies its own stride so older libraries can accept a
-        // caller's larger request structures without misreading the next entry.
-        std::memcpy(&request.size, request_bytes, sizeof(request.size));
-        if (request.size < sizeof(request) ||
-            request.size > static_cast<uint64_t>(std::numeric_limits<ptrdiff_t>::max()) ||
-            request.size > std::numeric_limits<uintptr_t>::max() - reinterpret_cast<uintptr_t>(request_bytes))
-            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-        std::memcpy(&request, request_bytes, sizeof(request));
-        if (!RecordFilter::valid(request.type)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-        if (next.isEnabled(request.type)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-        constexpr uint32_t supported = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE;
-        if ((request.flags & ~supported) != 0 ||
-            ((request.flags & supported) != 0 && !RecordFilter::supportsImmediate(request.type)))
-            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-        next.set(request.type, request.flags);
-        if (i + 1 < filter->record_count) request_bytes += request.size;
-    }
-
-    hd->record_filter = next;
+    if (!hd.valid() || !RecordFilter::valid(type)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+    hd->record_filter.set(type, enabled != 0);
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 

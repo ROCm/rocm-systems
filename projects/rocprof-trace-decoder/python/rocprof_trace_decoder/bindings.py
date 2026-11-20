@@ -17,7 +17,6 @@ from .records import (
     Marker,
     MarkerFlags,
     MarkerKind,
-    MarkerMetadata,
     Occupancy,
     OtherSimdInstruction,
     Pc,
@@ -130,29 +129,21 @@ class _ShaderData(ctypes.Structure):
     ]
 
 
-class _MarkerMetadata(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_uint64),
-        ("code_object_id", ctypes.c_uint64),
-        ("name", ctypes.c_char_p),
-        ("source_location", ctypes.c_char_p),
-        ("marker_id", ctypes.c_uint32),
-        ("marker_kind", ctypes.c_uint32),
-        ("payload_count", ctypes.c_uint32),
-        ("wave_size", ctypes.c_uint8),
-        ("reserved", ctypes.c_uint8 * 3),
-    ]
-
-
 class _Marker(ctypes.Structure):
     _fields_ = [
         ("size", ctypes.c_uint64),
         ("shaderdata", _ShaderData),
         ("kernel_entry", _PcInfo),
-        ("metadata", ctypes.POINTER(_MarkerMetadata)),
+        # Strings are read through a per-parse cache keyed by address.
+        ("name", ctypes.c_void_p),
+        ("source_location", ctypes.c_void_p),
         ("payload", ctypes.POINTER(ctypes.c_uint32)),
+        ("marker_id", ctypes.c_uint32),
+        ("marker_kind", ctypes.c_uint32),
         ("marker_flags", ctypes.c_uint32),
         ("payload_count", ctypes.c_uint32),
+        ("payload_dropped", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32),
     ]
 
 
@@ -214,22 +205,6 @@ class _Dispatch(ctypes.Structure):
 
 class _Handle(ctypes.Structure):
     _fields_ = [("handle", ctypes.c_uint64)]
-
-
-class _RecordRequest(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_uint64),
-        ("type", ctypes.c_int),
-        ("flags", ctypes.c_uint32),
-    ]
-
-
-class _RecordFilter(ctypes.Structure):
-    _fields_ = [
-        ("size", ctypes.c_uint64),
-        ("records", ctypes.POINTER(_RecordRequest)),
-        ("record_count", ctypes.c_uint64),
-    ]
 
 
 _TRACE_CB = ctypes.CFUNCTYPE(
@@ -431,11 +406,8 @@ class Decoder:
         ]
         lib.rocprof_trace_decoder_set_se_data_callback.restype = ctypes.c_int
 
-        lib.rocprof_trace_decoder_set_record_filter.argtypes = [
-            _Handle,
-            ctypes.POINTER(_RecordFilter),
-        ]
-        lib.rocprof_trace_decoder_set_record_filter.restype = ctypes.c_int
+        lib.rocprof_trace_decoder_set_record_enabled.argtypes = [_Handle, ctypes.c_int, ctypes.c_int]
+        lib.rocprof_trace_decoder_set_record_enabled.restype = ctypes.c_int
 
         lib.rocprof_trace_decoder_parse.argtypes = [
             _Handle,
@@ -559,50 +531,15 @@ class Decoder:
         status = self._lib.rocprof_trace_decoder_codeobj_unload(self._handle, load_id)
         self._check(status)
 
-    def set_record_filter(
-        self,
-        record_types: Iterable[RecordType] | None = None,
-        *,
-        immediate: Iterable[RecordType] = (),
-    ) -> None:
-        """Select callback record types and their delivery mode.
+    def set_record_enabled(self, record_type: RecordType, enabled: bool = True) -> None:
+        """Enable or disable one record type for subsequent parses.
 
-        ``record_types=None`` restores the native defaults: pooled delivery
-        with semantic marker decoding disabled. Enable ``RecordType.MARKER``
-        explicitly to decode markers. Types omitted from an explicit iterable
-        are disabled. Immediate delivery is supported for marker, shaderdata,
-        occupancy, and realtime records.
+        All types except ``RecordType.MARKER`` are enabled by default.
         """
         self._ensure_open()
-        immediate_types = {RecordType(value) for value in immediate}
-        if record_types is None:
-            if immediate_types:
-                raise ValueError("immediate record types require an explicit record filter")
-            self._check(self._lib.rocprof_trace_decoder_set_record_filter(self._handle, None))
-            return
-
-        selected = [RecordType(value) for value in record_types]
-        if not immediate_types.issubset(selected):
-            raise ValueError("immediate record types must also be selected")
-        array_type = _RecordRequest * len(selected)
-        requests = array_type(
-            *[
-                _RecordRequest(
-                    ctypes.sizeof(_RecordRequest),
-                    int(record_type),
-                    int(record_type in immediate_types),
-                )
-                for record_type in selected
-            ]
-        )
-        record_filter = _RecordFilter(
-            ctypes.sizeof(_RecordFilter),
-            ctypes.cast(requests, ctypes.POINTER(_RecordRequest)) if selected else None,
-            len(selected),
-        )
         self._check(
-            self._lib.rocprof_trace_decoder_set_record_filter(
-                self._handle, ctypes.byref(record_filter)
+            self._lib.rocprof_trace_decoder_set_record_enabled(
+                self._handle, int(RecordType(record_type)), int(bool(enabled))
             )
         )
 
@@ -652,7 +589,7 @@ class Decoder:
         raw = bytes(data)
         records = TraceRecords()
         callback_error: list[BaseException] = []
-        marker_metadata: dict[int, MarkerMetadata] = {}
+        strings: dict[int, str] = {}
 
         if isa is not None:
             self._isa_cb = self._make_isa_callback(isa)
@@ -670,7 +607,7 @@ class Decoder:
                     return int(DecoderStatus.SUCCESS)
                 if batch_type == RecordType.LAST or (not collect and on_batch is None):
                     return int(DecoderStatus.SUCCESS)
-                batch = self._convert_batch(batch_type, events, int(size), marker_metadata)
+                batch = self._convert_batch(batch_type, events, int(size), strings)
                 if collect:
                     _append_batch(records, batch_type, batch)
                 if on_batch is not None:
@@ -731,7 +668,7 @@ class Decoder:
         record_type: RecordType,
         events: int | None,
         size: int,
-        marker_metadata: dict[int, MarkerMetadata] | None = None,
+        strings: dict[int, str] | None = None,
     ) -> list[object] | int:
         if record_type == RecordType.GFXIP:
             return int(events or 0)
@@ -771,15 +708,8 @@ class Decoder:
             ptr = ctypes.cast(events, ctypes.POINTER(_Dispatch))
             return [_convert_dispatch(ptr[i]) for i in range(size)]
         if record_type == RecordType.MARKER:
-            batch = []
-            address = events
-            for _ in range(size):
-                record_size = ctypes.c_uint64.from_address(address).value
-                if record_size < ctypes.sizeof(_Marker):
-                    raise ValueError("Native marker record is smaller than the supported layout")
-                batch.append(_convert_marker(_Marker.from_address(address), marker_metadata))
-                address += record_size
-            return batch
+            ptr = ctypes.cast(events, ctypes.POINTER(_Marker))
+            return [_convert_marker(ptr[i], strings) for i in range(size)]
         return []
 
 
@@ -879,49 +809,32 @@ def _convert_shaderdata(c: _ShaderData) -> ShaderData:
     )
 
 
-def _decode_optional(value: bytes | None) -> str | None:
-    return value.decode("utf-8", errors="replace") if value else None
+def _string_at(address: int | None, cache: dict[int, str] | None) -> str | None:
+    """Decode a native string once per parse; its address is stable meanwhile."""
+    if not address:
+        return None
+    if cache is not None and address in cache:
+        return cache[address]
+    value = ctypes.string_at(address).decode("utf-8", errors="replace")
+    if cache is not None:
+        cache[address] = value
+    return value
 
 
-def _convert_marker_metadata(c: _MarkerMetadata) -> MarkerMetadata:
-    if c.size < ctypes.sizeof(_MarkerMetadata):
-        raise ValueError("Native marker metadata is smaller than the supported layout")
-    kind = int(c.marker_kind)
-    if MarkerKind.UNKNOWN <= kind < MarkerKind.LAST:
-        kind = MarkerKind(kind)
-    return MarkerMetadata(
-        size=int(c.size),
-        code_object_id=int(c.code_object_id),
-        name=_decode_optional(c.name),
-        source_location=_decode_optional(c.source_location),
-        marker_id=int(c.marker_id),
-        marker_kind=kind,
-        payload_count=int(c.payload_count),
-        wave_size=int(c.wave_size),
-        reserved=bytes(c.reserved),
-    )
-
-
-def _convert_marker(c: _Marker, metadata_cache: dict[int, MarkerMetadata] | None = None) -> Marker:
-    metadata_address = ctypes.cast(c.metadata, ctypes.c_void_p).value
-    if metadata_address is None:
-        raise ValueError("Native marker metadata is NULL")
-    metadata = metadata_cache.get(metadata_address) if metadata_cache is not None else None
-    if metadata is None:
-        metadata = _convert_marker_metadata(c.metadata.contents)
-        if metadata_cache is not None:
-            metadata_cache[metadata_address] = metadata
+def _convert_marker(c: _Marker, strings: dict[int, str] | None = None) -> Marker:
     if c.payload_count and not c.payload:
         raise ValueError("Native marker payload is NULL with a nonzero count")
-    payload = [int(c.payload[index]) for index in range(c.payload_count)]
+    kind = int(c.marker_kind)
     return Marker(
-        size=int(c.size),
         shaderdata=_convert_shaderdata(c.shaderdata),
         kernel_entry=_pc(c.kernel_entry),
-        metadata=metadata,
-        payload=payload,
+        name=_string_at(c.name, strings),
+        source_location=_string_at(c.source_location, strings),
+        marker_id=int(c.marker_id),
+        marker_kind=MarkerKind(kind) if MarkerKind.UNKNOWN <= kind < MarkerKind.LAST else kind,
         marker_flags=MarkerFlags(int(c.marker_flags)),
-        payload_count=int(c.payload_count),
+        payload=[int(c.payload[index]) for index in range(c.payload_count)],
+        payload_dropped=int(c.payload_dropped),
     )
 
 

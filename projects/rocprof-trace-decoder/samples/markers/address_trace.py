@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from marker_common import add_marker_args, load_marker_traces, marker_selected, marker_time
-from rocprof_trace_decoder import MarkerFlags
 
 
 @dataclass
@@ -72,14 +71,11 @@ def decode_block(header) -> AddressTrace | None:
     if matched is None:
         return None
     kind, is_64bit = matched
-    wave_size = infer_wave_size(kind, is_64bit, header.metadata.payload_count)
-    if (
-        not wave_size
-        or header.metadata.wave_size not in (0, wave_size)
-        or header.marker_flags & MarkerFlags.INCOMPLETE
-        or header.payload_count != header.metadata.payload_count
-        or len(header.payload) != header.payload_count
-    ):
+    # A block with lost words cannot be split into lanes reliably.
+    if header.payload_dropped:
+        return None
+    wave_size = infer_wave_size(kind, is_64bit, len(header.payload))
+    if not wave_size:
         return None
 
     values = header.payload

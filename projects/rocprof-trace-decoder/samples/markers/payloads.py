@@ -11,7 +11,6 @@ from marker_common import (
     marker_selected,
     marker_time,
 )
-from rocprof_trace_decoder import MarkerFlags
 
 
 def main() -> int:
@@ -37,9 +36,8 @@ def main() -> int:
                         "simd": marker.shaderdata.simd,
                         "wave_id": marker.shaderdata.wave_id,
                         "payload_index": index,
-                        "payload_count": marker.payload_count,
-                        "declared_payload_count": marker.metadata.payload_count,
-                        "incomplete": bool(marker.marker_flags & MarkerFlags.INCOMPLETE),
+                        "payload_count": len(marker.payload),
+                        "payload_dropped": marker.payload_dropped,
                         "value": payload,
                     }
                 )

@@ -189,7 +189,7 @@ TEST_F(StitcherTest, RollingMarkerStreamUsesWaveFuncmapAndPayloadState)
     mock_service->funcmaps.emplace(7, &funcmap);
 
     RecordFilter filter{};
-    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, true);
     Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
     pcinfo_t kernel{0x100, 7};
     stitcher.markerWaveStart(0, 1, 2, kernel);
@@ -211,27 +211,27 @@ TEST_F(StitcherTest, RollingMarkerStreamUsesWaveFuncmapAndPayloadState)
     ASSERT_EQ(cbdata.shaderdata.size(), 4u);
     ASSERT_EQ(cbdata.markers.size(), 3u);
 
-    EXPECT_EQ(cbdata.markers[0].metadata->marker_id, 1u);
-    EXPECT_STREQ(cbdata.markers[0].metadata->name, "scope");
+    EXPECT_EQ(cbdata.markers[0].marker_id, 1u);
+    EXPECT_STREQ(cbdata.markers[0].name, "scope");
     EXPECT_EQ(
         cbdata.markers[0].marker_flags,
         ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER | ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE
     );
     EXPECT_EQ(cbdata.markers[0].kernel_entry.code_object_id, 7u);
-    EXPECT_EQ(cbdata.markers[0].metadata->code_object_id, 7u);
+    EXPECT_EQ(cbdata.markers[0].kernel_entry.code_object_id, 7u);
 
-    EXPECT_EQ(cbdata.markers[1].metadata->marker_id, 2u);
-    EXPECT_EQ(cbdata.markers[1].metadata->payload_count, 1u);
+    EXPECT_EQ(cbdata.markers[1].marker_id, 2u);
+    EXPECT_EQ(cbdata.markers[1].payload_dropped, 0u);
     ASSERT_EQ(cbdata.markers[1].payload_count, 1u);
     ASSERT_NE(cbdata.markers[1].payload, nullptr);
     EXPECT_EQ(cbdata.markers[1].payload[0], 0xDEADBEEFu);
 
-    EXPECT_EQ(cbdata.markers[2].metadata->marker_id, 1u);
+    EXPECT_EQ(cbdata.markers[2].marker_id, 1u);
     EXPECT_EQ(cbdata.markers[2].marker_flags, ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS);
     EXPECT_EQ(cbdata.markers[2].shaderdata.time, 14);
 }
 
-TEST_F(StitcherTest, MarkerOnlyImmediateFilterSuppressesRawShaderdata)
+TEST_F(StitcherTest, MarkerOnlyFilterSuppressesRawShaderdata)
 {
     Funcmap funcmap{};
     addMarker(funcmap, FuncmapEntryKind::Point, 3, "point");
@@ -239,9 +239,7 @@ TEST_F(StitcherTest, MarkerOnlyImmediateFilterSuppressesRawShaderdata)
 
     RecordFilter filter{};
     filter.clear();
-    filter.set(
-        ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE
-    );
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, true);
 
     Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
     stitcher.markerWaveStart(0, 0, 0, pcinfo_t{0x20, 9});
@@ -249,6 +247,7 @@ TEST_F(StitcherTest, MarkerOnlyImmediateFilterSuppressesRawShaderdata)
     std::vector<rocprofiler_thread_trace_decoder_shaderdata_t> shaderdata{};
     stitcher.records().append(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata, shader);
     stitcher.processShaderdata(shader);
+    stitcher.flushMarkers();
 
     EXPECT_TRUE(cbdata.shaderdata.empty());
     ASSERT_EQ(cbdata.markers.size(), 1u);
@@ -262,7 +261,7 @@ TEST_F(StitcherTest, MarkerStreamReplaysAfterResolutionAndMarksEachWaveGeneratio
     mock_service->funcmaps.emplace(12, &funcmap);
 
     RecordFilter filter{};
-    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, true);
     Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
 
     stitcher.markerWaveStart(1, 2, 3, pcinfo_t{0x200, 0});
@@ -292,7 +291,7 @@ TEST_F(StitcherTest, PacketLossStopsMarkerDecodingForCurrentWaveGeneration)
     mock_service->funcmaps.emplace(13, &funcmap);
 
     RecordFilter filter{};
-    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, true);
     Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
     stitcher.markerWaveStart(0, 0, 0, pcinfo_t{0x10, 13});
     stitcher.processShaderdata(markerShaderdata(2, 5u << 2));
@@ -314,7 +313,7 @@ TEST_F(StitcherTest, InterleavedWavesResolveSameMarkerIdInDifferentCodeObjects)
     mock_service->funcmaps.emplace(22, &second);
 
     RecordFilter filter{};
-    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, true);
     Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
     stitcher.markerWaveStart(0, 0, 1, pcinfo_t{0x10, 21});
     stitcher.markerWaveStart(0, 0, 2, pcinfo_t{0x20, 22});
@@ -323,10 +322,10 @@ TEST_F(StitcherTest, InterleavedWavesResolveSameMarkerIdInDifferentCodeObjects)
     stitcher.flushMarkers();
 
     ASSERT_EQ(cbdata.markers.size(), 2u);
-    EXPECT_STREQ(cbdata.markers[0].metadata->name, "second");
-    EXPECT_EQ(cbdata.markers[0].metadata->code_object_id, 22u);
-    EXPECT_STREQ(cbdata.markers[1].metadata->name, "first");
-    EXPECT_EQ(cbdata.markers[1].metadata->code_object_id, 21u);
+    EXPECT_STREQ(cbdata.markers[0].name, "second");
+    EXPECT_EQ(cbdata.markers[0].kernel_entry.code_object_id, 22u);
+    EXPECT_STREQ(cbdata.markers[1].name, "first");
+    EXPECT_EQ(cbdata.markers[1].kernel_entry.code_object_id, 21u);
 }
 
 TEST_F(StitcherTest, StitchDoesNotCallbackTwice)

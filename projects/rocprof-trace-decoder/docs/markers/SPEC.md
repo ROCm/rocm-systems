@@ -670,7 +670,7 @@ stable wave identity across context save and restore (CWSR).
 from rocprof_trace_decoder import Decoder, RecordType
 
 with Decoder() as decoder:
-    decoder.set_record_filter([RecordType.INFO, RecordType.MARKER])
+    decoder.set_record_enabled(RecordType.MARKER)
     decoder.load_code_object(code_object, load_id, 0, len(code_object))
     records = decoder.parse(att_data, isa=code_index)
     for marker in records.markers:
@@ -984,9 +984,9 @@ which is a byte offset into LDS (source lane ID * 4). These intrinsics are
 ### Decoder integration
 
 Address trace blocks are represented by one decoded marker with a contiguous
-array of raw `uint32_t` payload words. `payload_count` is the observed length;
-`metadata->payload_count` is the declared length. `INCOMPLETE` indicates a
-truncated block.
+array of raw `uint32_t` payload words. `payload_count` is the received length;
+`payload_dropped` counts declared words that were lost, so a nonzero value
+indicates a truncated block.
 
 Because SQTT hardware captures `s_ttracedata` from all active waves into a
 single time-ordered buffer, records from concurrent waves are interleaved.

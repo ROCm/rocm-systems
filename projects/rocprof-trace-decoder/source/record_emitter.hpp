@@ -27,6 +27,9 @@
 
 #include <vector>
 
+/// Delivers records to the user callback, skipping disabled types. The first
+/// non-success status from the callback is kept: the parse returns it and no
+/// further callbacks are made.
 class RecordEmitter
 {
 public:
@@ -36,16 +39,13 @@ public:
 
     bool enabled(rocprofiler_thread_trace_decoder_record_type_t type) const { return filter_.isEnabled(type); }
 
-    bool immediate(rocprofiler_thread_trace_decoder_record_type_t type) const { return filter_.isImmediate(type); }
-
     rocprofiler_thread_trace_decoder_status_t status() const { return status_; }
 
     rocprofiler_thread_trace_decoder_status_t emit(
         rocprofiler_thread_trace_decoder_record_type_t type, void* data, uint64_t count
     ) const
     {
-        if (status_ != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return status_;
-        if (!enabled(type)) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
+        if (status_ != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS || !enabled(type)) return status_;
         return status_ = callback_(type, data, count, userdata_);
     }
 
@@ -56,36 +56,19 @@ public:
         return emit(type, &value, 1);
     }
 
-    template <typename Type> rocprofiler_thread_trace_decoder_status_t append(
-        rocprofiler_thread_trace_decoder_record_type_t type, std::vector<Type>& pooled, const Type& value
-    ) const
+    template <typename Type>
+    void append(rocprofiler_thread_trace_decoder_record_type_t type, std::vector<Type>& pooled, const Type& value) const
     {
-        if (status_ != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS || !enabled(type)) return status_;
-        if (immediate(type))
-        {
-            Type copy = value;
-            return emit(type, copy);
-        }
-        pooled.push_back(value);
-        return status_;
+        if (enabled(type)) pooled.push_back(value);
     }
 
-    template <typename Type> rocprofiler_thread_trace_decoder_status_t flush(
+    /// Delivers and clears a pooled batch.
+    template <typename Type>
+    rocprofiler_thread_trace_decoder_status_t flush(
         rocprofiler_thread_trace_decoder_record_type_t type, std::vector<Type>& pooled
     ) const
     {
-        if (status_ != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS || !enabled(type))
-        {
-            pooled.clear();
-            return status_;
-        }
-        if (immediate(type))
-        {
-            for (auto& value : pooled)
-                if (emit(type, value) != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) break;
-        }
-        else if (!pooled.empty())
-            emit(type, pooled.data(), pooled.size());
+        if (!pooled.empty()) emit(type, pooled.data(), pooled.size());
         pooled.clear();
         return status_;
     }
@@ -94,8 +77,5 @@ private:
     rocprof_trace_decoder_trace_callback_t callback_ = nullptr;
     void* userdata_ = nullptr;
     RecordFilter filter_{};
-    // Most parser call sites emit through void helpers. Preserve the first
-    // callback failure so the C API can report it and never call the consumer
-    // again after it has asked us to stop.
     mutable rocprofiler_thread_trace_decoder_status_t status_ = ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 };

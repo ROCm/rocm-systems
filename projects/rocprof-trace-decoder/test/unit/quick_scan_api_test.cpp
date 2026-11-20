@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <limits>
 #include <string>
 #include <utility>
@@ -171,90 +172,17 @@ reject_records(rocprofiler_thread_trace_decoder_record_type_t, void*, uint64_t, 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
 }
 
-TEST(RecordFilterApiTest, ValidatesRequestsAndSupportsReset)
+/// Enables exactly `types` on the handle.
+void enable_only(rocprof_trace_decoder_handle_t handle, std::initializer_list<rocprofiler_thread_trace_decoder_record_type_t> types)
 {
-    HandleGuard handle;
-    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
-
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, nullptr), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-
-    rocprofiler_thread_trace_decoder_record_filter_t empty{
-        .size = sizeof(empty), .records = nullptr, .record_count = 0};
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &empty), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-
-    rocprofiler_thread_trace_decoder_record_request_t request{
-        .size = sizeof(request),
-        .type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER,
-        .flags = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE};
-    rocprofiler_thread_trace_decoder_record_filter_t marker_only{
-        .size = sizeof(marker_only), .records = &request, .record_count = 1};
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &marker_only),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-
-    request.type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE;
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &marker_only),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
-
-    request.type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER;
-    rocprofiler_thread_trace_decoder_record_request_t duplicate[] = {request, request};
-    rocprofiler_thread_trace_decoder_record_filter_t duplicate_filter{
-        .size = sizeof(duplicate_filter), .records = duplicate, .record_count = 2};
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &duplicate_filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
-}
-
-TEST(RecordFilterApiTest, RejectsTruncatedAndOverflowingRequests)
-{
-    HandleGuard handle;
-    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
-
-    using Request = rocprofiler_thread_trace_decoder_record_request_t;
-    alignas(Request) uint64_t truncated_size = sizeof(truncated_size);
-    rocprofiler_thread_trace_decoder_record_filter_t filter{
-        .size = sizeof(filter), .records = reinterpret_cast<const Request*>(&truncated_size), .record_count = 1
-    };
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
-
-    Request request{
-        .size = std::numeric_limits<uint64_t>::max(), .type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, .flags = 0
-    };
-    filter.records = &request;
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
-
-    request.size = sizeof(request);
-    request.type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST;
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
-
-    filter.records = nullptr;
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
-    filter.record_count = 0;
-    filter.size = sizeof(filter) - 1;
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
+    for (int type = 0; type < ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST; ++type)
+    {
+        const auto record = static_cast<rocprofiler_thread_trace_decoder_record_type_t>(type);
+        const bool enabled = std::find(types.begin(), types.end(), record) != types.end();
+        ASSERT_EQ(
+            rocprof_trace_decoder_set_record_enabled(handle, record, enabled), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+        );
+    }
 }
 
 rocprofiler_thread_trace_decoder_status_t
@@ -549,7 +477,7 @@ struct MarkerApiSink
         uint64_t code_object_id;
         uint32_t id;
         uint32_t kind;
-        uint32_t declared_payload_count;
+        uint32_t payload_dropped;
         std::string name;
         std::string source;
         rocprofiler_thread_trace_decoder_pc_t kernel_entry;
@@ -582,16 +510,14 @@ rocprofiler_thread_trace_decoder_status_t collect_api_markers(
     for (uint64_t i = 0; i < count; ++i)
     {
         const auto& marker = *reinterpret_cast<const rocprofiler_thread_trace_decoder_marker_t*>(cursor);
-        EXPECT_GE(marker.size, sizeof(marker));
-        if (!marker.metadata) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
-        const auto& metadata = *marker.metadata;
+        EXPECT_EQ(marker.size, sizeof(marker));
         MarkerApiSink::Marker copy{
-            metadata.code_object_id,
-            metadata.marker_id,
-            metadata.marker_kind,
-            metadata.payload_count,
-            metadata.name ? metadata.name : "",
-            metadata.source_location ? metadata.source_location : "",
+            marker.kernel_entry.code_object_id,
+            marker.marker_id,
+            marker.marker_kind,
+            marker.payload_dropped,
+            marker.name ? marker.name : "",
+            marker.source_location ? marker.source_location : "",
             marker.kernel_entry,
             {},
             marker.shaderdata,
@@ -599,7 +525,7 @@ rocprofiler_thread_trace_decoder_status_t collect_api_markers(
         };
         if (marker.payload_count != 0) copy.payload.assign(marker.payload, marker.payload + marker.payload_count);
         sink.markers.push_back(std::move(copy));
-        cursor += marker.size;
+        cursor += sizeof(marker);
     }
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
@@ -989,6 +915,44 @@ void expect_gfx9_scanner_captures_dispatch_context(Gfx9ScannerForTest scanner)
 #endif
 } // namespace
 
+TEST(RecordFilterApiTest, EnablesRecordTypesIndividually)
+{
+    HandleGuard handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_enabled(handle.value, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 1),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_enabled(handle.value, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_enabled(handle.value, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST, 1),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
+    );
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_enabled(
+            handle.value, static_cast<rocprofiler_thread_trace_decoder_record_type_t>(-1), 1
+        ),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
+    );
+    EXPECT_EQ(
+        rocprof_trace_decoder_set_record_enabled({0}, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 1),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
+    );
+
+    // With every type disabled, a parse makes no callbacks.
+    enable_only(handle.value, {});
+    const auto trace = make_gfx9_marker_trace();
+    CallbackFailure calls;
+    EXPECT_EQ(
+        rocprof_trace_decoder_parse(handle.value, trace.data(), trace.size(), reject_and_count_records, &calls),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    EXPECT_EQ(calls.calls, 0u);
+}
+
 TEST(MarkerApiTest, LoadsOwnedMetadataWithAndWithoutCustomIsa)
 {
     const auto trace = make_gfx9_marker_trace();
@@ -1010,16 +974,7 @@ TEST(MarkerApiTest, LoadsOwnedMetadataWithAndWithoutCustomIsa)
                 ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
             );
         }
-        rocprofiler_thread_trace_decoder_record_request_t request{
-            .size = sizeof(request), .type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, .flags = 0
-        };
-        rocprofiler_thread_trace_decoder_record_filter_t filter{
-            .size = sizeof(filter), .records = &request, .record_count = 1
-        };
-        ASSERT_EQ(
-            rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-            ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-        );
+        enable_only(handle.value, {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER});
 
         for (const std::string name : {"api-marker", "reloaded-marker"})
         {
@@ -1049,7 +1004,7 @@ TEST(MarkerApiTest, LoadsOwnedMetadataWithAndWithoutCustomIsa)
             EXPECT_EQ(marker.source, "api.cpp:42");
             EXPECT_EQ(marker.kernel_entry.code_object_id, kCodeObjectId);
             EXPECT_EQ(marker.kernel_entry.address, 0x80u);
-            EXPECT_EQ(marker.declared_payload_count, 1u);
+            EXPECT_EQ(marker.payload_dropped, 0u);
             ASSERT_EQ(marker.payload.size(), 1u);
             EXPECT_EQ(marker.payload.front(), 0xCAFEBABEu);
 
@@ -1065,12 +1020,11 @@ TEST(MarkerApiTest, LoadsOwnedMetadataWithAndWithoutCustomIsa)
     }
 }
 
-TEST(MarkerApiTest, CalibratesPackedClocksForPooledImmediateAndStreamedInput)
+TEST(MarkerApiTest, CalibratesPackedClocksForSingleAndStreamedInput)
 {
-    for (bool immediate : {false, true})
         for (bool streamed : {false, true})
         {
-            SCOPED_TRACE(testing::Message() << "immediate=" << immediate << ", streamed=" << streamed);
+            SCOPED_TRACE(testing::Message() << "streamed=" << streamed);
             HandleGuard handle;
             ASSERT_EQ(
                 rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
@@ -1082,17 +1036,9 @@ TEST(MarkerApiTest, CalibratesPackedClocksForPooledImmediateAndStreamedInput)
                 ),
                 ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
             );
-            rocprofiler_thread_trace_decoder_record_request_t requests[] = {
-                {sizeof(requests[0]), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER,
-                 immediate ? ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE : 0u},
-                {sizeof(requests[0]), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, 0}
-            };
-            rocprofiler_thread_trace_decoder_record_filter_t filter{
-                .size = sizeof(filter), .records = requests, .record_count = 2
-            };
-            ASSERT_EQ(
-                rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-                ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+            enable_only(
+                handle.value,
+                {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA}
             );
 
             struct Source
@@ -1183,16 +1129,12 @@ TEST(ParseApiTest, Mi400PacketLossKeepsItsTokenTimestampWithMarkersEnabled)
         SCOPED_TRACE(testing::Message() << "markers=" << markers);
         HandleGuard handle;
         ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
-        rocprofiler_thread_trace_decoder_record_request_t requests[] = {
-            {sizeof(requests[0]), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, 0},
-            {sizeof(requests[0]), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0}
-        };
-        rocprofiler_thread_trace_decoder_record_filter_t filter{
-            .size = sizeof(filter), .records = requests, .record_count = markers ? 2u : 1u
-        };
-        ASSERT_EQ(
-            rocprof_trace_decoder_set_record_filter(handle.value, &filter), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-        );
+        if (markers)
+            enable_only(
+                handle.value, {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER}
+            );
+        else
+            enable_only(handle.value, {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT});
         RecordSink sink;
         ASSERT_EQ(
             rocprof_trace_decoder_parse(handle.value, trace.data(), trace.size(), collect_records, &sink),
@@ -1249,13 +1191,7 @@ TEST(MarkerApiTest, EveryPacketLossStopsAPayloadEvenWhileALossIsPending)
         ),
         ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
     );
-    rocprofiler_thread_trace_decoder_record_request_t request{
-        sizeof(request), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0
-    };
-    rocprofiler_thread_trace_decoder_record_filter_t filter{.size = sizeof(filter), .records = &request, .record_count = 1};
-    ASSERT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
+    enable_only(handle.value, {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER});
     MarkerApiSink sink;
     ASSERT_EQ(
         rocprof_trace_decoder_parse(handle.value, trace.data(), trace.size(), collect_api_markers, &sink),
@@ -1264,7 +1200,7 @@ TEST(MarkerApiTest, EveryPacketLossStopsAPayloadEvenWhileALossIsPending)
 
     ASSERT_EQ(sink.markers.size(), 1u);
     EXPECT_EQ(sink.markers[0].id, 2u);
-    EXPECT_NE(sink.markers[0].flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INCOMPLETE, 0u);
+    EXPECT_EQ(sink.markers[0].payload_dropped, 129u);
     EXPECT_EQ(sink.markers[0].payload, std::vector<uint32_t>{0});
 }
 
@@ -1282,7 +1218,7 @@ TEST(MarkerApiTest, RawShaderdataDoesNotDependOnMarkerDecoding)
     for (const auto& test : cases)
     {
         std::vector<std::vector<rocprofiler_thread_trace_decoder_shaderdata_t>> results;
-        for (uint32_t markers : {0u, 1u, 2u}) // disabled, pooled, immediate
+        for (bool markers : {false, true})
         {
             HandleGuard handle;
             ASSERT_EQ(
@@ -1295,18 +1231,13 @@ TEST(MarkerApiTest, RawShaderdataDoesNotDependOnMarkerDecoding)
                 ),
                 ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
             );
-            rocprofiler_thread_trace_decoder_record_request_t requests[] = {
-                {sizeof(requests[0]), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, 0},
-                {sizeof(requests[0]), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER,
-                 markers == 2 ? ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE : 0u}
-            };
-            rocprofiler_thread_trace_decoder_record_filter_t filter{
-                .size = sizeof(filter), .records = requests, .record_count = markers ? 2u : 1u
-            };
-            ASSERT_EQ(
-                rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-                ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-            );
+            if (markers)
+                enable_only(
+                    handle.value,
+                    {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER}
+                );
+            else
+                enable_only(handle.value, {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA});
             MarkerApiSink sink;
             ASSERT_EQ(
                 rocprof_trace_decoder_parse(
@@ -1314,7 +1245,7 @@ TEST(MarkerApiTest, RawShaderdataDoesNotDependOnMarkerDecoding)
                 ),
                 ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
             );
-            EXPECT_EQ(sink.markers.empty(), markers == 0);
+            EXPECT_EQ(sink.markers.empty(), !markers);
             results.push_back(sink.raw_shaderdata);
         }
         for (size_t i = 1; i < results.size(); ++i)
@@ -1378,138 +1309,23 @@ TEST(ParseApiTest, DefaultWaveRecordsStillRequireIsaWhenDisassemblyIsDisabled)
 }
 #endif
 
-TEST(RecordFilterApiTest, AcceptsExtendedStructuresAndUsesRequestSizeAsStride)
-{
-    struct ExtendedRequest
-    {
-        rocprofiler_thread_trace_decoder_record_request_t request;
-        uint64_t extension;
-    } requests[] = {
-        {{sizeof(ExtendedRequest), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, 0},    0xAABBCCDDu},
-        {{sizeof(ExtendedRequest), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH, 0}, 0x11223344u}
-    };
-    struct ExtendedFilter
-    {
-        rocprofiler_thread_trace_decoder_record_filter_t filter;
-        uint64_t extension;
-    } filter{
-        {sizeof(ExtendedFilter), &requests[0].request, 2},
-        0xFFFFu
-    };
-
-    HandleGuard handle;
-    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
-    ASSERT_EQ(
-        rocprof_trace_decoder_set_isa_callback(handle.value, nop_isa, nullptr),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-    ASSERT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter.filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-
-    const auto trace = make_dispatch_trace();
-    RecordSink sink;
-    ASSERT_EQ(
-        rocprof_trace_decoder_parse(handle.value, trace.data.data(), trace.data.size(), collect_records, &sink),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-    EXPECT_EQ(sink.events.size(), 1u);
-    EXPECT_EQ(sink.dispatches.size(), 1u);
-}
-
-TEST(RecordFilterApiTest, CopiesRequestsAndPreservesFilterAfterInvalidUpdate)
-{
-    const auto trace = make_dispatch_trace();
-    HandleGuard handle;
-    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
-    ASSERT_EQ(
-        rocprof_trace_decoder_set_isa_callback(handle.value, nop_isa, nullptr),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-
-    rocprofiler_thread_trace_decoder_record_request_t request{
-        .size = sizeof(request), .type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_EVENT, .flags = 0
-    };
-    rocprofiler_thread_trace_decoder_record_filter_t filter{
-        .size = sizeof(filter), .records = &request, .record_count = 1
-    };
-    ASSERT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-
-    request.type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DISPATCH;
-    request.flags = 0x80000000u;
-    EXPECT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT
-    );
-
-    RecordSink sink;
-    ASSERT_EQ(
-        rocprof_trace_decoder_parse(handle.value, trace.data.data(), trace.data.size(), collect_records, &sink),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-    EXPECT_EQ(sink.events.size(), 1u);
-    EXPECT_TRUE(sink.dispatches.empty());
-
-    filter.record_count = 0;
-    filter.records = nullptr;
-    ASSERT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, &filter), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-    CallbackFailure failure;
-    EXPECT_EQ(
-        rocprof_trace_decoder_parse(
-            handle.value, trace.data.data(), trace.data.size(), reject_and_count_records, &failure
-        ),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-    EXPECT_EQ(failure.calls, 0u);
-
-    ASSERT_EQ(
-        rocprof_trace_decoder_set_record_filter(handle.value, nullptr), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-    sink = RecordSink{};
-    ASSERT_EQ(
-        rocprof_trace_decoder_parse(handle.value, trace.data.data(), trace.data.size(), collect_records, &sink),
-        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-    );
-    EXPECT_EQ(sink.events.size(), 1u);
-    EXPECT_EQ(sink.dispatches.size(), 1u);
-}
-
-TEST(RecordFilterApiTest, PropagatesPooledAndImmediateCallbackFailures)
+TEST(RecordFilterApiTest, PropagatesCallbackFailures)
 {
     const auto trace = make_mi400_wave_metadata_trace();
-    for (uint32_t flags : {0u, uint32_t{ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE}})
-    {
-        SCOPED_TRACE(flags);
-        HandleGuard handle;
-        ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
-        ASSERT_EQ(
-            rocprof_trace_decoder_set_isa_callback(handle.value, nop_isa, nullptr),
-            ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-        );
-        rocprofiler_thread_trace_decoder_record_request_t request{
-            .size = sizeof(request), .type = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, .flags = flags
-        };
-        rocprofiler_thread_trace_decoder_record_filter_t filter{
-            .size = sizeof(filter), .records = &request, .record_count = 1
-        };
-        ASSERT_EQ(
-            rocprof_trace_decoder_set_record_filter(handle.value, &filter),
-            ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
-        );
+    HandleGuard handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    ASSERT_EQ(
+        rocprof_trace_decoder_set_isa_callback(handle.value, nop_isa, nullptr), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    enable_only(handle.value, {ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY});
 
-        CallbackFailure failure;
-        EXPECT_EQ(
-            rocprof_trace_decoder_parse(handle.value, trace.data(), trace.size(), reject_and_count_records, &failure),
-            ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES
-        );
-        EXPECT_EQ(failure.calls, 1u);
-        EXPECT_EQ(failure.records, flags == 0 ? 2u : 1u);
-    }
+    CallbackFailure failure;
+    EXPECT_EQ(
+        rocprof_trace_decoder_parse(handle.value, trace.data(), trace.size(), reject_and_count_records, &failure),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES
+    );
+    EXPECT_EQ(failure.calls, 1u);
+    EXPECT_EQ(failure.records, 2u);
 }
 
 TEST(ParseApiTest, StopsRequestingInputAfterCallbackFailure)

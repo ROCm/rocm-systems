@@ -194,6 +194,10 @@ public:
     {
         records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD, vec);
     }
+    void sendShaderdata(std::vector<att_shader_data_t>& vec)
+    {
+        records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, vec);
+    }
     void processShaderdata(const att_shader_data_t& record)
     {
         if (marker_stream) processMarkerShaderdata(record);

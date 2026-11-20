@@ -83,10 +83,6 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
     {
         if ((++id & 0x3FF) == 0) ++id;
     };
-    auto& records = stitch.records();
-
-    auto add_occupancy = [&](const occupancy_info_t& record)
-    { records.append(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, occupancy, record); };
 
     auto send_occupancy = [&]()
     {
@@ -129,7 +125,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
     while (generator.nextValid())
     {
-        if (records.status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
+        if (stitch.records().status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         Token token = generator.next();
         if (generator.packetloss_count != marker_losses)
         {
@@ -314,7 +310,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                         auto it = running_waves.find(start.getGPULocation());
                         if (it != running_waves.end())
                         {
-                            add_occupancy(
+                            occupancy.push_back(
                                 {it->second.pc,
                                  token.time,
                                  start.SACU(),
@@ -343,7 +339,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                             addr, dispatch_id, static_cast<uint32_t>(start.me), static_cast<uint32_t>(start.pipe)
                         };
 
-                        add_occupancy(
+                        occupancy.push_back(
                             {addr,
                              token.time,
                              start.SACU(),
@@ -364,7 +360,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 if (generator.packetlost && running_waves.find(start.getGPULocation()) != running_waves.end())
                 {
-                    add_occupancy({
+                    occupancy.push_back({
                         {0, 0},
                         token.time - 1, start.SACU(), start.simd, start.wid, 0, 0, 0, 0, 0, 0, 0
                     });
@@ -376,7 +372,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                 if (dispatch_id > 0) active_waves_per_pipe.at_reg(start)++;
 
-                add_occupancy({
+                occupancy.push_back({
                     wave_addr,
                     token.time,
                     start.SACU(),
@@ -441,17 +437,11 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     running_waves.erase(end.getGPULocation());
                 }
                 else
-                {
-                    occupancy_info_t missing_start{pipe.pc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0, 0, 0};
-                    if (records.immediate(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY))
-                        add_occupancy(missing_start);
-                    else if (records.enabled(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY))
-                        occupancy.insert(occupancy.begin(), missing_start);
-                }
+                    occupancy.insert(
+                        occupancy.begin(), {pipe.pc, 0, end.SACU(), end.simd, end.wid, 1, 0, 0, 0, 0, 0, 0}
+                    );
 
-                if (pipe.pc.code_object_id == 0 && pipe.pc.address != 0)
-                    pipe.pc = csregister.get_wave_start_delayed(pipe.pc.address);
-                add_occupancy(
+                occupancy.push_back(
                     {pipe.pc,
                      token.time,
                      end.SACU(),
@@ -465,7 +455,12 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                      0,
                      pipe.dispatch_id}
                 );
-                stitch.markerWaveEnd(end.SACU(), end.simd, end.wid, pipe.pc);
+                {
+                    pcinfo_t entry = pipe.pc;
+                    if (entry.code_object_id == 0 && entry.address != 0)
+                        entry = csregister.get_wave_start_delayed(entry.address);
+                    stitch.markerWaveEnd(end.SACU(), end.simd, end.wid, entry);
+                }
 
                 if (pipe.dispatch_id > 0)
                 {
@@ -738,9 +733,8 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 shader.flags |= (common.isshort != 0) << ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_IMM;
                 shader.value = common.data;
 
-                records.append(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata, shader);
-                if (shaderdata.size() >= MAX_ACCUM_RECORDS)
-                    records.flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata);
+                shaderdata.emplace_back(shader);
+                if (shaderdata.size() >= MAX_ACCUM_RECORDS) stitch.sendShaderdata(shaderdata);
                 stitch.processShaderdata(shader);
 
                 break;
@@ -771,8 +765,6 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                 }
                 break;
         }
-        if (records.immediate(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME) && !generator.realtime.empty())
-            stitch.sendRealtime(generator.realtime);
     }
 
     for (auto& slot : SIMD)
@@ -787,7 +779,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
     info.bPacketLost |= generator.packetlost;
 
     if (generator.realtime.size()) stitch.sendRealtime(generator.realtime);
-    records.flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata);
+    if (shaderdata.size()) stitch.sendShaderdata(shaderdata);
     stitch.finishMarkers();
     if (other_simd.size()) stitch.sendOtherSimd(other_simd);
 

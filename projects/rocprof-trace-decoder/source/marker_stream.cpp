@@ -34,7 +34,6 @@ using rocprof_trace_decoder::codeobj::Funcmap;
 using rocprof_trace_decoder::codeobj::FuncmapEntryKind;
 using rocprof_trace_decoder::codeobj::MarkerEncoding;
 using Marker = rocprofiler_thread_trace_decoder_marker_t;
-using MarkerMetadata = rocprofiler_thread_trace_decoder_marker_metadata_t;
 
 namespace
 {
@@ -42,7 +41,6 @@ constexpr auto MarkerRecord = ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER;
 constexpr size_t MaxPendingWords = 1u << 20;
 constexpr size_t MaxDeferredGenerations = 4096;
 constexpr size_t MaxScopeDepth = 4096;
-constexpr size_t MaxUnknownIds = 65536;
 constexpr size_t BatchRecords = 4096;
 constexpr size_t BatchPayloadWords = 65536;
 // A larger declaration cannot come from the producer and would need its own
@@ -65,58 +63,56 @@ uint32_t publicKind(FuncmapEntryKind kind)
 
 class MarkerStream
 {
-    // Descriptors are owned once per code object. Compiler-assigned IDs use a
-    // bounded dense index; sparse IDs live in a node map. Descriptor addresses
-    // remain stable until the enclosing parse returns.
+    /// What a code object declares for one marker ID. Strings live in the
+    /// funcmap, which outlives the parse.
+    struct Info
+    {
+        const char* name = nullptr;
+        const char* source_location = nullptr;
+        uint32_t id = 0;
+        uint32_t kind = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_KIND_UNKNOWN;
+        uint32_t payload_count = 0;
+    };
+
+    // Compiler-assigned IDs use a bounded dense index; sparse IDs a map.
     struct CodeMap
     {
-        uint64_t code_object_id = 0;
         const Funcmap* source = nullptr;
         MarkerEncoding encoding{};
         uint32_t id_mask = 0xFFFFFFFCu;
-        uint8_t wave_size = 0;
-        std::vector<MarkerMetadata> descriptions;
-        std::vector<const MarkerMetadata*> dense;
-        std::unordered_map<uint32_t, MarkerMetadata> others;
-        std::unordered_map<uint32_t, MarkerMetadata> unknown;
+        std::vector<Info> dense;
+        std::unordered_map<uint32_t, Info> sparse;
 
-        CodeMap(uint64_t id, const Funcmap* map) : code_object_id(id)
+        explicit CodeMap(const Funcmap* map)
         {
             if (!map || (map->entries.empty() && map->wave_size == 0)) return;
             source = map;
             encoding = map->marker_encoding.is_valid() ? map->marker_encoding : MarkerEncoding{};
             id_mask = encoding.marker_id_mask();
-            wave_size = static_cast<uint8_t>(map->wave_size == 32 || map->wave_size == 64 ? map->wave_size : 0);
-            descriptions.reserve(map->by_id.size());
-            dense.resize(std::min<size_t>(65536, std::max<size_t>(256, map->by_id.size() * 2)), nullptr);
+            dense.resize(std::min<size_t>(65536, std::max<size_t>(256, map->by_id.size() * 2)));
             for (const auto& [marker_id, entry] : map->by_id)
             {
                 if (entry->kind == FuncmapEntryKind::Kernel) continue;
-                MarkerMetadata metadata{
-                    .size = sizeof(MarkerMetadata),
-                    .code_object_id = id,
-                    .name = entry->name.empty() ? nullptr : entry->name.c_str(),
-                    .source_location = entry->source_loc.empty() ? nullptr : entry->source_loc.c_str(),
-                    .marker_id = marker_id,
-                    .marker_kind = publicKind(entry->kind),
-                    .payload_count = entry->extra_payload_count,
-                    .wave_size = wave_size,
+                const Info info{
+                    entry->name.empty() ? nullptr : entry->name.c_str(),
+                    entry->source_loc.empty() ? nullptr : entry->source_loc.c_str(),
+                    marker_id,
+                    publicKind(entry->kind),
+                    entry->extra_payload_count,
                 };
                 if (marker_id < dense.size())
-                {
-                    descriptions.push_back(metadata);
-                    dense[marker_id] = &descriptions.back();
-                }
+                    dense[marker_id] = info;
                 else
-                    others.emplace(marker_id, metadata);
+                    sparse.emplace(marker_id, info);
             }
         }
 
-        const MarkerMetadata* find(uint32_t id) const
+        /// The declared marker, or nullptr if the code object has none with this ID.
+        const Info* find(uint32_t id) const
         {
-            if (id < dense.size()) return dense[id];
-            auto it = others.find(id);
-            return it == others.end() ? nullptr : &it->second;
+            if (id < dense.size()) return dense[id].id == id && id != 0 ? &dense[id] : nullptr;
+            auto it = sparse.find(id);
+            return it == sparse.end() ? nullptr : &it->second;
         }
     };
 
@@ -130,7 +126,7 @@ class MarkerStream
         bool reliable = true;
         bool deferred = false;
         std::vector<uint32_t> payload;
-        std::vector<const MarkerMetadata*> scopes;
+        std::vector<Info> scopes;
         std::vector<att_shader_data_t> pending;
         Marker header{};
     };
@@ -154,7 +150,7 @@ class MarkerStream
 
 public:
     MarkerStream(RecordEmitter& emitter, ICodeServicer& service) :
-    records(emitter), service(service), immediate(emitter.immediate(MarkerRecord))
+    records(emitter), service(service)
     {
         marker_records.reserve(BatchRecords);
         payload_words.reserve(BatchPayloadWords);
@@ -193,8 +189,8 @@ public:
         if (slot->saved)
         {
             finish(*slot->saved);
+            if (!slot->saved->pending.empty()) warn();
             release(*slot->saved);
-            warn();
         }
         slot->saved_predecessors = slot->restored ? slot->current_predecessors : slot->retired.size();
         slot->saved = std::move(slot->current);
@@ -270,7 +266,6 @@ public:
                 }
             }
         );
-        warn();
     }
 
     void flush()
@@ -325,6 +320,9 @@ private:
                 for (size_t i = 0; i < Simds * WaveSlots; ++i) fn(unit[i]);
     }
 
+    /// Reports marker data dropped without any MARKER record to carry it.
+    /// Truncated payloads are reported by the record's payload_dropped, and
+    /// packet loss by the parser's DATA_LOST.
     void warn()
     {
         if (calibrating || warning_reported) return;
@@ -345,7 +343,7 @@ private:
         pending_count -= generation.pending.size();
         std::vector<att_shader_data_t>().swap(generation.pending);
         std::vector<uint32_t>().swap(generation.payload);
-        std::vector<const MarkerMetadata*>().swap(generation.scopes);
+        std::vector<Info>().swap(generation.scopes);
         generation.reliable = false;
     }
 
@@ -439,28 +437,8 @@ private:
         if (!slot.current.deferred) replay(slot.current);
     }
 
-    const MarkerMetadata* unknown(CodeMap& map, uint32_t id)
-    {
-        auto it = map.unknown.find(id);
-        if (it != map.unknown.end()) return &it->second;
-        if (unknown_count == MaxUnknownIds) return nullptr;
-        ++unknown_count;
-        return &map.unknown
-                    .emplace(
-                        id,
-                        MarkerMetadata{
-                            .size = sizeof(MarkerMetadata),
-                            .code_object_id = map.code_object_id,
-                            .marker_id = id,
-                            .marker_kind = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_KIND_UNKNOWN,
-                            .wave_size = map.wave_size,
-                        }
-                    )
-                    .first->second;
-    }
-
     // Payload words outnumber headers. Keep their dispatch separate from the
-    // metadata, scope, and resource-limit handling needed only for headers.
+    // name lookup, scope, and resource-limit handling needed only for headers.
     void decode(Generation& generation, const att_shader_data_t& source)
     {
         if (!generation.reliable) return;
@@ -483,7 +461,7 @@ private:
         {
             const auto id = generation.kernel_entry.code_object_id;
             auto it = maps.find(id);
-            if (it == maps.end()) it = maps.try_emplace(id, id, service.GetFuncmap(id)).first;
+            if (it == maps.end()) it = maps.try_emplace(id, service.GetFuncmap(id)).first;
             generation.map = &it->second;
         }
         auto& map = *generation.map;
@@ -494,36 +472,34 @@ private:
         // s_ttracedata_imm carries a literal, never a sampled shader clock.
         const bool constant_header = source.flags & (1u << ROCPROFILER_THREAD_TRACE_DECODER_SHADERDATA_FLAGS_IMM);
         uint32_t id = constant_header ? raw >> 2 : (raw & map.id_mask) >> 2;
-        const MarkerMetadata* metadata = map.find(id);
-        bool bare_exit = id == 0 && flags == ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS;
-        if (!metadata && !bare_exit && !constant_header && map.encoding.has_shader_clock())
+        const Info* declared = map.find(id);
+        const bool bare_exit = id == 0 && flags == ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS;
+        if (!declared && !bare_exit && !constant_header && map.encoding.has_shader_clock())
         {
             id = raw >> 2;
-            metadata = map.find(id);
+            declared = map.find(id);
         }
         if (id == 0 && !bare_exit) return;
-        bool known = metadata != nullptr || bare_exit;
+        const bool known = declared != nullptr || bare_exit;
+        Info info = declared ? *declared : Info{nullptr, nullptr, id};
         if (flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS)
         {
             if (!generation.scopes.empty())
             {
-                if (bare_exit) metadata = generation.scopes.back();
+                // A bare exit names the scope it closes.
+                if (bare_exit) info = generation.scopes.back();
                 generation.scopes.pop_back();
             }
-        }
-        if (!metadata) metadata = unknown(map, id);
-        if (!metadata)
-        {
-            invalidate(generation);
-            warn();
-            return;
         }
 
         Marker marker{
             .size = sizeof(Marker),
             .shaderdata = source,
             .kernel_entry = generation.kernel_entry,
-            .metadata = metadata,
+            .name = info.name,
+            .source_location = info.source_location,
+            .marker_id = info.id,
+            .marker_kind = info.kind,
             .marker_flags = flags,
         };
         if (generation.first_marker)
@@ -531,14 +507,14 @@ private:
             marker.marker_flags |= ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE;
             generation.first_marker = false;
         }
-        // A bare exit reports its popped scope's metadata but carries no payload.
-        const uint32_t count = bare_exit ? 0 : metadata->payload_count;
+        // A bare exit carries no payload, whatever its scope declared.
+        const uint32_t count = bare_exit ? 0 : info.payload_count;
         if ((calibrating || !clocks.empty()) && known && !constant_header && count == 0)
             correctClock(marker, map.encoding);
-        // Following words would otherwise be misread as headers.
+        // The wave's following words cannot be framed: drop the rest of it.
         auto unframeable = [&]()
         {
-            if (count != 0) marker.marker_flags |= ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INCOMPLETE;
+            marker.payload_dropped = count;
             emit(marker, {});
             invalidate(generation);
             warn();
@@ -546,7 +522,7 @@ private:
         if (flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER)
         {
             if (generation.scopes.size() == MaxScopeDepth) return unframeable();
-            generation.scopes.push_back(metadata);
+            generation.scopes.push_back(info);
         }
 
         if (count == 0)
@@ -588,28 +564,20 @@ private:
         }
     }
 
+    /// Delivers a payload cut short by the end of the wave's data.
     void finish(Generation& generation)
     {
         if (!generation.payload_expected) return;
-        generation.header.marker_flags |= ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INCOMPLETE;
+        generation.header.payload_dropped = generation.payload_expected;
         emit(generation.header, generation.payload);
         generation.payload.clear();
         generation.payload_expected = 0;
-        warn();
     }
 
-    // Each owned header is delivered once. Finalize it in place so immediate
-    // callbacks can borrow it and pooled delivery makes only one header copy.
     void emit(Marker& marker, const std::vector<uint32_t>& payload)
     {
         if (calibrating || records.status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         marker.payload_count = static_cast<uint32_t>(payload.size());
-        if (immediate)
-        {
-            marker.payload = payload.empty() ? nullptr : payload.data();
-            records.emit(MarkerRecord, marker);
-            return;
-        }
         // Payloads never exceed BatchPayloadWords, so the reserved pool never
         // reallocates and earlier payload pointers stay valid until the flush.
         if (marker_records.size() == BatchRecords || payload_words.size() + payload.size() > BatchPayloadWords) flush();
@@ -631,10 +599,8 @@ private:
     std::vector<uint32_t> payload_words;
     size_t pending_count = 0;
     size_t retired_count = 0;
-    size_t unknown_count = 0;
     bool calibrating = false;
     bool warning_reported = false;
-    const bool immediate;
 };
 
 Stitcher::Stitcher(

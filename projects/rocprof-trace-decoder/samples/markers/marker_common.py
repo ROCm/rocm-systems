@@ -53,7 +53,7 @@ def load_marker_traces(args):
         )
     traces = []
     with Decoder() as decoder:
-        decoder.set_record_filter([RecordType.INFO, RecordType.MARKER])
+        decoder.set_record_enabled(RecordType.MARKER)
         for code_object in inputs.code_objects:
             path = Path(code_object.path)
             decoder.load_code_object_file(

@@ -295,29 +295,20 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 );
 
 /**
- * @brief Replaces the enabled callback record set for subsequent parses.
+ * @brief Enables or disables delivery of one record type for subsequent parses.
  *
- * NULL restores the default record set (all types except MARKER) and default
- * delivery. Semantic MARKER decoding is opt-in. A non-NULL filter replaces the
- * enabled set; an empty set disables all callbacks. The decoder copies the
- * requests, so the caller may release them after this call returns. The filter
- * applies to subsequent parse calls on this handle; quick scan ignores it.
+ * All record types except MARKER are enabled by default; MARKER decoding is
+ * opt-in. Call once per type to change. Applies to parse calls on this handle;
+ * quick scan ignores it.
  *
- * Initialize the filter and each request's size to sizeof its structure. Larger
- * structures are accepted and unknown trailing fields are ignored. Array entries
- * must be spaced by each entry's size in bytes. Unknown record types, duplicate
- * types, unsupported flags, and undersized structures are
- * rejected with INVALID_ARGUMENT, leaving the previous filter unchanged.
- *
- * IMMEDIATE is supported for shaderdata, occupancy, realtime, and marker
- * records. These records are otherwise pooled. Other record types retain
- * their existing delivery behavior.
- *
- * Immediate occupancy records may precede delayed code-object attribution and
- * therefore retain code_object_id zero.
+ * @param[in] handle The decoder handle.
+ * @param[in] type Record type to enable or disable.
+ * @param[in] enabled Nonzero to deliver records of this type.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for an invalid handle or type.
  */
-ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_record_filter(
-    rocprof_trace_decoder_handle_t handle, const rocprofiler_thread_trace_decoder_record_filter_t* filter
+ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trace_decoder_set_record_enabled(
+    rocprof_trace_decoder_handle_t handle, rocprofiler_thread_trace_decoder_record_type_t type, int enabled
 );
 
 /**

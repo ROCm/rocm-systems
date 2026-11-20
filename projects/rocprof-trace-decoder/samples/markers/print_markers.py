@@ -35,8 +35,8 @@ def main() -> int:
                 flags.append("exit")
             if marker.marker_flags & MarkerFlags.ENTER:
                 flags.append("enter")
-            if marker.marker_flags & MarkerFlags.INCOMPLETE:
-                flags.append("incomplete")
+            if marker.payload_dropped:
+                flags.append(f"dropped={marker.payload_dropped}")
             kind = (
                 marker.marker_kind.name.lower()
                 if isinstance(marker.marker_kind, MarkerKind)
@@ -50,7 +50,7 @@ def main() -> int:
             for index, payload in enumerate(marker.payload):
                 print(
                     "    "
-                    f"payload[{index}/{marker.metadata.payload_count}]="
+                    f"payload[{index}/{len(marker.payload) + marker.payload_dropped}]="
                     f"0x{payload:08x}"
                 )
     return 0

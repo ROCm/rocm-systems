@@ -21,44 +21,29 @@ from rocprof_trace_decoder import (
     Marker,
     MarkerFlags,
     MarkerKind,
-    MarkerMetadata,
     Pc,
     RecordType,
     ShaderData,
 )
-from rocprof_trace_decoder.bindings import _Handle, _Marker, _MarkerMetadata
+from rocprof_trace_decoder.bindings import _Handle, _Marker
 
 
 def marker(time: int, marker_id: int, name: str, flags: int) -> Marker:
     return Marker(
-        size=ctypes.sizeof(_Marker),
         shaderdata=ShaderData(time, marker_id << 2, 0, 0, 0, 0, 0),
         kernel_entry=Pc(0x100, 7),
-        metadata=MarkerMetadata(
-            size=ctypes.sizeof(_MarkerMetadata),
-            code_object_id=7,
-            name=name,
-            source_location=None,
-            marker_id=marker_id,
-            marker_kind=MarkerKind.USER_SCOPE,
-            payload_count=0,
-            wave_size=32,
-            reserved=b"\0\0\0",
-        ),
-        payload=[],
+        name=name,
+        source_location=None,
+        marker_id=marker_id,
+        marker_kind=MarkerKind.USER_SCOPE,
         marker_flags=flags,
-        payload_count=0,
+        payload=[],
+        payload_dropped=0,
     )
 
 
 def address_block(name: str, values: list[int]) -> Marker:
-    header = marker(10, 1, name, 0)
-    header.metadata = replace(
-        header.metadata, marker_kind=MarkerKind.POINT, payload_count=len(values)
-    )
-    header.payload_count = len(values)
-    header.payload = list(values)
-    return header
+    return replace(marker(10, 1, name, 0), marker_kind=MarkerKind.POINT, payload=list(values))
 
 
 class MarkerSamplesTest(unittest.TestCase):
@@ -85,7 +70,7 @@ class MarkerSamplesTest(unittest.TestCase):
             marker(20, 2, "next", MarkerFlags.NEW_WAVE),
             marker(30, 2, "next", MarkerFlags.EXIT_PREVIOUS),
         ]
-        records[1].metadata = replace(records[1].metadata, marker_kind=MarkerKind.POINT)
+        records[1] = replace(records[1], marker_kind=MarkerKind.POINT)
         self.assertEqual(folded_stacks(records), {})
         events = trace_events(records)
         self.assertEqual([event["ph"] for event in events], ["B", "E", "i"])
@@ -121,57 +106,47 @@ class MarkerSamplesTest(unittest.TestCase):
 
     def test_address_payload_rejects_incomplete_blocks(self):
         complete = address_block("addr_trace_lds_load", [1, 0, *range(32)])
-        incomplete = replace(
-            complete,
-            marker_flags=MarkerFlags.INCOMPLETE,
-            payload=complete.payload[:-1],
-            payload_count=len(complete.payload) - 1,
-        )
+        incomplete = replace(complete, payload=complete.payload[:-1], payload_dropped=1)
         self.assertIsNone(decode_block(incomplete))
-        self.assertIsNone(
-            decode_block(replace(complete, metadata=replace(complete.metadata, wave_size=64)))
-        )
         self.assertEqual(len(decode_address_traces([incomplete, complete], None)), 1)
 
 
 class MarkerBindingsTest(unittest.TestCase):
     def make_native_batch(self):
-        class ExtendedMarker(ctypes.Structure):
-            _fields_ = [("base", _Marker), ("future_field", ctypes.c_uint64)]
-
-        metadata = _MarkerMetadata()
-        metadata.size = ctypes.sizeof(metadata)
-        metadata.code_object_id = 7
-        metadata.name = b"point"
-        metadata.marker_id = 42
-        metadata.marker_kind = 123  # A future kind must survive conversion.
-        metadata.payload_count = 2
-        metadata.wave_size = 32
+        name = ctypes.create_string_buffer(b"point")
         payload = (ctypes.c_uint32 * 2)(1234, 5678)
-        native = (ExtendedMarker * 2)()
+        native = (_Marker * 2)()
         for index, entry in enumerate(native):
-            entry.base.size = ctypes.sizeof(ExtendedMarker)
-            entry.base.shaderdata.time = index * 100
-            entry.base.metadata = ctypes.pointer(metadata)
-            entry.base.payload = payload
-            entry.base.payload_count = 2
-        return native, metadata, payload
+            entry.size = ctypes.sizeof(_Marker)
+            entry.shaderdata.time = index * 100
+            entry.kernel_entry.code_object_id = 7
+            entry.name = ctypes.addressof(name)
+            entry.marker_id = 42
+            entry.marker_kind = 123  # A future kind must survive conversion.
+            entry.payload = payload
+            entry.payload_count = 2
+            entry.payload_dropped = 1
+        return native, name, payload
 
-    def test_extended_records_own_payloads_and_share_metadata(self):
-        native, metadata, payload = self.make_native_batch()
+    def test_records_own_strings_and_payloads(self):
+        native, name, payload = self.make_native_batch()
         decoder = Decoder.__new__(Decoder)
         records = decoder._convert_batch(RecordType.MARKER, ctypes.addressof(native), 2, {})
         self.assertEqual([record.shaderdata.time for record in records], [0, 100])
-        self.assertIs(records[0].metadata, records[1].metadata)
+        self.assertEqual(records[0].code_object_id, 7)
         self.assertEqual(records[0].marker_kind, 123)
         self.assertEqual(records[0].payload, [1234, 5678])
-        metadata.name = b"changed"
+        self.assertEqual(records[0].payload_dropped, 1)
+        self.assertIsNone(records[0].source_location)
+        # Each native string is decoded once per parse.
+        self.assertIs(records[0].name, records[1].name)
+        name.value = b"other"
         payload[0] = 0
         self.assertEqual(records[0].name, "point")
         self.assertEqual(records[0].payload[0], 1234)
 
     def test_batch_callback_can_avoid_collection_and_ignores_new_record_types(self):
-        native, metadata, payload = self.make_native_batch()
+        native, name, payload = self.make_native_batch()
         decoder = Decoder.__new__(Decoder)
         decoder._closed = False
         decoder._handle = _Handle(1)

@@ -25,43 +25,31 @@
 #include "rocprof_trace_decoder/trace_decoder_types.h"
 
 #include <array>
-#include <cstdint>
 
+/// The record types a parse delivers.
 class RecordFilter
 {
 public:
     RecordFilter() { reset(); }
 
+    /// Everything except MARKER: legacy consumers already receive the raw
+    /// shaderdata and should not pay to decode it a second time.
     void reset()
     {
         enabled.fill(true);
-        // Semantic marker decoding is opt-in: legacy consumers already receive
-        // the raw shaderdata and should not pay to decode it a second time.
         enabled[ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER] = false;
-        flags.fill(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_NONE);
     }
 
-    void clear()
-    {
-        enabled.fill(false);
-        flags.fill(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_NONE);
-    }
+    void clear() { enabled.fill(false); }
 
     bool isEnabled(rocprofiler_thread_trace_decoder_record_type_t type) const
     {
         return valid(type) && enabled[static_cast<size_t>(type)];
     }
 
-    bool isImmediate(rocprofiler_thread_trace_decoder_record_type_t type) const
+    void set(rocprofiler_thread_trace_decoder_record_type_t type, bool value)
     {
-        return isEnabled(type) && (flags[static_cast<size_t>(type)] &
-                                   ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE) != 0;
-    }
-
-    void set(rocprofiler_thread_trace_decoder_record_type_t type, uint32_t value)
-    {
-        enabled[static_cast<size_t>(type)] = true;
-        flags[static_cast<size_t>(type)] = value;
+        if (valid(type)) enabled[static_cast<size_t>(type)] = value;
     }
 
     static bool valid(rocprofiler_thread_trace_decoder_record_type_t type)
@@ -70,16 +58,6 @@ public:
                type < ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST;
     }
 
-    static bool supportsImmediate(rocprofiler_thread_trace_decoder_record_type_t type)
-    {
-        return type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA ||
-               type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY ||
-               type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME ||
-               type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER;
-    }
-
 private:
-    static constexpr size_t Count = static_cast<size_t>(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST);
-    std::array<bool, Count> enabled{};
-    std::array<uint32_t, Count> flags{};
+    std::array<bool, ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST> enabled{};
 };

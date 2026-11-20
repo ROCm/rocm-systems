@@ -332,7 +332,7 @@ rocprofiler_thread_trace_decoder_status_t consume(
     sink.markers += count;
     // Accumulate in locals: stores through `sink` may alias the record bytes and
     // would serialize the loop on store forwarding, charging the consumer's cost
-    // to buffered delivery.
+    // to marker delivery.
     uint64_t payload_words = 0;
     uint64_t checksum = 0;
     const bool synthetic = sink.synthetic;
@@ -341,11 +341,11 @@ rocprofiler_thread_trace_decoder_status_t consume(
     {
         const auto& marker = *reinterpret_cast<const rocprofiler_thread_trace_decoder_marker_t*>(cursor);
         // Captured traces may legitimately end inside a payload.
-        if (marker.size < sizeof(marker) || !marker.metadata || (marker.payload_count != 0 && !marker.payload) ||
-            (synthetic && (marker.marker_flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INCOMPLETE) != 0))
+        if (marker.size != sizeof(marker) || (marker.payload_count != 0 && !marker.payload) ||
+            (synthetic && marker.payload_dropped != 0))
             return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA;
         payload_words += marker.payload_count;
-        checksum += marker.kernel_entry.code_object_id + marker.metadata->marker_id + marker.shaderdata.value;
+        checksum += marker.kernel_entry.code_object_id + marker.marker_id + marker.shaderdata.value;
         for (uint32_t word = 0; word < marker.payload_count; ++word) checksum += marker.payload[word];
         cursor += marker.size;
     }
@@ -415,10 +415,9 @@ Options parse_options(int argc, char** argv)
         }
         else if (argument == "--delivery")
         {
-            if (value != "all" && value != "disabled" && value != "shaderdata" && value != "buffered" &&
-                value != "immediate" && value != "both")
+            if (value != "all" && value != "disabled" && value != "shaderdata" && value != "markers" && value != "both")
                 throw std::invalid_argument(
-                    "--delivery must be all, disabled, shaderdata, buffered, immediate, or both"
+                    "--delivery must be all, disabled, shaderdata, markers, or both"
                 );
             options.delivery = value;
         }
@@ -442,41 +441,30 @@ Options parse_options(int argc, char** argv)
     return options;
 }
 
-void verify(
-    const Sink& sink, const Trace& trace, uint64_t iterations, bool disabled, bool immediate, bool shaderdata
-)
+void verify(const Sink& sink, const Trace& trace, uint64_t iterations, bool disabled, bool shaderdata)
 {
     const uint64_t expected = disabled ? 0 : iterations;
     // Every header and payload word is one raw shaderdata record.
     const uint64_t raw_records = shaderdata ? (trace.markers + trace.payload_words) * iterations : 0;
     if (sink.markers != trace.markers * expected || sink.payload_words != trace.payload_words * expected ||
         sink.checksum != trace.checksum * expected || (disabled && sink.callbacks != 0) ||
-        (immediate && sink.callbacks != sink.markers) || sink.shaderdata != raw_records)
+        sink.shaderdata != raw_records)
         throw std::runtime_error("Consumer count/checksum mismatch");
 }
 
 void benchmark(Handle& handle, const Trace& trace, const char* pattern, const char* delivery, const Options& options)
 {
     const bool synthetic = options.trace.empty();
-    const bool immediate = std::strcmp(delivery, "immediate") == 0;
-    const bool markers = immediate || std::strcmp(delivery, "buffered") == 0 || std::strcmp(delivery, "both") == 0;
+    const bool markers = std::strcmp(delivery, "markers") == 0 || std::strcmp(delivery, "both") == 0;
     const bool shaderdata = std::strcmp(delivery, "shaderdata") == 0 || std::strcmp(delivery, "both") == 0;
     const bool disabled = !markers;
-    std::vector<rocprofiler_thread_trace_decoder_record_request_t> requests;
-    if (markers)
-        requests.push_back(
-            {sizeof(rocprofiler_thread_trace_decoder_record_request_t),
-             ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER,
-             immediate ? uint32_t{ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_IMMEDIATE} : 0u}
-        );
-    if (shaderdata)
-        requests.push_back(
-            {sizeof(rocprofiler_thread_trace_decoder_record_request_t),
-             ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA,
-             0u}
-        );
-    rocprofiler_thread_trace_decoder_record_filter_t filter{sizeof(filter), requests.data(), requests.size()};
-    check(rocprof_trace_decoder_set_record_filter(handle.value, &filter), "set_record_filter");
+    for (int type = 0; type < ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST; ++type)
+    {
+        const auto record = static_cast<rocprofiler_thread_trace_decoder_record_type_t>(type);
+        const bool enabled = (record == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER && markers) ||
+                             (record == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA && shaderdata);
+        check(rocprof_trace_decoder_set_record_enabled(handle.value, record, enabled), "set_record_enabled");
+    }
 
     auto parse = [&](Sink& sink)
     {
@@ -487,7 +475,7 @@ void benchmark(Handle& handle, const Trace& trace, const char* pattern, const ch
     };
     Sink warmup;
     parse(warmup);
-    if (synthetic) verify(warmup, trace, 1, disabled, immediate, shaderdata);
+    if (synthetic) verify(warmup, trace, 1, disabled, shaderdata);
 
     Sink sink;
     uint64_t iterations = 0;
@@ -500,7 +488,7 @@ void benchmark(Handle& handle, const Trace& trace, const char* pattern, const ch
         seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count();
     }
     while (options.iterations != 0 ? iterations < options.iterations : seconds < options.seconds);
-    if (synthetic) verify(sink, trace, iterations, disabled, immediate, shaderdata);
+    if (synthetic) verify(sink, trace, iterations, disabled, shaderdata);
 
     const double input_mbps = static_cast<double>(trace.bytes.size()) * iterations / seconds / 1.0e6;
     std::cout << std::left << std::setw(18) << pattern << std::setw(11) << delivery << std::right << std::setw(12)
@@ -520,7 +508,7 @@ int main(int argc, char** argv)
         {
             std::cout << "Usage: marker_benchmark [--mib 32] [--seconds 0.25] [--iterations N]\n"
                          "                        [--arch all|gfx9|gfx12] [--pattern all|points|payload130]\n"
-                         "                        [--delivery all|disabled|shaderdata|buffered|immediate|both]\n"
+                         "                        [--delivery all|disabled|shaderdata|markers|both]\n"
                          "                        [--trace FILE.att --codeobj ID:PATH ...]\n"
                          "--mib is approximate encoded input MiB per pattern (1 MiB = 1,048,576 bytes).\n"
                          "--seconds is minimum measured time per case; --iterations overrides it.\n"
@@ -528,7 +516,7 @@ int main(int argc, char** argv)
             return 0;
         }
 
-        const char* deliveries[] = {"disabled", "shaderdata", "buffered", "immediate", "both"};
+        const char* deliveries[] = {"disabled", "shaderdata", "markers", "both"};
         Handle handle;
         if (!options.trace.empty())
         {

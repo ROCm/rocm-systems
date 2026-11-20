@@ -104,21 +104,17 @@ Important dataclasses include:
 - `Occupancy`, `PerfEvent`, `ShaderData`, `Realtime`, `OtherSimdInstruction`,
   `Event`, and `Dispatch`: direct Python equivalents of the public decoder
   payloads.
-- `Marker`: a logical SQTT marker with its header in `shaderdata`, an immutable
-  `MarkerMetadata` declaration, and a list of unsigned 32-bit payload words. Metadata
-  includes the marker name, code-object ID, kind, declared payload count, and
-  wave size. The convenience properties `name`,
-  `marker_id`, `marker_kind`, `code_object_id`, and `source_location` access that
-  declaration. Unknown future marker kinds remain integers.
+- `Marker`: a logical SQTT marker with its header in `shaderdata`, its `name`,
+  `source_location`, `marker_id`, `marker_kind` and `marker_flags`, and its raw
+  32-bit `payload` words. `code_object_id` reads `kernel_entry`. `name` is
+  `None` for markers the code object does not declare. Unknown future marker
+  kinds remain integers.
 - `TraceRecords`: the aggregate returned by `Decoder.parse*`, with one list per
   record type and a `batches` list preserving callback batch order.
 
-`shaderdata.time` is the marker timestamp.
-`payload_count` is the number of observed payload words;
-`metadata.payload_count` is the declared count. `MarkerFlags.INCOMPLETE`
-identifies a block the decoder could not complete.
-Protocol consumers should check this flag and the counts before interpreting a
-block. Reset scope state at `MarkerFlags.NEW_WAVE` and preserve callback order
+`shaderdata.time` is the marker timestamp, in the shader clock of the trace's
+shader engine. `payload_dropped` counts declared payload words that were lost;
+protocol consumers should skip blocks where it is nonzero. Reset scope state at `MarkerFlags.NEW_WAVE` and preserve callback order
 within each reported wave slot. The hardware coordinates and this flag do not
 establish stable wave identity across context save and restore (CWSR). Keep
 records from separate traces in separate groups when building scope stacks.
@@ -128,7 +124,7 @@ Payload words have no individual timestamps or source flags. Subscribe to
 
 The wrapper copies marker strings and payload values before the native callback
 returns. Returned Python records therefore remain valid after parsing or closing
-the decoder. Immutable metadata is shared between records within a parse.
+the decoder.
 
 This is the best module for users to import when they want type names for
 annotations or record inspection.
@@ -148,11 +144,8 @@ The main public class is `Decoder`. It manages a handle created with
 - `parse_file(path, isa=...)`, a convenience wrapper around `parse(...)`.
 - `parse_chunks(chunks, isa=...)`, for callers that intentionally decode each
   chunk as a separate trace buffer.
-- `set_record_filter(record_types, immediate=...)`, to select emitted record
-  types and optionally request immediate delivery. Marker decoding is opt-in:
-  explicitly include `RecordType.MARKER`. For a marker with payload,
-  immediate delivery happens when the whole block is available or is marked
-  incomplete. Use `set_record_filter()` to restore the native defaults.
+- `set_record_enabled(record_type, enabled=True)`, to enable or disable one
+  record type. All types except `RecordType.MARKER` are enabled by default.
 - `load_code_object(data, load_id=..., load_addr=..., load_size=...)`, where
   `data` is code-object bytes or a path. `load_size` is the loaded memory range
   size and is intentionally distinct from the code-object byte length, which is
@@ -179,12 +172,12 @@ def consume(kind, batch):
         for marker in batch:
             print(marker.name, marker.payload)
 
-decoder.set_record_filter([RecordType.INFO, RecordType.MARKER])
+decoder.set_record_enabled(RecordType.MARKER)
 decoder.parse(att_bytes, on_batch=consume, collect=False)
 ```
 
 Configure the decoder's code-object metadata before this example, as in the
-loading example above. An ISA provider alone does not supply marker metadata.
+loading example above. An ISA provider alone does not supply marker names.
 The callback receives ordinary Python objects and may retain selected records.
 Callback batch order can differ from timestamp order when code-object
 attribution is delayed.
