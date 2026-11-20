@@ -55,11 +55,7 @@ class ImageAddressInstruction : public Encoding {
   // BVH explicitly names the base of each vector (node, extent, origin,
   // direction and inverse direction). A16 combines the two direction groups.
   unsigned ray_group_width(unsigned group) const {
-    if (group == 0)
-      return Form.kind == ImageAddressKind::Bvh64 ? 2 : 1;
-    if (group == 1)
-      return 1;
-    return group == 4 && this->inst_.a16 ? 0 : 3;
+    return gfx11_bvh_group_widths(Form.kind == ImageAddressKind::Bvh64, this->inst_.a16)[group];
   }
 
   unsigned print_group_width(unsigned group, unsigned words) const {

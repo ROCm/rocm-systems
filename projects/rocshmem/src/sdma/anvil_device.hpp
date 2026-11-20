@@ -260,40 +260,40 @@ struct SdmaQueueDeviceHandle {
         // All stores inside the loop to avoid SIMD reconvergence deadlock:
         // the committedWptr update must complete before this lane becomes
         // inactive, so that other lanes in the same wavefront can proceed.
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __scoped_atomic_store_n(wptr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __scoped_atomic_store_n(doorbell, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
         __scoped_atomic_store_n(committedWptr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
-#if defined(__GFX12__)
-        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
         __builtin_amdgcn_s_waitcnt(0);
+#else
+        asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
@@ -418,10 +418,10 @@ struct SdmaQueueSingleProducerDeviceHandle : SdmaQueueDeviceHandle {
   __device__ __forceinline__ void submitPacket([[maybe_unused]] uint64_t base,
                                                uint64_t pendingWptr) {
     *wptr = pendingWptr;
-#if defined(__GFX12__)
-    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
     __builtin_amdgcn_s_waitcnt(0);
+#else
+    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
     __builtin_amdgcn_wave_barrier();
     __atomic_signal_fence(__ATOMIC_SEQ_CST);

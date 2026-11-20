@@ -4,9 +4,10 @@
 //! HSA signal creation, destruction, and IPC C entry points.
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::signal_batch_pool;
-use crate::runtime::{boundary, initialized_mut, lock};
 use crate::signal::{signal_uses_interrupt, valid_consumers};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -33,12 +34,12 @@ pub unsafe extern "C" fn hsa_signal_create(
             Err(status) => return status,
         };
         // SAFETY: The public ABI promises num_consumers readable handles when nonzero.
-        let interrupt =
-            match unsafe { signal_uses_interrupt(runtime.cpus.len(), num_consumers, consumers, 0) }
-            {
-                Ok(interrupt) => interrupt,
-                Err(status) => return status,
-            };
+        let interrupt = match unsafe {
+            signal_uses_interrupt(runtime.agents.cpus.len(), num_consumers, consumers, 0)
+        } {
+            Ok(interrupt) => interrupt,
+            Err(status) => return status,
+        };
         let created = match runtime.create_signal(initial_value, interrupt) {
             Ok(signal) => signal,
             Err(status) => return status,
@@ -79,15 +80,20 @@ pub unsafe extern "C" fn hsa_amd_signal_create(
         // SAFETY: The public ABI promises num_consumers readable handles when
         // the selected signal kind consumes this list.
         let interrupt = match unsafe {
-            signal_uses_interrupt(runtime.cpus.len(), num_consumers, consumers, attributes)
+            signal_uses_interrupt(
+                runtime.agents.cpus.len(),
+                num_consumers,
+                consumers,
+                attributes,
+            )
         } {
             Ok(interrupt) => interrupt,
             Err(status) => return status,
         };
         let created = match if attributes & AMD_SIGNAL_IPC != 0 {
             runtime.signal_state.create_ipc_signal(
-                &runtime.gpus,
-                runtime.host_page_size,
+                &runtime.agents.gpus,
+                runtime.agents.host_page_size,
                 initial_value,
             )
         } else {
@@ -147,7 +153,12 @@ pub unsafe extern "C" fn hsa_amd_signal_batch_create(
         };
         // SAFETY: The validated consumer list meets the signal selector's ABI.
         let interrupt = match unsafe {
-            signal_uses_interrupt(runtime.cpus.len(), num_consumers, consumers, attributes)
+            signal_uses_interrupt(
+                runtime.agents.cpus.len(),
+                num_consumers,
+                consumers,
+                attributes,
+            )
         } {
             Ok(value) => value,
             Err(status) => return status,
@@ -194,16 +205,9 @@ pub extern "C" fn hsa_amd_signal_batch_destroy(batch: HsaAmdSignalBatch) -> Stat
 #[cfg_attr(any(not(hsa_tool_dispatch), test), unsafe(no_mangle))]
 /// Invalidates a signal and retires its backing safely.
 pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
-    boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        runtime.signal_state.destroy_signal(signal)
+    boundary(|| match crate::signal::destroy(signal) {
+        Ok(()) => SUCCESS,
+        Err(status) => status,
     })
 }
 
@@ -263,13 +267,13 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
         // SAFETY: The caller supplied a readable IPC handle.
         let words = unsafe { handle.read() }.handle;
         // SAFETY: attach_ipc_signal validates the imported mapping and shared header.
-        let Some(session) = runtime.session.as_ref() else {
+        let Some(session) = runtime.native_session().cloned() else {
             return ERROR;
         };
         let attached = match unsafe {
             runtime
                 .signal_state
-                .attach_ipc_signal(session, &runtime.gpus, words)
+                .attach_ipc_signal(&session, &runtime.agents.gpus, words)
         } {
             Ok(signal) => signal,
             Err(status) => return status,

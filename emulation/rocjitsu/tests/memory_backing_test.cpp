@@ -1618,19 +1618,22 @@ TEST_F(MemoryBackingDeathTest, EmptyMetadataTruncatesAliasesAndNeedsOnlyOneFd) {
       ::testing::ExitedWithCode(0), "");
 }
 
+void use_cookie_authentication_without_pidfs() {
+  // A non-pidfs kernel reports no unique inode on the startup channel.
+  rocjitsu::libc_passthrough().recvmsg = [](int fd, msghdr *message, int flags) -> ssize_t {
+    rocjitsu::libc_passthrough().recvmsg = ::recvmsg;
+    const ssize_t size = ::recvmsg(fd, message, flags);
+    if (size == sizeof(rocjitsu::kmd::KeeperStartupReply))
+      static_cast<rocjitsu::kmd::KeeperStartupReply *>(message->msg_iov[0].iov_base)
+          ->process_inode = 0;
+    return size;
+  };
+}
+
 void check_preparation_with_stopped_keeper(bool simulate_old_kernel) {
   ASSERT_EQ(setenv("RJ_TEST_FORCE_TOKEN_BACKING", "1", 1), 0);
-  if (simulate_old_kernel) {
-    // A non-pidfs kernel reports no unique inode on the startup channel.
-    rocjitsu::libc_passthrough().recvmsg = [](int fd, msghdr *message, int flags) -> ssize_t {
-      rocjitsu::libc_passthrough().recvmsg = ::recvmsg;
-      const ssize_t size = ::recvmsg(fd, message, flags);
-      if (size == sizeof(rocjitsu::kmd::KeeperStartupReply))
-        static_cast<rocjitsu::kmd::KeeperStartupReply *>(message->msg_iov[0].iov_base)
-            ->process_inode = 0;
-      return size;
-    };
-  }
+  if (simulate_old_kernel)
+    use_cookie_authentication_without_pidfs();
   const int token = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(token, 0);
   const pid_t helper = token_keeper(token);
@@ -1842,8 +1845,10 @@ ssize_t interrupt_metadata_batch(int socket, const msghdr *message, int flags) {
   return ::sendmsg(socket, message, flags);
 }
 
-void check_metadata_batch_recovery(bool after_flush) {
+void check_metadata_batch_recovery(bool after_flush, bool simulate_old_kernel = false) {
   ASSERT_EQ(setenv("RJ_TEST_FORCE_TOKEN_BACKING", "1", 1), 0);
+  if (simulate_old_kernel)
+    use_cookie_authentication_without_pidfs();
   const int retained = rocjitsu::create_memory_backing(kSize);
   ASSERT_GE(retained, 0);
   metadata_keeper_to_kill = token_keeper(retained);
@@ -1899,6 +1904,18 @@ TEST_F(MemoryBackingDeathTest, MetadataBatchKeepsAcknowledgedFilesAfterHelperLos
         _exit(::testing::Test::HasFailure() ? 1 : 0);
       },
       ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(MemoryBackingDeathTest, MetadataBatchRecoversAfterHelperLossWithoutPidfs) {
+  for (bool after_flush : {false, true}) {
+    SCOPED_TRACE(after_flush);
+    ASSERT_EXIT(
+        {
+          check_metadata_batch_recovery(after_flush, true);
+          _exit(::testing::Test::HasFailure() ? 1 : 0);
+        },
+        ::testing::ExitedWithCode(0), "");
+  }
 }
 
 pid_t metadata_child = -1;

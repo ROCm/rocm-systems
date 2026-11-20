@@ -509,7 +509,7 @@ fn repeated_queue_index_access_does_not_wait_for_the_registry_mutex() {
                 .unwrap();
         });
         ready_rx.recv().unwrap();
-        let guard = crate::runtime::LIFECYCLE.lock().unwrap();
+        let guard = crate::lifecycle::LIFECYCLE.lock().unwrap();
         go_tx.send(()).unwrap();
         let value = done_rx.recv_timeout(Duration::from_millis(200));
         drop(guard);

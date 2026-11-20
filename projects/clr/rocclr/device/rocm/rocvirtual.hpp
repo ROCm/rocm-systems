@@ -337,6 +337,21 @@ class VirtualGPU : public device::VirtualDevice {
     //! Adds a raw signal for dependency tracking
     void AddDynamicQueueWait(hsa_signal_t signal) { dynamic_queue_waits_.push_back(signal); }
 
+    //! Keeps a submitted signal from being rearmed until ReleaseHeldSignals
+    virtual void HoldSignal(ProfilingSignal* /*signal*/) {}
+
+    //! Mark for ReleaseHeldSignals: number of signals currently held
+    virtual size_t HeldSignalCount() const { return 0; }
+
+    //! Drops the HoldSignal references taken since mark once their waits have been captured
+    virtual void ReleaseHeldSignals(size_t /*mark*/ = 0) {}
+
+    //! Keeps the pins and the held signals until the queue retires the packets submitted so far
+    virtual void KeepUntilRetired(const std::vector<void*>& pins);
+
+    //! Most signals a caller may acquire before submitting the ops that use them
+    virtual size_t MaxUnsubmittedSignals() const { return std::numeric_limits<size_t>::max(); }
+
    protected:
     //! Returns the signal attributes for the requested scope and updates interrupt
     uint64_t SignalAttributes(bool& interrupt) const;
@@ -500,6 +515,13 @@ class VirtualGPU : public device::VirtualDevice {
     void NoteQueueDrained() override;
     bool WaitCurrent() override;
     void ResetCurrentSignal() override;
+    //! The ring starts with this many slots and never shrinks, so a chunk can't wrap onto its own
+    //! unsubmitted signals
+    size_t MaxUnsubmittedSignals() const override { return ROC_SIGNAL_POOL_SIZE; }
+    void HoldSignal(ProfilingSignal* signal) override;
+    size_t HeldSignalCount() const override { return held_signals_.size(); }
+    void ReleaseHeldSignals(size_t mark = 0) override;
+    void KeepUntilRetired(const std::vector<void*>& pins) override;
 
    private:
     void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;
@@ -600,6 +622,7 @@ class VirtualGPU : public device::VirtualDevice {
     //! Retired signals swapped out while shared, oldest first. Reusing them avoids destroying and
     //! recreating device-memory signals.
     std::deque<ProfilingSignal*> parked_signals_;
+    std::vector<ProfilingSignal*> held_signals_;   //!< References taken by HoldSignal
     ProfilingSignal* unflushed_store_ = nullptr;  //!< Last direct store not yet flushed
     hsa_signal_value_t unflushed_value_ = 0;      //!< Value of unflushed_store_
   };

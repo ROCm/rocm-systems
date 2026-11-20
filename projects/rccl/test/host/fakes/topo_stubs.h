@@ -74,6 +74,8 @@ extern std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, in
 // one binary that reaches it installs its own.
 // -------------------------------------------------------------------------
 extern std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_ncclTopoGetLocalGinDevs;
+// src/graph/topo.cc. (system, count): the NVSwitch count; fail-loud default.
+extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoGetNvsCount;
 extern std::function<ncclResult_t(struct ncclTopoSystem*, int*)> g_ncclTopoPathAllNVLink;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclTopoRanks*)> g_ncclTopoPreset;
 extern ncclResult_t g_rcclCheckRomeTopoModelIdxConsensusResult;
