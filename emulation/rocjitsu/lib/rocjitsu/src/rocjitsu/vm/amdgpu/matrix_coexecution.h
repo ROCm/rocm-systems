@@ -45,7 +45,7 @@ inline void relax_cpu() {
 #endif
 }
 
-inline bool async_candidate(std::string_view name) { return async_mma_policy::candidate(name); }
+inline bool async_candidate(const Instruction &inst) { return async_mma_policy::candidate(inst); }
 
 // A fork child has none of the parent's helper threads. Disable offload there
 // with a load, avoiding a getpid syscall on every issue. Register before the

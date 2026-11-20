@@ -29,6 +29,14 @@ CDNA_INTEGER_ALIASES = {
     'V_SUBBREV_CO_U32': 'V_SUBREV_CO_CI_U32',
 }
 INTEGER_ARCHITECTURES = ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+# Older profiles currently share the single-VGPR integer arithmetic only.
+INTEGER32_ARCHITECTURES = INTEGER_ARCHITECTURES + (
+    'cdna1',
+    'cdna2',
+    'rdna1',
+    'rdna2',
+    'rdna3_5',
+)
 # Routing and conversions migrate independently of integer arithmetic.
 ROUTING_ARCHITECTURES = INTEGER_ARCHITECTURES
 
@@ -144,7 +152,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     arch = ctx.arch_name
     mnemonic = (
         CDNA_INTEGER_ALIASES.get(ctx.inst.name, ctx.inst.name)
-        if arch.startswith('cdna')
+        if arch.startswith('cdna') or arch in ('rdna1', 'rdna2')
         else ctx.inst.name
     )
     dst = ctx.dst_ops
@@ -154,12 +162,14 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     if mnemonic == 'V_PRNG_B32' and arch not in ('cdna4', 'cdna5'):
         return None
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in VECTOR32_NAMES:
+    if arch not in INTEGER32_ARCHITECTURES or mnemonic not in VECTOR32_NAMES:
         return None
     if (
         mnemonic in CONDITIONAL_NAMES | {'V_MOV_B32'}
         and arch not in ROUTING_ARCHITECTURES
     ):
+        return None
+    if mnemonic in WIDEN16_NAMES | SATURATE_NAMES and arch not in ROUTING_ARCHITECTURES:
         return None
     if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna4', 'cdna5'):
         return None
@@ -256,8 +266,15 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     if mnemonic == 'V_MOV_B32' and is_vop3 and arch in ('rdna3', 'rdna4', 'cdna5'):
         modifiers = '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
     extra = ''
-    if mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32') and arch in ('cdna3', 'cdna4'):
-        # CDNA selects one of four count bytes; RDNA selects the low/high half.
+    if mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32') and arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+        'rdna1',
+        'rdna2',
+    ):
+        # gfx9/gfx10 select a count byte; later Radeon selects a count half.
         extra = ', 0xF, 0xF, ~uint64_t{0}, 0, amdgpu::vop3_opsel(inst_) & 3u'
     elif mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32'):
         modifiers = (
@@ -265,7 +282,11 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
             '((amdgpu::vop3_opsel(inst_) & 4u) ? RJ_ARITH_ALU_HIGH_C : 0u)'
         )
     sdwa = ''
-    if arch in ('cdna3', 'cdna4') and not is_vop3 and count <= 2:
+    if (
+        arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2')
+        and not is_vop3
+        and count <= 2
+    ):
         sdwa = (
             f'  if (amdgpu::arith::try_execute_sdwa_integer32(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
             f'      wf.cu().arithmetic_flags(), 0, {dst[0]}, {", ".join(src)})) return;\n'
@@ -710,15 +731,16 @@ INTEGER_DOT_NAMES = (
 
 
 def gen_integer_dot(ctx: ExecuteContext) -> str | None:
+    """Route packed integer reductions and accumulating aliases through rj-arith."""
     arch = ctx.arch_name
     mnemonic = ctx.inst.name
     dst = ctx.dst_ops
     src = ctx.src_ops
     enc_name = ctx.enc_name
     opsel_exprs = ctx.opsel_exprs
-    if arch in ('cdna3', 'cdna4'):
+    if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna2'):
         names = CDNA_INTEGER_DOT_NAMES | ACCUMULATING_INTEGER_DOT_NAMES
-    elif arch in ('rdna3', 'rdna4', 'cdna5'):
+    elif arch in ('rdna3_5', 'rdna3', 'rdna4', 'cdna5'):
         names = MODERN_INTEGER_DOT_NAMES
     else:
         return None
