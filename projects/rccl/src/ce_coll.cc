@@ -116,6 +116,17 @@ static constexpr size_t HIER_COLL_CHUNK_ALIGN = 8 * 1024;
 static constexpr size_t HIER_COLL_AG_RING_HALF_AWARE_THRESHOLD = 128 * 1024 * 1024;
 static constexpr size_t HIER_COLL_AG_RING_MIN_HALF_AWARE_CHUNK = 8 * 1024 * 1024;
 
+// Ring scatter batch shape. From ROCm 10.3 each round fans every arrived cw and
+// ccw chunk out in a single CE batch, several copies per LSA peer. On older
+// ROCm each contiguous arrived piece is its own batch with at most one copy
+// per LSA peer, since a batch with several copies per destination has been
+// observed to never signal completion there.
+#if ROCM_VERSION >= 100300
+static constexpr bool HIER_COLL_AG_RING_SINGLE_SCATTER_BATCH = true;
+#else
+static constexpr bool HIER_COLL_AG_RING_SINGLE_SCATTER_BATCH = false;
+#endif
+
 // A positive value forces the Ring path and 0 forces Direct. -1 selects
 // automatically: Direct on two nodes, where the ring has a single remote peer
 // and never beats Direct, and otherwise Ring once each rank's contribution
@@ -2216,6 +2227,27 @@ static ncclResult_t ncclHierCeAgRingScatterPiece(struct ncclComm* comm, struct n
   return ncclCeLaunchBatchOps(comm, ops, stream, args);
 }
 
+// Append the fan-out of one arrived chunk to a round's single scatter batch
+// (HIER_COLL_AG_RING_SINGLE_SCATTER_BATCH) without launching it.
+static void ncclHierCeAgRingScatterAppend(struct ncclCeBatchOpsParams* ops, struct ncclDevrWindow* recvWin,
+                                          uint8_t* src, size_t bytes, bool useMulticast, uint8_t* mcBase,
+                                          uint8_t** peerBases, int lsaSize) {
+  size_t winOffset = src - (uint8_t*)recvWin->userPtr;
+  if (useMulticast) {
+    ops->srcs[ops->numOps] = src;
+    ops->dsts[ops->numOps] = (void*)(mcBase + winOffset);
+    ops->sizes[ops->numOps] = bytes;
+    ops->numOps++;
+    return;
+  }
+  for (int r = 1; r < lsaSize; r++) {
+    ops->srcs[ops->numOps] = src;
+    ops->dsts[ops->numOps] = (void*)(peerBases[r - 1] + winOffset);
+    ops->sizes[ops->numOps] = bytes;
+    ops->numOps++;
+  }
+}
+
 // Bidirectional ring variant of hierarchical CE allgather.
 //
 // DAG on the user stream:
@@ -2449,6 +2481,11 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
     int recvRailPeerCw = comm->nodeRanks[prevNode].localRankToRank[localRank];
     int recvRailPeerCcw = comm->nodeRanks[nextNode].localRankToRank[localRank];
     int scatterCapacity = agUseMulticast ? 1 : lsaSize - 1;
+    if (HIER_COLL_AG_RING_SINGLE_SCATTER_BATCH) {
+      int nRoundChunks = (cwChunkPlan.chunkStart ? cwChunkPlan.chunkStart[1] - cwChunkPlan.chunkStart[0] : 0) +
+                         (ccwChunkPlan.chunkStart ? ccwChunkPlan.chunkStart[1] - ccwChunkPlan.chunkStart[0] : 0);
+      scatterCapacity = agUseMulticast ? nRoundChunks : nRoundChunks * (lsaSize - 1);
+    }
 
     for (int ai = 0; ai < nActiveCtx; ai++) {
       int k = activeCtxs[ai];
@@ -2506,12 +2543,33 @@ static ncclResult_t ncclHierCeAllGatherRing(struct ncclComm* comm, struct ncclKe
         NCCLCHECKGOTO(ncclHierCeAllGatherRingIssueRound(comm, plan, stream, &issueState, step + 1, slot ^ 1), ret,
                       fail);
 
-      // Same batch shape as Direct: one CE batch per contiguous arrived piece,
-      // with at most one copy per LSA peer. A hipMemcpyBatchAsync holding
-      // several copies per destination (cw + ccw halves) has been observed to
-      // never signal completion. When cw and ccw originate from the same rank
-      // (always on 2 nodes) the halves are adjacent and fan out as one piece.
-      if (scatterCapacity > 0) {
+      // TODO: odd node counts at large message sizes (cw and ccw from different
+      // origin ranks, multi-chunk halves) are untested. Add a CI case for it,
+      // e.g. 3 nodes with a large message size.
+      if (scatterCapacity > 0 && HIER_COLL_AG_RING_SINGLE_SCATTER_BATCH) {
+        // One CE batch for the whole round: every cw and ccw chunk, grouped by
+        // the rail context that carried it, fanned out to every LSA peer.
+        ceScatterOps.numOps = 0;
+        for (int ai = 0; ai < nActiveCtx; ai++) {
+          int k = activeCtxs[ai];
+          for (int half = 0; half < 2; half++) {
+            struct ncclHierChunkPlan* cp = half == 0 ? &cwChunkPlan : &ccwChunkPlan;
+            if (cp->chunkStart == nullptr) continue;
+            uint8_t* halfBase = half == 0 ? (uint8_t*)recvbuff + meta->originRankRecvCw * perRankBytes
+                                          : (uint8_t*)recvbuff + meta->originRankRecvCcw * perRankBytes + cwBytes;
+            for (int c = cp->chunkStart[0]; c < cp->chunkStart[1]; c++) {
+              if (c % numCtx != k) continue;
+              ncclHierCeAgRingScatterAppend(&ceScatterOps, recvWin, halfBase + cp->chunkOff[c], cp->chunkBytes[c],
+                                            agUseMulticast, scatterMcBase, scatterPeerBases, lsaSize);
+            }
+          }
+        }
+        if (ceScatterOps.numOps > 0) NCCLCHECKGOTO(ncclCeLaunchBatchOps(comm, &ceScatterOps, stream, args), ret, fail);
+      } else if (scatterCapacity > 0) {
+        // Same batch shape as Direct: one CE batch per contiguous arrived piece,
+        // with at most one copy per LSA peer. When cw and ccw originate from the
+        // same rank (always on 2 nodes) the halves are adjacent and fan out as
+        // one piece.
         uint8_t* pieceSlot = nullptr;
         size_t pieceBytes = 0;
         for (int half = 0; half < 2; half++) {
