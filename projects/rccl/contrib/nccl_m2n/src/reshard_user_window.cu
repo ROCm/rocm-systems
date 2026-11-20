@@ -1366,6 +1366,9 @@ ncclResult_t reshardTryExecuteStagingGroup(ncclM2nHandle_t handle, ncclComm_t co
   ncclCommProperties commProps = NCCL_COMM_PROPERTIES_INITIALIZER;
   ncclResult_t propsResult = ncclSuccess;
   NCCL_M2N_CHECK(reshardMatchCommCudaDevice(comm, &currentCudaDev, &commProps, &propsResult));
+  NCCL_M2N_CHECK(reshardCheckValidatedConfig("ncclM2nGroupEnd", worldRank, RESHARD_COPY_ALGO_PACK, propsResult,
+                                             &commProps,
+                                             propsResult == ncclSuccess ? commProps.cudaDev : currentCudaDev));
   ncclResult_t captureResult = reshardRejectGraphCapture("ncclReshard", stream);
   if (captureResult == ncclInvalidUsage) {
     return ncclSuccess;

@@ -7,6 +7,7 @@
 
 #include "reshard_call_setup.h"
 
+#include <atomic>
 #include <limits>
 
 static ncclResult_t validateDescriptorHeader(const char* apiName, const char* fieldName, size_t size,
@@ -139,6 +140,64 @@ ncclResult_t reshardComputeStagingGinCounts(int logRank, int numCtas, size_t max
 
   *signalCount = static_cast<int>(signals);
   *counterCount = static_cast<int>(counters);
+  return ncclSuccess;
+}
+
+ncclResult_t reshardCheckValidatedConfig(const char* apiName, int logRank, ReshardCopyAlgorithm copyAlgo,
+                                         ncclResult_t propsResult, const ncclCommProperties* commProps,
+                                         int cudaDev) {
+#if defined(__HIP_PLATFORM_AMD__)
+  static std::atomic<bool> warnedPipe{false};
+  static std::atomic<bool> warnedGin{false};
+  static std::atomic<bool> warnedDirect{false};
+  static std::atomic<uint64_t> devicesSeen{0};
+  const bool experimental = gReshardEnableExperimental;
+
+  if (copyAlgo == RESHARD_COPY_ALGO_PIPE) {
+    if (!experimental) {
+      NCCL_M2N_FAIL(ncclInvalidUsage, logRank,
+                    "%s: NCCL_RESHARD_COPY_ALGORITHM=PIPE is not validated on ROCm yet; use PACK or DIRECT, or set "
+                    "NCCL_M2N_ENABLE_EXPERIMENTAL=1",
+                    apiName);
+    }
+    if (!warnedPipe.exchange(true)) {
+      RESHARD_WARN(logRank, "%s: running the PIPE copy algorithm, which is not validated on ROCm yet "
+                            "(NCCL_M2N_ENABLE_EXPERIMENTAL=1)", apiName);
+    }
+  }
+
+  if (propsResult == ncclSuccess && commProps->ginType != NCCL_GIN_TYPE_NONE &&
+      commProps->ginType != NCCL_GIN_TYPE_PROXY) {
+    if (!experimental) {
+      NCCL_M2N_FAIL(ncclInvalidUsage, logRank,
+                    "%s: the communicator uses GIN type %d, but nccl_m2n is validated on ROCm only with the GIN "
+                    "proxy; set NCCL_GIN_TYPE=2 before creating the communicator, or set "
+                    "NCCL_M2N_ENABLE_EXPERIMENTAL=1",
+                    apiName, (int)commProps->ginType);
+    }
+    if (!warnedGin.exchange(true)) {
+      RESHARD_WARN(logRank, "%s: running on GIN type %d, which is not validated with nccl_m2n on ROCm yet "
+                            "(NCCL_M2N_ENABLE_EXPERIMENTAL=1)", apiName, (int)commProps->ginType);
+    }
+  }
+
+  uint64_t seen = devicesSeen.load(std::memory_order_relaxed);
+  if (cudaDev >= 0 && cudaDev < 64) {
+    seen = devicesSeen.fetch_or(1ull << cudaDev, std::memory_order_relaxed) | (1ull << cudaDev);
+  }
+  if (copyAlgo == RESHARD_COPY_ALGO_DIRECT && (seen & (seen - 1)) != 0 && !warnedDirect.exchange(true)) {
+    RESHARD_WARN(logRank, "%s: DIRECT with several GPUs in one process is not validated on ROCm yet and can run "
+                          "out of staging buffers or hang on back-to-back calls; use one process per GPU or PACK",
+                 apiName);
+  }
+#else
+  (void)apiName;
+  (void)logRank;
+  (void)copyAlgo;
+  (void)propsResult;
+  (void)commProps;
+  (void)cudaDev;
+#endif
   return ncclSuccess;
 }
 

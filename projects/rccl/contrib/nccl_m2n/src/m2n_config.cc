@@ -141,6 +141,7 @@ void resetReshardRuntimeConfig() {
   gReshardAlgorithm = RESHARD_ALGO_AUTO;
   gReshardLbMode = RESHARD_LB_UNIFORM;
   gReshardCopyAlgorithm = RESHARD_COPY_ALGO_PACK;
+  gReshardEnableExperimental = false;
   gReshardPipeNetMode = RESHARD_PIPE_NET_DEVICE;
   gReshardStagingRuntimeConfig = {};
   gReshardAutoUniformBcast = true;
@@ -342,6 +343,11 @@ void applyReshardEnv() {
    * getenv on the hot path. */
   if (parseM2nEnvSize(getenv("NCCL_RESHARD_CHUNK_SIZE"), &sizeValue, false)) {
     gReshardChunkSizeBytes = sizeValue;
+  }
+
+  bool enableExperimental;
+  if (parseBoolEnv(getenv("NCCL_M2N_ENABLE_EXPERIMENTAL"), &enableExperimental)) {
+    gReshardEnableExperimental = enableExperimental;
   }
 
   bool useInternalStreams;

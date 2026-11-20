@@ -125,6 +125,9 @@ inline int gReshardDstDomainSize = 0;
 inline ReshardAlgorithm gReshardAlgorithm = RESHARD_ALGO_AUTO;
 inline ReshardLoadBalanceMode gReshardLbMode = RESHARD_LB_UNIFORM;
 inline ReshardCopyAlgorithm gReshardCopyAlgorithm = RESHARD_COPY_ALGO_PACK;
+/* NCCL_M2N_ENABLE_EXPERIMENTAL: run configurations not yet validated on ROCm
+ * (see reshardCheckValidatedConfig) with a warning instead of failing. */
+inline bool gReshardEnableExperimental = false;
 
 /* PIPE transport/control mode. DEVICE keeps the CUDA persistent kernel path;
  * HOST_RMA keeps the cached PIPE graph but enqueues CE pack/unpack plus
