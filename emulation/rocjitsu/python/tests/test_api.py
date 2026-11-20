@@ -607,8 +607,8 @@ finally:
     os.close(descriptor)
 """
                     for attach_args in (
-                        ["--attach"],
-                        ["--attach", "--config", str(CONFIG)],
+                        ["--attach", "default"],
+                        ["--attach", "default", "--config", str(CONFIG)],
                     ):
                         result = subprocess.run(
                             [

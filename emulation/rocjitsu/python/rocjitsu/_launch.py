@@ -71,7 +71,11 @@ def launch_options(mode, cpu_thread_budget):
     budget = budget_option(cpu_thread_budget)
     if mode == "attach" and budget:
         raise ValueError("cpu_thread_budget cannot be combined with mode='attach'")
-    return ([] if mode == "local" else [f"--{mode}"]) + budget
+    if mode == "local":
+        return budget
+    if mode == "attach":
+        return ["--attach", "default"]
+    return ["--daemon"] + budget
 
 
 class Config:
