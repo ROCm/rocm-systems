@@ -106,6 +106,13 @@ TEST_P(Gfx1100DsAddress, HandlesFullSelectorRangeAndRejectsMalformedInputs) {
       amdgpu::replace_ds_address_field(ROCJITSU_CODE_TARGET_GFX1100, fixture.source, UINT32_MAX));
   const std::array<uint32_t, 2> wrong_format = {0xbf800000u, fixture.source[1]};
   EXPECT_FALSE(amdgpu::replace_ds_address_field(ROCJITSU_CODE_TARGET_GFX1100, wrong_format, 6));
+  // FLAT's prefix differs from DS by bit 26; omitting that mask bit would
+  // accept this instruction even though the SOPP witness above still rejects.
+  const std::array<uint32_t, 2> flat_load = {0xdc500000u, 0x0c7c0002u};
+  const DecodeResult decoded_flat = decoder->decode_window(flat_load);
+  ASSERT_TRUE(decoded_flat.succeeded());
+  EXPECT_EQ(decoded_flat.value()->mnemonic(), "flat_load_b32");
+  EXPECT_FALSE(amdgpu::replace_ds_address_field(ROCJITSU_CODE_TARGET_GFX1100, flat_load, 6));
   EXPECT_FALSE(amdgpu::replace_ds_address_field(ROCJITSU_CODE_TARGET_GFX90A, fixture.source, 6));
   EXPECT_TRUE(decoder->decode_window(std::span(fixture.source).first(1)).failed());
 }
