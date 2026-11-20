@@ -10,6 +10,8 @@
 
 #include "init_fakes.h"
 
+#include "ce_coll.h"  // NCCL_CE_REDUCE_PER_CHUNK_SLOTS default
+
 #include <cstdint>
 #include <cstring>
 
@@ -28,6 +30,13 @@ int64_t ncclParamEnqueueRearchEnable() { return g_loadParam("ENQUEUE_REARCH_ENAB
 int64_t ncclParamP2pLL128Enable() { return g_loadParam("P2P_LL128_ENABLE", -1); }
 // Same for NCCL_PARAM(TreeCompact, ...) in graph/connect.cc, read by the cross-rank consensus check.
 int64_t ncclParamTreeCompact() { return g_loadParam("TREE_COMPACT", 0); }
+// Real RCCL_PARAM(CeReducePerChunk*, ...) lives in ce_coll.cc. init.cc only has the
+// RCCL_PARAM_DECLARE externs (via rccl_common.h). MicroInit does not compile ce_coll.cc,
+// so without these fakes initTransportsRank fails to link.
+int64_t rcclParamCeReducePerChunk() { return g_loadParam("RCCL_CE_REDUCE_PER_CHUNK", 0); }
+int64_t rcclParamCeReducePerChunkSlots() {
+  return g_loadParam("RCCL_CE_REDUCE_PER_CHUNK_SLOTS", NCCL_CE_REDUCE_PER_CHUNK_SLOTS);
+}
 int64_t ncclParamRasDiagnostics() { return g_loadParam("RUN_RAS_DIAGNOSTICS", 0); }
 int64_t ncclParamDiagnostics() { return g_loadParam("RUN_DIAGNOSTICS", 0); }
 // src/ras/ras.cc (NCCL 2.32): init.cc gates the progress-counter monitor on RAS being enabled.

@@ -2629,6 +2629,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
            allGather3Data[r].ceReducePerChunk, allGather3Data[r].ceReduceNumStagingSlots);
       ret = ncclInvalidUsage;
       goto fail;
+    }
+  }
+
   // The hierarchical AllGather pairs blocks across ranks by index and chunk, so ranks that size its grid or
   // chunks differently hang
   if (ncclSymkAgHierAvailable(comm)) {
