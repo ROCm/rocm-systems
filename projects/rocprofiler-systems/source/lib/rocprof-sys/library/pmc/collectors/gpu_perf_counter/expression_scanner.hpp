@@ -14,16 +14,6 @@ namespace rocprofsys::pmc::collectors::gpu_perf_counter::detail
 {
 
 /**
- * @brief Throws std::invalid_argument naming the whole @p expression and the @p reason.
- */
-[[noreturn]] inline void
-fail_expression(std::string_view expression, std::string_view reason)
-{
-    throw std::invalid_argument(
-        fmt::format("derived counter expression '{}': {}", expression, reason));
-}
-
-/**
  * @brief A cursor over expression text that skips spaces and reads tokens.
  *
  * Errors name @p expression, the text the user wrote, even when the scanner reads
@@ -54,7 +44,9 @@ public:
     {
         if(!consume(token))
         {
-            fail(fmt::format("expected '{}' at '{}'", token, m_text.substr(m_position)));
+            throw std::invalid_argument(
+                fmt::format("derived counter expression '{}': expected '{}' at '{}'",
+                            m_expression, token, m_text.substr(m_position)));
         }
     }
 
@@ -64,7 +56,9 @@ public:
         skip_spaces();
         if(m_position != m_text.size())
         {
-            fail(fmt::format("unexpected '{}'", m_text.substr(m_position)));
+            throw std::invalid_argument(
+                fmt::format("derived counter expression '{}': unexpected '{}'",
+                            m_expression, m_text.substr(m_position)));
         }
     }
 
@@ -85,14 +79,11 @@ public:
         auto const name = read_while(is_identifier_char);
         if(name.empty())
         {
-            fail(fmt::format("expected a name at '{}'", m_text.substr(m_position)));
+            throw std::invalid_argument(
+                fmt::format("derived counter expression '{}': expected a name at '{}'",
+                            m_expression, m_text.substr(m_position)));
         }
         return name;
-    }
-
-    [[noreturn]] void fail(std::string_view reason) const
-    {
-        fail_expression(m_expression, reason);
     }
 
 private:

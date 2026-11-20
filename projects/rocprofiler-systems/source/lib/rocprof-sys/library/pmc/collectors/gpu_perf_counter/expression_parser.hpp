@@ -72,8 +72,10 @@ public:
         auto const root    = parse_complete(scanner);
         if(root.shape == derived_evaluation::interval && root.per_instance)
         {
-            fail_expression(m_expression,
-                            "non-linear expression reads a counter outside reduce()");
+            throw std::invalid_argument(fmt::format(
+                "derived counter expression '{}': non-linear expression reads a "
+                "counter outside reduce()",
+                m_expression));
         }
         m_result.tree.set_root(root.index);
         m_result.evaluation = root.shape;
@@ -158,7 +160,9 @@ private:
         auto const number = utility::string::safe_stod(token);
         if(number.is_error())
         {
-            scanner.fail(fmt::format("invalid number '{}'", token));
+            throw std::invalid_argument(
+                fmt::format("derived counter expression '{}': invalid number '{}'",
+                            m_expression, token));
         }
         return { .index = m_result.tree.add(
                      { .kind = node_kind::number, .number = number.value() }),
@@ -168,12 +172,12 @@ private:
     [[nodiscard]] subexpression parse_name(expression_scanner& scanner)
     {
         auto const name = scanner.read_identifier();
-        reject_accumulate(name, scanner);
+        reject_accumulate(name);
         if(name == "reduce")
         {
             return parse_reduce(scanner);
         }
-        const auto& meta = lookup(name, scanner);
+        const auto& meta = lookup(name);
         if(meta.is_derived)
         {
             return expand_derived(meta);
@@ -185,14 +189,16 @@ private:
     {
         scanner.expect('(');
         auto const name = scanner.read_identifier();
-        reject_accumulate(name, scanner);
-        const auto& meta = lookup(name, scanner);
+        reject_accumulate(name);
+        const auto& meta = lookup(name);
         if(meta.is_derived)
         {
-            scanner.fail(fmt::format("reduce() of derived counter '{}'", name));
+            throw std::invalid_argument(fmt::format(
+                "derived counter expression '{}': reduce() of derived counter '{}'",
+                m_expression, name));
         }
         scanner.expect(',');
-        auto const read = to_input_read(scanner.read_identifier(), scanner);
+        auto const read = to_input_read(scanner.read_identifier());
         scanner.expect(')');
         return add_input(meta, read);
     }
@@ -201,8 +207,9 @@ private:
     {
         if(std::ranges::find(m_expanding, meta.name) != m_expanding.end())
         {
-            fail_expression(m_expression,
-                            fmt::format("cyclic definition of '{}'", meta.name));
+            throw std::invalid_argument(
+                fmt::format("derived counter expression '{}': cyclic definition of '{}'",
+                            m_expression, meta.name));
         }
         m_expanding.push_back(meta.name);
         auto       scanner = expression_scanner{ meta.expression, m_expression };
@@ -263,8 +270,7 @@ private:
         }
     }
 
-    [[nodiscard]] static input_read to_input_read(std::string_view    operation,
-                                                  expression_scanner& scanner)
+    [[nodiscard]] input_read to_input_read(std::string_view operation) const
     {
         if(operation == "sum")
         {
@@ -282,27 +288,33 @@ private:
         {
             return input_read::avr;
         }
-        scanner.fail(fmt::format("unknown reduce operation '{}'", operation));
+        throw std::invalid_argument(
+            fmt::format("derived counter expression '{}': unknown reduce operation '{}'",
+                        m_expression, operation));
     }
 
     // accumulate() selects an SQ counter collection mode that the SDK applies only
     // inside its own derived counter; it cannot be reproduced from the plain counter.
-    static void reject_accumulate(std::string_view name, expression_scanner& scanner)
+    void reject_accumulate(std::string_view name) const
     {
         if(name == "accumulate")
         {
-            scanner.fail("accumulate() is not supported: it is an SQ counter collection "
-                         "mode the SDK applies only inside its own derived counter");
+            throw std::invalid_argument(
+                fmt::format("derived counter expression '{}': accumulate() is not "
+                            "supported: it is an SQ counter collection mode "
+                            "the SDK applies only inside its own derived counter",
+                            m_expression));
         }
     }
 
-    [[nodiscard]] const counter_metadata& lookup(std::string_view    name,
-                                                 expression_scanner& scanner)
+    [[nodiscard]] const counter_metadata& lookup(std::string_view name)
     {
         auto const itr = m_definitions.find(std::string{ name });
         if(itr == m_definitions.end())
         {
-            scanner.fail(fmt::format("unknown counter '{}'", name));
+            throw std::invalid_argument(
+                fmt::format("derived counter expression '{}': unknown counter '{}'",
+                            m_expression, name));
         }
         auto& referenced = m_result.referenced_names;
         if(std::ranges::find(referenced, itr->second.name) == referenced.end())
