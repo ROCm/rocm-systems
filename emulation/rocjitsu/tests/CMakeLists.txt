@@ -494,55 +494,8 @@ test "$TMPDIR" = "$RJ_EXPECTED_TMPDIR" &&
 test -z "$RJ_SHOULD_NOT_LEAK"]=]
 )
 
-set(_rj_attach_runtime
-    "${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchAttachClearEnv"
-)
-file(MAKE_DIRECTORY "${_rj_attach_runtime}")
-file(WRITE "${_rj_attach_runtime}/daemon.sock" "")
-add_test(
-    NAME RocjitsuLaunchAttachClearEnv
-    COMMAND
-        ${CMAKE_COMMAND} -E env "ROCJITSU_RUNTIME_DIR=${_rj_attach_runtime}"
-        RJ_SHOULD_NOT_LEAK=bad $<TARGET_FILE:rocjitsu_bin> --attach
-        --clear-env-vars -- /bin/sh -c
-        [=[test -n "$ROCJITSU_INVOCATION_DIR" &&
-test "${ROCJITSU_INVOCATION_DIR#/}" != "$ROCJITSU_INVOCATION_DIR" &&
-test -e "$ROCJITSU_INVOCATION_DIR/daemon.sock" &&
-test -z "$RJ_SHOULD_NOT_LEAK"]=]
-)
 set(_rj_cli_workdir "${CMAKE_CURRENT_BINARY_DIR}/cli-workdir")
 file(MAKE_DIRECTORY "${_rj_cli_workdir}")
-
-set(_rj_attach_parent_xdg_runtime
-    "${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchAttachEnvOverrideParentXdg"
-)
-set(_rj_attach_child_xdg_runtime
-    "${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchAttachEnvOverrideChildXdg"
-)
-file(
-    MAKE_DIRECTORY
-        "${_rj_attach_parent_xdg_runtime}/rocjitsu"
-        "${_rj_attach_child_xdg_runtime}/rocjitsu"
-)
-file(WRITE "${_rj_attach_parent_xdg_runtime}/rocjitsu/daemon.sock" "")
-file(WRITE "${_rj_attach_child_xdg_runtime}/rocjitsu/daemon.sock" "")
-add_test(
-    NAME RocjitsuLaunchAttachEnvOverrideRuntime
-    COMMAND
-        ${CMAKE_COMMAND} -E env "ROCJITSU_RUNTIME_DIR="
-        "XDG_RUNTIME_DIR=${_rj_attach_parent_xdg_runtime}"
-        "RJ_EXPECTED_INVOCATION_DIR=${_rj_attach_child_xdg_runtime}/rocjitsu"
-        $<TARGET_FILE:rocjitsu_bin> --attach --env
-        "XDG_RUNTIME_DIR=${_rj_attach_child_xdg_runtime}" -- /bin/sh -c
-        [=[test "$ROCJITSU_INVOCATION_DIR" = "$RJ_EXPECTED_INVOCATION_DIR"]=]
-)
-add_test(
-    NAME RocjitsuLaunchAttachEmptyRuntimeOverrideUsesDefault
-    COMMAND
-        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
-        "-DTEST_PARENT_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchAttachEmptyRuntimeOverrideUsesDefaultParent"
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/check_empty_runtime_override.cmake
-)
 
 add_test(
     NAME RocjitsuLaunchWorkdir

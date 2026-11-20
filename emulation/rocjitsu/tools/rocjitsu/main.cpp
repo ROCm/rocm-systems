@@ -844,151 +844,80 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
 
 void print_usage() {
   std::cerr
-      << "Usage: rocjitsu [options] -- <app> [args...]
-"
-         "       rocjitsu [options] --daemon
-"
-         "       rocjitsu --attach <id_or_path> [options] -- <app> [args...]
-"
-         "       rocjitsu paths [--json]
-"
-         "       rocjitsu [options] --vfio-socket <path> [--vfio-socket <path> ...]
-"
-         "
-"
-         "Modes:
-"
-         "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)
-"
+      << "Usage: rocjitsu [options] -- <app> [args...]\n"
+         "       rocjitsu [options] --daemon\n"
+         "       rocjitsu --attach <id_or_path> [options] -- <app> [args...]\n"
+         "       rocjitsu paths [--json]\n"
+         "       rocjitsu [options] --vfio-socket <path> [--vfio-socket <path> ...]\n"
+         "\n"
+         "Modes:\n"
+         "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
          "  rocjitsu --profile "
       << kDefaultProfile
-      << " -- ./app          Run with a bundled profile config
-"
-         "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)
-"
-         "  rocjitsu --daemon --config foo.json          Daemon-only (run server)
-"
-         "  rocjitsu --attach default -- ./app           Attach to a running daemon
-"
-         "  rocjitsu --config foo.json --vfio-socket <path>
-"
-         "                                               Serve a PCI device to a VMM
-"
-         "  rocjitsu --config foo.json --vfio-socket /tmp/gpu0.sock --vfio-socket /tmp/gpu1.sock
-"
-         "                                               Serve a multi-GPU node to a VMM
-"
-         "  rocjitsu paths [--json]                      Print config/runtime paths
-"
-         "
-"
-         "Options:
-"
-         "  --config <path>   Simulation config JSON. Cannot be combined with --profile.
-"
+      << " -- ./app          Run with a bundled profile config\n"
+         "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
+         "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
+         "  rocjitsu --attach default -- ./app           Attach to a running daemon\n"
+         "  rocjitsu --config foo.json --vfio-socket <path>\n"
+         "                                               Serve a PCI device to a VMM\n"
+         "  rocjitsu --config foo.json --vfio-socket /tmp/gpu0.sock --vfio-socket /tmp/gpu1.sock\n"
+         "                                               Serve a multi-GPU node to a VMM\n"
+         "  rocjitsu paths [--json]                      Print config/runtime paths\n"
+         "\n"
+         "Options:\n"
+         "  --config <path>   Simulation config JSON. Cannot be combined with --profile.\n"
          "  --profile <name>  Bundled profile config to run. Defaults to "
       << kDefaultProfile
-      << " outside attach mode.
-"
-         "  --node <id>      Select one local node from a system manifest. Not available
-"
-         "                    with --attach or dbt_guest mode.
-"
-         "  --daemon         Run a daemon, optionally launching an application.
-"
-         "  --attach <id_or_path>
-"
-         "                    Attach to an existing daemon target: default, an ID under
-"
-         "                    the default runtime directory, a runtime directory path,
-"
-         "                    or a daemon.sock path.
-"
-         "  --env KEY=VALUE  Add or replace an environment variable for the launched app.
-"
-         "  --clear-env-vars Start the launched app with a clean environment, preserving
-"
-         "                    PATH, HOME, TERM, USER, LOGNAME, SHELL, LANG, LC_ALL,
-"
-         "                    and TMPDIR before applying --env.
-"
-         "  --workdir <dir>  Run the launched app from this existing directory.
-"
-         "  --gdb           Run the launched app under rocgdb. Unless --attach is used,
-"
-         "                    this starts a daemon so rocgdb and the app share a backend.
-"
-         "  --gdb-ex <cmd>  Extra rocgdb command to run before the program. May be repeated
-"
-         "                    and implies --gdb; command lists run rocgdb in batch mode.
-"
-         "  --option KEY=VALUE, -o KEY=VALUE
-"
-         "                    Override cpu_thread_budget or wait_checking for this launch.
-"
-         "                    Dedicated flags win over --option in either argument order.
-"
-         "                    Simulator variables for an implicit debugger daemon must be
-"
-         "                    set on rocjitsu itself, not only through --env.
-"
-         "  --cpu-thread-budget <n>, --cpu-thread-budget=<n>
-"
-         "                    Replace cpu_thread_budget for this launch only; the
-"
-         "                    config file is left unchanged. Zero selects automatic
-"
-         "                    sizing. Not available with --attach.
-"
-         "  --wait-checking <mode>, --wait-checking=<mode>
-"
-         "                    Override every CU and GPU for this launch:
-"
-         "                    off disables checks, on enables ordinary checks, and
-"
-         "                    all includes gfx1250 XCNT checks.
-"
-         "                    Omission keeps JSON settings and defaults. The source
-"
-         "                    config is unchanged. Not available with --attach.
-"
-         "  --vfio-socket <path>
-"
-         "                    Serve the configured GPU as a PCI function to a VMM over
-"
-         "                    the vfio-user protocol on this AF_UNIX socket, instead of
-"
-         "                    launching an application. Requires a build with
-"
-         "                    ROCJITSU_ENABLE_VFIO=ON.
-"
-         "                    The VMM must share guest RAM through an mmap-able
-"
-         "                    descriptor or the device cannot reach it; with QEMU that
-"
-         "                    means -object
-"
-         "                    memory-backend-memfd,id=mem,size=<N>,share=on together
-"
-         "                    with -machine memory-backend=mem.
-"
-         "  --thread-budget-table
-"
-         "                    Print engine / dispatch allocations without running a VM
-"
-         "  --check-vfio-user Report whether this binary includes VFIO-user support
-"
-         "  --version, -v     Print version and exit
-"
-         "  --help, -h        Print this help and exit
-"
-         "
-"
-         "Launch overrides apply only to this invocation and do not rewrite the source config.
-";
+      << " outside attach mode.\n"
+         "  --node <id>      Select one local node from a system manifest. Not available\n"
+         "                    with --attach or dbt_guest mode.\n"
+         "  --daemon         Run a daemon, optionally launching an application.\n"
+         "  --attach <id_or_path>\n"
+         "                    Attach to an existing daemon target: default, an ID under\n"
+         "                    the default runtime directory, a runtime directory path,\n"
+         "                    or a daemon.sock path.\n"
+         "  --env KEY=VALUE  Add or replace an environment variable for the launched app.\n"
+         "  --clear-env-vars Start the launched app with a scrubbed environment that\n"
+         "                    keeps process/session basics: PATH, HOME, TERM, USER,\n"
+         "                    LOGNAME, SHELL, LANG, LC_ALL, and TMPDIR; apply --env after.\n"
+         "  --workdir <dir>  Run the launched app from this existing directory.\n"
+         "  --gdb           Run the launched app under rocgdb. Unless --attach is used,\n"
+         "                    this starts a daemon so rocgdb and the app share a backend.\n"
+         "  --gdb-ex <cmd>  Extra rocgdb command to run before the program. May be repeated\n"
+         "                    and implies --gdb; command lists run rocgdb in batch mode.\n"
+         "  --option KEY=VALUE, -o KEY=VALUE\n"
+         "                    Override cpu_thread_budget or wait_checking for this launch.\n"
+         "                    Dedicated flags win over --option in either argument order.\n"
+         "                    Simulator variables for an implicit debugger daemon must be\n"
+         "                    set on rocjitsu itself, not only through --env.\n"
+         "  --cpu-thread-budget <n>, --cpu-thread-budget=<n>\n"
+         "                    Replace cpu_thread_budget for this launch only; the\n"
+         "                    config file is left unchanged. Zero selects automatic\n"
+         "                    sizing. Not available with --attach.\n"
+         "  --wait-checking <mode>, --wait-checking=<mode>\n"
+         "                    Override every CU and GPU for this launch:\n"
+         "                    off disables checks, on enables ordinary checks, and\n"
+         "                    all includes gfx1250 XCNT checks.\n"
+         "                    Omission keeps JSON settings and defaults. The source\n"
+         "                    config is unchanged. Not available with --attach.\n"
+         "  --vfio-socket <path>\n"
+         "                    Serve the configured GPU as a PCI function to a VMM over\n"
+         "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
+         "                    launching an application. Requires a build with\n"
+         "                    ROCJITSU_ENABLE_VFIO=ON.\n"
+         "                    The VMM must share guest RAM through an mmap-able\n"
+         "                    descriptor or the device cannot reach it; with QEMU that\n"
+         "                    means -object\n"
+         "                    memory-backend-memfd,id=mem,size=<N>,share=on together\n"
+         "                    with -machine memory-backend=mem.\n"
+         "  --thread-budget-table\n"
+         "                    Print engine / dispatch allocations without running a VM\n"
+         "  --check-vfio-user Report whether this binary includes VFIO-user support\n"
+         "  --version, -v     Print version and exit\n"
+         "  --help, -h        Print this help and exit\n"
+         "\n"
+         "Launch overrides apply only to this invocation and do not rewrite the source config.\n";
 }
-}
-
 } // namespace
 
 int main(int argc, char *argv[]) {
