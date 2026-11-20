@@ -24,7 +24,10 @@ rocjitsu paths [--json]
 | --- | --- |
 | `--config <path>` | Path to the simulation configuration JSON file. Cannot be combined with `--profile`. |
 | `--profile <name>` | Bundled profile config to run. Defaults to `mi350x` when neither `--config` nor `--profile` is supplied outside attach mode. |
-| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach`. |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach` or `dbt_guest` mode. |
+| `--exec-mode <mode>` | Override top-level `exec_mode` for this launch. Supported values are `functional` and `clocked`. Not available with `--attach` or `dbt_guest` mode. |
+| `--gpus-per-node <n>` | Set `vm.gpu.num_gpus` for legacy configs. With a system manifest, the selected node must already have this GPU count. Not available with `--attach` or `dbt_guest` mode. |
+| `--plugin <name>` | Require an execution plugin for this launch, using built-in defaults when the config has no entry for the plugin. Repeatable. Not available with `--attach`, `--vfio-socket`, or hardware-backed `dbt_guest` mode. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
 | `--attach <id_or_path>` | Attach to a running daemon. Use `default` for the current runtime directory, a daemon ID under that runtime directory, a runtime directory path, or a `daemon.sock` path. |
 | `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The socket count must match the selected node's local GPU count, and paths must be distinct. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
