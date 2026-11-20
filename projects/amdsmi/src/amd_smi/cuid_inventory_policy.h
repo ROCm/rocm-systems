@@ -7,8 +7,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <string>
 

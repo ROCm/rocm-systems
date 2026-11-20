@@ -38,8 +38,8 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
-#include "cuid_inventory_policy.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
+#include "cuid_inventory_policy.h"
 #include "test_common.h"
 
 namespace {

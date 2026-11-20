@@ -1522,7 +1522,6 @@ amdsmi_cuid_source_t cuid_source_for(const amdcuid_id_t& handle) {
   return static_cast<amdsmi_cuid_source_t>(source);
 }
 
-
 void copy_cuid_string(const amdcuid_id_t& id, char* out, size_t out_size) {
   const char* str = amdcuid_id_to_string(id);
   if (!str) {
@@ -1642,8 +1641,8 @@ class CuidInventoryGuard {
     // Register on first use, after libamdcuid's startup handler. fork prepare
     // must take our outer gate before it enters the library's inner lock.
     if (cuid_gate_init != 0) return;
-    static const int registered = pthread_atfork(take_inventory_gate, release_inventory_gate,
-                                                 release_inventory_gate);
+    static const int registered =
+        pthread_atfork(take_inventory_gate, release_inventory_gate, release_inventory_gate);
     held_ = registered == 0;
     if (held_) take_inventory_gate();
   }
@@ -1784,7 +1783,8 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
                 return a.info.component_type < b.info.component_type;
               }
               const int bdf = strcmp(a.bdf, b.bdf);
-              return bdf != 0 ? bdf < 0 : amdsmi_cuid_detail::path_compare(a.device_path, b.device_path) < 0;
+              return bdf != 0 ? bdf < 0
+                              : amdsmi_cuid_detail::path_compare(a.device_path, b.device_path) < 0;
             });
 
   const uint32_t written = std::min(capacity, total);
