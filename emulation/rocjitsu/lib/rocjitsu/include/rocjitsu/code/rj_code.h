@@ -153,24 +153,6 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
 /// @param[in] inst Caller-owned instruction to destroy (may be NULL).
 RJ_API_EXPORT void rj_code_inst_destroy(rj_code_inst_t *inst);
 
-/// @brief Instruction property flags.
-/// @details Each flag is a single bit in a bitmask. Multiple flags can be
-/// combined with bitwise OR to describe an instruction's properties.
-typedef enum rj_code_inst_flags_e {
-  /// @brief Instruction is an unconditional branch.
-  RJ_CODE_INST_BRANCH = 1,
-  /// @brief Instruction is a conditional branch.
-  RJ_CODE_INST_COND_BRANCH = (1 << 1),
-  /// @brief Instruction is an indirect branch (target from register).
-  RJ_CODE_INST_INDIRECT_BRANCH = (1 << 2),
-  /// @brief Instruction terminates the program (e.g. s_endpgm).
-  RJ_CODE_INST_PROGRAM_TERMINATOR = (1 << 3),
-  /// @brief Instruction executes immediately without scheduling latency.
-  RJ_CODE_INST_IMMEDIATELY_EXECUTED = (1 << 4),
-  /// @brief Instruction performs a memory operation (load or store).
-  RJ_CODE_INST_MEMORY_OP = (1 << 5)
-} rj_code_inst_flags_t;
-
 /// @brief Opaque handle to an executable (x86 HIP fat binary or standalone device ELF).
 typedef struct rj_code_executable_t rj_code_executable_t;
 
@@ -378,11 +360,6 @@ RJ_API_EXPORT const char *rj_code_inst_mnemonic(const rj_code_inst_t *inst);
 /// @param[in] inst Instruction to query.
 /// @returns Size in bytes.
 RJ_API_EXPORT uint32_t rj_code_inst_size(const rj_code_inst_t *inst);
-
-/// @brief Get the flags for an instruction.
-/// @param[in] inst Instruction to query.
-/// @returns Bitmask of @ref rj_code_inst_flags_t values.
-RJ_API_EXPORT uint32_t rj_code_inst_flags(const rj_code_inst_t *inst);
 
 /// @brief Disassemble an instruction into a string buffer.
 /// @param[in] inst Instruction to disassemble.
