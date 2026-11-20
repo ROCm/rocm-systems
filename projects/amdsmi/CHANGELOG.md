@@ -46,6 +46,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Setting the current memory partition now cancels a pending memory partition change**.  
   - Previously, amd-smi did not send this request to the driver, so the next driver reload still applied a different partition requested earlier. Older amdgpu drivers ignore the request because of a driver bug and still apply the partition requested earlier; update to an amdgpu driver that has the fix. If a read-only `/sys` (for example, in a container) refuses the request, amd-smi now reports an error instead of success.
 
+- **Fixed duplicate and stale AI NIC handles after reinitializing the library**.  
+  - After a shut down, a NIC-only session listed every AI NIC one extra time for each earlier session and grew its memory use. AI NIC handles from before the shut down also kept working, and an init that followed one failing during GPU discovery could hang. Each init now lists every AI NIC once, rejects old handles, and no longer hangs.
+
 ## amd_smi_lib for ROCm 10.2.0
 
 ### Added
