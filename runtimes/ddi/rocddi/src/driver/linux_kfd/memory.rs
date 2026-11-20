@@ -1943,6 +1943,37 @@ impl KfdAllocation {
         self.metadata.as_slice()
     }
 
+    #[allow(unsafe_code)]
+    pub(super) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.vm
+            .kfd()
+            .check_process()
+            .map_err(|source| native_error("diagnostic allocation", source))?;
+        if self.freeing
+            || self.uncertain
+            || !matches!(self.mapping, GpuMapping::Mapped)
+            || self.native_flags & (uapi::DOORBELL | uapi::MMIO_REMAP) != 0
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "allocation has no retained diagnostic backing",
+            ));
+        }
+        let info = self.cached_info();
+        // SAFETY: Native cleanup is excluded by this borrow. Registered callers
+        // retain their pages by the allocation's original lifetime contract.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                info.device_address,
+                info.host_address,
+                info.size,
+            )
+        }
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.check_address()
     }
