@@ -12441,28 +12441,45 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableOutOfPlace) {
       });
 }
 
-TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableInPlace) {
+// In place, every size the fabric table sends to DDA LL, LL128 or VMM out of place takes Direct p2p instead, without
+// probing any fabric tier's eligibility.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceTakesDirect) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAlltoAll_Gfx1250FabricTableInPlace",
+      "Wrap_SelectAlltoAll_Gfx1250InPlaceTakesDirect",
       []() {
         A2aGfx1250Comm a2a;
         ncclComm* const comm = a2a.comm;
+        a2a.tbl.ddaVmmMax[ncclFuncAlltoAll] = 256u << 20;
+        int fabricCalls = 0;
+        auto count = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++fabricCalls;
+          return true;
+        };
+        g_allToAllDdaFabricLLEligible = count;
+        g_allToAllDdaFabricLL128Eligible = count;
+        ScopedHook vmmEligible(g_allToAllDdaFabricEligible, count);
         struct Case {
           int n;
           size_t perPeer;
-          int algo;
+          int outOfPlace;
         } cases[] = {
             {8, 512, RCCL_DDA_FABRIC_LL},
             {8, 1u << 20, RCCL_DDA_FABRIC_LL128},
             {8, 2u << 20, RCCL_DDA_FABRIC_LL128},        // T = 16 MiB
             {16, 1u << 20, RCCL_DDA_FABRIC_LL128},
+            {8, 4u << 20, RCCL_DDA_FABRIC_VMM},          // T = 32 MiB
+            {8, 32u << 20, RCCL_DDA_FABRIC_VMM},         // T = 256 MiB == ddaVmmMax
         };
         for (const Case& c : cases) {
           comm->nRanks = c.n;
           for (bool query : {true, false}) {
             rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aSend, kA2aRecv, query, &d));
+            EXPECT_EQ(c.outOfPlace, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+            fabricCalls = 0;
             ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aRecv, kA2aRecv, query, &d));
-            EXPECT_EQ(c.algo, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+            EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+            EXPECT_EQ(0, fabricCalls) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
           }
         }
       });
@@ -12550,8 +12567,8 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128) {
       });
 }
 
-// Buffer alignment does not move a call off LL128, in or out of place, so ranks whose buffers differ
-// in alignment pick the same kernel. Live dispatch and the query report the same decision.
+// Buffer alignment does not move an out-of-place call off LL128, so ranks whose buffers differ in alignment
+// pick the same kernel; in place takes Direct at every alignment. Live dispatch and the query agree.
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128",
@@ -12572,17 +12589,17 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128) {
               SCOPED_TRACE(testing::Message() << "query=" << query << " n=" << n << " P=" << perPeer);
               rcclCollDecision d{};
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, inPlace4, inPlace4, query, &d));
+              EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send4, kA2aRecv, query, &d));
               EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
               EXPECT_EQ(132u, d.nMaxChannels);
-              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send4, kA2aRecv, query, &d));
-              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send2, kA2aRecv, query, &d));
               EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, recv1, query, &d));
               EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, inPlace2, inPlace2, query, &d));
-              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
             }
           }
         }
