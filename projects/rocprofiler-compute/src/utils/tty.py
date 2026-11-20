@@ -16,11 +16,7 @@ from tabulate import tabulate
 
 import config
 from membw_analysis.models import MemBwAnalysisResult
-from membw_analysis.summary import (
-    ACTIVE_FALLBACK_TEXT,
-    has_active_nodes,
-    status_text,
-)
+from membw_analysis.summary import status_line
 from memory_chart.loader import Layouts
 from memory_chart.render import format_mem_chart_heading, plot_mem_chart
 from memory_chart.units import panel_units
@@ -461,22 +457,13 @@ def _render_membw_guidance(
     chart_width: int = 0,
 ) -> str:
     """Render membw guidance text to append below the memory chart."""
-    if not has_active_nodes(membw_result.nodes):
-        return _render_membw_status_line(membw_result)
-    panel_output = _render_membw_guidance_panel(
+    line = status_line(membw_result)
+    if line is not None:
+        return f"{line}\n"
+    return _render_membw_guidance_panel(
         membw_result.guidance_blocks,
         chart_width=chart_width,
     )
-    if panel_output:
-        return panel_output
-    return f"{ACTIVE_FALLBACK_TEXT}\n"
-
-
-def _render_membw_status_line(
-    membw_result: MemBwAnalysisResult,
-) -> str:
-    """Render a single status line when no bottlenecks are active."""
-    return f"{status_text(membw_result)}\n"
 
 
 def _style_guidance_block(block: str) -> RichText:
