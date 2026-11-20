@@ -370,6 +370,35 @@ TEST(GpuUnit, ProcessListKeepsKfdVramAsVramWhenTheVramTotalIsNotANumber) {
   EXPECT_EQ(list[0].memory_usage.gtt_mem, kGtt);
 }
 
+TEST(GpuUnit, ProcessListTakesKfdVramAsGttWhereTheGpuHasNoVramTotal) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // As on an MI300A in native mode: amdgpu manages no VRAM, so the GPU has no
+  // VRAM total, and it places what KFD allocates as VRAM in GTT.
+  constexpr uint32_t kPid = 4275;
+  constexpr uint64_t kKfdVram = 8 * 1024 * 1024;
+  const std::string dir = std::to_string(kPid);
+  roots.kfd().WriteFile(dir + "/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), dir);
+  roots.kfd().WriteFile(dir + "/vram_" + std::to_string(kKfdGpuId), std::to_string(kKfdVram));
+  AddProcess(&roots.proc(), kPid, kBdfText);
+  roots.topology().WriteFile("0/mem_banks/0/properties",
+                             "heap_type 1\nsize_in_bytes 14040223744\n");
+
+  TestGpu gpu;
+  amd::smi::RocmSMI::getInstance().devices()[gpu.index()]->set_bdfid((0xfeULL << 8) |
+                                                                     (0x1fULL << 3) | 7);
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  ASSERT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_processes, 1U);
+  EXPECT_EQ(list[0].memory_usage.vram_mem, kVram);
+  EXPECT_EQ(list[0].memory_usage.gtt_mem, kKfdVram);
+  EXPECT_EQ(list[0].mem, kVram + kKfdVram + kCpu);
+}
+
 TEST(GpuUnit, ProcessListTakesKfdVramAsGttOnEveryPartitionOfSuchAnApu) {
   ScopedAmdsmiInit smi_init;
   MockProcessRoots roots;

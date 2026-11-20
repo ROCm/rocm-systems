@@ -103,7 +103,8 @@ inline DrmMemory DrmMemoryBytes(pid_t pid, const std::string& render_node) {
 
 // Whether amdgpu places what KFD allocates as VRAM on the GPU with KFD id
 // `kfd_gpu_id` and render node `render_node` in GTT, as it does on an APU with
-// less VRAM than GTT. KFD then offers more local memory than the GPU has VRAM.
+// less VRAM than GTT. KFD then offers more local memory than the GPU has VRAM,
+// which is 0 where amdgpu shows no VRAM total (an MI300A in native mode).
 inline bool KfdVramIsInGtt(uint32_t kfd_gpu_id, const std::string& render_node) {
   uint64_t kfd_memory = 0;
   if (DIR* nodes = opendir(kKfdNodesRoot)) {
@@ -127,7 +128,9 @@ inline bool KfdVramIsInGtt(uint32_t kfd_gpu_id, const std::string& render_node) 
     closedir(nodes);
   }
   const std::string node_name = render_node.substr(render_node.rfind('/') + 1);
-  std::ifstream vram_file("/sys/class/drm/" + node_name + "/device/mem_info_vram_total");
+  const std::string vram_path = "/sys/class/drm/" + node_name + "/device/mem_info_vram_total";
+  if (access(vram_path.c_str(), F_OK) != 0 && errno == ENOENT) return kfd_memory > 0;
+  std::ifstream vram_file(vram_path);
   uint64_t vram = 0;
   return (vram_file >> vram) && kfd_memory > vram;
 }

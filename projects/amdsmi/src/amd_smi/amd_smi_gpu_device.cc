@@ -198,7 +198,8 @@ constexpr uint64_t kPartitionIdBits = (uint64_t{0xF} << 28) | 0x7;
 // GTT. KFD then offers more local memory than the GPU has VRAM. The VRAM total
 // comes from sysfs, as rsmi_dev_memory_total_get() falls back to KFD's size, and
 // for a partition whose render node has none, from the GPU's first partition.
-// No if either size cannot be read.
+// Where no partition has one, amdgpu manages no VRAM (an MI300A in native mode),
+// so the total is 0. No if a size cannot be read.
 bool KfdVramIsInGtt(uint32_t index, uint64_t kfd_gpu_id) {
   try {
     RocmSMI& smi = RocmSMI::getInstance();
@@ -210,14 +211,15 @@ bool KfdVramIsInGtt(uint32_t index, uint64_t kfd_gpu_id) {
       return false;
     }
     uint64_t vram = 0;
-    if (devices[index]->readDevInfo(kDevMemTotVRAM, &vram) != 0) {
+    const int vram_err = devices[index]->readDevInfo(kDevMemTotVRAM, &vram);
+    if (vram_err != 0) {
       if (devices[index]->bdfid() == UINT64_MAX) return false;
       const uint64_t gpu = devices[index]->bdfid() & ~kPartitionIdBits;
       const auto first = std::find_if(devices.begin(), devices.end(), [&](const auto& device) {
         return (device->bdfid() & ~kPartitionIdBits) == gpu &&
                device->readDevInfo(kDevMemTotVRAM, &vram) == 0;
       });
-      if (first == devices.end()) return false;
+      if (first == devices.end() && vram_err != ENOENT) return false;
     }
     return kfd_memory > vram;
   } catch (...) {
