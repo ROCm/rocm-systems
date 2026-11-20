@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 
@@ -71,7 +72,7 @@ sdk_definitions()
         derived("LOOP_A", "LOOP_B+1"),
         derived("LOOP_B", "LOOP_A+1"),
     };
-    return make_counter_definitions(counters);
+    return counter_definitions{ counters };
 }
 
 input_reduction

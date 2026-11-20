@@ -5,6 +5,7 @@
 
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "core/agent.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
@@ -237,7 +238,7 @@ private:
             lookup.entries.try_emplace(entry.details.front().name, &entry);
         }
         lookup.definitions =
-            collectors::gpu_perf_counter::make_counter_definitions(all_details);
+            collectors::gpu_perf_counter::counter_definitions{ all_details };
 
         auto result = resolved_counters{};
         for(const auto& entry : catalog)

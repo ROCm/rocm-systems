@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/expression_parser.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/expression_tree.hpp"
 

@@ -10,6 +10,7 @@ endif()
 set(pmc_gpu_perf_counter_sources
     ${CMAKE_CURRENT_LIST_DIR}/types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/sample.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/counter_definitions.hpp
     ${CMAKE_CURRENT_LIST_DIR}/expression_tree.hpp
     ${CMAKE_CURRENT_LIST_DIR}/expression_scanner.hpp
     ${CMAKE_CURRENT_LIST_DIR}/expression_parser.hpp

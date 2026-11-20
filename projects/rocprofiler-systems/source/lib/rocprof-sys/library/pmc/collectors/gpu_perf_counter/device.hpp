@@ -5,6 +5,7 @@
 
 #include "common/defines.h"
 #include "core/agent.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "logger/debug.hpp"
@@ -222,7 +223,7 @@ private:
     {
         auto all_counters = m_counter_meta;
         all_counters.insert(all_counters.end(), inputs.begin(), inputs.end());
-        auto const definitions = make_counter_definitions(all_counters);
+        auto const definitions = counter_definitions{ all_counters };
 
         auto slots_by_name = std::unordered_map<std::string, size_t>{};
         for(const auto& meta : m_counter_meta)

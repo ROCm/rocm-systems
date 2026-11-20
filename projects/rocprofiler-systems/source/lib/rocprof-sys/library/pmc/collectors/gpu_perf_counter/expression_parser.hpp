@@ -4,6 +4,7 @@
 #pragma once
 
 #include "common/string_utility.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/expression_scanner.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/expression_tree.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
@@ -13,31 +14,14 @@
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace rocprofsys::pmc::collectors::gpu_perf_counter
 {
-
-/// @brief Counter metadata by counter name; resolves the names used in expressions.
-using counter_definitions = std::unordered_map<std::string, counter_metadata>;
-
-/// @brief Indexes @p counters by name. Instances of one counter share a definition.
-[[nodiscard]] inline counter_definitions
-make_counter_definitions(std::span<const counter_metadata> counters)
-{
-    auto definitions = counter_definitions{};
-    for(const auto& meta : counters)
-    {
-        definitions.try_emplace(meta.name, meta);
-    }
-    return definitions;
-}
 
 /// @brief What parsing an expression yields.
 struct parsed_expression
@@ -309,19 +293,19 @@ private:
 
     [[nodiscard]] const counter_metadata& lookup(std::string_view name)
     {
-        auto const itr = m_definitions.find(std::string{ name });
-        if(itr == m_definitions.end())
+        const auto* meta = m_definitions.find(name);
+        if(meta == nullptr)
         {
             throw std::invalid_argument(
                 fmt::format("derived counter expression '{}': unknown counter '{}'",
                             m_expression, name));
         }
         auto& referenced = m_result.referenced_names;
-        if(std::ranges::find(referenced, itr->second.name) == referenced.end())
+        if(std::ranges::find(referenced, meta->name) == referenced.end())
         {
-            referenced.push_back(itr->second.name);
+            referenced.push_back(meta->name);
         }
-        return itr->second;
+        return *meta;
     }
 
     [[nodiscard]] size_t input_slot(const std::string& name)
