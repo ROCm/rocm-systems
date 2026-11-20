@@ -12,7 +12,7 @@ name: AMDSMI Manylinux Wheels
 
 on:
   pull_request:
-    branches: [develop]
+    branches: [develop, 'release/**']
     paths:
       - 'projects/amdsmi/**'
       - '!projects/amdsmi/docs/**'
@@ -88,6 +88,7 @@ jobs:
       # the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
           sparse-checkout: |
             projects/amdsmi
             shared/cuid
@@ -132,6 +133,13 @@ jobs:
           ${{matrix.target.python-bin}} \
             "$GITHUB_WORKSPACE/projects/amdsmi/tests/run_amdsmi_pkg_conflict_test.py" \
             --build-root "$AMDSMI_WHEEL_BUILD_DIR"
+
+      # This is the ESMI-on system library from this build, not the isolated
+      # wheel library or a previously installed ROCm. No GPU/libclang needed.
+      - name: Check shipped system ABI
+        run: |
+          ${{matrix.target.python-bin}} -I projects/amdsmi/tests/abi_check/abi_gate.py shipped \
+            --library "$AMDSMI_WHEEL_BUILD_DIR/src/libamd_smi.so"
 
       - name: Smoke test (install + import)
         run: |

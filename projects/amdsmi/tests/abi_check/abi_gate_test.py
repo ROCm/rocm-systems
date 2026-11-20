@@ -2,6 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import json
 import os
 import shutil
 import subprocess
@@ -670,6 +671,122 @@ class GateTest(unittest.TestCase):
 
     def test_no_change_passes(self):
         self.assertFalse(self.run_gate()["blocking"])
+
+    def ship(self):
+        snap = abi_gate.snapshot_text(BASE)
+        baseline = {
+            "source": self.rev(),
+            "header": {k: snap[k] for k in ("types", "aliases", "functions", "macros")},
+            "elf": {"soname": "libamd_smi.so.27", "exports": ["amdsmi_old_api@@AMDSMI_1"]},
+            "append_only": {},
+        }
+        self.write(abi_gate.SHIPPED, json.dumps(baseline))
+        self.commit("release baseline")
+        self.base = self.rev()
+        return baseline
+
+    def test_shipped_contract_survives_acknowledged_drift(self):
+        self.ship()
+        self.grow()
+        self.acknowledge()
+        self.write(abi_gate.CHANGELOG, self.BREAK)
+        self.commit("acknowledged drift")
+        self.base = self.rev()
+        self.add_api()
+        self.commit("additive follow-up with unchanged broken base")
+        result = self.run_gate()
+        self.assertTrue(result["blocking"])
+        self.assertFalse(result["breaks"])
+        self.assertIn("shipped ABI: types/amdsmi_info_t/size: 48 -> 56", result["errors"])
+
+    def test_shipped_reserved_carve_and_new_api_pass(self):
+        self.ship()
+        self.write(abi_gate.HEADER, edit(BASE, "reserved[8]", "added, reserved[7]"))
+        self.add_api()
+        self.commit("carve reserved and add a getter")
+        self.assertFalse(self.run_gate()["blocking"])
+
+    def test_shipped_refresh_cannot_drop_or_exempt_contract(self):
+        b = self.ship()
+        b["elf"]["exports"] = ["amdsmi_new@@AMDSMI_1"]
+        del b["header"]["functions"]["amdsmi_get_info"]
+        b["append_only"]["amdsmi_info_t"] = "exemption"
+        self.write(abi_gate.SHIPPED, json.dumps(b))
+        self.commit("weaken baseline without changing SONAME")
+        errors = "\n".join(self.run_gate()["errors"])
+        for text in (
+            "missing export amdsmi_old_api@@AMDSMI_1",
+            "functions/amdsmi_get_info",
+            "cannot mark shipped type amdsmi_info_t",
+        ):
+            self.assertIn(text, errors)
+        os.remove(os.path.join(self.repo, abi_gate.SHIPPED))
+        self.commit("drop the baseline")
+        self.assertTrue(self.run_gate()["blocking"])
+
+    def test_shipped_new_major_requires_matching_baseline(self):
+        b = self.ship()
+        self.write(abi_gate.HEADER, edit(BASE, "VERSION_MAJOR 27", "VERSION_MAJOR 28"))
+        self.commit("bump major")
+        self.assertTrue(self.run_gate()["blocking"])
+        b["header"]["macros"]["AMDSMI_LIB_VERSION_MAJOR"] = 28
+        b["elf"]["soname"] = "libamd_smi.so.28"
+        self.write(abi_gate.SHIPPED, json.dumps(b))
+        self.commit("review baseline for new SONAME")
+        self.assertFalse(self.run_gate()["blocking"])
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux") and shutil.which("cc") and shutil.which("readelf"),
+        "requires ELF tools",
+    )
+    def test_shipped_elf_tracks_defined_exports_versions_and_soname(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = os.path.join(tmp, "lib.so")
+            script = os.path.join(tmp, "lib.map")
+
+            def build(version, symbols, major=27):
+                with open(script, "w") as f:
+                    f.write(f"{version} {{ global: amdsmi_*; local: *; }};")
+                subprocess.run(
+                    [
+                        "cc",
+                        "-fPIC",
+                        "-shared",
+                        "-x",
+                        "c",
+                        "-",
+                        "-o",
+                        lib,
+                        f"-Wl,--version-script={script},-soname,libamd_smi.so.{major}",
+                    ],
+                    input="extern void amdsmi_external(void);\n"
+                    + "\n".join(f"void {s}(void) {{ amdsmi_external(); }}" for s in symbols),
+                    text=True,
+                    check=True,
+                )
+
+            build("AMDSMI_1", ["amdsmi_old_api", "private_fn"])
+            baseline = abi_gate.capture(self.repo, self.base, lib)
+            elf = baseline["elf"]
+            self.assertEqual(elf["exports"], ["amdsmi_old_api@@AMDSMI_1"])
+            for version, symbols, major, expected in (
+                ("AMDSMI_1", ["amdsmi_old_api", "amdsmi_added"], 27, []),
+                ("AMDSMI_1", ["amdsmi_added"], 27, ["missing export amdsmi_old_api@@AMDSMI_1"]),
+                ("AMDSMI_2", ["amdsmi_old_api"], 27, ["missing export amdsmi_old_api@@AMDSMI_1"]),
+                (
+                    "AMDSMI_1",
+                    ["amdsmi_old_api"],
+                    28,
+                    ["expected libamd_smi.so.27, found libamd_smi.so.28"],
+                ),
+            ):
+                with self.subTest(version=version, symbols=symbols, major=major):
+                    build(version, symbols, major)
+                    self.assertEqual(
+                        abi_gate.shipped_elf_errors(elf, abi_gate.elf_contract(lib)), expected
+                    )
+            with self.assertRaisesRegex(abi_gate.GateError, "expects libamd_smi.so.27"):
+                abi_gate.capture(self.repo, self.base, lib)
 
     def test_break_blocks_without_acknowledgement(self):
         self.grow()
