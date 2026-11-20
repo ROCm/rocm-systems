@@ -5901,6 +5901,15 @@ FcntlArgKind fcntl_arg_kind(int cmd) {
 #if defined(F_GETLK64) && (!defined(F_GETLK) || F_GETLK64 != F_GETLK)
   case F_GETLK64:
 #endif
+#ifdef F_OFD_SETLK
+  case F_OFD_SETLK:
+#endif
+#ifdef F_OFD_SETLKW
+  case F_OFD_SETLKW:
+#endif
+#ifdef F_OFD_GETLK
+  case F_OFD_GETLK:
+#endif
 #ifdef F_GETOWNER_UIDS
   case F_GETOWNER_UIDS:
 #endif

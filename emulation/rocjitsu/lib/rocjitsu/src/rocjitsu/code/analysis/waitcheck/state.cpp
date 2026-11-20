@@ -725,7 +725,7 @@ util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruc
     return util::Result::failure();
   if (!fields.value())
     return util::Result::success();
-  if (inst.mnemonic() == "s_wait_idle") {
+  if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_IDLE) {
     VgprMsbState vgpr_msb = state.vgpr_msb;
     ExpertSchedulingState expert_scheduling = state.expert_scheduling;
     state = {};
@@ -733,7 +733,8 @@ util::Result WaitcheckStateOps::apply_waitcnt(PendingState &state, const Instruc
     state.expert_scheduling = expert_scheduling;
     return util::Result::success();
   }
-  if (inst.mnemonic() == "s_wait_alu" || inst.mnemonic() == "s_waitcnt_depctr")
+  if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_ALU ||
+      inst.amdgpu_operation() == amdgpu::Operation::S_WAITCNT_DEPCTR)
     apply_sgpr_hazard_wait(state.sgpr_hazards,
                            static_cast<uint32_t>(inst.src_operand(0)->encoding_value()));
   return apply_wait_fields(state, *fields.value(), arch);

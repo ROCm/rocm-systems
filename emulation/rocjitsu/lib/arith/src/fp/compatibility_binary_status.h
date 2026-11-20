@@ -103,7 +103,7 @@ inline uint32_t compatibility_mul_causes(uint32_t a, uint32_t b, uint32_t omod, 
 }
 
 // Inspect participating source lanes before any possibly aliased destination writes.
-template <Binary Op, bool Rdna3>
+template <Binary Op, bool Rdna3, bool Gfx1250 = false>
 inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, uint32_t write_mask,
                                             uint32_t modifiers, const uint32_t *a,
                                             const uint32_t *b) {
@@ -112,7 +112,7 @@ inline uint32_t compatibility_binary_causes(uint64_t flags, uint32_t exec_mask, 
     if (!(exec_mask & (1U << lane))) {
       continue;
     }
-    if constexpr (!Rdna3) {
+    if constexpr (!Rdna3 && !Gfx1250) {
       if (write_mask & (1U << lane)) {
         causes |= gfx12_binary_causes<Op>(flags, modifiers, a[lane], b[lane]);
       }

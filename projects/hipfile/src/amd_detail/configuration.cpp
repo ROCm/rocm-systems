@@ -57,13 +57,13 @@ Configuration::fastpath() const noexcept
     static bool readExists{!!getHipAmdFileReadPtr()};
     static bool writeExists{!!getHipAmdFileWritePtr()};
     static bool usesDxg{rocrUsesDxg()};
-    return readExists && writeExists && !usesDxg && m_fastpath_override.value_or(fastpath_env);
+    return readExists && writeExists && !usesDxg && m_fastpath_override.load().value_or(fastpath_env);
 }
 
 void
 Configuration::fastpath(bool enabled) noexcept
 {
-    m_fastpath_override = enabled;
+    m_fastpath_override.store(enabled);
 }
 
 bool

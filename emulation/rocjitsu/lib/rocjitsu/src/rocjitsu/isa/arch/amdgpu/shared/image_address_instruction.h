@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 

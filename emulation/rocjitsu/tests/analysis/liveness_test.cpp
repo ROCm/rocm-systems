@@ -95,6 +95,11 @@ private:
 
 class TestInstruction : public Instruction {
 public:
+  TestInstruction(amdgpu::Operation operation, std::string_view mnemonic)
+      : TestInstruction(mnemonic) {
+    set_amdgpu_operation(operation);
+  }
+
   // `literal_src`, when set, appends one literal source operand carrying the
   // given value via literal64_value() — models an instruction's literal64
   // (SIMM) immediate, e.g. the all-ones source of `s_mov_b64 exec, <lit>`.
@@ -300,9 +305,9 @@ public:
                                  std::nullopt, {}, std::nullopt, std::nullopt,
                                  /*def_size_bits=*/16);
     case TestOpcode::SetregWithoutHwreg:
-      return new TestInstruction("s_setreg_b32");
+      return new TestInstruction(amdgpu::Operation::S_SETREG_B32, "s_setreg_b32");
     case TestOpcode::SetregImmWithoutHwreg:
-      return new TestInstruction("s_setreg_imm32_b32");
+      return new TestInstruction(amdgpu::Operation::S_SETREG_IMM32_B32, "s_setreg_imm32_b32");
     }
     return new TestInstruction("test_end", {}, {}, PROGRAM_TERMINATOR);
   }
