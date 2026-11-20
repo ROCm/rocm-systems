@@ -95,17 +95,14 @@ void dfs_reverse_post_order(const BasicBlock &start,
 }
 
 [[nodiscard]] bool is_sgpr_movrel(const Instruction &inst) {
-  return inst.mnemonic().starts_with("s_movrel");
+  return (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION)) != 0;
 }
 
 // True if inst may reach VGPRs through M0-relative or GPR-index addressing,
 // which explicit operands do not show.
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
                                                std::span<const uint8_t> text, rj_code_arch_t arch) {
-  const std::string_view mnemonic = inst.mnemonic();
-  // TODO: Move indirect-access properties into decoded instruction metadata so
-  // future ISA variants cannot bypass this completeness gate.
-  if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
+  if ((inst.flags() & (RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) != 0) {
     return true;
   }
   return may_enable_gpr_indexing(inst, text, arch);
@@ -119,8 +116,9 @@ namespace {
 // writes whose source cannot be proved clear from the supplied bytes.
 std::optional<bool> mode_bit_write(const Instruction &inst, std::span<const uint8_t> text,
                                    uint16_t bit, uint64_t offset) {
-  const std::string_view mnemonic = inst.mnemonic();
-  if (mnemonic != "s_setreg_b32" && mnemonic != "s_setreg_imm32_b32")
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (operation != amdgpu::Operation::S_SETREG_B32 &&
+      operation != amdgpu::Operation::S_SETREG_IMM32_B32)
     return std::nullopt;
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr)
@@ -128,7 +126,7 @@ std::optional<bool> mode_bit_write(const Instruction &inst, std::span<const uint
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
   if (!amdgpu::hwreg_slice_overlaps_mode_bit(hwreg, bit))
     return std::nullopt;
-  if (mnemonic == "s_setreg_b32" || inst.size() < 8 || offset > text.size() ||
+  if (operation == amdgpu::Operation::S_SETREG_B32 || inst.size() < 8 || offset > text.size() ||
       text.size() - offset < 8)
     return true;
   const std::optional<uint32_t> literal = text_word_at(text, offset + sizeof(uint32_t));
@@ -144,7 +142,7 @@ bool may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> t
                              rj_code_arch_t arch, std::optional<uint64_t> instruction_offset) {
   if (!isa_properties(arch).mode_has_gpr_idx_en)
     return false;
-  if (inst.mnemonic() == "s_set_gpr_idx_on")
+  if (inst.amdgpu_operation() == amdgpu::Operation::S_SET_GPR_IDX_ON)
     return true;
   return mode_bit_write(inst, text, 27, instruction_offset.value_or(inst.src_loc()))
       .value_or(false);
@@ -154,7 +152,7 @@ bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text, rj
                       std::optional<uint64_t> instruction_offset) {
   if (!arch_is_cdna_4_or_lower(arch))
     return false;
-  if (inst.mnemonic() == "s_setvskip") {
+  if (inst.amdgpu_operation() == amdgpu::Operation::S_SETVSKIP) {
     const Operand *source = inst.src_operand(0);
     const Operand *selector = inst.src_operand(1);
     if (source == nullptr || selector == nullptr)

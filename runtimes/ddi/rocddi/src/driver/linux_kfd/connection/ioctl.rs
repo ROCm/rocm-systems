@@ -27,6 +27,7 @@ unsafe extern "C" {
 /// Production dispatch goes straight from this match to the kernel ioctl.
 pub(in super::super) enum Call<'a> {
     Version(&'a mut uapi::Version),
+    VersionExtension(&'a mut uapi::VersionExtension),
     ClockCounters(&'a mut uapi::ClockCounters),
     AvailableMemory(&'a mut uapi::AvailableMemory),
     XnackMode(&'a mut uapi::XnackMode),
@@ -60,6 +61,7 @@ pub(in super::super) enum Call<'a> {
     CreateQueue(&'a mut uapi::CreateQueue),
     DestroyQueue(&'a mut uapi::DestroyQueue),
     UpdateQueue(&'a mut uapi::UpdateQueue),
+    QueueWaveState(&'a mut uapi::QueueWaveState),
     SetCuMask(&'a mut uapi::SetCuMask, &'a [u32]),
     AllocQueueGws(&'a mut uapi::AllocQueueGws),
 }
@@ -121,6 +123,10 @@ impl Kfd {
         }
         let (request, body) = match &mut call {
             Call::Version(args) => (uapi::GET_VERSION, ptr::from_mut(*args).cast::<c_void>()),
+            Call::VersionExtension(args) => (
+                uapi::GET_VERSION_EXTENSION,
+                ptr::from_mut(*args).cast::<c_void>(),
+            ),
             Call::ClockCounters(args) => (uapi::GET_CLOCK_COUNTERS, ptr::from_mut(*args).cast()),
             Call::AvailableMemory(args) => {
                 (uapi::GET_AVAILABLE_MEMORY, ptr::from_mut(*args).cast())
@@ -183,6 +189,7 @@ impl Kfd {
             Call::SetTrapHandler(args) => (uapi::SET_TRAP_HANDLER, ptr::from_mut(*args).cast()),
             Call::CreateQueue(args) => (uapi::CREATE_QUEUE, ptr::from_mut(*args).cast()),
             Call::DestroyQueue(args) => (uapi::DESTROY_QUEUE, ptr::from_mut(*args).cast()),
+            Call::QueueWaveState(args) => (uapi::GET_QUEUE_WAVE_STATE, ptr::from_mut(*args).cast()),
             Call::UpdateQueue(args) => (uapi::UPDATE_QUEUE, ptr::from_mut(*args).cast()),
             Call::SetCuMask(args, mask) => {
                 args.mask = mask.as_ptr() as u64;
