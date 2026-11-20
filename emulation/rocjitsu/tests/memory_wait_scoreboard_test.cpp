@@ -38,12 +38,27 @@
 
 #include "gfx11_mimg_test_common.h"
 
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <format>
 #include <fstream>
+#include <functional>
+#include <initializer_list>
+#include <ios>
 #include <iterator>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace {
 constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT

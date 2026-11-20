@@ -20,8 +20,17 @@
 #include "rocjitsu/vm/amdgpu/ordered_count.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string_view>
+#include <vector>
 
 namespace rocjitsu::amdgpu {
 
