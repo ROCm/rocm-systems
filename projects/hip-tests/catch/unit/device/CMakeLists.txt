@@ -136,6 +136,9 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX)
   # Exports its ioctl() so that it interposes the one ROCr calls
   set_target_properties(hipInitQueues_Exe PROPERTIES ENABLE_EXPORTS ON)
   add_dependencies(DeviceTest hipInitQueues_Exe)
+  if(TARGET hipInitQueues)  # STANDALONE_TESTS per-file target
+    add_dependencies(hipInitQueues hipInitQueues_Exe)
+  endif()
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipInitQueues_Exe)
 endif()
 
