@@ -182,19 +182,22 @@ def check_checksums(results: dict[str, list[RunResult]]) -> list[str]:
 
 
 def check_drift(runs: Sequence[RunResult]) -> dict[str, Any]:
-    """Compare wall median of the first half of runs with the second half."""
+    """Compare the wall median of the first half of runs with the second half.
+
+    Each half's own scatter sets the noise: the scatter of all runs pooled grows with the
+    drift itself and would hide it.
+    """
     walls = [r.wall_ns for r in runs if r.ok]
     if len(walls) < MIN_DRIFT_RUNS:
         return {"drift": False, "checked": False}
     half = len(walls) // 2
-    first = statistics.median(walls[:half])
-    second = statistics.median(walls[half:])
-    diff = abs(second - first)
+    first, second = stats(walls[:half]), stats(walls[half:])
+    diff = second["median"] - first["median"]
     return {
-        "drift": diff > 0 and diff >= NOISE_FACTOR * mad(walls),
+        "drift": exceeds_noise(diff, first["median"], first, second),
         "checked": True,
-        "first_half_median": first,
-        "second_half_median": second,
+        "first_half_median": first["median"],
+        "second_half_median": second["median"],
     }
 
 

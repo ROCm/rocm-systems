@@ -56,6 +56,21 @@ def test_drift_detected():
     assert not analysis.check_drift([run(10)] * 3)["checked"]
 
 
+# Deterministic scatter of -5..5 ms around a 200 ms run.
+NOISE_MS = [(i * 7919) % 11 - 5 for i in range(100)]
+
+
+def test_drift_detects_a_gradual_slowdown_hidden_by_pooled_scatter():
+    # A 0 -> 12 ms ramp inflates the scatter of all runs pooled as much as it moves the
+    # half medians, so a threshold built from the pooled scatter never fires.
+    ramp = [run(200 + n + 12 * i / 99) for i, n in enumerate(NOISE_MS)]
+    assert analysis.check_drift(ramp)["drift"]
+
+
+def test_drift_not_flagged_for_stable_noisy_runs():
+    assert not analysis.check_drift([run(200 + n) for n in NOISE_MS])["drift"]
+
+
 def test_app_reported_metrics_are_summarized_and_compared():
     base = [run(10, i=i) for i in range(6)]
     tool = [run(10, i=i) for i in range(6)]
