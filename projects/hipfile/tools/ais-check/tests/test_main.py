@@ -35,7 +35,7 @@ def stub_checks(monkeypatch, ais_check):
                 "device": "nvme0n1",
                 "backing": "nvme",
                 "odirect": volumes,
-                "capable": volumes,
+                "capable": "yes" if volumes else "no",
             }
         ]
         monkeypatch.setattr(ais_check, "kernel_supports_p2pdma", lambda: p2pdma)
@@ -132,7 +132,7 @@ def test_nfs_listing_preserves_exit_status(
 
     def backing_storage(devno):
         assert devno == "259:0"
-        return "nvme", "nvme0n1"
+        return "nvme", "nvme0n1", "yes"
 
     def probe_odirect(mountpoint):
         assert mountpoint == "/data" or (

@@ -103,7 +103,7 @@ def _fake_topology(  # pylint: disable=too-many-arguments
     raid_types=None,
 ):
     """
-    Drive stack_over_nvme against an in-memory sysfs tree.
+    Drive the backing check against an in-memory sysfs tree.
 
     `prefixes` maps a node path to its dm target prefix (or None for a physical
     leaf); `slaves` maps a node path to the child node paths it is stacked on;
@@ -122,7 +122,7 @@ def _fake_topology(  # pylint: disable=too-many-arguments
     passing a realistic maj:min.
     """
 
-    def _realpath(path):
+    def _realpath(path, *, strict=False):
         if start is not None and path.startswith("/sys/dev/block/"):
             return start
         return path
@@ -130,6 +130,7 @@ def _fake_topology(  # pylint: disable=too-many-arguments
     monkeypatch.setattr(ais_check.os.path, "realpath", _realpath)
     monkeypatch.setattr(ais_check, "dm_uuid_prefix", prefixes.get)
     monkeypatch.setattr(ais_check, "block_slaves", slaves.get)
+    monkeypatch.setattr(ais_check, "nvme_transport", lambda node: "pcie")
     monkeypatch.setattr(ais_check, "md_level", (levels or {}).get)
     monkeypatch.setattr(
         ais_check, "dm_name", lambda node: (names or {}).get(node, node)
@@ -149,7 +150,7 @@ def test_stack_over_nvme_lvm_direct_on_nvme(ais_check, monkeypatch):
         prefixes={lv: "lvm", "/dev/nvme0n1p1": None},
         slaves={lv: ["/dev/nvme0n1p1"]},
     )
-    assert ais_check.stack_over_nvme("253:0") is True
+    assert ais_check.backing_storage("253:0")[2] == "yes"
 
 
 def test_stack_over_nvme_lvm_spanning_multiple_nvme(ais_check, monkeypatch):
@@ -160,7 +161,7 @@ def test_stack_over_nvme_lvm_spanning_multiple_nvme(ais_check, monkeypatch):
         prefixes={lv: "lvm", "/dev/nvme0n1p1": None, "/dev/nvme1n1p1": None},
         slaves={lv: ["/dev/nvme0n1p1", "/dev/nvme1n1p1"]},
     )
-    assert ais_check.stack_over_nvme("253:0") is True
+    assert ais_check.backing_storage("253:0")[2] == "yes"
 
 
 def test_stack_over_nvme_lvm_nested_lvm(ais_check, monkeypatch):
@@ -171,7 +172,7 @@ def test_stack_over_nvme_lvm_nested_lvm(ais_check, monkeypatch):
         prefixes={lv: "lvm", inner: "lvm", "/dev/nvme0n1p1": None},
         slaves={lv: [inner], inner: ["/dev/nvme0n1p1"]},
     )
-    assert ais_check.stack_over_nvme("253:1") is True
+    assert ais_check.backing_storage("253:1")[2] == "yes"
 
 
 def _raid_lv_topology(members):
@@ -215,7 +216,7 @@ def test_stack_over_nvme_lvm_raid_lv_passthrough_types(
         names=names,
         raid_types={"vg-lv": {raid_type}},
     )
-    assert ais_check.stack_over_nvme("253:0") is True
+    assert ais_check.backing_storage("253:0")[2] == "yes"
 
 
 @pytest.mark.parametrize("raid_type", ["raid4", "raid5_ls", "raid6_nr"])
@@ -233,7 +234,7 @@ def test_stack_over_nvme_lvm_parity_raid_lv_rejected(ais_check, monkeypatch, rai
         names=names,
         raid_types={"vg-lv": {raid_type}},
     )
-    assert ais_check.stack_over_nvme("253:0") is False
+    assert ais_check.backing_storage("253:0")[2] == "no"
 
 
 def test_stack_over_nvme_lvm_raid_lv_unreadable_table_unverified(
@@ -250,7 +251,7 @@ def test_stack_over_nvme_lvm_raid_lv_unreadable_table_unverified(
         names=names,
         raid_types={"vg-lv": None},
     )
-    assert ais_check.stack_over_nvme("253:0") is None
+    assert ais_check.backing_storage("253:0")[2] == "unverified"
 
 
 def test_stack_over_nvme_plain_lv_unreadable_table_still_capable(
@@ -267,7 +268,7 @@ def test_stack_over_nvme_plain_lv_unreadable_table_still_capable(
         names={lv: "vg-lv"},
         raid_types={"vg-lv": None},
     )
-    assert ais_check.stack_over_nvme("253:0") is True
+    assert ais_check.backing_storage("253:0")[2] == "yes"
 
 
 def test_stack_over_nvme_lvm_raid_lv_with_non_nvme_member_rejected(
@@ -296,7 +297,7 @@ def test_stack_over_nvme_lvm_raid_lv_with_non_nvme_member_rejected(
             scsi_member: ["/dev/sda1"],
         },
     )
-    assert ais_check.stack_over_nvme("253:4") is False
+    assert ais_check.backing_storage("253:4")[2] == "no"
 
 
 def test_stack_over_nvme_lvm_on_scsi_rejected(ais_check, monkeypatch):
@@ -307,7 +308,7 @@ def test_stack_over_nvme_lvm_on_scsi_rejected(ais_check, monkeypatch):
         prefixes={lv: "lvm", "/dev/sda1": None},
         slaves={lv: ["/dev/sda1"]},
     )
-    assert ais_check.stack_over_nvme("253:0") is False
+    assert ais_check.backing_storage("253:0")[2] == "no"
 
 
 def test_stack_over_nvme_lvm_on_mpath_rejected(ais_check, monkeypatch):
@@ -318,13 +319,13 @@ def test_stack_over_nvme_lvm_on_mpath_rejected(ais_check, monkeypatch):
         prefixes={lv: "lvm", mpath: "mpath", "/dev/nvme0n1p1": None},
         slaves={lv: [mpath], mpath: ["/dev/nvme0n1p1"]},
     )
-    assert ais_check.stack_over_nvme("253:1") is False
+    assert ais_check.backing_storage("253:1")[2] == "no"
 
 
 def test_stack_over_nvme_unresolvable_topology(ais_check, monkeypatch):
     lv = "/sys/dev/block/253:0"
     _fake_topology(ais_check, monkeypatch, prefixes={lv: "lvm"}, slaves={})
-    assert ais_check.stack_over_nvme("253:0") is None
+    assert ais_check.backing_storage("253:0")[2] == "unverified"
 
 
 @pytest.mark.parametrize("level", ["linear", "raid0", "raid1", "raid10"])
@@ -340,7 +341,7 @@ def test_stack_over_nvme_md_passthrough_levels_on_nvme(ais_check, monkeypatch, l
         start=md,
         levels={md: level},
     )
-    assert ais_check.stack_over_nvme("9:0") is True
+    assert ais_check.backing_storage("9:0")[2] == "yes"
 
 
 @pytest.mark.parametrize("level", ["raid4", "raid5", "raid6"])
@@ -355,7 +356,7 @@ def test_stack_over_nvme_md_parity_levels_rejected(ais_check, monkeypatch, level
         start=md,
         levels={md: level},
     )
-    assert ais_check.stack_over_nvme("9:0") is False
+    assert ais_check.backing_storage("9:0")[2] == "no"
 
 
 def test_stack_over_nvme_md_unknown_level_rejected(ais_check, monkeypatch):
@@ -370,7 +371,7 @@ def test_stack_over_nvme_md_unknown_level_rejected(ais_check, monkeypatch):
         start=md,
         levels={md: "faulty"},
     )
-    assert ais_check.stack_over_nvme("9:0") is False
+    assert ais_check.backing_storage("9:0")[2] == "no"
 
 
 def test_stack_over_nvme_md_unreadable_level_unresolvable(ais_check, monkeypatch):
@@ -383,7 +384,7 @@ def test_stack_over_nvme_md_unreadable_level_unresolvable(ais_check, monkeypatch
         start=md,
         levels={},
     )
-    assert ais_check.stack_over_nvme("9:0") is None
+    assert ais_check.backing_storage("9:0")[2] == "unverified"
 
 
 def test_stack_over_nvme_md_raid_with_non_nvme_member_rejected(ais_check, monkeypatch):
@@ -399,7 +400,7 @@ def test_stack_over_nvme_md_raid_with_non_nvme_member_rejected(ais_check, monkey
         start=md,
         levels={md: "raid1"},
     )
-    assert ais_check.stack_over_nvme("9:0") is False
+    assert ais_check.backing_storage("9:0")[2] == "no"
 
 
 def test_stack_over_nvme_md_raid_partition(ais_check, monkeypatch):
@@ -416,7 +417,7 @@ def test_stack_over_nvme_md_raid_partition(ais_check, monkeypatch):
         levels={md: "raid0"},
     )
     monkeypatch.setattr(ais_check.os.path, "exists", lambda p: p == part + "/partition")
-    assert ais_check.stack_over_nvme("259:3") is True
+    assert ais_check.backing_storage("259:3")[2] == "yes"
 
 
 def test_stack_over_nvme_md_raid_partition_real_layout(
@@ -435,16 +436,21 @@ def test_stack_over_nvme_md_raid_partition_real_layout(
     part = md / "md0p1"
     part.mkdir()
     (part / "partition").write_text("1\n")
-    member = tmp_path / "nvme0n1p1"
-    member.mkdir()
+    controller = tmp_path / "nvme0"
+    member = controller / "nvme0n1" / "nvme0n1p1"
+    member.mkdir(parents=True)
+    (member / "partition").write_text("1\n")
+    (controller / "transport").write_text("pcie\n")
     (md / "slaves" / "nvme0n1p1").symlink_to(member)
 
     monkeypatch.setattr(
         ais_check.os.path,
         "realpath",
-        lambda p: str(part) if p == "/sys/dev/block/259:3" else real_realpath(p),
+        lambda p, **kw: (
+            str(part) if p == "/sys/dev/block/259:3" else real_realpath(p, **kw)
+        ),
     )
-    assert ais_check.stack_over_nvme("259:3") is True
+    assert ais_check.backing_storage("259:3")[2] == "yes"
 
 
 def test_stack_over_nvme_lvm_on_md_raid_on_nvme(ais_check, monkeypatch):
@@ -456,7 +462,7 @@ def test_stack_over_nvme_lvm_on_md_raid_on_nvme(ais_check, monkeypatch):
         slaves={lv: [md], md: ["/dev/nvme0n1p1"]},
         levels={md: "raid1"},
     )
-    assert ais_check.stack_over_nvme("253:0") is True
+    assert ais_check.backing_storage("253:0")[2] == "yes"
 
 
 def test_stack_over_nvme_md_raid_on_lvm_on_nvme(ais_check, monkeypatch):
@@ -469,7 +475,7 @@ def test_stack_over_nvme_md_raid_on_lvm_on_nvme(ais_check, monkeypatch):
         start=md,
         levels={md: "raid0"},
     )
-    assert ais_check.stack_over_nvme("9:0") is True
+    assert ais_check.backing_storage("9:0")[2] == "yes"
 
 
 def test_stack_over_nvme_md_raid_on_mpath_rejected(ais_check, monkeypatch):
@@ -482,7 +488,7 @@ def test_stack_over_nvme_md_raid_on_mpath_rejected(ais_check, monkeypatch):
         start=md,
         levels={md: "raid1"},
     )
-    assert ais_check.stack_over_nvme("9:0") is False
+    assert ais_check.backing_storage("9:0")[2] == "no"
 
 
 def test_stack_over_nvme_md_raid_unresolvable_topology(ais_check, monkeypatch):
@@ -490,7 +496,7 @@ def test_stack_over_nvme_md_raid_unresolvable_topology(ais_check, monkeypatch):
     _fake_topology(
         ais_check, monkeypatch, prefixes={}, slaves={}, start=md, levels={md: "raid1"}
     )
-    assert ais_check.stack_over_nvme("9:0") is None
+    assert ais_check.backing_storage("9:0")[2] == "unverified"
 
 
 def _patch_dmsetup(monkeypatch, ais_check, *, stdout="", returncode=0, exc=None):
@@ -529,33 +535,134 @@ def test_dm_raid_segment_types_dmsetup_missing(ais_check, monkeypatch):
     assert ais_check.dm_raid_segment_types("vg-lv") is None
 
 
-def test_backing_supported_nvme(ais_check):
-    assert ais_check.backing_supported("nvme", "259:0") is True
+@pytest.mark.parametrize("name", ["sda", "loop0"])
+def test_other_block_devices_rejected(ais_check, monkeypatch, tmp_path, name):
+    node = tmp_path / name
+    node.mkdir()
+    monkeypatch.setattr(ais_check.os.path, "realpath", lambda *a, **kw: str(node))
+    assert ais_check.backing_storage("8:0")[2] == "no"
 
 
-@pytest.mark.parametrize("backing,devno", [("lvm", "253:0"), ("md", "9:0")])
-def test_backing_supported_stacked_layers_delegate(
-    ais_check, monkeypatch, backing, devno
-):
-    monkeypatch.setattr(ais_check, "stack_over_nvme", lambda devno: True)
-    assert ais_check.backing_supported(backing, devno) is True
-    monkeypatch.setattr(ais_check, "stack_over_nvme", lambda devno: False)
-    assert ais_check.backing_supported(backing, devno) is False
+def test_unknown_device_unverified(ais_check, monkeypatch):
+    monkeypatch.setattr(
+        ais_check.os.path, "realpath", Mock(side_effect=FileNotFoundError)
+    )
+    assert ais_check.backing_storage("missing") == (None, None, "unverified")
 
 
-def test_backing_supported_other_layers_rejected(ais_check):
-    assert ais_check.backing_supported("mpath", "253:0") is False
-    assert ais_check.backing_supported("crypt", "253:0") is False
-    assert ais_check.backing_supported("loop", "7:0") is False
+@pytest.mark.parametrize(
+    "transport_case",
+    [
+        ("pcie", "nvme", "yes"),
+        ("rdma", "nvmeof-rdma", "yes*"),
+        ("tcp", "nvmeof-tcp", "no"),
+        ("fc", "nvmeof-fc", "no"),
+        ("loop", "nvme-loop", "no"),
+        ("other", "nvme", "unverified"),
+        (None, "nvme", "unverified"),
+    ],
+)
+@pytest.mark.parametrize("partition", [False, True])
+def test_nvme_backing(ais_check, monkeypatch, tmp_path, transport_case, partition):
+    transport, backing, verdict = transport_case
+    ctrl = tmp_path / "nvme9"
+    disk = ctrl / "nvme2n1"
+    disk.mkdir(parents=True)
+    if transport:
+        (ctrl / "transport").write_text(transport + "\n")
+    if partition:
+        disk = disk / "nvme2n1p3"
+        disk.mkdir()
+        (disk / "partition").write_text("3\n")
+    monkeypatch.setattr(ais_check.os.path, "realpath", lambda *a, **kw: str(disk))
+    assert ais_check.backing_storage("259:1") == (backing, disk.name, verdict)
 
 
-def test_backing_supported_unknown_is_none(ais_check):
-    assert ais_check.backing_supported(None, "0:0") is None
+@pytest.mark.parametrize("paths", [[], ["rdma"], ["rdma", "rdma"], ["pcie", "pcie"]])
+@pytest.mark.parametrize("partition", [False, True])
+def test_nvme_multipath_namespace(ais_check, monkeypatch, tmp_path, paths, partition):
+    subsystem = tmp_path / "nvme-subsys7"
+    disk = subsystem / "nvme7n2"
+    disk.mkdir(parents=True)
+    for index, transport in enumerate(paths):
+        ctrl = tmp_path / f"nvme{index}"
+        (ctrl / f"nvme7c{index}n2").mkdir(parents=True)
+        (subsystem / ctrl.name).symlink_to(ctrl)
+        (ctrl / "transport").write_text(transport + "\n")
+    if partition:
+        disk = disk / "nvme7n2p1"
+        disk.mkdir()
+        (disk / "partition").write_text("1\n")
+    monkeypatch.setattr(ais_check.os.path, "realpath", lambda *a, **kw: str(disk))
+    monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
+    (row,) = ais_check.collect(
+        [_mount(ais_check, fstype="xfs", source=f"/dev/{disk.name}")]
+    )
+    assert (row["backing"], row["capable"]) == ("mpath", "no")
+
+
+@pytest.mark.parametrize(
+    "member,verdict",
+    [("rdma", "yes*"), ("tcp", "no"), ("mpath", "no"), (None, "unverified")],
+)
+def test_stacked_nvmeof(ais_check, monkeypatch, member, verdict):
+    lv, md = "/dev/dm-0", "/dev/md0"
+    local, fabric = "/dev/nvme1n1", "/dev/nvme2n1"
+    _fake_topology(
+        ais_check,
+        monkeypatch,
+        prefixes={lv: "lvm"},
+        slaves={lv: [md], md: [local, fabric]},
+        start=lv,
+        levels={md: "raid0"},
+    )
+    monkeypatch.setattr(
+        ais_check, "nvme_transport", {local: "pcie", fabric: member}.__getitem__
+    )
+    assert ais_check.backing_storage("253:0") == ("lvm", "dm-0", verdict)
+
+
+@pytest.mark.parametrize(
+    "probe_case",
+    [
+        ("xfs", True, "yes*"),
+        ("ext4", False, "no"),
+        ("ext4", None, "unverified"),
+        ("btrfs", True, "no"),
+    ],
+)
+def test_nvmeof_and_nfs_share_rdma_note(ais_check, monkeypatch, capsys, probe_case):
+    fstype, probe, verdict = probe_case
+    mounts = [
+        _mount(ais_check, fstype=fstype),
+        _mount(
+            ais_check,
+            fstype="nfs4",
+            options="proto=rdma6",
+            source="server:/export",
+            mountpoint="/nfs",
+        ),
+    ]
+    monkeypatch.setattr(ais_check, "parse_mountinfo", lambda: mounts)
+    monkeypatch.setattr(
+        ais_check, "backing_storage", lambda devno: ("nvmeof-rdma", "nvme2n1", "yes*")
+    )
+    monkeypatch.setattr(
+        ais_check, "probe_odirect", lambda mp: True if mp == "/nfs" else probe
+    )
+    rows, any_capable = ais_check.capable_volumes()
+    assert any_capable is False
+    ais_check.print_volume_table(rows)
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[1].split()[-1] == verdict
+    assert lines[2].split()[-1] == "yes*"
+    assert lines[3:] == ["* NFS and NVMe over RDMA require a hardware RDMA NIC"]
 
 
 def test_collect_lvm_on_nvme_capable(ais_check, monkeypatch):
-    monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("lvm", "dm-0"))
-    monkeypatch.setattr(ais_check, "stack_over_nvme", lambda devno: True)
+    monkeypatch.setattr(
+        ais_check, "backing_storage", lambda devno: ("lvm", "dm-0", "yes")
+    )
     monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
 
     rows = ais_check.collect(
@@ -563,34 +670,38 @@ def test_collect_lvm_on_nvme_capable(ais_check, monkeypatch):
     )
 
     assert rows[0]["backing"] == "lvm"
-    assert rows[0]["capable"] is True
+    assert rows[0]["capable"] == "yes"
 
 
 def test_collect_lvm_not_on_nvme_not_capable(ais_check, monkeypatch):
-    monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("lvm", "dm-0"))
-    monkeypatch.setattr(ais_check, "stack_over_nvme", lambda devno: False)
+    monkeypatch.setattr(
+        ais_check, "backing_storage", lambda devno: ("lvm", "dm-0", "no")
+    )
     monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
 
     rows = ais_check.collect(
         [_mount(ais_check, fstype="ext4", source="/dev/mapper/vg-lv")]
     )
 
-    assert rows[0]["capable"] is False
+    assert rows[0]["capable"] == "no"
 
 
 def test_collect_md_raid_on_nvme_capable(ais_check, monkeypatch):
-    monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("md", "md0"))
-    monkeypatch.setattr(ais_check, "stack_over_nvme", lambda devno: True)
+    monkeypatch.setattr(
+        ais_check, "backing_storage", lambda devno: ("md", "md0", "yes")
+    )
     monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
 
     rows = ais_check.collect([_mount(ais_check, fstype="xfs", source="/dev/md0")])
 
     assert rows[0]["backing"] == "md"
-    assert rows[0]["capable"] is True
+    assert rows[0]["capable"] == "yes"
 
 
 def test_collect_skips_pseudo_and_non_block(ais_check, monkeypatch):
-    monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("nvme", "nvme0n1"))
+    monkeypatch.setattr(
+        ais_check, "backing_storage", lambda devno: ("nvme", "nvme0n1", "yes")
+    )
     monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
 
     mounts = [
@@ -600,20 +711,20 @@ def test_collect_skips_pseudo_and_non_block(ais_check, monkeypatch):
     rows = ais_check.collect(mounts)
 
     assert [r["mountpoint"] for r in rows] == ["/data"]
-    assert rows[0]["capable"] is True
+    assert rows[0]["capable"] == "yes"
 
 
 @pytest.mark.parametrize("fstype", ["nfs", "nfs4"])
 @pytest.mark.parametrize(
-    "source_options_capable",
+    "source_options",
     [
-        ("server:/export", "rw,proto=tcp", False),
-        ("[2001:db8::1]:/export", "ro,proto=tcp6", False),
-        ("[2001:db8::1]:/export", "ro", False),
+        ("server:/export", "rw,proto=tcp"),
+        ("[2001:db8::1]:/export", "ro,proto=tcp6"),
+        ("[2001:db8::1]:/export", "ro"),
     ],
 )
 def test_collect_lists_non_rdma_nfs_without_probing(
-    ais_check, monkeypatch, capsys, fstype, source_options_capable
+    ais_check, monkeypatch, capsys, fstype, source_options
 ):
     def fail_probe(*_args):
         raise AssertionError("NFS listing must not resolve block devices or probe I/O")
@@ -621,7 +732,7 @@ def test_collect_lists_non_rdma_nfs_without_probing(
     monkeypatch.setattr(ais_check, "backing_storage", fail_probe)
     monkeypatch.setattr(ais_check, "probe_odirect", fail_probe)
     monkeypatch.setattr(ais_check.subprocess, "run", fail_probe)
-    source, options, capable = source_options_capable
+    source, options = source_options
     mount = ais_check.Mount("0:42", "/mnt/nfs", fstype, source, options)
     monkeypatch.setattr(ais_check, "parse_mountinfo", lambda: [mount])
 
@@ -634,7 +745,7 @@ def test_collect_lists_non_rdma_nfs_without_probing(
             "device": source,
             "backing": "nfs",
             "odirect": None,
-            "capable": capable,
+            "capable": "no",
         }
     ]
     assert any_capable is False
@@ -645,7 +756,7 @@ def test_collect_lists_non_rdma_nfs_without_probing(
         source,
         "nfs",
         "unverified",
-        "no" if capable is False else "unverified",
+        "no",
     ]
 
 
@@ -675,11 +786,11 @@ def _assert_probe_io(ais_check, probe_io, error):
 @pytest.mark.parametrize(
     "probe_result",
     [
-        (None, True, None),
-        (errno.EINVAL, False, False),
-        (errno.EACCES, None, None),
-        (errno.EROFS, None, None),
-        (errno.ENOSPC, None, None),
+        (None, True, "yes*"),
+        (errno.EINVAL, False, "no"),
+        (errno.EACCES, None, "unverified"),
+        (errno.EROFS, None, "unverified"),
+        (errno.ENOSPC, None, "unverified"),
     ],
 )
 def test_collect_probes_rdma_nfs(
@@ -713,15 +824,17 @@ def test_collect_probes_rdma_nfs(
 
     _assert_probe_io(ais_check, probe_io, error)
     assert rows[0]["odirect"] is odirect
-    assert rows[0]["capable"] is capable
+    assert rows[0]["capable"] == capable
     assert any_capable is False
     ais_check.print_volume_table(rows)
     lines = capsys.readouterr().out.splitlines()
     assert lines[1].split()[-2:] == [
         {True: "yes", False: "no", None: "unverified"}[odirect],
-        {True: "yes*", False: "no", None: "unverified"}[odirect],
+        capable,
     ]
-    assert lines[2:] == (["* NFS requires a hardware RDMA NIC"] if odirect else [])
+    assert lines[2:] == (
+        ["* NFS and NVMe over RDMA require a hardware RDMA NIC"] if odirect else []
+    )
 
 
 @pytest.mark.parametrize(
@@ -744,7 +857,9 @@ def test_collect_skips_other_network_mounts_before_resolution(
 
 
 def test_collect_unsupported_fs_not_probed(ais_check, monkeypatch):
-    monkeypatch.setattr(ais_check, "backing_storage", lambda devno: ("nvme", "nvme0n1"))
+    monkeypatch.setattr(
+        ais_check, "backing_storage", lambda devno: ("nvme", "nvme0n1", "yes")
+    )
 
     def _fail_probe(mp):
         raise AssertionError("probe_odirect must not run on unsupported fs")
@@ -753,7 +868,7 @@ def test_collect_unsupported_fs_not_probed(ais_check, monkeypatch):
 
     rows = ais_check.collect([_mount(ais_check, fstype="btrfs")])
 
-    assert rows[0]["capable"] is False
+    assert rows[0]["capable"] == "no"
     assert rows[0]["odirect"] is None
 
 
@@ -762,7 +877,7 @@ def test_capable_volumes_aggregates_any(ais_check, monkeypatch):
     monkeypatch.setattr(
         ais_check,
         "collect",
-        lambda mounts: [{"capable": False}, {"capable": True}],
+        lambda mounts: [{"capable": "no"}, {"capable": "yes"}],
     )
     rows, any_capable = ais_check.capable_volumes()
     assert any_capable is True

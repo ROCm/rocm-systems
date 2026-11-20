@@ -36,6 +36,10 @@ personality (linear, raid0, raid1, raid10) rather than a parity one (raid4,
 raid5, raid6). Any other interposing layer (multipath, dm-crypt, loopback)
 breaks the direct P2P-DMA path and forces the compatibility fallback.
 
+NVMe controller transports are read from sysfs. NVMe over RDMA can qualify
+with the same hardware NIC caveat as NFS over RDMA. Native NVMe multipath
+namespaces report HIPFILE=no regardless of the number of live paths.
+
 NFS mounts are also listed, with their server/export as DEVICE and nfs as
 BACKING. Only proto=rdma or proto=rdma6 passes the NFS transport check; other
 or missing protocols report HIPFILE=no and are not probed. RDMA mounts are
@@ -56,6 +60,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 # Mounts backed by these (or any non-block source) can never use the fast path.
 PSEUDO_FSTYPES = {
@@ -788,7 +793,7 @@ def block_layer_verdict(sysfs_dir):
     walk should do with the node:
 
       "descend"  a supported stacking layer; check the devices it sits on
-      "leaf"     a local NVMe; nothing below it to check
+      "leaf"     an NVMe namespace; inspect its transport
       "parent"   an MD partition; the array it was carved out of carries the
                  state to classify
       "reject"   breaks the direct path, so the whole stack is False
@@ -808,31 +813,30 @@ def block_layer_verdict(sysfs_dir):
     if name.startswith("md"):
         return md_layer_verdict(sysfs_dir)
     if name.startswith("nvme"):
-        # A physical leaf of the right kind; nothing below it to check.
         return "leaf"
     # Any other leaf (scsi, virtio, loopback, ...) is not P2P-capable.
     return "reject"
 
 
-def stack_over_nvme(devno):
-    """
-    Whether a stacked (LVM or MD RAID) mount bottoms out on local NVMe.
-
-    Walks the slave tree from the mount's block device. Returns True only when
-    every layer in the stack is an LVM target or a pass-through MD array and
-    every device underneath them is NVMe. Returns False when a layer that
-    breaks the direct path (multipath, dm-crypt, a parity array, ...) or a
-    non-NVMe leaf (scsi, loopback, ...) is found, and None when the topology
-    can't be resolved from sysfs.
-    """
+def nvme_transport(sysfs_dir):
+    """Return the controller transport, 'mpath' for a native multipath head, or None."""
+    disk = Path(sysfs_dir)
     try:
-        start = os.path.realpath(os.path.join("/sys/dev/block", devno))
-    except OSError:
+        if (disk / "partition").exists():
+            disk = disk.parent
+        # A namespace head belongs to the subsystem even when only one path is live.
+        if disk.parent.name.startswith("nvme-subsys"):
+            return "mpath"
+        return (disk.parent / "transport").read_text(encoding="ascii").strip() or None
+    except (OSError, UnicodeError):
         return None
 
+
+def stack_transports(start):
+    """Collect transports under a supported stack, including unresolved leaves."""
     seen = set()
     stack = [start]
-    saw_leaf = False
+    transports = set()
     while stack:
         node = stack.pop()
         if node in seen:
@@ -841,38 +845,29 @@ def stack_over_nvme(devno):
 
         verdict = block_layer_verdict(node)
         if verdict == "leaf":
-            saw_leaf = True
+            transports.add(nvme_transport(node))
             continue
         if verdict == "parent":
             stack.append(os.path.dirname(node))
             continue
         if verdict != "descend":
-            return False if verdict == "reject" else None
+            if verdict == "reject":
+                return {"unsupported"}
+            transports.add(None)
+            continue
 
         slaves = block_slaves(node)
-        if not slaves:
-            return None
-        stack.extend(slaves)
+        if slaves:
+            stack.extend(slaves)
+        else:
+            transports.add(None)
 
-    return True if saw_leaf else None
+    return transports or {None}
 
 
-def backing_storage(devno):
-    """
-    Resolve a maj:min to (backing_type, disk_name) via sysfs.
-
-    `backing_type` is a single short label describing what the filesystem
-    resides on: device-mapper targets are classified from their dm/uuid
-    (lvm, mpath, crypt, dm), software RAID as md, and raw block devices from
-    their kernel name (nvme, virtio, scsi, loop). Returns (None, None) when
-    sysfs cannot be read.
-    """
-    try:
-        real = os.path.realpath(f"/sys/dev/block/{devno}")
-    except OSError:
-        return None, None
+def block_type(real):
+    """Name the block layer exposed by a mount's device."""
     name = os.path.basename(real)
-
     # device-mapper targets (lvm, multipath, crypt, ...) carry a dm/uuid whose
     # prefix names the target type.
     prefix = dm_uuid_prefix(real)
@@ -891,27 +886,41 @@ def backing_storage(devno):
     else:
         backing = name or None
 
-    return backing, name
+    return backing
 
 
-def backing_supported(backing, devno):
-    """
-    Whether the backing storage allows hipFile's direct P2P-DMA path.
+def nvme_support(transports):
+    """Classify all paths together, giving known exclusions precedence."""
+    if transports.intersection({"tcp", "fc", "loop", "mpath", "unsupported"}):
+        return "no"
+    if not transports or not transports <= {"pcie", "rdma"}:
+        return "unverified"
+    return "yes*" if "rdma" in transports else "yes"
 
-    Raw local NVMe qualifies, as do LVM and MD RAID stacks that bottom out on
-    local NVMe (see stack_over_nvme). Anything else -- a parity array, or an
-    interposing layer such as multipath, dm-crypt or loopback -- breaks the
-    direct path to the device, so the kernel rejects the IO at runtime.
 
-    Returns None when the backing could not be determined.
-    """
-    if backing is None:
-        return None
+def nvme_label(transport):
+    """Name the backing of a directly mounted NVMe namespace."""
+    if transport in ("rdma", "tcp", "fc"):
+        return f"nvmeof-{transport}"
+    if transport == "loop":
+        return "nvme-loop"
+    if transport == "mpath":
+        return "mpath"
+    return "nvme"
+
+
+def backing_storage(devno):
+    """Resolve a mount's backing label, disk name and fastpath support via sysfs."""
+    try:
+        real = os.path.realpath(f"/sys/dev/block/{devno}", strict=True)
+    except OSError:
+        return None, None, "unverified"
+    backing = block_type(real)
     if backing == "nvme":
-        return True
-    if backing in ("lvm", "md"):
-        return stack_over_nvme(devno)
-    return False
+        transport = nvme_transport(real)
+        return nvme_label(transport), os.path.basename(real), nvme_support({transport})
+    support = nvme_support(stack_transports(real)) if backing in ("lvm", "md") else "no"
+    return backing, os.path.basename(real), support
 
 
 def tri(value, unknown="?"):
@@ -930,42 +939,18 @@ def collect(mounts):
         if m.fstype in PSEUDO_FSTYPES:
             continue
         if m.fstype in ("nfs", "nfs4"):
-            # RDMA transport and O_DIRECT are necessary, but device capability
-            # is unverified. NFS does not use local block-device resolution.
-            supported_fs = fs_supported(m)
-            odirect = probe_odirect(m.mountpoint) if supported_fs else None
-            rows.append(
-                {
-                    "mountpoint": m.mountpoint,
-                    "fstype": m.fstype,
-                    "device": m.source,
-                    "backing": "nfs",
-                    "odirect": odirect,
-                    "capable": False if not supported_fs or odirect is False else None,
-                }
-            )
-            continue
-        # Other network filesystems (CIFS, sshfs, ...) are not listed.
-        if not m.source.startswith("/dev/"):
-            continue
-
-        backing, disk = backing_storage(m.devno)
-        supported_fs = fs_supported(m)
-        backing_ok = backing_supported(backing, m.devno)
-
-        # Only probe fs types that can qualify; unsupported fs is never capable.
-        odirect = probe_odirect(m.mountpoint) if supported_fs else None
-
-        # A volume is capable only when the filesystem qualifies, the backing is
-        # a direct local NVMe (or LVM/MD RAID stacked on local NVMe), and
-        # O_DIRECT works. Unknown backing leaves the verdict unverified.
-        if not supported_fs or backing_ok is False:
-            capable = False
-        elif backing_ok is None:
-            capable = None
+            backing, disk, support = "nfs", m.source, "yes*"
+        elif m.source.startswith("/dev/"):
+            backing, disk, support = backing_storage(m.devno)
         else:
-            capable = odirect
+            continue
 
+        supported_fs = fs_supported(m)
+        odirect = probe_odirect(m.mountpoint) if supported_fs else None
+        if not supported_fs or odirect is False:
+            support = "no"
+        elif odirect is None and support != "no":
+            support = "unverified"
         rows.append(
             {
                 "mountpoint": m.mountpoint,
@@ -973,7 +958,7 @@ def collect(mounts):
                 "device": disk or m.source,
                 "backing": backing,
                 "odirect": odirect,
-                "capable": capable,
+                "capable": support,
             }
         )
     return rows
@@ -985,9 +970,8 @@ def print_volume_table(rows):
     table = [headers]
     show_rdma_note = False
     for r in rows:
-        hipfile = tri(r["capable"], unknown="unverified")
-        if r["fstype"] in ("nfs", "nfs4") and r["odirect"] is True:
-            hipfile = "yes*"
+        hipfile = r["capable"]
+        if hipfile == "yes*":
             show_rdma_note = True
         table.append(
             [
@@ -1004,7 +988,7 @@ def print_volume_table(rows):
     for row in table:
         print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
     if show_rdma_note:
-        print("* NFS requires a hardware RDMA NIC")
+        print("* NFS and NVMe over RDMA require a hardware RDMA NIC")
 
 
 def capable_volumes():
@@ -1015,7 +999,7 @@ def capable_volumes():
     dicts and any_capable is True if at least one volume is confidently capable.
     """
     rows = collect(parse_mountinfo())
-    return rows, any(r["capable"] is True for r in rows)
+    return rows, any(r["capable"] == "yes" for r in rows)
 
 
 # Reimplemented in hipfile/test/common/ais-capability.h.
@@ -1031,10 +1015,11 @@ def main():
         epilog=(
             "The O_DIRECT probe opens a temporary file and needs write access to the mount.\n"
             "NFS requires proto=rdma or proto=rdma6. Other or missing protocols report\n"
-            "HIPFILE=no. On NFS/RDMA, a successful open reports HIPFILE=yes*. The fast\n"
-            "path requires a hardware RDMA NIC, which the probe does not verify. Rejected\n"
+            "HIPFILE=no. On eligible NFS/RDMA and NVMe/RDMA mounts, a successful open\n"
+            "reports HIPFILE=yes*. Both require a hardware RDMA NIC. Rejected\n"
             "O_DIRECT reports no, and an inconclusive probe reports unverified. Only an\n"
-            "unstarred yes counts toward a successful exit."
+            "unstarred yes counts toward a successful exit. Native NVMe multipath mounts\n"
+            "report HIPFILE=no."
         ),
     )
     output_group = parser.add_mutually_exclusive_group()
