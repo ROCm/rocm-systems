@@ -66,8 +66,10 @@ auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view b
   }
 
   // Every fd that refers to a DRM client (dup, fork, fd passing) lists that
-  // client's usage, so count each drm-client-id once.
+  // client's usage, so count each drm-client-id once. Without one (amdgpu DKMS
+  // on Linux before 6.5), the client's VM pasid names it.
   std::unordered_set<uint64_t> clients;
+  std::unordered_set<uint64_t> pasids;
   // A file that cannot be opened or read would leave its usage out of the sums,
   // so it fails them. Files of fds closed, or of a process that exited, since the
   // directory was listed are gone.
@@ -86,7 +88,7 @@ auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view b
     }
     char fd_bdf_str[13] = "";
     bool has_client = false;
-    uint64_t client = 0, vram = 0, gtt = 0, cpu = 0, gfx = 0, enc = 0;
+    uint64_t client = 0, pasid = 0, vram = 0, gtt = 0, cpu = 0, gfx = 0, enc = 0;
     char* l = nullptr;
     size_t l_size = 0;
     while (::getline(&l, &l_size, fdinfo) > 0) {
@@ -95,6 +97,7 @@ auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view b
         has_client = true;
         continue;
       }
+      if (sscanf(l, "pasid: %" SCNu64, &pasid) == 1) continue;
       if (smi_amdgpu_parse_drm_memory(l, "drm-memory-vram:", &vram)) continue;
       if (smi_amdgpu_parse_drm_memory(l, "drm-memory-gtt:", &gtt)) continue;
       if (smi_amdgpu_parse_drm_memory(l, "drm-memory-cpu:", &cpu)) continue;
@@ -110,7 +113,9 @@ auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view b
       continue;
     }
     if (bdf != fd_bdf_str) continue;
-    if (has_client && !clients.insert(client).second) continue;
+    if (has_client ? !clients.insert(client).second : pasid != 0 && !pasids.insert(pasid).second) {
+      continue;
+    }
     info->memory_usage.vram_mem += vram;
     info->memory_usage.gtt_mem += gtt;
     info->memory_usage.cpu_mem += cpu;

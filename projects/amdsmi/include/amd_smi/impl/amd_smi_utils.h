@@ -340,7 +340,8 @@ auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, ui
  *
  *  @details Reads every file of @p fdinfo_dir through the open directory, and
  *  counts each DRM client on @p bdf once, however many of the files list it.
- *  A file without a drm-client-id counts on its own.
+ *  A file without a drm-client-id is matched by its pasid; one with neither
+ *  counts on its own.
  *
  *  @param[in] fdinfo_dir A /proc/<pid>/fdinfo directory.
  *  @param[in] bdf The GPU's address as fdinfo prints it, such as "0000:03:00.0".

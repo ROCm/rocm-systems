@@ -42,17 +42,20 @@ class FdinfoDir {
 };
 
 // The fdinfo of an fd for an amdgpu DRM client, without a drm-client-id line
-// when client is negative.
+// when client is negative, and with the pasid line of amdgpu DKMS when pasid is
+// not.
 std::string AmdgpuFdinfo(const std::string& pdev, int64_t client, const std::string& vram,
                          const std::string& gtt, const std::string& cpu, uint64_t gfx_ns,
-                         uint64_t enc_ns) {
+                         uint64_t enc_ns, int64_t pasid = -1) {
   std::string text =
       "pos:\t0\nflags:\t02100002\nmnt_id:\t26\nino:\t1094\n"
       "drm-driver:\tamdgpu\n";
   if (client >= 0) text += "drm-client-id:\t" + std::to_string(client) + "\n";
-  text += "drm-pdev:\t" + pdev + "\ndrm-memory-vram:\t" + vram + "\ndrm-memory-gtt: \t" + gtt +
-          "\ndrm-memory-cpu: \t" + cpu + "\ndrm-engine-gfx:\t" + std::to_string(gfx_ns) +
-          " ns\ndrm-engine-enc:\t" + std::to_string(enc_ns) + " ns\n";
+  text += "drm-pdev:\t" + pdev + "\n";
+  if (pasid >= 0) text += "pasid:\t" + std::to_string(pasid) + "\n";
+  text += "drm-memory-vram:\t" + vram + "\ndrm-memory-gtt: \t" + gtt + "\ndrm-memory-cpu: \t" +
+          cpu + "\ndrm-engine-gfx:\t" + std::to_string(gfx_ns) + " ns\ndrm-engine-enc:\t" +
+          std::to_string(enc_ns) + " ns\n";
   return text;
 }
 
@@ -94,7 +97,23 @@ TEST(GpuUnit, DrmFdinfoSumAddsClients) {
   EXPECT_EQ(uint64_t{44455 + 101}, info.engine_usage.enc);
 }
 
-// Without a client id, fds cannot be matched to clients, so each one counts.
+// Without a client id, amdgpu DKMS names the client by its VM's pasid.
+TEST(GpuUnit, DrmFdinfoSumCountsEachPasidOnceWithoutClientId) {
+  FdinfoDir dir;
+  ASSERT_FALSE(dir.path().empty());
+  for (const char* fd : {"3", "4", "7", "12"}) {
+    dir.Add(fd, AmdgpuFdinfo(kBdf, -1, "1234 KiB", "567 KiB", "89 KiB", 500, 7, 2406));
+  }
+  dir.Add("5", AmdgpuFdinfo(kBdf, -1, "29 KiB", "2 KiB", "6 KiB", 900, 13, 2407));
+  const amdsmi_proc_info_t info = Sum(dir);
+  EXPECT_EQ(uint64_t{1234 + 29} * 1024, info.memory_usage.vram_mem);
+  EXPECT_EQ(uint64_t{567 + 2} * 1024, info.memory_usage.gtt_mem);
+  EXPECT_EQ(uint64_t{89 + 6} * 1024, info.memory_usage.cpu_mem);
+  EXPECT_EQ(uint64_t{500 + 900}, info.engine_usage.gfx);
+  EXPECT_EQ(uint64_t{7 + 13}, info.engine_usage.enc);
+}
+
+// Without a client id or pasid, fds cannot be matched to clients, so each one counts.
 TEST(GpuUnit, DrmFdinfoSumCountsEachFdWithoutClientId) {
   FdinfoDir dir;
   ASSERT_FALSE(dir.path().empty());
