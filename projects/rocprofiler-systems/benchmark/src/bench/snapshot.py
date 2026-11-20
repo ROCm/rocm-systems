@@ -20,6 +20,9 @@ from bench.analysis import MIN_REAL_FRACTION, exceeds_noise, pct
 SNAPSHOT_FILE = "snapshot.json"
 RESULTS_DIR = "results"
 SCHEMA_VERSION = 1
+# The standard error behind a verdict comes from the MAD, which needs many runs: the MAD
+# of a handful of runs can be far too small or too large.
+MIN_RELIABLE_RUNS = 20
 # (summary key, label, scale to display unit, unit)
 COMPARED_METRICS = (
     ("wall", "wall", 1e-6, "ms"),
@@ -160,6 +163,11 @@ def compare_command(
     return rows
 
 
+def run_count(entry: dict[str, Any]) -> int:
+    """Fewest successful runs of any command of a scenario entry."""
+    return min((s["wall"]["n"] for s in entry["summary"].values() if s), default=0)
+
+
 def settings_changed(entry_a: dict[str, Any], entry_b: dict[str, Any]) -> bool:
     """Both snapshots recorded the scenario's settings hash, and the hashes differ."""
     hash_a, hash_b = entry_a.get("settings_hash"), entry_b.get("settings_hash")
@@ -195,6 +203,7 @@ def compare_snapshots(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
         "settings_changed": [
             name for name in common if settings_changed(by_a[name], by_b[name])
         ],
+        "runs": {name: (run_count(by_a[name]), run_count(by_b[name])) for name in common},
         "failed_in_b": [
             name
             for name in common
@@ -217,12 +226,17 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
     ):
         if diffs:
             lines += [title, *(f"  {k}: {va} -> {vb}" for k, va, vb in diffs), ""]
+    few_runs = [n for n, runs in cmp["runs"].items() if min(runs) < MIN_RELIABLE_RUNS]
     for label, names in (
         ("only in A", cmp["only_in_a"]),
         ("only in B", cmp["only_in_b"]),
         (
             "whose commands or settings differ between A and B (not judged)",
             cmp["settings_changed"],
+        ),
+        (
+            f"with fewer than {MIN_RELIABLE_RUNS} runs per command (verdicts are rough)",
+            few_runs,
         ),
         (
             "with failed runs or missing commands in B (counted as REGRESSION)",
@@ -232,9 +246,11 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
         if names:
             lines += [f"Scenarios {label}: {', '.join(names)}", ""]
     for name, rows in cmp["scenarios"].items():
-        lines.append(f"SCENARIO {name}")
+        runs_a, runs_b = cmp["runs"][name]
+        lines.append(f"SCENARIO {name}  (runs per command: A {runs_a}, B {runs_b})")
+        cmd_w = max([16] + [len(r["command"]) + 2 for r in rows])
         lines.append(
-            f"  {'command':<16}{'metric':<10}{'A':>12}{'B':>12}{'Δ %':>9}  verdict"
+            f"  {'command':<{cmd_w}}{'metric':<10}{'A':>12}{'B':>12}{'Δ %':>9}  verdict"
         )
         changed = name in cmp["settings_changed"]
         for r in rows:
@@ -248,7 +264,7 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
                 verdict = "noise"
             pct_text = "n/a" if r["pct"] != r["pct"] else f"{r['pct']:+.1f}"
             lines.append(
-                f"  {r['command']:<16}{r['metric']:<10}{r['a']:>9.2f} {r['unit']:<2}"
+                f"  {r['command']:<{cmd_w}}{r['metric']:<10}{r['a']:>9.2f} {r['unit']:<2}"
                 f"{r['b']:>9.2f} {r['unit']:<2}{pct_text:>9}  {verdict}"
             )
         lines.append("")

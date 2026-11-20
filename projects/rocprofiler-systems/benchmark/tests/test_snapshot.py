@@ -197,6 +197,24 @@ def test_compare_rejects_a_changed_reference() -> None:
         snapshot.compare_snapshots(a, b)
 
 
+def test_comparison_shows_run_counts_and_warns_about_too_few_runs() -> None:
+    a = snap("baseline", baseline=1000, tool=1100)
+    b = copy.deepcopy(a)
+    for stats in b["scenarios"][0]["summary"].values():
+        stats["wall"]["n"] = 3
+    text = snapshot.format_comparison(a, b, snapshot.compare_snapshots(a, b))
+    assert "SCENARIO s  (runs per command: A 150, B 3)" in text
+    assert "fewer than 20 runs per command (verdicts are rough): s" in text
+    plenty = snapshot.format_comparison(a, a, snapshot.compare_snapshots(a, a))
+    assert "fewer than" not in plenty
+
+
+def test_long_command_names_do_not_run_into_the_metric_column() -> None:
+    a = snap("baseline", baseline=1000, only_sampling_on=1100)
+    text = snapshot.format_comparison(a, a, snapshot.compare_snapshots(a, a))
+    assert "  only_sampling_on  wall " in text
+
+
 def test_snapshot_records_a_settings_hash_per_scenario(tmp_path, capsys):
     doc = json.loads((take(tmp_path, "a") / "snapshot.json").read_text())
     settings_hash = doc["scenarios"][0]["settings_hash"]
