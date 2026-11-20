@@ -4,6 +4,10 @@
 
 # The ROCTx binding test: one test, no GPU needed.
 
+# The tests are free form whatever their extension: with the Intel compilers,
+# which read .f03 and .f08 as fixed form, this adds -free.
+set(CMAKE_Fortran_FORMAT FREE)
+
 # The Intel compilers skip .f03 and .f08 sources unless -Tf precedes them.
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
     string(
