@@ -988,16 +988,10 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
                         f'SCC={body_writes_scc}, MR ISA writes SCC={mrisa_writes_scc}'
                     )
                 if sem.semantic_class == 'scalar_addk':
-                    # Migrated architectures delegate signed overflow to rj-arith;
-                    # other architectures still emit the local helper.
-                    overflow = (
-                        f'rj_arith_{inst.name.lower()}('
-                        if isa_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
-                        else 'signed_add_overflows'
-                    )
-                    if overflow not in body:
+                    # All AMDGPU profiles delegate ADDK's overflow result to rj-arith.
+                    if f'rj_arith_{inst.name.lower()}(' not in body:
                         mismatches.append(
-                            f'{inst.name}/{inst.enc_name}: ADDK does not use signed overflow'
+                            f'{inst.name}/{inst.enc_name}: ADDK does not delegate signed overflow'
                         )
 
     assert checked > 0, f'{isa_name}: no instruction SCC contracts checked'
