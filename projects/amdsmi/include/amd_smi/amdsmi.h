@@ -8790,13 +8790,15 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  * listing is returned, which can be any status (including ::AMDSMI_STATUS_INVAL), and the list is
  * not filled. Without KFD the list is empty. A process whose KFD statistics cannot be read is
  * still listed, with cu_occupancy, evicted_time and sdma_usage all-ones (not available) and memory
- * sizes from its fdinfo only (0 if unreadable). So is a running process whose GPUs cannot be read
- * from KFD, if its DRM fdinfo shows a DRM node of this GPU's PCI device open, which the ROCm
- * runtime does for every GPU it can see (for a GPU split into partitions, see the note on
+ * sizes from its fdinfo only (0 if the caller may not read it). So is a running process whose GPUs
+ * cannot be read from KFD, if its DRM fdinfo shows a DRM node of this GPU's PCI device open, which
+ * the ROCm runtime does for every GPU it can see (for a GPU split into partitions, see the note on
  * memory_usage above). If its fdinfo cannot be read either, the listing
  * fails with the error from KFD, unless that error is that the caller may not read which GPUs it
  * uses (::AMDSMI_STATUS_NO_PERM from amdsmi_get_gpu_compute_process_gpus()): such a process is
- * left out, as is one that exited.
+ * left out, as is one that exited. A listed process's DRM fdinfo (its directory or one of its
+ * files) that cannot be read, other than because the caller may not read it, its fd was closed or
+ * the process exited, fails the listing with the error from that read.
  *
  *  @note In a PID namespace other than the host's, such as that of a container that does not
  *  share the host's, the list holds the processes of that namespace that have /dev/kfd open,

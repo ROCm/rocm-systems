@@ -451,6 +451,194 @@ TEST(GpuUnit, ProcessListFailsWhenReadingAnFdinfoFileFails) {
             AMDSMI_STATUS_UNEXPECTED_DATA);
 }
 
+TEST(GpuUnit, ProcessListFailsWhenAnFdinfoFileOfAProcessOnTheGpuCannotBeRead) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the process on this GPU through a queue. One of its fdinfo files
+  // shows this GPU; another opens and then fails to read (a directory), so its
+  // usage would be missing from the sizes.
+  roots.kfd().WriteFile("4265/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4265");
+  AddProcess(&roots.proc(), 4265, kBdfText);
+  std::filesystem::create_directory(roots.proc().root() + "/4265/fdinfo/9");
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_FILE_ERROR);
+}
+
+TEST(GpuUnit, ProcessListFailsWhenTheFdinfoOfAProcessOnTheGpuCannotBeOpened) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the process on this GPU through a queue, and its fdinfo directory
+  // cannot be opened (a file stands in its place), as with EMFILE when no fd is
+  // left: its sizes would read as 0.
+  roots.kfd().WriteFile("4268/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4268");
+  roots.proc().WriteFile("4268/fdinfo", "not a directory\n");
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_DIRECTORY_NOT_FOUND);
+}
+
+TEST(GpuUnit, ProcessListFailsWhenTheFdinfoOfAProcessWithoutKfdFilesForTheGpuCannotBeOpened) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the process on this GPU through a queue but has its per-GPU files
+  // only for another GPU, so its fdinfo is searched for this GPU, and that
+  // directory cannot be opened (a file stands in its place).
+  roots.kfd().WriteFile("4272/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  roots.kfd().WriteFile("4272/vram_" + std::to_string(kOtherKfdGpuId), "0\n");
+  roots.proc().WriteFile("4272/fdinfo", "not a directory\n");
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_DIRECTORY_NOT_FOUND);
+}
+
+TEST(GpuUnit, ProcessListFailsWhenAnFdinfoFileOfAProcessWithoutKfdFilesForTheGpuFailsToRead) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // As in ProcessListFailsWhenTheFdinfoOfAProcessWithoutKfdFilesForTheGpuCannotBeOpened,
+  // except that the directory opens: its readable file shows another GPU, and one
+  // that opens and then fails to read (a directory) might have shown this one.
+  roots.kfd().WriteFile("4274/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  roots.kfd().WriteFile("4274/vram_" + std::to_string(kOtherKfdGpuId), "0\n");
+  AddProcess(&roots.proc(), 4274, kOtherBdfText);
+  std::filesystem::create_directory(roots.proc().root() + "/4274/fdinfo/9");
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_FILE_ERROR);
+}
+
+TEST(GpuUnit, ProcessListGivesOnlyKfdsCountWhenTheCallerMayNotReadAnFdinfoFile) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the process on this GPU through a queue. The caller may read one
+  // of its fdinfo files but not another, as for a process it may not trace: the
+  // sizes summed from the readable one are not the process's usage, so only
+  // KFD's VRAM count is listed.
+  constexpr uint64_t kKfdVram = 8 * 1024 * 1024;
+  roots.kfd().WriteFile("4273/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4273");
+  roots.kfd().WriteFile("4273/vram_" + std::to_string(kKfdGpuId), std::to_string(kKfdVram));
+  AddProcess(&roots.proc(), 4273, kBdfText);
+  roots.proc().WriteFile("4273/fdinfo/9", "drm-pdev:\t" + std::string(kBdfText) + "\n");
+  std::filesystem::permissions(roots.proc().root() + "/4273/fdinfo/9",
+                               std::filesystem::perms::none);
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  // Root reads files whatever their mode, so the list is read as another user.
+  auto list_process = [&] {
+    uint32_t num_processes = 4;
+    amdsmi_proc_info_t list[4] = {};
+    EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+              AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(num_processes, 1U);
+    EXPECT_EQ(list[0].pid, 4273U);
+    EXPECT_EQ(list[0].memory_usage.vram_mem, kKfdVram);
+    EXPECT_EQ(list[0].memory_usage.gtt_mem, 0U);
+    EXPECT_EQ(list[0].memory_usage.cpu_mem, 0U);
+    return AMDSMI_STATUS_SUCCESS;
+  };
+  const amdsmi_status_t status = amd::smi::testing::RunAsUnprivilegedUser(list_process);
+  std::filesystem::permissions(roots.proc().root() + "/4273/fdinfo/9",
+                               std::filesystem::perms::owner_all);
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+}
+
+TEST(GpuUnit, ProcessListKeepsAProcessOnTheGpuThatItsFdinfoDoesNotShow) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the process on this GPU through a queue, but has its per-GPU
+  // files only for another GPU, and its fdinfo shows only that GPU: the fdinfo
+  // read finds nothing for this GPU, which leaves the process listed with KFD's
+  // information, not the list failed.
+  roots.kfd().WriteFile("4269/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  roots.kfd().WriteFile("4269/vram_" + std::to_string(kOtherKfdGpuId), "0\n");
+  AddProcess(&roots.proc(), 4269, kOtherBdfText);
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  ASSERT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list), AMDSMI_STATUS_SUCCESS);
+  ASSERT_EQ(num_processes, 1U);
+  EXPECT_EQ(list[0].pid, 4269U);
+}
+
+TEST(GpuUnit, ProcessListFailsWhenAnFdinfoFileOfAProcessPlacedByFdinfoCannotBeRead) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // As in ProcessListFailsWhenAnFdinfoFileOfAProcessOnTheGpuCannotBeRead, except
+  // that KFD cannot say which GPU the process uses, so its fdinfo places it.
+  roots.kfd().WriteFile("4266/queues/0/gpuid", "not-a-gpu-id\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4266");
+  AddProcess(&roots.proc(), 4266, kBdfText);
+  std::filesystem::create_directory(roots.proc().root() + "/4266/fdinfo/9");
+
+  TestGpu gpu;
+  WaitOutProcessListCache();
+  uint32_t num_processes = 4;
+  amdsmi_proc_info_t list[4] = {};
+  EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+            AMDSMI_STATUS_FILE_ERROR);
+}
+
+TEST(GpuUnit, ProcessListKeepsAProcessOnTheGpuWhoseFdinfoTheCallerMayNotRead) {
+  ScopedAmdsmiInit smi_init;
+  MockProcessRoots roots;
+  // KFD places the process on this GPU through a queue, and the caller may not
+  // read its fdinfo, as for another user's process: it is listed with KFD's
+  // VRAM count.
+  constexpr uint64_t kKfdVram = 8 * 1024 * 1024;
+  roots.kfd().WriteFile("4267/queues/0/gpuid", std::to_string(kKfdGpuId) + "\n");
+  AddKfdFilesForEveryGpu(&roots.kfd(), "4267");
+  roots.kfd().WriteFile("4267/vram_" + std::to_string(kKfdGpuId), std::to_string(kKfdVram));
+  AddProcess(&roots.proc(), 4267, kBdfText);
+  std::filesystem::permissions(roots.proc().root() + "/4267/fdinfo", std::filesystem::perms::none);
+
+  TestGpu gpu;
+  ScopedKfdNode kfd_node(kKfdGpuId, gpu.index());
+  WaitOutProcessListCache();
+  // Root reads files whatever their mode, so the list is read as another user.
+  auto list_process = [&] {
+    uint32_t num_processes = 4;
+    amdsmi_proc_info_t list[4] = {};
+    EXPECT_EQ(amdsmi_get_gpu_process_list(gpu.handle(), &num_processes, list),
+              AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(num_processes, 1U);
+    EXPECT_EQ(list[0].pid, 4267U);
+    EXPECT_EQ(list[0].memory_usage.vram_mem, kKfdVram);
+    return AMDSMI_STATUS_SUCCESS;
+  };
+  const amdsmi_status_t status = amd::smi::testing::RunAsUnprivilegedUser(list_process);
+  std::filesystem::permissions(roots.proc().root() + "/4267/fdinfo",
+                               std::filesystem::perms::owner_all);
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+}
+
 TEST(GpuUnit, ProcessListLeavesOutAProcessWhoseGpusTheCallerMayNotRead) {
   ScopedAmdsmiInit smi_init;
   MockProcessRoots roots;

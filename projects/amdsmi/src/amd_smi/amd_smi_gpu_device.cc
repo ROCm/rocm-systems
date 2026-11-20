@@ -335,6 +335,14 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     return status_code;
   };
 
+  // A process's fdinfo that cannot be read, other than because it exited or the
+  // caller may not read it, would leave sizes and engine usage silently low, so it
+  // fails the list.
+  auto fdinfo_read_failed = [](amdsmi_status_t status) {
+    return status != AMDSMI_STATUS_SUCCESS && status != AMDSMI_STATUS_NOT_FOUND &&
+           status != AMDSMI_STATUS_NO_PERM;
+  };
+
   // For a process whose GPUs KFD could not report: KFD makes its files for every
   // GPU, so only its DRM fdinfo places it. If that cannot be read either, the list
   // fails rather than drop a running process, unless the caller may not read its
@@ -348,9 +356,12 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
     const amdsmi_status_t shown = smi_amdgpu_fdinfo_shows_gpu(pid, fdinfo_bdf);
     if (shown == AMDSMI_STATUS_SUCCESS) {
       amdsmi_proc_info_t amdsmi_proc_info{};
-      if (get_process_info(MakeUnavailableProcessInfo(pid), amdsmi_proc_info) ==
-              AMDSMI_STATUS_SUCCESS ||
-          KfdProcessExists(pid)) {
+      const amdsmi_status_t info_status =
+          get_process_info(MakeUnavailableProcessInfo(pid), amdsmi_proc_info);
+      if (fdinfo_read_failed(info_status)) {
+        return info_status;
+      }
+      if (info_status == AMDSMI_STATUS_SUCCESS || KfdProcessExists(pid)) {
         compute_process_list.emplace(pid, amdsmi_proc_info);
       }
     }
@@ -398,7 +409,10 @@ amdsmi_status_t AMDSmiGPUDevice::get_compute_process_list_impl(
           rsmi_proc_info = MakeUnavailableProcessInfo(pid);
         }
         amdsmi_proc_info_t amdsmi_proc_info{};
-        get_process_info(rsmi_proc_info, amdsmi_proc_info);
+        const amdsmi_status_t info_status = get_process_info(rsmi_proc_info, amdsmi_proc_info);
+        if (fdinfo_read_failed(info_status)) {
+          return info_status;
+        }
         compute_process_list.emplace(rsmi_proc_info.process_id, amdsmi_proc_info);
       }
     }

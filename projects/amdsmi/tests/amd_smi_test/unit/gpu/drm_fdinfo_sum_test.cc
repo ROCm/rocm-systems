@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -11,6 +12,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "test_fixture_utils.h"
 
 namespace {
 
@@ -139,10 +141,77 @@ TEST(GpuUnit, DrmFdinfoSumStartsEachFdAtZero) {
   EXPECT_EQ(uint64_t{30}, info.engine_usage.enc);
 }
 
+TEST(GpuUnit, DrmFdinfoSumFailsWhenAFileFailsToRead) {
+  FdinfoDir dir;
+  ASSERT_FALSE(dir.path().empty());
+  dir.Add("3", AmdgpuFdinfo(kBdf, 7, "4 KiB", "8 KiB", "0 KiB", 1000, 30));
+  // Opens, then fails to read: a directory.
+  std::filesystem::create_directory(dir.path() + "/4");
+  amdsmi_proc_info_t info{};
+  EXPECT_EQ(AMDSMI_STATUS_FILE_ERROR, smi_amdgpu_sum_drm_fdinfo(dir.path(), kBdf, &info));
+}
+
+TEST(GpuUnit, DrmFdinfoSumFailsWhenAFileCannotBeOpened) {
+  FdinfoDir dir;
+  ASSERT_FALSE(dir.path().empty());
+  dir.Add("3", AmdgpuFdinfo(kBdf, 7, "4 KiB", "8 KiB", "0 KiB", 1000, 30));
+  // A symlink loop: opening it fails with ELOOP.
+  std::filesystem::create_symlink("4", dir.path() + "/4");
+  amdsmi_proc_info_t info{};
+  EXPECT_EQ(AMDSMI_STATUS_UNKNOWN_ERROR, smi_amdgpu_sum_drm_fdinfo(dir.path(), kBdf, &info));
+}
+
+TEST(GpuUnit, DrmFdinfoSumSkipsAFileOfAClosedFd) {
+  FdinfoDir dir;
+  ASSERT_FALSE(dir.path().empty());
+  dir.Add("3", AmdgpuFdinfo(kBdf, 7, "4 KiB", "8 KiB", "0 KiB", 1000, 30));
+  // An fd closed after the directory was listed: its file is gone (ENOENT).
+  std::filesystem::create_symlink("gone", dir.path() + "/4");
+  const amdsmi_proc_info_t info = Sum(dir);
+  EXPECT_EQ(uint64_t{4} * 1024, info.memory_usage.vram_mem);
+  EXPECT_EQ(uint64_t{8} * 1024, info.memory_usage.gtt_mem);
+}
+
 TEST(GpuUnit, DrmFdinfoSumWithoutDirectory) {
   FdinfoDir dir;
   ASSERT_FALSE(dir.path().empty());
+  // The process exited.
   amdsmi_proc_info_t info{};
-  EXPECT_EQ(AMDSMI_STATUS_NO_PERM, smi_amdgpu_sum_drm_fdinfo(dir.path() + "/missing", kBdf, &info));
+  EXPECT_EQ(AMDSMI_STATUS_NOT_FOUND,
+            smi_amdgpu_sum_drm_fdinfo(dir.path() + "/missing", kBdf, &info));
   EXPECT_EQ(uint64_t{0}, info.memory_usage.vram_mem);
+}
+
+TEST(GpuUnit, DrmFdinfoSumFailsWhenTheDirectoryCannotBeOpened) {
+  FdinfoDir dir;
+  ASSERT_FALSE(dir.path().empty());
+  // A file where the directory should be: opendir() fails with ENOTDIR, as it
+  // would with EMFILE when no fd is left.
+  dir.Add("fdinfo", "not a directory\n");
+  amdsmi_proc_info_t info{};
+  EXPECT_EQ(AMDSMI_STATUS_DIRECTORY_NOT_FOUND,
+            smi_amdgpu_sum_drm_fdinfo(dir.path() + "/fdinfo", kBdf, &info));
+}
+
+TEST(GpuUnit, DrmFdinfoSumReportsAFileTheCallerMayNotRead) {
+  FdinfoDir dir;
+  ASSERT_FALSE(dir.path().empty());
+  dir.Add("3", AmdgpuFdinfo(kBdf, 7, "4 KiB", "8 KiB", "0 KiB", 1000, 30));
+  dir.Add("4", AmdgpuFdinfo(kBdf, 8, "4 KiB", "8 KiB", "0 KiB", 1000, 30));
+  // Another user may list the directory but not read file 4.
+  std::filesystem::permissions(
+      dir.path(), std::filesystem::perms::owner_all | std::filesystem::perms::group_read |
+                      std::filesystem::perms::group_exec | std::filesystem::perms::others_read |
+                      std::filesystem::perms::others_exec);
+  std::filesystem::permissions(dir.path() + "/4", std::filesystem::perms::none);
+  // Root reads files whatever their mode, so the sum is read as another user.
+  const amdsmi_status_t status = amd::smi::testing::RunAsUnprivilegedUser([&] {
+    // So that NO_PERM comes from file 4, not from a directory out of reach.
+    EXPECT_EQ(0, access((dir.path() + "/3").c_str(), R_OK));
+    amdsmi_proc_info_t info{};
+    EXPECT_EQ(AMDSMI_STATUS_NO_PERM, smi_amdgpu_sum_drm_fdinfo(dir.path(), kBdf, &info));
+    return AMDSMI_STATUS_SUCCESS;
+  });
+  std::filesystem::permissions(dir.path() + "/4", std::filesystem::perms::owner_all);
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
 }

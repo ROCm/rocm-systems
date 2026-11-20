@@ -47,23 +47,41 @@ auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, ui
   return false;
 }
 
+// The status for an errno that keeps a process's fdinfo from being read.
+static amdsmi_status_t FdinfoReadStatus(int err) {
+  if (err == EACCES || err == EPERM) return AMDSMI_STATUS_NO_PERM;
+  return amd::smi::rsmi_to_amdsmi_status(amd::smi::ErrnoToRsmiStatus(err));
+}
+
+// Whether an errno says that the fd was closed, or its process exited, since the
+// fdinfo directory was listed or named.
+static bool FdinfoGone(int err) { return err == ENOENT || err == ESRCH; }
+
 auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view bdf,
                                amdsmi_proc_info_t* info) -> amdsmi_status_t {
   DIR* d = opendir(fdinfo_dir.c_str());
-  if (d == nullptr) return AMDSMI_STATUS_NO_PERM;
+  if (d == nullptr) {
+    const int err = errno;
+    return FdinfoGone(err) ? AMDSMI_STATUS_NOT_FOUND : FdinfoReadStatus(err);
+  }
 
   // Every fd that refers to a DRM client (dup, fork, fd passing) lists that
   // client's usage, so count each drm-client-id once.
   std::unordered_set<uint64_t> clients;
+  // A file that cannot be opened or read would leave its usage out of the sums,
+  // so it fails them. Files of fds closed, or of a process that exited, since the
+  // directory was listed are gone.
+  int read_err = 0;
   while (const dirent* dir = readdir(d)) {
     if (dir->d_name[0] == '.') continue;
     // Opened through the directory already open, not by its path again, so a
     // PID reused during the scan cannot switch these reads to another process.
     const int fd = openat(dirfd(d), dir->d_name, O_RDONLY | O_CLOEXEC);
-    if (fd < 0) continue;
-    FILE* fdinfo = fdopen(fd, "r");
+    FILE* fdinfo = fd < 0 ? nullptr : fdopen(fd, "r");
     if (fdinfo == nullptr) {
-      close(fd);
+      const int err = errno;
+      if (fd >= 0) close(fd);
+      if (read_err == 0 && !FdinfoGone(err)) read_err = err;
       continue;
     }
     char fd_bdf_str[13] = "";
@@ -83,8 +101,14 @@ auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view b
       if (sscanf(l, "drm-engine-gfx: %" SCNu64, &gfx) == 1) continue;
       if (sscanf(l, "drm-engine-enc: %" SCNu64, &enc) == 1) continue;
     }
+    // getline() returns -1 for a failed read as for the end of the file.
+    const int err = ferror(fdinfo) ? (errno != 0 ? errno : EIO) : 0;
     free(l);
     fclose(fdinfo);
+    if (err != 0) {
+      if (read_err == 0 && !FdinfoGone(err)) read_err = err;
+      continue;
+    }
     if (bdf != fd_bdf_str) continue;
     if (has_client && !clients.insert(client).second) continue;
     info->memory_usage.vram_mem += vram;
@@ -94,13 +118,7 @@ auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view b
     info->engine_usage.enc += enc;
   }
   closedir(d);
-  return AMDSMI_STATUS_SUCCESS;
-}
-
-// The status for an errno that keeps a process's fdinfo from being read.
-static amdsmi_status_t FdinfoReadStatus(int err) {
-  if (err == EACCES || err == EPERM) return AMDSMI_STATUS_NO_PERM;
-  return amd::smi::rsmi_to_amdsmi_status(amd::smi::ErrnoToRsmiStatus(err));
+  return read_err == 0 ? AMDSMI_STATUS_SUCCESS : FdinfoReadStatus(read_err);
 }
 
 auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_status_t {
@@ -109,7 +127,7 @@ auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_statu
   DIR* d = opendir(fdinfo_dir.c_str());
   if (d == nullptr) {
     const int err = errno;
-    return err == ENOENT || err == ESRCH ? AMDSMI_STATUS_NOT_FOUND : FdinfoReadStatus(err);
+    return FdinfoGone(err) ? AMDSMI_STATUS_NOT_FOUND : FdinfoReadStatus(err);
   }
   constexpr std::string_view kPdevKey = "drm-pdev:";
   bool shown = false;
@@ -126,7 +144,7 @@ auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_statu
     if (fdinfo == nullptr) {
       const int err = errno;
       if (fd >= 0) close(fd);
-      if (read_err == 0 && err != ENOENT && err != ESRCH) read_err = err;
+      if (read_err == 0 && !FdinfoGone(err)) read_err = err;
       continue;
     }
     ssize_t len = 0;
@@ -138,7 +156,7 @@ auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_statu
     // getline() returns -1 for a failed read as for the end of the file.
     if (!shown && ferror(fdinfo)) {
       const int err = errno != 0 ? errno : EIO;
-      if (read_err == 0 && err != ENOENT && err != ESRCH) read_err = err;
+      if (read_err == 0 && !FdinfoGone(err)) read_err = err;
     }
     fclose(fdinfo);
   }
@@ -149,32 +167,6 @@ auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_statu
 }
 
 extern "C" {
-
-amdsmi_status_t gpuvsmi_pid_is_gpu(const std::string& path, const char* bdf) {
-  DIR* d;
-  struct dirent* dir;
-
-  d = opendir(path.c_str());
-  if (!d) return AMDSMI_STATUS_NO_PERM;
-
-  /* iterate through all the fds, try to find
-   * a match for the GPU bdf
-   */
-  while ((dir = readdir(d)) != NULL) {
-    std::string file = path + dir->d_name;
-    std::ifstream fdinfo(file.c_str());
-    for (std::string line; std::getline(fdinfo, line);) {
-      if (line.find(bdf) != std::string::npos) {
-        closedir(d);
-        return AMDSMI_STATUS_SUCCESS;
-      }
-    }
-  }
-
-  closedir(d);
-
-  return AMDSMI_STATUS_NOT_FOUND;
-}
 
 // See fdinfo.h for the full contract. The fast path uses `known_kfd_gpu_id`;
 // the sentinels 0 and UINT64_MAX force the topology-discovery fallback below.
@@ -247,8 +239,10 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
   amdsmi_status_t ret = gpu_is_in_kfd_pid(bdf, pid, kfd_gpu_id);
 
   if (ret != AMDSMI_STATUS_SUCCESS) {
-    // If kfd process detection fails, fallback on old bdf code
-    ret = gpuvsmi_pid_is_gpu(path.c_str(), bdf_str);
+    // KFD does not show the GPU, or could not be read: look for it in the
+    // process's fdinfo, as the fdinfo placement does, which reports a file it
+    // cannot read.
+    ret = smi_amdgpu_fdinfo_shows_gpu(pid, bdf_str);
     if (ret != AMDSMI_STATUS_SUCCESS) {
       return ret;
     }
@@ -256,7 +250,11 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
   memset(&info, 0, sizeof(info));
   ret = smi_amdgpu_sum_drm_fdinfo(path, bdf_str, &info);
-  if (ret != AMDSMI_STATUS_SUCCESS) return ret;
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    // What was summed before the failure is not the process's usage.
+    memset(&info, 0, sizeof(info));
+    return ret;
+  }
   info.mem = info.memory_usage.vram_mem + info.memory_usage.gtt_mem + info.memory_usage.cpu_mem;
 
   //  Note: If possible at all, try to get the name of the process/container.

@@ -1840,7 +1840,7 @@ note: In a PID namespace other than the host's, such as that of a container that
 
 note: A running process whose GPUs cannot be read from KFD is listed if its DRM fdinfo shows a DRM node of this GPU's PCI device open, which the ROCm runtime does for every GPU it can see (for a GPU split into partitions, see the next note). If its fdinfo cannot be read either, the call raises the error from KFD, unless that error is `AMDSMI_STATUS_NO_PERM` (the caller may not read which GPUs the process uses): such a process is left out, as is one that exited.
 
-note: VRAM that amdgpu has moved to GTT for a while (evicted) can count in both `vram_mem` and `gtt_mem`. If the caller may not read a process's fdinfo (such as another user's, when the caller lacks CAP_SYS_PTRACE), only KFD's count is known and the other sizes are 0. On a GPU split into partitions, DRM fdinfo names only the GPU's PCI device. Where amd-smi shows the partitions with their ID in the PCI function, only the first partition's list matches it and covers every partition's fdinfo sizes and `engine_usage`, while the others hold only KFD's count (nothing, in a PID namespace other than the host's); otherwise every partition's list matches it and covers them all.
+note: VRAM that amdgpu has moved to GTT for a while (evicted) can count in both `vram_mem` and `gtt_mem`. If the caller may not read a process's fdinfo (such as another user's, when the caller lacks CAP_SYS_PTRACE), only KFD's count is known and the other sizes are 0. A listed process's DRM fdinfo (its directory or one of its files) that cannot be read for any other reason, except that its fd was closed or the process exited, raises the error from that read. On a GPU split into partitions, DRM fdinfo names only the GPU's PCI device. Where amd-smi shows the partitions with their ID in the PCI function, only the first partition's list matches it and covers every partition's fdinfo sizes and `engine_usage`, while the others hold only KFD's count (nothing, in a PID namespace other than the host's); otherwise every partition's list matches it and covers them all.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
@@ -1857,7 +1857,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 - `AMDSMI_STATUS_NO_PERM` - Permission Denied
 - `AMDSMI_STATUS_RETRY` - Processes kept starting while the list was read; call again
 - `AMDSMI_STATUS_OUT_OF_RESOURCES` - More than 1024 processes use the GPU
-- Any other status from reading the GPU's KFD processes, such as `AMDSMI_STATUS_UNEXPECTED_DATA`
+- Any other status from reading the GPU's KFD processes, such as `AMDSMI_STATUS_UNEXPECTED_DATA`, or a listed process's DRM fdinfo, such as `AMDSMI_STATUS_FILE_ERROR`
 
 Example:
 

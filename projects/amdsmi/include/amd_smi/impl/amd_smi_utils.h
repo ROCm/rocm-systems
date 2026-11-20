@@ -344,9 +344,14 @@ auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, ui
  *
  *  @param[in] fdinfo_dir A /proc/<pid>/fdinfo directory.
  *  @param[in] bdf The GPU's address as fdinfo prints it, such as "0000:03:00.0".
- *  @param[in,out] info Gets the sums added to its memory_usage and engine_usage.
- *  @return ::AMDSMI_STATUS_NO_PERM if the directory cannot be opened, else
- *  ::AMDSMI_STATUS_SUCCESS.
+ *  @param[in,out] info Gets the sums added to its memory_usage and engine_usage;
+ *  they may be partial when the status is not ::AMDSMI_STATUS_SUCCESS, or when
+ *  the process exits during the read.
+ *  @return ::AMDSMI_STATUS_SUCCESS; ::AMDSMI_STATUS_NOT_FOUND if the process
+ *  exited before its directory was opened; otherwise ::AMDSMI_STATUS_NO_PERM if
+ *  the caller may not read the directory or one of its files, or the status for
+ *  another error that keeps one of them from being opened or read. Files of fds
+ *  closed, or of a process that exits, during the read are skipped.
  */
 auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view bdf,
                                amdsmi_proc_info_t* info) -> amdsmi_status_t;
