@@ -62,6 +62,15 @@ rocprofiler_start_context(rocprofiler_context_id_t context_id) ROCPROFILER_API;
 /**
  * @brief Stop context.
  *
+ * Deactivates collection for subsequent work. Kernel-dispatch records retain the context
+ * selected at submission and may be delivered after this call returns. This call does not
+ * synchronize application GPU work or flush the context's kernel-dispatch buffers.
+ *
+ * To consume a complete kernel-dispatch window, synchronize the required application work
+ * and call ::rocprofiler_flush_buffer, checking its status, before consuming the records.
+ * Stop may precede or follow that flush if the application submits no new work between them.
+ * Services other than kernel-dispatch tracing may perform their own service-specific drains.
+ *
  * @param [in] context_id Identifier for context to be deactivated
  * @return ::rocprofiler_status_t
  */

@@ -27,11 +27,17 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
+#include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
+#include "lib/rocprofiler-sdk/kfd/signal_less.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <hsa/hsa.h>
 
@@ -41,6 +47,39 @@ namespace rocprofiler
 {
 namespace kernel_dispatch
 {
+rocprofiler_status_t
+flush_buffer_records(rocprofiler_buffer_id_t buffer_id)
+{
+    if(internal_threading::fork_stale() || registration::get_fini_status() != 0)
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    auto* target = buffer::get_buffer(buffer_id);
+    if(!target) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+    auto                    contexts = context::get_registered_contexts_snapshot();
+    const context::context* owner    = nullptr;
+    for(const auto* candidate : contexts)
+    {
+        if(candidate && candidate->context_idx == target->context_id)
+        {
+            owner = candidate;
+            break;
+        }
+    }
+    if(!owner || !owner->buffered_tracer ||
+       owner->buffered_tracer->buffer_data.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) !=
+           buffer_id)
+        return ROCPROFILER_STATUS_SUCCESS;
+
+    if(internal_threading::is_task_group_thread() || hsa::is_async_signal_handler_thread())
+        return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+
+    const auto reader_ready   = !kfd::signal_less_feature_enabled() || kfd::flush_reader_records();
+    const auto inline_ready   = hsa::queue_interposition::interposition_fence_records();
+    const auto expanded_ready = hsa::flush_async_signal_records();
+    return reader_ready && inline_ready && expanded_ready ? ROCPROFILER_STATUS_SUCCESS
+                                                          : ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+}
+
 profiling_time
 get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data)
 {

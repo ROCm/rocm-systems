@@ -29,6 +29,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <future>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -60,12 +62,28 @@ struct record_batch
     // Which GPU's ring these came from. Pairing and correlation are keyed by it,
     // so records from different GPUs can never be matched to each other.
     uint32_t gpu_id = 0;
+    // Set only on a fence marker: a recordless batch the reader queues behind a session's copied
+    // overflow so the processor, which drains the pipe in order, proves it has passed everything
+    // ahead of it by fulfilling this.
+    std::shared_ptr<std::promise<void>> completion = {};
+
+    // Fulfils and releases the marker, reporting whether this batch was one. The promise is moved
+    // out first, so a second call is a no-op rather than a promise_already_satisfied throw from
+    // whatever scope happens to be unwinding.
+    bool take_fence()
+    {
+        if(!completion) return false;
+        auto fence = std::move(completion);
+        fence->set_value();
+        return true;
+    }
 
     void clear()
     {
         records.clear();  // keeps capacity: steady state does not allocate
         now_ns = 0;
         gpu_id = 0;
+        completion.reset();
     }
 };
 

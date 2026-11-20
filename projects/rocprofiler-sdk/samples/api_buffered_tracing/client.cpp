@@ -524,7 +524,11 @@ shutdown()
 {
     if(client_id)
     {
-        ROCPROFILER_CALL(rocprofiler_flush_buffer(client_buffer), "buffer flush");
+        auto flush_status = rocprofiler_flush_buffer(client_buffer);
+        // the records in the buffer were delivered, but the SDK would not promise the window is
+        // complete; that is not an error here
+        if(flush_status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+            ROCPROFILER_CALL(flush_status, "buffer flush");
         client_fini_func(*client_id);
     }
 }

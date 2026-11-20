@@ -49,6 +49,9 @@ using queue_info_session_t   = hsa::queue_info_session_t;
 using packet_data_t          = hsa::packet_data_t;
 using profiling_time         = tracing::profiling_time;
 
+rocprofiler_status_t
+flush_buffer_records(rocprofiler_buffer_id_t buffer_id);
+
 profiling_time
 get_dispatch_time(const queue_info_session_t& session, packet_data_t& packet_data);
 
