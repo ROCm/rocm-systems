@@ -410,12 +410,20 @@ Callback policy is derived from the plugins contained by an
 `ExecutionPluginGroup`. An empty group returns before dispatch or locking. The
 group divides hooks by frequency and synchronization cost:
 
-- Lifecycle, dispatch, workgroup, wavefront, and barrier callbacks are
+- Lifecycle, dispatch, workgroup, wavefront, and barrier-completion callbacks
+  (`onAmdgpuBarrierResolved` and `onAmdgpuBarrierRoundCompleted`) are
   infrequent. The group takes one recursive mutex before iterating its plugins,
   so two infrequent callbacks cannot overlap across simulation partitions. With
   the default hot-hook policy, an infrequent callback can still overlap a
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.
+- The barrier signal and wait callbacks (`onAmdgpuBarrierSignaled` and
+  `onAmdgpuBarrierWaitPassed`) fire as instructions execute. Like the
+  high-frequency callbacks below, they take the mutex only when a plugin
+  requires serial hot hooks, and otherwise can run concurrently across
+  simulation partitions, with each other and with every other callback. A
+  plugin that shares state between them and the completion callbacks must
+  synchronize it or require serial hot hooks.
 - Instruction before/after, memory-routing, tensor-DMA issue, tensor-DMA
   memory, and register-access callbacks are high-frequency and run concurrently
   with both other high-frequency callbacks and infrequent callbacks by default.
