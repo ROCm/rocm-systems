@@ -138,11 +138,12 @@ HTESTS := $(HIPIFY_DIR)/tests
 HBENCH := $(HIPIFY_DIR)/benchmarks
 
 # -- Compiler flags ----------------------------------------------------------
+NLOHMANN_JSON_INC ?= $(abspath $(NCCL_M2N_ROOT)/../../external/nlohmann_json/include)
 CXXSTD   := -std=c++17
 INCLUDES := -isystem $(RCCL_HOME)/include \
             -isystem $(RCCL_HOME)/include/nccl_device \
             -I$(HSRC) \
-            -isystem $(NCCL_M2N_ROOT)/third_party
+            -isystem $(NLOHMANN_JSON_INC)
 
 # Every library/test TU is compiled as HIP (-x hip); the host-only .cc drivers
 # carry no device code so the device pass is a no-op for them.
@@ -353,7 +354,7 @@ $(BINDIR)/reshard_batch_bench_user_window: $(M2N_LIBTARGET)
 
 # reshard_model_bench.cu is a host-only driver (JSON model/system configs, no
 # device code) -> compile it -x c++ so clang-HIP does not run a device pass on
-# the vendored nlohmann/json templates. The kernels live in the companion
+# the nlohmann/json templates. The kernels live in the companion
 # bench_common_kernels.cu, compiled as HIP.
 $(BINDIR)/reshard_model_bench: $(M2N_LIBTARGET)
 	@printf "Building reshard_model_bench ...\n"

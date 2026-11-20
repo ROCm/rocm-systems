@@ -1753,7 +1753,7 @@ enum PipeHostLayoutCopyDir {
 };
 
 /* CE pack/unpack counterpart to the device layout-copy helpers.  It emits a
- * single cudaMemcpyAsync for contiguous spans, cudaMemcpy3DAsync for maximal
+ * single cudaMemcpyAsync for contiguous spans, m2nMemcpy3DAsync for maximal
  * fast-dimension row runs, and smaller 1D copies only for partial row edges. */
 static ncclResult_t pipeHostEnqueueLayoutCopy(void* dst, const void* src, const StagingPipeCopyLayout& layout,
                                               size_t byteStart, size_t bytes, cudaStream_t stream, int rank,

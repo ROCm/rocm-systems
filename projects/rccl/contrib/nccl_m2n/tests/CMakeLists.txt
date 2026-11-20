@@ -136,7 +136,7 @@ target_include_directories(basic_api_test_local PRIVATE
     ${NCCL_M2N_INCLUDE_DIR}
 )
 target_include_directories(basic_api_test_local SYSTEM PRIVATE
-    ${NCCL_M2N_SOURCE_DIR}/third_party
+    ${NCCL_M2N_NLOHMANN_JSON_INCLUDE_DIR}
     ${_NCCL_M2N_NCCL_INCLUDES}
     ${CUDAToolkit_INCLUDE_DIRS}
 )
@@ -172,7 +172,7 @@ if(MPI_FOUND)
       ${NCCL_M2N_INCLUDE_DIR}
   )
   target_include_directories(basic_api_test_mpi SYSTEM PRIVATE
-      ${NCCL_M2N_SOURCE_DIR}/third_party
+      ${NCCL_M2N_NLOHMANN_JSON_INCLUDE_DIR}
       ${_NCCL_M2N_NCCL_INCLUDES}
       ${CUDAToolkit_INCLUDE_DIRS}
   )

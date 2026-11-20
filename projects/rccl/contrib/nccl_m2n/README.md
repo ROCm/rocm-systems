@@ -495,16 +495,16 @@ for JSON parsing and serialization.
 
 | Component | Version | Source | License and copyright | Used by |
 |---|---|---|---|---|
-| [JSON for Modern C++](https://github.com/nlohmann/json) (`nlohmann/json`) | 3.12.0 | `json.hpp` from `nlohmann/json`, for example upstream `single_include/nlohmann/json.hpp`; bundled here as `third_party/nlohmann/json.hpp` | MIT License; Copyright (c) 2013-2025 Niels Lohmann | `benchmarks/reshard_model_bench.cu` parses model and system configuration JSON files. |
+| [JSON for Modern C++](https://github.com/nlohmann/json) (`nlohmann/json`) | 3.12.0 | `json.hpp` from `nlohmann/json`, for example upstream `single_include/nlohmann/json.hpp`; taken from RCCL's vendored copy in `projects/rccl/external/nlohmann_json` | MIT License; Copyright (c) 2013-2025 Niels Lohmann | `benchmarks/reshard_model_bench.cu` parses model and system configuration JSON files. |
 
 The applicable third-party copyright and license notice is included in this
-product's [nlohmann/json MIT license file](third_party/nlohmann/LICENSE.MIT).
+product's [nlohmann/json MIT license file](../../external/nlohmann_json/LICENSE.MIT).
 
 ---
 
 ## License
 
 Apache-2.0 in the NCCL contrib drop, inherited from the parent `nccl/nccl`
-`LICENSE.txt`. The third-party license for the vendored `nlohmann/json`
-dependency is in [`third_party/nlohmann/LICENSE.MIT`](third_party/nlohmann/LICENSE.MIT).
+`LICENSE.txt`. The third-party license for the `nlohmann/json`
+dependency is in [`external/nlohmann_json/LICENSE.MIT`](../../external/nlohmann_json/LICENSE.MIT).
 © NVIDIA Corporation.

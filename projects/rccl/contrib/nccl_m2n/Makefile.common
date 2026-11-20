@@ -75,11 +75,12 @@ BENCHDIR := $(NCCL_RESHARD_ROOT)/benchmarks
 TESTSDIR := $(NCCL_RESHARD_ROOT)/tests
 
 # ── Compiler flags ─────────────────────────────────────────────────────────
+NLOHMANN_JSON_INC ?= $(abspath $(NCCL_RESHARD_ROOT)/../../external/nlohmann_json/include)
 INCLUDES := -isystem $(NCCL_HOME)/include \
             -isystem $(NCCL_HOME)/include/nccl_device \
             -isystem $(CUDA_HOME)/include \
             -I$(SRCDIR) \
-            -isystem $(NCCL_RESHARD_ROOT)/third_party
+            -isystem $(NLOHMANN_JSON_INC)
 
 NVCUFLAGS := -ccbin $(CXX) \
              $(CXXSTD) \

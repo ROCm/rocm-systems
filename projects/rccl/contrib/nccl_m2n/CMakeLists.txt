@@ -8,6 +8,8 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(NCCL_M2N_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}")
+set(NCCL_M2N_NLOHMANN_JSON_INCLUDE_DIR "${NCCL_M2N_SOURCE_DIR}/../../external/nlohmann_json/include"
+    CACHE PATH "nlohmann/json include directory (RCCL vendored copy)")
 set(NCCL_M2N_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}")
 set(NCCL_M2N_INCLUDE_DIR "${NCCL_M2N_BINARY_DIR}/include")
 set(NCCL_M2N_LIBRARY_DIR "${NCCL_M2N_BINARY_DIR}/lib")
@@ -239,7 +241,7 @@ foreach(_target IN LISTS NCCL_M2N_TARGETS)
       PRIVATE
         "${NCCL_M2N_SOURCE_DIR}/src")
   target_include_directories(${_target} SYSTEM PRIVATE
-      "${NCCL_M2N_SOURCE_DIR}/third_party"
+      "${NCCL_M2N_NLOHMANN_JSON_INCLUDE_DIR}"
       ${_NCCL_M2N_NCCL_INCLUDES}
       ${CUDAToolkit_INCLUDE_DIRS})
   target_compile_definitions(${_target} PRIVATE NCCL_OS_LINUX)
