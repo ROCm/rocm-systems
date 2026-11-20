@@ -294,6 +294,13 @@ static void UpdateGeometry(AsyncDecoder &dec, const RocdecVideoFormat *format) {
 // ------------------------------------------------------------------------------------------
 static int ROCDECAPI HandleVideoSequence(void *user_data, RocdecVideoFormat *format) {
     AsyncDecoder &dec = *static_cast<AsyncDecoder *>(user_data);
+    // MD5Generator handles only 4:2:0 with interleaved chroma: for monochrome it would read and
+    // write past the luma-only frame, and planar 4:4:4 or 4:2:2 would be hashed incorrectly.
+    if ((dec.opt.md5 || !dec.opt.md5_frames_path.empty()) && format->chroma_format != rocDecVideoChromaFormat_420) {
+        std::cerr << "Error: MD5 hashing (-md5, -md5_check, -md5_frames) supports only 4:2:0 streams" << std::endl;
+        dec.failed = true;
+        return 0;
+    }
     RocdecDecodeCaps caps = {};
     caps.codec_type = format->codec;
     caps.chroma_format = format->chroma_format;

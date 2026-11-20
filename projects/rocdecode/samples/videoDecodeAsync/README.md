@@ -58,7 +58,7 @@ cmake --build . --config Release
                    -expect_mismatch <succeed only if the -md5_check digest does NOT match; for control runs [optional]>
 ```
 
-The MD5 digest is computed the same way as `videoDecode -md5` in its default output mode, so `-md5_check` can compare against the same reference files. The sample prints the decode FPS, the end-to-end FPS and the time the producer spent inside the display callback.
+The MD5 digest is computed the same way as `videoDecode -md5` in its default output mode, so `-md5_check` can compare against the same reference files. MD5 hashing (`-md5`, `-md5_check`, `-md5_frames`) supports only 4:2:0 streams; for other chroma formats the sample stops with an error. The sample prints the decode FPS, the end-to-end FPS and the time the producer spent inside the display callback.
 
 ## Running the no-copy control
 
