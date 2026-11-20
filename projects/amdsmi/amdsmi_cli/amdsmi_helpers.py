@@ -2573,17 +2573,19 @@ class AMDSMIHelpers:
 
         for entry in entries.values():
             timestamp = entry.get("timestamp", "unknown")
-            gpu_id = "-"
+            device_id = "-"
             output = ""
             if not isinstance(device_handle, Path):
-                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+                device_id = self.get_gpu_id_from_device_handle(device_handle)
+                source = entry.get("source")
+                device_str = self._format_device_identifier(device_id, source)
                 prefix = self._severity_as_string(
                     entry.get("error_severity", "Unknown"),
                     entry.get("notify_type", "Unknown"),
                     False,
-                    entry.get("source"),
+                    source,
                 )
-                output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
+                output = f"{timestamp:<20} {device_str:<10} {prefix:<20}"
 
             self.cper_print(output, logger)
         return []
@@ -2601,14 +2603,50 @@ class AMDSMIHelpers:
         else:
             print(text)
 
+    def _format_device_identifier(self, device_id, source):
+        """Format device identifier based on source type.
+
+        Args:
+            device_id: Raw device ID (integer, string, or None)
+            source: Source type ('gpu', 'cpu', 'fabric', 'nic', etc.)
+
+        Returns:
+            Formatted device string (e.g., 'GPU0', 'CPU1', 'Fabric', 'NIC0', or '-')
+        """
+        if source == "fabric":
+            # Fabric might not have a device number
+            if device_id is None or device_id == "":
+                return "Fabric"
+            else:
+                return f"Fabric{device_id}"
+        elif source == "nic":
+            # NIC might not have a device number
+            if device_id is None or device_id == "":
+                return "NIC"
+            else:
+                return f"NIC{device_id}"
+        elif source == "gpu":
+            if device_id is None or device_id == "-":
+                return "-"
+            return f"GPU{device_id}"
+        elif source == "cpu":
+            if device_id is None or device_id == "-":
+                return "-"
+            return f"CPU{device_id}"
+        else:
+            # Unknown source
+            if device_id is None or device_id == "-":
+                return "-"
+            return str(device_id)
+
     def _print_header(self, folder, logger: Optional["AMDSMILogger"] = None):
         """Print the CPER column header line (skipped for JSON output)."""
         if logger is not None and logger.is_json_format():
             return
 
-        header = f"{'timestamp':<20} {'gpu_id':<7} {'severity':<20}"
+        header = f"{'timestamp':<20} {'device':<10} {'severity':<20}"
         if folder:
-            header += f" {'file_name':<17} {'list of afids'}"
+            header += f" {'file_name':<17} {'fru':<15} {'list of afids'}"
 
         self.cper_print(header, logger)
 
@@ -2640,10 +2678,16 @@ class AMDSMIHelpers:
 
         output_rows = {}
         for entry_index, entry in enumerate(entries.values()):
-            # Determine prefix/severity
+            # Extract FRU first to determine actual source for filename
+            raw_bytes = cper_data[entry_index]["bytes"]
+            if isinstance(raw_bytes, list):
+                raw_bytes = bytes(x & 0xFF for x in raw_bytes)
+            fru_str, fru_source, fru_device_id = self.cper_extract_fru_and_device(raw_bytes)
+
+            # Determine prefix/severity using FRU-derived source if available
             error_severity = entry.get("error_severity", "").lower()
             notify_type = entry.get("notify_type", "")
-            source = entry.get("source")
+            source = fru_source if fru_source else entry.get("source", "unknown")
             prefix = self._severity_as_string(error_severity, notify_type, True, source)
 
             # Generate filenames
@@ -2680,15 +2724,27 @@ class AMDSMIHelpers:
             # the path so the AFID decode loop does not have to read
             # the file we just wrote back from disk.
             timestamp = entry.get("timestamp", "unknown")
-            gpu_id = "-"
-            if not isinstance(device_handle, Path):
-                gpu_id = self.get_gpu_id_from_device_handle(device_handle)
+
+            # Use FRU-derived device info if available (already extracted above for filename)
+            if fru_source and fru_device_id:
+                # FRU parsing succeeded - use the actual device from FRU
+                device_str = self._format_device_identifier(fru_device_id, fru_source)
+                # Update source to match what FRU says
+                source = fru_source
+            else:
+                # Fallback: use entry source + device handle
+                device_id = "-"
+                if not isinstance(device_handle, Path):
+                    device_id = self.get_gpu_id_from_device_handle(device_handle)
+                device_str = self._format_device_identifier(device_id, source)
+
             severity = self._severity_as_string(error_severity, notify_type, False, source)
             output_rows[cper_path] = [
                 timestamp,
-                gpu_id,
+                device_str,
                 severity,
                 cper_name,
+                fru_str,
                 cper_data[entry_index]["bytes"],
             ]
             cper_counter[0] += 1
@@ -2742,6 +2798,8 @@ class AMDSMIHelpers:
             list: JSON row dicts when JSON format is active, otherwise ``[]``.
         """
         json_output = logger is not None and logger.is_json_format()
+        csv_output = logger is not None and logger.is_csv_format()
+        structured_output = json_output or csv_output
         # Only the AFID message text varies by format. json_output picks the branch.
         output_format = logger.format if logger is not None else "human"
         if cper_counter is None:
@@ -2759,10 +2817,10 @@ class AMDSMIHelpers:
             )
 
             # Print collected rows
-            if json_output:
+            if structured_output:
                 json_rows = []
                 for cper_path, row in output_rows.items():
-                    timestamp, gpu_id, severity, fname, raw_bytes = row
+                    timestamp, device_str, severity, fname, fru_str, raw_bytes = row
                     cper_path_str = str(cper_path)
                     json_path_str = str(Path(cper_path).with_suffix(".json"))
                     try:
@@ -2781,26 +2839,34 @@ class AMDSMIHelpers:
                         afid_record = self.build_afid_record(
                             cper_path, output_format, code=e.get_error_code()
                         )
-                    json_rows.append(
-                        {
-                            "timestamp": timestamp,
-                            "gpu": gpu_id,
-                            "severity": severity,
-                            "cper_file": cper_path_str,
-                            "metadata_file": json_path_str,
-                            "afids": afid_record["afids"],
-                            "decode_failed": afid_record["decode_failed"],
-                            "status": afid_record["status"],
-                            "message": afid_record["message"],
-                            "code": afid_record["code"],
-                        }
-                    )
+                    row_dict = {
+                        "timestamp": timestamp,
+                        "device": device_str,
+                        "severity": severity,
+                        "cper_file": cper_path_str,
+                        "metadata_file": json_path_str,
+                        "fru": fru_str,
+                        "afids": afid_record["afids"],
+                        "decode_failed": afid_record["decode_failed"],
+                        "status": afid_record["status"],
+                        "message": afid_record["message"],
+                        "code": afid_record["code"],
+                    }
+                    # For CSV, convert afids list to space-separated string
+                    if csv_output:
+                        row_dict["afids"] = self.afid_cell(afid_record)
+                    json_rows.append(row_dict)
                 if emit_inline:
-                    self.cper_print(json.dumps(json_rows, indent=2), logger)
+                    if json_output:
+                        self.cper_print(json.dumps(json_rows, indent=2), logger)
+                    elif csv_output:
+                        # Use logger's standard output for CSV
+                        logger.multiple_device_output = json_rows
+                        logger.print_output(multiple_device_enabled=True)
                 return json_rows
             else:
                 for cper_path, row in output_rows.items():
-                    timestamp, gpu_id, severity, fname, raw_bytes = row
+                    timestamp, device_str, severity, fname, fru_str, raw_bytes = row
                     try:
                         # Convert list of integers to bytes if necessary
                         if isinstance(raw_bytes, list):
@@ -2818,8 +2884,10 @@ class AMDSMIHelpers:
                             cper_path, output_format, code=e.get_error_code()
                         )
                     afids_str = self.afid_cell(afid_record)
+                    # Truncate FRU if too long for display
+                    fru_display = fru_str[:15] if len(fru_str) > 15 else fru_str
                     self.cper_print(
-                        f"{timestamp:<20} {gpu_id:<7} {severity:<20} {fname:<17} {afids_str}",
+                        f"{timestamp:<20} {device_str:<10} {severity:<20} {fname:<17} {fru_display:<15} {afids_str}",
                         logger,
                     )
         else:
@@ -2909,6 +2977,62 @@ class AMDSMIHelpers:
         else:
             raw = cper_file
         return _json.loads(amdsmi_interface.amdsmi_get_cper_json(raw))
+
+    def cper_extract_fru_and_device(self, cper_bytes: bytes) -> tuple[str, str, str]:
+        """Extract FRU and device info from CPER using ADDC decoder.
+
+        Returns:
+            tuple: (fru_str, source, device_id)
+                - fru_str: FRU text (e.g., "Perr: CPU0", "Fabric", "NIC0") or "N/A"
+                - source: 'cpu', 'gpu', 'fabric', 'nic', or None
+                - device_id: Device number (e.g., '0', '1') or None (for fabric)
+
+        Silently returns ("N/A", None, None) on decode failures.
+        """
+        try:
+            addc = self.cper_dump_decode(cper_bytes)
+            events = addc.get("events", [])
+            if events and len(events) > 0:
+                first_event = events[0]
+                platform = first_event.get("platform", {})
+                fru = platform.get("fru")
+
+                if fru and fru != "":
+                    fru_str = str(fru)
+                    # Parse FRU to extract device info
+                    # Examples: "Perr: CPU0", "GPU0", "Fabric", "NIC0", etc.
+                    import re
+
+                    # Try to match patterns like "CPU0", "GPU1", etc. (with device number)
+                    match = re.search(r"\b(CPU|GPU)(\d+)\b", fru_str, re.IGNORECASE)
+                    if match:
+                        source = match.group(1).lower()  # 'cpu' or 'gpu'
+                        device_id = match.group(2)  # '0', '1', etc.
+                        return (fru_str, source, device_id)
+
+                    # Try to match NIC patterns (might not have device number)
+                    # Examples: "NIC", "NIC0", "NIC1", etc.
+                    match = re.search(r"\bNIC(\d*)\b", fru_str, re.IGNORECASE)
+                    if match:
+                        source = "nic"
+                        device_id = match.group(1) if match.group(1) else None  # Optional number
+                        return (fru_str, source, device_id)
+
+                    # Try to match fabric patterns (might not have device number)
+                    # Examples: "Fabric", "Fabric0", etc.
+                    match = re.search(r"\bFabric(\d*)\b", fru_str, re.IGNORECASE)
+                    if match:
+                        source = "fabric"
+                        device_id = match.group(1) if match.group(1) else None  # Optional number
+                        return (fru_str, source, device_id)
+
+                    # FRU exists but doesn't match known patterns
+                    return (fru_str, None, None)
+        except Exception as e:
+            # Silently fail - FRU is nice-to-have, not critical
+            logging.debug(f"Failed to extract FRU from CPER: {e}")
+
+        return ("N/A", None, None)
 
     def get_partition_id(self, device_handle, gpu_id=None) -> int:
         partition_id = -1
