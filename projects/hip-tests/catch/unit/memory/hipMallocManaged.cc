@@ -54,9 +54,12 @@ HIP_TEST_CASE(Unit_hipMallocManaged_Basic) {
 
   float *A, *B, *C;
 
-  HIP_CHECK(hipMallocManaged(&A, numElements * sizeof(float)));
-  HIP_CHECK(hipMallocManaged(&B, numElements * sizeof(float)));
-  HIP_CHECK(hipMallocManaged(&C, numElements * sizeof(float)));
+  const size_t bytes =
+      GENERATE(size_t{1}, size_t{4095}, size_t{4096}, size_t{4097}, numElements * sizeof(float));
+  CAPTURE(bytes);
+  HIP_CHECK(hipMallocManaged(&A, bytes));
+  HIP_CHECK(hipMallocManaged(&B, bytes));
+  HIP_CHECK(hipMallocManaged(&C, bytes));
   HIP_CHECK(hipFree(A));
   HIP_CHECK(hipFree(B));
   HIP_CHECK(hipFree(C));

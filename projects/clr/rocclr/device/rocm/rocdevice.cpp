@@ -2699,6 +2699,12 @@ bool Device::getVmmAllocInfo(amd::Memory& amd_mem_obj, amd::Device::VmmLocationT
 }
 
 void* Device::reserveMemory(size_t size, size_t alignment) const {
+  const size_t page_size = amd::Os::pageSize();
+  if (size > std::numeric_limits<size_t>::max() - (page_size - 1)) {
+    return nullptr;
+  }
+  // HIP allocations have byte granularity; HSA reservations require whole pages.
+  size = amd::alignUp(size, page_size);
   void* ptr = nullptr;
   // Reserves non registered VA memory using HSA APIs.
   hsa_status_t status = Hsa::vmem_address_reserve_align(&ptr, size, 0, alignment,
@@ -2712,6 +2718,8 @@ void* Device::reserveMemory(size_t size, size_t alignment) const {
 }
 
 void Device::releaseMemory(void* ptr, size_t size) const {
+  // Match the reserved extent while the memory object retains its logical size.
+  size = amd::alignUp(size, amd::Os::pageSize());
   hsa_status_t hsa_status = Hsa::vmem_address_free(ptr, size);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM, "Free hsa reserved memory %p", ptr);
   if (hsa_status != HSA_STATUS_SUCCESS) {
