@@ -4,6 +4,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 7.14.2
+
+### Fixed
+
+- Fixed `amd-smi set --ptl-status` exiting successfully after reporting a library
+  failure. The command now exits non-zero after processing the selected GPUs,
+  using the first PTL library error code. Existing output and permission-error
+  handling are unchanged.
+
 ## amd_smi_lib for ROCm 7.14.0
 
 ### Added
