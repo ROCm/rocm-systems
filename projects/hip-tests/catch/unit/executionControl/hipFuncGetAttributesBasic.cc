@@ -8,6 +8,23 @@
 #include <hip/hip_runtime_api.h>
 #include <utils.hh>
 
+#if HT_AMD
+#include "hipFuncGetAttributesConstantFixtures.hh"
+
+static void CheckStaticConstantSize(const void* kernel, size_t expected_size) {
+  hipFunction_t function = nullptr;
+  HIP_CHECK(hipGetFuncBySymbol(&function, kernel));
+  // Query the static handle first: accounting must not rely on an earlier struct query.
+  int scalar_size = -1;
+  HIP_CHECK(hipFuncGetAttribute(&scalar_size, HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, function));
+  REQUIRE(scalar_size == static_cast<int>(expected_size));
+
+  hipFuncAttributes attributes{};
+  HIP_CHECK(hipFuncGetAttributes(&attributes, kernel));
+  REQUIRE(attributes.constSizeBytes == expected_size);
+}
+#endif
+
 constexpr size_t kConstSizeBytes = 128;
 __constant__ char const_data[kConstSizeBytes];
 
@@ -26,6 +43,26 @@ HIP_TEST_CASE(Unit_hipFuncGetAttributes_Positive_Basic) {
   SECTION("cacheModeCA") { REQUIRE((attr.cacheModeCA == 0 || attr.cacheModeCA == 1)); }
 
   SECTION("constSizeBytes") { REQUIRE(attr.constSizeBytes == kConstSizeBytes); }
+
+#if HT_AMD
+  SECTION("Registered static constant allocations remain isolated by translation unit") {
+    // Static attributes describe the owning program's registered __constant__ allocations,
+    // including an empty kernel. Raw module/library metadata cannot provide this identity.
+    CheckStaticConstantSize(ConstantAttributeTest::MultipleConstantsKernel(), 17 + 29);
+    CheckStaticConstantSize(ConstantAttributeTest::NoConstantsKernel(), 0);
+    CheckStaticConstantSize(reinterpret_cast<const void*>(attribute_test_kernel), kConstSizeBytes);
+    CheckStaticConstantSize(ConstantAttributeTest::MultipleConstantsReaderKernel(), 17 + 29);
+    CheckStaticConstantSize(ConstantAttributeTest::NoConstantsKernel(), 0);
+
+    size_t first_size = 0;
+    HIP_CHECK(ConstantAttributeTest::GetFirstConstantSize(&first_size));
+    REQUIRE(first_size == 17);
+
+    size_t inline_size = 0;
+    HIP_CHECK(ConstantAttributeTest::GetInlineConstantSize(&inline_size));
+    REQUIRE(inline_size == 29);
+  }
+#endif
 
   SECTION("maxThreadsPerBlock") {
     REQUIRE(attr.maxThreadsPerBlock == GetDeviceAttribute(hipDeviceAttributeMaxThreadsPerBlock, 0));

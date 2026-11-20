@@ -395,6 +395,7 @@ FatBinaryInfo** StatCO::AddKpackBinary(const void* hipk_metadata, const void* wr
 
 hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
   std::scoped_lock lock(sclock_);
+  constantVars_.erase(module);
 
   auto hostVarsIter = module_to_hostVars_.find(module);
   if (hostVarsIter != module_to_hostVars_.end()) {
@@ -461,6 +462,7 @@ hipError_t StatCO::RemoveFatBinary(FatBinaryInfo** module) {
 // =================================================================================================
 void StatCO::RemoveAllFatBinaries() {
   std::scoped_lock lock(sclock_);
+  constantVars_.clear();
 
   // Clear mapping tables that associate modules with host-side constructs
   module_to_hostModule_.clear();
@@ -579,7 +581,26 @@ hipError_t StatCO::GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFun
   return it->second->GetStatFuncAttr(func_attr, deviceId);
 }
 
-hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var) {
+std::optional<size_t> StatCO::GetConstantMemorySize(const amd::Program& program) const {
+  std::scoped_lock lock(sclock_);
+  for (const auto& module : modules_) {
+    if (module.second == nullptr || !module.second->OwnsProgram(program)) {
+      continue;
+    }
+
+    size_t bytes = 0;
+    const auto constants = constantVars_.find(&module.second);
+    if (constants != constantVars_.end()) {
+      for (const auto& constant : constants->second) {
+        bytes += constant.second;
+      }
+    }
+    return bytes;
+  }
+  return std::nullopt;
+}
+
+hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var, const char* constantName) {
   std::scoped_lock lock(sclock_);
 
   auto var_it = vars_.find(hostVar);
@@ -589,6 +610,11 @@ hipError_t StatCO::RegisterGlobalVar(const void* hostVar, Var* var) {
 
   vars_.insert(std::make_pair(hostVar, var));
   module_to_hostVars_[var->ModuleInfo()].push_back(hostVar);
+  if (constantName != nullptr) {
+    // Repeated definitions of one device symbol contribute one allocation. Query the map
+    // on demand so registrations after a program has been built are visible as well.
+    constantVars_[var->ModuleInfo()].try_emplace(constantName, var->GetSize());
+  }
   return hipSuccess;
 }
 

@@ -63,6 +63,15 @@ class FatBinaryInfo {
     return hipSuccess;
   }
 
+  bool OwnsProgram(const amd::Program& program) const {
+    for (const auto* device_program : dev_programs_) {
+      if (device_program == &program) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   //! Returns the lock for this fatbinary access
   std::recursive_mutex& FatBinaryLock() { return fb_lock_; }
 

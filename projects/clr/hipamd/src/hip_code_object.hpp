@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -176,13 +177,18 @@ class StatCO : public CodeObject {
 
   // Register vars/funcs given to use from __hipRegister[Var/Func/ManagedVar]
   hipError_t RegisterFunction(const void* hostFunction, Function* func);
-  hipError_t RegisterGlobalVar(const void* hostVar, Var* var);
+  hipError_t RegisterGlobalVar(const void* hostVar, Var* var, const char* constantName = nullptr);
   hipError_t RegisterManagedVar(Var* var);
 
   // Retrive Vars/Funcs for a given hostSidePtr(const void*), unless stated otherwise.
   const char* GetFuncName(const void* hostFunction);
   hipError_t GetFunc(hipFunction_t* hfunc, const void* hostFunction, int deviceId);
   hipError_t GetFuncAttr(hipFuncAttributes* func_attr, const void* hostFunction, int deviceId);
+
+  // Static attributes report the owning program's registered __constant__ allocation footprint,
+  // not per-kernel references. Raw module/library programs have no compiler registrations;
+  // nullopt preserves their backend-provided size rather than inferring it from ELF sections.
+  std::optional<size_t> GetConstantMemorySize(const amd::Program& program) const;
   hipError_t GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_t* dev_ptr,
                           size_t* size_ptr);
 
@@ -214,6 +220,9 @@ class StatCO : public CodeObject {
   //! Populated during __hipRegisterFuncs
   std::unordered_map<const void*, Function*> functions_;
   std::unordered_map<const void*, Var*> vars_;               //!< Populated during __hipRegisterVars
+  // Own copied device-symbol names independently of host-shadow deduplication. Module tokens
+  // remain stable through lazy loading; definitions in different modules are distinct.
+  std::unordered_map<FatBinaryInfo* const*, std::unordered_map<std::string, size_t>> constantVars_;
   //! Populated during __hipRegisterManagedVar
   std::unordered_map<FatBinaryInfo**, std::vector<Var*> > managedVars_;
   //! Reverse mapping of modules to speed up removal

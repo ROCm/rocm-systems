@@ -131,7 +131,10 @@ hipError_t Function::GetStatFuncAttr(hipFuncAttributes* func_attr, int deviceId)
   func_attr->sharedSizeBytes = static_cast<int>(wginfo->localMemSize_);
   func_attr->binaryVersion = binaryVersion;
   func_attr->cacheModeCA = 0;
-  func_attr->constSizeBytes = wginfo->constMemSize_ - 1;
+  func_attr->constSizeBytes = PlatformState::Instance()
+                                  .StatCO()
+                                  .GetConstantMemorySize(kernel->program())
+                                  .value_or(wginfo->constMemSize_);
   func_attr->localSizeBytes = wginfo->privateMemSize_;
   func_attr->maxDynamicSharedSizeBytes = wginfo->maxDynamicSharedSizeBytes_;
   func_attr->maxThreadsPerBlock = static_cast<int>(wginfo->size_);

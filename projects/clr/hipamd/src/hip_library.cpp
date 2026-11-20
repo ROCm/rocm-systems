@@ -450,7 +450,10 @@ hipError_t hipKernelGetAttribute(int* pi, hipFunction_attribute attrib, hipKerne
       *pi = static_cast<int>(wrkGrpInfo.localMemSize_);
       break;
     case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
-      *pi = static_cast<int>(wrkGrpInfo.constMemSize_ - 1);
+      *pi = static_cast<int>(hip::PlatformState::Instance()
+                                 .StatCO()
+                                 .GetConstantMemorySize(d_kernel->program())
+                                 .value_or(wrkGrpInfo.constMemSize_));
       break;
     case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
       *pi = static_cast<int>(wrkGrpInfo.privateMemSize_);

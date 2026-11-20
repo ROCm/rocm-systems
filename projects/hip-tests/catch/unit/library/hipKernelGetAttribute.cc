@@ -34,6 +34,15 @@ HIP_TEST_CASE(Unit_hipKernelGetAttribute_Positive_Basic) {
     REQUIRE((pi == 0 || pi == 1));
   }
 
+#if HT_AMD
+  SECTION("constSizeBytes") {
+    // The offline library has no constants or static host registrations.
+    pi = -1;
+    HIP_CHECK(hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES, kernel, device_id));
+    REQUIRE(pi == 0);
+  }
+#endif
+
   SECTION("maxThreadsPerBlock") {
     HIP_CHECK(
         hipKernelGetAttribute(&pi, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kernel, device_id));
