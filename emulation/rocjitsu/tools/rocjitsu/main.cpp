@@ -58,6 +58,8 @@
 #include <string>
 #include <string_view>
 #include <sys/prctl.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
@@ -449,6 +451,27 @@ void cleanup_runtime_files(pid_t pid) {
   std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), error);
 }
 
+bool daemon_socket_accepts_connections(const std::filesystem::path &socket_path) {
+  std::error_code socket_error;
+  if (!std::filesystem::is_socket(socket_path, socket_error) || socket_error)
+    return false;
+
+  const std::string path = socket_path.string();
+  sockaddr_un address{};
+  address.sun_family = AF_UNIX;
+  if (path.size() >= sizeof(address.sun_path))
+    return false;
+  std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+
+  const int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+  if (fd < 0)
+    return false;
+  const int result = connect(fd, reinterpret_cast<const sockaddr *>(&address), sizeof(address));
+  const bool connected = result == 0 || errno == EINPROGRESS || errno == EAGAIN;
+  close(fd);
+  return connected;
+}
+
 // Best-effort reap of per-PID runtime dirs left behind by prior invocations that
 // exited via execvp (which never returns, so cleanup_runtime_files does not run).
 // Each numeric <pid> subdir of the runtime root is removed if that PID is no
@@ -486,6 +509,9 @@ void reap_stale_runtime_dirs() {
     pid_t pid = 0;
     auto [ptr, parse_error] = std::from_chars(name.data(), name.data() + name.size(), pid);
     if (parse_error != std::errc{} || ptr != name.data() + name.size() || pid <= 0) {
+      continue;
+    }
+    if (daemon_socket_accepts_connections(it->path() / "daemon.sock")) {
       continue;
     }
     // kill(pid, 0) probes existence without signalling: ESRCH means the process
