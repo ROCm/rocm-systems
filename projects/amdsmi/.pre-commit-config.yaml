@@ -79,8 +79,8 @@ repos:
 
 -   repo: local
     hooks:
-    # `language: python` runs a hook on pre-commit's own interpreter; `system` runs it on the
-    # host's python3, which is 3.6 on RHEL 8 and SLES 15.
+    # These hooks run on pre-commit's interpreter, except amdsmi-abi-check-tests
+    # (`system`), which runs on the host's python3: 3.6 on RHEL 8 and SLES 15.
     -   id: amdsmi-test-conventions
         name: amd-smi C++ test conventions
         description: >-
