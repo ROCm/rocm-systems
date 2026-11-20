@@ -95,6 +95,21 @@ def test_statistics_section_shows_na_for_undefined_stddev() -> None:
     assert na_count(doc) == before + 1
 
 
+def test_row_with_baseline_median_below_1ms_has_no_percentage() -> None:
+    doc = _doc()
+    base, tool = _stats(0.685e6), _stats(222.164e6)
+    base.update(p95=1.102e6, mean=1.05e6)  # p95 and mean above the 1 ms floor
+    doc["summary"]["base"]["wall"], doc["summary"]["tool"]["wall"] = base, tool
+    text = text_report.format_text(doc)
+
+    detail_rows = _section(text, "WALL-CLOCK TIME").splitlines()
+    detail = next(line for line in detail_rows if line.startswith("total"))
+    assert detail.count("n/a") == 2 and "%" not in detail
+    stats_rows = _section(text, "STATISTICS (mean-based)").splitlines()
+    tool_wall = next(line for line in stats_rows if "│tool " in line)
+    assert tool_wall.rstrip().endswith("n/a")
+
+
 def test_statistics_section_without_tool_has_no_overhead_column() -> None:
     doc = _doc()
     del doc["summary"]["tool"], doc["commands"]["tool"]

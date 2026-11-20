@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from typing import Any
 
 import pytest
@@ -163,6 +164,30 @@ def test_comparison_shows_overhead_and_marks_the_reference() -> None:
     assert ref_row.endswith("reference moved")
     assert "100.00 ms" in tool_row and "150.00 ms" in tool_row
     assert tool_row.endswith("REGRESSION")
+
+
+@pytest.mark.parametrize(
+    "overhead_a_ms,pct",
+    [
+        pytest.param(92.27, 130.9, id="percent-of-the-overhead-in-a"),
+        pytest.param(0.5, None, id="overhead-in-a-below-1pct-of-the-median"),
+        pytest.param(-30.0, None, id="negative-overhead-in-a"),
+    ],
+)
+def test_comparison_pct_is_relative_to_the_overhead_in_a(
+    overhead_a_ms: float, pct: float | None
+) -> None:
+    reference_ms, added_ms = 2372.73, 120.77
+    a = snap("baseline", baseline=reference_ms, tool=reference_ms + overhead_a_ms)
+    b = snap(
+        "baseline", baseline=reference_ms, tool=reference_ms + overhead_a_ms + added_ms
+    )
+    rows = snapshot.compare_snapshots(a, b)["scenarios"]["s"]
+    (row,) = [r for r in rows if r["command"] == "tool"]
+    if pct is None:
+        assert math.isnan(row["pct"])
+    else:
+        assert row["pct"] == pytest.approx(pct, abs=0.05)
 
 
 def test_compare_rejects_a_changed_reference() -> None:

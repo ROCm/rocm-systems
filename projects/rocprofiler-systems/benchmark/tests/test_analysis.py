@@ -96,6 +96,23 @@ def test_pct_is_nan_for_near_zero_baseline():
     assert analysis.pct(10e6, 100e6, analysis.MIN_PCT_BASE_NS) == pytest.approx(10.0)
 
 
+def test_pct_gate_decides_instead_of_the_base() -> None:
+    floor = analysis.MIN_PCT_BASE_NS
+    assert math.isnan(analysis.pct(233.717e6, 1.102e6, floor, gate=0.685e6))
+    assert analysis.pct(10e6, 100e6, floor, gate=90e6) == pytest.approx(10.0)
+    assert math.isnan(analysis.pct(1.0, 0.0, gate=5.0))
+
+
+def test_compare_has_no_pct_at_all_when_baseline_median_is_below_floor() -> None:
+    # Baseline p95 and mean are above the 1 ms floor, its median is below.
+    base = {"median": 0.685e6, "p95": 1.102e6, "mean": 1.05e6, "mad": 0.05e6, "n": 100}
+    tool = {"median": 222.164e6, "p95": 234.819e6, "mean": 223e6, "mad": 1.62e6, "n": 100}
+    cmp = analysis.compare({"wall": base}, {"wall": tool})
+    for key in ("wall_pct", "wall_p95_pct", "wall_mean_pct"):
+        assert math.isnan(cmp[key]), key
+    assert cmp["wall_p95_abs_ns"] == pytest.approx(233.717e6)
+
+
 def test_stats_sum_mean_sample_stddev():
     values = list(range(1, 101))
     s = analysis.stats(values)

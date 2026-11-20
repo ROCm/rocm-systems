@@ -114,7 +114,7 @@ LEGEND = (
     ),
     (
         "Δ",
-        "value with the tool minus the baseline value; Δ % is that difference relative to the baseline",
+        "value with the tool minus the baseline value; Δ % is that difference relative to the baseline, n/a for a time whose baseline median is below 1 ms",
     ),
     ("Δ mean %", "(tool mean - baseline mean) / baseline mean x 100"),
     (
@@ -133,9 +133,11 @@ def _num(value: float, width: int = COL) -> str:
     return f"{'n/a':>{width}}" if math.isnan(value) else f"{value:>{width}.2f}"
 
 
-def _pct(diff: float, base: float, factor: float, unit: str) -> str:
-    floor = MIN_PCT_BASE_NS * 1e-6 / factor if unit == "ms" else 0.0  # 1 ms in raw units
-    value = pct(diff, base, floor)
+def _pct_floor(factor: float, unit: str) -> float:
+    return MIN_PCT_BASE_NS * 1e-6 / factor if unit == "ms" else 0.0  # 1 ms in raw units
+
+
+def _pct_cell(value: float) -> str:
     return f"{'n/a':>{COL}}" if math.isnan(value) else f"{value:>+{COL - 1}.1f}%"
 
 
@@ -173,11 +175,12 @@ def _delta_cells(
     b: dict[str, float], o: dict[str, float], factor: float, unit: str
 ) -> str:
     dm, dp = o["median"] - b["median"], o["p95"] - b["p95"]
+    floor = _pct_floor(factor, unit)
     return (
         _num(dm * factor)
-        + _pct(dm, b["median"], factor, unit)
+        + _pct_cell(pct(dm, b["median"], floor))
         + _num(dp * factor)
-        + _pct(dp, b["p95"], factor, unit)
+        + _pct_cell(pct(dp, b["p95"], floor, b["median"]))
         + _verdict(b, o)
     )
 
@@ -226,7 +229,7 @@ def _glance_row(
         groups.append(
             _num(o["median"] * factor)
             + _num(diff * factor)
-            + _pct(diff, b["median"], factor, unit)
+            + _pct_cell(pct(diff, b["median"], _pct_floor(factor, unit)))
             + _verdict(b, o)
         )
     return _joined(label, unit, groups, label_w)
@@ -275,15 +278,13 @@ def _stats_table(summary: dict[str, Any], base: str, tools: list[str]) -> list[s
     lines = _frame_header(groups, label_w)
     for label, metric, factor, unit in rows:
         b = summary[base][metric]
+        floor = _pct_floor(factor, unit)
         for i, name in enumerate(names):
             s = summary[name][metric]
             cells = [name.ljust(cmd_w) + _stats_cells(s, factor)]
             if tools:
-                cells.append(
-                    _pct(s["mean"] - b["mean"], b["mean"], factor, unit)
-                    if i
-                    else " " * COL
-                )
+                mean_pct = pct(s["mean"] - b["mean"], b["mean"], floor, b["median"])
+                cells.append(_pct_cell(mean_pct) if i else " " * COL)
             lines.append(
                 _joined(label if i == 0 else "", unit if i == 0 else "", cells, label_w)
             )

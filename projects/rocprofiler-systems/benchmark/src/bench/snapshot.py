@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from bench.analysis import exceeds_noise, pct
+from bench.analysis import MIN_REAL_FRACTION, exceeds_noise, pct
 
 SNAPSHOT_FILE = "snapshot.json"
 RESULTS_DIR = "results"
@@ -132,7 +132,8 @@ def compare_command(
                 "reference": cmd == ref,
                 "a": value_a * scale,
                 "b": value_b * scale,
-                "pct": pct(diff, a["median"]),
+                # % of the value in column A; none when that value is within the noise floor
+                "pct": pct(diff, max(value_a, 0.0), MIN_REAL_FRACTION * a["median"]),
                 "real": exceeds_noise(diff, a["median"], *samples),
                 "worse": diff > 0,
             }
@@ -221,7 +222,8 @@ def format_comparison(a: dict[str, Any], b: dict[str, Any], cmp: dict[str, Any])
     )
     lines.append(
         "verdict: REGRESSION or improved only if |Δ overhead| > max(2 x standard error, "
-        "1% of the command's median in A); Δ % is the change in % of that median"
+        "1% of the command's median in A); Δ % is the change in % of A, n/a when A is "
+        "below that 1%"
     )
     return "\n".join(lines)
 

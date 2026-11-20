@@ -18,7 +18,8 @@ MEDIAN_SE_FACTOR = 1.2533 * 1.4826
 # every tiny difference "real".
 MIN_REAL_FRACTION = 0.01
 MIN_DRIFT_RUNS = 4
-# Time baselines below 1 ms get no percentage (init/fini without the tool are near zero).
+# A time whose baseline median is below 1 ms gets no percentage, for its median, p95 and
+# mean alike (init/fini without the tool are near zero).
 MIN_PCT_BASE_NS = 1e6
 
 METRICS: dict[str, Callable[[RunResult], float]] = {
@@ -110,9 +111,14 @@ def is_real(base: dict[str, float], other: dict[str, float]) -> bool:
     return exceeds_noise(other["median"] - base["median"], base["median"], base, other)
 
 
-def pct(diff: float, base: float, floor: float = 0.0) -> float:
-    """diff as % of base; NaN when |base| <= floor (a near-zero base gives meaningless %)."""
-    return diff / base * 100 if abs(base) > floor else math.nan
+def pct(diff: float, base: float, floor: float = 0.0, gate: float | None = None) -> float:
+    """diff as % of base; NaN when |gate| <= floor (a near-zero base gives meaningless %).
+
+    gate defaults to base. A row passes its baseline median as gate for its p95 and mean,
+    so the row never shows n/a next to a percentage.
+    """
+    gate = base if gate is None else gate
+    return diff / base * 100 if base and abs(gate) > floor else math.nan
 
 
 def compare(
@@ -136,9 +142,9 @@ def compare(
                     f"{name}_abs_{unit}": diff,
                     f"{name}_pct": pct(diff, b["median"], floor),
                     f"{name}_p95_abs_{unit}": diff_p95,
-                    f"{name}_p95_pct": pct(diff_p95, b["p95"], floor),
+                    f"{name}_p95_pct": pct(diff_p95, b["p95"], floor, b["median"]),
                     f"{name}_mean_abs_{unit}": diff_mean,
-                    f"{name}_mean_pct": pct(diff_mean, b["mean"], floor),
+                    f"{name}_mean_pct": pct(diff_mean, b["mean"], floor, b["median"]),
                     verdict: is_real(b, o),
                 }
             )
@@ -155,7 +161,11 @@ def compare(
             ),
             "p95_abs": other[name]["p95"] - base[name]["p95"],
             "mean_abs": other[name]["mean"] - base[name]["mean"],
-            "mean_pct": pct(other[name]["mean"] - base[name]["mean"], base[name]["mean"]),
+            "mean_pct": pct(
+                other[name]["mean"] - base[name]["mean"],
+                base[name]["mean"],
+                gate=base[name]["median"],
+            ),
             "resolvable_from_noise": is_real(base[name], other[name]),
         }
         for name in sorted(set(base) & set(other))
