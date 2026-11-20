@@ -929,10 +929,6 @@ this source tree. The original
   - A cell is remembered for the life of the workgroup. A load of those bytes
     after the kernel reuses them as data still acquires the cell's completed
     phases.
-  - A tensor transfer that touches no LDS bytes can leave no event. Its
-    arrival is then checked against pending writes of the cell when it
-    arrives, and a plain store to the cell after the arrival is not reported
-    against it.
   - Every poll of a cell is an LDS read that stays in the history until the
     other live waves acquire the polling wave's next release, so a wave that
     polls many times between its own releases grows the history by one read

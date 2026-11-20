@@ -1542,8 +1542,8 @@ void RaceDetectorPlugin::onAmdgpuLdsBarrierArrived(
   // The arrival's atomic update of the cell is then attached to the transfer's
   // event, so a later write of the cell that the transfer is not ordered before
   // races with it. The transfer holds the one TENSORcnt slot for both. A
-  // transfer that touches no LDS bytes can have no event; its arrival is then
-  // checked only here.
+  // transfer that touches no LDS bytes still has an event, so its arrival is
+  // attached the same way.
   if (kind == BarrierCellArrival::Tensor) {
     detector->validateRead(static_cast<int>(arrival.cell_address), waveId, /*lane=*/-1,
                            kBarrierCellBytes, MemoryOrderClass::UNORDERED, kBarrierCellBytes);
