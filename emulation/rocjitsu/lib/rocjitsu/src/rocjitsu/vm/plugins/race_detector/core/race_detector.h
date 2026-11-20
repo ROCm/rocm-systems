@@ -120,9 +120,24 @@ public:
   /// @details Uses the same LDS access ordering as validateRead.
   /// If checkLdsWaw is enabled at construction, WAW is reported at the write,
   /// independent of values or later reads.
+  /// For an instruction with multiple ranges, call validateWriteAfterRead for
+  /// every range before calling validateWriteAfterWrite, so a WAW cannot hide
+  /// a WAR when the handler reports only one conflict per instruction.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                      uint8_t atomicBytes = 0) const;
+
+  /// @brief Check a write against pending LDS reads, including SRC2 sources.
+  /// @details Uses the same LDS access ordering as validateRead.
+  void validateWriteAfterRead(int addr, WaveId, int lane, int nBytes,
+                              MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                              uint8_t atomicBytes = 0) const;
+
+  /// @brief Check a write against pending LDS writes when checkLdsWaw is enabled.
+  /// @details Uses the same LDS access ordering as validateRead.
+  void validateWriteAfterWrite(int addr, WaveId, int lane, int nBytes,
+                               MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                               uint8_t atomicBytes = 0) const;
 
   /// @brief Conservatively check an instruction's LDS intervals for conflicts.
   /// @details The intervals must describe valid LDS byte ranges. False proves

@@ -878,10 +878,14 @@ void RaceDetectorPlugin::onAmdgpuMixedFlatLdsAccess(const Instruction &, amdgpu:
         detector.validateRead(access.address, wave, access.lane, access.bytes, pending.order,
                               access.atomic_bytes);
       if (writes)
-        detector.validateWrite(access.address, wave, access.lane, access.bytes, pending.order,
-                               access.atomic_bytes);
+        detector.validateWriteAfterRead(access.address, wave, access.lane, access.bytes,
+                                        pending.order, access.atomic_bytes);
     }
   }
+  if (writes && lds_waw_)
+    for (const auto &access : pending.lanes)
+      detector.validateWriteAfterWrite(access.address, wave, access.lane, access.bytes,
+                                       pending.order, access.atomic_bytes);
   detector.attachLdsIntervals(pending.event, std::move(pending.intervals));
   s->mixed_lds.reset();
 }
@@ -1238,8 +1242,21 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
             detector->validateRead(address, waveId, static_cast<int>(lane), bytes, ldsOrder,
                                    atomicBytes);
           if (checkWrites)
-            detector->validateWrite(address, waveId, static_cast<int>(lane), bytes, ldsOrder,
-                                    atomicBytes);
+            detector->validateWriteAfterRead(address, waveId, static_cast<int>(lane), bytes,
+                                             ldsOrder, atomicBytes);
+        }
+      }
+    }
+    // Finish WAR checks for the whole instruction before WAW can claim its PC.
+    if (checkWrites && lds_waw_) {
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        for (size_t set = 0; set < numAddressSets; ++set) {
+          const int bytes = static_cast<int>(laneBytes[set][lane]);
+          if (bytes == 0)
+            continue;
+          const int address = static_cast<int>(addressSets[set][lane]);
+          detector->validateWriteAfterWrite(address, waveId, static_cast<int>(lane), bytes,
+                                            ldsOrder, atomicWidth(address, bytes));
         }
       }
     }
@@ -1319,8 +1336,20 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
           continue;
         const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
         if (bytes != 0)
-          detector->validateWrite(static_cast<int>(ldsAddrs[lane]), waveId, static_cast<int>(lane),
-                                  static_cast<int>(bytes), ldsWriteOrder);
+          detector->validateWriteAfterRead(static_cast<int>(ldsAddrs[lane]), waveId,
+                                           static_cast<int>(lane), static_cast<int>(bytes),
+                                           ldsWriteOrder);
+      }
+      if (lds_waw_) {
+        for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+          if (!(validLaneMask & (1ULL << lane)))
+            continue;
+          const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
+          if (bytes != 0)
+            detector->validateWriteAfterWrite(static_cast<int>(ldsAddrs[lane]), waveId,
+                                              static_cast<int>(lane), static_cast<int>(bytes),
+                                              ldsWriteOrder);
+        }
       }
       if (obligations.empty())
         return;
@@ -1465,9 +1494,17 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       continue;
     const int addr = static_cast<int>(range.address);
     if (issue.is_load)
-      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
+      detector->validateWriteAfterRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
     else
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
+  }
+  if (issue.is_load && lds_waw_) {
+    for (const auto &range : ranges) {
+      const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
+      if (bytes != 0)
+        detector->validateWriteAfterWrite(static_cast<int>(range.address), waveId, -1,
+                                          static_cast<int>(bytes), ldsAccessOrder);
+    }
   }
 
   // TENSORcnt counts each tensor instruction (CDNA5 ISA 10.11.1), so one that

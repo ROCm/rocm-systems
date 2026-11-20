@@ -914,6 +914,77 @@ TEST_F(TensorDmaRaceTest, LdsWawPreservesThePendingReadDiagnostic) {
   EXPECT_EQ(report.find("write-after-write (WAW)"), std::string::npos) << report;
 }
 
+enum class LdsWriter { DsStore, AsyncLoad, MixedFlatStore };
+
+class LdsWarPriorityTest : public TensorDmaRaceTest,
+                           public ::testing::WithParamInterface<LdsWriter> {};
+
+TEST_P(LdsWarPriorityTest, PendingReadOnLaterLaneTakesPriority) {
+  ComputeUnitCore &cu = *fixture.cu();
+  Wavefront &wave = *waves[1];
+  const uint32_t lds_base = cu.allocate_lds(256);
+  wave.set_lds_base(lds_base);
+  wave.set_lds_size(256);
+  ASSERT_FALSE(ds_write(0, lds_base));
+  ASSERT_FALSE(ds_read(0, lds_base + 4));
+
+  const bool mixed = GetParam() == LdsWriter::MixedFlatStore;
+  constexpr uint64_t kSharedBase = uint64_t{1} << 48;
+  cu.set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  wave.set_exec(mixed ? 7 : 3);
+  const uint32_t vgprs = wave.vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 3; ++lane) {
+    const uint64_t address = mixed && lane < 2 ? kSharedBase + lane * 4
+                             : mixed           ? 0x10000
+                                               : lane * 4;
+    cu.write_vgpr(vgprs, lane, static_cast<uint32_t>(address));
+    cu.write_vgpr(vgprs + 1, lane, static_cast<uint32_t>(address >> 32));
+    cu.write_vgpr(vgprs + 2, lane, lane * 4); // Async load LDS destinations.
+    cu.write_vgpr(vgprs + 3, lane, 7);
+  }
+  cu.write_sgpr(wave.sgpr_alloc().base, 0x10000);
+  cu.write_sgpr(wave.sgpr_alloc().base + 1, 0);
+  const std::array store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 3});
+  const std::array load = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                               {.saddr = 0, .vdst = 2, .vaddr = 0});
+  const std::array flat = cdna5::build_vflat(cdna5::kFlatStoreB32Vflat,
+                                             {.saddr = kModernNullSelector, .vsrc = 3, .vaddr = 0});
+  const std::span<const uint32_t> words = mixed ? std::span<const uint32_t>(flat)
+                                          : GetParam() == LdsWriter::AsyncLoad
+                                              ? std::span<const uint32_t>(load)
+                                              : std::span<const uint32_t>(store);
+  DecodeResult instruction = decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  wave.pc = 0x2000;
+  const size_t previous = sink->str().size();
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction.value(), wave);
+  ASSERT_TRUE(cu.execute_instruction(instruction.value().get(), wave).succeeded());
+  ASSERT_EQ(
+      test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction.value()), wave),
+      VmAccessOutcome::Complete);
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+  EXPECT_NE(report.find("reg=" + std::to_string(lds_base + 4) + " wave=1 lane=1"),
+            std::string::npos)
+      << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)"), std::string::npos) << report;
+}
+
+INSTANTIATE_TEST_SUITE_P(LdsWrites, LdsWarPriorityTest,
+                         ::testing::Values(LdsWriter::DsStore, LdsWriter::AsyncLoad,
+                                           LdsWriter::MixedFlatStore));
+
+TEST_F(TensorDmaRaceTest, LdsWawPreservesTheReadDiagnosticAcrossTensorRanges) {
+  ASSERT_FALSE(ds_write(0, 0));
+  ASSERT_FALSE(ds_read(0, 8));
+  const size_t previous = sink->str().size();
+  ASSERT_TRUE(tensor_load(1, {{.address = 0, .bytes = 4}, {.address = 8, .bytes = 4}}));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+  EXPECT_NE(report.find("reg=8 wave=1 lane=-1"), std::string::npos) << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)"), std::string::npos) << report;
+}
+
 TEST(RaceDetectorPluginTest, LdsWawOptionControlsOnlyLdsWriteWriteReports) {
   struct Config {
     const char *json;

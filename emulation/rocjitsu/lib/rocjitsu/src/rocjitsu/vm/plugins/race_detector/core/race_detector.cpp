@@ -381,10 +381,15 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
                                  MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
+  validateWriteAfterRead(addr, wave, lane, nBytes, currentMemoryOrder, atomicBytes);
+  validateWriteAfterWrite(addr, wave, lane, nBytes, currentMemoryOrder, atomicBytes);
+}
+
+void RaceDetector::validateWriteAfterRead(int addr, WaveId wave, int lane, int nBytes,
+                                          MemoryOrderClass currentMemoryOrder,
+                                          uint8_t atomicBytes) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
-  // Preserve WAR diagnostics when both reads and writes overlap: the plugin
-  // emits only the first report for an instruction.
   if (hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
     for (const auto &source : src2Events) {
       const auto id = source.id;
@@ -405,6 +410,13 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     reportUnorderedOverlaps(/*pendingWrites=*/false, addr, wave, lane, nBytes, /*isWrite=*/true,
                             currentMemoryOrder, atomicBytes);
   }
+}
+
+void RaceDetector::validateWriteAfterWrite(int addr, WaveId wave, int lane, int nBytes,
+                                           MemoryOrderClass currentMemoryOrder,
+                                           uint8_t atomicBytes) const {
+  if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
+    return;
   if (checkLdsWaw_ &&
       hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder))
     reportUnorderedOverlaps(/*pendingWrites=*/true, addr, wave, lane, nBytes, /*isWrite=*/true,
