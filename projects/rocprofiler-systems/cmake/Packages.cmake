@@ -966,6 +966,33 @@ if(ROCPROFSYS_BUILD_LIBUNWIND)
     )
 endif()
 
+# timemory's unwind::entry falls back to unw_get_proc_name, which needs a cursor, when
+# libunwind.h does not define unw_get_proc_name_by_ip (same check as timemory/unwind/types.hpp)
+if(NOT ROCPROFSYS_BUILD_LIBUNWIND AND libunwind_INCLUDE_DIR)
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_INCLUDES ${libunwind_INCLUDE_DIR})
+    check_cxx_source_compiles(
+        "
+#include <libunwind.h>
+#if !defined(unw_get_proc_name_by_ip)
+#    error \"unw_get_proc_name_by_ip not available\"
+#endif
+int main() { return 0; }
+"
+        ROCPROFSYS_LIBUNWIND_HAS_PROC_NAME_BY_IP
+    )
+    unset(CMAKE_REQUIRED_INCLUDES)
+    if(NOT ROCPROFSYS_LIBUNWIND_HAS_PROC_NAME_BY_IP)
+        message(
+            WARNING
+            "libunwind in ${libunwind_INCLUDE_DIR} does not provide unw_get_proc_name_by_ip. "
+            "Symbol names for sampled addresses (e.g. causal profiling) will come from "
+            "BFD/DWARF and dladdr instead of libunwind. "
+            "Set ROCPROFSYS_BUILD_LIBUNWIND=ON to use the bundled libunwind."
+        )
+    endif()
+endif()
+
 rocprofiler_systems_restore_variables(
     BUILD_CONFIG VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS
     CMAKE_POSITION_INDEPENDENT_CODE CMAKE_PREFIX_PATH
