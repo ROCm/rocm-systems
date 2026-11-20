@@ -37,8 +37,8 @@ raid5, raid6). Any other interposing layer (multipath, dm-crypt, loopback)
 breaks the direct P2P-DMA path and forces the compatibility fallback.
 
 NVMe controller transports are read from sysfs. NVMe over RDMA can qualify
-with the same hardware NIC caveat as NFS over RDMA. Native NVMe multipath
-namespaces report HIPFILE=no regardless of the number of live paths.
+with the same hardware NIC caveat as NFS over RDMA. A native multipath namespace
+reports HIPFILE=no with multiple controller paths or a single PCIe path.
 
 NFS mounts are also listed, with their server/export as DEVICE and nfs as
 BACKING. Only proto=rdma or proto=rdma6 passes the NFS transport check; other
@@ -58,6 +58,7 @@ import glob
 import gzip
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -819,15 +820,31 @@ def block_layer_verdict(sysfs_dir):
 
 
 def nvme_transport(sysfs_dir):
-    """Return the controller transport, 'mpath' for a native multipath head, or None."""
+    """Identify the namespace transport or a multipath layout excluded by AIS."""
     disk = Path(sysfs_dir)
     try:
         if (disk / "partition").exists():
             disk = disk.parent
-        # A namespace head belongs to the subsystem even when only one path is live.
-        if disk.parent.name.startswith("nvme-subsys"):
+        controller = disk.parent
+        multipath_head = controller.name.startswith("nvme-subsys")
+        if multipath_head:
+            # For head nvmeSnN, a serving controller nvmeC has a child nvmeScCnN.
+            subsystem, _, namespace = disk.name.rpartition("n")
+            paths = [
+                ctrl
+                for ctrl in disk.parent.iterdir()
+                if re.fullmatch(r"nvme[0-9]+", ctrl.name)
+                and f"{subsystem}c{ctrl.name[4:]}n{namespace}" in os.listdir(ctrl)
+            ]
+            if not paths:
+                return None
+            if len(paths) > 1:
+                return "mpath"
+            controller = paths[0]
+        transport = (controller / "transport").read_text(encoding="ascii").strip()
+        if multipath_head and transport == "pcie":
             return "mpath"
-        return (disk.parent / "transport").read_text(encoding="ascii").strip() or None
+        return transport or None
     except (OSError, UnicodeError):
         return None
 
@@ -1018,8 +1035,8 @@ def main():
             "HIPFILE=no. On eligible NFS/RDMA and NVMe/RDMA mounts, a successful open\n"
             "reports HIPFILE=yes*. Both require a hardware RDMA NIC. Rejected\n"
             "O_DIRECT reports no, and an inconclusive probe reports unverified. Only an\n"
-            "unstarred yes counts toward a successful exit. Native NVMe multipath mounts\n"
-            "report HIPFILE=no."
+            "unstarred yes counts toward a successful exit. A native NVMe multipath head\n"
+            "reports HIPFILE=no with multiple controller paths or a single PCIe path."
         ),
     )
     output_group = parser.add_mutually_exclusive_group()

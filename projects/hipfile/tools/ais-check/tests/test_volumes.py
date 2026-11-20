@@ -578,12 +578,27 @@ def test_nvme_backing(ais_check, monkeypatch, tmp_path, transport_case, partitio
     assert ais_check.backing_storage("259:1") == (backing, disk.name, verdict)
 
 
-@pytest.mark.parametrize("paths", [[], ["rdma"], ["rdma", "rdma"], ["pcie", "pcie"]])
+@pytest.mark.parametrize(
+    "case",
+    [
+        ([], ("nvme", "unverified")),
+        (["rdma"], ("nvmeof-rdma", "yes*")),
+        (["pcie"], ("mpath", "no")),
+        (["tcp"], ("nvmeof-tcp", "no")),
+        (["rdma", "rdma"], ("mpath", "no")),
+        (["pcie", "pcie"], ("mpath", "no")),
+    ],
+)
 @pytest.mark.parametrize("partition", [False, True])
-def test_nvme_multipath_namespace(ais_check, monkeypatch, tmp_path, paths, partition):
+def test_nvme_multipath_namespace(ais_check, monkeypatch, tmp_path, case, partition):
+    paths, expected = case
     subsystem = tmp_path / "nvme-subsys7"
     disk = subsystem / "nvme7n2"
     disk.mkdir(parents=True)
+    # A controller serving only a different namespace is not a path to this disk.
+    other = tmp_path / "nvme9"
+    (other / "nvme7c9n1").mkdir(parents=True)
+    (subsystem / other.name).symlink_to(other)
     for index, transport in enumerate(paths):
         ctrl = tmp_path / f"nvme{index}"
         (ctrl / f"nvme7c{index}n2").mkdir(parents=True)
@@ -596,9 +611,10 @@ def test_nvme_multipath_namespace(ais_check, monkeypatch, tmp_path, paths, parti
     monkeypatch.setattr(ais_check.os.path, "realpath", lambda *a, **kw: str(disk))
     monkeypatch.setattr(ais_check, "probe_odirect", lambda mp: True)
     (row,) = ais_check.collect(
-        [_mount(ais_check, fstype="xfs", source=f"/dev/{disk.name}")]
+        [_mount(ais_check, fstype="ext4", source=f"/dev/{disk.name}")]
     )
-    assert (row["backing"], row["capable"]) == ("mpath", "no")
+    assert row["odirect"] is True
+    assert (row["backing"], row["capable"]) == expected
 
 
 @pytest.mark.parametrize(
