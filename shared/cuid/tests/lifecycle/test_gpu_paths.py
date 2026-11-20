@@ -671,6 +671,12 @@ class GpuPaths(unittest.TestCase):
                     child.kill()
                     child.wait()
 
+    def test_host_vf_discovery_uses_unit_zero(self):
+        vf = self.devices["0000:63:00.0"]
+        self.link(vf / "physfn", "/sys/bus/pci/devices/0000:03:00.0")
+        for role in (False, True):
+            self.run_probe("discover-host-vf", "/sys/class/drm/renderD129", nonroot=role)
+
     def test_host_vf_cannot_adopt_attributes(self):
         self.driver()
         self.partitions(count=2, published=2)

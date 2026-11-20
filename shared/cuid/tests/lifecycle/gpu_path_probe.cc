@@ -313,6 +313,14 @@ int main(int argc, char** argv) {
                ? 0
                : 1;
   }
+  if (action == "discover-host-vf" && argc == 3) {
+    amdcuid_gpu_info info{};
+    if (CuidGpu::discover_single(&info, argv[2]) != AMDCUID_STATUS_SUCCESS || !info.host_vf ||
+        info.bdf != "0000:63:00.0" || info.header.fields.gpu.unit_id != 0)
+      return 1;
+    uint16_t unit = UINT16_MAX;
+    return CuidGpu(info).get_unit_id(unit) == AMDCUID_STATUS_SUCCESS && unit == 0 ? 0 : 1;
+  }
   if (action == "host-vf") {
     for (int n = 2; n < argc; ++n) {
       amdcuid_gpu_info info{};
