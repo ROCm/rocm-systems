@@ -111,6 +111,10 @@ struct RaceWavefrontState : WavefrontState {
   };
   std::vector<LdsOperandRead> lds_operand_reads;
 
+  /// The event of the tensor transfer the wave is executing, until the
+  /// transfer's barrier arrival, if it has one, attaches its cell to it.
+  EventId tensor_transfer;
+
   struct MixedLdsAccess {
     struct Lane {
       int address;
@@ -122,6 +126,9 @@ struct RaceWavefrontState : WavefrontState {
     MemoryOrderClass order;
     bool reads;
     bool writes;
+    /// The access is a load, so it acquires the completed phases of the LDS
+    /// barrier cells it reads.
+    bool acquires_barrier_cells = false;
     std::vector<Lane> lanes;
     IntervalSet intervals;
   };
@@ -154,6 +161,7 @@ public:
   bool observes_sgpr_reads() const override { return true; }
   bool observes_memory_routing() const override { return true; }
   bool observes_tensor_dma_issue() const override { return true; }
+  bool observes_lds_barrier_arrival() const override { return true; }
   /// Skip waves without race state, including slots between a halt and the
   /// next workgroup dispatch, when other plugins may read their registers.
   bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override;
@@ -184,6 +192,8 @@ public:
   /// Register an issued tensor DMA instruction's LDS side as an event on TENSORCNT.
   void onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObservation &issue,
                                const amdgpu::Wavefront &wf) override;
+  void onAmdgpuLdsBarrierArrived(const amdgpu::LdsBarrierArrivalObservation &arrival,
+                                 const amdgpu::Wavefront &wf) override;
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg, uint64_t lane_mask,
                              uint8_t byte_mask = ExecutionPlugin::kFullByteMask) override;
