@@ -183,13 +183,13 @@ else()
   set(DL_OPT_FLAGS -O3)
 endif()
 
-# Device-only compiles (per-kernel, dispatcher, and fat objects' device halves).
-# Release has no NDEBUG (CMAKE_CXX_FLAGS_RELEASE), and each kernel compile unit
-# gets its own internal __assert_fail and printf, which cannot be merged at
-# link time. Host compiles keep their asserts.
-set(DL_DEVICE_ONLY_FLAGS "")
+# Device-only compiles (per-kernel, dispatcher, fat objects' device halves).
+# Release has no NDEBUG, so each kernel compile unit would get its own
+# __assert_fail and printf. Device code needs no .eh_frame; with -g the CFI
+# goes to .debug_frame.
+set(DL_DEVICE_ONLY_FLAGS -fno-unwind-tables -fno-asynchronous-unwind-tables)
 if(NOT ENABLE_FULL_COVERAGE AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
-  set(DL_DEVICE_ONLY_FLAGS -DNDEBUG)
+  list(APPEND DL_DEVICE_ONLY_FLAGS -DNDEBUG)
 endif()
 set(DL_DEVICE_OPT_FLAGS ${DL_OPT_FLAGS} ${DL_DEVICE_ONLY_FLAGS})
 
