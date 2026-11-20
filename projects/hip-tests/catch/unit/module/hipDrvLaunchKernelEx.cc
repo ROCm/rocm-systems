@@ -622,15 +622,8 @@ static __global__ void clusterValidationKernel(int* out) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.0
- *  - Device with cluster launch support
  */
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Negative_OversizedCluster) {
-  hipDeviceProp_t prop{};
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-  if (!prop.clusterLaunch) {
-    HIP_SKIP_TEST("Test requires a device with cluster launch support");
-  }
-
   hipFunction_t func;
   HIP_CHECK(hipGetFuncBySymbol(&func, reinterpret_cast<const void*>(&clusterValidationKernel)));
 
@@ -668,15 +661,8 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Negative_OversizedCluster) {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.0
- *  - Device with cluster launch support
  */
 HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_Negative_OverflowClusterDim) {
-  hipDeviceProp_t prop{};
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-  if (!prop.clusterLaunch) {
-    HIP_SKIP_TEST("Test requires a device with cluster launch support");
-  }
-
   hipFunction_t func;
   HIP_CHECK(hipGetFuncBySymbol(&func, reinterpret_cast<const void*>(&clusterValidationKernel)));
 
