@@ -35,7 +35,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     ROOFLINE_PANEL_ID,
-    config_arch_members,
+    canonical_config_arch,
     parse_sets_yaml,
 )
 from utils.utils_counter_defs import Collectables, metric_value_keys
@@ -186,9 +186,18 @@ UNIT_VARIANTS["gfx1250"] = {
 }
 
 
+def member_arch(arch: str) -> str:
+    """Return a GPU arch with the analysis configs of arch (gfx1150 for gfx115x)."""
+    return next(
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == arch
+    )
+
+
 def unshown_file_ids(arch: str) -> Set[str]:
     """Return the ids of analysis config files hidden on arch."""
-    if config_arch_members(arch)[0] in mi_gpu_specs.get_roofline_archs():
+    if member_arch(arch) in mi_gpu_specs.get_roofline_archs():
         return set()
     return {f"{ROOFLINE_PANEL_ID:04d}"}
 
@@ -322,8 +331,7 @@ def old_sets_by_metric_id(arch_view: SimpleNamespace) -> Dict[str, Dict[str, Any
         zip((row.legacy_id for row in arch_view.rows), arch_view.metric_ids)
     )
     old_sets = {}
-    gpu_arch = config_arch_members(arch_view.arch)[0]
-    for set_option, entry in parse_sets_yaml(gpu_arch).items():
+    for set_option, entry in parse_sets_yaml(member_arch(arch_view.arch)).items():
         metric_ids = [
             metric_id_by_position.get(str(position))
             for item in entry["metric"]
@@ -438,8 +446,7 @@ def test_counters_match_detect_counters(arch_view):
     has_membw_panel = any(
         (config.analysis_configs_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
     )
-    gpu_arch = config_arch_members(arch)[0]
-    soc = make_soc(gpu_arch, has_membw_panel, shown_blocks(arch))
+    soc = make_soc(member_arch(arch), has_membw_panel, shown_blocks(arch))
     expected, _ = soc.detect_counters()
     library_counters = arch_view.library.get_counters_for_metrics(
         list(arch_view.library.metrics)
