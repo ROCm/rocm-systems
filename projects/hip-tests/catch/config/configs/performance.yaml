@@ -27,6 +27,8 @@ performance:
   Performance_hipMemcpyAsync_HostToHost: *level_stress
   Performance_hipMemcpyAsync_DeviceToDevice_DisablePeerAccess: *level_stress
   Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess: *level_stress
+  Performance_hipMemcpyAsync_PinnedSynchronized: *level_stress
+  Performance_hipMemcpyAsync_HostToDevice_DependentKernel: *level_stress
   Performance_hipMemcpyWithStream_DeviceToHost: *level_stress
   Performance_hipMemcpyWithStream_HostToDevice: *level_stress
   Performance_hipMemcpyWithStream_HostToHost: *level_stress
