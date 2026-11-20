@@ -9,7 +9,7 @@ from typing import Callable, Optional
 import pandas as pd
 
 from membw_analysis.debug import log_evaluation_summary, log_evaluation_trace
-from membw_analysis.guidance import render_guidance_blocks
+from membw_analysis.guidance import render_guidance_blocks, rendered_guidance_ids
 from membw_analysis.metric_extract import extract_membw_metrics
 from membw_analysis.models import (
     MEMBW_TABLE_IDS,
@@ -70,6 +70,9 @@ def evaluate_membw_tree(
         availability_reason=availability_reason,
         nodes=evaluated_roots,
         guidance_blocks=guidance_blocks,
+        guidance_block_ids=rendered_guidance_ids(
+            guidance_ids, tree_spec.guidance_templates, _MAX_GUIDANCE_BLOCKS
+        ),
     )
 
 

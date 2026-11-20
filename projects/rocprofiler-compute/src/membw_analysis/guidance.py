@@ -4,9 +4,18 @@
 """Render guidance templates with actual metric and threshold values."""
 
 import re
-from typing import Optional
+from typing import Dict, List, Optional, Tuple
 
 _METRIC_THRESHOLD_RE = re.compile(r"\{(threshold|metric):([^}]+)\}")
+
+
+def rendered_guidance_ids(
+    guidance_ids: List[str],
+    guidance_templates: Dict[str, str],
+    max_blocks: int,
+) -> Tuple[str, ...]:
+    """The guidance ids that render_guidance_blocks renders, in its order."""
+    return tuple(gid for gid in guidance_ids[:max_blocks] if gid in guidance_templates)
 
 
 def render_guidance_blocks(
@@ -18,10 +27,10 @@ def render_guidance_blocks(
 ) -> tuple[str, ...]:
     """Render guidance blocks for active leaf bottleneck nodes."""
     blocks: list[str] = []
-    for guidance_id in guidance_ids[:max_blocks]:
-        template = guidance_templates.get(guidance_id)
-        if template is None:
-            continue
+    for guidance_id in rendered_guidance_ids(
+        guidance_ids, guidance_templates, max_blocks
+    ):
+        template = guidance_templates[guidance_id]
         try:
             rendered = _render_template(template, thresholds, metric_values)
             blocks.append(rendered.rstrip())
