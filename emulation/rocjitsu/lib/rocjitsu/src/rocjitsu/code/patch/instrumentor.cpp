@@ -1199,6 +1199,264 @@ bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
   return false;
 }
 
+// Return provenance for the closed-text MODE proof is separate from register
+// liveness. Summarized callees may destroy any register they actually define;
+// lane saves survive a nested call only when its inspected callees leave them alone.
+class ClosedVskipCalls {
+public:
+  ClosedVskipCalls(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                   const BlockOffsetIndex &offsets,
+                   const std::unordered_set<const BasicBlock *> &proven_reentries,
+                   uint32_t ordinary_sgprs)
+      : offsets_(offsets), proven_reentries_(proven_reentries), ordinary_sgprs_(ordinary_sgprs) {
+    for (const std::unique_ptr<BasicBlock> &block : blocks)
+      decoded_.insert(block.get());
+  }
+
+  bool contains_flow(BasicBlock &entry, const KernelScopeSpec &spec) {
+    if (!analyze(entry, std::nullopt))
+      return false;
+    for (uint64_t offset : spec.own_entries) {
+      BasicBlock *extra = block_for_offset(offsets_, offset);
+      if (extra == nullptr || extra->start_offset() != offset || !analyze(*extra, std::nullopt))
+        return false;
+    }
+    return true;
+  }
+
+private:
+  struct State {
+    std::array<uint8_t, REGISTER_SET_MAX_SGPRS> scalar = {};
+    std::unordered_map<uint32_t, uint8_t> lanes;
+  };
+
+  const BlockOffsetIndex &offsets_;
+  const std::unordered_set<const BasicBlock *> &proven_reentries_;
+  uint32_t ordinary_sgprs_;
+  unsigned active_summaries_ = 0;
+  std::unordered_set<const BasicBlock *> decoded_;
+  std::unordered_map<const BasicBlock *, std::unordered_map<uint16_t, std::optional<RegisterSet>>>
+      summaries_;
+
+  static std::optional<RegisterRef> reg(const Operand *operand, RegClass cls) {
+    const std::optional<RegisterRef> ref =
+        operand == nullptr ? std::nullopt : operand->to_register_ref();
+    return ref && ref->cls == cls ? ref : std::nullopt;
+  }
+
+  static std::optional<uint16_t> lane(const Operand *operand) {
+    const std::optional<uint64_t> value =
+        operand == nullptr ? std::nullopt : operand->const_value();
+    return value && *value < 64 ? std::optional<uint16_t>(static_cast<uint16_t>(*value))
+                                : std::nullopt;
+  }
+
+  static uint32_t slot(RegisterRef vector, uint16_t lane_index) {
+    return uint32_t{vector.index} * 64 + lane_index;
+  }
+
+  static void kill(State &state, const RegisterSet &defs,
+                   std::optional<uint16_t> preserved_vector = std::nullopt) {
+    for (uint16_t index = 0; index < state.scalar.size(); ++index)
+      if (state.scalar[index] && defs.contains({RegClass::SGPR, index, 1}))
+        state.scalar[index] = 0;
+    std::erase_if(state.lanes, [&](const std::pair<const uint32_t, uint8_t> &item) {
+      const uint16_t vector = item.first / 64;
+      return vector != preserved_vector && defs.contains({RegClass::VGPR, vector, 1});
+    });
+  }
+
+  bool complete_calls(const BasicBlock &block) const {
+    const Instruction *term = block.terminator();
+    if (term == nullptr || block.call_edges().empty())
+      return false;
+    for (const BasicBlock::CallEdge &edge : block.call_edges()) {
+      if (edge.callee == nullptr || edge.continuation == nullptr ||
+          !decoded_.contains(edge.callee) || !decoded_.contains(edge.continuation) ||
+          edge.source_call_offset != term->src_loc() || edge.return_sreg % 2 ||
+          edge.return_sreg + 1u >= ordinary_sgprs_)
+        return false;
+      if (edge.kind == BasicBlock::CallEdgeKind::DirectCall) {
+        const std::optional<int64_t> delta = term->branch_offset_bytes();
+        if (!delta || static_cast<int64_t>(block.end_offset()) + *delta < 0 ||
+            static_cast<uint64_t>(static_cast<int64_t>(block.end_offset()) + *delta) !=
+                edge.callee->start_offset())
+          return false;
+      } else {
+        const std::vector<IndirectCallFixup> &fixups = block.static_indirect_call_fixups();
+        if (fixups.empty() ||
+            !std::ranges::any_of(fixups,
+                                 [&](const IndirectCallFixup &fixup) {
+                                   return fixup.source_call_offset == term->src_loc() &&
+                                          fixup.source_target_offset ==
+                                              edge.callee->start_offset() &&
+                                          fixup.source_return_sreg == edge.return_sreg;
+                                 }) ||
+            !std::ranges::all_of(fixups, [&](const IndirectCallFixup &fixup) {
+              return !fixup.source_incomplete && fixup.source_is_call &&
+                     fixup.source_call_offset == term->src_loc() &&
+                     std::ranges::any_of(
+                         block.call_edges(), [&](const BasicBlock::CallEdge &target) {
+                           return target.callee != nullptr &&
+                                  target.callee->start_offset() == fixup.source_target_offset &&
+                                  target.return_sreg == fixup.source_return_sreg;
+                         });
+            }))
+          return false;
+      }
+    }
+    return true;
+  }
+
+  std::optional<RegisterSet> callee(const BasicBlock::CallEdge &edge) {
+    std::unordered_map<uint16_t, std::optional<RegisterSet>> &by_link = summaries_[edge.callee];
+    const std::unordered_map<uint16_t, std::optional<RegisterSet>>::const_iterator found =
+        by_link.find(edge.return_sreg);
+    if (found != by_link.end())
+      return found->second;
+    // Bound recursion as well as cycles; an incomplete summary never grants admission.
+    by_link.emplace(edge.return_sreg, std::nullopt);
+    if (active_summaries_ == 64)
+      return std::nullopt;
+    ++active_summaries_;
+    const std::optional<RegisterSet> result = analyze(*edge.callee, edge.return_sreg);
+    --active_summaries_;
+    summaries_[edge.callee][edge.return_sreg] = result;
+    return result;
+  }
+
+  std::optional<RegisterSet> analyze(BasicBlock &entry, std::optional<uint16_t> link) {
+    State initial;
+    if (link) {
+      initial.scalar[*link] = 1;
+      initial.scalar[*link + 1] = 2;
+    }
+    std::unordered_map<const BasicBlock *, State> incoming;
+    std::vector<const BasicBlock *> work;
+    auto merge = [&](const BasicBlock *block, const State &state) {
+      if (block == nullptr || !decoded_.contains(block))
+        return false;
+      auto [position, inserted] = incoming.emplace(block, state);
+      bool changed = inserted;
+      if (!inserted) {
+        State &old = position->second;
+        for (size_t index = 0; index < old.scalar.size(); ++index) {
+          if (old.scalar[index] && old.scalar[index] != state.scalar[index]) {
+            old.scalar[index] = 0;
+            changed = true;
+          }
+        }
+        std::erase_if(old.lanes, [&](const std::pair<const uint32_t, uint8_t> &item) {
+          const std::unordered_map<uint32_t, uint8_t>::const_iterator other =
+              state.lanes.find(item.first);
+          const bool remove = other == state.lanes.end() || other->second != item.second;
+          changed |= remove;
+          return remove;
+        });
+      }
+      if (changed)
+        work.push_back(block);
+      return true;
+    };
+    merge(&entry, initial);
+    RegisterSet clobbers;
+    while (!work.empty()) {
+      const BasicBlock *block = work.back();
+      work.pop_back();
+      State state = incoming.at(block);
+      for (const Instruction &inst : block->instructions()) {
+        const std::string_view name = inst.mnemonic();
+        if (is_control_flow_transfer(inst) && &inst != block->terminator())
+          return std::nullopt;
+        // Dynamic register addressing is not represented by these fixed slots.
+        if (name.starts_with("s_movrel") || name.starts_with("s_set_gpr_idx") ||
+            name.starts_with("s_setreg"))
+          return std::nullopt;
+        const InstDefUse effects(inst, 64);
+        RegisterSet defs = effects.defs;
+        if (effects.conditional_vgpr_def)
+          defs.expand(*effects.conditional_vgpr_def);
+        clobbers |= defs;
+        const std::optional<RegisterRef> scalar_dst = reg(inst.dst_operand(0), RegClass::SGPR);
+        // WRITELANE's read-modify-write destination is its first decoded source.
+        const bool writes_lane = name == "v_writelane_b32";
+        const std::optional<RegisterRef> scalar_src =
+            reg(inst.src_operand(writes_lane ? 1 : 0), RegClass::SGPR);
+        const std::optional<RegisterRef> vector_dst = reg(inst.dst_operand(0), RegClass::VGPR);
+        const std::optional<RegisterRef> vector_src = reg(inst.src_operand(0), RegClass::VGPR);
+        const std::optional<uint16_t> lane_index = lane(inst.src_operand(writes_lane ? 2 : 1));
+        std::array<uint8_t, 2> copied = {};
+        unsigned copied_width = 0;
+        std::optional<uint32_t> written_lane;
+        uint8_t lane_value = 0;
+        if ((name == "s_mov_b32" || name == "s_mov_b64") && scalar_dst && scalar_src &&
+            scalar_dst->width == scalar_src->width && scalar_dst->width <= copied.size() &&
+            scalar_dst->index + scalar_dst->width <= ordinary_sgprs_ &&
+            scalar_src->index + scalar_src->width <= ordinary_sgprs_) {
+          copied_width = scalar_dst->width;
+          for (unsigned half = 0; half < copied_width; ++half)
+            copied[half] = state.scalar[scalar_src->index + half];
+        } else if (name == "v_writelane_b32" && vector_dst && vector_dst->width == 1 &&
+                   lane_index) {
+          written_lane = slot(*vector_dst, *lane_index);
+          if (scalar_src && scalar_src->width == 1 && scalar_src->index < ordinary_sgprs_)
+            lane_value = state.scalar[scalar_src->index];
+        } else if (name == "v_readlane_b32" && scalar_dst && scalar_dst->width == 1 &&
+                   scalar_dst->index < ordinary_sgprs_ && vector_src && vector_src->width == 1 &&
+                   lane_index) {
+          copied_width = 1;
+          const std::unordered_map<uint32_t, uint8_t>::const_iterator saved =
+              state.lanes.find(slot(*vector_src, *lane_index));
+          copied[0] = saved == state.lanes.end() ? 0 : saved->second;
+        }
+        kill(state, defs, written_lane ? std::optional<uint16_t>(vector_dst->index) : std::nullopt);
+        if (written_lane) {
+          state.lanes.erase(*written_lane);
+          if (lane_value)
+            state.lanes.emplace(*written_lane, lane_value);
+        }
+        for (unsigned half = 0; half < copied_width; ++half)
+          state.scalar[scalar_dst->index + half] = copied[half];
+      }
+      const Instruction *term = block->terminator();
+      if (term == nullptr)
+        return std::nullopt;
+      if (term->mnemonic() == "s_setpc_b64") {
+        const std::optional<RegisterRef> source = reg(term->src_operand(0), RegClass::SGPR);
+        if (link && source && source->width == 2 && source->index + 1u < ordinary_sgprs_ &&
+            state.scalar[source->index] == 1 && state.scalar[source->index + 1] == 2)
+          continue;
+      }
+      const bool has_calls = !block->call_edges().empty();
+      if (is_control_flow_transfer(*term) && !is_program_path_terminator(*term) &&
+          !term->branch_offset_bytes() && term->mnemonic() != "s_setpc_b64" && !has_calls &&
+          !proven_reentries_.contains(block))
+        return std::nullopt;
+      if (has_calls) {
+        if (!complete_calls(*block))
+          return std::nullopt;
+        for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+          const std::optional<RegisterSet> summary = callee(edge);
+          if (!summary)
+            return std::nullopt;
+          clobbers |= *summary;
+          kill(state, *summary);
+        }
+      }
+      const BasicBlock::SuccessorIssue issue = block->successor_issue();
+      if (issue != BasicBlock::SuccessorIssue::None &&
+          issue != BasicBlock::SuccessorIssue::MissingFallthrough &&
+          !(issue == BasicBlock::SuccessorIssue::IndirectControlFlow && has_calls) &&
+          !proven_reentries_.contains(block))
+        return std::nullopt;
+      for (const BasicBlock *next : block->successors())
+        if (!merge(next, state))
+          return std::nullopt;
+    }
+    return clobbers;
+  }
+};
+
 // Omitted but bounded call/return edges cannot introduce set VSKIP when
 // every instruction in the inspected text leaves it clear. This establishes
 // only the MODE precondition, never EXEC or interprocedural register liveness.
@@ -1239,8 +1497,11 @@ bool vskip_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBl
                                   ? cdna3::flat_scratch_base(cdna3::sgpr_alias_end(*count))
                                   : ordinary_sgpr_bound(arch, *count);
     if (kernel_has_unknown_target(*entry, spec, offsets, reachable, ordinary, proven_reentries,
-                                  true))
-      return false;
+                                  true)) {
+      ClosedVskipCalls calls(blocks, offsets, proven_reentries, ordinary);
+      if (!calls.contains_flow(*entry, spec))
+        return false;
+    }
   }
   return !kernels.empty();
 }
@@ -1985,6 +2246,10 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   bool can_analyze_exec = !kernels.empty();
   std::vector<const BasicBlock *> entries;
   for (const KernelDescriptorInfo &kernel : kernels) {
+    // Preload firmware may skip the first 256 bytes. That entry is not a CFG
+    // boundary here, so its dispatch mask cannot inherit prefix instructions.
+    if (kernarg_preload_length(kernel.descriptor))
+      can_analyze_exec = false;
     const std::vector<BasicBlock *>::const_iterator entry =
         std::ranges::find(scope, kernel.entry_text_offset, &BasicBlock::start_offset);
     if (entry == scope.end())

@@ -2596,6 +2596,214 @@ TEST(InstrumentorSpill, PlanAccSpillsRejectsNonCdnaArch) {
 //   anchor at offset 4, return_target   = 4 + 4 = 8
 //==============================================================================
 
+struct CompiledCallProgram {
+  std::vector<uint32_t> words;
+  uint64_t anchor_offset = 0;
+  uint64_t exit_offset = 0;
+  size_t callee_word = 0;
+  size_t return_word = 0;
+};
+
+enum class SavedLinkJoin { None, Preserve, Clobber };
+
+CompiledCallProgram make_compiled_call_program(rocjitsu::IsaFamily arch, bool non_leaf,
+                                               SavedLinkJoin join = SavedLinkJoin::None) {
+  CompiledCallProgram program;
+  const uint32_t ret = build_s_setpc_b64(30, arch).value();
+  auto append_call = [&]() {
+    const size_t start = program.words.size();
+    program.words.insert(program.words.end(), {build_s_getpc_b64(8, arch).value(),
+                                               build_s_add_u32(8, 8, 255, arch).value(), 0,
+                                               build_s_addc_u32(9, 9, 128, arch).value(),
+                                               build_s_swappc_b64(30, 8, arch).value()});
+    return start;
+  };
+  const auto resolve_call = [&](size_t call, size_t target) {
+    program.words[call + 2] = static_cast<uint32_t>((target - call - 1) * sizeof(uint32_t));
+  };
+  const size_t call = append_call();
+  program.anchor_offset = program.words.size() * sizeof(uint32_t);
+  program.words.push_back(build_s_nop(0, arch).value());
+  program.exit_offset = program.words.size() * sizeof(uint32_t);
+  program.words.push_back(build_s_endpgm(arch).value());
+  program.callee_word = program.words.size();
+  resolve_call(call, program.callee_word);
+  if (non_leaf) {
+    for (uint16_t half : {0, 1}) {
+      const std::array<uint32_t, 2> save = build_v_writelane_b32(3, 30 + half, half, arch).value();
+      program.words.insert(program.words.end(), save.begin(), save.end());
+    }
+    const size_t first_nested_call = append_call();
+    const size_t second_nested_call = append_call();
+    if (join != SavedLinkJoin::None) {
+      // Both predecessors meet at the reads of the saved outer return pair.
+      program.words.push_back(0xbf850001u); // s_cbranch_scc1 join
+      program.words.push_back(join == SavedLinkJoin::Clobber
+                                  ? build_v_mov_b32_src(3, 128, arch).value()
+                                  : build_s_nop(0, arch).value());
+    }
+    for (uint16_t half : {0, 1}) {
+      const std::array<uint32_t, 2> restore =
+          build_v_readlane_b32(30 + half, 3, half, arch).value();
+      program.words.insert(program.words.end(), restore.begin(), restore.end());
+    }
+    program.return_word = program.words.size();
+    program.words.push_back(ret);
+    resolve_call(first_nested_call, program.words.size());
+    resolve_call(second_nested_call, program.words.size());
+  } else {
+    program.return_word = program.words.size();
+  }
+  program.words.push_back(ret);
+  return program;
+}
+
+TEST(InstrumentorProbePatch, VskipProofSupportsCompiledLeafAndNonLeafCalls) {
+  struct CallCase {
+    bool non_leaf;
+    SavedLinkJoin join = SavedLinkJoin::None;
+  };
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const uint32_t machine = arch == rocjitsu::IsaFamily::Cdna3 ? EF_AMDGPU_MACH_AMDGCN_GFX942
+                                                              : EF_AMDGPU_MACH_AMDGCN_GFX950;
+    const std::vector<uint8_t> probe =
+        make_amdgpu_probe_elf("return_probe", {build_s_setpc_b64(30, arch).value()}, machine);
+    const AmdGpuCodeObject probe_object(probe.data(), probe.size());
+    for (CallCase test_case : {CallCase{.non_leaf = false}, CallCase{.non_leaf = true},
+                               CallCase{.non_leaf = true, .join = SavedLinkJoin::Preserve}}) {
+      const CompiledCallProgram program =
+          make_compiled_call_program(arch, test_case.non_leaf, test_case.join);
+      const std::vector<uint8_t> image =
+          make_amdgpu_kernel_elf(program.words, 64, kCallableProbeGranulatedSgprCount, machine);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+      const util::FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+          BasicBlock::build(object, *decoder, arch);
+      ASSERT_TRUE(blocks.succeeded());
+      size_t recovered_calls = 0;
+      for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+        for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+          EXPECT_EQ(edge.kind, BasicBlock::CallEdgeKind::IndirectSwapPc);
+          ++recovered_calls;
+        }
+      }
+      ASSERT_EQ(recovered_calls, test_case.non_leaf ? 3u : 1u);
+      for (InstrumentationKind kind :
+           {InstrumentationKind::BeforeInst, InstrumentationKind::KernelExit}) {
+        SCOPED_TRACE(::testing::Message() << "arch=" << arch << " non_leaf=" << test_case.non_leaf
+                                          << " join=" << static_cast<int>(test_case.join)
+                                          << " kind=" << static_cast<int>(kind));
+        Instrumentor instrumentor(object, arch);
+        instrumentor.add_point({.anchor_offset = kind == InstrumentationKind::KernelExit
+                                                     ? program.exit_offset
+                                                     : program.anchor_offset,
+                                .kind = kind,
+                                .probe_obj = &probe_object,
+                                .probe_symbol = "return_probe",
+                                .probe_args = {}});
+        const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        const InstrumentedCodeObject result = instrumentor.patch();
+        EXPECT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+        EXPECT_FALSE(result.elf_bytes.empty());
+        EXPECT_EQ(result.sites.size(), 1u);
+        EXPECT_EQ(object.image_size(), image.size());
+        EXPECT_EQ(std::memcmp(object.image_data(), image.data(), image.size()), 0);
+      }
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, VskipProofRejectsEscapingOrModifiedCompiledCallReturns) {
+  enum class Corruption {
+    ExternalCall,
+    ReturnLink,
+    SavedLane,
+    MixedLanes,
+    BranchMerge,
+    RecursiveCall,
+    VskipWriter
+  };
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const uint32_t machine = arch == rocjitsu::IsaFamily::Cdna3 ? EF_AMDGPU_MACH_AMDGCN_GFX942
+                                                              : EF_AMDGPU_MACH_AMDGCN_GFX950;
+    const std::vector<uint8_t> probe =
+        make_amdgpu_probe_elf("return_probe", {build_s_setpc_b64(30, arch).value()}, machine);
+    const AmdGpuCodeObject probe_object(probe.data(), probe.size());
+    for (Corruption corruption :
+         {Corruption::ExternalCall, Corruption::ReturnLink, Corruption::SavedLane,
+          Corruption::MixedLanes, Corruption::BranchMerge, Corruption::RecursiveCall,
+          Corruption::VskipWriter}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "arch=" << arch << " corruption=" << static_cast<int>(corruption));
+      CompiledCallProgram program = make_compiled_call_program(
+          arch,
+          corruption == Corruption::SavedLane || corruption == Corruption::MixedLanes ||
+              corruption == Corruption::BranchMerge,
+          corruption == Corruption::BranchMerge ? SavedLinkJoin::Clobber : SavedLinkJoin::None);
+      switch (corruption) {
+      case Corruption::ExternalCall:
+        program.words[2] = 0x10000;
+        break;
+      case Corruption::ReturnLink:
+        program.words.insert(program.words.begin() + program.return_word,
+                             build_s_mov_b32(30, 128, arch).value());
+        break;
+      case Corruption::SavedLane:
+        // Both nested calls now execute a leaf that destroys the saved outer link.
+        program.words.insert(program.words.end() - 1, build_v_mov_b32_src(3, 128, arch).value());
+        break;
+      case Corruption::MixedLanes: {
+        // Saving the low half into both lanes does not preserve a return address.
+        const std::array<uint32_t, 2> wrong_high = build_v_writelane_b32(3, 30, 1, arch).value();
+        std::ranges::copy(wrong_high, program.words.begin() + program.callee_word + 2);
+        break;
+      }
+      case Corruption::BranchMerge:
+        break;
+      case Corruption::RecursiveCall:
+        // A syntactic return base case does not bound recursive call contexts.
+        program.words.back() = 0xbf850006u; // s_cbranch_scc1 return
+        program.words.insert(
+            program.words.end(),
+            {build_s_getpc_b64(8, arch).value(), build_s_add_u32(8, 8, 255, arch).value(),
+             0xfffffff8u, build_s_addc_u32(9, 9, 255, arch).value(), 0xffffffffu,
+             build_s_swappc_b64(30, 8, arch).value(), build_s_setpc_b64(30, arch).value()});
+        break;
+      case Corruption::VskipWriter:
+        program.words.insert(program.words.begin() + program.callee_word, 0xbf108081u);
+        break;
+      }
+      const std::vector<uint8_t> image =
+          make_amdgpu_kernel_elf(program.words, 64, kCallableProbeGranulatedSgprCount, machine);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      if (corruption == Corruption::BranchMerge || corruption == Corruption::RecursiveCall) {
+        const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+        const util::FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+            BasicBlock::build(object, *decoder, arch);
+        ASSERT_TRUE(blocks.succeeded());
+        size_t calls = 0;
+        for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+          calls += block->call_edges().size();
+        ASSERT_EQ(calls, corruption == Corruption::RecursiveCall ? 2u : 3u);
+      }
+      Instrumentor instrumentor(object, arch);
+      instrumentor.add_point({.anchor_offset = program.anchor_offset,
+                              .kind = InstrumentationKind::BeforeInst,
+                              .probe_obj = &probe_object,
+                              .probe_symbol = "return_probe",
+                              .probe_args = {}});
+      const InstrumentedCodeObject result = instrumentor.patch();
+      ASSERT_FALSE(result.errors.empty());
+      EXPECT_NE(result.errors.front().find("VSKIP"), std::string::npos) << result.errors.front();
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_EQ(object.image_size(), image.size());
+      EXPECT_EQ(std::memcmp(object.image_data(), image.data(), image.size()), 0);
+    }
+  }
+}
+
 TEST(InstrumentorProbePatch, RejectsGfx1251ProbeForGfx1250Destination) {
   constexpr uint32_t kGfx1250Nop = 0xBF800000u;
   constexpr uint32_t kGfx1250SetPcS30 = 0xBE80481Eu;
