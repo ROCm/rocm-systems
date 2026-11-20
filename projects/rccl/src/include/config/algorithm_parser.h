@@ -21,6 +21,6 @@
 // No logging here: the caller (ncclCollConfigGetAlgMask) decides WARN vs
 // INFO based on forceAlgSelection.
 // All the valid strings can be found in src/config/algorithm_registry.cc
-ncclResult_t ncclAlgParse(const char* sel, ncclTuningMask* outMask);
+ncclResult_t ncclAlgParse(const char* sel, rcclTuningMask* outMask);
 
 #endif

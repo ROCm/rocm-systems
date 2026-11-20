@@ -1362,19 +1362,19 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CrossTrayAllGatherNeedsSelector
 }
 
 namespace {
-constexpr ncclTuningMask kTdmOnlyMask = ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST);
+constexpr rcclTuningMask kTdmOnlyMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST);
 
 // Schedules a TDM-window AllGather (ALLOW_TDM_ONLY) and a plain one (ALLOW), windowFirst deciding which leads
 // the input. Returns the tuning mask each batch offered, in batch order, tagged 'w' or 'p' by its head task.
-std::vector<std::pair<char, ncclTuningMask>> ScheduleWindowAndPlain(
-  bool windowFirst, ncclTuningMask windowAlgMask = ncclTuningMask(),
+std::vector<std::pair<char, rcclTuningMask>> ScheduleWindowAndPlain(
+  bool windowFirst, rcclTuningMask windowAlgMask = rcclTuningMask(),
   ncclSymkKernelMask tdmKernels = ncclSymkKernelMask(1) << ncclSymkKernelId_AllGather_TmaST) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
   scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
   ScopedHook tmaMask(g_symkTmaKernelMask, [tdmKernels] { return tdmKernels; });
-  std::vector<std::pair<char, ncclTuningMask>> batches;
+  std::vector<std::pair<char, rcclTuningMask>> batches;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* in, struct ncclTuningResult_t*) {
     batches.emplace_back(in->count == 64 ? 'w' : 'p', in->tuningMask);
     return ncclSuccess;
@@ -1403,7 +1403,7 @@ std::vector<std::pair<char, ncclTuningMask>> ScheduleWindowAndPlain(
 // A task the AllGather TDM window admitted offers the cost model only the TDM kernels, and batches alone,
 // whether it heads the bucket or follows another task. Classification reverses the input order.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskOffersOnlyTdmKernelsInItsOwnBatch) {
-  using Batches = std::vector<std::pair<char, ncclTuningMask>>;
+  using Batches = std::vector<std::pair<char, rcclTuningMask>>;
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false),
             (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/true),
@@ -1412,24 +1412,23 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskOffersOnlyTdmKerne
 
 // An algSelection that leaves out the TDM kernels keeps its own symmetric kernels.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskKeepsAnAlgSelectionWithoutTdm) {
-  using Batches = std::vector<std::pair<char, ncclTuningMask>>;
-  const ncclTuningMask st = ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST);
+  using Batches = std::vector<std::pair<char, rcclTuningMask>>;
+  const rcclTuningMask st = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST);
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st),
             (Batches{{'w', st}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st | kTdmOnlyMask),
             (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
 }
 
-// [RCCL] The TDM-only narrowing keeps TDM kernels with ids above 31, such as AllGather_HierLsaTmaST. It used to cast
-// the kernel mask to 32 bits, which would drop them.
+// [RCCL] The TDM-only narrowing keeps TDM kernels with ids above 31, such as AllGather_HierLsaTmaST.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskKeepsTdmKernelsPastKernelId31) {
-  using Batches = std::vector<std::pair<char, ncclTuningMask>>;
+  using Batches = std::vector<std::pair<char, rcclTuningMask>>;
   const ncclSymkKernelMask tdm = ncclSymkKernelMask(1) << ncclSymkKernelId_AllGather_TmaST |
                                  ncclSymkKernelMask(1) << ncclSymkKernelId_AllGather_HierLsaTmaST;
-  const ncclTuningMask expected =
-    ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST) |
-    ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
-  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, ncclTuningMask(), tdm),
+  const rcclTuningMask expected =
+    rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST) |
+    rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, rcclTuningMask(), tdm),
             (Batches{{'w', expected}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
 }
 
@@ -1883,7 +1882,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskDefault_W
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
 
-  ncclTuningMask capturedMask;
+  rcclTuningMask capturedMask{};
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
     capturedMask = input->tuningMask;
     return ncclSuccess;
@@ -1898,10 +1897,10 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskOverridde
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   // A single sym-range bit, not the whole mask, so the overridden value differs from the pre-override default.
-  const ncclTuningMask kOneSymBit = ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+  const rcclTuningMask kOneSymBit = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
   task.algMask = kOneSymBit;
 
-  ncclTuningMask capturedMask;
+  rcclTuningMask capturedMask{};
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
     capturedMask = input->tuningMask;
     return ncclSuccess;

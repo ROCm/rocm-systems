@@ -323,8 +323,8 @@ enum ncclSymkKernelId {
   // Append new kernels so existing tuning IDs remain stable.
   ncclSymkKernelId_AlltoAll_LL,
 
-  // RCCL's own kernels follow NCCL's, so NCCL's keep NCCL's ids, tuning ids and algorithm-registry bits. Add
-  // RCCL kernels at the end of this list.
+  // RCCL's own kernels follow NCCL's, so NCCL's kernels have the same ids, tuning ids and algorithm-registry bits as
+  // upstream NCCL. Add RCCL kernels at the end of this list.
   ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_HierLsaST,
   ncclSymkKernelId_AllGather_HierLsaTmaST,

@@ -149,7 +149,7 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     if (task->acc != nullptr) symAvailable = false;
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
-    ncclTuningMask effAlgMask = symTaskHasForcedTuning(comm, task->func) ? ncclTuningMask() : task->algMask;
+    rcclTuningMask effAlgMask = symTaskHasForcedTuning(comm, task->func) ? rcclTuningMask() : task->algMask;
     bool cfgAllowsSymk = effAlgMask.none() || (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS).any();
 
     bool wantSym = symAvailable && cfgAllowsSymk;
@@ -233,15 +233,15 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
       // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
       // algSelection for any function it forced.
-      ncclTuningMask effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? ncclTuningMask() : headTask->algMask;
+      rcclTuningMask effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? rcclTuningMask() : headTask->algMask;
       if (effAlgMask.any()) {
-        ncclTuningMask symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
+        rcclTuningMask symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
         if (symkMask.any()) input.tuningMask = symkMask;
       }
       // [RCCL] The selector admitted this task for its TDM kernel, so offer only TDM kernels,
       // unless the caller's algSelection leaves them out.
       if (headTask->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY) {
-        const ncclTuningMask tdmMask = ncclTuningMaskFromSymk(ncclSymkTmaKernelMask());
+        const rcclTuningMask tdmMask = rcclTuningMaskFromSymk(ncclSymkTmaKernelMask());
         if ((input.tuningMask & tdmMask).any()) input.tuningMask &= tdmMask;
       }
       input.func = headTask->func;

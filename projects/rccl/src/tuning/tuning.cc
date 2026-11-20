@@ -194,7 +194,7 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
         "Input: { .comm = %p, .tuningMask = 0x%016" PRIx64 "%016" PRIx64 ", .func = %s, .redOp = %d, .devRedop = %d, "
         ".dataType = %d, .nBytes = %zu, .numPipeOps = %d, .count = %zu, .countMax = %zu, .nWorks = %d, "
         ".winRegType = %d, .regBuff = %d }",
-        input->comm, input->tuningMask.w[1], input->tuningMask.w[0], ncclFuncToString(input->func), input->redOp,
+        input->comm, input->tuningMask.word(64), input->tuningMask.word(0), ncclFuncToString(input->func), input->redOp,
         input->devRedOp, input->datatype, input->nBytes, input->numPipeOps, input->count, input->countMax,
         input->nWorks, input->winRegType, input->regBuff);
   struct ncclTuningResultList_t tunings;
@@ -348,8 +348,8 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
     }
     WARN("No algorithm/protocol nor symKernelId available for function %s with datatype %s tuning mask "
          "0x%016" PRIx64 "%016" PRIx64 ".%s%s%s",
-         ncclFuncToString(input->func), ncclDatatypeToString(input->datatype), input->tuningMask.w[1],
-         input->tuningMask.w[0], ncclAlgoEnvStr, ncclProtoEnvStr, ncclSymKernelIdEnvStr);
+         ncclFuncToString(input->func), ncclDatatypeToString(input->datatype), input->tuningMask.word(64),
+         input->tuningMask.word(0), ncclAlgoEnvStr, ncclProtoEnvStr, ncclSymKernelIdEnvStr);
     ret = (algoEnv || protoEnv || symKernelIdEnv) ? ncclInvalidUsage : ncclInternalError;
   }
   *result = bestTuning;

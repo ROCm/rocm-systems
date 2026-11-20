@@ -3236,8 +3236,8 @@ static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskCo
   // (a * NCCL_NUM_PROTOCOLS + p); see src/config/algorithm_registry.cc.
   // NCCL_ALGO/NCCL_PROTO/NCCL_SYM_KERNEL set forced[] and win here, as in ncclMakeSymmetricTaskList.
   // RCCL_OVERRIDE_* do not, and getAlgoInfo drops their error, so a blanked cell loses the override.
-  ncclTuningMask effAlgMask = comm->tuningContext.forced[info->func] ? ncclTuningMask() : info->algMask;
-  ncclTuningMask generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
+  rcclTuningMask effAlgMask = comm->tuningContext.forced[info->func] ? rcclTuningMask() : info->algMask;
+  rcclTuningMask generalMask = effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS;
   // Naming a row per call is as explicit as naming it in NCCL_ALGO or NCCL_PROTO, so it lifts the
   // same heuristic gates those env vars lift. Otherwise one selection string succeeds at 1 MiB and
   // fails at 4 MiB, or works only on an all-XGMI node.
@@ -4884,7 +4884,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     if (info->count == 0) return ncclSuccess;
 
     // Validate any per-call algorithm selection up front.
-    ncclTuningMask algMask;
+    rcclTuningMask algMask{};
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
 
     // Reductions in FP8 require sm90+.
@@ -4968,7 +4968,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
     // kernel selector, so without this an unsatisfiable selection (bad syntax, or a function with
     // no selectable algorithm) would be silently accepted despite forceAlgSelection. getAlgMask
     // rejects it when forceAlgSelection is set, else logs and falls back to automatic.
-    ncclTuningMask algMask;
+    rcclTuningMask algMask{};
     NCCLCHECK(ncclCollConfigGetAlgMask(&info->collConfig, info->coll, &algMask));
 
     if (info->datatype == ncclFloat8e4m3 || info->datatype == ncclFloat8e5m2) {

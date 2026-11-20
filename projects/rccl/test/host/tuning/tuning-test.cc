@@ -232,7 +232,7 @@ void TuningFree(void* pointer) {
 namespace {
 
 constexpr int GeneralId(int algo, int proto) { return algo * NCCL_NUM_PROTOCOLS + proto; }
-constexpr ncclTuningMask TuningBit(int id) { return ncclTuningMask::bit(id); }
+constexpr rcclTuningMask TuningBit(int id) { return rcclTuningMask::bit(id); }
 constexpr int symFirst = NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
 constexpr int symSecond = NCCL_TUNING_SYM_KERNEL_ID_OFFSET + 1;
 
@@ -1375,19 +1375,19 @@ TEST_F(TuningMicrotest, NoValidTuningDistinguishesConfigurationErrors) {
 }
 
 // ---------------------------------------------------------------------------
-// [RCCL] ncclTuningMask and the symmetric kernel conversions, on both sides of the 64-bit word boundary.
+// [RCCL] rcclTuningMask and the symmetric kernel conversions, on both sides of the 64-bit word boundary.
 // ---------------------------------------------------------------------------
 
 TEST(TuningMaskMicrotest, BitHoldsOnlyItsIdOnEitherSideOfTheWordBoundary) {
   for (int id : {0, 1, 63, 64, 65, 127}) {
-    const ncclTuningMask m = ncclTuningMask::bit(id);
+    const rcclTuningMask m = rcclTuningMask::bit(id);
     EXPECT_TRUE(m.any()) << "id " << id;
-    for (int other = 0; other < ncclTuningMask::kBits; other++) {
+    for (int other = 0; other < rcclTuningMask::kBits; other++) {
       EXPECT_EQ(other == id, m.test(other)) << "bit(" << id << ").test(" << other << ")";
     }
   }
-  EXPECT_EQ(uint64_t(1) << 63, ncclTuningMask::bit(63).w[0]);
-  EXPECT_EQ(uint64_t(1), ncclTuningMask::bit(64).w[1]);
+  EXPECT_EQ(uint64_t(1) << 63, rcclTuningMask::bit(63).word(0));
+  EXPECT_EQ(uint64_t(1), rcclTuningMask::bit(64).word(64));
 }
 
 TEST(TuningMaskMicrotest, RangeHoldsExactlyItsIds) {
@@ -1396,24 +1396,24 @@ TEST(TuningMaskMicrotest, RangeHoldsExactlyItsIds) {
   } const cases[] = {{0, 0},  {5, 5},   {64, 64},  {0, 1},    {0, 63},     {0, 64},
                      {0, 65}, {60, 70}, {63, 65},  {64, 128}, {100, 128},  {0, 128}};
   for (const auto& c : cases) {
-    const ncclTuningMask m = ncclTuningMask::range(c.lo, c.hi);
+    const rcclTuningMask m = rcclTuningMask::range(c.lo, c.hi);
     EXPECT_EQ(c.lo < c.hi, m.any()) << "range(" << c.lo << ", " << c.hi << ")";
-    for (int id = 0; id < ncclTuningMask::kBits; id++) {
+    for (int id = 0; id < rcclTuningMask::kBits; id++) {
       EXPECT_EQ(id >= c.lo && id < c.hi, m.test(id)) << "range(" << c.lo << ", " << c.hi << ").test(" << id << ")";
     }
   }
 }
 
 TEST(TuningMaskMicrotest, SetOperationsSpanBothWords) {
-  const ncclTuningMask a = ncclTuningMask::bit(3) | ncclTuningMask::bit(70);
-  const ncclTuningMask b = ncclTuningMask::bit(70) | ncclTuningMask::bit(100);
-  EXPECT_EQ(ncclTuningMask::bit(70), a & b);
-  EXPECT_EQ(ncclTuningMask::bit(3) | ncclTuningMask::bit(70) | ncclTuningMask::bit(100), a | b);
-  EXPECT_EQ(ncclTuningMask::bit(3) | ncclTuningMask::bit(100), a ^ b);
+  const rcclTuningMask a = rcclTuningMask::bit(3) | rcclTuningMask::bit(70);
+  const rcclTuningMask b = rcclTuningMask::bit(70) | rcclTuningMask::bit(100);
+  EXPECT_EQ(rcclTuningMask::bit(70), a & b);
+  EXPECT_EQ(rcclTuningMask::bit(3) | rcclTuningMask::bit(70) | rcclTuningMask::bit(100), a | b);
+  EXPECT_EQ(rcclTuningMask::bit(3) | rcclTuningMask::bit(100), a ^ b);
   EXPECT_TRUE((~a).test(4));
   EXPECT_FALSE((~a).test(70));
   EXPECT_TRUE((~a).test(127));
-  ncclTuningMask c = a;
+  rcclTuningMask c = a;
   c &= b;
   EXPECT_EQ(a & b, c);
   c |= a;
@@ -1421,23 +1421,23 @@ TEST(TuningMaskMicrotest, SetOperationsSpanBothWords) {
   c ^= a;
   EXPECT_TRUE(c.none());
   EXPECT_NE(a, b);
-  EXPECT_TRUE(ncclTuningMask().none());
+  EXPECT_TRUE(rcclTuningMask().none());
 }
 
 TEST(TuningMaskMicrotest, SymkConversionsPutKernelIdAtOffsetPlusId) {
   constexpr int off = NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
   // 64 - off is the first kernel id whose tuning id falls in the second word.
   for (int k : {0, 1, 64 - off - 1, 64 - off, 63}) {
-    EXPECT_EQ(ncclTuningMask::bit(off + k), ncclTuningMaskFromSymk(ncclSymkKernelMask(1) << k)) << "kernel id " << k;
+    EXPECT_EQ(rcclTuningMask::bit(off + k), rcclTuningMaskFromSymk(ncclSymkKernelMask(1) << k)) << "kernel id " << k;
   }
   for (int k = 0; k < ncclSymkKernelId_Count; k++) {
-    EXPECT_EQ(ncclSymkKernelMask(1) << k, ncclSymkMaskFromTuning(ncclTuningMask::bit(off + k))) << "kernel id " << k;
+    EXPECT_EQ(ncclSymkKernelMask(1) << k, rcclSymkMaskFromTuning(rcclTuningMask::bit(off + k))) << "kernel id " << k;
   }
   const ncclSymkKernelMask allKernels =
     ncclSymkKernelId_Count == 64 ? ~ncclSymkKernelMask(0) : (ncclSymkKernelMask(1) << ncclSymkKernelId_Count) - 1;
-  EXPECT_EQ(allKernels, ncclSymkMaskFromTuning(NCCL_TUNING_MASK_ALL)) << "general and CE ids must be dropped";
-  EXPECT_EQ(ncclSymkKernelMask(0), ncclSymkMaskFromTuning(NCCL_TUNING_MASK_GENERAL_KERNELS | NCCL_TUNING_MASK_CE));
-  EXPECT_EQ(NCCL_TUNING_MASK_SYM_KERNELS, ncclTuningMaskFromSymk(allKernels));
+  EXPECT_EQ(allKernels, rcclSymkMaskFromTuning(NCCL_TUNING_MASK_ALL)) << "general and CE ids must be dropped";
+  EXPECT_EQ(ncclSymkKernelMask(0), rcclSymkMaskFromTuning(NCCL_TUNING_MASK_GENERAL_KERNELS | NCCL_TUNING_MASK_CE));
+  EXPECT_EQ(NCCL_TUNING_MASK_SYM_KERNELS, rcclTuningMaskFromSymk(allKernels));
 }
 
 }  // namespace

@@ -439,7 +439,7 @@ TEST_F(SymModelTdmHierTest, TmaForced_TdmKernelsSplitAllGatherLikeTheirVectorTwi
 // An algorithm selection naming only the TDM hierarchical kernel reaches it without NCCL_SYM_KERNEL.
 TEST_F(SymModelTdmHierTest, SelectionOfOnlyHierTma_KeepsItValid) {
   ncclTuningInput_t in = Input(ncclFuncAllGather, size_t(1) << 20);
-  in.tuningMask = ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
+  in.tuningMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
   EXPECT_TRUE(Evaluate(in, ncclSymkKernelId_AllGather_HierLsaTmaST).valid);
 }
 

@@ -16,16 +16,16 @@
 // prefix. mask == {cost-model tuning id}: general ids precede Symk/Genk ids.
 struct ncclAlgRegEntry {
   const char* name;
-  ncclTuningMask mask;
+  rcclTuningMask mask;
   uint32_t collMask;   // OR of (1u << ncclFunc_t)
   int16_t algo;        // NCCL_ALGO_* for general rows, else -1
   int16_t proto;       // NCCL_PROTO_* for general rows, else -1
   int16_t symkKernelId; // ncclSymkKernelId for Symk/Genk rows, else -1
 };
 
-ncclTuningMask ncclAlgAllBits();                     // OR of all selectable rows (parser '^' base)
-ncclTuningMask ncclAlgTagMask(const char* tag);     // case-insensitive name-prefix match; empty == unknown
-ncclTuningMask ncclAlgValidForFuncMask(ncclFunc_t func);
+rcclTuningMask ncclAlgAllBits();                     // OR of all selectable rows (parser '^' base)
+rcclTuningMask ncclAlgTagMask(const char* tag);     // case-insensitive name-prefix match; empty == unknown
+rcclTuningMask ncclAlgValidForFuncMask(ncclFunc_t func);
 const char* ncclAlgNameForGeneral(int algo, int proto); // introspection (NULL if none)
 const char* ncclAlgNameForSymk(int symkKernelId);
 

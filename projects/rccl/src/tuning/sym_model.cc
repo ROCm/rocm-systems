@@ -84,7 +84,7 @@ static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* con
     ncclSymkKernelMask bits;
     bool has(int id) const { return bits >> id & 1; }
   };
-  const AllowMask allowed{valid_kmask & ncclSymkMaskFromTuning(inputs->tuningMask)};
+  const AllowMask allowed{valid_kmask & rcclSymkMaskFromTuning(inputs->tuningMask)};
   int st = allowed.has(vecSt) ? vecSt : tmaSt;
   int hier = allowed.has(vecHier) ? vecHier : tmaHier;
   bool hasSt = allowed.has(st);

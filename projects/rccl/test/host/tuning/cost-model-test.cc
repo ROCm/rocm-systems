@@ -318,7 +318,7 @@ TEST_F(CostModelMicrotest, RegistryNamesEverySymmetricKernelId) {
 TEST_F(CostModelMicrotest, RegistryCollMaskMirrorsModelMapEnabledColumns) {
   // algorithm_registry.cc: "collMask mirrors modelMap[].enabled[func]".
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
-    ncclTuningMask valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
+    rcclTuningMask valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
     for (int id = 0; id < kCeOffset; id++) {
       bool inRegistry = valid.test(id);
       bool inModelMap = modelMap[id].enabled[f] != 0;
@@ -333,7 +333,7 @@ TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
   // The registry stops before the CE ids, and cost_model.cc's "TODO: allow NCCL_ALGO=CE" is the
   // other half of that gap. Pinned so adding CE rows forces this test and the TODO together.
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
-    ncclTuningMask valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
+    rcclTuningMask valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
     EXPECT_TRUE((valid & NCCL_TUNING_MASK_CE).none()) << "func " << ncclFuncStr[f];
   }
   EXPECT_TRUE((ncclAlgAllBits() & NCCL_TUNING_MASK_CE).none());
@@ -346,14 +346,14 @@ TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
 
 TEST_F(CostModelMicrotest, TagPrefixMatchStaysInsideItsFamily) {
   // Prefix match: "RING" spans the three RING_* rows without reaching SYMK_RailRing_LsaSTMC.
-  ncclTuningMask ring = ncclAlgTagMask("RING");
+  rcclTuningMask ring = ncclAlgTagMask("RING");
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
     EXPECT_TRUE(ring.test(NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + p)) << "proto " << p;
   }
   EXPECT_TRUE((ring & NCCL_TUNING_MASK_SYM_KERNELS).none());
 
   // "NVLS" spans NVLS_SIMPLE and NVLSTREE_SIMPLE, also by prefix.
-  ncclTuningMask nvls = ncclAlgTagMask("NVLS");
+  rcclTuningMask nvls = ncclAlgTagMask("NVLS");
   EXPECT_TRUE(nvls.test(NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE));
   EXPECT_TRUE(nvls.test(NCCL_ALGO_NVLS_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE));
 

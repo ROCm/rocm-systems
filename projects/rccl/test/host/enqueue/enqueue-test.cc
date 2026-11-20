@@ -1790,7 +1790,7 @@ struct CostTable {
 };
 
 // A general row's mask bit, for the per-call algSelection cases below.
-constexpr ncclTuningMask GeneralBit(int a, int p) { return ncclTuningMask::bit(a * NCCL_NUM_PROTOCOLS + p); }
+constexpr rcclTuningMask GeneralBit(int a, int p) { return rcclTuningMask::bit(a * NCCL_NUM_PROTOCOLS + p); }
 
 ncclTaskColl CostTask(ncclFunc_t f, ncclDataType_t dt = ncclFloat32,
                       ncclDevRedOp_t devOp = ncclDevSum) {
@@ -2101,7 +2101,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_NoAlgSelection_LeavesEveryEligibleC
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
-  task.algMask = ncclTuningMask();
+  task.algMask = rcclTuningMask();
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -2117,7 +2117,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SymmetricOnlySelection_LeavesGenera
   CostComm cc;
   CostTable tbl;
   auto task = CostTask(ncclFuncAllReduce);
-  task.algMask = ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
+  task.algMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
   task.forceAlgSelection = 1;
   ScriptAllTimes(1.0f);
 
@@ -2152,8 +2152,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_MixedGeneralAndSymmetricSelection_N
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
   task.algMask = GeneralBit(NCCL_ALGO_RING, NCCL_PROTO_LL) |
-                 ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LL) |
-                 ncclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LLMC);
+                 rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LL) |
+                 rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_LLMC);
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 1 << 20, 1, 1, 1, 0, tbl.ptr()));
@@ -2202,7 +2202,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_PatSizeWindowExcludesPatWhenNothing
   CostComm cc(/*nRanks=*/8, /*nNodes=*/8);
   CostTable tbl;
   auto task = CostTask(ncclFuncAllGather);
-  task.algMask = ncclTuningMask();
+  task.algMask = rcclTuningMask();
   ScriptAllTimes(1.0f);
 
   ASSERT_EQ(ncclSuccess, updateCollCostTable(cc.get(), &task, 64u << 20, 1, 1, 1,
