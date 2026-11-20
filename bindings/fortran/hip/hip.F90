@@ -384,6 +384,14 @@ module hip
     enumerator :: hipDeviceAttributeVendorSpecificBegin = 20000
   end enum
 
+  ! hipExecAffinityType
+  enum, bind(c)
+    enumerator :: hipExecAffinityTypeCUCount = 0
+    enumerator :: hipExecAffinityTypeMax = 1
+    enumerator :: hipExtExecAffinityTypeGranularityCU = 4096
+    enumerator :: hipExtExecAffinityTypeGranularityWGP = 4097
+  end enum
+
   ! hipDriverProcAddressQueryResult
   enum, bind(c)
     enumerator :: HIP_GET_PROC_ADDRESS_SUCCESS = 0
@@ -1169,6 +1177,7 @@ module hip
   integer(c_int), parameter :: hipGraphKernelNodePortDefault = 0
   integer(c_int), parameter :: hipGraphKernelNodePortLaunchCompletion = 2
   integer(c_int), parameter :: hipGraphKernelNodePortProgrammatic = 1
+  integer(c_int), parameter :: hipArraySparsePropertiesSingleMipTail = 1
 
 
   type, bind(c) :: hipDeviceArch_t
@@ -1880,6 +1889,14 @@ module hip
     integer(c_size_t) :: size
   end type hipArrayMemoryRequirements
 
+  type, bind(c) :: hipArraySparseProperties
+    integer(c_int32_t) :: tileExtent(3) !< 12-byte unnamed C struct: keeps the layout exact, fields not individually accessible
+    integer(c_int) :: miptailFirstLevel
+    integer(c_int64_t) :: miptailSize
+    integer(c_int) :: flags
+    integer(c_int) :: reserved(4)
+  end type hipArraySparseProperties
+
 
   interface hipCreateChannelDesc
     function hipCreateChannelDesc_(x,y,z,w,f) bind(c, name="hipCreateChannelDesc")
@@ -2124,6 +2141,28 @@ module hip
       integer(c_int),value :: target
       integer(c_int),value :: scope
     end function
+  end interface
+
+  interface hipDeviceGetExecAffinitySupport
+    function hipDeviceGetExecAffinitySupport_(pi,myType,dev) &
+        bind(c, name="hipDeviceGetExecAffinitySupport")
+      import
+      implicit none
+      integer(c_int) :: hipDeviceGetExecAffinitySupport_
+      type(c_ptr),value :: pi
+      integer(c_int),value :: myType
+      integer(c_int),value :: dev
+    end function
+
+#ifdef USE_ASSUMED_RANK
+    module procedure hipDeviceGetExecAffinitySupport_assumed_rank
+#else
+#ifdef USE_ASSUMED_SHAPE
+    module procedure &
+      hipDeviceGetExecAffinitySupport_rank_0,&
+      hipDeviceGetExecAffinitySupport_rank_1
+#endif
+#endif
   end interface
 
   interface hipDeviceGetDefaultMemPool
@@ -4164,6 +4203,17 @@ module hip
     end function
   end interface
 
+  interface hipArrayGetPlane
+    function hipArrayGetPlane_(pPlaneArray,hArray,planeIdx) bind(c, name="hipArrayGetPlane")
+      import
+      implicit none
+      integer(c_int) :: hipArrayGetPlane_
+      type(c_ptr) :: pPlaneArray
+      type(c_ptr),value :: hArray
+      integer(c_int),value :: planeIdx
+    end function
+  end interface
+
   interface hipMemcpyParam2D
     function hipMemcpyParam2D_(pCopy) bind(c, name="hipMemcpyParam2D")
       import
@@ -4508,6 +4558,17 @@ module hip
       type(hipArrayMemoryRequirements) :: memoryRequirements
       type(c_ptr),value :: mipmap
       integer(c_int),value :: device
+    end function
+  end interface
+
+  interface hipArrayGetSparseProperties
+    function hipArrayGetSparseProperties_(sparseProperties,array) &
+        bind(c, name="hipArrayGetSparseProperties")
+      import
+      implicit none
+      integer(c_int) :: hipArrayGetSparseProperties_
+      type(hipArraySparseProperties) :: sparseProperties
+      type(c_ptr),value :: array
     end function
   end interface
 
@@ -6676,6 +6737,54 @@ module hip
     end function
 
     module procedure hipGraphNodeGetType_typed
+  end interface
+
+  interface hipGraphNodeGetLocalId
+    function hipGraphNodeGetLocalId_(node,nodeId) bind(c, name="hipGraphNodeGetLocalId")
+      import
+      implicit none
+      integer(c_int) :: hipGraphNodeGetLocalId_
+      type(c_ptr),value :: node
+      type(c_ptr),value :: nodeId
+    end function
+
+    module procedure hipGraphNodeGetLocalId_typed
+  end interface
+
+  interface hipGraphNodeGetToolsId
+    function hipGraphNodeGetToolsId_(node,toolsId) bind(c, name="hipGraphNodeGetToolsId")
+      import
+      implicit none
+      integer(c_int) :: hipGraphNodeGetToolsId_
+      type(c_ptr),value :: node
+      type(c_ptr),value :: toolsId
+    end function
+
+    module procedure hipGraphNodeGetToolsId_typed
+  end interface
+
+  interface hipGraphGetId
+    function hipGraphGetId_(graph,graphId) bind(c, name="hipGraphGetId")
+      import
+      implicit none
+      integer(c_int) :: hipGraphGetId_
+      type(c_ptr),value :: graph
+      type(c_ptr),value :: graphId
+    end function
+
+    module procedure hipGraphGetId_typed
+  end interface
+
+  interface hipGraphExecGetId
+    function hipGraphExecGetId_(graphExec,graphId) bind(c, name="hipGraphExecGetId")
+      import
+      implicit none
+      integer(c_int) :: hipGraphExecGetId_
+      type(c_ptr),value :: graphExec
+      type(c_ptr),value :: graphId
+    end function
+
+    module procedure hipGraphExecGetId_typed
   end interface
 
   interface hipGraphDestroyNode
@@ -11546,6 +11655,42 @@ module hip
       hipGraphNodeGetType_typed = hipGraphNodeGetType_(node,c_loc(pType))
     end function
 
+    function hipGraphNodeGetLocalId_typed(node,nodeId)
+      implicit none
+      integer(kind(hipSuccess)) :: hipGraphNodeGetLocalId_typed
+      type(c_ptr), value :: node
+      integer(c_int),target :: nodeId
+      !
+      hipGraphNodeGetLocalId_typed = hipGraphNodeGetLocalId_(node,c_loc(nodeId))
+    end function
+
+    function hipGraphNodeGetToolsId_typed(node,toolsId)
+      implicit none
+      integer(kind(hipSuccess)) :: hipGraphNodeGetToolsId_typed
+      type(c_ptr), value :: node
+      integer(c_int64_t),target :: toolsId
+      !
+      hipGraphNodeGetToolsId_typed = hipGraphNodeGetToolsId_(node,c_loc(toolsId))
+    end function
+
+    function hipGraphGetId_typed(graph,graphId)
+      implicit none
+      integer(kind(hipSuccess)) :: hipGraphGetId_typed
+      type(c_ptr), value :: graph
+      integer(c_int),target :: graphId
+      !
+      hipGraphGetId_typed = hipGraphGetId_(graph,c_loc(graphId))
+    end function
+
+    function hipGraphExecGetId_typed(graphExec,graphId)
+      implicit none
+      integer(kind(hipSuccess)) :: hipGraphExecGetId_typed
+      type(c_ptr), value :: graphExec
+      integer(c_int),target :: graphId
+      !
+      hipGraphExecGetId_typed = hipGraphExecGetId_(graphExec,c_loc(graphId))
+    end function
+
     function hipGraphExecGetFlags_typed(graphExec,flags)
       implicit none
       integer(kind(hipSuccess)) :: hipGraphExecGetFlags_typed
@@ -11744,6 +11889,42 @@ module hip
       integer(c_int) :: len
       !
       hipSetValidDevices_rank_1 = hipSetValidDevices_(c_loc(device_arr),len)
+    end function
+
+#endif
+#ifdef USE_ASSUMED_RANK
+    function hipDeviceGetExecAffinitySupport_assumed_rank(pi,myType,dev)
+      implicit none
+      integer(kind(hipSuccess)) :: hipDeviceGetExecAffinitySupport_assumed_rank
+      integer(c_int),target,dimension(..) :: pi
+      integer(kind(hipExecAffinityTypeCUCount)) :: myType
+      integer(c_int) :: dev
+      !
+      hipDeviceGetExecAffinitySupport_assumed_rank = hipDeviceGetExecAffinitySupport_(c_loc(pi), &
+        myType,dev)
+    end function
+
+#else
+    function hipDeviceGetExecAffinitySupport_rank_0(pi,myType,dev)
+      implicit none
+      integer(kind(hipSuccess)) :: hipDeviceGetExecAffinitySupport_rank_0
+      integer(c_int),target :: pi
+      integer(kind(hipExecAffinityTypeCUCount)) :: myType
+      integer(c_int) :: dev
+      !
+      hipDeviceGetExecAffinitySupport_rank_0 = hipDeviceGetExecAffinitySupport_(c_loc(pi),myType, &
+        dev)
+    end function
+
+    function hipDeviceGetExecAffinitySupport_rank_1(pi,myType,dev)
+      implicit none
+      integer(kind(hipSuccess)) :: hipDeviceGetExecAffinitySupport_rank_1
+      integer(c_int),target,dimension(:) :: pi
+      integer(kind(hipExecAffinityTypeCUCount)) :: myType
+      integer(c_int) :: dev
+      !
+      hipDeviceGetExecAffinitySupport_rank_1 = hipDeviceGetExecAffinitySupport_(c_loc(pi),myType, &
+        dev)
     end function
 
 #endif
