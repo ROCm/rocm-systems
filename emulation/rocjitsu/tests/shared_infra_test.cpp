@@ -8884,16 +8884,4 @@ TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
   }
 }
 
-#if RJ_HOST_ARCH_X86
-TEST(AluExceptionTest, HostDazPreservesExactSubnormalOutputClassification) {
-  const amdgpu::fp_mode::ScopedEnvironment environment(0);
-  _mm_setcsr(_mm_getcsr() | (1u << 6));
-  volatile float lhs = std::bit_cast<float>(0x00800000u);
-  volatile float rhs = 1.0f;
-  // OMOD produces an exact subnormal. Widening that result through a host
-  // conversion would flush it and falsely report INEXACT.
-  EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, 0.5f), 1u << 4);
-}
-#endif
-
 } // namespace

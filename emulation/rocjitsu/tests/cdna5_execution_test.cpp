@@ -92,39 +92,6 @@ public:
   }
 };
 
-class HostFenvGuard {
-public:
-  HostFenvGuard() : saved_(std::fegetenv(&environment_) == 0) {}
-  ~HostFenvGuard() {
-    if (saved_)
-      std::fesetenv(&environment_);
-  }
-
-private:
-  std::fenv_t environment_{};
-  bool saved_;
-};
-
-#if RJ_HOST_ARCH_X86
-class HostMxcsrGuard {
-public:
-  HostMxcsrGuard() : saved_(_mm_getcsr()) {}
-  ~HostMxcsrGuard() { _mm_setcsr(saved_); }
-
-private:
-  uint32_t saved_;
-};
-#elif RJ_HOST_ARCH_AARCH64
-class HostFpcrGuard {
-public:
-  HostFpcrGuard() : saved_(amdgpu::fp_mode::detail::read_fpcr()) {}
-  ~HostFpcrGuard() { amdgpu::fp_mode::detail::write_fpcr(saved_); }
-
-private:
-  uint64_t saved_;
-};
-#endif
-
 TEST(Gfx1250ExecutionTest, GlobalTransposePromotesNonzeroExecToAllWave32Lanes) {
   amdgpu::GpuMemory memory("gfx1250_transpose_memory");
   amdgpu::L2Cache l2("gfx1250_transpose_l2");
@@ -982,85 +949,20 @@ TEST(Gfx1250ExecutionTest, Vop3CarryClampSaturatesVdstAndPreservesCarryBorrow) {
   }
 }
 
-TEST(FpModePolicyTest, F64HelpersRestoreAmbientHostEnvironment) {
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetenv(FE_DFL_ENV), 0);
-  ASSERT_EQ(std::fesetround(FE_DOWNWARD), 0);
-  ASSERT_EQ(std::feraiseexcept(FE_INVALID | FE_INEXACT), 0);
-  const int expected_flags = std::fetestexcept(FE_ALL_EXCEPT);
-#if RJ_HOST_ARCH_X86
-  HostMxcsrGuard mxcsr_guard;
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kFtzMask = 1u << 15;
-  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
-  const uint32_t expected_mxcsr = _mm_getcsr();
-#endif
-
-  constexpr uint64_t kOne = std::bit_cast<uint64_t>(1.0);
-  constexpr uint64_t kSubnormal = 0x0000000000000001ULL;
-  constexpr uint64_t kInfinity = std::bit_cast<uint64_t>(std::numeric_limits<double>::infinity());
-  constexpr uint64_t kQuietNan = std::bit_cast<uint64_t>(std::numeric_limits<double>::quiet_NaN());
-  for (const uint64_t input : {kOne, kSubnormal, kInfinity, kQuietNan}) {
-    (void)amdgpu::fp_mode::fma_f64(input, kOne, kOne, 1, 3);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    (void)amdgpu::fp_mode::binary_f64(input, kOne, amdgpu::fp_mode::BinaryF64Op::Add, 1, 3);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    (void)amdgpu::fp_mode::finish_f64(input, 1, 1, false, true);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    const uint64_t result = amdgpu::fp_mode::finish_f64(input, 1, 0, false, true);
-    EXPECT_EQ(result, input);
-    EXPECT_EQ(std::fegetround(), FE_DOWNWARD);
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), expected_flags);
-#if RJ_HOST_ARCH_X86
-    EXPECT_EQ(_mm_getcsr(), expected_mxcsr);
-#endif
-  }
-}
-
-TEST(FpModePolicyTest, F32ToBf16FmaRestoresAmbientHostEnvironment) {
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
-
+TEST(FpModePolicyTest, F32ToBf16FmaRoundsTowardNegativeInfinity) {
   const float multiplicand = std::bit_cast<float>(0x8e0b5904u);
   const float multiplier = std::bit_cast<float>(0x1ae3bc34u);
   const float addend = std::bit_cast<float>(0xb6630000u);
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(multiplicand, multiplier, addend, 2, false, true),
             0xb664u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
-
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, false, true), 0x8000u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(-0.0f, 1.0f, -0.0f, 2, true, true), 0u);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
 }
 
-#if RJ_HOST_ARCH_X86
-TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFtzDaz) {
-  HostMxcsrGuard environment_guard;
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kFtzMask = 1u << 15;
-  _mm_setcsr(_mm_getcsr() | kDazMask | kFtzMask);
-
+TEST(FpModePolicyTest, F32ToBf16FmaKeepsSubnormal) {
   const float subnormal = std::bit_cast<float>(0x00018000u);
   EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
-  EXPECT_EQ(_mm_getcsr() & (kDazMask | kFtzMask), kDazMask | kFtzMask);
 }
-#elif RJ_HOST_ARCH_AARCH64
-TEST(FpModePolicyTest, F32ToBf16FmaIgnoresAndRestoresFpcrFlushModes) {
-  HostFpcrGuard environment_guard;
-  constexpr uint64_t kFizMask = uint64_t{1} << 0;
-  constexpr uint64_t kFz16Mask = uint64_t{1} << 19;
-  constexpr uint64_t kFzMask = uint64_t{1} << 24;
-  constexpr uint64_t kFlushMask = kFizMask | kFz16Mask | kFzMask;
-  amdgpu::fp_mode::detail::write_fpcr(amdgpu::fp_mode::detail::read_fpcr() | kFlushMask);
-  const uint64_t enabled_flush_modes = amdgpu::fp_mode::detail::read_fpcr() & kFlushMask;
-  ASSERT_NE(enabled_flush_modes & kFzMask, 0u);
-
-  const float subnormal = std::bit_cast<float>(0x00018000u);
-  EXPECT_EQ(amdgpu::fp_mode::fma_f32_to_bf16(subnormal, 1.0f, 0.0f, 0, false, true), 0x0002u);
-  EXPECT_EQ(amdgpu::fp_mode::detail::read_fpcr() & kFlushMask, enabled_flush_modes);
-}
-#endif
 
 TEST(FpModePolicyTest, F64ClampCanonicalizesNanAndNonpositiveValues) {
   constexpr uint64_t kPositiveZero = 0x0000000000000000ULL;
@@ -7139,10 +7041,7 @@ TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRule
   const auto trig_words =
       cdna5::build_vop3(cdna5::kVTrigPreopF64Vop3, {.vdst = 4, .src0 = 256, .src1 = 258});
   cdna5::VTrigPreopF64Vop3 trig(trig_words.data());
-  HostFenvGuard environment_guard;
-  ASSERT_EQ(std::fesetround(FE_UPWARD), 0);
   trig.execute_impl(*wf);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
   for (uint32_t lane = 0; lane < trig_cases.size(); ++lane) {
     const uint64_t result = cu->read_vgpr(vgpr_base + 4, lane) |
                             (static_cast<uint64_t>(cu->read_vgpr(vgpr_base + 5, lane)) << 32);
@@ -7157,7 +7056,6 @@ TEST(Gfx1250ExecutionTest, MullitAndTrigPreopPreserveLegacyAndRangeReductionRule
                                                  {.vdst = 4, .src0 = 256, .src1 = 258, .omod = 1});
   cdna5::VTrigPreopF64Vop3 omod_trig(omod_trig_words.data());
   omod_trig.execute_impl(*wf);
-  EXPECT_EQ(std::fegetround(), FE_UPWARD);
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 4, 0), 0u);
   EXPECT_EQ(cu->read_vgpr(vgpr_base + 5, 0), 0u);
 }

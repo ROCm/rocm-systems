@@ -14,7 +14,6 @@
 #include <array>
 #include <atomic>
 #include <bit>
-#include <cfenv>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -81,7 +80,6 @@ public:
     instruction_ = &instruction;
     wave_ = wave;
     error_ = nullptr;
-    std::fegetenv(&environment_);
     publish(1);
   }
 
@@ -128,7 +126,6 @@ private:
         wait_while(0);
         continue;
       }
-      std::fesetenv(&environment_);
       try {
         instruction_->execute(*instruction_, wave_);
       } catch (...) {
@@ -141,7 +138,6 @@ private:
   alignas(64) std::atomic<int> state_{0};
   alignas(64) Instruction *instruction_ = nullptr;
   void *wave_ = nullptr;
-  std::fenv_t environment_{};
   std::exception_ptr error_;
   std::thread thread_;
 };

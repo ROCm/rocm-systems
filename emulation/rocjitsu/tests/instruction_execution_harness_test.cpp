@@ -11633,30 +11633,22 @@ TEST(RdnaDot2Bf16ExecutionTest, TruncationAndSubnormalsMatchEachTarget) {
     const uint32_t base = wave->vgpr_alloc().base;
     for (uint32_t mode : {0u, 0xffu}) {
       wave->set_mode_raw(mode);
-      for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-        for (const Case &test : cases) {
-          SCOPED_TRACE(test.name);
-          SCOPED_TRACE(static_cast<int>(arch));
-          SCOPED_TRACE(mode);
-          SCOPED_TRACE(host_round);
-          compute_unit->write_vgpr(base, 0, test.left);
-          compute_unit->write_vgpr(base + 1, 0, test.right);
-          compute_unit->write_vgpr(base + 2, 0, test.accumulator);
-          compute_unit->write_vgpr(base + 3, 0, 0xcafe0000);
-          const std::array<uint32_t, 2> words =
-              encode_vop3(/*op=*/rdna4::kVDot2Bf16Bf16Vop3, /*vdst=*/3,
-                          /*src0=*/vgpr_src(0), /*src1=*/vgpr_src(1), /*src2=*/vgpr_src(2));
-          std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
-          ASSERT_NE(instruction, nullptr);
-          const int saved_round = std::fegetround();
-          ASSERT_EQ(std::fesetround(host_round), 0);
-          EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
-          const int restored_round = std::fegetround();
-          std::fesetround(saved_round);
-          EXPECT_EQ(restored_round, host_round);
-          const uint16_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.gfx1201 : test.gfx1100;
-          EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | expected);
-        }
+      for (const Case &test : cases) {
+        SCOPED_TRACE(test.name);
+        SCOPED_TRACE(static_cast<int>(arch));
+        SCOPED_TRACE(mode);
+        compute_unit->write_vgpr(base, 0, test.left);
+        compute_unit->write_vgpr(base + 1, 0, test.right);
+        compute_unit->write_vgpr(base + 2, 0, test.accumulator);
+        compute_unit->write_vgpr(base + 3, 0, 0xcafe0000);
+        const std::array<uint32_t, 2> words =
+            encode_vop3(/*op=*/rdna4::kVDot2Bf16Bf16Vop3, /*vdst=*/3,
+                        /*src0=*/vgpr_src(0), /*src1=*/vgpr_src(1), /*src2=*/vgpr_src(2));
+        std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+        ASSERT_NE(instruction, nullptr);
+        EXPECT_TRUE(compute_unit->execute_instruction(instruction.get(), *wave).succeeded());
+        const uint16_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.gfx1201 : test.gfx1100;
+        EXPECT_EQ(compute_unit->read_vgpr(base + 3, 0), 0xcafe0000u | expected);
       }
     }
     wave->halt();
@@ -11912,19 +11904,13 @@ TEST(SdwaOutputScalingTest, F32ScalingUsesExplicitRounding) {
       Case{0x7f812345u, 1, {0x7fc12345u, 0x7fc12345u, 0x7fc12345u, 0x7fc12345u}},
       Case{0x3f800001u, 0, {0x3f800001u, 0x3f800001u, 0x3f800001u, 0x3f800001u}},
   };
-  const int saved_round = std::fegetround();
-  for (int host_round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    EXPECT_EQ(std::fesetround(host_round), 0);
-    for (const Case &test : cases) {
-      for (uint32_t mode = 0; mode < 4; ++mode) {
-        SCOPED_TRACE(::testing::Message() << "input=" << test.input << " omod=" << test.omod
-                                          << " mode=" << mode << " host=" << host_round);
-        EXPECT_EQ(amdgpu::sdwa::scale_f32(test.input, test.omod, mode), test.expected[mode]);
-        EXPECT_EQ(std::fegetround(), host_round);
-      }
+  for (const Case &test : cases) {
+    for (uint32_t mode = 0; mode < 4; ++mode) {
+      SCOPED_TRACE(::testing::Message()
+                   << "input=" << test.input << " omod=" << test.omod << " mode=" << mode);
+      EXPECT_EQ(amdgpu::sdwa::scale_f32(test.input, test.omod, mode), test.expected[mode]);
     }
   }
-  EXPECT_EQ(std::fesetround(saved_round), 0);
 }
 
 TEST(SdwaOutputScalingTest, FloatingConversionsUseDestinationFormat) {

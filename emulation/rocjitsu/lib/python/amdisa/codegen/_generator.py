@@ -19744,11 +19744,6 @@ class CodeGenerator:
                 ),
                 prefixed_body,
             )
-            if mnemonic.rsplit('_', 1)[0].upper() in FLUSH_NEAREST_F32_OPS:
-                # These mappings ignore guest rounding. Keep output scaling and clamp
-                # under the saved environment too: OMOD can overflow or touch
-                # signaling NaNs, and SIMD clamp compares NaN results.
-                lines.append('  fp_mode::ScopedEnvironment environment(0);')
             alu_classifiers = {
                 'v_mul_f32_vop2': 'classify_mul_f32_vop2',
                 'v_mul_f32_vop3': 'classify_mul_f32_vop3',
