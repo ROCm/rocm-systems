@@ -14,6 +14,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files rather than exiting when a file has an unsupported codec.
 * Fixed decoders that one process creates on different compute partitions of the same GPU (DPX, TPX, QPX, or CPX mode) all decoding on the first partition of that GPU that the process used.
 * Fixed corrupted output for the last frames decoded before an AV1 frame size change: they were displayed after the decoder reconfigure had replaced the surfaces holding them.
+* Fixed the `RocVideoDecoder` utility returning skipped, repeated or corrupt frames after a decoder reconfigure in the `OUT_SURFACE_MEM_DEV_COPIED` and `OUT_SURFACE_MEM_HOST_COPIED` output modes, which affected HEVC streams with a repeated sequence header and VP9 streams with resolution changes.
 
 ## rocDecode 1.12.0 for ROCm 10.2.0
 

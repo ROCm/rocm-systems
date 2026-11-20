@@ -58,6 +58,7 @@ add_library(
     fp/half_fma.cpp
     fp/half_minmax.cpp
     fp/ldexp.cpp
+    fp/legacy_mul.cpp
     fp/minmax.cpp
     fp/mixed_fma_gfx908.cpp
     fp/mixed_mad.cpp
