@@ -108,6 +108,8 @@ const std::map<rdc_field_t, rdc_field_t>& health_field_fallbacks() {
 }
 
 bool is_health_field(rdc_field_t field_id) {
+  // Memory and EEPROM health also poll the total on mixed groups with and without ECC.
+  if (field_id == RDC_FI_ECC_UNCORRECT_TOTAL) return true;
   if (field_id >= RDC_HEALTH_XGMI_ERROR && field_id < RDC_FI_CPU_FIRST) return true;
   for (const auto& fb : health_field_fallbacks()) {
     if (fb.second == field_id) return true;

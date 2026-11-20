@@ -373,7 +373,7 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   }
 
   // Without a count from any block, as on GPUs without ECC, report N/A rather than 0 errors.
-  value->status = counted ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_NOT_SUPPORTED;
+  value->status = counted ? RDC_ST_OK : RDC_ST_NOT_SUPPORTED;
   value->type = INTEGER;
   if (field_id == RDC_FI_ECC_CORRECT_TOTAL) {
     value->value.l_int = correctable_count;
@@ -1551,7 +1551,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
             break;
         }
         if (smi_not_available(raw)) {
-          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+          value->status = RDC_ST_NOT_SUPPORTED;
         } else {
           value->value.l_int = static_cast<int64_t>(raw);
         }

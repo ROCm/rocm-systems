@@ -53,14 +53,14 @@ TEST(HealthFieldsTest, TransientStatusesAreNotCapabilityMisses) {
 TEST(HealthFieldsTest, HealthRangeFields) {
   EXPECT_TRUE(is_health_field(RDC_HEALTH_XGMI_ERROR));
   EXPECT_TRUE(is_health_field(RDC_HEALTH_PENDING_PAGE_NUM));
+  EXPECT_TRUE(is_health_field(RDC_FI_ECC_UNCORRECT_TOTAL));
   EXPECT_TRUE(is_health_field(RDC_HEALTH_POWER_THROTTLE_TIME));
   EXPECT_TRUE(is_health_field(RDC_HEALTH_GFX_CLK_LMT_TOTAL_PCT));
 }
 
 TEST(HealthFieldsTest, NonHealthFields) {
   EXPECT_FALSE(is_health_field(RDC_FI_GPU_TEMP));
-  // Watched by the memory component, but a general telemetry field.
-  EXPECT_FALSE(is_health_field(RDC_FI_ECC_UNCORRECT_TOTAL));
+  EXPECT_FALSE(is_health_field(RDC_FI_ECC_CORRECT_TOTAL));
   EXPECT_FALSE(is_health_field(RDC_FI_CPU_FIRST));
 }
 
