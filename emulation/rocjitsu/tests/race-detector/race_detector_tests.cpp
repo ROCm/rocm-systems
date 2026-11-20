@@ -3429,12 +3429,14 @@ TEST(RaceDetector, SplitBarrier_AcquiredHistoryStillRacesWithANonMember) {
 
   b.clearViolations();
   b.checkLdsWrite(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
-  ASSERT_EQ(b.raceCount(), kExchanges);
+  // The non-member's write conflicts with both reads and writes in the history.
+  ASSERT_EQ(b.raceCount(), 2 * kExchanges);
   for (const RaceViolation &violation : b.violations()) {
     EXPECT_EQ(violation.wave, 2);
     EXPECT_EQ(violation.index, kX);
     EXPECT_TRUE(violation.isWrite);
-    EXPECT_EQ(b.events().waveId(violation.conflictingEvent), WaveId{1});
+    const bool pendingWrite = b.events().writesLds(violation.conflictingEvent);
+    EXPECT_EQ(b.events().waveId(violation.conflictingEvent), WaveId{pendingWrite ? 0 : 1});
   }
 
   b.clearViolations();
@@ -3495,7 +3497,7 @@ TEST(RaceDetector, SplitBarrier_MembersAlternatingOnOneDwordSkipAcquiredHistory)
   EXPECT_EQ(b.raceCount(), 2 * kExchanges);
   b.clearViolations();
   b.checkLdsWrite(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
-  EXPECT_EQ(b.raceCount(), 2 * kExchanges);
+  EXPECT_EQ(b.raceCount(), 4 * kExchanges);
 }
 
 // Two pairs use disjoint tiles. Each pair's history remains necessary for
@@ -3526,7 +3528,7 @@ TEST(RaceDetector, SplitBarrier_IndependentPairsKeepHistoryForEachOther) {
   EXPECT_EQ(b.raceCount(), kExchanges);
   b.clearViolations();
   b.checkLdsWrite(/*wave=*/2, /*lane=*/0, kX, /*bytes=*/4);
-  EXPECT_EQ(b.raceCount(), kExchanges);
+  EXPECT_EQ(b.raceCount(), 2 * kExchanges);
   b.clearViolations();
   b.barrier();
   EXPECT_EQ(b.ldsReadEventCount(), 0u);
