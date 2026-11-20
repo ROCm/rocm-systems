@@ -31,11 +31,12 @@ struct subcommand_spec
     std::string_view name;
     std::string_view description;
     std::string_view binary_name;
-    // True when a token must follow the subcommand: the application, after "--", or
-    // attach's -p. A plain word there is an application without "--", an error.
+    // True when the subcommand runs an application, which must follow "--". False
+    // (avail, attach) refuses "--".
     bool requires_app = true;
-    // False leaves the rocsys options out of this subcommand's help.
-    bool lists_rocsys_options = true;
+    // False: rocsys reads none of its options and passes every argument to the tool,
+    // and this subcommand's help leaves the rocsys options out.
+    bool takes_rocsys_options = true;
     // What this subcommand's help says it runs. Empty names binary_name.
     std::string_view runs;
     // Set only for in-process verbs. Exec verbs leave this empty.
@@ -70,7 +71,7 @@ inline constexpr auto k_subcommands = std::to_array<subcommand_spec>({
         .description          = "Query available counters and settings",
         .binary_name          = "rocprof-sys-avail",
         .requires_app         = false,
-        .lists_rocsys_options = false,
+        .takes_rocsys_options = false,
         .runs                 = {},
         .extra_flag           = {},
     },
@@ -78,7 +79,7 @@ inline constexpr auto k_subcommands = std::to_array<subcommand_spec>({
         .name         = "attach",
         .description  = "Attach to a running process",
         .binary_name  = "rocprof-sys-attach",
-        .requires_app = true,
+        .requires_app = false,
         .runs         = {},
         .extra_flag   = {},
     },
@@ -87,7 +88,7 @@ inline constexpr auto k_subcommands = std::to_array<subcommand_spec>({
         .description          = "Causal profiling",
         .binary_name          = "rocprof-sys-causal",
         .requires_app         = true,
-        .lists_rocsys_options = false,
+        .takes_rocsys_options = false,
         .runs                 = {},
         .extra_flag           = {},
     },
@@ -104,7 +105,7 @@ inline constexpr auto k_subcommands = std::to_array<subcommand_spec>({
         .description          = "Binary rewrite application",
         .binary_name          = "rocprof-sys-instrument",
         .requires_app         = true,
-        .lists_rocsys_options = false,
+        .takes_rocsys_options = false,
         .runs = "rocprof-sys-instrument with the -o option to generate an instrumented "
                 "binary, such as app.inst for ./app",
         .extra_flag = "-o",
@@ -138,9 +139,10 @@ struct dispatch_result
  * Does not execute anything. @p program is the basename used in error text; the caller
  * computes it once so help and errors use the same name.
  * `-h`, `-?`, or `--help` before `--` asks for the subcommand's rocsys help.
- * `--help=<topic>` is the tool's, so it is forwarded. A plain word right after a
- * subcommand with requires_app is an application without `--`, an error even when a
- * help flag follows it.
+ * `--help=<topic>` is the tool's, so it is forwarded. Any other command of a subcommand
+ * with requires_app without `--` is an error, and so is a plain word right after the
+ * subcommand, even when a help flag follows it. A subcommand without requires_app
+ * refuses `--`.
  */
 [[nodiscard]] dispatch_result
 parse_dispatch(int argc, char** argv, std::string_view program);
@@ -159,7 +161,7 @@ make_forwarded_argv(int argc, char** argv, forward_options options);
 void
 print_help(std::ostream& out, std::string_view program, std::string_view options_text);
 
-/// The rocsys help for @p spec: @p options_text as in print_help() when the row lists the
+/// The rocsys help for @p spec: @p options_text as in print_help() when the row takes the
 /// rocsys options, and the tool whose `--help` lists every other option.
 void
 print_subcommand_help(std::ostream& out, std::string_view program,

@@ -216,6 +216,121 @@ class TestRocsys(RocprofsysTest):
             use_abort_fail_regex=False,
         )
 
+    @pytest.mark.timeout(15)
+    @pytest.mark.parametrize(
+        "run_args, command",
+        [
+            pytest.param(
+                ["python", "-v", "./script.py", "--log-level", "info"],
+                "rocsys python",
+                id="python",
+            ),
+            pytest.param(
+                ["rewrite", "-o", "out.inst", "./transpose"],
+                "rocsys rewrite",
+                id="rewrite",
+            ),
+            pytest.param(["--traces", "hip", "./app"], "rocsys", id="profile"),
+        ],
+    )
+    def test_a_command_without_the_separator_is_refused(
+        self, run_args: list[str], command: str
+    ) -> None:
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=run_args,
+            fail_on_pass=True,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                (
+                    rf"error: put '--' before the application: {command} \[options\] "
+                    r"-- <app> \[app-args\]"
+                ),
+                r"hint: run 'rocsys --help'",
+            ],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.timeout(15)
+    def test_attach_leaves_a_missing_pid_to_the_tool(self) -> None:
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["attach", "1234"],
+            fail_on_pass=True,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                r"Unknown option '1234'",
+                r"rocprof-sys-attach -p <pid> \[OPTIONS\]",
+            ],
+            fail_regex=[r"put '--' before the application"],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.timeout(15)
+    @pytest.mark.parametrize(
+        "run_args",
+        [
+            pytest.param(["attach", "--log-level", "info", "--", "-p", "1"], id="attach"),
+            pytest.param(["avail", "--", "gpu"], id="avail"),
+        ],
+    )
+    def test_a_subcommand_without_an_application_refuses_the_separator(
+        self, run_args: list[str]
+    ) -> None:
+        subcommand = run_args[0]
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=run_args,
+            fail_on_pass=True,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[
+                rf"error: rocsys {subcommand} runs no application, so it takes no '--'",
+                rf"hint: run 'rocsys {subcommand} --help' for its options\.",
+            ],
+            use_abort_fail_regex=False,
+        )
+
+    @pytest.mark.timeout(45)
+    @pytest.mark.parametrize(
+        "run_args, option",
+        [
+            pytest.param(["avail", "--log-level", "debug"], "log-level", id="avail"),
+            pytest.param(
+                ["causal", "--traces", "hip", "--", "/bin/true"], "traces", id="causal"
+            ),
+            pytest.param(
+                ["rewrite", "--traces", "hip", "--", "/bin/true"], "traces", id="rewrite"
+            ),
+        ],
+    )
+    def test_rocsys_options_reach_a_tool_that_takes_none(
+        self, run_args: list[str], option: str
+    ) -> None:
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=run_args,
+            fail_on_pass=True,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[rf"Unrecognized command line option '{option}'"],
+            use_abort_fail_regex=False,
+        )
+
     @pytest.mark.timeout(120)
     @pytest.mark.sys_run
     def test_options_reach_the_tool_environment(

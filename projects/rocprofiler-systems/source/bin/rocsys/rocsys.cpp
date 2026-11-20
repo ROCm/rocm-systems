@@ -121,12 +121,26 @@ supported_rocm_domains()
     return tracing_config_t::get_domain_choices();
 }
 
+/// Start the tool of @p parsed with @p argv.
+[[nodiscard]] int
+start_tool(int argc, char** argv, const rocprofsys::cli::dispatch_result& parsed,
+           std::string_view program)
+{
+    return parsed.spec->mode.has_value() ? dispatch_in_process(argc, argv, parsed)
+                                         : dispatch_exec(argc, argv, parsed, program);
+}
+
 /// Read the rocsys options, set the variables they write, and start the tool with the
-/// command line that is left.
+/// command line that is left. A subcommand that takes no rocsys options gets the whole
+/// command line.
 [[nodiscard]] int
 run_subcommand(int argc, char** argv, const rocprofsys::cli::dispatch_result& parsed,
                std::string_view program)
 {
+    if(!parsed.spec->takes_rocsys_options)
+    {
+        return start_tool(argc, argv, parsed, program);
+    }
     const int  first   = parsed.strip_subcommand ? 2 : 1;
     const auto options = rocprofsys::rocsys::parse_options(
         std::vector<std::string>(argv + first, argv + argc), supported_rocm_domains());
@@ -156,11 +170,9 @@ run_subcommand(int argc, char** argv, const rocprofsys::cli::dispatch_result& pa
         tool_argv.emplace_back("--");
         tool_argv.insert(tool_argv.end(), options.command.begin(), options.command.end());
     }
-    auto       pointers  = rocprofsys::common_utils::to_c_argv(tool_argv);
-    const auto tool_argc = static_cast<int>(tool_argv.size());
-    return parsed.spec != nullptr && parsed.spec->mode.has_value()
-               ? dispatch_in_process(tool_argc, pointers.data(), parsed)
-               : dispatch_exec(tool_argc, pointers.data(), parsed, program);
+    auto pointers = rocprofsys::common_utils::to_c_argv(tool_argv);
+    return start_tool(static_cast<int>(tool_argv.size()), pointers.data(), parsed,
+                      program);
 }
 
 /// Print @p text, or @p error when the catalog has no such help.

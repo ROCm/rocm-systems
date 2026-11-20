@@ -72,9 +72,15 @@ is_bare_help_flag(std::string_view token) noexcept
 }
 
 [[nodiscard]] bool
+is_topic_help_flag(std::string_view token) noexcept
+{
+    return token.starts_with(k_help_long_eq);
+}
+
+[[nodiscard]] bool
 is_help_flag(std::string_view token) noexcept
 {
-    return is_bare_help_flag(token) || token.starts_with(k_help_long_eq);
+    return is_bare_help_flag(token) || is_topic_help_flag(token);
 }
 
 /// The topic of "--help=<topic>", or nothing for a bare help flag.
@@ -96,15 +102,33 @@ details_hint(std::string_view program)
         program);
 }
 
+[[nodiscard]] std::string_view
+as_text(const char* arg) noexcept
+{
+    return arg;
+}
+
+/// The arguments from @p start on.
+[[nodiscard]] std::span<char*>
+payload(int argc, char** argv, int start)
+{
+    return std::span{ argv, static_cast<std::size_t>(argc) }.subspan(
+        static_cast<std::size_t>(std::min(start, argc)));
+}
+
+/// The arguments in @p args before "--": the rocsys and tool options.
+[[nodiscard]] std::span<char*>
+before_separator(std::span<char*> args)
+{
+    return { args.begin(), std::ranges::find(args, std::string_view{ "--" }, as_text) };
+}
+
 // "--help=<topic>" is the tool's topic help, so only the bare help flags match.
 [[nodiscard]] bool
 asks_for_help(int argc, char** argv, int start)
 {
-    const auto args = std::span{ argv, static_cast<std::size_t>(argc) }.subspan(
-        static_cast<std::size_t>(std::min(start, argc)));
-    const auto as_text   = [](const char* arg) { return std::string_view{ arg }; };
-    const auto separator = std::ranges::find(args, std::string_view{ "--" }, as_text);
-    return std::ranges::any_of(args.begin(), separator, is_bare_help_flag, as_text);
+    return std::ranges::any_of(before_separator(payload(argc, argv, start)),
+                               is_bare_help_flag, as_text);
 }
 
 [[nodiscard]] dispatch_result
@@ -115,6 +139,56 @@ make_tool_result(const subcommand_spec* spec, bool strip_subcommand, int argc,
                           ? dispatch_kind::show_subcommand_help
                           : dispatch_kind::run_subcommand;
     return { .kind = kind, .spec = spec, .strip_subcommand = strip_subcommand };
+}
+
+/// The command before its options: "rocsys", or "rocsys python" when the subcommand is
+/// typed.
+[[nodiscard]] std::string
+command_name(std::string_view program, const subcommand_spec& spec, bool strip_subcommand)
+{
+    return strip_subcommand ? fmt::format("{} {}", program, spec.name)
+                            : std::string{ program };
+}
+
+/// "put '--' before the application", showing @p app after "--".
+[[nodiscard]] std::string
+separator_error(std::string_view command, std::string_view app, std::string_view program)
+{
+    return fmt::format(
+        "error: put '--' before the application: {} [options] -- {} [app-args]\n{}",
+        command, app, help_hint(program));
+}
+
+/// @p result, or an error when it runs a subcommand with requires_app without "--", or
+/// one without requires_app with "--". A tool help topic, as in
+/// "rocsys profile --help=all", runs no application.
+[[nodiscard]] dispatch_result
+check_separator(dispatch_result result, int argc, char** argv, std::string_view program)
+{
+    if(result.kind != dispatch_kind::run_subcommand)
+    {
+        return result;
+    }
+    const auto& spec    = *result.spec;
+    const auto  args    = payload(argc, argv, payload_index(result.strip_subcommand));
+    const auto  options = before_separator(args);
+    const bool  has_separator = options.size() < args.size();
+    const auto  command       = command_name(program, spec, result.strip_subcommand);
+    if(spec.requires_app && !has_separator &&
+       !std::ranges::any_of(options, is_topic_help_flag, as_text))
+    {
+        return { .kind          = dispatch_kind::error,
+                 .error_message = separator_error(command, "<app>", program) };
+    }
+    if(!spec.requires_app && has_separator)
+    {
+        return { .kind = dispatch_kind::error,
+                 .error_message =
+                     fmt::format("error: {0} runs no application, so it takes no '--'\n"
+                                 "hint: run '{0} --help' for its options.",
+                                 command) };
+    }
+    return result;
 }
 
 // Scan the tool's own options (tokens after argv0 / the verb, before "--").
@@ -178,12 +252,11 @@ parse_dispatch(int argc, char** argv, std::string_view program)
         if(found->requires_app && !std::string_view{ argv[2] }.starts_with('-'))
         {
             return { .kind          = dispatch_kind::error,
-                     .error_message = fmt::format(
-                         "error: put '--' before the application: {} {} [options] -- {} "
-                         "[app-args]\n{}",
-                         program, found->name, argv[2], help_hint(program)) };
+                     .error_message = separator_error(command_name(program, *found, true),
+                                                      argv[2], program) };
         }
-        return make_tool_result(found, true, argc, argv);
+        return check_separator(make_tool_result(found, true, argc, argv), argc, argv,
+                               program);
     }
 
     if(!first.starts_with('-'))
@@ -201,7 +274,8 @@ parse_dispatch(int argc, char** argv, std::string_view program)
 
     // Implicit default: first token is a flag or "--". Keep it in the forwarded argv.
     const auto* chosen = &k_subcommands.front();
-    return make_tool_result(chosen, false, argc, argv);
+    return check_separator(make_tool_result(chosen, false, argc, argv), argc, argv,
+                           program);
 }
 
 std::vector<std::string>
@@ -286,7 +360,7 @@ print_subcommand_help(std::ostream& out, std::string_view program,
         fmt::arg("runs", spec.runs.empty() ? spec.binary_name : spec.runs),
         fmt::arg("tool", spec.binary_name),
         fmt::arg("options",
-                 spec.lists_rocsys_options ? options_text : std::string_view{}));
+                 spec.takes_rocsys_options ? options_text : std::string_view{}));
 }
 
 }  // namespace rocprofsys::cli

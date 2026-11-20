@@ -35,7 +35,11 @@ telemetry. You can change the data that is collected by using ``--preset`` or
 domain flags, as described in :doc:`using-preset-profiles`.
 
 The application and its arguments always follow ``--``. ``rocsys`` reports an error
-for an application given without it, such as ``rocsys python ./script.py``.
+for a command without ``--``, such as ``rocsys python ./script.py`` or
+``rocsys rewrite -o app.inst ./app``, because it cannot tell the application from a
+tool option's value. A command that runs no application still ends with ``--``, as in
+``rocsys --preset=balanced --export-config --``. ``avail`` and ``attach`` run no
+application and take no ``--``.
 
 ``rocsys`` with no arguments prints the top-level help. ``rocsys --version``
 prints the version. Print the top-level help, or run a profile with a preset:
@@ -50,8 +54,11 @@ prints the version. Print the top-level help, or run a profile with a preset:
 rocsys options
 ==============
 
-``rocsys`` has three options of its own. They apply to every subcommand and can appear
-anywhere between the subcommand and ``--``.
+``rocsys`` has three options of its own. They apply to ``profile``, ``instrument``,
+``python``, and ``attach``, and can appear anywhere between the subcommand and ``--``.
+``rewrite``, ``avail``, and ``causal`` pass them to their tool unchanged, like any other
+option: ``rocsys causal --log-level debug -- ./app`` uses the ``--log-level`` of
+``rocprof-sys-causal``.
 
 .. list-table::
    :header-rows: 1
@@ -84,9 +91,33 @@ separate names with commas only: ``--traces=hip,mpi``. An unknown name is an err
 ``rocsys --traces hip -- ./app`` also turns MPI tracing off. Without ``--traces``, the
 tool's own defaults apply.
 
-A tool option for the same setting, such as ``--rocm``, ``--parallel``, ``--preset``, or
-``-o``, takes priority over the ``rocsys`` option. For ``rewrite``, pass ``--traces`` when
-the rewritten binary runs, as in ``rocsys --traces hip -- ./app.inst``.
+.. _rocsys-precedence:
+
+Setting precedence
+==================
+
+``rocsys`` uses the order below, and the highest source in this list wins:
+
+#. A tool option forwarded by ``rocsys``, such as ``--rocm`` or ``-o``, or a preset
+   named with ``--preset``. Where both set the same thing, ``--rocm`` overrides the
+   preset, but the preset overrides ``--gpu`` and ``--cpu``, and overrides ``-o`` when
+   the preset sets an output path.
+#. A ``rocsys`` option: ``--traces``, ``--output-path``, or ``--log-level``.
+#. An environment variable.
+#. A configuration file (:ref:`creating-a-configuration-file`).
+#. The tool's built-in default.
+
+.. note::
+
+   This order might change in a future release. Don't rely on a preset to override
+   ``--traces``, ``--output-path``, or ``--log-level``.
+
+``rocsys`` writes only an option you type, and that write replaces the environment
+variable of the same name. The tool then applies the preset and its own command line, so
+``rocsys --traces hip --rocm=hsa -- ./app`` keeps the domains from ``--rocm``.
+With no ``rocsys`` option for a setting, the shell value is left unchanged.
+For ``rewrite``, pass ``--traces`` when the rewritten binary runs, as in
+``rocsys --traces hip -- ./app.inst``.
 
 ``rocsys --help`` lists these options after the subcommands. ``rocsys <subcommand> --help``,
 ``-h``, or ``-?`` names the tool whose own ``--help`` lists every other option, and also
@@ -113,7 +144,7 @@ Subcommands
      - Queries the settings, domains, hardware counters, and components available on the current system through ``rocprof-sys-avail``.
      - :doc:`general-tips-using-rocprof-sys`
    * - ``attach``
-     - Attaches to an already running process through ``rocprof-sys-attach``. Pass ``-p`` or ``--pid``. This verb does not take an application after ``--``.
+     - Attaches to an already running process through ``rocprof-sys-attach``. Pass ``-p`` or ``--pid``. This verb takes no application and no ``--``.
      - :doc:`attaching-to-running-process`
    * - ``causal``
      - Estimates how much faster the application would run if a selected function or line were sped up, through ``rocprof-sys-causal``.

@@ -10,7 +10,8 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - New options added for rocsys, `rocsys --traces` selects what is traced with one list of names,
   for example `rocsys --traces hip mpi -- ./app`. `rocsys --output-path` and `rocsys --log-level`
-  set `ROCPROFSYS_OUTPUT_PATH` and `ROCPROFSYS_LOG_LEVEL` for every subcommand.
+  set `ROCPROFSYS_OUTPUT_PATH` and `ROCPROFSYS_LOG_LEVEL` for `profile`, `instrument`, `python`,
+  and `attach`.
 - Agent skills for choosing a profiling preset, discovering configuration options, and
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding

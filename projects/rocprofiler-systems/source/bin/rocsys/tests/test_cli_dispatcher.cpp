@@ -368,6 +368,35 @@ TEST(cli_dispatcher_test, an_application_without_the_separator_is_an_error)
     expect_refused({ "rocsys", "causal", "./app" },
                    "error: put '--' before the application: rocsys causal [options] -- "
                    "./app [app-args]\n");
+    expect_refused({ "rocsys", "python", "-v", "./script.py", "--log-level", "info" },
+                   "error: put '--' before the application: rocsys python [options] -- "
+                   "<app> [app-args]\n");
+    expect_refused({ "rocsys", "rewrite", "-o", "out.inst", "./transpose" },
+                   "error: put '--' before the application: rocsys rewrite [options] -- "
+                   "<app> [app-args]\n");
+    expect_refused({ "rocsys", "--traces", "hip", "./app" },
+                   "error: put '--' before the application: rocsys [options] -- <app> "
+                   "[app-args]\n");
+    expect_refused({ "rocsys", "profile", "--preset", "balanced", "--export-config" },
+                   "error: put '--' before the application: rocsys profile [options] -- "
+                   "<app> [app-args]\n");
+}
+
+TEST(cli_dispatcher_test, a_subcommand_without_an_application_refuses_the_separator)
+{
+    const auto expect_refused = [](std::initializer_list<const char*> tokens,
+                                   std::string_view                   message) {
+        auto args   = argv_builder{ tokens };
+        auto result = parse_dispatch(args.argc(), args.argv(), "rocsys");
+        EXPECT_EQ(result.kind, dispatch_kind::error);
+        EXPECT_EQ(result.error_message, message);
+    };
+    expect_refused({ "rocsys", "attach", "--log-level", "info", "--", "-p", "1" },
+                   "error: rocsys attach runs no application, so it takes no '--'\n"
+                   "hint: run 'rocsys attach --help' for its options.");
+    expect_refused({ "rocsys", "avail", "--", "gpu" },
+                   "error: rocsys avail runs no application, so it takes no '--'\n"
+                   "hint: run 'rocsys avail --help' for its options.");
 }
 
 TEST(cli_dispatcher_test, the_separator_rule_leaves_other_forms_alone)
@@ -382,13 +411,17 @@ TEST(cli_dispatcher_test, the_separator_rule_leaves_other_forms_alone)
     expect_kind({ "rocsys", "python", "--", "./script.py", "--log-level", "info" },
                 k_run);
     expect_kind({ "rocsys", "rewrite", "-o", "out", "--", "./app" }, k_run);
-    expect_kind({ "rocsys", "profile", "--preset", "balanced", "--export-config" },
+    // --export-config prints the configuration and exits; "--" still ends the options.
+    expect_kind({ "rocsys", "profile", "--preset", "balanced", "--export-config", "--" },
                 k_run);
     expect_kind({ "rocsys", "python", "--help" }, dispatch_kind::show_subcommand_help);
     expect_kind({ "rocsys", "python", "--help=all" }, k_run);
     // rocprof-sys-avail reads a plain first token as its REGEX_FILTER.
     expect_kind({ "rocsys", "avail", "gpu" }, k_run);
     expect_kind({ "rocsys", "attach", "-p", "1" }, k_run);
+    // rocprof-sys-attach answers a missing or plain pid with its own -p <pid> usage.
+    expect_kind({ "rocsys", "attach" }, k_run);
+    expect_kind({ "rocsys", "attach", "1234" }, k_run);
 }
 
 TEST(cli_dispatcher_test, subcommand_help_flags_show_rocsys_help)
