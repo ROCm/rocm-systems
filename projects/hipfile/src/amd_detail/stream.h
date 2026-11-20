@@ -48,8 +48,7 @@ public:
     virtual uint64_t releaseSignalTarget() = 0;
     virtual void     ensureSignalSlot()    = 0; // Allocates the signal slot once, on first gated use.
 
-    virtual void applyFlags(uint32_t flags) = 0; // Takes the lock.
-    virtual void drainAndRelease()          = 0; // Takes the lock; must not be called with it held.
+    virtual void drainAndRelease() = 0; // Takes the lock; must not be called with it held.
 };
 
 struct SignalSlotDeleter {
@@ -81,7 +80,6 @@ public:
     uint64_t releaseSignalTarget() override;
     void     ensureSignalSlot() override;
 
-    void applyFlags(uint32_t flags) override;
     void drainAndRelease() override;
 
     // blocking_only forces the blocking offload path (no wait-value gating, no signal slot), used for

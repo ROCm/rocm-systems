@@ -164,12 +164,6 @@ Stream::releaseSignalTarget()
     return --signal_counter;
 }
 void
-Stream::applyFlags(uint32_t flags)
-{
-    std::lock_guard<std::mutex> lock{mutex};
-    setFlags(flags);
-}
-void
 Stream::drainAndRelease()
 {
     uint64_t reserved;

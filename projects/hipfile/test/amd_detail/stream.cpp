@@ -334,18 +334,6 @@ TEST_F(HipFileStream, registered_stream_without_wait_value_support_has_no_signal
     EXPECT_EQ(stream->signalSlot(), nullptr);
 }
 
-TEST_F(HipFileStream, apply_flags_updates_and_validates_flags)
-{
-    EXPECT_CALL(mhip, hipStreamGetDevice);
-    stream_map.registerStream(nonnull_stream, 0);
-    auto stream = stream_map.findStream(nonnull_stream);
-    stream->applyFlags(HIPFILE_STREAM_FIXED_FILE_SIZE);
-    EXPECT_TRUE(stream->fixedIOSize());
-    EXPECT_FALSE(stream->fixedFileOffset());
-    EXPECT_THROW(stream->applyFlags(HIPFILE_STREAM_FLAGS_MASK + 1), std::invalid_argument);
-    EXPECT_TRUE(stream->fixedIOSize());
-}
-
 TEST_F(HipFileStream, find_stream_returns_only_registered_streams)
 {
     EXPECT_EQ(stream_map.findStream(nonnull_stream), nullptr);
