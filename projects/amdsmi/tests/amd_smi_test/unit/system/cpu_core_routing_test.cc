@@ -120,12 +120,10 @@ class CpuRoutingFixture {
     // Package numbering is deliberately interleaved. The second thread for a
     // physical core is one kPhysical stride away, as ESMI's MSR backend expects.
     tree_.WriteFile("cpu/online", sparse ? "0-3,5-767\n" : "0-767\n");
-    if (!sparse) {
-      for (uint32_t cpu = 0; cpu < 2 * kPhysical; ++cpu) {
-        const std::string path = "cpu/cpu" + std::to_string(cpu) + "/topology/";
-        tree_.WriteFile(path + "physical_package_id", std::to_string(cpu % 2));
-        tree_.WriteFile(path + "core_id", std::to_string((cpu % kPhysical) / 2));
-      }
+    for (uint32_t cpu = 0; cpu < 2 * kPhysical; ++cpu) {
+      const std::string path = "cpu/cpu" + std::to_string(cpu) + "/topology/";
+      tree_.WriteFile(path + "physical_package_id", std::to_string(cpu % 2));
+      tree_.WriteFile(path + "core_id", std::to_string((cpu % kPhysical) / 2));
     }
     status = amdsmi_init(AMDSMI_INIT_AMD_CPUS);
   }
