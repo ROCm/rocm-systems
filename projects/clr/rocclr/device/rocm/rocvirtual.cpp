@@ -3592,24 +3592,16 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   constexpr uint16_t systemScopeHBits =
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-  // acquire=SYSTEM, release=AGENT (needed for GFX12)
-  constexpr uint16_t sysAcquireAgentReleaseHBits =
-      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-      (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   constexpr uint16_t vendorSpecificHBits = (HSA_PACKET_TYPE_VENDOR_SPECIFIC
                                             << HSA_PACKET_HEADER_TYPE);
 
   if (device.settings().fenceScopeAgent_) {
-    const auto& isa = device.isa();
-    const bool isGfx12 = (isa.versionMajor() == 12) && (isa.versionMinor() == 0) &&
-                         (isa.versionStepping() == 0 || isa.versionStepping() == 1);
-
     dispatchPacketHeaderNoSync_ =
         ((device.settings().ext_dispatch_packet_ ? vendorSpecificHBits : kernelDispatchHBits) |
-         (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
+         agentScopeHBits);
     dispatchPacketHeader_ =
         ((device.settings().ext_dispatch_packet_ ? vendorSpecificHBits : kernelDispatchHBits) |
-         barrierHBits | (isGfx12 ? sysAcquireAgentReleaseHBits : agentScopeHBits));
+         barrierHBits | agentScopeHBits);
   } else {
     dispatchPacketHeaderNoSync_ =
         ((device.settings().ext_dispatch_packet_ ? vendorSpecificHBits : kernelDispatchHBits) |
