@@ -124,6 +124,16 @@ TEST_F(writer_test, initialize_schema_called_twice_is_a_no_op)
     });
 }
 
+TEST_F(writer_test, writer_on_existing_database_file_throws)
+{
+    {
+        auto writer = make_writer(version_t{ 3, 0, 0 });
+        writer->flush_in_memory_data_to_disk();
+    }
+
+    EXPECT_THROW(make_writer(version_t{ 3, 0, 1 }), std::runtime_error);
+}
+
 TEST_F(writer_test, construct_storage_accepts_supported_writable_schemas)
 {
     for(const auto& version : k_writer_supported_versions)

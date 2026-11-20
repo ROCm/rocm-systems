@@ -19,7 +19,9 @@ public:
     /**
      * @brief Construct a storage handle backed by a database on disk.
      * Writes schema 3.0.1. That version is ignored when only reading an existing
-     * database. This overload is a separate exported symbol. A defaulted third argument
+     * database. A writer opened on a file that already exists throws
+     * std::runtime_error and leaves the file unchanged. This overload is a separate
+     * exported symbol. A defaulted third argument
      * would not keep the two-argument symbol in the shared library.
      * @param database_path Path to the on-disk rocpd database
      * @param uuid Unique identifier embedded into this storage's table names
@@ -28,13 +30,16 @@ public:
 
     /**
      * @brief Construct a storage handle that writes `schema_version`.
-     * Ignored when only reading an existing database. version_t{} selects the newest
-     * schema the writer supports. Any other version must be one the writer can
-     * populate. Currently those are 3.0.0 and 3.0.1. version_t{} selects 3.0.1.
+     * Ignored when only reading an existing database. A writer opened on a file that
+     * already exists throws std::runtime_error and does not apply `schema_version`.
+     * version_t{} selects the newest schema the writer supports. Any other version
+     * must be one the writer can populate. Currently those are 3.0.0 and 3.0.1.
+     * version_t{} selects 3.0.1.
      * @param database_path Path to the on-disk rocpd database
      * @param uuid Unique identifier embedded into this storage's table names
      * @param schema_version rocpd schema version to initialize when writing
-     * @throws std::runtime_error when the writer cannot create `schema_version`
+     * @throws std::runtime_error when the writer cannot create `schema_version`,
+     *         or when a writer is opened on a database file that already exists
      */
     explicit storage_t(const std::string&      database_path,
                        const std::string&      uuid,

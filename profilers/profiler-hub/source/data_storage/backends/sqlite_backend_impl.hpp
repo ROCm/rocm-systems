@@ -279,7 +279,7 @@ database_backend<SqlitePolicy>::discover_uuids()
 /**
  * Creates the RocPD schema for `schema_version` and marks the database initialized.
  * version_t{} (all zero) uses the newest schema in k_writer_supported_versions.
- * An already-initialized database logs a warning and returns. Tables, indexes, views,
+ * An already-initialized database throws. Tables, indexes, views,
  * data views, summary views, and metadata are executed in that order, with uuid and
  * version placeholders filled in. A version the writer cannot create throws.
  */
@@ -289,8 +289,7 @@ database_backend<SqlitePolicy>::initialize_schema(profiler_hub::version_t schema
 {
     if(m_initialized)
     {
-        LOG_WARNING("Database already initialized!");
-        return;
+        throw std::runtime_error("Database already initialized!");
     }
 
     // version_t{} (all-zero) means the newest writer-supported schema, not merely
