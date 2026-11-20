@@ -146,29 +146,8 @@ include(ROCMCheckTargetIds)
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 
-#############################################################################
-# SEED ROCM_PATH FROM HIP (if EXPLICIT_ROCM_VERSION is set without ROCM_PATH)
-#############################################################################
-# When EXPLICIT_ROCM_VERSION is used (e.g. release builds), setup_project.cmake
-# skips the version-file probe and ROCM_PATH ends up cached as an empty string.
-# Locate HIP through CMAKE_PREFIX_PATH and derive ROCM_PATH from it. The empty
-# cache entry must be removed first: hip-config-amd.cmake only defaults
-# ROCM_PATH when it is NOT DEFINED, and would otherwise use "" (e.g. setting
-# HIP_CLANG_ROOT to "/llvm").
-if(NOT ROCM_PATH)
-  unset(ROCM_PATH CACHE)
-  unset(ROCM_PATH)
-  find_package(hip QUIET)
-  if(hip_FOUND AND HIP_PACKAGE_PREFIX_DIR)
-    set(ROCM_PATH "${HIP_PACKAGE_PREFIX_DIR}" CACHE PATH "Location of the ROCm SDK" FORCE)
-    message(STATUS "ROCM_PATH derived from HIP package: ${ROCM_PATH}")
-  else()
-    set(ROCM_PATH "" CACHE PATH "Location of the ROCm SDK")
-    message(STATUS "ROCM_PATH is not set and HIP could not be located via find_package")
-  endif()
-  # hip-config may have set a normal variable shadowing the cache entry
-  unset(ROCM_PATH)
-endif()
+find_package(hip REQUIRED)
+
 
 #############################################################################
 # DETECT POD CAPABILITY
@@ -191,8 +170,7 @@ if(TARGET amd_smi)
 
   find_path(_hip_include_dir
     hip/hip_runtime_api.h
-    HINTS ${hip_INCLUDE_DIRS} ${ROCM_PATH} ENV ROCM_PATH ENV HIP_PATH
-    PATHS /opt/rocm
+    HINTS ${ROCM_PATH} ${hip_INCLUDE_DIRS}
     PATH_SUFFIXES include
     NO_DEFAULT_PATH
   )
