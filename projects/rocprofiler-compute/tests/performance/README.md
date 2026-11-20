@@ -11,7 +11,9 @@ One HipRTC app ([`fib_vcopy_nbody_app.py`](fib_vcopy_nbody_app.py)) launches
 Device buffers ping-pong: nbody input is vcopy output; nbody output is the
 next vcopy input.
 
-Profile uses `--no-roof` (roofline / microbenchmark excluded for now).
+Profile selects every top-level block for the live GPU arch except
+roofline (block `4` / `roof`), PC sampling, and membw — equivalent to a full
+counter profile without the deprecated `--no-roof`.
 
 ### CMake / CTest
 

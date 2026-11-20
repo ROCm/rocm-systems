@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-"""Time profile (--no-roof) + analyze for the HipRTC Fibonacci workload.
+"""Time profile (all blocks except roofline) + analyze for Fibonacci workload.
 
 Pass --rocprof-compute once (or omit for this tree) to print timings. Pass it
 two or more times to print a comparison table with deltas vs the first path.
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _APP_PATH = Path(__file__).resolve().parent / "fib_vcopy_nbody_app.py"
 _DEFAULT_ROCPROF = _REPO_ROOT / "src" / "rocprof-compute"
 _WORKLOAD_NAME = "fib_vcopy_nbody"
+_REPO_SRC = _REPO_ROOT / "src"
+if str(_REPO_SRC) not in sys.path:
+    sys.path.insert(0, str(_REPO_SRC))
+
+from utils.utils_common import (  # noqa: E402
+    PC_SAMPLING_BLOCK_IDS,
+    ROOFLINE_BLOCK_IDS,
+    get_arch_panel_id_to_alias,
+)
 
 
 @dataclass
@@ -69,6 +79,37 @@ def find_workload_dir(search_root: Path) -> Path:
     return matches[0].parent
 
 
+def detect_gpu_arch() -> str:
+    """Return the first gfx* Name from rocminfo."""
+    completed = subprocess.run(
+        ["rocminfo"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"rocminfo failed (rc={completed.returncode})")
+    for line in completed.stdout.splitlines():
+        match = re.search(r"^\s*Name:\s+(gfx[0-9a-zA-Z]+)", line)
+        if match:
+            return match.group(1).lower()
+    raise RuntimeError("could not detect GPU arch from rocminfo")
+
+
+def non_roofline_block_ids(arch: str) -> list[str]:
+    """Top-level block ids for arch, excluding roof / PC sampling / membw."""
+    panels = get_arch_panel_id_to_alias(arch)
+    if not panels:
+        raise RuntimeError(f"no analysis config template for arch {arch}")
+    excluded = set(ROOFLINE_BLOCK_IDS) | set(PC_SAMPLING_BLOCK_IDS) | {"30"}
+    block_ids = [
+        panel_id
+        for panel_id in panels
+        if panel_id not in excluded and not panel_id.startswith("4.")
+    ]
+    return sorted(block_ids, key=lambda panel_id: int(panel_id))
+
+
 def run_timed(
     command: list[str],
     *,
@@ -101,11 +142,13 @@ def run_instance(
     env["PYTHONPATH"] = f"{repo_src}:{existing}" if existing else repo_src
 
     experimental_args = ["--experimental"] if experimental else []
+    block_ids = non_roofline_block_ids(detect_gpu_arch())
     profile_cmd = [
         *rocprof_cmd,
         "profile",
         *experimental_args,
-        "--no-roof",
+        "-b",
+        *block_ids,
         "--overwrite",
         "-n",
         _WORKLOAD_NAME,
@@ -202,7 +245,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Performance harness: HipRTC Fibonacci vcopy+nbody "
-            "profile (--no-roof) + analyze"
+            "profile (all blocks except roofline) + analyze"
         )
     )
     parser.add_argument(
