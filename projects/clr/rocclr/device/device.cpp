@@ -988,6 +988,15 @@ void Device::tearDown() {
   reportAllDeviceMemoryLeaks();
 #endif
   if (devices_ != nullptr) {
+    // An arena can own a roc::Memory for another device. Release every arena
+    // to avoid locking the already destroyed device's VA-cache mutex.
+    for (uint i = 0; i < devices_->size(); ++i) {
+      Device* device = devices_->at(i);
+      if (device != nullptr && device->arena_mem_obj_ != nullptr) {
+        device->arena_mem_obj_->release();
+        device->arena_mem_obj_ = nullptr;
+      }
+    }
     for (uint i = 0; i < devices_->size(); ++i) {
       delete devices_->at(i);
     }
@@ -1036,11 +1045,6 @@ Device::~Device() {
     arena_mem_obj_->release();
   }
 
-  if (vaCacheMap_) {
-    CondLog(vaCacheMap_->size() != 0, "Application didn't unmap all host memory!");
-    delete vaCacheMap_;
-  }
-
   for (auto memory : hostcall_allocated_memories_) {
     if (memory != nullptr) {
       amd::MemObjMap::RemoveMemObj(
@@ -1050,6 +1054,11 @@ Device::~Device() {
   }
 
   hostcall_allocated_memories_.clear();
+
+  if (vaCacheMap_) {
+    CondLog(vaCacheMap_->size() != 0, "Application didn't unmap all host memory!");
+    delete vaCacheMap_;
+  }
 
   delete vaCacheAccess_;
   delete settings_;
