@@ -593,6 +593,7 @@ Exceptions that can be thrown by `amdsmi_get_cuid_components` function:
 
 #### Possible Library Exceptions
 
+- `AMDSMI_STATUS_NO_PERM` - Permission denied while enumerating the inventory
 - `AMDSMI_STATUS_NO_DATA` - The node has no usable machine ID
 - `AMDSMI_STATUS_NOT_SUPPORTED` - Built without CUID support
 - `AMDSMI_STATUS_API_FAILED` - API call failed
