@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* `rocprof-compute analyze` also writes the memory chart as an HTML page next to the workload, for example `mem_chart_gpu-0.html`.
+
 ### Changed
 
 * The Memory Chart Compute Unit box uses the metric names of the other panels: *VGPRs*, *SGPRs*, *Wavefront Occupancy*, *Scratch Allocation* and *LDS Allocation*, and adds *AGPRs* on GPUs that report them.

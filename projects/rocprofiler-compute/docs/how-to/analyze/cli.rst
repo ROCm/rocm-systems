@@ -20,6 +20,8 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 * :ref:`Roofline HTML generation <roofline-html-generation>`: Generate interactive HTML roofline charts from profiling data.
 
+* :ref:`Memory chart HTML <cli-memory-chart-html>`: Open the memory chart in a browser.
+
 Run ``rocprof-compute analyze -h`` for more details.
 
 .. _cli-walkthrough:
@@ -120,6 +122,9 @@ There are three high-level GPU analysis views:
 
    Legend: <---- Read  ----> Write  <---> Atomic  █ Util %  █ Hit %
 
+
+   Interactive memory chart saved to /home/user/workloads/vcopy/MI350/mem_chart_gpu-0.html
+
 .. _cli-memory-chart-viewing:
 
 The memory chart is a wide diagram whose width follows its content. It does not
@@ -147,6 +152,26 @@ plain text in both of the preceding commands.
 
 To print the block as tables instead of the diagram, use ``--debug-table-view``
 (see :ref:`cli-debug-options`).
+
+.. _cli-memory-chart-html:
+
+**Memory chart HTML:**
+
+When ``analyze`` shows the memory chart, it also writes the chart as a
+self-contained HTML page next to the workload, and prints the page's path below the
+chart, as in the preceding output. The page needs no network access. It shows:
+
+* The chart for all kernels together, the same chart the terminal shows.
+* The memory bandwidth stalls and guidance. Click a stall to go to its guidance.
+* The metric name and description of a value, when you hover over it.
+
+The page shows stalls and guidance when the terminal does: when the workload was
+profiled with ``--experimental --membw-analysis`` and the analysis includes block 30.
+
+Hold Ctrl (Command on a Mac) and scroll to zoom, drag to pan, and double-click or
+use **Fit chart** to fit the chart in the window. **Export PNG** saves the chart as an
+image, and **Dark mode** switches the colors. With ``-k``, the file name ends with the
+kernel ids, as the roofline plot's does, for example ``mem_chart_gpu-0_0.html``.
 
 **Empirical hierarchical roofline:**
 
