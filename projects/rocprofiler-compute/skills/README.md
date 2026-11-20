@@ -120,10 +120,11 @@ each change. A PR that alters CLI options, output layout, supported
 architectures, or the experimental status of a feature updates the matching
 skill in the same PR, exactly as it updates docs and tests.
 
-Every skill that collects counters has the same "Collect only what the question
-needs" section: kernel-bottleneck, memory, roofline, speed-of-light, and
-torch-trace. Keep that section identical in all five. Put a tip that only one
-skill needs in that skill's own steps.
+Two sections are shared word for word. "Before you start" is in all six skills.
+"Collect only what the question needs" is in the five that collect counters:
+kernel-bottleneck, memory, roofline, speed-of-light, and torch-trace. Keep each
+shared section identical wherever it appears. If a tip applies to only one
+skill, put it in that skill's own steps.
 
 Skills must also serve users on the two previous ROCm releases. When a change
 alters how a feature behaves, keep a short note in the skill saying how it
@@ -148,6 +149,11 @@ amd/skills grades each skill with skillscope under these rules:
 - Put cases that cannot pass on those runners in `evals/extended_evals.json`:
   cases that need an Instinct GPU, and the torch-trace cases that profile a
   model, since the catalog runners may not have PyTorch. The catalog skips this
-  file.
+  file. Also put cases there when the behavioral cases in `evals.json` would
+  take more than ten minutes together, since the catalog stops a skill's run
+  after ten minutes. Each skill's `evals.json` has one behavioral case that asks
+  the skill's main questions together, so the catalog builds and profiles once.
+  Every other case that should trigger is routing-only there, and its
+  behavioral version is in `extended_evals.json`.
 - It copies only the skill directory, so `evals/samples/` holds copies of the
   samples from `sample/`.

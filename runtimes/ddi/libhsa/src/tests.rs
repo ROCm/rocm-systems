@@ -8,7 +8,7 @@ use crate::api::host_alloc_dmabuf_supported;
 use crate::api::{agent::*, amd::*, isa::*, system::*};
 use crate::ffi::*;
 use crate::isa::isa_name;
-use crate::runtime::lock;
+use crate::lifecycle::lock;
 use std::ffi::{CStr, c_char, c_void};
 
 #[test]

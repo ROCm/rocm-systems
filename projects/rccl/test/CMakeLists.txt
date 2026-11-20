@@ -432,6 +432,7 @@ if(BUILD_TESTS)
       device/DdaAllReduceFabricLL128TwoShotTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
+      device/DdaLL128ArchGeometryTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestTdmReduceCopy.cpp
@@ -1107,6 +1108,7 @@ if(BUILD_TESTS)
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
       transport/NetLl128MPITests.cpp
+      transport/LlStepBarrierMPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp

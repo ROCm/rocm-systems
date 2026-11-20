@@ -8,16 +8,16 @@
 //! checked removal; no queue advertises virtual-memory mutation today.
 
 use crate::generated::amdf::*;
-use crate::instance::{Device, Instance};
 use crate::memory;
+use crate::session::{AmdfSession, Device};
 use crate::support::*;
 use rocddi::memory::host;
-use rocddi::memory::storage::Owned;
+use rocddi::memory::storage::{Owned, RetainOnDrop};
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(crate) struct Reservation {
-    pub(crate) instance: *mut Instance,
+    pub(crate) instance: *mut AmdfSession,
     /// Mutation and destruction are caller-serialized; queries read only the
     /// immutable fields outside this cell.
     mutation: UnsafeCell<ReservationMutation>,
@@ -75,9 +75,9 @@ pub(crate) unsafe extern "C" fn host_capabilities(
     out: *mut amdf_memory_reservation_capabilities_t,
 ) -> u64 {
     boundary(|| unsafe {
-        let instance = object(pointer.cast::<Instance>())?;
+        let instance = object(pointer.cast::<AmdfSession>())?;
         let out = output(out, AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES)?;
-        if instance.closing || !instance.native.is_current_process() {
+        if instance.closing || !instance.native_session().is_current_process() {
             return Err(PRECONDITION);
         }
         out.publish(capabilities()?);
@@ -104,8 +104,8 @@ pub(crate) unsafe extern "C" fn create(
 ) -> u64 {
     boundary(|| unsafe {
         output_pointer(out)?;
-        let instance = object(pointer.cast::<Instance>())?;
-        if instance.closing || !instance.native.is_current_process() {
+        let instance = object(pointer.cast::<AmdfSession>())?;
+        if instance.closing || !instance.native_session().is_current_process() {
             return Err(PRECONDITION);
         }
         let info = input(info, AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO)?;
@@ -327,13 +327,14 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_reservation_t)
             return Err(BUSY);
         }
         // SAFETY: Destruction is exclusive to every reservation use.
-        let mut native_owner = reservation.mutation().native.take().ok_or(INTERNAL)?;
+        let mut native_owner =
+            RetainOnDrop::new(reservation.mutation().native.take().ok_or(INTERNAL)?);
         let result = native_owner.free().map_err(|error| native(&error));
-        if result.is_err() {
-            std::mem::forget(native_owner);
-        }
         unregister(&(*reservation.instance).children);
         drop(Owned::from_raw(pointer.cast::<Reservation>()));
+        if result.is_ok() {
+            drop(native_owner.into_inner());
+        }
         result
     })
 }

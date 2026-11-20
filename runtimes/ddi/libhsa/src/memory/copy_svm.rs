@@ -5,6 +5,75 @@
 
 use super::*;
 
+/// Copies a complete range using the HSA memory owner's selected host/GPU route.
+///
+/// The caller is already admitted to the HSA generation. This operation retains
+/// registry backing and an in-flight lease before releasing the registry lock.
+/// An uncertain native outcome quarantines the generation and retains operands.
+///
+/// # Safety
+/// Both ranges must remain valid for `size` bytes through completion. The source
+/// must be readable and the destination writable under the HSA memory contract.
+/// If native retirement is uncertain, external backing must remain live until
+/// conclusive native teardown.
+pub(crate) unsafe fn copy(dst: *mut c_void, src: *const c_void, size: usize) -> Result<(), Status> {
+    let mut guard = lock()?;
+    let runtime = initialized_mut(&mut guard)?;
+    if !memory_copy_has_work(dst, src, size)? {
+        return Ok(());
+    }
+    let host_destination = host_copy_address(runtime, dst as usize, size, ACCESS_PERMISSION_WO);
+    let host_source = host_copy_address(runtime, src as usize, size, ACCESS_PERMISSION_RO);
+    if let (Ok(destination), Ok(source)) = (host_destination, host_source) {
+        // SAFETY: The caller retains both ranges. The registry lock retains
+        // owned backing through this overlapping host copy.
+        unsafe { std::ptr::copy(source as *const u8, destination as *mut u8, size) };
+        fence(Ordering::SeqCst);
+        return Ok(());
+    }
+    let resolved = resolve_sync_gpu_copy(
+        runtime,
+        dst as usize,
+        src as usize,
+        size,
+        host_destination,
+        host_source,
+    )?;
+    let _inflight = runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+    let mut retained = [None; 2];
+    for (slot, base) in retained.iter_mut().zip(resolved.borrowed_memory) {
+        if let Some(base) = base {
+            if let Err(status) = runtime.memory_state.retain_copy_borrow(base) {
+                for base in retained.into_iter().flatten() {
+                    runtime.memory_state.release_copy_borrow(base);
+                }
+                return Err(status);
+            }
+            *slot = Some(base);
+        }
+    }
+    let stop = runtime.control.operation_stop();
+    let health = runtime.control.health.clone();
+    drop(guard);
+
+    let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
+        Ok(SyncGpuCopyOutcome::Done) => (SUCCESS, false),
+        Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => {
+            (write_loaded_copy_destination(address, &bytes), false)
+        }
+        Err(failure) => (failure.status, failure.operands_may_be_live),
+    };
+    if may_be_live {
+        health.quarantine();
+    }
+    release_async_resources(&[], &retained, may_be_live);
+    if status == SUCCESS {
+        Ok(())
+    } else {
+        Err(status)
+    }
+}
+
 /// Converts a pointer and size into a checked SVM address range.
 pub(crate) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64), Status> {
     if pointer.is_null() || size == 0 {
@@ -28,7 +97,7 @@ pub(crate) fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64),
 
 /// Maps an HSA agent to its SVM location identifier.
 pub(crate) fn svm_location_from_agent(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     service: &MemoryAdvice,
     agent: HsaAgent,
     allow_null: bool,
@@ -36,26 +105,27 @@ pub(crate) fn svm_location_from_agent(
     if agent.handle == 0 && allow_null {
         return Ok(SvmLocation::UnspecifiedOrMixed);
     }
-    if runtime.is_cpu_agent(agent) {
+    if runtime.agents.is_cpu_agent(agent) {
         return Ok(SvmLocation::System);
     }
-    let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
+    let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
     Ok(SvmLocation::Device(
         service
-            .target(&runtime.gpus[index].device)
+            .target(&runtime.agents.gpus[index].device)
             .map_err(map_error)?,
     ))
 }
 
 /// Maps a native SVM location identifier back to an HSA agent.
 pub(crate) fn svm_agent_from_location(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     location: SvmLocation,
 ) -> Result<HsaAgent, Status> {
     match location {
         SvmLocation::System => Ok(HsaAgent { handle: CPU_AGENT }),
         SvmLocation::UnspecifiedOrMixed => Ok(HsaAgent { handle: 0 }),
         SvmLocation::Device(identity) => runtime
+            .agents
             .gpus
             .iter()
             .position(|gpu| gpu.endpoint.id == identity.endpoint_id())
@@ -68,14 +138,14 @@ pub(crate) fn svm_agent_from_location(
 
 /// Selects the provider of an explicit GPU, or requires a unique service.
 pub(crate) fn svm_service(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     agent: Option<HsaAgent>,
 ) -> Result<MemoryAdvice, Status> {
-    let session = runtime.session().ok_or(ERROR)?;
+    let session = runtime.native_session().ok_or(ERROR)?;
     if let Some(agent) = agent {
-        if let Some(index) = runtime.gpu_index(agent) {
+        if let Some(index) = runtime.agents.gpu_index(agent) {
             return session
-                .memory_advice_for(&runtime.gpus[index].device)
+                .memory_advice_for(&runtime.agents.gpus[index].device)
                 .map_err(map_error);
         }
     }
@@ -552,7 +622,7 @@ pub(crate) struct ResolvedAsyncCopy {
 
 /// Copies agent after validating its source and destination.
 fn copy_agent(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     requested: HsaAgent,
     description: Option<&PointerDescription>,
 ) -> Result<HsaAgent, Status> {
@@ -568,6 +638,7 @@ fn copy_agent(
         requested
     };
     runtime
+        .agents
         .is_agent(agent)
         .then_some(agent)
         .ok_or(INVALID_AGENT)
@@ -575,18 +646,18 @@ fn copy_agent(
 
 /// Selects copy GPU from the available runtime resources.
 pub(crate) fn selected_copy_gpu(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: &PointerDescription,
 ) -> Option<(usize, HsaAgent)> {
     std::iter::once(description.owner)
         .chain(description.accessible.iter().copied())
         .filter(|agent| description.accessible.contains(agent))
-        .find_map(|agent| runtime.gpu_index(agent).map(|index| (index, agent)))
+        .find_map(|agent| runtime.agents.gpu_index(agent).map(|index| (index, agent)))
 }
 
 /// Copies pointer description after validating its source and destination.
 pub(crate) fn copy_pointer_description(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     pointer: usize,
     size: usize,
 ) -> Result<Option<PointerDescription>, Status> {
@@ -607,7 +678,7 @@ pub(crate) fn copy_pointer_description(
 
 /// Resolves a GPU address to its allocation and accessible agent.
 pub(crate) fn gpu_copy_address(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: Option<&PointerDescription>,
     pointer: usize,
     size: usize,
@@ -635,7 +706,7 @@ pub(crate) fn gpu_copy_address(
 /// Resolves a caller-owned image backing range to this agent's GPU address.
 /// Image data lifetime remains the caller's responsibility under HSA.
 pub(crate) fn image_device_address(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     pointer: usize,
     size: usize,
     agent: HsaAgent,
@@ -646,7 +717,7 @@ pub(crate) fn image_device_address(
 
 /// Resolves image backing and the owner to retain through native retirement.
 pub(crate) fn image_copy_borrow(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     pointer: usize,
     size: usize,
     agent: HsaAgent,
@@ -666,7 +737,7 @@ pub(crate) fn image_copy_borrow(
 
 /// Prepares host copy source before publication or execution.
 fn prepare_host_copy_source(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: Option<&PointerDescription>,
     pointer: usize,
     host: usize,
@@ -695,7 +766,7 @@ fn prepare_host_copy_source(
 
 /// Prepares host copy destination before publication or execution.
 fn prepare_host_copy_destination(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: Option<&PointerDescription>,
     pointer: usize,
     host: usize,
@@ -712,7 +783,7 @@ fn prepare_host_copy_destination(
 
 /// Checks virtual memory permissions for a copy by the given agent.
 pub(crate) fn vmem_copy_access(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     description: &PointerDescription,
     agent: HsaAgent,
     required_access: u32,
@@ -768,21 +839,21 @@ fn select_compute(
 
 /// Selects a mechanism from immutable generation policy and native capability.
 fn copy_uses_compute(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     index: usize,
     source: HsaAgent,
     destination: HsaAgent,
     preference: CopyPreference,
 ) -> Result<bool, Status> {
     let peer = source != destination
-        && runtime.gpu_index(source).is_some()
-        && runtime.gpu_index(destination).is_some();
-    let same_gpu = source == destination && runtime.gpu_index(source).is_some();
-    let device = &runtime.gpus[index].device;
+        && runtime.agents.gpu_index(source).is_some()
+        && runtime.agents.gpu_index(destination).is_some();
+    let same_gpu = source == destination && runtime.agents.gpu_index(source).is_some();
+    let device = &runtime.agents.gpus[index].device;
     let native_sdma = device.gpu().is_ok_and(|gpu| gpu.supports_linear_copy());
     let compute = select_compute(
-        runtime.sdma_enabled,
-        runtime.peer_sdma_enabled,
+        runtime.config.sdma_enabled,
+        runtime.config.peer_sdma_enabled,
         peer,
         same_gpu,
         native_sdma,
@@ -800,7 +871,7 @@ fn copy_uses_compute(
     reason = "preserves the HSA source/destination/agent tuple with explicit route selection"
 )]
 fn resolve_async_copy(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     destination: usize,
     dst_agent: HsaAgent,
     source: usize,
@@ -810,8 +881,8 @@ fn resolve_async_copy(
     preference: CopyPreference,
 ) -> Result<ResolvedAsyncCopy, Status> {
     if size == 0 {
-        if (dst_agent.handle != 0 && !runtime.is_agent(dst_agent))
-            || (src_agent.handle != 0 && !runtime.is_agent(src_agent))
+        if (dst_agent.handle != 0 && !runtime.agents.is_agent(dst_agent))
+            || (src_agent.handle != 0 && !runtime.agents.is_agent(src_agent))
         {
             return Err(INVALID_AGENT);
         }
@@ -824,8 +895,8 @@ fn resolve_async_copy(
     let src_description = copy_pointer_description(runtime, source, size)?;
     let dst_agent = copy_agent(runtime, dst_agent, dst_description.as_ref())?;
     let src_agent = copy_agent(runtime, src_agent, src_description.as_ref())?;
-    let dst_gpu = runtime.gpu_index(dst_agent);
-    let src_gpu = runtime.gpu_index(src_agent);
+    let dst_gpu = runtime.agents.gpu_index(dst_agent);
+    let src_gpu = runtime.agents.gpu_index(src_agent);
     if let Some(index) = copy_gpu_index.or(src_gpu.or(dst_gpu)) {
         let compute = copy_uses_compute(runtime, index, src_agent, dst_agent, preference)?;
         let gpu_agent = HsaAgent {
@@ -847,7 +918,7 @@ fn resolve_async_copy(
             gpu_agent,
             ACCESS_PERMISSION_RO,
         );
-        let device = Box::new(runtime.gpus[index].device.clone());
+        let device = Box::new(runtime.agents.gpus[index].device.clone());
         return match (gpu_destination, gpu_source) {
             (Ok((destination, dst_base)), Ok((source, src_base))) => Ok(ResolvedAsyncCopy {
                 route: AsyncCopyRoute::Gpu {
@@ -949,7 +1020,7 @@ fn resolve_async_copy(
 
 /// Resolves sync GPU copy to a validated runtime resource.
 pub(crate) fn resolve_sync_gpu_copy(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     destination: usize,
     source: usize,
     size: usize,
@@ -983,7 +1054,7 @@ pub(crate) fn resolve_sync_gpu_copy(
             )?;
             Ok(ResolvedSyncGpuCopy {
                 route: SyncGpuCopyRoute::FromHost {
-                    device: Box::new(runtime.gpus[index].device.clone()),
+                    device: Box::new(runtime.agents.gpus[index].device.clone()),
                     compute: copy_uses_compute(
                         runtime,
                         index,
@@ -1022,7 +1093,7 @@ pub(crate) fn resolve_sync_gpu_copy(
             )?;
             Ok(ResolvedSyncGpuCopy {
                 route: SyncGpuCopyRoute::ToHost {
-                    device: Box::new(runtime.gpus[index].device.clone()),
+                    device: Box::new(runtime.agents.gpus[index].device.clone()),
                     compute: copy_uses_compute(
                         runtime,
                         index,
@@ -1091,9 +1162,9 @@ pub(crate) fn resolve_sync_gpu_copy(
                                 CopyPreference::Default,
                             )?,
                         ],
-                        source_device: Box::new(runtime.gpus[source_index].device.clone()),
+                        source_device: Box::new(runtime.agents.gpus[source_index].device.clone()),
                         destination_device: Box::new(
-                            runtime.gpus[destination_index].device.clone(),
+                            runtime.agents.gpus[destination_index].device.clone(),
                         ),
                         source,
                         destination,
@@ -1650,7 +1721,7 @@ fn execute_copy_route(
                 }
             };
             // SAFETY: The caller keeps ordinary host ranges live through
-            // completion. HsaState-owned memory is borrowed, and the registry
+            // completion. HsaSession-owned memory is borrowed, and the registry
             // lock keeps loaded mappings live for this copy. ptr::copy also
             // permits overlapping ranges.
             unsafe { std::ptr::copy(source_host as *const u8, destination_host as *mut u8, size) };
