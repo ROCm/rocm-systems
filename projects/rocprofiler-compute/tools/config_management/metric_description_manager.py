@@ -297,7 +297,6 @@ def update_docs_file(
             docs_descriptions[section][metric_name] = entry
 
     cm_utils.save_yaml(docs_descriptions, output_path)
-    print(f"Updated: {output_path}")
 
 
 def load_docs_file(arch_name: str, docs_dir: Union[str, Path]) -> dict:
@@ -337,19 +336,16 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing: dict) -> dict:
             # If RST differs from plain, it was manually edited -> preserve it
             if existing_rst and existing_rst != existing_plain:
                 new_data["rst"] = existing_rst  # PRESERVE manual edit
-                # Don't print - this is routine
 
             # Otherwise, use new auto-generated RST (plain->rst conversion)
 
     # Second pass: Preserve metrics that exist in the file but not extracted
     # from panels (e.g., metrics defined in panel tables but lacking
     # descriptions in metrics_description)
-    preserved_count = 0
     for section, existing_metrics in existing.items():
         if section not in new_descriptions:
             # Entire section missing from panel extraction - preserve it
             new_descriptions[section] = existing_metrics
-            preserved_count += len(existing_metrics)
         else:
             # Check for individual metrics missing from panel extraction
             for metric_name, existing_data in existing_metrics.items():
@@ -357,13 +353,6 @@ def preserve_manual_rst_edits(new_descriptions: dict, existing: dict) -> dict:
                     # Metric exists in the file but not in panel extraction
                     # preserve it
                     new_descriptions[section][metric_name] = existing_data
-                    preserved_count += 1
-
-    if preserved_count > 0:
-        print(
-            f"  Preserved {preserved_count} metrics from the description file "
-            "(not in panel descriptions)"
-        )
 
     return new_descriptions
 
@@ -398,7 +387,6 @@ def validate_descriptions(
 
 def sync_arch(arch_name: str, docs_dir: Union[str, Path]) -> None:
     """Sync an arch's description file, keeping its hand-edited RST."""
-    print(f"Syncing descriptions for {arch_name}...")
     descriptions = with_docs_names(
         arch_name,
         extract_descriptions_from_arch(arch_name, arch_panel_configs(arch_name)),
@@ -455,13 +443,13 @@ def main() -> int:
         print(f"Error: no analysis views for {arch}")
         return 1
 
-    if args.sync_arch:
-        sync_arch(args.sync_arch, args.docs_output_dir)
-        return 0
-
-    if args.sync_all:
-        for arch in sorted(METRIC_LIBRARY_PARENT_ARCH):
+    if args.sync_arch or args.sync_all:
+        archs = (
+            [args.sync_arch] if args.sync_arch else sorted(METRIC_LIBRARY_PARENT_ARCH)
+        )
+        for arch in archs:
             sync_arch(arch, args.docs_output_dir)
+            print(f"Updated: {docs_file(arch, args.docs_output_dir)}")
         return 0
 
     if args.validate:
