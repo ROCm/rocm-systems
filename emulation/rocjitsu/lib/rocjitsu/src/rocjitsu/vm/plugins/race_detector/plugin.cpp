@@ -1301,11 +1301,16 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         }
       }
       uint32_t ldsAddrs[64];
+      // Async loads can write LDS out of order even though they decrement
+      // ASYNCcnt in order (CDNA5 ISA 10.8). Keep the event's completion class
+      // for partial waits, but do not use it to order these writes.
+      const auto ldsWriteOrder =
+          memoryOrder == MemoryOrderClass::ASYNC_LOAD ? MemoryOrderClass::UNORDERED : memoryOrder;
       const uint64_t validLaneMask = amdgpu::lds_destination_write_mask(d, wf.cu().arch());
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
-        // Check each written lane against pending LDS reads, such as a tensor
+        // Check each written lane against pending LDS accesses, such as a tensor
         // store's source or a DS read, as the DS write path does. That includes
         // the wave's own pending DS reads: the ISA does not establish that a
         // direct-to-LDS write waits for them, so as a conservative rule the
@@ -1315,7 +1320,7 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
         if (bytes != 0)
           detector->validateWrite(static_cast<int>(ldsAddrs[lane]), waveId, static_cast<int>(lane),
-                                  static_cast<int>(bytes), memoryOrder);
+                                  static_cast<int>(bytes), ldsWriteOrder);
       }
       if (obligations.empty())
         return;

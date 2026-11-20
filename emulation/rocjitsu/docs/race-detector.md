@@ -276,7 +276,7 @@ wait and barrier rules, including the exemption for matching LDS atomics.
 Enable LDS write-after-write checking with:
 
 ```json
-{ "plugins": { "race": { "lds_waw": true } } }
+{ "require_all_plugins": true, "plugins": { "race": { "lds_waw": true } } }
 ```
 
 LDS read-after-write and write-after-read checks and register race checks
@@ -326,9 +326,9 @@ LDS writes for those checks.
   the same wave that touch the same LDS byte, in either order, until
   `s_wait_tensorcnt` or a full `tensorcnt` retires the earlier one. Two stores
   of the same tile only read it, which is safe; two loads over the same bytes
-  are an LDS write/write conflict, reported under the same rule. Each
-  instruction is registered when it issues, as other memory instructions are,
-  so an instruction that moves no data still occupies its
+  are an LDS write/write conflict, reported under the same rule when `lds_waw`
+  is enabled. Each instruction is registered when it issues, as other memory
+  instructions are, so an instruction that moves no data still occupies its
   `tensorcnt` slot, and a transfer that waits for memory is pending from the
   moment it issues.
 - **Async copy races** (gfx1250): `global_load_async_to_lds_*` and
@@ -820,10 +820,12 @@ this source tree. The original
   destinations. When enabled, LDS WAW is reported under the rules for LDS
   reads: an earlier write of another wave must be waited for and followed by
   a barrier, and an earlier write of the same wave must be waited for or share
-  an in-order completion class with the later write. Overlapping lanes within
-  a single instruction are not checked against each other. See LDS
-  write-after-write reporting above for the reporting policy and the
-  `lds_waw` option.
+  a class that orders LDS accesses with the later write. Completion-counter
+  ordering alone does not establish that order: gfx1250 async loads can write
+  LDS out of order even though they decrement `asynccnt` in order (CDNA5 ISA
+  10.8). Overlapping lanes within a single instruction are not checked against
+  each other. See LDS write-after-write reporting above for the reporting
+  policy and the `lds_waw` option.
 
 - **Embedded waits**: the race detector applies the VINTERP EXPCNT threshold before
   checking its VGPR sources on GFX11, GFX11.5 and GFX12. A threshold of 7 leaves

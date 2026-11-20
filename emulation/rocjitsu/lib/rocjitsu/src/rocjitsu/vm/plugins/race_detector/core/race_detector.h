@@ -110,14 +110,14 @@ public:
 
   /// @brief Check for RAW hazards against outstanding LDS writes.
   /// @details Same-wave accesses are ordered when the earlier LDS access has
-  /// completed or both accesses belong to the same non-UNORDERED completion class.
+  /// completed or both accesses share a non-UNORDERED LDS access class.
+  /// Pass UNORDERED when only counter completion is ordered, not the LDS access.
   void validateRead(int addr, WaveId, int lane, int nBytes,
                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                     uint8_t atomicBytes = 0) const;
 
   /// @brief Check for WAR and WAW hazards against outstanding LDS accesses.
-  /// @details Same-wave accesses are ordered when the earlier LDS access has
-  /// completed or both accesses belong to the same non-UNORDERED completion class.
+  /// @details Uses the same LDS access ordering as validateRead.
   /// If checkLdsWaw is enabled at construction, WAW is reported at the write,
   /// independent of values or later reads.
   void validateWrite(int addr, WaveId, int lane, int nBytes,

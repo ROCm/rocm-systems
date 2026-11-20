@@ -904,6 +904,16 @@ TEST_F(TensorDmaRaceTest, DsWriteOverAnotherWavesWriteRacesUntilWaitAndBarrier) 
   EXPECT_FALSE(ds_write(0, 4));
 }
 
+TEST_F(TensorDmaRaceTest, LdsWawPreservesThePendingReadDiagnostic) {
+  ASSERT_FALSE(ds_write(0, 4));
+  ASSERT_FALSE(ds_read(0, 4));
+  const size_t previous = sink->str().size();
+  ASSERT_TRUE(ds_write(1, 4));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)"), std::string::npos) << report;
+}
+
 TEST(RaceDetectorPluginTest, LdsWawOptionControlsOnlyLdsWriteWriteReports) {
   struct Config {
     const char *json;
@@ -1197,6 +1207,55 @@ TEST_F(TensorDmaRaceTest, AsyncStoreAfterAsynccntIsSafe) {
 TEST_F(TensorDmaRaceTest, AsyncLoadOverAPendingAsyncStoreSourceRaces) {
   EXPECT_FALSE(async_store(0, 4));
   EXPECT_TRUE(async_load(0, 4));
+}
+
+class AsyncLoadWawTest : public TensorDmaRaceTest, public ::testing::WithParamInterface<int> {};
+
+// CDNA5 ISA 10.8 permits the LDS writes to occur out of order, although ASYNCcnt
+// decrements in order. Only a wait that completes the first load orders this pair.
+TEST_P(AsyncLoadWawTest, DecodedLoadsToTheSameLdsDword) {
+  auto &cu = *fixture.cu();
+  auto &wave = *waves[0];
+  const uint32_t lds_base = cu.allocate_lds(256);
+  wave.set_lds_base(lds_base);
+  wave.set_lds_size(256);
+  const uint32_t sgprs = wave.sgpr_alloc().base;
+  cu.write_sgpr(sgprs, 0x10000u);
+  cu.write_sgpr(sgprs + 1, 0);
+  const uint32_t vgprs = wave.vgpr_alloc().base;
+  cu.write_vgpr(vgprs + 1, 0, 0); // v1: both loads' LDS destination.
+  const auto words = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                          {.saddr = 0, .vdst = 1, .vaddr = 0});
+  auto load = [&](uint32_t global_offset) {
+    cu.write_vgpr(vgprs, 0, global_offset);
+    auto instruction = decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    wave.pc += 16;
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction.value(), wave);
+    ASSERT_TRUE(cu.execute_instruction(instruction.value().get(), wave).succeeded());
+    test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction.value()), wave);
+  };
+
+  ASSERT_NO_FATAL_FAILURE(load(0));
+  ASSERT_EQ(sink->str().find("RACE "), std::string::npos) << sink->str();
+  if (GetParam() >= 0) {
+    ASSERT_NO_FATAL_FAILURE(wait_asynccnt(0, GetParam()));
+  }
+  const size_t previous = sink->str().size();
+  ASSERT_NO_FATAL_FAILURE(load(4));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_EQ(report.find("RACE ") != std::string::npos, GetParam() != 0) << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)") != std::string::npos, GetParam() != 0) << report;
+}
+
+INSTANTIATE_TEST_SUITE_P(WaitThresholds, AsyncLoadWawTest, ::testing::Values(-1, 0, 1));
+
+TEST_F(TensorDmaRaceTest, AsyncLoadWawPartialWaitCompletesOnlyTheOlderLoad) {
+  ASSERT_FALSE(async_load(0, 0));
+  ASSERT_FALSE(async_load(0, 64));
+  wait_asynccnt(0, 1);
+  EXPECT_FALSE(async_load(0, 0));
+  EXPECT_TRUE(async_load(0, 64));
 }
 
 TEST_F(TensorDmaRaceTest, AsyncStoresOfOneSourceDoNotRace) {
