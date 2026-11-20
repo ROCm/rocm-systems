@@ -70,7 +70,7 @@ public:
   static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu,
                                                    std::unique_ptr<Instruction> inst,
                                                    amdgpu::Wavefront &wf) {
-    return cu.route_memory_inst(std::move(inst), wf);
+    return cu.route_memory_inst(inst, wf);
   }
 };
 
@@ -172,6 +172,14 @@ public:
       }
     }
     set_data(std::move(state));
+  }
+
+  TestMemoryInstruction(std::unique_ptr<DynamicInstState> state, std::string_view mnemonic,
+                        amdgpu::Operation operation, amdgpu::MemoryAddressing addressing,
+                        amdgpu::MemoryKind kind)
+      : TestMemoryInstruction(std::move(state), mnemonic) {
+    set_amdgpu_operation(operation);
+    set_amdgpu_memory(addressing, kind);
   }
 
 private:

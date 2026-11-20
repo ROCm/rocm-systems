@@ -326,6 +326,12 @@ struct RegisterModifiers {
   /// VADDR operand enabling coordinate tracking.
   const Operand *image_address = nullptr;
   std::optional<ShaderExportOperands> shader_export;
+  /// Base SGPR selector of the four-DWORD BVH resource (encoded SRSRC multiplied by four).
+  std::optional<uint16_t> bvh_resource;
+  /// Leading VADDR words read for every active lane. The remaining ray words are
+  /// read only for lanes whose pointer can fetch a complete node from that resource.
+  uint8_t bvh_pointer_words = 0;
+  const Operand *image_atomic_data = nullptr;
   const Operand *image_resource = nullptr;
   bool image_resource_info = false;
   std::optional<uint8_t> image_transfer_dim;
@@ -340,6 +346,8 @@ struct RegisterModifiers {
   uint8_t image_coordinate_count = 0;
   /// Coordinates occupy packed 16-bit halves.
   bool image_a16 = false;
+  /// GFX10 GET_LOD reads quad lanes 0, 1, and 2 for each active quad.
+  bool gfx10_lod_query_quad = false;
   /// VGPR words before coordinates, including offset, bias, compare, and explicit gradients.
   uint8_t image_prefix_words = 0;
   /// Prefix words in which only the low half carries an input.

@@ -41,6 +41,8 @@ import os
 from dataclasses import dataclass, field as _field
 from collections import defaultdict
 from itertools import groupby
+from pathlib import Path
+from functools import cached_property
 from enum import Enum, auto
 
 from amdisa.gpuisa import (
@@ -69,10 +71,23 @@ from amdisa.semantics import (
     takes_output_modifiers,
     takes_source_modifiers,
 )
-from amdisa.isa_profile import DppOpcodeRule, FloatDotAccumulation, SwmmacLayout
+from amdisa.isa_profile import (
+    DppOpcodeRule,
+    FloatDotAccumulation,
+    MIMG_BVH_INSTRUCTIONS,
+    SwmmacLayout,
+)
 
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.cpp_file import CppFile
+from amdisa.codegen.instruction_metadata import (
+    canonical_operation_name,
+    classification_flags,
+    installed_operation_names,
+    read_operation_names,
+    memory_classification,
+    operation_expression,
+)
 from amdisa.codegen.shared_baselines import (
     SCALAR_SHARED_INCLUDE as _SCALAR_SHARED_INCLUDE,
     CDNA_SHARED_INCLUDE as _CDNA_SHARED_INCLUDE,
@@ -444,6 +459,12 @@ class _ImageInstructionForm:
     lod_clamp: bool = False
     compare: bool = False
     horizontal: bool = False
+    pixels: int = 0
+    raw: bool = False
+    signed: bool = False
+    msaa: bool = False
+    coarse_derivatives: bool = False
+    packed_texels: int = 0
 
     @property
     def sample_control_initializers(self) -> list[str]:
@@ -451,6 +472,7 @@ class _ImageInstructionForm:
             f'.{field} = true'
             for field in (
                 'gradient16',
+                'coarse_derivatives',
                 'offset',
                 'lod_bias',
                 'lod_clamp',
@@ -472,6 +494,14 @@ class _ImageInstructionForm:
 
     @property
     def transfer_mode(self) -> str:
+        if self.msaa:
+            return 'Msaa'
+        if self.raw:
+            return (
+                ('Mip' if self.mip else '')
+                + 'Packed'
+                + ('Signed' if self.signed else '')
+            )
         return 'Mip' if self.mip and not self.sampled else 'Default'
 
 
@@ -560,8 +590,8 @@ class CodeGenerator:
     }
     _MEMORY_CLASSES = frozenset(_MEMORY_ISSUE_KINDS) - {'ds_barrier_arrive_async'}
 
-    # Image instructions whose generated bodies issue a memory access. Every
-    # other image instruction keeps its stub, which must not claim a pipeline.
+    # Forms routed through prepare_image_access or prepare_image_sample. GFX11
+    # also has dedicated packed, MSAA, atomic and BVH issue paths.
     _IMAGE_MEMORY_ARCHITECTURES = frozenset(
         ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4')
     )
@@ -578,6 +608,8 @@ class CodeGenerator:
             sampled=True, gather=True, zero_lod=True
         ),
     }
+
+    _RDNA4_GATHER_OPS = {'IMAGE_GATHER4', 'IMAGE_GATHER4_L'}
 
     # Shared scalar execution uses these encoding values without including one
     # ISA's generated operand enums. Validate the corresponding OPR_SSRC
@@ -641,13 +673,57 @@ class CodeGenerator:
         # instruction classes have been generated.
         self._split_execution_classes: list[str] = []
 
+    @staticmethod
+    def _image_pixel_form(name: str) -> _ImageInstructionForm | None:
+        parts = name.split('_')
+        if len(parts) < 3 or parts[:2] not in (['IMAGE', 'LOAD'], ['IMAGE', 'STORE']):
+            return None
+        variants = set(parts[2:]) - {'MIP', 'SGN'}
+        if len(variants) != 1:
+            return None
+        variant = variants.pop()
+        if variant not in ('PCK', 'PCK2', 'PCK4', 'BY2', 'BY4'):
+            return None
+        return _ImageInstructionForm(
+            mip='MIP' in parts,
+            pixels=int(variant[-1]) if variant[-1].isdigit() else 1,
+            raw=variant.startswith('PCK'),
+            signed='SGN' in parts,
+        )
+
     def _graphics_image_form(self, name: str) -> _ImageInstructionForm | None:
+        if name == 'IMAGE_MSAA_LOAD':
+            return _ImageInstructionForm(msaa=True)
+        if form := self._image_pixel_form(name):
+            return form if form.pixels == 1 else None
+        if name == 'IMAGE_GET_LOD':
+            return _ImageInstructionForm(sampled=True)
+        if form := self._image_sample_form(name):
+            # GFX11 does not implement coarse derivatives or packed gathers.
+            return None if form.coarse_derivatives or form.packed_texels else form
         return self._IMAGE_INSTRUCTION_FORMS.get(name)
 
-    def _issues_image_memory(self, name: str) -> bool:
+    def _uses_image_access_or_sample(self, name: str) -> bool:
+        arch = self.isa_spec.arch_name
+        if name == 'IMAGE_MSAA_LOAD':
+            return arch == 'rdna2'
+        if name.startswith('IMAGE_ATOMIC_'):
+            if arch in ('rdna1', 'rdna2'):
+                return (
+                    name.removeprefix('IMAGE_ATOMIC_').lower() in self._ATOMIC_OP_ENUM
+                )
+            return arch in ('cdna2', 'rdna4')
+        if form := self._image_pixel_form(name):
+            return arch in ('rdna1', 'rdna2') or (
+                arch in ('cdna2', 'rdna4') and form.pixels == 1
+            )
+        if arch in ('rdna1', 'rdna2') and self._image_sample_form(name):
+            return True
+        if arch == 'rdna4' and name in self._RDNA4_GATHER_OPS:
+            return True
         return (
-            self.isa_spec.arch_name in self._IMAGE_MEMORY_ARCHITECTURES
-            and name.upper() in self._IMAGE_INSTRUCTION_FORMS
+            arch in self._IMAGE_MEMORY_ARCHITECTURES
+            and name in self._IMAGE_INSTRUCTION_FORMS
         )
 
     @staticmethod
@@ -669,36 +745,89 @@ class CodeGenerator:
             )
         return 'amdgpu::gfx12_image_address_registers(inst_)'
 
+    def _image_sample_form(self, name: str) -> _ImageInstructionForm | None:
+        if form := self._IMAGE_INSTRUCTION_FORMS.get(name):
+            return form if form.sampled else None
+        parts = name.split('_')
+        if name in ('IMAGE_GATHER4H_PCK', 'IMAGE_GATHER8H_PCK'):
+            return _ImageInstructionForm(
+                sampled=True,
+                gather=True,
+                horizontal=True,
+                packed_texels=4 if parts[1] == 'GATHER4H' else 8,
+            )
+        if parts == ['IMAGE', 'GATHER4H']:
+            return _ImageInstructionForm(sampled=True, gather=True, horizontal=True)
+        if (
+            len(parts) < 2
+            or parts[0] != 'IMAGE'
+            or parts[1] not in ('SAMPLE', 'GATHER4')
+        ):
+            return None
+        options = set(parts[2:])
+        if options - {'L', 'LZ', 'D', 'CD', 'C', 'B', 'CL', 'O', 'G16'}:
+            return None
+        return _ImageInstructionForm(
+            sampled=True,
+            coarse_derivatives='CD' in options,
+            mip='L' in options,
+            derivatives=bool(options & {'D', 'CD'}),
+            gather=parts[1] == 'GATHER4',
+            zero_lod='LZ' in options,
+            gradient16='G16' in options,
+            offset='O' in options,
+            lod_bias='B' in options,
+            lod_clamp='CL' in options,
+            compare='C' in options,
+        )
+
     def _image_instruction_form(self, name: str) -> _ImageInstructionForm:
-        return self._IMAGE_INSTRUCTION_FORMS[name.upper()]
+        if name == 'IMAGE_MSAA_LOAD':
+            return _ImageInstructionForm(msaa=True)
+        if name.startswith('IMAGE_ATOMIC_'):
+            return _ImageInstructionForm()
+        if form := self._image_pixel_form(name):
+            return form
+        arch = self.isa_spec.arch_name
+        if arch in ('rdna1', 'rdna2') or (
+            arch == 'rdna4' and name in self._RDNA4_GATHER_OPS
+        ):
+            if form := self._image_sample_form(name):
+                return form
+        return self._IMAGE_INSTRUCTION_FORMS[name]
 
     def _image_address_base(self, inst: Instruction) -> str | None:
         """Address-only forms share their encoding, static uses and wait metadata."""
         name = inst.name
         if self.isa_spec.arch_name not in self._IMAGE_MEMORY_ARCHITECTURES:
             return None
-        if self._issues_image_memory(name):
+        if self._uses_image_access_or_sample(name):
             return None
         fields = []
         if name == 'IMAGE_GET_RESINFO':
             fields.append('.kind = amdgpu::ImageAddressKind::ResourceInfo')
         elif self.isa_spec.profile.image_dimensions_in_resource:
             return None
-        elif name in ('IMAGE_BVH_INTERSECT_RAY', 'IMAGE_BVH64_INTERSECT_RAY'):
+        elif name in MIMG_BVH_INSTRUCTIONS:
             kind = 'Bvh64' if 'BVH64' in name else 'Bvh'
             fields.append(f'.kind = amdgpu::ImageAddressKind::{kind}')
-        elif name.startswith(('IMAGE_SAMPLE_', 'IMAGE_GATHER4_')):
-            tokens = set(name.split('_')[2:])
-            for token, field in (('O', 'offset'), ('B', 'bias'), ('C', 'compare')):
-                if token in tokens:
+        elif name.startswith(('IMAGE_SAMPLE_', 'IMAGE_GATHER4_')) and (
+            form := self._image_sample_form(name)
+        ):
+            for enabled, field in (
+                (form.offset, 'offset'),
+                (form.lod_bias, 'bias'),
+                (form.compare, 'compare'),
+            ):
+                if enabled:
                     fields.append(f'.{field} = true')
-            if tokens & {'L', 'CL'}:
+            if form.mip or form.lod_clamp:
                 fields.append('.lod = true')
-            if tokens & {'D', 'CD'}:
+            if form.derivatives:
                 fields.append('.gradients = true')
-            if 'G16' in tokens:
+            if form.gradient16:
                 fields.append('.g16 = true')
-            if name.startswith('IMAGE_SAMPLE_'):
+            if not form.gather:
                 fields.append('.sample_result = true')
         elif name not in (
             'IMAGE_GET_LOD',
@@ -715,7 +844,12 @@ class CodeGenerator:
             + '}>'
         )
 
-    def _image_d16_components(self) -> str:
+    def _image_d16_components(self, name: str) -> str:
+        if name.startswith('IMAGE_GATHER') or (
+            name == 'IMAGE_MSAA_LOAD'
+            and self.isa_spec.profile.has_gfx11_image_address_extension
+        ):
+            return '4u'
         drops_empty = (
             self.isa_spec.profile.has_gfx11_image_address_extension
             or self.isa_spec.arch_name == 'rdna4'
@@ -793,6 +927,66 @@ class CodeGenerator:
 
     def _supports_simm64_literal_operands(self) -> bool:
         return 'OPR_SIMM64' in self.isa_spec.operand_types
+
+    @cached_property
+    def _operation_names(self) -> frozenset[str]:
+        # Instruction's operation type comes from the core shared header even
+        # for a standard ISA profile generated into a separate output tree.
+        # Production emits that header before generating instruction metadata.
+        config = getattr(self, 'config', None)
+        if config is not None:
+            if config.operation_names is not None:
+                return config.operation_names
+            if config.core_operations_header is not None:
+                return frozenset(
+                    read_operation_names(Path(config.core_operations_header))
+                )
+        return installed_operation_names()
+
+    def _operation_expression(self, name: str) -> str:
+        return operation_expression(name, self._operation_names)
+
+    def _instruction_metadata_stmts(self, inst, sem, fields: set[str]) -> list[str]:
+        """Resolve instruction facts once, alongside decoded operand construction."""
+        name = canonical_operation_name(inst.name)
+        operation = self._operation_expression(name)
+        addressing, kind = memory_classification(
+            name, sem.semantic_class if sem is not None else None
+        )
+        if name.startswith('FLAT_') and 'seg' in fields:
+            operation = (
+                f'inst_.seg == 1 ? {self._operation_expression("SCRATCH_" + name[5:])} : '
+                f'inst_.seg == 2 ? {self._operation_expression("GLOBAL_" + name[5:])} : '
+                + operation
+            )
+            address_expr = (
+                'inst_.seg == 1 ? amdgpu::MemoryAddressing::Scratch : '
+                'inst_.seg == 2 ? amdgpu::MemoryAddressing::Global : '
+                'amdgpu::MemoryAddressing::Flat'
+            )
+        elif addressing == 'Lds' and 'gds' in fields:
+            address_expr = 'inst_.gds ? amdgpu::MemoryAddressing::Gds : amdgpu::MemoryAddressing::Lds'
+        else:
+            address_expr = f'amdgpu::MemoryAddressing::{addressing}'
+        stmts = [f'set_amdgpu_operation({operation});']
+        if addressing != 'None':
+            stmts.append(
+                f'set_amdgpu_memory({address_expr}, amdgpu::MemoryKind::{kind});'
+            )
+        flags = classification_flags(name, sem)
+        if flags:
+            stmts.append('flags_ |= ' + ' | '.join(flags) + ';')
+        if 'lds' in fields and kind == 'Load':
+            if addressing in ('Buffer', 'TypedBuffer'):
+                stmts.append('if (inst_.lds) flags_ |= MEMORY_TO_LDS;')
+            elif sem is not None and self._legacy_flat_lds_load(sem):
+                # The same encoded bit enables scratch VADDR on CDNA3/4.
+                # Reuse the execution predicate for the legacy LDS meaning.
+                stmts.append(
+                    'if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) '
+                    'flags_ |= MEMORY_TO_LDS;'
+                )
+        return stmts
 
     @staticmethod
     def _literal64_condition_names(inst_enc: InstEncoding) -> list[str]:
@@ -2501,6 +2695,10 @@ class CodeGenerator:
             f'  case k{op.enum_name}:\n    return "{op.mnemonic}";'
             for op in vopd_slot_ops
         )
+        vopd_operation_cases = '\n'.join(
+            f'  case k{op.enum_name}:\n    return {self._operation_expression(op.mnemonic)};'
+            for op in vopd_slot_ops
+        )
 
         def opcode_mask(name: str, opcodes: frozenset[int]) -> str:
             unknown_opcodes = opcodes.difference(op.opcode for op in vopd_slot_ops)
@@ -3236,6 +3434,7 @@ class CodeGenerator:
               void execute_impl(amdgpu::Wavefront &wf);
 
               std::string disassemble() const override;
+              void implicit_uses(RegisterSet &uses) const override;
 
               private:
               enum class Format : uint8_t { VopdXy@VOPD3_FORMAT_ENUM@ };
@@ -3254,6 +3453,7 @@ class CodeGenerator:
               };
 
               static const char *op_name(uint16_t op);
+              static amdgpu::Operation operation(uint16_t op);
               static bool uses_src_neg_modifier(uint16_t op);
               static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);
               static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf,
@@ -3550,6 +3750,19 @@ class CodeGenerator:
               }
             }
 
+            amdgpu::Operation Vopd::operation(uint16_t op) {
+              switch (op) {
+            @VOPD_OPERATION_CASES@
+              default:
+                return amdgpu::Operation::Unknown;
+              }
+            }
+
+            void Vopd::implicit_uses(RegisterSet &uses) const {
+              if (x_.uses_vcc || y_.uses_vcc)
+                uses.expand(RegisterRef{RegClass::VCC, 0, 1});
+            }
+
             @VOPD3_MODEL_HELPERS@
 
             @INLINE_EXECUTION_HELPERS@
@@ -3638,6 +3851,7 @@ class CodeGenerator:
               std::memcpy(raw_words_.data(), words, size_);
               raw_encoding_ = raw_words_.data();
               init_operands();
+              set_amdgpu_operation(operation(opx_), operation(opy_));
             @VOPD_ISA_DIAGNOSTICS@
               mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
               mnemonic_ = mnemonic_storage_;
@@ -3750,6 +3964,7 @@ class CodeGenerator:
             )
             .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
             .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
+            .replace('@VOPD_OPERATION_CASES@', vopd_operation_cases)
             .replace('@VOPD3_MODEL_HELPERS@', vopd3_model_helpers)
             .replace('@VOPD3_VALIDATION_BRANCH@', vopd3_validation_branch)
             .replace('@VOPD3_CONSTRUCTOR_BRANCH@', vopd3_constructor_branch)
@@ -4332,7 +4547,7 @@ class CodeGenerator:
                 gfx11_mimg_no_dim_dmask_opcodes = [
                     inst.opcode
                     for inst in inst_enc.insts
-                    if inst.name in profile.gfx11_mimg_fixed_vaddr_words
+                    if inst.name in MIMG_BVH_INSTRUCTIONS
                 ]
                 if gfx11_mimg_no_dim_dmask_opcodes:
                     public_members.append(
@@ -4348,12 +4563,12 @@ class CodeGenerator:
                         )
                     )
 
-                nsa_group_rules = []
-                for inst in inst_enc.insts:
-                    groups = profile.gfx11_mimg_nsa_group_words.get(inst.name)
-                    if groups is not None:
-                        nsa_group_rules.append((inst.opcode, *groups))
-                if nsa_group_rules:
+                bvh_groups = [
+                    (inst.opcode, inst.name == 'IMAGE_BVH64_INTERSECT_RAY')
+                    for inst in inst_enc.insts
+                    if inst.name in MIMG_BVH_INSTRUCTIONS
+                ]
+                if bvh_groups:
                     public_members.append(
                         cgen.Line(
                             'uint32_t gfx11_mimg_nsa_group_width('
@@ -4365,22 +4580,14 @@ class CodeGenerator:
                         'uint32_t index, uint32_t vaddr_words) const {',
                         '  switch (inst_.op) {',
                     ]
-                    for opcode, default_groups, a16_groups in nsa_group_rules:
+                    for opcode, wide in bvh_groups:
                         nsa_group_lines.extend(
                             (
-                                f'  case {opcode}:',
-                                '    if (inst_.a16) {',
-                                '      static constexpr uint8_t widths[] = {'
-                                + ', '.join(str(width) for width in a16_groups)
-                                + '};',
-                                f'      return index < {len(a16_groups)} ? widths[index] : 0;',
-                                '    }',
-                                '    {',
-                                '      static constexpr uint8_t widths[] = {'
-                                + ', '.join(str(width) for width in default_groups)
-                                + '};',
-                                f'      return index < {len(default_groups)} ? widths[index] : 0;',
-                                '    }',
+                                f'  case {opcode}: {{',
+                                '    const auto widths = amdgpu::gfx11_bvh_group_widths('
+                                f'{str(wide).lower()}, inst_.a16);',
+                                '    return index < widths.size() ? widths[index] : 0;',
+                                '  }',
                             )
                         )
                     nsa_group_lines.extend(
@@ -5113,14 +5320,14 @@ class CodeGenerator:
                     cgen.Line(
                         'bool should_print_dst_operand(uint8_t operand_index) const override {\n'
                         '  // Image atomics have one encoded VDATA tuple, printed as a source.\n'
-                        '  return !mnemonic_.starts_with("image_atomic_") &&\n'
+                        '  return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&\n'
                         '         Instruction::should_print_dst_operand(operand_index);\n'
                         '}'
                     )
                 )
                 if 'tfe' in enc_field_names:
                     image_atomic_source_display = (
-                        '  if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {\n'
+                        '  if (operand_index == 0 && inst_.tfe && amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic) {\n'
                         '    // VDATA is the first source. Assembly includes the status slot;\n'
                         '    // the source dependency includes only the atomic payload.\n'
                         '    const auto first = operand->encoding_value();\n'
@@ -5157,9 +5364,16 @@ class CodeGenerator:
                                 'std::string image_vdata_name(int bits) const'
                             ),
                             cgen.Line(
+                                'bool should_print_src_operand(uint8_t index) const override {\n'
+                                '  // Keep the encoded VDATA operand visible for an illegal zero mask.\n'
+                                '  return (index == 0 && mnemonic_.starts_with("image_atomic_")) ||\n'
+                                '         Instruction::should_print_src_operand(index);\n'
+                                '}'
+                            ),
+                            cgen.Line(
                                 'void append_dst_operand(std::string &out, uint8_t index) const override {\n'
                                 '  const auto *operand = dst_operands_[index];\n'
-                                '  const bool status = flags_ & CONDITIONAL_LAST_VGPR_DEF;\n'
+                                '  const bool status = flags_ & (CONDITIONAL_LAST_VGPR_DEF | INCLUDES_UNWRITTEN_LAST_VGPR);\n'
                                 '  if (operand->is_vgpr() && !omits_gfx11_mimg_dim_dmask() && status != bool(inst_.tfe))\n'
                                 '    out += image_vdata_name(operand->size_bits() + 32 * (int(inst_.tfe) - int(status)));\n'
                                 '  else Instruction::append_dst_operand(out, index);\n'
@@ -5167,6 +5381,11 @@ class CodeGenerator:
                             ),
                         ]
                         image_atomic_source_display = (
+                            '  if (operand_index == 0 && !operand->size_bits() && mnemonic_.starts_with("image_atomic_")) {\n'
+                            '    // LLVM spells at least two registers for CMPSWAP or a TFE tuple.\n'
+                            '    out += image_vdata_name(inst_.tfe || mnemonic_ == "image_atomic_cmpswap" ? 64 : 32);\n'
+                            '    return;\n'
+                            '  }\n'
                             '  if (inst_.tfe && operand_index == 0 && operand->is_vgpr() && operand != nsa_vaddr_operand_) {\n'
                             '    // Store and atomic payloads never consume the spelled TFE slot.\n'
                             '    out += image_vdata_name(operand->size_bits() + 32);\n'
@@ -5722,6 +5941,10 @@ class CodeGenerator:
             ('cstring', True),
             ('string', True),
         ]
+        if self.isa_spec.profile.has_gfx11_image_address_extension:
+            _enc_cpp_includes.insert(
+                1, ('rocjitsu/isa/arch/amdgpu/shared/image_address.h', False)
+            )
         if needs_gfx12_cache_helpers:
             _enc_cpp_includes.insert(
                 1,
@@ -6350,6 +6573,8 @@ class CodeGenerator:
                       num_src_ = 5;
                       num_dst_ = 1;
                       flags_ |= MFMA;
+                      flags_ |= MATRIX_OP;
+                      set_amdgpu_operation({self._operation_expression(spec.mnemonic)});
                       flags_ |= MATRIX_REGISTER_ACCESSES | DIRECT_REGISTER_ACCESSES;
                     }}
                     '''))
@@ -6594,39 +6819,23 @@ class CodeGenerator:
                 '32 * amdgpu::image_coordinate_register_count('
                 'reinterpret_cast<const OpEncoding *>(inst)->dim, reinterpret_cast<const OpEncoding *>(inst)->a16)'
             )
-        if opnd_name == 'vaddr' and self._issues_image_memory(inst_name):
+        if opnd_name == 'vaddr' and self._uses_image_access_or_sample(inst_name):
             count = self._image_coordinate_register_count(
                 self._image_instruction_form(inst_name)
             ).replace('inst_.', 'reinterpret_cast<const OpEncoding *>(inst)->')
             return f'32 * {count}'
-        if self.isa_spec.arch_name == 'rdna2' and inst_name in (
-            'IMAGE_BVH_INTERSECT_RAY',
-            'IMAGE_BVH64_INTERSECT_RAY',
-        ):
+        if (
+            self.isa_spec.arch_name == 'rdna2'
+            or self.isa_spec.profile.has_gfx11_image_address_extension
+        ) and inst_name in MIMG_BVH_INSTRUCTIONS:
             if opnd_name in ('srsrc', 'vdata'):
                 return '128'
             if opnd_name == 'vaddr':
-                words = 12 if inst_name.startswith('IMAGE_BVH64') else 11
-                return f'(reinterpret_cast<const OpEncoding *>(inst)->a16 ? {32*(words-3)} : {32*words})'
+                wide = str(inst_name.startswith('IMAGE_BVH64')).lower()
+                return f'(32 * amdgpu::bvh_address_words({wide}, reinterpret_cast<const OpEncoding *>(inst)->a16))'
         if not self.isa_spec.profile.has_gfx11_image_address_extension:
             return None
-        if opnd_name == 'vdata':
-            fixed_words = self.isa_spec.profile.gfx11_mimg_fixed_vdata_words.get(
-                inst_name
-            )
-            if fixed_words is not None:
-                return str(fixed_words * 32)
-            return None
         if opnd_name == 'vaddr':
-            fixed_words = self.isa_spec.profile.gfx11_mimg_fixed_vaddr_words.get(
-                inst_name
-            )
-            if fixed_words is not None:
-                default_words, a16_words = fixed_words
-                return (
-                    '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? '
-                    f'{a16_words * 32} : {default_words * 32})'
-                )
             return (
                 'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst), '
                 f'"{inst_name.lower()}")'
@@ -6974,6 +7183,15 @@ class CodeGenerator:
               encoding_id_ = raw_encoding_[0] >> 23;
               opcode_ = scale_inst_.op;
               size_ = 4 * sizeof(MachineInst);
+              flags_ |= MATRIX_OP;
+              set_amdgpu_operation(
+                  cdna5_scaled_wmma_is_f4_32x16x128(inst)
+                      ? (cdna5_scaled_wmma_is_scale16(inst)
+                             ? amdgpu::Operation::V_WMMA_SCALE16_F32_32X16X128_F4
+                             : amdgpu::Operation::V_WMMA_SCALE_F32_32X16X128_F4)
+                      : (cdna5_scaled_wmma_is_scale16(inst)
+                             ? amdgpu::Operation::V_WMMA_SCALE16_F32_16X16X128_F8F6F4
+                             : amdgpu::Operation::V_WMMA_SCALE_F32_16X16X128_F8F6F4));
 
               dst_operands_[0] = &vdst;
               src_operands_[0] = &src0;
@@ -9166,7 +9384,9 @@ class CodeGenerator:
             return gds_guard + self._gen_ds_write2(dst_ops, src_ops, sem)
 
         if cls == 'atc_probe':
-            L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
+            L.append(
+                '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();'
+            )
             L.append('  d->translation_probe = true;')
             L.append('  d->num_dwords = 1;')
             L.append('  d->is_load = false;')
@@ -9185,7 +9405,7 @@ class CodeGenerator:
 
         if cls == 'buffer_store_from_lds':
             return (
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);\n'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);\n'
                 '  d->elem_size = 4;\n'
                 '  d->num_elems = 1;\n'
                 '  d->is_load = false;\n'
@@ -9273,7 +9493,7 @@ class CodeGenerator:
             )
             flags = '(1u | ((inst_.offset1 & 3u) << 1))' if modern else '0u'
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
             self._append_wait_counter_type(L, sem, cls)
             L.append(
@@ -9302,7 +9522,7 @@ class CodeGenerator:
             and self.isa_spec.profile.waitcnt_family == 'gfx10'
         ):
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
             self._append_wait_counter_type(L, sem, cls)
             L.append(
@@ -9316,7 +9536,7 @@ class CodeGenerator:
             source = 'addr' if ordered else 'data0'
             subtract = str(inst.name == 'DS_SUB_GS_REG_RTN').lower()
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
             L.append(
                 '  if (!amdgpu::GwsDevice::prepare_register_access('
@@ -9392,19 +9612,67 @@ class CodeGenerator:
         # and GFX12 VIMAGE/VSAMPLE carry five/four explicit selectors. Decode
         # the machine-inst fields for execution while retaining operand widths
         # for static liveness.
+        if (
+            cls == 'image_bvh'
+            and self.isa_spec.profile.has_gfx11_image_address_extension
+        ):
+            wide = str(inst.name == 'IMAGE_BVH64_INTERSECT_RAY').lower()
+            L = [
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                f'  {self._memory_cache_policy()}',
+            ]
+            self._append_wait_counter_type(L, sem, 'buffer_load')
+            L += [
+                '  if (amdgpu::prepare_bvh_intersection(wf, *d, inst_,',
+                f'                                       raw_encoding(), {wide}).failed()) return;',
+                '  set_data(std::move(d));',
+            ]
+            return '\n'.join(L)
+
+        if (
+            self.isa_spec.arch_name == 'rdna4'
+            and cls == 'image_atomic'
+            and self._uses_image_access_or_sample(inst.name)
+        ):
+            data_base = self._vgpr_base_expr('vdata')
+            L = [
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                f'  d->is_load = {self._atomic_return_expr("0")};',
+                f'  d->dst_reg_base = {data_base};',
+                f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
+                f'  d->mtype = {self._mtype_expr()};',
+            ]
+            self._append_atomic_fp_policy(L, sem, ds=False)
+            self._append_wait_counter_type(L, sem)
+            L += [
+                f'  if (amdgpu::prepare_gfx12_image_atomic(wf, *d, inst_.rsrc, {self._image_coordinates()},',
+                '        {.dmask = inst_.dmask, .dim = inst_.dim, .a16 = bool(inst_.a16),',
+                '         .d16 = bool(inst_.d16), .r128 = bool(inst_.r128), .tfe = bool(inst_.tfe),',
+                '         .da = true, .unorm = true}).failed()) return;',
+                '  set_data(std::move(d));',
+            ]
+            return '\n'.join(L)
+
         if cls in (
             'image_load',
             'image_store',
             'image_sample',
-        ) and self._issues_image_memory(inst.name):
+            'image_atomic',
+        ) and self._uses_image_access_or_sample(inst.name):
             is_load = cls != 'image_store'
             sample = cls == 'image_sample'
+            atomic = cls == 'image_atomic'
             form = self._image_instruction_form(inst.name)
             data_base = self._vgpr_base_expr('vdata')
             L.append(
-                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
             )
-            L.append(f'  d->is_load = {"true" if is_load else "false"};')
+            packed = self.isa_spec.arch_name == 'cdna2' and form.raw
+            if atomic:
+                L.append('  d->is_load = inst_.glc;')
+                L.append(f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};')
+            else:
+                L.append(f'  d->is_load = {"true" if is_load else "false"};')
             L.append(f'  {self._memory_cache_policy()}')
             self._append_wait_counter_type(L, sem)
             if is_load:
@@ -9427,28 +9695,58 @@ class CodeGenerator:
             flags.append(f'.mip = {str(form.mip and not sample).lower()}')
             flags.append(f'.gather = {str(form.gather).lower()}')
             flags.extend(form.sample_control_initializers)
+            if self.isa_spec.arch_name in ('rdna1', 'rdna2') and form.pixels:
+                flags += [
+                    f'.pixels = {form.pixels}',
+                    f'.raw = {str(form.raw).lower()}',
+                    f'.sign_extend = {str(form.signed).lower()}',
+                ]
+            if self.isa_spec.arch_name == 'rdna2' and inst.name == 'IMAGE_MSAA_LOAD':
+                flags.append('.msaa_load = true')
+            if form.packed_texels:
+                flags.append(f'.packed_texels = {form.packed_texels}')
             result_in_range = (
                 ', amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(*this)'
                 if self.isa_spec.arch_name == 'rdna2' and is_load
                 else ''
             )
+            if self.isa_spec.arch_name == 'rdna4' and form.raw:
+                flags.append('.raw = true')
+                if form.signed:
+                    flags.append('.sign_extend = true')
+            if self.isa_spec.arch_name == 'cdna2' and (atomic or packed):
+                flags.append('.raw = true')
             controls = '{' + ', '.join(flags) + '}'
             if sample:
                 sampler = (
                     'inst_.samp' if direct_resource_selector else 'inst_.ssamp * 4'
                 )
-                mode = form.sample_mode
                 prepare = (
                     f'prepare_image_sample(wf, *d, {resource}, {sampler}, '
-                    f'{coordinates}, {controls}, amdgpu::ImageSampleMode::{mode}{result_in_range})'
+                    f'{coordinates}, {controls}, amdgpu::ImageSampleMode::{form.sample_mode}{result_in_range})'
                 )
             else:
                 prepare = f'prepare_image_access(wf, *d, {resource}, {coordinates}, {controls}{result_in_range})'
             L.append(f'  if (amdgpu::{prepare}.failed()) {{')
             L.append('    return;')
             L.append('  }')
-            if not is_load:
-                L.append(f'  amdgpu::capture_buffer_format_store(wf, *d, {data_base});')
+            if self.isa_spec.arch_name == 'cdna2' and (atomic or packed):
+                signed = str(form.signed).lower()
+                L.append(
+                    f'  if (amdgpu::prepare_raw_image_payload(wf, *d, {data_base}, '
+                    f'inst_.dmask, {signed}).failed()) return;'
+                )
+            elif atomic:
+                L.append(
+                    '  if (amdgpu::capture_image_atomic(wf, *d, inst_.vdata, inst_.dmask, inst_.unorm, inst_.d16).failed()) return;'
+                )
+            elif not is_load:
+                capture = (
+                    'capture_packed_image_store'
+                    if self.isa_spec.arch_name == 'rdna4' and form.raw
+                    else 'capture_buffer_format_store'
+                )
+                L.append(f'  amdgpu::{capture}(wf, *d, {data_base});')
             L.append('  set_data(std::move(d));')
             if self.isa_spec.profile.has_gfx11_image_address_extension or (
                 self.isa_spec.arch_name == 'rdna4' and sample
@@ -9484,21 +9782,48 @@ class CodeGenerator:
             '.r128 = bool(inst_.r128), .tfe = bool(inst_.tfe), '
             '.lwe = bool(inst_.lwe), .unorm = bool(inst_.unorm)'
         )
+        if self._uses_gfx11_image_transfer_atomic(sem):
+            resource = 'inst_.srsrc * 4'
+            sc0, _, _ = self._coherency_exprs()
+            L = [
+                '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                f'  d->is_load = {self._atomic_return_expr(sc0)};',
+                f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
+                f'  {self._memory_cache_policy()}',
+            ]
+            self._append_atomic_fp_policy(L, sem, ds=False)
+            self._append_wait_counter_type(L, sem, 'buffer_atomic')
+            L += [
+                f'  if (amdgpu::prepare_image_transfer(wf, *d, {resource}, inst_.vdata,',
+                f'      {self._image_coordinates()}, {image_controls}}}).failed()) return;',
+                '  set_data(std::move(d));',
+            ]
+            return '\n'.join(L)
         gfx12_sample = (
             self.isa_spec.arch_name == 'rdna4'
             and cls == 'image_sample'
-            and self._issues_image_memory(image_name)
+            and self._uses_image_access_or_sample(image_name)
         )
         if (
             self.isa_spec.profile.has_gfx11_image_address_extension or gfx12_sample
         ) and (form := self._graphics_image_form(image_name)):
             transfer_mode = form.transfer_mode
+            query = image_name == 'IMAGE_GET_LOD'
             sample = form.sampled
             load = not image_name.startswith('IMAGE_STORE')
             resource = 'inst_.rsrc' if gfx12_sample else 'inst_.srsrc * 4'
             sampler = 'inst_.samp' if gfx12_sample else 'inst_.ssamp * 4'
             coords = self._image_coordinates()
-            counter = self._wait_counter_type(cls)
+            if query:
+                return (
+                    f'  amdgpu::execute_image_lod(wf, {resource}, {sampler}, inst_.vdata, '
+                    f'{coords}, {image_controls}}});'
+                )
+            counter = self._wait_counter_type(
+                'image_sample'
+                if gfx12_sample
+                else 'buffer_load' if load else 'buffer_store'
+            )
             mode = form.sample_mode
             if not sample:
                 sampler = '~0u'
@@ -9514,7 +9839,7 @@ class CodeGenerator:
             )
             return linear_body + '\n'.join(
                 [
-                    '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+                    '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
                     f'  d->is_load = {str(load).lower()};',
                     f'  {self._memory_cache_policy()}',
                     f'  d->wait_counter_type = {counter};',
@@ -9538,6 +9863,15 @@ class CodeGenerator:
                 'amdgpu::InstructionExecutionError::UnimplementedInstruction);'
             )
             return '\n'.join(L)
+
+        if inst.name == 'IMAGE_GET_LOD' and self.isa_spec.arch_name in (
+            'rdna1',
+            'rdna2',
+        ):
+            return (
+                '  amdgpu::execute_gfx10_image_get_lod(wf, inst_.srsrc * 4, inst_.ssamp * 4, '
+                f'inst_.vdata, {self._image_coordinates()}, {image_controls}}});'
+            )
 
         if cls == 'image_query' and inst.name.upper() == 'IMAGE_GET_RESINFO':
             vimage_encoding = self.isa_spec.arch_name == 'rdna4'
@@ -9606,7 +9940,9 @@ class CodeGenerator:
             f'  auto dst_register = amdgpu::resolve_scalar_destination_range(wf, inst_.sdata, {nd}u);'
         )
         L.append('  if (!dst_register) return;')
-        L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
+        L.append(
+            '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();'
+        )
         L.append('  d->dst_register = *dst_register;')
         L.append(f'  d->num_dwords = {nd};')
         L.append(f'  d->elem_size = {elem_size};')
@@ -9630,7 +9966,9 @@ class CodeGenerator:
     ) -> str:
         L = []
         nd = sem.num_elems
-        L.append('  auto d = std::make_unique<amdgpu::ScalarMemState>();')
+        L.append(
+            '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();'
+        )
         L.append(f'  d->num_dwords = {nd};')
         if self.isa_spec.profile.smem_address_uses_access_size:
             L.append('  d->elem_size = 4;')
@@ -9671,7 +10009,7 @@ class CodeGenerator:
         L = [
             f'  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {data_dwords}u);',
             '  if (!data_register) return;',
-            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            '  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();',
             '  d->dst_register = amdgpu::scalar_write_range(wf, *data_register);',
         ]
         if return_dwords != data_dwords:
@@ -10018,10 +10356,28 @@ class CodeGenerator:
             'rdna3_5',
         )
 
+    def _uses_gfx11_image_transfer_atomic(
+        self, sem: InstructionSemantics | None
+    ) -> bool:
+        return (
+            sem is not None
+            and self.isa_spec.profile.has_gfx11_image_address_extension
+            and sem.semantic_class == 'image_atomic'
+            and sem.operation in self._ATOMIC_OP_ENUM
+        )
+
     def _memory_issue_semantic_class(self, sem: InstructionSemantics) -> str:
         """Return the issue-metadata variant for one decoded instruction."""
         if (
             self.isa_spec.profile.has_gfx11_image_address_extension
+            and sem.semantic_class == 'image_bvh'
+        ):
+            return 'buffer_load'
+        if self._uses_gfx11_image_transfer_atomic(sem):
+            return 'buffer_atomic'
+        if (
+            self.isa_spec.profile.has_gfx11_image_address_extension
+            and sem.name != 'IMAGE_GET_LOD'
             and self._graphics_image_form(sem.name)
         ):
             return (
@@ -10216,7 +10572,7 @@ class CodeGenerator:
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         if not dedicated_flat_lds_load:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
@@ -10271,7 +10627,7 @@ class CodeGenerator:
         data_field = self.isa_spec.profile.flat_store_src_field
         data_base = self._vgpr_base_expr(data_field)
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(
@@ -10355,7 +10711,7 @@ class CodeGenerator:
         _, _, nt = self._coherency_exprs()
         stride = esz * ne
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -10399,7 +10755,7 @@ class CodeGenerator:
         _, _, nt = self._coherency_exprs()
         stride = esz * ne
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -10463,7 +10819,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {sem.elem_size};')
@@ -10481,7 +10837,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {sem.elem_size};')
         L.append(f'  d->num_elems = {sem.num_elems};')
@@ -10590,7 +10946,7 @@ class CodeGenerator:
         L = []
         sc0, sc1, nt = self._coherency_exprs()
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         acc = self._acc_vgpr_expr
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
@@ -10643,7 +10999,7 @@ class CodeGenerator:
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdata')};")
         L.append(f'  d->elem_size = {esz};')
@@ -10752,7 +11108,7 @@ class CodeGenerator:
         is_cmpswap = sem.operation in ('cmpswap', 'fcmpswap')
         has_data1 = is_cmpswap or sem.operation == 'wrap'
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         if returns_data:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
@@ -10844,7 +11200,7 @@ class CodeGenerator:
         )
         L.append(f'  uint64_t exec = {lanes};')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -10923,7 +11279,7 @@ class CodeGenerator:
 
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         if is_rtn:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
@@ -10981,7 +11337,7 @@ class CodeGenerator:
         op_enum = self._ATOMIC_OP_ENUM[sem.operation]
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
         L.append('  d->elem_size = 4;')
@@ -11015,7 +11371,7 @@ class CodeGenerator:
         is_async = sem.operation == 'async_barrier_arrive'
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         if not is_async:
             L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst', role='Dst')};")
@@ -11132,7 +11488,7 @@ class CodeGenerator:
         if not exec_independent:
             L.append('  }')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append('  d->elem_size = 4;')
         L.append('  d->num_elems = 0;')
@@ -11203,7 +11559,7 @@ class CodeGenerator:
             else 'mubuf_calculate_addresses'
         )
         L = [
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);',
             f'  d->is_load = {str(is_load).lower()};',
             f'  {self._memory_cache_policy()}',
             f'  d->non_temporal = {self._coherency_exprs()[2]};',
@@ -11292,7 +11648,7 @@ class CodeGenerator:
         if has_lds_field:
             L.append('  if (inst_.lds) {')
             L.append(
-                '    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+                '    std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
             )
             L.append(f'    d->elem_size = {esz};')
             L.append(f'    d->num_elems = {ne};')
@@ -11311,7 +11667,7 @@ class CodeGenerator:
             L.append('  }')
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdata')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11350,7 +11706,7 @@ class CodeGenerator:
             else 'mubuf_calculate_addresses'
         )
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -11417,7 +11773,7 @@ class CodeGenerator:
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11466,7 +11822,7 @@ class CodeGenerator:
         """Generate profile-specific DS ADDTID load addressing."""
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {sem.elem_size};')
@@ -11483,7 +11839,7 @@ class CodeGenerator:
         """Generate profile-specific DS ADDTID store addressing."""
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f'  d->elem_size = {sem.elem_size};')
         L.append(f'  d->num_elems = {sem.num_elems};')
@@ -11545,7 +11901,7 @@ class CodeGenerator:
         tr_kind = getattr(sem, 'transpose_kind', 0) or default_tr_kind
         L = []
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11569,7 +11925,7 @@ class CodeGenerator:
         esz, ne = sem.elem_size, sem.num_elems
         acc = self._acc_vgpr_expr
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append(f'  d->num_elems = {ne};')
@@ -11696,7 +12052,7 @@ class CodeGenerator:
         )
         L.append(f'  uint64_t exec = {lanes};')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
@@ -11781,7 +12137,7 @@ class CodeGenerator:
         )
         L.append(f'  uint64_t exec = {lanes};')
         L.append(
-            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+            '  std::unique_ptr<amdgpu::VectorMemState> d = acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
         L.append('  d->num_elems = 1;')
@@ -11963,9 +12319,9 @@ class CodeGenerator:
             or inst.name in getattr(profile, 'separately_rounded_mad_opcodes', ())
         ):
             return True
-        if self.isa_spec.profile.has_gfx11_image_address_extension and inst.name in (
-            'IMAGE_BVH_INTERSECT_RAY',
-            'IMAGE_BVH64_INTERSECT_RAY',
+        if (
+            self.isa_spec.profile.has_gfx11_image_address_extension
+            and inst.name in MIMG_BVH_INSTRUCTIONS
         ):
             return True
         if getattr(self.isa_spec, 'arch_name', None) == 'cdna1' and (
@@ -12558,12 +12914,52 @@ class CodeGenerator:
                         if self.semantics
                         else None
                     )
+                    bvh_addresses = (
+                        self.isa_spec.profile.has_gfx11_image_address_extension
+                        and inst_sem
+                        and inst_sem.semantic_class == 'image_bvh'
+                    )
+                    if bvh_addresses:
+                        wide = str(inst.name == 'IMAGE_BVH64_INTERSECT_RAY').lower()
+                        image_registers = (
+                            f'amdgpu::gfx11_bvh_registers({wide}, inst_.a16, inst_.vaddr, '
+                            'inst_.nsa ? raw_encoding() + 2 : nullptr)'
+                        )
+                        image_words = f'amdgpu::bvh_address_words({wide}, inst_.a16)'
+                    gfx11_form = (
+                        self._graphics_image_form(inst.name)
+                        if self.isa_spec.profile.has_gfx11_image_address_extension
+                        else None
+                    )
+                    extended_image_addresses = (
+                        self.isa_spec.profile.has_gfx11_image_address_extension
+                        and inst_sem
+                        and not self._uses_image_access_or_sample(inst.name)
+                        and (
+                            gfx11_form is not None
+                            or self._uses_gfx11_image_transfer_atomic(inst_sem)
+                        )
+                    )
+                    if extended_image_addresses:
+                        image_registers = self._image_coordinates()
+                        image_words = 'vaddr.size_bits() / 32u'
                     rdna_image = self.isa_spec.arch_name.startswith('rdna')
                     resource_info = rdna_image and inst.name == 'IMAGE_GET_RESINFO'
+                    gfx10_get_lod = (
+                        inst.name == 'IMAGE_GET_LOD'
+                        and self.isa_spec.arch_name in ('rdna1', 'rdna2')
+                    )
+                    _image_address_metadata = bool(inst_sem) and (
+                        resource_info
+                        or gfx10_get_lod
+                        or bvh_addresses
+                        or extended_image_addresses
+                        or self._uses_image_access_or_sample(inst.name)
+                    )
                     address_base = self._image_address_base(inst) if inst_sem else None
                     image_address_form = (
                         self._image_instruction_form(inst.name)
-                        if inst_sem and self._issues_image_memory(inst.name)
+                        if inst_sem and self._uses_image_access_or_sample(inst.name)
                         else None
                     )
                     masked_dpp_carry = (
@@ -12572,10 +12968,21 @@ class CodeGenerator:
                         and self.isa_spec.profile.dpp_masks_carry
                     )
                     _image_d16_preserves_destination = (
-                        image_address_form is not None
+                        inst_sem
                         and inst_sem.semantic_class in ('image_load', 'image_sample')
-                        and not image_address_form.gather
-                        and not self.isa_spec.profile.d16_loads_zero_unselected_half
+                        and not profile.d16_loads_zero_unselected_half
+                        and (
+                            (
+                                image_address_form is not None
+                                and not image_address_form.gather
+                            )
+                            or (
+                                extended_image_addresses
+                                and gfx11_form is not None
+                                and gfx11_form.sampled
+                                and not gfx11_form.gather
+                            )
+                        )
                     )
                     # Resolve the instruction's own encoding field names.
                     # Instructions from alternate sub-encodings (e.g.,
@@ -13165,7 +13572,13 @@ class CodeGenerator:
                                     if 'CMPSWAP' in inst.name:
                                         return_size += ' / 2'
                                     if 'tfe' in enc_field_names:
-                                        return_size += ' + 32u * inst_.tfe'
+                                        if (
+                                            self.isa_spec.profile.has_gfx11_image_address_extension
+                                            or self.isa_spec.arch_name == 'rdna4'
+                                        ):
+                                            return_size += ' + 32u * mimg_has_status(&inst_, false)'
+                                        else:
+                                            return_size += ' + 32u * inst_.tfe'
                                 else:
                                     return_size = str((inst_sem.elem_size or 4) * 8)
                                     if (
@@ -13312,8 +13725,15 @@ class CodeGenerator:
 
                         gfx12_image_payload = (
                             self.isa_spec.arch_name == 'rdna4'
-                            and self._issues_image_memory(inst.name)
+                            and self._uses_image_access_or_sample(inst.name)
                         )
+                        if self._uses_gfx11_image_transfer_atomic(inst_sem) or (
+                            gfx12_image_payload
+                            and inst_sem.semantic_class == 'image_atomic'
+                        ):
+                            access_conditions += [
+                                'modifiers.image_atomic_data = &vdata;',
+                            ]
                         if inst_sem.semantic_class == 'image_store' and (
                             self.isa_spec.profile.has_gfx11_image_address_extension
                             or gfx12_image_payload
@@ -13357,23 +13777,35 @@ class CodeGenerator:
                                     '}'
                                 )
                             )
-                        if rdna_image and (self._issues_image_memory(inst.name)):
+                        if rdna_image and (
+                            self._uses_image_access_or_sample(inst.name)
+                            or extended_image_addresses
+                            or gfx10_get_lod
+                        ):
                             gfx12 = self.isa_spec.arch_name == 'rdna4'
                             resource_member = 'rsrc' if gfx12 else 'srsrc'
-                            sampled = inst_sem.semantic_class == 'image_sample'
-                            if sampled:
-                                form = self._image_instruction_form(inst.name)
+                            query = inst.name == 'IMAGE_GET_LOD'
+                            sampled = inst_sem.semantic_class == 'image_sample' or query
+                            # GET_LOD on GFX10 computes its derivative from the first
+                            # three lanes in each live quad, regardless of the channel mask.
+                            if sampled and not gfx10_get_lod:
+                                form = (
+                                    self._image_instruction_form(inst.name)
+                                    if self._uses_image_access_or_sample(inst.name)
+                                    else gfx11_form
+                                )
+                                assert form is not None
                                 mode = form.sample_mode
                                 split_route = (
                                     self.isa_spec.profile.has_gfx11_image_address_extension
                                     or gfx12
-                                )
+                                ) and self._uses_image_access_or_sample(inst.name)
                                 sampler = 'inst_.samp' if gfx12 else 'inst_.ssamp * 4'
                                 fields = [
                                     f'.sampler = uint16_t({sampler})',
                                     '.dim = uint8_t(inst_.dim)',
                                     f'.mode = amdgpu::ImageSampleMode::{mode}',
-                                    '.query = false',
+                                    f'.query = {str(query).lower()}',
                                     (
                                         f'.linear_candidate = bool({self._ordinary_image_encoding()})'
                                         if split_route
@@ -13386,9 +13818,20 @@ class CodeGenerator:
                                     f'.gather = {str(form.gather).lower()}',
                                     '.lod_warning = bool(inst_.lwe)',
                                 ]
-                                if split_route and not form.gather:
-                                    fields.append(
-                                        '.filtered_feedback_candidate = bool(inst_.dmask && !inst_.r128 && (inst_.tfe || inst_.lwe))'
+                                if (
+                                    (
+                                        self.isa_spec.profile.has_gfx11_image_address_extension
+                                        or gfx12
+                                    )
+                                    and not query
+                                    and not form.gather
+                                    and not form.lod_clamp
+                                ):
+                                    fields.extend(
+                                        (
+                                            '.filtered_feedback_candidate = bool(inst_.dmask && !inst_.r128)',
+                                            '.texel_fault = bool(inst_.tfe)',
+                                        )
                                     )
                                 access_conditions.append(
                                     'modifiers.image_sample_sources = amdgpu::ImageSampleSources{'
@@ -13397,7 +13840,7 @@ class CodeGenerator:
                                 )
                             if (
                                 not sampled
-                                and self._issues_image_memory(inst.name)
+                                and self._uses_image_access_or_sample(inst.name)
                                 and not self._image_instruction_form(inst.name).mip
                             ):
                                 condition = (
@@ -13409,21 +13852,44 @@ class CodeGenerator:
                                     f'{condition}modifiers.image_transfer_dim = inst_.dim;'
                                 )
                             address_enabled = (
-                                'inst_.dmask || inst_.lwe' if sampled else 'inst_.dmask'
+                                'inst_.dmask || inst_.lwe'
+                                if sampled and not gfx10_get_lod
+                                else 'inst_.dmask'
                             )
                             access_conditions += [
                                 f'modifiers.image_resource = &{resource_member};',
                                 f'modifiers.image_reads_address = {address_enabled};',
                             ]
-                        if image_address_form is not None:
-                            form = image_address_form
+                        if bvh_addresses:
+                            access_conditions += [
+                                'modifiers.image_address = &vaddr;',
+                                f'modifiers.image_coordinates = {image_registers};',
+                                f'modifiers.image_coordinate_count = {image_words};',
+                                'modifiers.bvh_resource = uint16_t(inst_.srsrc * 4);',
+                                f'modifiers.bvh_pointer_words = 1 + {wide};',
+                            ]
+                        if (
+                            gfx10_get_lod
+                            or image_address_form is not None
+                            or extended_image_addresses
+                        ):
                             access_conditions += [
                                 'modifiers.image_address = &vaddr;',
                                 f'modifiers.image_coordinates = {self._image_coordinates()};',
                                 'modifiers.image_a16 = inst_.a16;',
                             ]
-                        if self._issues_image_memory(inst.name):
-                            form = self._image_instruction_form(inst.name)
+                            if gfx10_get_lod:
+                                access_conditions += [
+                                    'modifiers.image_coordinate_count = inst_.dim == amdgpu::kImageDimCube ? 3u : amdgpu::image_derivative_component_count(inst_.dim);',
+                                    'modifiers.gfx10_lod_query_quad = true;',
+                                ]
+                        if image_address_form is not None or extended_image_addresses:
+                            form = (
+                                image_address_form
+                                if image_address_form is not None
+                                else gfx11_form
+                                or _ImageInstructionForm()  # returning image atomics
+                            )
                             if self.isa_spec.profile.image_dimensions_in_resource:
                                 access_conditions += [
                                     'modifiers.gfx9_image_tuple.resource_selector = inst_.srsrc * 4;',
@@ -13658,7 +14124,7 @@ class CodeGenerator:
                                 'modifiers.packed_store_data = &vdata;'
                             )
                         if (
-                            self._issues_image_memory(inst.name)
+                            self._uses_image_access_or_sample(inst.name)
                             and inst_sem.semantic_class == 'image_store'
                         ):
                             access_conditions.append(
@@ -13720,7 +14186,7 @@ class CodeGenerator:
                                 f'modifiers.memory_result_payload_words = {(payload.size + 31) // 32};'
                             )
                         if _image_d16_preserves_destination:
-                            components = self._image_d16_components()
+                            components = self._image_d16_components(inst.name)
                             access_conditions.append(
                                 f'if (inst_.d16) modifiers.set_packed_image_result({components});'
                             )
@@ -13830,12 +14296,13 @@ class CodeGenerator:
                         and self._supports_dpp_for_instruction(inst, inst_dpp_enc_name)
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
                     )
-                    if (
+                    r128_resource_info = (
                         address_base
                         and inst.name == 'IMAGE_GET_RESINFO'
                         and enc.enc_name.upper() != 'ENC_MIMG'
                         and 'r128' in inst_field_names
-                    ):
+                    )
+                    if r128_resource_info:
                         # Assembly spells the full resource tuple even when R128 reads half.
                         public_members.append(
                             cgen.Line(
@@ -13846,7 +14313,7 @@ class CodeGenerator:
                                 '  ImageAddressInstruction::append_src_operand(out, index);\n}'
                             )
                         )
-                    if image_address_form is not None:
+                    if _image_address_metadata:
                         if self.isa_spec.arch_name == 'rdna4':
                             public_members.append(
                                 cgen.Statement(
@@ -13854,7 +14321,7 @@ class CodeGenerator:
                                     'uint8_t operand_index) const override'
                                 )
                             )
-                        if renders_image_address_list:
+                        if renders_image_address_list and not r128_resource_info:
                             public_members.append(
                                 cgen.Statement(
                                     'void append_src_operand(std::string &out, '
@@ -15417,7 +15884,7 @@ class CodeGenerator:
                         self.isa_spec.arch_name in ('cdna2', 'rdna1', 'rdna2', 'rdna4')
                         and inst_sem
                         and inst_sem.semantic_class in ('image_load', 'image_sample')
-                        and self._issues_image_memory(inst.name)
+                        and self._uses_image_access_or_sample(inst.name)
                     ):
                         sampled_result = str(
                             inst_sem.semantic_class == 'image_sample'
@@ -15432,6 +15899,33 @@ class CodeGenerator:
                             ctor_body_parts.append(
                                 'else if (inst_.tfe) flags_ |= RESERVES_UNWRITTEN_VGPR;'
                             )
+                    if (
+                        self.isa_spec.arch_name in ('rdna1', 'rdna2', 'rdna4')
+                        and inst_sem
+                        and inst_sem.semantic_class == 'image_atomic'
+                        and self._uses_image_access_or_sample(inst.name)
+                    ):
+                        status = (
+                            'mimg_has_status(&inst_, false)'
+                            if self.isa_spec.arch_name == 'rdna4'
+                            else 'inst_.tfe'
+                        )
+                        ctor_body_parts.append(
+                            f"if ({status} && {self._atomic_return_expr('inst_.glc')}) flags_ |= CONDITIONAL_LAST_VGPR_DEF;"
+                        )
+                    if inst.name == 'IMAGE_GET_LOD' and self.isa_spec.arch_name in (
+                        'rdna1',
+                        'rdna2',
+                        'rdna3',
+                        'rdna3_5',
+                    ):
+                        ctor_body_parts.append(
+                            'if (mimg_has_status(&inst_, true)) flags_ |= INCLUDES_UNWRITTEN_LAST_VGPR;'
+                        )
+                        if self.isa_spec.profile.has_gfx11_image_address_extension:
+                            ctor_body_parts.append(
+                                'else if (inst_.tfe) flags_ |= RESERVES_UNWRITTEN_VGPR;'
+                            )
                     gfx11_tfe = (
                         self.isa_spec.profile.has_gfx11_image_address_extension
                         if enc.enc_name.upper() == 'ENC_MIMG'
@@ -15440,15 +15934,9 @@ class CodeGenerator:
                     if gfx11_tfe and inst_sem:
                         sem_class = inst_sem.semantic_class
                         feedback = None
-                        image_result = (
-                            sem_class in ('image_load', 'image_sample')
-                            or inst.name == 'IMAGE_GET_LOD'
-                        )
+                        image_result = sem_class in ('image_load', 'image_sample')
                         if image_result:
-                            sampler = (
-                                sem_class == 'image_sample'
-                                or inst.name == 'IMAGE_GET_LOD'
-                            )
+                            sampler = sem_class == 'image_sample'
                             feedback = (
                                 f'mimg_has_status(&inst_, {str(sampler).lower()})'
                             )
@@ -15462,7 +15950,9 @@ class CodeGenerator:
                                 if buffer_lds_load
                                 else 'inst_.tfe'
                             )
-                        elif sem_class in ('image_atomic', 'buffer_atomic'):
+                        elif sem_class == 'image_atomic':
+                            feedback = 'inst_.glc && mimg_has_status(&inst_, false)'
+                        elif sem_class == 'buffer_atomic':
                             feedback = 'inst_.glc && inst_.tfe'
                         if feedback:
                             ctor_body_parts.append(
@@ -15644,7 +16134,9 @@ class CodeGenerator:
                         in self._MEMORY_ISSUE_KINDS
                         and (
                             not _mem_sem.semantic_class.startswith('image_')
-                            or self._issues_image_memory(inst.name)
+                            or self._uses_image_access_or_sample(inst.name)
+                            or self._memory_issue_semantic_class(_mem_sem)
+                            in ('buffer_store', 'buffer_load', 'buffer_atomic')
                         )
                     ):
                         ctor_body_parts.append(
@@ -15788,6 +16280,11 @@ class CodeGenerator:
                     ctor_body_parts.extend(_result_combinator_flag_stmts(_mem_sem))
                     ctor_body_parts.extend(
                         _instruction_class_flag_stmts(inst.name, _mem_sem)
+                    )
+                    ctor_body_parts.extend(
+                        self._instruction_metadata_stmts(
+                            inst, _mem_sem, inst_field_names
+                        )
                     )
 
                     ctor_body = ''.join(ctor_body_parts)
@@ -17037,17 +17534,29 @@ class CodeGenerator:
                     )
                     inst_classes.append(s)
                     inst_impls = [class_ctor_impl]
-                    if image_address_form is not None:
-                        address_registers = self._image_coordinates()
+                    if _image_address_metadata:
+                        address_registers = (
+                            image_registers
+                            if bvh_addresses or extended_image_addresses
+                            else self._image_coordinates()
+                        )
                         coordinate_count = (
-                            '1u'
-                            if resource_info
-                            else self._image_coordinate_register_count(
-                                image_address_form
+                            image_words
+                            if bvh_addresses or extended_image_addresses
+                            else (
+                                '1u'
+                                if resource_info
+                                else (
+                                    'amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16))'
+                                    if gfx10_get_lod
+                                    else self._image_coordinate_register_count(
+                                        image_address_form
+                                    )
+                                )
                             )
                         )
                         image_d16_preservation = (
-                            f'  const uint32_t components = {self._image_d16_components()};\n'
+                            f'  const uint32_t components = {self._image_d16_components(inst.name)};\n'
                             '  if (inst_.d16 && (components & 1u))\n'
                             '    if (auto r = vdata.to_register_ref()) {\n'
                             '      const RegisterRef preserved{\n'
@@ -17079,7 +17588,7 @@ class CodeGenerator:
                                     '}'
                                 )
                             )
-                        if renders_image_address_list:
+                        if renders_image_address_list and not r128_resource_info:
                             address_fallback = (
                                 'src_operands_[operand_index] != &vaddr || !inst_.nsa'
                                 if profile.mimg_max_nsa_words > 0
@@ -17114,7 +17623,11 @@ class CodeGenerator:
                                     '}'
                                 )
                             )
-                        query_inputs = 'inst_.dmask' if resource_info else None
+                        query_inputs = None
+                        if resource_info or gfx10_get_lod:
+                            query_inputs = 'inst_.dmask'
+                        elif extended_image_addresses and inst.name == 'IMAGE_GET_LOD':
+                            query_inputs = 'inst_.dmask || inst_.lwe'
                         static_coordinate_count = (
                             f'({query_inputs}) ? ({coordinate_count}) : 0u'
                             if query_inputs
@@ -17513,6 +18026,9 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_transfer.h', False)
                     )
+                    cpp_includes.append(
+                        ('rocjitsu/vm/graphics/bvh_intersection.h', False)
+                    )
                 if self.isa_spec.profile.gfx10_buffer_tfe and enc.enc_name in (
                     'ENC_MUBUF',
                     'ENC_MTBUF',
@@ -17520,7 +18036,7 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/gfx10_memory_exec.h', False)
                     )
-                if any(self._issues_image_memory(i.name) for i in all_insts):
+                if any(self._uses_image_access_or_sample(i.name) for i in all_insts):
                     cpp_includes.extend(
                         (header, False) for header in self._cache_flags_includes()
                     )
@@ -17530,7 +18046,7 @@ class CodeGenerator:
                                 (
                                     'rocjitsu/isa/arch/amdgpu/shared/image_sample.h'
                                     if any(
-                                        self._issues_image_memory(i.name)
+                                        self._uses_image_access_or_sample(i.name)
                                         and i.name.upper().startswith(
                                             ('IMAGE_SAMPLE', 'IMAGE_GATHER')
                                         )
@@ -18289,7 +18805,7 @@ class CodeGenerator:
                             False,
                         )
                     )
-                if any(self._issues_image_memory(i.name) for i in all_insts):
+                if any(self._uses_image_access_or_sample(i.name) for i in all_insts):
                     h_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_address.h', False)
                     )
@@ -18531,7 +19047,9 @@ class CodeGenerator:
                             (cache_flags_include, False)
                             for cache_flags_include in self._cache_flags_includes()
                         )
-                    if any(self._issues_image_memory(i.name) for i in all_insts):
+                    if any(
+                        self._uses_image_access_or_sample(i.name) for i in all_insts
+                    ):
                         model_cpp_includes.append(
                             (
                                 'rocjitsu/isa/arch/amdgpu/shared/image_address.h',
@@ -19037,6 +19555,11 @@ class CodeGenerator:
             )
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)set_data\(', 'inst.set_data(', prefixed_body
+            )
+            prefixed_body = _re.sub(
+                r'(?<!\.)(?<!\w)acquire_data<',
+                'inst.template acquire_data<',
+                prefixed_body,
             )
             prefixed_body = _re.sub(
                 r'(?<!\.)(?<!\w)size_(?!\w)', 'inst.size()', prefixed_body

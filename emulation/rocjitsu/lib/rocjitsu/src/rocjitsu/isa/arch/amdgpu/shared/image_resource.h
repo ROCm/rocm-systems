@@ -65,14 +65,20 @@ constexpr bool native_filterable_format(uint32_t format) {
 /// and filter formats that need its addressing or interpolation.
 inline bool compute_filtered_image_feedback(rj_code_arch_t arch, uint32_t dim,
                                             uint32_t resource_word3, uint32_t resource_word1,
-                                            uint32_t sampler_word2) {
+                                            uint32_t sampler_word2, ImageSampleMode mode,
+                                            bool offset, bool compare) {
   const uint32_t type = resource_word3 >> 28;
   const uint32_t swizzle = (resource_word3 >> 20) & 31;
+  // GFX11 prefix operations keep the native sampler's fixed-LOD source reads.
+  const bool one_dimensional = dim == kImageDim1d || dim == kImageDim1dArray;
+  if (one_dimensional && (offset || compare || mode == ImageSampleMode::Bias ||
+                          mode == ImageSampleMode::Derivatives16))
+    return false;
   const uint32_t format = rdna_image_format(arch, resource_word1);
   const bool filtered_xy = (sampler_word2 & (15u << 20)) != 0;
   const bool filtered_mip = ((sampler_word2 >> 26) & 3u) == 2;
   const bool tiled_1d = arch == ROCJITSU_CODE_ARCH_RDNA4 && swizzle && swizzle <= 4 &&
-                        (dim == kImageDim1d || dim == kImageDim1dArray) && dim + kImage1d == type;
+                        one_dimensional && dim + kImage1d == type;
   return image_sample_has_implicit_y(dim, type) || tiled_1d ||
          (image_is_1d_or_2d_sample(dim) && dim + kImage1d == type &&
           !native_filterable_format(format) && (filtered_xy || filtered_mip));
