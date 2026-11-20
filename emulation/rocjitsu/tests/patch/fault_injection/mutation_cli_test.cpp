@@ -1055,6 +1055,8 @@ TEST_F(FaultMutationCli, SharedLdsDisclosesBothOwnersAndMatchesLibrary) {
   EXPECT_NE(invoke({"--input", input_.string(), "--kernel", "unrelated", "--kind",
                     "LdsWrongAddress", "--list"}),
             0);
+  EXPECT_NE(stderr_.find("test_kernel0"), std::string::npos);
+  EXPECT_NE(stderr_.find("test_kernel1"), std::string::npos);
   EXPECT_FALSE(std::filesystem::exists(output_));
 }
 

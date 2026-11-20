@@ -276,6 +276,50 @@ TEST(FaultLdsWrongAddress, SharedHelperRejectsInvalidFlagsAndMalformedSibling) {
   }
 }
 
+TEST(FaultLdsWrongAddress, PrivateAndSharedSitesUseTheirOwnAffectedOwnerAllocations) {
+  std::vector<uint8_t> image = test::make_shared_lds_elf(false);
+  // A owns the private store at0 and calls the shared helper at512. B only
+  // calls that helper. A has eight VGPRs; B has four.
+  constexpr IsaFamily arch = IsaFamily::Rdna4;
+  const std::array<uint32_t, 4> entry = {0xd8340004u, 0x00000302u,
+                                         build_s_call_b64(30, 125, arch).value(),
+                                         build_s_endpgm(arch).value()};
+  std::memcpy(image.data() + 0x100, entry.data(), sizeof(entry));
+  constexpr size_t first_descriptor = 0x100 + 131 * sizeof(uint32_t);
+  amdhsa::kernel_descriptor_t descriptor = {};
+  std::memcpy(&descriptor, image.data() + first_descriptor, sizeof(descriptor));
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                     amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 1);
+  std::memcpy(image.data() + first_descriptor, &descriptor, sizeof(descriptor));
+  const FaultMutationContext source(image);
+  FaultMutationError error;
+  const FailureOr<LdsInventory> inventory =
+      discover_lds_wrong_address(source, "test_kernel0", error);
+  ASSERT_TRUE(inventory.succeeded()) << error.message;
+  ASSERT_EQ(inventory.value().sites().size(), 2u);
+  EXPECT_EQ(inventory.value().sites()[0].offset, 0u);
+  EXPECT_EQ(inventory.value().sites()[0].affected_owners.size(), 1u);
+  EXPECT_EQ(inventory.value().sites()[1].offset, 512u);
+  EXPECT_EQ(inventory.value().sites()[1].affected_owners.size(), 2u);
+  const FailureOr<LdsSelection> private_site =
+      select_lds_wrong_address(inventory.value(), {}, error);
+  ASSERT_TRUE(private_site.succeeded());
+  const FailureOr<LdsSelection> shared_site =
+      select_lds_wrong_address(inventory.value(), {.exact = std::nullopt, .ordinal = 1}, error);
+  ASSERT_TRUE(shared_site.succeeded());
+  const FailureOr<LdsResult> private_result =
+      apply_lds_wrong_address(source, private_site.value(), 4, error);
+  ASSERT_TRUE(private_result.succeeded()) << error.message;
+  EXPECT_TRUE(test::lds_owner_output_matches(source, 0, 4, private_result.value().image));
+  EXPECT_TRUE(apply_lds_wrong_address(source, shared_site.value(), 4, error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::InvalidParameters);
+  const FailureOr<LdsResult> shared_result =
+      apply_lds_wrong_address(source, shared_site.value(), 3, error);
+  ASSERT_TRUE(shared_result.succeeded()) << error.message;
+  EXPECT_TRUE(test::lds_owner_output_matches(source, 512, 3, shared_result.value().image));
+  EXPECT_TRUE(std::ranges::equal(source.image(), image));
+}
+
 TEST(FaultLdsWrongAddress, SharedRdnaMixedWavesUseEachOwnersAllocation) {
   std::vector<uint8_t> image = test::make_shared_lds_elf(false);
   constexpr size_t offset = 0x100 + 131 * sizeof(uint32_t) + sizeof(amdhsa::kernel_descriptor_t);

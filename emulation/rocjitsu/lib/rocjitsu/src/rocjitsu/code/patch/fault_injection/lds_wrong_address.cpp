@@ -27,6 +27,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -238,11 +239,15 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
         std::ranges::count_if(*owner_kernels, [&](const KernelDescriptorInfo &kernel) {
           return kernel.kernel_name == entry;
         });
-    if (matches != 1)
-      return reject_fault_mutation(error,
-                                   matches == 0 ? FaultMutationErrorCode::BadIdentity
-                                                : FaultMutationErrorCode::AmbiguousSelection,
-                                   "entry must match one exact kernel name");
+    if (matches == 0) {
+      std::string message = "entry must match one exact kernel name; descriptor entries:";
+      for (const KernelDescriptorInfo &kernel : *owner_kernels)
+        message += " " + kernel.kernel_name;
+      return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity, std::move(message));
+    }
+    if (matches > 1)
+      return reject_fault_mutation(error, FaultMutationErrorCode::AmbiguousSelection,
+                                   "exact entry name identifies multiple descriptors");
     const std::span<const KernelDescriptorInfo>::iterator kernel =
         std::ranges::find_if(*owner_kernels, [&](const KernelDescriptorInfo &item) {
           return item.kernel_name == entry;

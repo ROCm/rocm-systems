@@ -107,13 +107,13 @@ Generic mechanics and recipe semantics have separate responsibilities:
 | Feature | Status and main boundary | References |
 | --- | --- | --- |
 | Complete barrier Drop | Implemented for the target/wave forms below. Removes one logical barrier: an ordered two-member signal/wait pair or one true full-barrier instruction. A half-pair is never a singleton. | [`StaticBarrier` / family policy](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.h), [qualification](../lib/rocjitsu/src/rocjitsu/code/analysis/static_barriers.cpp), [analysis regressions](../tests/analysis/static_barriers_test.cpp), [Drop regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
-| LDS wrong address | Implements scalar b32/b64/b96/b128 loads and stores on gfx1200/gfx1201 wave32/wave64, gfx942/gfx950 wave64, and gfx1250 wave32. Also admits b32/b64 two-address and stride64 families on gfx1200/gfx1201/gfx942/gfx950. Replaces only the address VGPR with an explicitly supplied, distinct, allocated VGPR in the direct, independently owned CFG profile. Adds the target-specific subword, D16, and transpose profiles in the exact LDS matrices below. Other forms and targets remain follow-up work. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
+| LDS wrong address | Implements scalar b32/b64/b96/b128 loads and stores on gfx1200/gfx1201 wave32/wave64, gfx942/gfx950 wave64, and gfx1250 wave32. Also admits b32/b64 two-address and stride64 families on gfx1200/gfx1201/gfx942/gfx950. Replaces only the address VGPR with an explicitly supplied, distinct VGPR that satisfies every affected owner's allocation and bank checks. Adds the target-specific subword, D16, and transpose profiles in the exact LDS matrices below. Other forms and targets remain follow-up work. | [LDS API](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h), [library tests](../tests/patch/fault_injection/lds_wrong_address_test.cpp), [CLI tests](../tests/patch/fault_injection/lds_cli_test.cpp) |
 | Exact and logical-ordinal selection | An exact kernel name chooses one inventory; an exact context-bound handle takes precedence over the zero-based logical ordinal. Invalid exact requests fail without fallback. Ordinal zero chooses the first barrier by first-member offset, or the first LDS instruction by source offset. There is no race ranking or legacy physical-index adapter. | [`DropBarrierSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.h), [`select_drop_barrier`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/drop_barrier.cpp), [`LdsSelector`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.h) and [`select_lds_wrong_address`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/lds_wrong_address.cpp), [selection regressions](../tests/patch/fault_injection/drop_barrier_test.cpp) |
-| Multiple kernels in one text section | Limited support for independent sibling kernels. Discovery checks all entries before exposing one exact kernel's inventory; shared blocks, calls, aliased entries, and unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
+| Multiple kernels in one text section | Discovery checks all entries before exposing one exact kernel's inventory. Drop requires independent sibling CFGs; LDS also admits shared sites when complete affected ownership is proved. Unresolved owners are rejected. | [`FaultMutationContext`](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.h), [ownership analysis](../lib/rocjitsu/src/rocjitsu/code/patch/fault_injection/fault_mutation_context.cpp), [sibling preservation tests](../tests/patch/fault_injection/drop_barrier_test.cpp) |
 | Shared DBI instruction replacement | Consumed through `InstrumentationKind::ReplaceWithInst`. One transaction replaces complete source instructions through trampolines. Drop supplies one 4-byte NOP body for each qualified 4-byte barrier member. This does not widen observational trampoline-anchor admission. | [Instrumentor contract](../lib/rocjitsu/src/rocjitsu/code/patch/instrumentor.h), [DBI design](dbi-design.md), [transaction tests](../tests/patch/checked_text_edits_test.cpp), [replacement tests](../tests/patch/instrumentor_replacement_test.cpp) |
 | Offline CLI | Lists current-input sites and emits one complete Drop or one supported LDS address mutation using the same library. | [usage](#command-line-usage), [frontend](../tools/rj_code_mutate.cpp), [integration tests](../tests/patch/fault_injection/mutation_cli_test.cpp) |
 | Persistent selection files and replay bundles | Not provided; no durable replay format is committed. | — |
-| Helper, indirect-flow and firmware-preload ownership | Planned extensions; these inputs are not admitted by the current ownership profile. | — |
+| Helper, indirect-flow and firmware-preload ownership | LDS can list sites reached through shared helpers, recovered calls and supported CDNA preload entry points when complete ownership is proved. Recovered calls may still prevent emission. Drop requires independent direct control flow; unresolved flow remains rejected. | [ownership tests](../tests/patch/fault_injection/lds_ownership_test.cpp) |
 | Other mutation recipes and composition | Planned. Barrier movement, other address/order/scope changes, grouped or destructive partial Drop, and multi-mutation composition are not implemented here. | — |
 | Multiple text sections or dynamic occurrence selection | Unsupported. | — |
 
@@ -152,7 +152,9 @@ The table above describes Drop only. `lds_wrong_address_capabilities()` separate
 reports the exact LDS matrix below: scalar b32/b64/b96/b128 loads and stores on
 all five concrete targets, plus b32/b64 two-address and stride64 families on
 gfx1200/gfx1201/gfx942/gfx950 and the target-specific subword/transpose
-profiles below, restricted to independently owned direct CFGs.
+profiles below. LDS admits independent direct CFGs and qualified shared sites
+with complete affected-owner facts; the exact ownership and emission limits
+are described below.
 CDNA GDS encodings are excluded; the ACC data selector is preserved.
 A target is omitted if its decoder or binding is not linked. Other targets,
 waves, and DS forms are not advertised by this recipe; the Drop table does not
@@ -217,10 +219,12 @@ bound to the same file snapshot. Explicit-target static relocation metadata
 and dynamic writes outside descriptors retain the existing shared admission.
 This check does not resolve relocation values or add ABI qualification.
 
-The ownership profile admits closed direct CFGs with independent kernel entries. It rejects
-shared helpers/calls, indirect or unresolved flow,
+The Drop ownership profile admits closed direct CFGs with independent kernel
+entries. It rejects shared helpers/calls, indirect or unresolved flow,
 firmware-preload entries, and declared executable owners outside the analyzed
-text. Non-aliasing unselected sections are preserved; their executable flag alone
+text. LDS uses complete ownership facts for supported shared-helper, recovered-call
+and CDNA preload profiles as described below. Non-aliasing unselected sections
+are preserved; their executable flag alone
 does not imply another text section. Additional allocated executable sections
 must decode completely and satisfy the shared source checks before discovery
 can return an inventory. Detailed admission and diagnostics are in
@@ -278,8 +282,8 @@ For CDNA3/4 this window ends at the accumulator allocation base when that base
 is below the total allocation. These checks do not prove that the register has
 been initialized or holds a valid LDS address at runtime: the caller must arrange
 both. Static mutation affects every
-execution of the selected instruction. Other target/wave/form and shared-owner
-profiles remain follow-up work.
+execution of the selected instruction. Target/wave/form combinations outside the
+listed matrices and ownership cases without complete proof remain unsupported.
 
 Barrier qualification is all-or-nothing for a kernel's analyzed reachable
 scope: an unsupported form or incomplete barrier rejects that kernel's entire
