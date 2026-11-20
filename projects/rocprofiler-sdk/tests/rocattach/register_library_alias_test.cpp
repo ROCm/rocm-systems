@@ -23,7 +23,6 @@
 #include <rocprofiler-sdk/registration.h>
 
 #include <stdlib.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include <filesystem>
@@ -120,26 +119,5 @@ main(int argc, char** argv)
         return 1;
     }
 
-    auto child_pid = fork();
-    if(child_pid < 0)
-    {
-        std::cerr << "Test FAILED: could not fork registration subprocess\n";
-        return 1;
-    }
-    if(child_pid == 0) return run_registration_test(alias_path);
-
-    auto child_status = 0;
-    if(waitpid(child_pid, &child_status, 0) != child_pid)
-    {
-        std::cerr << "Test FAILED: could not wait for registration subprocess\n";
-        return 1;
-    }
-
-    if(!WIFEXITED(child_status) || WEXITSTATUS(child_status) != 0)
-    {
-        std::cerr << "Test FAILED: registration subprocess did not exit successfully\n";
-        return 1;
-    }
-
-    return 0;
+    return run_registration_test(alias_path);
 }

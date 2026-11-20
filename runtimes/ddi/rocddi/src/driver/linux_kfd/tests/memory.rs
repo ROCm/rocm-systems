@@ -66,6 +66,7 @@ struct Fixture {
 
 fn node() -> sysfs::KfdNode {
     sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
         host_atomics: false,
         node: 1,
         gpu_id: 42,
@@ -841,6 +842,7 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
     let make_device = |gfx_target| super::super::DeviceState {
         vm: fixture.vm.clone(),
         native: sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
             host_atomics: false,
             queues: sysfs::KfdQueueProperties {
                 gfx_target,
@@ -2952,6 +2954,7 @@ fn runtime_reenable_reuses_exact_vm_and_allows_late_distinct_device_activation()
         })
         .unwrap();
     let second = sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
         host_atomics: false,
         node: 2,
         gpu_id: 43,

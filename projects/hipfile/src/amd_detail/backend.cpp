@@ -48,6 +48,7 @@ BackendWithFallback::io(IoType type, std::shared_ptr<IFile> file, std::shared_pt
         std::exception_ptr e_ptr = std::current_exception();
         if (fallback_backend && is_fallback_eligible(e_ptr, nbytes) &&
             fallback_backend->score(file, buffer, size, file_offset, buffer_offset) >= 0) {
+            on_fallback();
             nbytes = fallback_backend->io(type, std::move(file), std::move(buffer), size, file_offset,
                                           buffer_offset);
         }

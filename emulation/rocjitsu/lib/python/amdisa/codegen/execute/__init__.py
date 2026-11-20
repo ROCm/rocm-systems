@@ -85,8 +85,6 @@ def _register_handlers() -> None:
         gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
-        gen_vector_bcnt,
-        gen_vector_mbcnt,
         gen_vector_movrel,
         gen_vector_swaprel,
         gen_vector_sat_pack,
@@ -99,7 +97,6 @@ def _register_handlers() -> None:
         gen_vector_div_fixup,
         gen_vector_div_scale,
         gen_vector_div_fmas,
-        gen_vector_dot,
         gen_vector_dot2c_bf16,
         gen_vector_bitop3,
         gen_vector_permlane_swap,
@@ -120,10 +117,6 @@ def _register_handlers() -> None:
         gen_pk_binop_f64,
         gen_pk_lshl_add_u64,
         gen_pk_mov_b32,
-        gen_dot2,
-        gen_dot2_true16,
-        gen_dot4,
-        gen_dot8,
     )
     from amdisa.codegen.execute.matrix import (
         gen_accvgpr_read,
@@ -179,8 +172,6 @@ def _register_handlers() -> None:
     )
 
     # Vector special
-    DISPATCH['vector_bcnt'] = lambda c: gen_vector_bcnt(c.dst_ops, c.src_ops)
-    DISPATCH['vector_mbcnt'] = lambda c: gen_vector_mbcnt(c.dst_ops, c.src_ops, c.op)
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
         c.dst_ops,
         c.src_ops,
@@ -249,8 +240,11 @@ def _register_handlers() -> None:
     DISPATCH['vector_div_fmas'] = lambda c: gen_vector_div_fmas(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
     )
-    DISPATCH['vector_dot'] = lambda c: gen_vector_dot(
-        c.dst_ops, c.src_ops, c.op, c.dtype
+    from .rj_arith_vector import gen_integer_dot
+    from .rj_arith_float import gen_float_dot32
+
+    DISPATCH['vector_dot'] = lambda c: (
+        gen_integer_dot(c) if c.dtype == 'i32' else gen_float_dot32(c)
     )
     DISPATCH['vector_dot2c_bf16'] = lambda c: gen_vector_dot2c_bf16(
         c.dst_ops, c.src_ops
@@ -359,31 +353,24 @@ def _register_handlers() -> None:
     # DOT: every semantic class routes here, so the generator keeps no
     # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
     # fails if a new class arrives without an entry.
-    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16', 'dot2_i32_i16', 'dot2_u32_u16'):
-        DISPATCH[_cls] = lambda c: gen_dot2(
-            c.dst_ops,
-            c.src_ops,
-            c.cls,
-            opsel_exprs=c.opsel_exprs,
-            dot_accumulation=c.profile.float_dot_accumulation,
-        )
+    for _cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+        DISPATCH[_cls] = gen_float_dot32
+    from amdisa.codegen.execute.rj_arith_float import gen_half_dot
+
     for _cls in ('dot2_f16_f16', 'dot2_bf16_bf16'):
-        DISPATCH[_cls] = lambda c: gen_dot2_true16(
-            c.dst_ops, c.src_ops, c.cls, c.profile.float_dot_accumulation
-        )
-    for _cls in ('dot4_i32_i8', 'dot4_i32_iu8', 'dot4_u32_u8', 'dot4_f32_fp8'):
-        DISPATCH[_cls] = lambda c: gen_dot4(
-            c.dst_ops,
-            c.src_ops,
-            c.cls,
-            operation=c.sem.operation,
-            dot_accumulation=c.profile.float_dot_accumulation,
-            opsel_exprs=c.opsel_exprs,
-        )
-    for _cls in ('dot8_i32_i4', 'dot8_i32_iu4', 'dot8_u32_u4'):
-        DISPATCH[_cls] = lambda c: gen_dot8(
-            c.dst_ops, c.src_ops, c.cls, opsel_exprs=c.opsel_exprs
-        )
+        DISPATCH[_cls] = gen_half_dot
+    for _cls in (
+        'dot2_i32_i16',
+        'dot2_u32_u16',
+        'dot4_i32_i8',
+        'dot4_i32_iu8',
+        'dot4_u32_u8',
+        'dot8_i32_i4',
+        'dot8_i32_iu4',
+        'dot8_u32_u4',
+    ):
+        DISPATCH[_cls] = gen_integer_dot
+    DISPATCH['dot4_f32_fp8'] = gen_float_dot32
 
     # Matrix
     DISPATCH['accvgpr_read'] = lambda c: gen_accvgpr_read(c.dst_ops, c.src_ops)
