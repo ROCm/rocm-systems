@@ -469,7 +469,7 @@ jobs:
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
             -R 'FaultDropBarrier' --no-tests=error --output-on-failure -j
           ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
-            -R 'FaultMutationCli' --no-tests=error --output-on-failure -j
+            -R 'FaultMutationCli|FaultLdsCli|CdnaLdsCli' --no-tests=error --output-on-failure -j
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
@@ -481,7 +481,7 @@ jobs:
           FI_INSTALL_PREFIX="$(mktemp -d "${RUNNER_TEMP}/rocjitsu-fi-installed.XXXXXX")"
           cmake --install "${ROCJITSU_BUILD_DIR}" --prefix "${FI_INSTALL_PREFIX}"
           ctest --test-dir "${FI_INSTALL_PREFIX}/share/rocjitsu/tests" \
-            -R 'FaultMutationCli' --no-tests=error --output-on-failure
+            -R 'FaultMutationCli|FaultLdsCli|CdnaLdsCli' --no-tests=error --output-on-failure
 
       # Debug retains callable inline definitions that optimized builds can hide.
       # Check both compilers without building the simulator or enabling sanitizers.

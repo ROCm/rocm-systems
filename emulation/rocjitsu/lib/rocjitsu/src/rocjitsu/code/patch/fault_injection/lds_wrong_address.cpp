@@ -30,9 +30,6 @@
 
 namespace rocjitsu {
 
-using fault_mutation_detail::reject;
-using fault_mutation_detail::translate_edit_error;
-
 struct LdsRecord {
   std::weak_ptr<const AmdGpuCodeObject> source;
   FaultMutationSection section;
@@ -123,7 +120,8 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
   const decltype(kLdsProfiles)::const_iterator profile =
       std::ranges::find(kLdsProfiles, target, &LdsProfile::target);
   if (profile == kLdsProfiles.end())
-    return reject(error, FaultMutationErrorCode::UnsupportedTarget, "target has no LDS profile");
+    return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
+                                 "target has no LDS profile");
   FailureOr<const FaultSourceFacts *> found = context.source_facts(entry, error);
   if (found.failed())
     return Result::failure();
@@ -135,7 +133,8 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
       (!rdna4 && !cdna5 &&
        (facts.descriptor.descriptor.kernel_code_properties &
         amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) != 0))
-    return reject(error, FaultMutationErrorCode::UnsupportedForm, "unsupported LDS wave size");
+    return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
+                                 "unsupported LDS wave size");
   std::shared_ptr<LdsRecord> record = std::make_shared<LdsRecord>();
   record->source = context.source_;
   record->section = facts.section;
@@ -161,8 +160,8 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
           return block->start_offset() == facts.owner.entry_offset;
         });
     if (!binding || entry_block == facts.blocks.end())
-      return reject(error, FaultMutationErrorCode::UnsupportedForm,
-                    "missing LDS bank analysis entry");
+      return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
+                                   "missing LDS bank analysis entry");
     const std::span<const uint8_t> text =
         context.image().subspan(facts.section.file_offset, facts.section.size);
     banks = std::make_unique<Gfx1250VgprMsbAnalysis>(
@@ -224,7 +223,8 @@ FailureOr<LdsSelection> select_lds_wrong_address(const LdsInventory &inventory,
                                                  FaultMutationError &error) {
   error = {};
   if (!inventory.record_ || inventory.record_->source.expired())
-    return reject(error, FaultMutationErrorCode::BadIdentity, "source context expired");
+    return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                 "source context expired");
   if (selector.exact) {
     const LdsSelection &exact = *selector.exact;
     if (!exact.record_ || exact.record_->source.lock() != inventory.record_->source.lock() ||
@@ -234,14 +234,16 @@ FailureOr<LdsSelection> select_lds_wrong_address(const LdsInventory &inventory,
                  site.address_vgpr == exact.site_.address_vgpr &&
                  site.address_bank == exact.site_.address_bank && site.form == exact.site_.form;
         }))
-      return reject(error, FaultMutationErrorCode::BadIdentity,
-                    "exact LDS selection does not match source and owner");
+      return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                   "exact LDS selection does not match source and owner");
     return exact;
   }
   if (inventory.record_->sites.empty())
-    return reject(error, FaultMutationErrorCode::NoCandidates, "no supported LDS site");
+    return reject_fault_mutation(error, FaultMutationErrorCode::NoCandidates,
+                                 "no supported LDS site");
   if (selector.ordinal >= inventory.record_->sites.size())
-    return reject(error, FaultMutationErrorCode::OrdinalOutOfRange, "LDS ordinal out of range");
+    return reject_fault_mutation(error, FaultMutationErrorCode::OrdinalOutOfRange,
+                                 "LDS ordinal out of range");
   LdsSelection selection;
   selection.record_ = inventory.record_;
   selection.site_ = inventory.record_->sites[selector.ordinal];
@@ -250,40 +252,45 @@ FailureOr<LdsSelection> select_lds_wrong_address(const LdsInventory &inventory,
 
 FailureOr<LdsResult> apply_lds_wrong_address(const FaultMutationContext &context,
                                              const LdsSelection &selection,
-                                             std::optional<uint32_t> replacement_vgpr,
+                                             std::optional<uint32_t> replacement_selector,
                                              FaultMutationError &error) {
   error = {};
   if (!selection.record_ || selection.record_->source.lock() != context.source_)
-    return reject(error, FaultMutationErrorCode::BadIdentity,
-                  "selection belongs to another or expired source");
-  if (!replacement_vgpr || *replacement_vgpr > 255 ||
-      *replacement_vgpr == selection.site_.address_vgpr ||
-      selection.site_.address_bank * 256u + *replacement_vgpr >= selection.record_->allocated_vgprs)
-    return reject(error, FaultMutationErrorCode::InvalidParameters,
-                  "replacement must be distinct, encoded, and allocated as an ordinary VGPR");
+    return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                 "selection belongs to another or expired source");
+  if (!replacement_selector || *replacement_selector > 255 ||
+      *replacement_selector == selection.site_.address_vgpr ||
+      selection.site_.address_bank * 256u + *replacement_selector >=
+          selection.record_->allocated_vgprs)
+    return reject_fault_mutation(
+        error, FaultMutationErrorCode::InvalidParameters,
+        "replacement must be distinct, encoded, and allocated as an ordinary VGPR");
   const uint64_t offset = selection.site_.offset;
   const std::span<const uint8_t> image = context.image();
   if (offset > selection.record_->section.size || 8 > selection.record_->section.size - offset ||
       selection.record_->section.file_offset > image.size() ||
       offset > image.size() - selection.record_->section.file_offset ||
       8 > image.size() - selection.record_->section.file_offset - offset)
-    return reject(error, FaultMutationErrorCode::ValidationFailure, "invalid source extent",
-                  offset);
+    return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
+                                 "invalid source extent", offset);
   const uint64_t file_offset = selection.record_->section.file_offset + offset;
   std::array<uint32_t, 2> original = {};
   std::memcpy(original.data(), image.data() + file_offset, 8);
   std::unique_ptr<Decoder> decoder =
       Decoder::create(default_isa_target_registry(), context.source().target_id());
   if (!decoder)
-    return reject(error, FaultMutationErrorCode::ValidationFailure, "missing LDS decoder", offset);
+    return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
+                                 "missing LDS decoder", offset);
   const DecodeResult decoded = decoder->decode_window(original, offset);
   if (decoded.failed() || decoded.value()->mnemonic() != selection.site_.form ||
       decoded.value()->size() != 8)
-    return reject(error, FaultMutationErrorCode::ValidationFailure, "stale LDS form", offset);
+    return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure, "stale LDS form",
+                                 offset);
   const std::optional<std::array<uint32_t, 2>> replacement =
-      replace_lds_address(context.source().target_id(), original, *replacement_vgpr);
+      replace_lds_address(context.source().target_id(), original, *replacement_selector);
   if (!replacement || (original[1] & 255u) != selection.site_.address_vgpr)
-    return reject(error, FaultMutationErrorCode::ValidationFailure, "stale LDS source", offset);
+    return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
+                                 "stale LDS source", offset);
   FailureOr<std::unique_ptr<Instrumentor>> fork = context.fork_instrumentor(error);
   if (fork.failed())
     return Result::failure();
@@ -299,11 +306,12 @@ FailureOr<LdsResult> apply_lds_wrong_address(const FaultMutationContext &context
                            .replacement = std::move(edit)});
   InstrumentedCodeObject applied = instrumentor->patch();
   if (applied.edit_error) {
-    error = translate_edit_error(*applied.edit_error);
+    error = translate_fault_mutation_edit_error(*applied.edit_error);
     return Result::failure();
   }
   if (!applied.errors.empty())
-    return reject(error, FaultMutationErrorCode::ValidationFailure, applied.errors.front(), offset);
+    return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
+                                 applied.errors.front(), offset);
   return LdsResult{.selection = selection, .image = std::move(applied.elf_bytes)};
 }
 
