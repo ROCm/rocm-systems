@@ -183,9 +183,9 @@ class TestCliBase(unittest.TestCase):
     list_data: dict
     static_data: dict
     metric_data: dict
+    metric_named_data: dict
     partition_data: dict
     clk_freq: list
-    is_apu: list
     gpus: list
     sub_args: dict
 
@@ -208,11 +208,11 @@ class TestCliBase(unittest.TestCase):
 
         baseline = cls._build_baseline()
         TestCliBase.metric_data = baseline["metric_data"]
+        TestCliBase.metric_named_data = baseline["metric_named_data"]
         TestCliBase.static_data = baseline["static_data"]
         TestCliBase.list_data = baseline["list_data"]
         TestCliBase.partition_data = baseline["partition_data"]
         TestCliBase.clk_freq = baseline["clk_freq"]
-        TestCliBase.is_apu = baseline["is_apu"]
         TestCliBase.gpus = baseline["gpus"]
         TestCliBase.sub_args = baseline["sub_args"]
         TestCliBase._initialized = True
@@ -226,6 +226,9 @@ class TestCliBase(unittest.TestCase):
         # O(1) — N being the number of test methods in this class.
         cmds = [
             ("metric", "amd-smi metric --json"),
+            # Sections named on the command line are reported for every GPU; the
+            # default dump leaves fan and an N/A perf_level out on an APU.
+            ("metric_named", "amd-smi metric --fan --perf-level --json"),
             ("static", "amd-smi static --json"),
             ("list", "amd-smi list --json"),
             ("partition", "amd-smi partition --current --json"),
@@ -282,7 +285,6 @@ class TestCliBase(unittest.TestCase):
             #'LEVEL': ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
         }
         baseline["clk_freq"] = cls._read_clk_freq()
-        baseline["is_apu"] = cls._read_apu_flags()
         return baseline
 
     @classmethod
@@ -351,31 +353,6 @@ class TestCliBase(unittest.TestCase):
         finally:
             amdsmi.amdsmi_shut_down()
         return per_gpu
-
-    @classmethod
-    def _read_apu_flags(cls):
-        """Per-GPU APU flag, which no CLI output reports.
-
-        ``amd-smi metric`` reads ``is_apu`` from ``amdsmi_get_gpu_metrics_info`` to
-        drop dGPU-only sections, such as ``fan``, from an APU's default dump.
-
-        Returns:
-            list: one bool per GPU; False when the metrics table cannot be read, as
-            the CLI does.
-        """
-        flags = []
-        cls.common.amdsmi_smart_init()
-        try:
-            for processor in amdsmi.amdsmi_get_processor_handles():
-                try:
-                    metrics = amdsmi.amdsmi_get_gpu_metrics_info(processor)
-                except amdsmi.AmdSmiLibraryException:
-                    flags.append(False)
-                    continue
-                flags.append(bool(metrics.get("is_apu", False)))
-        finally:
-            amdsmi.amdsmi_shut_down()
-        return flags
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

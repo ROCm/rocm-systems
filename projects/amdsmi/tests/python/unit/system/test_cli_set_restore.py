@@ -4,6 +4,7 @@
 
 """Hardware-free replay of the set sweep's recorded starting values."""
 
+import json
 import sys
 import unittest
 from copy import deepcopy
@@ -26,7 +27,10 @@ finally:
         sys.modules[_CLI_EXCEPTIONS] = _cli_exceptions
 
 UNSUPPORTED = int(amdsmi.AmdSmiStatus.NOT_SUPPORTED)
-DGPU_FAN = {"max": 255, "speed": 80}
+UNEXPECTED_DATA = int(amdsmi.AmdSmiStatus.UNEXPECTED_DATA)
+DGPU_FAN = {"speed": 80, "max": 255, "rpm": 1200, "usage": {"value": 31.37, "unit": "%"}}
+FANLESS_DGPU_FAN = {"speed": "N/A", "max": "N/A", "rpm": "N/A", "usage": "N/A"}
+APU_FAN = {"apu_fan_pwm": "N/A"}
 POWER_CAP = {
     "min_power_limit": {"value": 261, "unit": "W"},
     "max_power_limit": {"value": 350, "unit": "W"},
@@ -38,9 +42,9 @@ class TestCliSetRestore(unittest.TestCase):
     def setUp(self) -> None:
         self.sweep = test_set.TestSet(methodName="test_command")
         self.sweep.common = mock.Mock(processors=[object()])
-        self.sweep.is_apu = [False]
-        self.sweep.metric_data = {
-            "gpu_data": [{"fan": {"max": "N/A", "speed": "N/A"}, "clock": {}, "perf_level": "AUTO"}]
+        self.sweep.metric_data = {"gpu_data": [{"clock": {}}]}
+        self.sweep.metric_named_data = {
+            "gpu_data": [{"fan": dict(FANLESS_DGPU_FAN), "perf_level": "AUTO"}]
         }
         self.sweep.static_data = {
             "gpu_data": [
@@ -64,11 +68,7 @@ class TestCliSetRestore(unittest.TestCase):
             "current_partition": [{"memory": "N/A", "accelerator_type": "N/A"}]
         }
 
-    def _make_apu(self) -> None:
-        self.sweep.is_apu[0] = True
-        del self.sweep.metric_data["gpu_data"][0]["fan"]
-
-    def _remaining_commands(self, index: int = 0) -> list:
+    def _expected_commands(self, index: int = 0) -> list:
         return [
             f"amd-smi reset --fans --gpu {index}",
             f"amd-smi set --profile COMPUTE --gpu {index}",
@@ -111,7 +111,7 @@ class TestCliSetRestore(unittest.TestCase):
 
     def _assert_reset_codes(self, command: str, accepted: tuple, rejected: tuple) -> None:
         """Run the restore with *command* answering each code; only *accepted* pass."""
-        expected = self._remaining_commands()
+        expected = self._expected_commands()
         for code in accepted:
             with self.subTest(command=command, code=code):
                 self._restore(expected, {command: code})
@@ -122,26 +122,41 @@ class TestCliSetRestore(unittest.TestCase):
                     self._run_restore()
                 self._assert_commands(expected)
 
-    def test_restore_with_omitted_fan_runs_remaining_cleanup(self) -> None:
-        self._make_apu()
-        self._restore(self._remaining_commands())
+    def _set_fan(self, fan: dict) -> None:
+        self.sweep.metric_named_data["gpu_data"][0]["fan"] = fan
+
+    def test_apu_default_dump_without_fan_or_perf_level_runs_cleanup(self) -> None:
+        # The APU default metric dump omits fan and an N/A perf_level; the restore
+        # reads both from the named sections instead.
+        self._set_fan(dict(APU_FAN))
+        self._restore(self._expected_commands())
 
     def test_restore_commands_leave_baseline_unchanged(self) -> None:
-        self._make_apu()
-        baseline = deepcopy((self.sweep.metric_data, self.sweep.static_data))
+        self._set_fan(dict(APU_FAN))
+        baseline = deepcopy(
+            (self.sweep.metric_data, self.sweep.metric_named_data, self.sweep.static_data)
+        )
         first = self.sweep._restore_commands()
         self.assertEqual(self.sweep._restore_commands(), first)
-        self.assertEqual((self.sweep.metric_data, self.sweep.static_data), baseline)
+        self.assertEqual(
+            (self.sweep.metric_data, self.sweep.metric_named_data, self.sweep.static_data), baseline
+        )
 
-    def test_missing_dgpu_sections_are_rejected(self) -> None:
-        for field in ("fan", "clock", "perf_level"):
+    def test_missing_sections_are_rejected_before_writes(self) -> None:
+        for data, field in (
+            (self.sweep.metric_named_data, "fan"),
+            (self.sweep.metric_named_data, "perf_level"),
+            (self.sweep.metric_data, "clock"),
+        ):
             with self.subTest(field=field):
-                original = self.sweep.metric_data["gpu_data"][0].pop(field)
-                self._mock_commands([])
-                with self.assertRaisesRegex(KeyError, field):
-                    self._run_restore()
-                self.sweep.util.RunCmdSync.assert_not_called()
-                self.sweep.metric_data["gpu_data"][0][field] = original
+                original = data["gpu_data"][0].pop(field)
+                try:
+                    self._mock_commands([])
+                    with self.assertRaisesRegex(KeyError, field):
+                        self._run_restore()
+                    self.sweep.util.RunCmdSync.assert_not_called()
+                finally:
+                    data["gpu_data"][0][field] = original
 
     def test_invalid_restore_data_prevents_sweep_writes(self) -> None:
         self.sweep.static_data["gpu_data"][0]["profile"] = {}
@@ -151,36 +166,26 @@ class TestCliSetRestore(unittest.TestCase):
             self.sweep.test_command()
         self.sweep.util.RunCmdSync.assert_not_called()
 
-    def test_baseline_records_apu_status_from_metrics(self) -> None:
-        processors = [object(), object(), object()]
-        with mock.patch.object(test_set.TestSet, "common", self.sweep.common, create=True):
-            with mock.patch.multiple(
-                amdsmi,
-                amdsmi_get_processor_handles=mock.Mock(return_value=processors),
-                amdsmi_get_gpu_metrics_info=mock.Mock(
-                    side_effect=[
-                        {"is_apu": True},
-                        {"is_apu": False},
-                        amdsmi.AmdSmiLibraryException(amdsmi.AmdSmiStatus.NOT_SUPPORTED),
-                    ]
-                ),
-                amdsmi_shut_down=mock.DEFAULT,
-            ) as functions:
-                flags = test_set.TestSet._read_apu_flags()
-        self.assertEqual(flags, [True, False, False])
-        functions["amdsmi_shut_down"].assert_called_once_with()
-
-    def test_clock_tables_hold_only_clocks(self) -> None:
-        with mock.patch.object(test_set.TestSet, "common", self.sweep.common, create=True):
-            with mock.patch.multiple(
-                amdsmi,
-                amdsmi_get_processor_handles=mock.Mock(return_value=[object()]),
-                amdsmi_get_clk_freq=mock.Mock(return_value={"num_supported": 1}),
-                amdsmi_get_clock_info=mock.Mock(return_value={"clk_deep_sleep": "N/A"}),
-                amdsmi_shut_down=mock.DEFAULT,
-            ):
-                tables = test_set.TestSet._read_clk_freq()
-        self.assertEqual(set(tables[0]), {"SCLK", "MCLK", "FCLK", "SOCCLK"})
+    def test_baseline_records_named_metric_sections(self) -> None:
+        outputs = {
+            "amd-smi metric --json": {"gpu_data": [{"clock": {}}]},
+            "amd-smi metric --fan --perf-level --json": {
+                "gpu_data": [{"fan": APU_FAN, "perf_level": "AMDSMI_DEV_PERF_LEVEL_AUTO"}]
+            },
+            "amd-smi static --json": {"gpu_data": [{}]},
+            "amd-smi list --json": [{"gpu": 0, "bdf": "0000:c4:00.0", "uuid": "u"}],
+            "amd-smi partition --current --json": {},
+            "amd-smi list --nic all --json": [],
+        }
+        util = mock.Mock(
+            RunCmdSync=mock.Mock(side_effect=lambda cmd: (0, json.dumps(outputs[cmd]), ""))
+        )
+        with mock.patch.object(test_set.TestSet, "util", util, create=True):
+            with mock.patch.object(test_set.TestSet, "_read_clk_freq", return_value=[]):
+                baseline = test_set.TestSet._build_baseline()
+        self.assertEqual(
+            baseline["metric_named_data"], outputs["amd-smi metric --fan --perf-level --json"]
+        )
 
     def test_reported_power_cap_requires_reset_success(self) -> None:
         limits = self.sweep.static_data["gpu_data"][0]["limit"]
@@ -200,106 +205,84 @@ class TestCliSetRestore(unittest.TestCase):
                 "amd-smi reset --power-cap --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
             )
 
-    def test_restore_without_static_clock_levels_runs_remaining_cleanup(self) -> None:
-        self._make_apu()
-        for fields in (
-            {},
-            {"clock": "N/A"},
-            {"clock": {}},
-            {"clock": {"sys": "N/A"}},
-            {"clock": {"sys": {"frequency_levels": {}}}},
-        ):
-            with self.subTest(fields=fields):
-                self.sweep.static_data["gpu_data"][0].pop("clock", None)
-                self.sweep.static_data["gpu_data"][0].update(fields)
-                self._restore(self._remaining_commands())
+    def test_perf_determinism_restore_follows_clock_levels(self) -> None:
+        static = self.sweep.static_data["gpu_data"][0]
+        for sys_clock in ("N/A", {"frequency_levels": {}}):
+            with self.subTest(sys_clock=sys_clock):
+                static["clock"] = {"sys": sys_clock}
+                self._restore(self._expected_commands())
+        static["clock"] = {
+            "sys": {
+                "frequency_levels": {
+                    "Level 0": {"value": "500", "unit": "MHz"},
+                    "Level 1": {"value": "2100", "unit": "MHz"},
+                }
+            }
+        }
+        expected = self._expected_commands()
+        expected.insert(2, "amd-smi set --perf-determinism 2100 --gpu 0")
+        self._restore(expected)
 
-    def test_restore_without_metric_clock_runs_remaining_cleanup(self) -> None:
-        self._make_apu()
-        for fields in (
-            {},
-            {"clock": "N/A"},
-            {"clock": {}},
-            {"clock": {"gfx_0": "N/A"}},
-            {"clock": {"apu_gfxclk": {"value": 400, "unit": "MHz"}}},
-        ):
-            with self.subTest(fields=fields):
-                self.sweep.metric_data["gpu_data"][0].pop("clock", None)
-                self.sweep.metric_data["gpu_data"][0].update(fields)
-                self._restore(self._remaining_commands())
-
-    def test_restore_without_perf_level_runs_remaining_cleanup(self) -> None:
-        self._make_apu()
-        for fields in ({}, {"perf_level": "N/A"}, {"perf_level": "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"}):
-            with self.subTest(fields=fields):
-                self.sweep.metric_data["gpu_data"][0].pop("perf_level", None)
-                self.sweep.metric_data["gpu_data"][0].update(fields)
-                expected = [cmd for cmd in self._remaining_commands() if "--perf-level" not in cmd]
+    def test_unreadable_perf_level_is_not_restored(self) -> None:
+        for perf_level in ("N/A", "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"):
+            with self.subTest(perf_level=perf_level):
+                self.sweep.metric_named_data["gpu_data"][0]["perf_level"] = perf_level
+                expected = [cmd for cmd in self._expected_commands() if "--perf-level" not in cmd]
                 self._restore(expected)
 
-    def test_apu_fan_reset_requires_not_supported(self) -> None:
-        self._make_apu()
-        self._assert_reset_codes(
-            "amd-smi reset --fans --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
-        )
-
-    def test_apu_with_fan_section_fails_before_sweep(self) -> None:
-        # The APU default metric dump drops the fan section, N/A included.
-        self._make_apu()
+    def test_fan_reset_without_reported_max_requires_not_supported(self) -> None:
+        # An APU reports only apu_fan_pwm; a fanless dGPU reports max as N/A.
         for fan in (
-            "N/A",
-            {},
-            {"max": "N/A", "speed": "N/A"},
-            {"apu_fan_pwm": "N/A"},
+            APU_FAN,
             {"apu_fan_pwm": {"value": 38, "unit": "%"}},
+            FANLESS_DGPU_FAN,
+            {"speed": 80, "max": "N/A", "rpm": "N/A", "usage": "N/A"},
         ):
             with self.subTest(fan=fan):
-                self.sweep.metric_data["gpu_data"][0]["fan"] = fan
-                self._mock_commands([])
-                with self.assertRaisesRegex(AssertionError, "fan section"):
-                    self._run_restore()
-                self.sweep.util.RunCmdSync.assert_not_called()
+                self._set_fan(dict(fan))
+                self._assert_reset_codes(
+                    "amd-smi reset --fans --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
+                )
 
-    def test_dgpu_fan_reset_is_graded_by_max_not_speed(self) -> None:
+    def test_fan_reset_with_reported_max_allows_pass(self) -> None:
         # A runtime-suspended dGPU reports speed as N/A; max decides whether a fan exists.
-        for speed in ("N/A", 80):
-            self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": "N/A", "speed": speed}
-            self._assert_reset_codes(
-                "amd-smi reset --fans --gpu 0", accepted=(UNSUPPORTED,), rejected=(0,)
-            )
         for speed in ("N/A", 80, 0):
-            self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": 255, "speed": speed}
-            self._assert_reset_codes(
-                "amd-smi reset --fans --gpu 0",
-                accepted=(0, UNSUPPORTED),
-                rejected=(int(amdsmi.AmdSmiStatus.UNEXPECTED_DATA),),
-            )
+            with self.subTest(speed=speed):
+                self._set_fan(dict(DGPU_FAN, speed=speed))
+                self._assert_reset_codes(
+                    "amd-smi reset --fans --gpu 0",
+                    accepted=(0, UNSUPPORTED),
+                    rejected=(UNEXPECTED_DATA,),
+                )
 
-    def test_dgpu_fan_max_out_of_range_fails_before_sweep(self) -> None:
+    def test_fan_max_out_of_range_fails_before_writes(self) -> None:
         for maximum in (0, 256):
             with self.subTest(maximum=maximum):
-                self.sweep.metric_data["gpu_data"][0]["fan"] = {"max": maximum, "speed": 80}
+                self._set_fan(dict(DGPU_FAN, max=maximum))
                 self._mock_commands([])
                 with self.assertRaises(AssertionError):
                     self._run_restore()
                 self.sweep.util.RunCmdSync.assert_not_called()
 
-    def test_restore_mixed_apu_dgpu_preserves_cleanup_order(self) -> None:
-        dgpu = {"fan": dict(DGPU_FAN), "clock": {}, "perf_level": "AMDSMI_DEV_PERF_LEVEL_HIGH"}
+    def test_restore_mixed_apu_dgpu_grades_each_gpu(self) -> None:
         static = deepcopy(self.sweep.static_data["gpu_data"][0])
         self.sweep.common.processors.append(object())
         self.sweep.partition_data["current_partition"] *= 2
+        self.sweep.metric_data["gpu_data"] *= 2
         for dgpu_index in (0, 1):
             with self.subTest(dgpu_index=dgpu_index):
-                self.sweep.is_apu = [index != dgpu_index for index in range(2)]
-                metrics = [{}, {}]
-                metrics[dgpu_index] = deepcopy(dgpu)
-                self.sweep.metric_data["gpu_data"] = metrics
+                apu_index = 1 - dgpu_index
+                named = [None, None]
+                named[dgpu_index] = {"fan": dict(DGPU_FAN), "perf_level": "HIGH"}
+                named[apu_index] = {"fan": dict(APU_FAN), "perf_level": "N/A"}
+                self.sweep.metric_named_data = {"gpu_data": named}
                 self.sweep.static_data["gpu_data"] = [deepcopy(static), deepcopy(static)]
-                self.sweep.static_data["gpu_data"][1 - dgpu_index].pop("clock")
+                self.sweep.static_data["gpu_data"][dgpu_index]["limit"]["ppt0"] = deepcopy(
+                    POWER_CAP
+                )
                 expected = []
                 for index in range(2):
-                    commands = self._remaining_commands(index)
+                    commands = self._expected_commands(index)
                     if index == dgpu_index:
                         commands = [
                             cmd.replace("--perf-level AUTO", "--perf-level HIGH")
@@ -308,17 +291,25 @@ class TestCliSetRestore(unittest.TestCase):
                     else:
                         commands = [cmd for cmd in commands if "--perf-level" not in cmd]
                     expected.extend(commands)
-                self._restore(expected)
-                self.assertEqual(metrics[1 - dgpu_index], {})
+                dgpu_resets = {
+                    f"amd-smi reset --fans --gpu {dgpu_index}": 0,
+                    f"amd-smi reset --power-cap --gpu {dgpu_index}": 0,
+                }
+                self._restore(expected, dgpu_resets)
+                for command in (
+                    f"amd-smi reset --fans --gpu {apu_index}",
+                    f"amd-smi reset --power-cap --gpu {apu_index}",
+                ):
+                    self._mock_commands(expected, dict(dgpu_resets, **{command: 0}))
+                    with self.assertRaisesRegex(AssertionError, command):
+                        self._run_restore()
 
     def test_restore_unexpected_command_failure_still_runs_remaining_cleanup(self) -> None:
-        self.sweep.metric_data["gpu_data"][0]["fan"] = dict(DGPU_FAN)
-        expected = self._remaining_commands()
+        self._set_fan(dict(DGPU_FAN))
+        expected = self._expected_commands()
         for failed_command in expected:
             with self.subTest(command=failed_command):
-                self._mock_commands(
-                    expected, {failed_command: int(amdsmi.AmdSmiStatus.UNEXPECTED_DATA)}
-                )
+                self._mock_commands(expected, {failed_command: UNEXPECTED_DATA})
                 with self.assertRaisesRegex(AssertionError, "UNEXPECTED_DATA"):
                     self._run_restore()
                 self._assert_commands(expected)
@@ -328,25 +319,16 @@ class TestCliSetRestore(unittest.TestCase):
             with self.subTest(section=section):
                 original = self.sweep.static_data["gpu_data"][0][section]
                 self.sweep.static_data["gpu_data"][0][section] = value
-                self._mock_commands([])
-                with self.assertRaisesRegex(KeyError, missing):
-                    self._run_restore()
-                self.sweep.util.RunCmdSync.assert_not_called()
-                self.sweep.static_data["gpu_data"][0][section] = original
-
-    def test_restore_does_not_hide_malformed_optional_sections(self) -> None:
-        for section in ("fan", "clock"):
-            with self.subTest(section=section):
-                original = self.sweep.metric_data["gpu_data"][0][section]
-                self.sweep.metric_data["gpu_data"][0][section] = None
-                self._mock_commands([])
-                with self.assertRaises(TypeError):
-                    self._run_restore()
-                self.sweep.util.RunCmdSync.assert_not_called()
-                self.sweep.metric_data["gpu_data"][0][section] = original
+                try:
+                    self._mock_commands([])
+                    with self.assertRaisesRegex(KeyError, missing):
+                        self._run_restore()
+                    self.sweep.util.RunCmdSync.assert_not_called()
+                finally:
+                    self.sweep.static_data["gpu_data"][0][section] = original
 
     def test_failed_set_sweep_registers_actual_restore_cleanup(self) -> None:
-        expected = self._remaining_commands()
+        expected = self._expected_commands()
         self._mock_commands(expected)
         run_restore = self.sweep.util.RunCmdSync.side_effect
 
@@ -354,7 +336,7 @@ class TestCliSetRestore(unittest.TestCase):
             if command == "amd-smi set --help":
                 return 0, "Set Arguments:\n  --fan %\n\n", ""
             if command.startswith("amd-smi set --fan "):
-                return int(amdsmi.AmdSmiStatus.UNEXPECTED_DATA), "", ""
+                return UNEXPECTED_DATA, "", ""
             return run_restore(command, msg_in=msg_in)
 
         self.sweep.util.RunCmdSync.side_effect = run

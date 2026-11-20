@@ -33,40 +33,27 @@ class TestSet(TestCliBase):
             "set", "Set Arguments:", "Device Arguments:", "Command Modifiers:", ""
         )
         self.addCleanup(self.RunCmds, restore_cmds)
+        # Cleanups run last in, first out, so the header prints before the restore.
+        self.addCleanup(self.common.print, "Restore Starting Values")
         self.RunCmds(cmds)
 
         return
-
-    def _section(self, data: dict, key: str, *, index: int, default: object) -> object:
-        """``data[key]``, defaulted where an APU's dump omits it; required on a dGPU."""
-        is_apu = self.is_apu[index]
-        value = data.get(key, default) if is_apu else data[key]
-        if is_apu and value == "N/A":
-            value = default
-        if not isinstance(value, type(default)):
-            raise TypeError(f"GPU {index}: invalid {key} section")
-        return {**default, **value} if is_apu and isinstance(default, dict) else value
 
     def _restore_commands(self) -> list:
         """Validate the recorded data and prepare cleanup before the sweep writes."""
         cmds = []
         for index, gpu in enumerate(self.common.processors):
             metric = self.metric_data["gpu_data"][index]
+            named = self.metric_named_data["gpu_data"][index]
             static = self.static_data["gpu_data"][index]
-            # The APU default metric dump drops the fan section, N/A included.
-            if self.is_apu[index] and "fan" in metric:
-                self.fail(f"GPU {index}: APU metric dump has a fan section: {metric['fan']}")
-            fan = self._section(metric, "fan", index=index, default={"max": "N/A", "speed": "N/A"})
-            metric_clock = self._section(metric, "clock", index=index, default={})
-            perf_level = self._section(metric, "perf_level", index=index, default="N/A")
-            static_clock = self._section(static, "clock", index=index, default={"sys": "N/A"})
 
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
-            # The driver hides pwm1_max only along with every other fan attribute,
-            # pwm1_enable included, so a GPU without max cannot reset its fan. Speed is
-            # not used: a runtime-suspended dGPU reports it as "N/A".
-            fan_max = fan["max"]
-            if self.is_apu[index] or fan_max == "N/A":
+            # The named fan section reports max (N/A without pwm1_max) on a GPU the CLI
+            # treats as a dGPU and only apu_fan_pwm on an APU; a GPU without max is
+            # expected to have no fan to reset. Speed is not used: a runtime-suspended
+            # dGPU reports it as "N/A".
+            fan_max = named["fan"].get("max", "N/A")
+            if fan_max == "N/A":
                 fan_reset = [amdsmi.AmdSmiStatus.NOT_SUPPORTED]
             else:
                 # max fan speed is the hwmon pwm1_max ceiling on every interface
@@ -86,7 +73,7 @@ class TestSet(TestCliBase):
                 )
 
             # set --perf-determinism defaults
-            clock_sys = static_clock["sys"]
+            clock_sys = static["clock"]["sys"]
             if clock_sys != "N/A" and clock_sys["frequency_levels"]:
                 num = len(clock_sys["frequency_levels"])
                 level = f"Level {num - 1}"
@@ -132,7 +119,8 @@ class TestSet(TestCliBase):
             # reset --power-cap
             # Writes each supported sensor's default_power_cap. Replaying the recorded
             # value did not restore it: min and max were written after it, so the cap
-            # was left at max. The current cap is not read, so a cap of 0 still resets.
+            # was left at max. The write does not depend on the current cap, so a cap of 0
+            # still resets.
             power_limits = static["limit"]
             reports_cap = any(
                 isinstance(power_limits[power_type], dict)
@@ -178,7 +166,7 @@ class TestSet(TestCliBase):
             # set --clk-limit defaults
             for clk_type in self.clk_limits:
                 for limit_type in self.limit_types:
-                    value = self._clk_limit_value(metric_clock, clk_type, limit_type)
+                    value = self._clk_limit_value(metric["clock"], clk_type, limit_type)
                     if value is not None:
                         # A readable min/max clock does not imply the device
                         # supports setting a limit on it.
@@ -203,6 +191,7 @@ class TestSet(TestCliBase):
             # set --perf-level defaults
             # Last of the clock writes: the reset above forces AUTO, and --clk-limit and
             # --perf-determinism each leave the device on a level of their own.
+            perf_level = named["perf_level"]
             if perf_level not in ("N/A", "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"):
                 perf_level = _strip_prefix(perf_level, "AMDSMI_DEV_PERF_LEVEL_")
                 cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
