@@ -164,6 +164,12 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
+            // Display the pending frames first: a reconfigure replaces the decode surfaces
+            // that hold them.
+            if ((ret = FlushDpb()) != PARSER_OK) {
+                FunctionExitLog(g_rocdec_logger);
+                return ret;
+            }
             if ((ret = NotifyNewSequence(&seq_header_, &frame_header_)) != PARSER_OK) {
                 FunctionExitLog(g_rocdec_logger);
                 return ret;
