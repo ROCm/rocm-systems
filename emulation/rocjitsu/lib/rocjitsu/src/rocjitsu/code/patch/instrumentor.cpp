@@ -130,6 +130,77 @@ bool requires_cdna5_valu_follower(const Instruction &inst) {
          mnemonic == "v_perm_pk16_b8_u4";
 }
 
+// Ownership requires a complete descriptor inventory. The shared scanner and
+// descriptor rebasing currently recognize only global symbols and deduplicate
+// by location, so check exported definitions before those distinctions are lost.
+bool validate_entry_descriptor_symbols(std::span<const uint8_t> image,
+                                       std::span<const KernelDescriptorInfo> kernels,
+                                       std::string *error_out) {
+  const auto fail = [error_out](const char *message) {
+    report(error_out, message);
+    return false;
+  };
+  if (image.size() < sizeof(Elf64_Ehdr))
+    return fail("entry requests require a complete descriptor symbol inventory");
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  const std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
+  if (!sections)
+    return fail("entry requests require a complete descriptor symbol inventory");
+  for (const Elf64_Shdr &table : *sections) {
+    if (table.sh_type != SHT_SYMTAB && table.sh_type != SHT_DYNSYM)
+      continue;
+    if (table.sh_entsize == 0 || table.sh_size % table.sh_entsize != 0 ||
+        table.sh_link >= sections->size())
+      return fail("entry requests require a complete descriptor symbol inventory");
+    const std::optional<std::vector<Elf64_Sym>> symbols = read_elf_table<Elf64_Sym>(
+        image, table.sh_offset, table.sh_size / table.sh_entsize, table.sh_entsize);
+    const Elf64_Shdr &strings = (*sections)[table.sh_link];
+    if (!symbols || strings.sh_offset > image.size() ||
+        strings.sh_size > image.size() - strings.sh_offset)
+      return fail("entry requests require a complete descriptor symbol inventory");
+    for (const Elf64_Sym &symbol : *symbols) {
+      const uint8_t binding = elf_symbol_bind(symbol.st_info);
+      if (elf_symbol_type(symbol.st_info) != kElfSymbolTypeObject ||
+          (binding != kElfSymbolBindGlobal && binding != kElfSymbolBindWeak) ||
+          symbol.st_shndx == SHN_UNDEF)
+        continue;
+      if (symbol.st_name >= strings.sh_size)
+        return fail("entry requests require a complete descriptor symbol inventory");
+      const char *name =
+          reinterpret_cast<const char *>(image.data() + strings.sh_offset + symbol.st_name);
+      const size_t available = strings.sh_size - symbol.st_name;
+      const size_t length = strnlen(name, available);
+      if (length == available)
+        return fail("entry requests require a complete descriptor symbol inventory");
+      const std::string_view symbol_name(name, length);
+      if (!symbol_name.ends_with(".kd"))
+        continue;
+      if (binding == kElfSymbolBindWeak)
+        return fail("entry requests do not admit weak kernel descriptor symbols");
+      if (symbol.st_shndx >= sections->size() ||
+          symbol.st_size != sizeof(amdhsa::kernel_descriptor_t))
+        return fail("entry requests require a complete descriptor symbol inventory");
+      const Elf64_Shdr &owner = (*sections)[symbol.st_shndx];
+      if (owner.sh_type == SHT_NOBITS || symbol.st_value < owner.sh_addr ||
+          owner.sh_offset > image.size() || owner.sh_size > image.size() - owner.sh_offset)
+        return fail("entry requests require a complete descriptor symbol inventory");
+      const uint64_t delta = symbol.st_value - owner.sh_addr;
+      if (delta > owner.sh_size || symbol.st_size > owner.sh_size - delta)
+        return fail("entry requests require a complete descriptor symbol inventory");
+      const uint64_t descriptor_offset = owner.sh_offset + delta;
+      const std::span<const KernelDescriptorInfo>::iterator found = std::ranges::find(
+          kernels, descriptor_offset, &KernelDescriptorInfo::descriptor_file_offset);
+      if (found == kernels.end())
+        return fail("entry requests require a complete descriptor symbol inventory");
+      if (found->kernel_name != symbol_name.substr(0, length - 3))
+        return fail("entry requests do not admit descriptor aliases with distinct names");
+    }
+  }
+  return true;
+}
+
 // These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
 // architectures give that encoding different semantics.
 bool deallocates_vgprs(const Instruction &instruction, rocjitsu::IsaFamily arch) {
@@ -3281,6 +3352,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
                                           obj_.image_size());
   const std::vector<KernelDescriptorInfo> kernels =
       scan_kernel_descriptors(original, text->sectionOffset(), text->size());
+  if (!validate_entry_descriptor_symbols(original, kernels, &error)) {
+    result.errors.push_back(std::move(error));
+    return result;
+  }
   if (kernels.empty() || !common_wavefront_size(arch_, kernels)) {
     result.errors.emplace_back("entry requests require descriptors with one common wave size");
     return result;
@@ -3329,6 +3404,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
       for (const Instruction &instruction : block->instructions()) {
         if ((instruction.flags() & (INDIRECT_CALL | INDIRECT_BRANCH)) != 0) {
           result.errors.emplace_back("disjoint entry requests do not admit calls or indirect flow");
+          return result;
+        }
+        if ((instruction.flags() & WRITES_PC) != 0 && !instruction.branch_offset_bytes()) {
+          result.errors.emplace_back(
+              "disjoint entry requests do not admit an unknown branch target");
           return result;
         }
       }
@@ -3559,10 +3639,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
         result.errors.emplace_back("selected entry exceeds bounded register allocation");
         return result;
       }
-      if (arch_ == rocjitsu::IsaFamily::Cdna3) {
+      if (arch_ == rocjitsu::IsaFamily::Cdna3 || arch_ == rocjitsu::IsaFamily::Cdna4) {
         const std::array source_kernel{plan.kernel};
-        // gfx942 rounds physical SGPR storage to 16 dwords. The named
-        // FLAT_SCRATCH/VCC pairs follow that allocation up through s107.
+        // gfx942/gfx950 round physical SGPR storage to 16 dwords. The
+        // FLAT_SCRATCH, XNACK_MASK and VCC pairs alias its final six slots.
         const auto alias_end = [](uint32_t requested) {
           return std::min(amdgpu::kVccSelectorLast + 1, std::max(16u, (requested + 15u) & ~15u));
         };
@@ -3571,10 +3651,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
         const uint32_t new_end = alias_end(plan.resources.sgprs + kCdnaSpecialSgprTailReserve);
         const auto uses_alias = [&](uint32_t end) {
           return plan.guest_registers.intersects(
-                     {RegClass::SGPR, static_cast<uint16_t>(end - kCdnaSpecialSgprTailReserve),
-                      2}) ||
-                 plan.guest_registers.intersects(
-                     {RegClass::SGPR, static_cast<uint16_t>(end - 2), 2});
+              {RegClass::SGPR, static_cast<uint16_t>(end - kCdnaSpecialSgprTailReserve),
+               kCdnaSpecialSgprTailReserve});
         };
         if (old_end != new_end && (uses_alias(old_end) || uses_alias(new_end))) {
           result.errors.emplace_back("selected entry growth changes a guest numeric SGPR alias");
@@ -3755,9 +3833,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   // resolve_points() built blocks_ and resolved those probes only because the
   // kernels share a wave size. blocks_ owns the Instructions live_before() is
   // keyed on; their encoding bytes belong to obj_ or the owned analysis_object_.
-  // TODO: scope this to the kernel containing each anchor, like the DBT path,
-  // rather than treating every decoded block as one CFG. Replacement analysis
-  // must retain any new edges caused by an omitted terminator.
+  // Explicit-entry planning scopes analysis to the selected kernel's reachable
+  // blocks. Legacy requests retain the existing whole-image analysis scope,
+  // including new edges introduced by replacement of a terminator.
   std::vector<BasicBlock *> liveness_scope;
   if (planning_descriptor_offset_ && kernels.size() == 1) {
     const BlockOffsetIndex offsets = build_block_offset_index(blocks_);

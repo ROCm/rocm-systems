@@ -258,6 +258,18 @@ their additional firmware entry is outside this bounded ownership model. Validat
 records retain caller insertion order, including a `KernelEntry` callback and an
 ordinary point sharing the same source offset.
 
+Descriptor ownership also requires a complete symbol inventory: weak `.kd`
+definitions and distinct names aliasing one descriptor are rejected before
+planning. Identical name/location records in `.symtab` and `.dynsym` remain
+valid. Unknown PC-writing branch targets are rejected for native siblings even
+when only a `KernelEntry` callback is requested.
+
+For explicit requests, look up `InstrumentedCodeObject::entries` by
+`InstrumentedEntry::original_descriptor_offset` and read that entry's `resources`,
+including `kernarg_bytes` for its wrapper size. Entries are sorted by original
+descriptor offset, independently of request order. The top-level `resources`
+field is zero on this path, including a single selected entry.
+
 Callable `AfterInst` requires an ordinary relocatable anchor and a supported
 post-anchor state. Pre-anchor liveness alone cannot justify a callback after
 the instruction; addressing and storage must be valid at the observation point.

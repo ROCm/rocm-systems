@@ -8496,47 +8496,206 @@ TEST(InstrumentorDisjointEntries, NativeKernargPreloadCannotHideAForeignFirmware
   }
 }
 
-TEST(InstrumentorDisjointEntries, Gfx942GrowthRejectsMovedNumericSgprAliases) {
-  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna3;
+TEST(InstrumentorDisjointEntries, CdnaGrowthRejectsAllMovedNumericSgprAliases) {
+  for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    SCOPED_TRACE(arch);
+    const FailureOr<uint32_t> nop = build_s_nop(0, arch);
+    const FailureOr<uint32_t> end = build_s_endpgm(arch);
+    const FailureOr<uint32_t> ret = build_s_setpc_b64(30, arch);
+    ASSERT_TRUE(nop.succeeded() && end.succeeded() && ret.succeeded());
+    const uint32_t mach = elf_mach_for_arch(arch);
+    const std::vector<uint8_t> body = make_amdgpu_probe_elf("alias_probe", {ret.value()}, mach);
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    // A 32-SGPR physical allocation aliases FLAT_SCRATCH, XNACK_MASK and
+    // VCC to s[26:31]. Exercise both dwords of all three pairs.
+    for (const uint16_t source_register : {2, 26, 27, 28, 29, 30, 31}) {
+      SCOPED_TRACE(source_register);
+      const FailureOr<uint32_t> read = build_v_mov_b32_src(0, source_register, arch);
+      ASSERT_TRUE(read.succeeded());
+      const std::vector<uint8_t> image = with_resource_metadata(
+          make_amdgpu_kernel_elf({read.value(), nop.value(), end.value()}, 0, 3, mach, 0, 1),
+          {{"test_kernel", 0, 32, 8, 0}});
+      const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+      ASSERT_EQ(kernels.size(), 1u);
+      const AmdGpuCodeObject source(image.data(), image.size());
+      Instrumentor instrumentor(
+          source, arch,
+          {.register_growth = std::nullopt,
+           .entries = {{.descriptor_file_offset = kernels.front().descriptor_file_offset,
+                        .preservation = GuestStatePreservation::DeclaredRegisters,
+                        .register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 8}}}});
+      instrumentor.add_point({.anchor_offset = 4,
+                              .probe_obj = &probe,
+                              .probe_symbol = "alias_probe",
+                              .probe_args = {}});
+      const InstrumentedCodeObject result = instrumentor.patch();
+      if (source_register != 2) {
+        if (result.errors.empty()) {
+          ADD_FAILURE() << "numeric SGPR alias was accepted";
+          continue;
+        }
+        EXPECT_NE(result.errors.front().find("numeric SGPR alias"), std::string::npos)
+            << result.errors.front();
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+        EXPECT_TRUE(result.entries.empty());
+      } else {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        ASSERT_EQ(result.entries.size(), 1u);
+        const InstrumentationResources &resources = result.entries.front().resources;
+        EXPECT_GT(resources.sgprs, 32u);
+        const std::vector<KernelDescriptorInfo> updated = entry_growth_kernels(result.elf_bytes);
+        ASSERT_EQ(updated.size(), 1u);
+        const amdhsa::kernel_descriptor_t &descriptor = updated.front().descriptor;
+        // Decode the actual emitted descriptor, independently of the metadata.
+        EXPECT_EQ(RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                                     amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+                  resources.vgprs / 8 - 1);
+        EXPECT_EQ(RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc1,
+                                     amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT),
+                  (resources.sgprs + 6 + 7) / 8 - 1);
+        EXPECT_EQ(RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3,
+                                     amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+                  resources.vgprs / 4 - 1);
+      }
+    }
+  }
+}
+
+TEST(InstrumentorDisjointEntries, RejectsWeakAndAliasedDescriptorSymbolsBeforeDeduplication) {
+  for (const unsigned scenario : {0u, 1u, 2u, 3u}) {
+    SCOPED_TRACE(scenario);
+    std::vector<uint8_t> image = make_disjoint_entry_growth_image();
+    const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 2u);
+    Elf64_Ehdr header = {};
+    std::memcpy(&header, image.data(), sizeof(header));
+    std::vector<Elf64_Shdr> sections(header.e_shnum);
+    std::memcpy(sections.data(), image.data() + header.e_shoff,
+                sections.size() * sizeof(Elf64_Shdr));
+    const std::vector<Elf64_Shdr>::iterator symtab =
+        std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
+    ASSERT_NE(symtab, sections.end());
+    std::vector<Elf64_Sym> symbols(symtab->sh_size / sizeof(Elf64_Sym));
+    std::memcpy(symbols.data(), image.data() + symtab->sh_offset,
+                symbols.size() * sizeof(Elf64_Sym));
+    ASSERT_EQ(symbols.size(), 3u);
+    if (scenario == 0) {
+      // Native B is dispatchable but invisible to the legacy descriptor scan.
+      symbols[2].st_info = elf_symbol_info(kElfSymbolBindWeak, kElfSymbolTypeObject);
+    } else if (scenario == 1) {
+      // Two exported names resolve to one descriptor, but have separate metadata.
+      symbols[2].st_value = symbols[1].st_value;
+    }
+    if (scenario < 2) {
+      std::memcpy(image.data() + symtab->sh_offset, symbols.data(),
+                  symbols.size() * sizeof(Elf64_Sym));
+    } else {
+      // Duplicate definitions across .symtab/.dynsym are legal only when the
+      // name and descriptor location agree. Scenario 3 hides B's alias solely
+      // in .dynsym, after the original descriptors have already been scanned.
+      if (scenario == 3)
+        symbols[2].st_value = symbols[1].st_value;
+      Elf64_Shdr dynsym = *symtab;
+      dynsym.sh_type = SHT_DYNSYM;
+      dynsym.sh_offset = image.size();
+      image.resize(image.size() + symbols.size() * sizeof(Elf64_Sym));
+      std::memcpy(image.data() + dynsym.sh_offset, symbols.data(),
+                  symbols.size() * sizeof(Elf64_Sym));
+      sections.push_back(dynsym);
+      header.e_shoff = image.size();
+      header.e_shnum = sections.size();
+      image.resize(image.size() + sections.size() * sizeof(Elf64_Shdr));
+      std::memcpy(image.data() + header.e_shoff, sections.data(),
+                  sections.size() * sizeof(Elf64_Shdr));
+      std::memcpy(image.data(), &header, sizeof(header));
+    }
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    InstrumentationOptions options;
+    options.entries.push_back(entry_growth_request(kernels[0], 0));
+    Instrumentor instrumentor(source, rocjitsu::IsaFamily::Cdna5, options);
+    instrumentor.add_point_by_offset(4);
+    const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+    const InstrumentedCodeObject result = instrumentor.patch();
+    if (scenario == 2) {
+      EXPECT_TRUE(validation.errors.empty());
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      EXPECT_FALSE(result.elf_bytes.empty());
+      continue;
+    }
+    const std::string expected = scenario == 0 ? "weak kernel descriptor" : "descriptor aliases";
+    if (validation.errors.empty() || result.errors.empty()) {
+      ADD_FAILURE() << "expected rejection: " << expected;
+      continue;
+    }
+    EXPECT_NE(validation.errors.front().find(expected), std::string::npos)
+        << validation.errors.front();
+    EXPECT_TRUE(validation.sites.empty());
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find(expected), std::string::npos) << result.errors.front();
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    EXPECT_TRUE(result.entries.empty());
+  }
+}
+
+TEST(InstrumentorDisjointEntries, EntryOnlyRequestRejectsNativeDebugBranchesIntoSelectedEntry) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   const FailureOr<uint32_t> nop = build_s_nop(0, kArch);
   const FailureOr<uint32_t> end = build_s_endpgm(kArch);
   const FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
   ASSERT_TRUE(nop.succeeded() && end.succeeded() && ret.succeeded());
   const std::vector<uint8_t> body =
-      make_amdgpu_probe_elf("alias_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX942);
+      make_amdgpu_probe_elf("entry_probe", {ret.value()}, EF_AMDGPU_MACH_AMDGCN_GFX950);
   const AmdGpuCodeObject probe(body.data(), body.size());
-  for (const bool alias : {false, true}) {
-    SCOPED_TRACE(alias);
-    const FailureOr<uint32_t> read = build_v_mov_b32_src(0, alias ? 30 : 2, kArch);
-    ASSERT_TRUE(read.succeeded());
-    const std::vector<uint8_t> image =
-        with_resource_metadata(make_amdgpu_kernel_elf({read.value(), nop.value(), end.value()}, 0,
-                                                      3, EF_AMDGPU_MACH_AMDGCN_GFX942, 0, 1),
-                               {{"test_kernel", 0, 32, 8, 0}});
-    const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
-    ASSERT_EQ(kernels.size(), 1u);
+  // gfx950 SOPP debug branch encodings; all target A from native B at offset 8.
+  for (const uint32_t opcode : {0u, 0xbf970000u, 0xbf980000u, 0xbf990000u, 0xbf9a0000u}) {
+    SCOPED_TRACE(opcode);
+    const uint32_t instruction = opcode == 0 ? nop.value() : opcode | uint16_t(-3);
+    if (opcode != 0) {
+      std::unique_ptr<Decoder> decoder = Decoder::create(kArch);
+      ASSERT_NE(decoder, nullptr);
+      std::unique_ptr<Instruction> decoded(decode_valid(*decoder, &instruction));
+      ASSERT_NE(decoded, nullptr);
+      EXPECT_TRUE(decoded->mnemonic().starts_with("s_cbranch_cdbg"));
+      EXPECT_NE(decoded->flags() & COND_BRANCH, 0u);
+      ASSERT_TRUE(decoded->branch_offset_bytes());
+      EXPECT_EQ(*decoded->branch_offset_bytes(), -12);
+    }
+    std::vector<uint8_t> image = make_amdgpu_two_kernel_elf(
+        {nop.value(), end.value(), instruction, end.value()}, 0, 3, EF_AMDGPU_MACH_AMDGCN_GFX950);
+    std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 2u);
+    amdhsa::kernel_descriptor_t native = kernels[1].descriptor;
+    native.kernel_code_entry_byte_offset += 8;
+    std::memcpy(image.data() + kernels[1].descriptor_file_offset, &native, sizeof(native));
     const AmdGpuCodeObject source(image.data(), image.size());
     Instrumentor instrumentor(
         source, kArch,
         {.register_growth = std::nullopt,
-         .entries = {{.descriptor_file_offset = kernels.front().descriptor_file_offset,
-                      .preservation = GuestStatePreservation::DeclaredRegisters,
-                      .register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 8}}}});
-    instrumentor.add_point(
-        {.anchor_offset = 4, .probe_obj = &probe, .probe_symbol = "alias_probe", .probe_args = {}});
+         .entries = {{.descriptor_file_offset = kernels[0].descriptor_file_offset,
+                      .register_growth = std::nullopt}}});
+    instrumentor.add_point({.anchor_offset = 0,
+                            .kind = InstrumentationKind::KernelEntry,
+                            .probe_obj = &probe,
+                            .probe_symbol = "entry_probe",
+                            .probe_args = {}});
     const InstrumentedCodeObject result = instrumentor.patch();
-    if (alias) {
-      ASSERT_FALSE(result.errors.empty());
-      EXPECT_NE(result.errors.front().find("numeric SGPR alias"), std::string::npos)
-          << result.errors.front();
-      EXPECT_TRUE(result.elf_bytes.empty());
-      EXPECT_TRUE(result.sites.empty());
-      EXPECT_TRUE(result.entries.empty());
-    } else {
+    if (opcode == 0) {
       ASSERT_TRUE(result.errors.empty()) << result.errors.front();
-      ASSERT_EQ(result.entries.size(), 1u);
-      EXPECT_GT(result.entries.front().resources.sgprs, 32u);
+      EXPECT_FALSE(result.elf_bytes.empty());
+      continue;
     }
+    if (result.errors.empty()) {
+      ADD_FAILURE() << "native debug branch into the selected entry was accepted";
+      continue;
+    }
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(), "entry requests require complete disjoint kernel scopes");
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.entries.empty());
+    EXPECT_TRUE(result.sites.empty());
   }
 }
 
@@ -8560,6 +8719,9 @@ TEST(InstrumentorDisjointEntries, SelectingEitherEntryPreservesTheNativeSibling)
     const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty()) << result.errors.front();
     ASSERT_EQ(result.entries.size(), 1u);
+    EXPECT_EQ(result.resources.sgprs, 0u);
+    EXPECT_EQ(result.resources.vgprs, 0u);
+    EXPECT_EQ(result.resources.kernarg_bytes, 0u);
     EXPECT_EQ(result.entries.front().original_descriptor_offset,
               kernels[selected].descriptor_file_offset);
     EXPECT_EQ(result.entries.front().sites.size(), 3u);
@@ -8620,6 +8782,9 @@ TEST(InstrumentorDisjointEntries, BothSelectedEntriesHaveIndependentBootstrapRes
   const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
   ASSERT_TRUE(result.errors.empty()) << result.errors.front();
   ASSERT_EQ(result.entries.size(), 2u);
+  EXPECT_EQ(result.resources.sgprs, 0u);
+  EXPECT_EQ(result.resources.vgprs, 0u);
+  EXPECT_EQ(result.resources.kernarg_bytes, 0u);
   ASSERT_EQ(result.sites.size(), 6u);
   const std::vector<KernelDescriptorInfo> updated = entry_growth_kernels(result.elf_bytes);
   ASSERT_EQ(updated.size(), 2u);
@@ -8716,7 +8881,13 @@ TEST(InstrumentorDisjointEntries, DuplicateUnknownAndUnselectedOwnersFailClosed)
     Instrumentor instrumentor(source, kArch, options);
     instrumentor.add_point_by_offset(scenario == 2 ? 256 : 0);
     const InstrumentedCodeObject result = instrumentor.patch();
-    ASSERT_FALSE(result.errors.empty());
+    const std::array<std::string_view, 4> expected = {
+        "entry request has an unknown or duplicate original descriptor",
+        "entry request has an unknown or duplicate original descriptor",
+        "instrumentation point has no unique selected entry owner",
+        "explicit entry requests cannot be combined with legacy options"};
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(), expected[scenario]);
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.entries.empty());
     EXPECT_TRUE(result.sites.empty());
@@ -8752,7 +8923,11 @@ TEST(InstrumentorDisjointEntries, AliasedEntriesAndCrossEntryBranchesAreRejected
     Instrumentor instrumentor(source, kArch, options);
     instrumentor.add_point_by_offset(4);
     const InstrumentedCodeObject result = instrumentor.patch();
-    EXPECT_FALSE(result.errors.empty());
+    const std::string_view expected =
+        scenario == 0 ? "entry requests require distinct descriptors, entries and names"
+                      : "entry requests require complete disjoint kernel scopes";
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(), expected);
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.entries.empty());
   }
@@ -8805,7 +8980,8 @@ TEST(InstrumentorDisjointEntries, NativeTextTailFallthroughCannotEnterAppendedCo
       EXPECT_GT(prepared.text_sections().front()->size(), text->size());
       continue;
     }
-    EXPECT_FALSE(result.errors.empty());
+    ASSERT_EQ(result.errors.size(), 1u);
+    EXPECT_EQ(result.errors.front(), "entry requests require complete disjoint kernel scopes");
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.entries.empty());
     EXPECT_TRUE(result.sites.empty());

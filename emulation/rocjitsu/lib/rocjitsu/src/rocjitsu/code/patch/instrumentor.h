@@ -259,7 +259,10 @@ struct InstrumentedCodeObject {
   std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
+  /// Legacy-path resources; zero for explicit entry requests, even one selection.
   InstrumentationResources resources;
+  /// Explicit-entry results sorted by original_descriptor_offset. Find the
+  /// requested descriptor here and read its resources for the kernarg wrapper size.
   std::vector<InstrumentedEntry> entries;
 };
 
