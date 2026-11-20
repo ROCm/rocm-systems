@@ -371,6 +371,9 @@ struct Info : public amd::EmbeddedObject {
   //! Size of L2 Cache in bytes.
   uint32_t l2CacheSize_;
 
+  //! Size of L3 Cache (MALL) in bytes, 0 if the device has none.
+  uint32_t l3CacheSize_;
+
   //! Maximum persisting L2 cache size in bytes.
   size_t persistingL2CacheMaxSize_;
 
@@ -1428,6 +1431,13 @@ class VirtualDevice : public amd::ReferenceCountedObject {
     return false;
   }
 
+  //! Puts on the queue a wait for a command of another queue, without a command of its own: no
+  //! completion signal, no batch. The anchor holds the waited command until it completes, so
+  //! its anchor's completion must follow the wait. False if the queue can't
+  virtual bool dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) {
+    return false;
+  }
+
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1561,10 +1571,14 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
 
  private:
-  // Helper struct for memory object lookup results
+  //!< Helper struct for memory object lookup results.
   struct LookupResult {
     amd::Memory* memory;
     size_t offset;
+    size_t size;        //!< size == 0 for Windows overlapping VA range or a miss, and is
+                        //!< not cacheable. Otherwise (global map hit) the length from the entry's
+                        //!< start over which a fresh lookup returns this same entry: its size, cut
+                        //!< at the next key so overlapping entries cannot be served from the cache
   };
 
   //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.

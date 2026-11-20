@@ -48,7 +48,7 @@
 #endif
 
 /// @brief Byte offset into the in-memory file image at which writing starts.
-/// Must be a multiple of the filesystem block size for O_DIRECT.
+/// Must be a multiple of the direct-I/O alignment.
 #ifndef SW_SUB_OFFSET
 #define SW_SUB_OFFSET (8192UL)
 #endif
@@ -65,21 +65,10 @@ main(int argc, char *argv[])
     const char *out_path = argv[2];
     const int   gpu_id   = (argc == 4) ? atoi(argv[3]) : 0;
 
-    /* Stat the input file to get its size and the filesystem block size. */
-    size_t file_size, block_size;
-    {
-        struct stat statbuf;
-        if (stat(in_path, &statbuf)) {
-            fprintf(stderr, "Could not stat %s (%s)\n", in_path, strerror(errno));
-            return EXIT_FAILURE;
-        }
-        file_size  = static_cast<size_t>(statbuf.st_size);
-        block_size = static_cast<size_t>(statbuf.st_blksize);
-        if (!is_power_of_two(block_size)) {
-            fprintf(stderr, "Block size is not a power of two (%zu)\n", block_size);
-            return EXIT_FAILURE;
-        }
-    }
+    /* Query file size and direct-I/O alignment. */
+    size_t file_size, io_alignment;
+    if (get_file_info(in_path, &file_size, &io_alignment))
+        return EXIT_FAILURE;
 
     if (0 == file_size) {
         fprintf(stderr, "Input file %s is empty\n", in_path);
@@ -87,9 +76,9 @@ main(int argc, char *argv[])
     }
 
     const size_t sub_offset = SW_SUB_OFFSET;
-    if (sub_offset == 0 || (sub_offset & (block_size - 1)) != 0) {
-        fprintf(stderr, "SW_SUB_OFFSET (%zu) must be a non-zero multiple of block size (%zu)\n", sub_offset,
-                block_size);
+    if (sub_offset == 0 || (sub_offset & (io_alignment - 1)) != 0) {
+        fprintf(stderr, "SW_SUB_OFFSET (%zu) must be a non-zero multiple of direct-I/O alignment (%zu)\n",
+                sub_offset, io_alignment);
         return EXIT_FAILURE;
     }
 
@@ -99,9 +88,9 @@ main(int argc, char *argv[])
                 sub_offset, payload_size);
         return EXIT_FAILURE;
     }
-    const size_t alloc_size = align_up(payload_size, block_size);
+    const size_t alloc_size = align_up(payload_size, io_alignment);
     const size_t write_size = payload_size - sub_offset;
-    const size_t write_xfer = align_up(write_size, block_size);
+    const size_t write_xfer = align_up(write_size, io_alignment);
 
     int             in_fd  = -1;
     int             out_fd = -1;

@@ -19,8 +19,10 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append probe bodies, entry stub and trampolines
-///         |  into .text + redirect the entry to the stub + emit()
+///         |  KernelEntry callbacks: retarget only the entry-stub branch
+///         |  checked transaction into the private original-text buffer
+///         |  append probe bodies, entry stub and trampolines to .text
+///         |  replace_text() + finalize ELF/resource updates
 ///         v
 ///   InstrumentedCodeObject      -- patch(): patched ELF + diagnostics
 ///   InstrumentedCodeObjectDebug -- patch_with_debug_summaries(): same result
@@ -30,7 +32,7 @@
 /// failure aborts the whole patch.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
 /// itself), per-site failure tolerance,
-/// AfterInst / BlockEntry / BlockExit kinds.
+/// BlockEntry / BlockExit kinds.
 /// As that lands the per-stage types will thicken
 /// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
 /// and a layout/negotiation stage will appear between planning and splicing.
@@ -42,10 +44,12 @@
 
 #pragma once
 
+#include "rocjitsu/code/analysis/instruction_boundaries.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/patch/spill_manager.h"
+#include "rocjitsu/code/patch/text_edit_error.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
@@ -72,8 +76,11 @@ class LivenessAnalysis;
 /// Internal enum mirroring the future public `rj_code_instrument_kind_t`.
 /// BeforeInst relocates an ordinary instruction. KernelEntry runs once through
 /// the descriptor's dispatch-only stub; KernelExit runs before s_endpgm. Both
-/// boundary kinds require a callable probe. AfterInst, BlockEntry, and BlockExit
-/// remain reserved and are rejected.
+/// boundary kinds require a callable probe. AfterInst calls a probe after a
+/// relocated instruction, observing its resulting state. Anchors changing VGPR
+/// addressing or allocation state, enabling VSKIP, or deallocating VGPRs and
+/// scratch are rejected. BlockEntry and BlockExit remain
+/// reserved.
 enum class InstrumentationKind {
   BeforeInst,
   AfterInst,
@@ -112,11 +119,11 @@ struct InstrumentationPoint {
   // naming one probe and describing it differently is an error, not two probes.
   // Immediate values and the source indices of guest-register arguments are per-site.
   std::vector<ProbeArgValue> probe_args;
-  // Run the probe body with every lane enabled rather than under the mask the
-  // guest had at the anchor. For a uniform probe whose work does not depend on
-  // which lanes were active; a probe that reads per-lane guest state wants the
-  // anchor mask instead, which is the default. Declared per probe, like the
-  // argument shape, and relayed through this point for the same reason.
+  // Run the probe body with every lane enabled rather than under EXEC at the
+  // selected observation point. For AfterInst, the default mask is the EXEC
+  // produced by the anchor. Intended for uniform probes; probes reading per-lane
+  // guest state want the default observation mask instead. Declared per probe,
+  // like the argument shape, and relayed through this point for the same reason.
   //
   // The envelope already widens EXEC around the spill and argument writes; this
   // holds that window open across the call instead of closing it first.
@@ -175,6 +182,8 @@ struct InstrumentationPatch {
 /// For callable sites, instrumentation_offset and instrumentation_size cover
 /// the call envelope and exclude the relocated guest instruction and resume
 /// branch.
+/// AfterInst maps the relocated guest before its instrumentation range; ordinary
+/// BeforeInst maps it after that range. Probe bodies are shared separately.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;
@@ -200,6 +209,8 @@ struct InstrumentationResources {
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
+  /// Present for anchor-batch failures; errors retains the human-readable diagnostic.
+  std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
   InstrumentationResources resources;
@@ -240,7 +251,7 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///   - anchor.raw_encoding() is non-null.
 ///   - anchor is not a branch/cond branch/indirect branch/indirect call/
 ///     program terminator, and branch_offset_bytes() is nullopt.
-///   - anchor.mnemonic() is not in the small PC-relative denylist
+///   - the anchor operation has no prohibited PC-relative semantics
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
 ///   - anchor is not s_clause. Because this predicate has no surrounding
 ///     instruction-stream context, Instrumentor additionally rejects anchors
@@ -262,9 +273,15 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
-///   - @p pt.kind is BeforeInst, KernelEntry, or KernelExit. Boundaries require
+///   - @p pt.kind is BeforeInst, AfterInst, KernelEntry, or KernelExit. Boundaries require
 ///     a probe; KernelExit must name s_endpgm. The orchestrator separately checks
 ///     that KernelEntry names the sole kernel's descriptor entry.
+///   - AfterInst requires a callable probe and a supported post-anchor state.
+///     See emulation/rocjitsu/docs/dbi-design.md, "Key design constraint", for
+///     the complete admission rules. Liveness proves addressing state before
+///     the anchor.
+///     @p setreg_vgpr_msb_fixup selects the concrete target's MODE-write behavior;
+///     the default conservatively applies gfx1250's clobber semantics on CDNA5.
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
 ///     call) or both empty (the inline nop). Setting only one is rejected.
 ///   - @p pt.probe_args is empty without a probe: an inline-nop site has
@@ -274,7 +291,8 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                rj_code_arch_t arch, std::string *error_out = nullptr);
+                rj_code_arch_t arch, std::string *error_out = nullptr,
+                bool setreg_vgpr_msb_fixup = true);
 
 /// @brief Build a TrampolinePlan from a validated site.
 ///
@@ -448,7 +466,7 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
-  ///             Instrumentor.
+  ///             Instrumentor and must remain immutable and unmoved.
   /// @param arch The ISA used to decode @p obj. An arch that has no
   ///             registered Decoder (RV32I/RV64I/INVALID/etc.) surfaces as
   ///             a ValidationResult / InstrumentedCodeObject error at
@@ -480,6 +498,8 @@ public:
   /// Currently all-or-nothing: on any failure, `sites` is empty and `errors`
   /// lists every fatal diagnostic encountered. On success, `sites` contains
   /// one record per queued point in insertion order and `errors` is empty.
+  /// Success establishes per-site eligibility, not that the final patch will succeed.
+  /// Complete encoded-batch reference checks and final layout checks run in patch().
   [[nodiscard]] ValidationResult validate_points();
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
@@ -526,14 +546,15 @@ private:
   std::unique_ptr<Decoder> decoder_;
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   std::unique_ptr<LivenessAnalysis> liveness_;
+  class CallableStateAnalysis;
+  std::unique_ptr<CallableStateAnalysis> callable_state_analysis_;
   // .text-relative byte offset -> decoded Instruction. Populated alongside
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
-  // .text-relative byte offsets that cannot be trampoline anchors because they
-  // are among the following instructions covered by an s_clause. The s_clause
-  // instruction itself is rejected by is_relocatable_anchor().
-  std::unordered_set<uint64_t> clause_blocked_offsets_;
+  // Owned full-section index built with this source's decoder alongside blocks_.
+  // The local anchor transaction borrows it during patching.
+  InstructionBoundaries instruction_boundaries_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
@@ -553,7 +574,7 @@ private:
     uint64_t padding_bytes = 0;           ///< s_nop fill ahead of the stub, for entry alignment.
     uint64_t stub_offset = 0;             ///< .text offset the descriptor enters at.
     std::optional<uint16_t> storage_base; ///< Persistent pair, when context is requested.
-    std::vector<EntryVgprCapture> captured_vgprs;
+    std::vector<EntryRegisterCapture> captured_registers;
     std::vector<uint32_t> words; ///< Prologue, then s_branch to the original entry.
   };
 

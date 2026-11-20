@@ -11,6 +11,8 @@
 
 #include "gin_rocshmem_gda_plugin_test_stubs.h"
 
+#include "../common/ScopedEnv.hpp"
+
 #include "gin/gin_host_rocshmem_gda.h"
 #include "comm.h"
 #include "nccl_device/gin/rocshmem_gda/gin_rocshmem_device_host_common_gda.h"
@@ -67,7 +69,7 @@ class GinRocshmemGdaPluginTest : public ::testing::Test {
     char handle[NCCL_NET_HANDLE_MAXSIZE] = {};
     ASSERT_EQ(plugin_.listen(ictx_, 0, handle, &listen), ncclSuccess);
     std::vector<void*> handles(static_cast<size_t>(nranks), handle);
-    ASSERT_EQ(plugin_.connect(ictx_, handles.data(), nranks, rank, listen, &coll_), ncclSuccess);
+    ASSERT_EQ(plugin_.connect(ictx_, handles.data(), nranks, rank, listen, &coll_, nullptr), ncclSuccess);
     ASSERT_EQ(plugin_.closeListen(listen), ncclSuccess);
   }
 
@@ -76,6 +78,61 @@ class GinRocshmemGdaPluginTest : public ::testing::Test {
     return CopyToHost(static_cast<const ncclGinRocshmemGdaGPUContext*>(devHandle->handle), n);
   }
 };
+
+// GIN v15 barrierOptions: GDA keeps NCCL's default one-signal-per-rank barrier.
+// The default is 0, so the field starts at the other valid value to catch a plugin
+// that never sets it. Needs no GPU, unlike GinRocshmemGdaPluginTest.
+TEST(GinRocshmemGdaPluginPropertiesTest, GinProperties_ReportDefaultBarrier) {
+  ncclGinProperties_t props{};
+  props.barrierOptions = NCCL_GIN_BARRIER_SIGNAL_EFFICIENT;
+  ASSERT_EQ(ncclGinRocshmemGdaPlugin.getGinProperties(&props), ncclSuccess);
+  EXPECT_TRUE(props.supportsStrongSignals);
+  EXPECT_TRUE(props.supportsVASignals);
+  EXPECT_EQ(props.barrierOptions, NCCL_GIN_BARRIER_DEFAULT);
+}
+
+// AICOMRCCL-3418: GDA stays off unless NCCL_GIN_TYPE=6, or NCCL_GIN_TYPE is unset
+// and RCCL_GIN_TYPE_LIST lists 6.
+TEST_F(GinRocshmemGdaPluginTest, Init_OffByDefault) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", nullptr);
+  EXPECT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(ictx_, nullptr);
+}
+
+TEST_F(GinRocshmemGdaPluginTest, Init_ListedInGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+  ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
+  EXPECT_NE(ictx_, nullptr);
+}
+
+// An empty NCCL_GIN_TYPE is unset, so the list still turns GDA on.
+TEST_F(GinRocshmemGdaPluginTest, Init_EmptyGinTypeAndListed) {
+  ScopedEnv ty("NCCL_GIN_TYPE", "");
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "6,7");
+  ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
+  EXPECT_NE(ictx_, nullptr);
+}
+
+TEST_F(GinRocshmemGdaPluginTest, Init_NotListedInGinTypes) {
+  ScopedEnv ty("NCCL_GIN_TYPE", nullptr);
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "2,7");
+  EXPECT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(ictx_, nullptr);
+}
+
+TEST_F(GinRocshmemGdaPluginTest, Init_GinTypeOverridesGinTypes) {
+  ScopedEnv list("RCCL_GIN_TYPE_LIST", "2,7");
+  ASSERT_EQ(plugin_.init(&ictx_, 0, nullptr), ncclSuccess);
+  EXPECT_NE(ictx_, nullptr);
+
+  ScopedEnv ty("NCCL_GIN_TYPE", "7");
+  ScopedEnv listWithGda("RCCL_GIN_TYPE_LIST", "6,7");
+  void* other = nullptr;
+  EXPECT_EQ(plugin_.init(&other, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(other, nullptr);
+}
 
 TEST_F(GinRocshmemGdaPluginTest, CreateContext_StripesSignalsAndCountersPerContext) {
   constexpr int kRanks = 2, kRank = 1, kContexts = 3, kSignals = 4, kCounters = 2;

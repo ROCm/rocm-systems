@@ -49,6 +49,7 @@ enable GIN plugins.
 |----------|---------|-------------|
 | `NCCL_GIN_ENABLE` | `1` | Enable/disable GIN (all backends) |
 | `NCCL_GIN_TYPE` | (auto) | Force a specific backend: `2`=IB proxy, `6`=rocSHMEM GDA, `7`=Anvil SDMA. **Not value-compatible with 2.30.7** (see below). |
+| `RCCL_GIN_TYPE_LIST` | (unset) | RCCL-only. Comma-separated backend types that may be active together, e.g. `6,7` (GDA and SDMA) or `6,2` (GDA and IB proxy). Ignored when `NCCL_GIN_TYPE` is set. See [Mixing backends](#mixing-backends). |
 | `NCCL_GIN_ANVIL_SDMA_THRESHOLD` | `128` | Minimum message size (bytes) to use SDMA; smaller messages fall back to the IB proxy |
 | `NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL` | `0` | Enable fused signal mode for SDMA (experimental) |
 | `NCCL_GIN_ANVIL_SDMA_CONN_CHECK` | `1` | Validate LSA signal connectivity on first bind (LSA team only; skipped under `NCCL_GIN_CONNECTION_RAIL`); set exactly `0` to bypass |
@@ -87,6 +88,38 @@ docker run -it --rm --shm-size 64G \
 
 To use the rocSHMEM GDA backend instead, set `NCCL_GIN_TYPE=6`.
 
+### Mixing backends
+
+With `NCCL_GIN_TYPE` unset, Anvil SDMA and the IB proxy are both active by
+default, and rocSHMEM GDA is off. `RCCL_GIN_TYPE_LIST` replaces that default set
+with the listed types, so one communicator can host DevComms on different
+backends:
+
+| `RCCL_GIN_TYPE_LIST` | Active backends | Default (`backends[0]`) |
+|------------------|-----------------|-------------------------|
+| `6,7` | rocSHMEM GDA, Anvil SDMA | Anvil SDMA |
+| `6,2` | rocSHMEM GDA, IB proxy | rocSHMEM GDA |
+| `6,7,2` | all three | Anvil SDMA |
+
+The default order is Anvil SDMA, then rocSHMEM GDA, then the IB proxy. A
+DevComm that leaves `ncclDevCommRequirements::ginType` as
+`NCCL_GIN_TYPE_NONE` gets the first backend that can serve it; set `ginType`
+to `NCCL_GIN_TYPE_ROCSHMEM_GDA` (or `NCCL_GIN_TYPE_ANVIL_SDMA`,
+`NCCL_GIN_TYPE_PROXY`) to pick one. Each backend still needs its own platform
+requirements below. A backend whose plugin fails to initialize is dropped from
+the set.
+
+Connecting is different: the first GIN DevComm on a communicator connects every
+listed backend together, and if any one of them fails to connect (for example,
+rocSHMEM GDA cannot create its queue pairs), GIN fails on that communicator for
+all of them. That includes the built-in Anvil SDMA alltoall and allreduce, which
+then return the error instead of running on SDMA. List only backends the
+platform supports.
+
+Entries must be backend types `2` through `7`; any other entry is dropped with a
+warning, and a list that leaves no backend registered also logs a warning. An
+empty `NCCL_GIN_TYPE` counts as unset, so it does not override the list.
+
 ### Platform requirements
 
 rocSHMEM GDA (`NCCL_GIN_TYPE=6`) requires a supported GDA NIC provider (mlx5, bnxt,
@@ -120,6 +153,47 @@ kernel that includes the GIN headers inherits no hidden device state and needs n
 `hipMemcpyToSymbol` init (matching how the PROXY/GDAKI backends pass device state
 through the GPU context). The old zero-initialized `constmem` stub and its
 device-bitcode injection are gone.
+
+## Resource sharing modes
+
+`ncclGin` is constructed with a `ncclGinResourceSharingMode`
+(`ncclGinResourceSharingMode` in `nccl_device/gin/gin_device_common.h`) that tells
+the backend how a queue pair's send queue (SQ) is shared across the GPU threads
+that post to it. It only changes the SQ's internal synchronization, not *who*
+posts (a single elected lane still posts for the whole coop):
+
+| Mode | Value | Meaning |
+|------|-------|---------|
+| `GPU` | 0 | SQ shared grid-wide; keep the SQ lock. Library default. |
+| `CTA` | 1 | SQ shared within a CTA; keep the lock (no cheaper CTA-scope lock exists yet). |
+| `THREAD` | 2 | Exclusive QP ownership; drop the SQ lock. |
+
+`THREAD` elides a per-WQE lock (on rocSHMEM GDA, an agent-scope CAS + acquire/release
+fence), so it is the fast path when a QP has a single poster. It is the RCCL/rocSHMEM
+analogue of DOCA's `doca_gpu_dev_verbs_resource_sharing_mode`.
+
+Each backend maps the mode onto its own QP primitive:
+
+| Backend | How the mode is applied |
+|---------|-------------------------|
+| rocSHMEM GDA | `PostOpt{ThreadSafe<bool>}`: THREAD -> `ThreadSafe<false>` (no lock), GPU/CTA -> `ThreadSafe<true>` (lock). rocSHMEM has only an agent-scope lock, so CTA folds into GPU. |
+| GDAKI (DOCA) | Templated on the DOCA `resource_sharing_mode` enum; all three modes map to distinct DOCA values. |
+| Anvil SDMA, IB proxy | Ignored (no SQ lock to elide); correct regardless of the mode. |
+
+### rocSHMEM GDA THREAD precondition (stronger than GDAKI)
+
+At the moment, on the rocSHMEM GDA backend, **every logical context aliases the same per-peer QP
+array** (`gin_plugin_rocshmem_gda.cc` sets `gpuCtx->qps = cctx->gpu_qp_ptrs` for
+all contexts; only signals/counters are striped per `contextId`). So there is one
+SQ per peer for the *whole grid* -- unlike GDAKI, where `handle[contextId].gdqp`
+is a distinct QP per context.
+
+Consequently `THREAD` is safe here only when a **single coop posts to each peer
+across the entire grid** (e.g. all GIN confined to one CTA). The usual
+GDAKI-friendly pattern of one context per CTA does **not** give each CTA its own
+SQ on this backend, and a multi-CTA barrier that signals/flushes `qps[peer]` from
+every CTA would race under THREAD -- such callers must use `GPU` mode. True
+per-CTA QP parity is deferred to a GDA QP refactor.
 
 ## Writing tests that use the GIN device API
 

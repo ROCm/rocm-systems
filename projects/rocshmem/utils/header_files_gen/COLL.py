@@ -38,16 +38,63 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("int32_t", "int32"),
+    ("int64_t", "int64"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16"),
+    ("uint32_t", "uint32"),
+    ("uint64_t", "uint64"),
+    ("size_t", "size"),
+    ("ptrdiff_t", "ptrdiff"),
 ]
 
-def alltoall_ctx_wg_api(T, TNAME):
-    return (
-        f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
-        f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
-        f"    const {T} *source, int nelems);\n\n"
-    )
+_int_types = [
+    0, # ("float", "float"),
+    0, # ("double", "double"),
+    1, # ("char", "char"),
+    1, # ("signed char", "schar"),
+    1, # ("short", "short"),
+    1, # ("int", "int"),
+    1, # ("long", "long"),
+    1, # ("long long", "longlong"),
+    1, # ("unsigned char", "uchar"),
+    1, # ("unsigned short", "ushort"),
+    1, # ("unsigned int", "uint"),
+    1, # ("unsigned long", "ulong"),
+    1, # ("unsigned long long", "ulonglong"),
+    0, # ("__half", "half"),
+    0, # ("__hip_bfloat16", "bfloat16"),
+    1, # ("int8_t", "int8"),
+    1, # ("int16_t", "int16"),
+    1, # ("int32_t", "int32"),
+    1, # ("int64_t", "int64"),
+    1, # ("uint8_t", "uint8"),
+    1, # ("uint16_t", "uint16"),
+    1, # ("uint32_t", "uint32"),
+    1, # ("uint64_t", "uint64"),
+    1, # ("size_t", "size"),
+    1, # ("ptrdiff_t", "ptrdiff"),
+]
 
-def alltoall_api(T, TNAME):
+# bfloat16 reductions are disabled on HIP 7.16/7.17 due to a compiler bug
+# (cannot select v2bf16 scalar_to_vector). Keep this guard in sync with the
+# one around the __hip_bfloat16 reduction instantiations in src/.
+_BF16_REDUCE_GUARD = (
+    "#if !(HIP_VERSION_MAJOR == 7 && "
+    "(HIP_VERSION_MINOR == 16 || HIP_VERSION_MINOR == 17))\n"
+)
+
+def guard_bf16_reduce(T, code):
+    if T == "__hip_bfloat16":
+        return _BF16_REDUCE_GUARD + code + "#endif\n"
+    return code
+
+
+def alltoall_ctx_wg_api(T, TNAME):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_ctx_{TNAME}_alltoall_wg(\n"
         f"    rocshmem_ctx_t ctx, rocshmem_team_t team, {T} *dest,\n"
@@ -76,8 +123,6 @@ def generate_alltoall_wg_api():
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
- *
- * @return void
  */\n"""
     for type_, tname_ in types:
         expanded_code += alltoall_ctx_wg_api(type_, tname_)
@@ -98,8 +143,6 @@ def generate_alltoall_wg_api():
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of data blocks transferred per pair of PEs.
- *
- * @return void
  */
 __device__ void rocshmem_ctx_alltoallmem_wg(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
@@ -143,6 +186,26 @@ def generate_alltoall_wave_api():
  */\n"""
     for type_, tname_ in types:
         expanded_code += alltoall_wave_api(type_, tname_)
+    expanded_code += """/**
+ * @name ROCSHMEM_ALLTOALLMEM_WAVE
+ * @brief Exchanges a fixed amount of contiguous data blocks between all pairs
+ * of PEs participating in the collective routine.
+ *
+ * This function must be called as a wave collective.
+ *
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
+ * @param[in] team         The team participating in the collective.
+ * @param[in] dest         Destination address. Must be an address on the
+ *                         symmetric heap.
+ * @param[in] source       Source address. Must be an address on the symmetric
+ *                         heap.
+ * @param[in] nelems       Number of data blocks transferred per pair of PEs.
+ *
+ * @return int; zero on success, non-zero otherwise
+ */
+__device__ int rocshmem_ctx_alltoallmem_wave(rocshmem_ctx_t ctx,
+    rocshmem_team_t team, void *dest, const void *source, int nelems);
+"""
 
     for type_, tname_ in types:
         expanded_code += alltoall_wave_non_ctx_api(type_, tname_)
@@ -199,8 +262,6 @@ def generate_alltoallv_wg_api():
  * @param[in] source        Source address. Must be an address on the symmetric heap.
  * @param[in] source_nelems Array containing number of elements to send from each participating PE
  * @param[in] source_displs Array of offsets into source buffer for each participating PE
- *
- * @return void
  */
 \n"""
 
@@ -252,8 +313,6 @@ def generate_broadcast_api():
  * @param[in] PE_size      Number PEs participating in the reduction.
  * @param[in] pSync        Temporary sync buffer provided to ROCSHMEM. Must
  *                         be of size at least ROCSHMEM_REDUCE_SYNC_SIZE.
- *
- * @return void
  */\n"""
     for type_, tname_ in types:
         expanded_code += broadcast_api(type_, tname_)
@@ -277,8 +336,6 @@ def generate_broadcast_api():
  * @param[in] nelems       Size of buffer to participate in the broadcast.
  * @param[in] PE_root      Root PE (relative to team) from which to broadcast.
  *
- *
- * @return void
  */
 __device__ void rocshmem_ctx_broadcastmem_wg(rocshmem_ctx_t ctx, rocshmem_team_t team,
               void *dest, const void *source, int nelems, int PE_root);
@@ -314,8 +371,6 @@ def generate_fcollect_api():
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of data blocks in source array.
- *
- * @return void
  */\n"""
     for type_, tname_ in types:
         expanded_code += fcollect_api(type_, tname_)
@@ -333,8 +388,6 @@ def generate_fcollect_api():
  * @param[in] source       Source address. Must be an address on the symmetric
  *                         heap.
  * @param[in] nelems       Number of bytes contributed by each PE.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_fcollectmem_wg(rocshmem_ctx_t ctx,
     rocshmem_team_t team, void *dest, const void *source, int nelems);
@@ -440,24 +493,14 @@ def generate_reduction_wave_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
         expanded_code += bitwise_reduction_wave_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reduction_wave_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reduction_wave_api(type_, tname_))
 
     return expanded_code
 
@@ -506,25 +549,14 @@ def generate_reducescatter_wg_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_api(type_, tname_)
         expanded_code += bitwise_reducescatter_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reducescatter_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reducescatter_api(type_, tname_))
 
     return expanded_code
 
@@ -553,25 +585,14 @@ def generate_reducescatter_wave_api():
  * Only the wave (wavefront) participates. Returns ROCSHMEM_SUCCESS on success.
  */\n"""
 
-
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_wave_api(type_, tname_)
         expanded_code += bitwise_reducescatter_wave_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reducescatter_wave_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reducescatter_wave_api(type_, tname_))
 
     return expanded_code
 
@@ -599,25 +620,14 @@ def generate_reducescatter_host_api():
  * of source[i*nreduce..(i+1)*nreduce-1] across all PEs.
  */\n"""
 
-
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reducescatter_host_api(type_, tname_)
         expanded_code += bitwise_reducescatter_host_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reducescatter_host_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reducescatter_host_api(type_, tname_))
 
     return expanded_code
 
@@ -658,24 +668,14 @@ def generate_reduction_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduction_api(type_, tname_)
         expanded_code += bitwise_reduction_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reduction_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reduction_api(type_, tname_))
 
     return expanded_code
 
@@ -698,24 +698,14 @@ def generate_reduce_on_stream_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    int_types = [
-        ("short", "short"),
-        ("int", "int"),
-        ("long", "long"),
-        ("long long", "longlong")
-    ]
-
-    float_types = [
-        ("float", "float"),
-        ("double", "double")
-    ]
-
-    for type_, tname_ in int_types:
+    # int types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
         expanded_code += bitwise_reduce_on_stream_api(type_, tname_)
 
-    for type_, tname_ in float_types:
-        expanded_code += arith_reduce_on_stream_api(type_, tname_)
+    # float types
+    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+        expanded_code += guard_bf16_reduce(type_, arith_reduce_on_stream_api(type_, tname_))
 
     return expanded_code
 
@@ -793,8 +783,6 @@ def add_misc():
 /**
  * @brief kernel for performing a barrier synchronization.
  * Caller enqueues the kernel on given stream
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
 
@@ -803,16 +791,12 @@ __global__ ATTR_NO_INLINE void rocshmem_barrier_all_kernel();
  * Caller enqueues the kernel on given stream.
  *
  * @param[in] team  The team participating in the barrier.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_barrier_kernel(rocshmem_team_t team);
 
 /**
  * @brief kernel for performing a sync_all operation.
  * Caller enqueues the kernel on given stream
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
 
@@ -821,8 +805,6 @@ __global__ ATTR_NO_INLINE void rocshmem_sync_all_kernel();
  * Caller enqueues the kernel on given stream.
  *
  * @param[in] team  The team participating in the sync.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team);
 
@@ -835,8 +817,6 @@ __global__ ATTR_NO_INLINE void rocshmem_team_sync_kernel(rocshmem_team_t team);
  *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] size    Number of bytes to transfer per pair of PEs.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
                                                            void *dest,
@@ -851,8 +831,6 @@ __global__ ATTR_NO_INLINE void rocshmem_alltoallmem_kernel(rocshmem_team_t team,
  *                     heap.
  * @param[in] source   Source address. Must be an address on the symmetric heap.
  * @param[in] nreduce  Number of elements to reduce.
- *
- * @return void
  */
 template <typename T, ROCSHMEM_OP Op>
 __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t team,
@@ -870,8 +848,6 @@ __global__ ATTR_NO_INLINE void rocshmem_reduce_on_stream_kernel(rocshmem_team_t 
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Number of bytes to broadcast.
  * @param[in] pe_root Root PE (relative to team) from which to broadcast.
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
     rocshmem_team_t team, void *dest, const void *source, size_t nelems,
@@ -882,8 +858,6 @@ __global__ ATTR_NO_INLINE void rocshmem_broadcastmem_kernel(
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be invoked by a single thread within the PE.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_barrier_all();
 
@@ -892,8 +866,6 @@ __device__ ATTR_NO_INLINE void rocshmem_barrier_all();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a wave-front collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wave();
 
@@ -902,8 +874,6 @@ __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wave();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a work-group collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wg();
 
@@ -913,11 +883,9 @@ __device__ ATTR_NO_INLINE void rocshmem_barrier_all_wg();
  *
  * This function must be invoked by a single thread within the PE.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  *
  * @param[in] team The team on which to perform barrier synchronization
- *
- * @return void
  */
 __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team);
 
@@ -927,11 +895,9 @@ __device__ void rocshmem_ctx_barrier(rocshmem_ctx_t ctx, rocshmem_team_t team);
  *
  * This function must be called as a wave-front collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  *
  * @param[in] team The team on which to perform barrier synchronization
- *
- * @return void
  */
 __device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t team);
 
@@ -941,11 +907,9 @@ __device__ void rocshmem_ctx_barrier_wave(rocshmem_ctx_t ctx, rocshmem_team_t te
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  *
  * @param[in] team The team on which to perform barrier synchronization
- *
- * @return void
  */
 __device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team);
 
@@ -954,8 +918,6 @@ __device__ void rocshmem_ctx_barrier_wg(rocshmem_ctx_t ctx, rocshmem_team_t team
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be invoked by a single thread within the PE.
- *
- * @return void
  */
 __device__ void rocshmem_barrier();
 
@@ -964,8 +926,6 @@ __device__ void rocshmem_barrier();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a wave-front collective.
- *
- * @return void
  */
 __device__ void rocshmem_barrier_wave();
 
@@ -974,8 +934,6 @@ __device__ void rocshmem_barrier_wave();
  * The caller is blocked until the barrier is resolved.
  *
  * This function must be called as a work-group collective.
- *
- * @return void
  */
 __device__ void rocshmem_barrier_wg();
 
@@ -988,8 +946,6 @@ __device__ void rocshmem_barrier_wg();
  * ensure completion of remote memory updates issued via OpenSHMEM routines.
  *
  * This function must be invoked by a single thread within the PE.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_sync_all();
 
@@ -1002,8 +958,6 @@ __device__ ATTR_NO_INLINE void rocshmem_sync_all();
  * ensure completion of remote memory updates issued via OpenSHMEM routines.
  *
  * This function must be called as a wave-front collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_sync_all_wave();
 
@@ -1016,8 +970,6 @@ __device__ ATTR_NO_INLINE void rocshmem_sync_all_wave();
  * ensure completion of remote memory updates issued via OpenSHMEM routines.
  *
  * This function must be called as a work-group collective.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_sync_all_wg();
 
@@ -1031,10 +983,8 @@ __device__ ATTR_NO_INLINE void rocshmem_sync_all_wg();
  *
  * This function must be invoked by a single thread within the PE.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  * @param[in] team  Handle of the team being synchronized
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
@@ -1049,10 +999,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync(
  *
  * This function must be called as a wave-front collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  * @param[in] team  Handle of the team being synchronized
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wave(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
@@ -1067,10 +1015,8 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wave(
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] handle GPU side handle.
+ * @param[in] ctx    Context with which to perform this collective.
  * @param[in] team  Handle of the team being synchronized
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_sync_wg(
     rocshmem_ctx_t ctx, rocshmem_team_t team);
@@ -1088,6 +1034,8 @@ def generate_COLL_header(output_dir, copyright):
     expanded_code += """
 #ifndef LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
 #define LIBRARY_INCLUDE_ROCSHMEM_COLL_HPP
+
+#include <hip/hip_version.h>
 
 namespace rocshmem {
 """

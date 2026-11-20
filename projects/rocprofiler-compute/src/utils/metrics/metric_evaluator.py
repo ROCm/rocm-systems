@@ -3,10 +3,9 @@
 
 """MetricEvaluator for YAML metric expression evaluation."""
 
-from __future__ import annotations
-
 import warnings
-from typing import Any
+from collections import ChainMap
+from typing import Any, Dict, List, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -26,7 +25,86 @@ from utils.metrics.aggregation import (
     to_sum,
 )
 from utils.metrics.common import EVAL_BUILTINS
-from utils.metrics.noise_clamper import to_noise_clamp
+from utils.metrics.expression import build_eval_string, columns_read
+from utils.utils_counter_defs import extract_counters_and_variables
+
+
+def counter_table_index(
+    eval_string: object,
+    tables: List[Union[pd.DataFrame, ChainMap]],
+    build_in_vars: Dict[str, str],
+) -> int:
+    """Return the index of the table an eval string should read.
+
+    Callers list the pass tables first and the merged table last. The first
+    pass table that has every column the eval string reads wins. Otherwise
+    the merged table wins.
+    """
+    if isinstance(eval_string, str):
+        columns = columns_read(eval_string, build_in_vars)
+        for index, table in enumerate(tables[:-1]):
+            if has_columns(table, columns):
+                return index
+    return len(tables) - 1
+
+
+def has_columns(table: Union[pd.DataFrame, ChainMap], columns: Set[str]) -> bool:
+    """Return whether table has every column in columns."""
+    return all(column in table for column in columns)
+
+
+def collectables_per_table(
+    eval_strings: List[object],
+    table_index_of_row: List[int],
+    tables: List[Union[pd.DataFrame, ChainMap]],
+    collectables: Dict[str, str],
+    used_collectables: Set[str],
+) -> List[Set[str]]:
+    """Return the collectables to evaluate on each table.
+
+    eval_strings[i] reads tables[table_index_of_row[i]], as counter_table_index
+    chose. Callers list the pass tables first and the merged table last.
+    """
+    merged_index = len(tables) - 1
+    collectables_to_evaluate: List[Set[str]] = [set() for _table in tables]
+
+    # A pass table evaluates the collectables its eval strings use
+    for eval_string, table_index in zip(eval_strings, table_index_of_row):
+        if table_index != merged_index:
+            _, row_collectables = extract_counters_and_variables(
+                eval_string, collectables, include_supported_denom=False
+            )
+            collectables_to_evaluate[table_index].update(row_collectables)
+
+    # The merged table takes each collectable from the first table that holds
+    # its counters, so that table evaluates it, with the ones it uses
+    tables_holding: Dict[str, Set[int]] = {}
+    for collectable in used_collectables:
+        formula = collectables[collectable]
+        columns = columns_read(build_eval_string(formula), collectables)
+        tables_holding[collectable] = {
+            table_index
+            for table_index, table in enumerate(tables)
+            if has_columns(table, columns)
+        }
+        if tables_holding[collectable]:
+            first_holding = min(tables_holding[collectable])
+            _, collectables_it_uses = extract_counters_and_variables(
+                formula, collectables, include_supported_denom=False
+            )
+            collectables_to_evaluate[first_holding].add(collectable)
+            collectables_to_evaluate[first_holding].update(collectables_it_uses)
+
+    # Leave out a collectable the expressions do not use or the table lacks
+    return [
+        {
+            collectable
+            for collectable in collectable_names
+            if collectable in used_collectables
+            and table_index in tables_holding[collectable]
+        }
+        for table_index, collectable_names in enumerate(collectables_to_evaluate)
+    ]
 
 
 class MetricEvaluator:
@@ -35,18 +113,18 @@ class MetricEvaluator:
     def __init__(
         self,
         raw_pmc_df: pd.DataFrame,
-        sys_vars: dict[str, Any],
-        empirical_peaks: dict[str, Any],
+        sys_vars: Dict[str, Any],
+        empirical_peaks: Dict[str, Any],
     ) -> None:
         self.raw_pmc_df = raw_pmc_df
         self.sys_vars = sys_vars
         self.empirical_peaks = empirical_peaks
 
-    def eval_expression(self, expr: str) -> str | float | int:
+    def eval_expression(self, expr: str) -> Union[str, float, int]:
         """Evaluate a single expression with proper local context."""
         try:
             # Create comprehensive local context
-            local_expr_context: dict[str, Any] = {}
+            local_expr_context: Dict[str, Any] = {}
             local_expr_context.update({"raw_pmc_df": self.raw_pmc_df})
             local_expr_context.update(self.sys_vars)
             local_expr_context.update(self.empirical_peaks)
@@ -64,7 +142,6 @@ class MetricEvaluator:
                 "to_quantile": to_quantile,
                 "to_mod": to_mod,
                 "to_concat": to_concat,
-                "to_noise_clamp": to_noise_clamp,
             })
 
             with warnings.catch_warnings(record=True) as caught:

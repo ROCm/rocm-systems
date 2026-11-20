@@ -97,8 +97,12 @@ std::vector<ncclAffinity> ncclOsSetAffinityMasksSnapshot() {
   return g_ncclOsSetAffinityMasks;
 }
 
-// Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
-// Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
+// Default sysfs text is "Linux version 6.8.0-microtest": the words "Linux", "version", and the
+// kernel release "6.8.0-microtest". ncclInit() splits /proc/version on spaces and keeps only that
+// third token, the release. Fewer than those three, including "", leaves the release NULL and
+// ncclInit() returns ncclSystemError.
+// The same string is not "1" and not the Hyper-V BIOS string, so numa_balancing and bios_version
+// stay on their benign arms.
 ncclResult_t g_ncclOsTopoGetStrFromSysResult = ncclSuccess;
 int g_ncclOsTopoGetStrFromSysCalls = 0;
 static ncclResult_t DefaultOsTopoGetStrFromSys(const char*, const char*, char* value, int maxLen) {

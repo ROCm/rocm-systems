@@ -766,6 +766,10 @@ foreach(_coll all_reduce reduce_scatter all_gather alltoall)
       ${_dda_dir}/${_coll}/dda_${_coll}_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
   endforeach()
 endforeach()
+foreach(_proto _ll _ll128)
+  dl_add_fat_object(dda_broadcast_fabric${_proto}
+    ${_dda_dir}/broadcast/dda_broadcast_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
+endforeach()
 
 # ===========================================================================
 # Symmetric kernels: per-instantiation device TUs from gensrc/symmetric/.
@@ -794,6 +798,10 @@ if(ENABLE_ROCSHMEM_GIN)
       DEFINES NCCL_GIN_ANVIL_SDMA_ENABLE=1 NCCL_GIN_PROXY_ENABLE=0
               NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
   endforeach()
+  dl_add_fat_object(gin_all_gather_sdma
+    ${HIPIFY_DIR}/src/algorithms/gin/sdma/gin_all_gather_sdma.cu.cpp
+    DEFINES NCCL_GIN_ANVIL_SDMA_ENABLE=1 NCCL_GIN_PROXY_ENABLE=0
+            NCCL_GIN_ROCSHMEM_GDA_ENABLE=0)
   dl_add_fat_object(gin_anvil_conn_check_device
     ${HIPIFY_DIR}/src/gin/gin_anvil_conn_check_device.cc
     DEFINES ENABLE_ROCSHMEM_GIN)

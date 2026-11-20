@@ -5,7 +5,7 @@
 // inputs. Accumulates sixteen columns at a time, including per-DOT4 narrowing
 // for packed FP16/BF16 results, then packs and stores the output tile.
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/swmmac_float_impl.h"
 
 #include <immintrin.h>

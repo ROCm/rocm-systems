@@ -5,156 +5,6 @@
 
 use super::*;
 
-/// Writes an AIS transfer result into the caller’s output record.
-unsafe fn publish_ais_result(
-    result: linux_interop::AisFileResult,
-    size_copied: *mut u64,
-    operation_status: *mut i32,
-) -> Status {
-    // SAFETY: Both outputs are optional in the public ABI and, when non-null,
-    // point to caller-owned writable storage for the duration of this call.
-    unsafe {
-        if !size_copied.is_null() {
-            size_copied.write(result.size_copied);
-        }
-        if !operation_status.is_null() {
-            operation_status.write(result.status);
-        }
-    }
-    if result.status == 0 { SUCCESS } else { ERROR }
-}
-
-/// Transfers data between an HSA allocation and an AIS file handle.
-pub(super) unsafe fn ais_transfer(
-    descriptor: i32,
-    host: usize,
-    size: usize,
-    file_offset: i64,
-    size_copied: *mut u64,
-    operation_status: *mut i32,
-    operation: AisOperation,
-) -> Status {
-    if size > 0 && (host == 0 || host.checked_add(size).is_none() || size > isize::MAX as usize) {
-        return ERROR;
-    }
-    // SAFETY: ais_file_io validates the full host mapping and holds the
-    // runtime lock until this synchronous positioned I/O call returns.
-    let buffer = match operation {
-        AisOperation::Read => linux_interop::AisHostBuffer::Read(if size == 0 {
-            &mut []
-        } else {
-            unsafe { std::slice::from_raw_parts_mut(host as *mut u8, size) }
-        }),
-        AisOperation::Write => linux_interop::AisHostBuffer::Write(if size == 0 {
-            &[]
-        } else {
-            unsafe { std::slice::from_raw_parts(host as *const u8, size) }
-        }),
-    };
-    let result = linux_interop::ais_host_transfer(descriptor, buffer, file_offset);
-    // SAFETY: The caller owns the optional output storage for this call.
-    unsafe { publish_ais_result(result, size_copied, operation_status) }
-}
-
-/// Reads or writes a file descriptor for an AIS transfer.
-pub(crate) unsafe fn ais_file_io(
-    handle: HsaAmdAisFileHandle,
-    device_pointer: *mut c_void,
-    size: u64,
-    file_offset: i64,
-    size_copied: *mut u64,
-    operation_status: *mut i32,
-    operation: AisOperation,
-) -> Status {
-    // SAFETY: Linux defines the public union's active member as fd.
-    let descriptor = unsafe { handle.fd };
-    let guard = match lock() {
-        Ok(guard) => guard,
-        Err(status) => return status,
-    };
-    let Some(runtime) = guard.as_ref() else {
-        return NOT_INITIALIZED;
-    };
-    if device_pointer.is_null() || descriptor < 0 {
-        return INVALID_ARGUMENT;
-    }
-    let transfer_size = match usize::try_from(size.min(linux_interop::AIS_MAX_TRANSFER_BYTES)) {
-        Ok(size) => size,
-        Err(_) => return ERROR,
-    };
-    let Some(description) = pointer_description(runtime, device_pointer as usize) else {
-        return ERROR;
-    };
-    if runtime.is_cpu_agent(description.owner) {
-        return ERROR;
-    }
-    let address = device_pointer as usize;
-    let Some(offset) = description.offset_range(address, transfer_size) else {
-        return ERROR;
-    };
-    // Hold the runtime lock through either synchronous transfer, preventing
-    // another HSA call from freeing the allocation during the borrow.
-    let status = if let Some(host) = description.host_address(address) {
-        // SAFETY: The mapped host range stays owned by the locked runtime.
-        // The public call keeps its descriptor live until this call returns.
-        unsafe {
-            ais_transfer(
-                descriptor,
-                host,
-                transfer_size,
-                file_offset,
-                size_copied,
-                operation_status,
-                operation,
-            )
-        }
-    } else {
-        let Some(memory) = owned_memory(runtime, address).filter(|memory| {
-            memory.description.agent_base == description.agent_base
-                && memory.description.host_base == description.host_base
-                && memory.description.offset_range(address, transfer_size) == Some(offset)
-        }) else {
-            return ERROR;
-        };
-        let offset = match u64::try_from(offset) {
-            Ok(offset) => offset,
-            Err(_) => return ERROR,
-        };
-        let size = match u64::try_from(transfer_size) {
-            Ok(size) => size,
-            Err(_) => return ERROR,
-        };
-        match linux_interop::ais_transfer(
-            &memory.allocation,
-            descriptor,
-            offset,
-            size,
-            file_offset,
-            operation,
-        ) {
-            Ok(result) => {
-                // SAFETY: Optional outputs belong to the caller for this call.
-                unsafe { publish_ais_result(result, size_copied, operation_status) }
-            }
-            Err(error) => {
-                // The ioctl input overlaps its output. On error KFD's copied
-                // count cannot be trusted, so leave size_copied untouched.
-                let errno = error
-                    .native_error_code()
-                    .filter(|errno| *errno > 0)
-                    .unwrap_or(EIO);
-                if !operation_status.is_null() {
-                    // SAFETY: The non-null optional output is caller-owned.
-                    unsafe { operation_status.write(-errno) };
-                }
-                ERROR
-            }
-        }
-    };
-    drop(guard);
-    status
-}
-
 /// Exports an allocation as a portable DMA-BUF descriptor.
 pub(crate) unsafe fn portable_export_dmabuf(
     pointer: *const c_void,
@@ -187,16 +37,16 @@ pub(crate) unsafe fn portable_export_dmabuf(
     else {
         return INVALID_ALLOCATION;
     };
-    if runtime.is_cpu_agent(memory.description.owner) {
+    if runtime.agents.is_cpu_agent(memory.description.owner) {
         return INVALID_AGENT;
     }
-    let Some(index) = runtime.gpu_index(memory.description.owner) else {
+    let Some(index) = runtime.agents.gpu_index(memory.description.owner) else {
         return INVALID_AGENT;
     };
     if flags & DMABUF_MAPPING_PCIE != 0 && !gpu_pcie_dmabuf_supported(runtime, index) {
         return NOT_SUPPORTED;
     }
-    let dma_buf = match linux_interop::export_dma_buf(&memory.allocation) {
+    let dma_buf = match native_memory::export_dma_buf(&memory.allocation) {
         Ok(dma_buf) => dma_buf,
         Err(error) => return map_error(error),
     };
@@ -208,7 +58,7 @@ pub(crate) unsafe fn portable_export_dmabuf(
         Some(exported_offset) => exported_offset,
         None => return INVALID_ALLOCATION,
     };
-    let exported_descriptor = dma_buf.into_fd().into_raw_fd();
+    let exported_descriptor = dma_buf.into_descriptor();
     // SAFETY: Both output pointers were validated above and are written only
     // after the export has completed successfully.
     unsafe {
@@ -242,10 +92,15 @@ pub(crate) unsafe fn memory_lock_to_pool(
         Err(status) => return status,
     };
     let pool = pool.unwrap_or_else(|| {
-        runtime.cpus.iter().position(|cpu| !cpu.apu).map_or_else(
-            || HsaState::cpu_pool(0, CpuPoolKind::Fine),
-            |index| HsaState::cpu_pool(index, CpuPoolKind::Coarse),
-        )
+        runtime
+            .agents
+            .cpus
+            .iter()
+            .position(|cpu| !cpu.apu)
+            .map_or_else(
+                || crate::agent::Agents::cpu_pool(0, CpuPoolKind::Fine),
+                |index| crate::agent::Agents::cpu_pool(index, CpuPoolKind::Coarse),
+            )
     });
     if host_ptr.is_null() || size == 0 || agent_ptr.is_null() {
         return INVALID_ARGUMENT;
@@ -256,7 +111,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
     {
         return INVALID_ARGUMENT;
     }
-    if runtime.decode_cpu_pool(pool).is_none() {
+    if runtime.agents.decode_cpu_pool(pool).is_none() {
         return INVALID_MEMORY_POOL;
     }
     let global_flags = match pool_global_flags(runtime, pool) {
@@ -268,7 +123,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
         Ok(owner) => owner,
         Err(status) => return status,
     };
-    if runtime.full_profile {
+    if runtime.agents.full_profile {
         // SAFETY: The caller supplied writable pointer storage.
         unsafe { agent_ptr.write(host_ptr) };
         return SUCCESS;
@@ -278,7 +133,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
     // two may share storage under the public C ABI.
     let mut gpu_indexes = Vec::new();
     if agents.is_null() {
-        gpu_indexes.extend(0..runtime.gpus.len());
+        gpu_indexes.extend(0..runtime.agents.gpus.len());
     } else {
         let count = match usize::try_from(num_agents) {
             Ok(count) => count,
@@ -287,10 +142,10 @@ pub(crate) unsafe fn memory_lock_to_pool(
         // SAFETY: The ABI requires num_agents readable handles when agents is non-null.
         let requested = unsafe { std::slice::from_raw_parts(agents, count) };
         for agent in requested {
-            if runtime.is_cpu_agent(*agent) {
+            if runtime.agents.is_cpu_agent(*agent) {
                 continue;
             }
-            let Some(index) = runtime.gpu_index(*agent) else {
+            let Some(index) = runtime.agents.gpu_index(*agent) else {
                 return INVALID_AGENT;
             };
             if !gpu_indexes.contains(&index) {
@@ -311,10 +166,10 @@ pub(crate) unsafe fn memory_lock_to_pool(
     let (allocation, device_base) =
         if let Some((&first_index, peer_indexes)) = gpu_indexes.split_first() {
             let (allocation, page_offset) = {
-                let first = &runtime.gpus[first_index].device;
+                let first = &runtime.agents.gpus[first_index].device;
                 let peers: Vec<_> = peer_indexes
                     .iter()
-                    .map(|&index| &runtime.gpus[index].device)
+                    .map(|&index| &runtime.agents.gpus[index].device)
                     .collect();
                 // SAFETY: The HSA lock caller retains the complete host page
                 // cover until unlock succeeds; ambiguous native failures keep
@@ -325,7 +180,7 @@ pub(crate) unsafe fn memory_lock_to_pool(
                         host_base,
                         cpu_pool_mapping_policy(pool, flags & ALLOC_UNCACHED),
                         size as u64,
-                        runtime.host_page_size as u64,
+                        runtime.agents.host_page_size as u64,
                         DeviceAccess::READ | DeviceAccess::WRITE,
                     )
                 } {
@@ -380,7 +235,7 @@ pub(crate) unsafe fn interop_map_buffer(
 ) -> Status {
     if num_agents == 0
         || agents.is_null()
-        || interop_handle < 0
+        || !native_memory::valid_graphics_handle(interop_handle)
         || flags != 0
         || size.is_null()
         || pointer.is_null()
@@ -403,31 +258,30 @@ pub(crate) unsafe fn interop_map_buffer(
         return OUT_OF_RESOURCES;
     }
     for agent in agents {
-        let Some(index) = runtime.gpu_index(*agent) else {
+        let Some(index) = runtime.agents.gpu_index(*agent) else {
             return INVALID_AGENT;
         };
-        devices.push(&runtime.gpus[index].device);
+        devices.push(&runtime.agents.gpus[index].device);
         accessible.push(*agent);
     }
-    let descriptor = match linux_interop::duplicate_descriptor(interop_handle) {
+    let descriptor = match native_memory::duplicate_graphics_handle(interop_handle) {
         Ok(descriptor) => descriptor,
         Err(error) => return map_error(error),
     };
-    let Some(session) = runtime.session() else {
+    let Some(session) = runtime.native_session() else {
         return ERROR;
     };
-    let allocation = match linux_interop::import_graphics_dma_buf(
+    let allocation = match native_memory::import_graphics_dma_buf(
         session,
         &devices,
-        descriptor.as_fd(),
+        &descriptor,
         size_hint as u64,
     ) {
         Ok(allocation) => allocation,
         Err(error) => {
             return match error.kind() {
-                rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                    INVALID_ARGUMENT
-                }
+                rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
+                rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
                 rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
                 _ => ERROR,
             };
@@ -440,6 +294,7 @@ pub(crate) unsafe fn interop_map_buffer(
     };
     let imported_pointer = info.device_address as usize;
     let owner = runtime
+        .agents
         .gpus
         .iter()
         .enumerate()

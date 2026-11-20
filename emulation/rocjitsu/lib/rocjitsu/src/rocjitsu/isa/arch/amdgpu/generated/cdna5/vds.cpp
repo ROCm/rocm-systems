@@ -16,8 +16,8 @@ namespace cdna5 {
 DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
     : Vds("ds_add_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -33,6 +33,8 @@ DsAddU32Vds::DsAddU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -48,8 +50,8 @@ DecodeResult decodeDsAddU32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
     : Vds("ds_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -65,6 +67,8 @@ DsSubU32Vds::DsSubU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -80,8 +84,8 @@ DecodeResult decodeDsSubU32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
     : Vds("ds_rsub_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsRsubU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -97,6 +101,8 @@ DsRsubU32Vds::DsRsubU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -112,8 +118,8 @@ DecodeResult decodeDsRsubU32Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
     : Vds("ds_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -129,6 +135,8 @@ DsIncU32Vds::DsIncU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -144,8 +152,8 @@ DecodeResult decodeDsIncU32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
     : Vds("ds_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsDecU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -161,6 +169,8 @@ DsDecU32Vds::DsDecU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -176,8 +186,8 @@ DecodeResult decodeDsDecU32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
     : Vds("ds_min_i32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinI32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -193,6 +203,8 @@ DsMinI32Vds::DsMinI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -208,8 +220,8 @@ DecodeResult decodeDsMinI32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
     : Vds("ds_max_i32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxI32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -225,6 +237,8 @@ DsMaxI32Vds::DsMaxI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -240,8 +254,8 @@ DecodeResult decodeDsMaxI32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
     : Vds("ds_min_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -257,6 +271,8 @@ DsMinU32Vds::DsMinU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -272,8 +288,8 @@ DecodeResult decodeDsMinU32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
     : Vds("ds_max_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -289,6 +305,8 @@ DsMaxU32Vds::DsMaxU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -304,8 +322,8 @@ DecodeResult decodeDsMaxU32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
     : Vds("ds_and_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndB32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -321,6 +339,8 @@ DsAndB32Vds::DsAndB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -336,8 +356,8 @@ DecodeResult decodeDsAndB32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
     : Vds("ds_or_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsOrB32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -353,6 +373,8 @@ DsOrB32Vds::DsOrB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -368,8 +390,8 @@ DecodeResult decodeDsOrB32Vds(const MachineInst *opcode, const DecodeErrorEmitte
 DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
     : Vds("ds_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorB32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -385,6 +407,8 @@ DsXorB32Vds::DsXorB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -400,9 +424,9 @@ DecodeResult decodeDsXorB32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
     : Vds("ds_mskor_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMskorB32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -420,6 +444,8 @@ DsMskorB32Vds::DsMskorB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -435,8 +461,8 @@ DecodeResult decodeDsMskorB32Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
     : Vds("ds_store_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -450,6 +476,8 @@ DsStoreB32Vds::DsStoreB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -465,9 +493,9 @@ DecodeResult decodeDsStoreB32Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStore2addrB32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -483,6 +511,8 @@ DsStore2addrB32Vds::DsStore2addrB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -499,9 +529,9 @@ DecodeResult decodeDsStore2addrB32Vds(const MachineInst *opcode,
 DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -517,6 +547,8 @@ DsStore2addrStride64B32Vds::DsStore2addrStride64B32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -533,9 +565,9 @@ DecodeResult decodeDsStore2addrStride64B32Vds(const MachineInst *opcode,
 DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCmpstoreB32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -553,6 +585,8 @@ DsCmpstoreB32Vds::DsCmpstoreB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -569,8 +603,8 @@ DecodeResult decodeDsCmpstoreB32Vds(const MachineInst *opcode,
 DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
     : Vds("ds_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumF32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -586,6 +620,8 @@ DsMinNumF32Vds::DsMinNumF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -601,8 +637,8 @@ DecodeResult decodeDsMinNumF32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
     : Vds("ds_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxNumF32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -618,6 +654,8 @@ DsMaxNumF32Vds::DsMaxNumF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -636,6 +674,8 @@ DsNopVds::DsNopVds(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_NOP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -651,8 +691,8 @@ DecodeResult decodeDsNopVds(const MachineInst *opcode, const DecodeErrorEmitter 
 DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
     : Vds("ds_add_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddF32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -668,6 +708,8 @@ DsAddF32Vds::DsAddF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -683,8 +725,8 @@ DecodeResult decodeDsAddF32Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
     : Vds("ds_store_b8", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB8Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(8, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(8, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -699,6 +741,8 @@ DsStoreB8Vds::DsStoreB8Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -714,8 +758,8 @@ DecodeResult decodeDsStoreB8Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
     : Vds("ds_store_b16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB16Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(16, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(16, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -730,6 +774,8 @@ DsStoreB16Vds::DsStoreB16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -745,9 +791,9 @@ DecodeResult decodeDsStoreB16Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -765,6 +811,8 @@ DsAddRtnU32Vds::DsAddRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -780,9 +828,9 @@ DecodeResult decodeDsAddRtnU32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -800,6 +848,8 @@ DsSubRtnU32Vds::DsSubRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -815,9 +865,9 @@ DecodeResult decodeDsSubRtnU32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_rsub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsRsubRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -835,6 +885,8 @@ DsRsubRtnU32Vds::DsRsubRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -851,9 +903,9 @@ DecodeResult decodeDsRsubRtnU32Vds(const MachineInst *opcode,
 DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
     : Vds("ds_inc_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -871,6 +923,8 @@ DsIncRtnU32Vds::DsIncRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -886,9 +940,9 @@ DecodeResult decodeDsIncRtnU32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
     : Vds("ds_dec_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsDecRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -906,6 +960,8 @@ DsDecRtnU32Vds::DsDecRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -921,9 +977,9 @@ DecodeResult decodeDsDecRtnU32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnI32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -941,6 +997,8 @@ DsMinRtnI32Vds::DsMinRtnI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -956,9 +1014,9 @@ DecodeResult decodeDsMinRtnI32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_i32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxRtnI32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -976,6 +1034,8 @@ DsMaxRtnI32Vds::DsMaxRtnI32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -991,9 +1051,9 @@ DecodeResult decodeDsMaxRtnI32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1011,6 +1071,8 @@ DsMinRtnU32Vds::DsMinRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1026,9 +1088,9 @@ DecodeResult decodeDsMinRtnU32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1046,6 +1108,8 @@ DsMaxRtnU32Vds::DsMaxRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1061,9 +1125,9 @@ DecodeResult decodeDsMaxRtnU32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
     : Vds("ds_and_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndRtnB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1081,6 +1145,8 @@ DsAndRtnB32Vds::DsAndRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1096,9 +1162,9 @@ DecodeResult decodeDsAndRtnB32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
     : Vds("ds_or_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsOrRtnB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1116,6 +1182,8 @@ DsOrRtnB32Vds::DsOrRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1131,9 +1199,9 @@ DecodeResult decodeDsOrRtnB32Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
     : Vds("ds_xor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorRtnB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1151,6 +1219,8 @@ DsXorRtnB32Vds::DsXorRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1166,10 +1236,10 @@ DecodeResult decodeDsXorRtnB32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
     : Vds("ds_mskor_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMskorRtnB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1189,6 +1259,8 @@ DsMskorRtnB32Vds::DsMskorRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1205,9 +1277,9 @@ DecodeResult decodeDsMskorRtnB32Vds(const MachineInst *opcode,
 DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1225,6 +1297,8 @@ DsStorexchgRtnB32Vds::DsStorexchgRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1241,10 +1315,10 @@ DecodeResult decodeDsStorexchgRtnB32Vds(const MachineInst *opcode,
 DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchg2addrRtnB32Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1264,6 +1338,8 @@ DsStorexchg2addrRtnB32Vds::DsStorexchg2addrRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1280,10 +1356,10 @@ DecodeResult decodeDsStorexchg2addrRtnB32Vds(const MachineInst *opcode,
 DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB32Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1303,6 +1379,8 @@ DsStorexchg2addrStride64RtnB32Vds::DsStorexchg2addrStride64RtnB32Vds(const Machi
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1320,10 +1398,10 @@ DecodeResult decodeDsStorexchg2addrStride64RtnB32Vds(const MachineInst *opcode,
 DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1343,6 +1421,8 @@ DsCmpstoreRtnB32Vds::DsCmpstoreRtnB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_RTN_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1359,9 +1439,9 @@ DecodeResult decodeDsCmpstoreRtnB32Vds(const MachineInst *opcode,
 DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
     : Vds("ds_min_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumRtnF32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1379,6 +1459,8 @@ DsMinNumRtnF32Vds::DsMinNumRtnF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_RTN_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1395,9 +1477,9 @@ DecodeResult decodeDsMinNumRtnF32Vds(const MachineInst *opcode,
 DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
     : Vds("ds_max_num_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxNumRtnF32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1415,6 +1497,8 @@ DsMaxNumRtnF32Vds::DsMaxNumRtnF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_RTN_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1431,8 +1515,8 @@ DecodeResult decodeDsMaxNumRtnF32Vds(const MachineInst *opcode,
 DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
     : Vds("ds_swizzle_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSwizzleB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   num_src_ = 1;
@@ -1441,6 +1525,8 @@ DsSwizzleB32Vds::DsSwizzleB32Vds(const MachineInst *inst)
   addr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SWIZZLE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -1457,8 +1543,8 @@ DecodeResult decodeDsSwizzleB32Vds(const MachineInst *opcode,
 DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
     : Vds("ds_load_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1473,6 +1559,8 @@ DsLoadB32Vds::DsLoadB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1488,8 +1576,8 @@ DecodeResult decodeDsLoadB32Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoad2addrB32Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1503,6 +1591,8 @@ DsLoad2addrB32Vds::DsLoad2addrB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1519,8 +1609,8 @@ DecodeResult decodeDsLoad2addrB32Vds(const MachineInst *opcode,
 DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B32Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1534,6 +1624,8 @@ DsLoad2addrStride64B32Vds::DsLoad2addrStride64B32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1550,8 +1642,8 @@ DecodeResult decodeDsLoad2addrStride64B32Vds(const MachineInst *opcode,
 DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
     : Vds("ds_load_i8", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadI8Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1566,6 +1658,8 @@ DsLoadI8Vds::DsLoadI8Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1581,8 +1675,8 @@ DecodeResult decodeDsLoadI8Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
     : Vds("ds_load_u8", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadU8Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1597,6 +1691,8 @@ DsLoadU8Vds::DsLoadU8Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1612,8 +1708,8 @@ DecodeResult decodeDsLoadU8Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
     : Vds("ds_load_i16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadI16Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1628,6 +1724,8 @@ DsLoadI16Vds::DsLoadI16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1643,8 +1741,8 @@ DecodeResult decodeDsLoadI16Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
     : Vds("ds_load_u16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadU16Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -1659,6 +1757,8 @@ DsLoadU16Vds::DsLoadU16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -1674,7 +1774,7 @@ DecodeResult decodeDsLoadU16Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsConsumeVds::DsConsumeVds(const MachineInst *inst)
     : Vds("ds_consume", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsConsumeVds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &dsmem;
@@ -1688,6 +1788,8 @@ DsConsumeVds::DsConsumeVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CONSUME);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1703,7 +1805,7 @@ DecodeResult decodeDsConsumeVds(const MachineInst *opcode, const DecodeErrorEmit
 DsAppendVds::DsAppendVds(const MachineInst *inst)
     : Vds("ds_append", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAppendVds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   dst_operands_[1] = &dsmem;
@@ -1717,6 +1819,8 @@ DsAppendVds::DsAppendVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_APPEND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1732,8 +1836,8 @@ DecodeResult decodeDsAppendVds(const MachineInst *opcode, const DecodeErrorEmitt
 DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
     : Vds("ds_add_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddU64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1749,6 +1853,8 @@ DsAddU64Vds::DsAddU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1764,8 +1870,8 @@ DecodeResult decodeDsAddU64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
     : Vds("ds_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubU64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1781,6 +1887,8 @@ DsSubU64Vds::DsSubU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1796,8 +1904,8 @@ DecodeResult decodeDsSubU64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
     : Vds("ds_rsub_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsRsubU64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1813,6 +1921,8 @@ DsRsubU64Vds::DsRsubU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1828,8 +1938,8 @@ DecodeResult decodeDsRsubU64Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
     : Vds("ds_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncU64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1845,6 +1955,8 @@ DsIncU64Vds::DsIncU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1860,8 +1972,8 @@ DecodeResult decodeDsIncU64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
     : Vds("ds_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsDecU64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1877,6 +1989,8 @@ DsDecU64Vds::DsDecU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1892,8 +2006,8 @@ DecodeResult decodeDsDecU64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
     : Vds("ds_min_i64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinI64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1909,6 +2023,8 @@ DsMinI64Vds::DsMinI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1924,8 +2040,8 @@ DecodeResult decodeDsMinI64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
     : Vds("ds_max_i64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxI64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1941,6 +2057,8 @@ DsMaxI64Vds::DsMaxI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1956,8 +2074,8 @@ DecodeResult decodeDsMaxI64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
     : Vds("ds_min_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinU64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -1973,6 +2091,8 @@ DsMinU64Vds::DsMinU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1988,8 +2108,8 @@ DecodeResult decodeDsMinU64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
     : Vds("ds_max_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxU64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2005,6 +2125,8 @@ DsMaxU64Vds::DsMaxU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2020,8 +2142,8 @@ DecodeResult decodeDsMaxU64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
     : Vds("ds_and_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2037,6 +2159,8 @@ DsAndB64Vds::DsAndB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2052,8 +2176,8 @@ DecodeResult decodeDsAndB64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
     : Vds("ds_or_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsOrB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2069,6 +2193,8 @@ DsOrB64Vds::DsOrB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2084,8 +2210,8 @@ DecodeResult decodeDsOrB64Vds(const MachineInst *opcode, const DecodeErrorEmitte
 DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
     : Vds("ds_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2101,6 +2227,8 @@ DsXorB64Vds::DsXorB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2116,9 +2244,9 @@ DecodeResult decodeDsXorB64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
     : Vds("ds_mskor_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMskorB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2136,6 +2264,8 @@ DsMskorB64Vds::DsMskorB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2151,8 +2281,8 @@ DecodeResult decodeDsMskorB64Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
     : Vds("ds_store_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2166,6 +2296,8 @@ DsStoreB64Vds::DsStoreB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2181,9 +2313,9 @@ DecodeResult decodeDsStoreB64Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStore2addrB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2199,6 +2331,8 @@ DsStore2addrB64Vds::DsStore2addrB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2215,9 +2349,9 @@ DecodeResult decodeDsStore2addrB64Vds(const MachineInst *opcode,
 DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_store_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStore2addrStride64B64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2233,6 +2367,8 @@ DsStore2addrStride64B64Vds::DsStore2addrStride64B64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -2249,9 +2385,9 @@ DecodeResult decodeDsStore2addrStride64B64Vds(const MachineInst *opcode,
 DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCmpstoreB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2269,6 +2405,8 @@ DsCmpstoreB64Vds::DsCmpstoreB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2285,8 +2423,8 @@ DecodeResult decodeDsCmpstoreB64Vds(const MachineInst *opcode,
 DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
     : Vds("ds_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumF64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2302,6 +2440,8 @@ DsMinNumF64Vds::DsMinNumF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2317,8 +2457,8 @@ DecodeResult decodeDsMinNumF64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
     : Vds("ds_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxNumF64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2334,6 +2474,8 @@ DsMaxNumF64Vds::DsMaxNumF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2349,8 +2491,8 @@ DecodeResult decodeDsMaxNumF64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
     : Vds("ds_add_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddF64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -2366,6 +2508,8 @@ DsAddF64Vds::DsAddF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2381,7 +2525,7 @@ DecodeResult decodeDsAddF64Vds(const MachineInst *opcode, const DecodeErrorEmitt
 DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const MachineInst *inst)
     : Vds("ds_atomic_async_barrier_arrive_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAtomicAsyncBarrierArriveB64Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   dst_operands_[0] = &dsmem;
@@ -2395,6 +2539,8 @@ DsAtomicAsyncBarrierArriveB64Vds::DsAtomicAsyncBarrierArriveB64Vds(const Machine
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::ASYNCCNT, amdgpu::MemoryCompletionClass::ASYNC_LOAD}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2412,9 +2558,9 @@ DecodeResult decodeDsAtomicAsyncBarrierArriveB64Vds(const MachineInst *opcode,
 DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddRtnU64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2432,6 +2578,8 @@ DsAddRtnU64Vds::DsAddRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2447,9 +2595,9 @@ DecodeResult decodeDsAddRtnU64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
     : Vds("ds_sub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubRtnU64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2467,6 +2615,8 @@ DsSubRtnU64Vds::DsSubRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2482,9 +2632,9 @@ DecodeResult decodeDsSubRtnU64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
     : Vds("ds_rsub_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsRsubRtnU64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2502,6 +2652,8 @@ DsRsubRtnU64Vds::DsRsubRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_RSUB_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2518,9 +2670,9 @@ DecodeResult decodeDsRsubRtnU64Vds(const MachineInst *opcode,
 DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
     : Vds("ds_inc_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsIncRtnU64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2538,6 +2690,8 @@ DsIncRtnU64Vds::DsIncRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_INC_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2553,9 +2707,9 @@ DecodeResult decodeDsIncRtnU64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
     : Vds("ds_dec_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsDecRtnU64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2573,6 +2727,8 @@ DsDecRtnU64Vds::DsDecRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_DEC_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2588,9 +2744,9 @@ DecodeResult decodeDsDecRtnU64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnI64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2608,6 +2764,8 @@ DsMinRtnI64Vds::DsMinRtnI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2623,9 +2781,9 @@ DecodeResult decodeDsMinRtnI64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_i64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxRtnI64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2643,6 +2801,8 @@ DsMaxRtnI64Vds::DsMaxRtnI64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2658,9 +2818,9 @@ DecodeResult decodeDsMaxRtnI64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
     : Vds("ds_min_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinRtnU64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2678,6 +2838,8 @@ DsMinRtnU64Vds::DsMinRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2693,9 +2855,9 @@ DecodeResult decodeDsMinRtnU64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
     : Vds("ds_max_rtn_u64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxRtnU64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2713,6 +2875,8 @@ DsMaxRtnU64Vds::DsMaxRtnU64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_RTN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2728,9 +2892,9 @@ DecodeResult decodeDsMaxRtnU64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
     : Vds("ds_and_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAndRtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2748,6 +2912,8 @@ DsAndRtnB64Vds::DsAndRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_AND_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2763,9 +2929,9 @@ DecodeResult decodeDsAndRtnB64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
     : Vds("ds_or_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsOrRtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2783,6 +2949,8 @@ DsOrRtnB64Vds::DsOrRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_OR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2798,9 +2966,9 @@ DecodeResult decodeDsOrRtnB64Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
     : Vds("ds_xor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsXorRtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2818,6 +2986,8 @@ DsXorRtnB64Vds::DsXorRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_XOR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2833,10 +3003,10 @@ DecodeResult decodeDsXorRtnB64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
     : Vds("ds_mskor_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMskorRtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2856,6 +3026,8 @@ DsMskorRtnB64Vds::DsMskorRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MSKOR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2872,9 +3044,9 @@ DecodeResult decodeDsMskorRtnB64Vds(const MachineInst *opcode,
 DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchgRtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2892,6 +3064,8 @@ DsStorexchgRtnB64Vds::DsStorexchgRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2908,10 +3082,10 @@ DecodeResult decodeDsStorexchgRtnB64Vds(const MachineInst *opcode,
 DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchg2addrRtnB64Vds)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2931,6 +3105,8 @@ DsStorexchg2addrRtnB64Vds::DsStorexchg2addrRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2947,10 +3123,10 @@ DecodeResult decodeDsStorexchg2addrRtnB64Vds(const MachineInst *opcode,
 DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const MachineInst *inst)
     : Vds("ds_storexchg_2addr_stride64_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStorexchg2addrStride64RtnB64Vds)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -2970,6 +3146,8 @@ DsStorexchg2addrStride64RtnB64Vds::DsStorexchg2addrStride64RtnB64Vds(const Machi
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2987,10 +3165,10 @@ DecodeResult decodeDsStorexchg2addrStride64RtnB64Vds(const MachineInst *opcode,
 DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
     : Vds("ds_cmpstore_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCmpstoreRtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
-      data1(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data1),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data1(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data1),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3010,6 +3188,8 @@ DsCmpstoreRtnB64Vds::DsCmpstoreRtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CMPSTORE_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3026,9 +3206,9 @@ DecodeResult decodeDsCmpstoreRtnB64Vds(const MachineInst *opcode,
 DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
     : Vds("ds_min_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMinNumRtnF64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3046,6 +3226,8 @@ DsMinNumRtnF64Vds::DsMinNumRtnF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MIN_NUM_RTN_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3062,9 +3244,9 @@ DecodeResult decodeDsMinNumRtnF64Vds(const MachineInst *opcode,
 DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
     : Vds("ds_max_num_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsMaxNumRtnF64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3082,6 +3264,8 @@ DsMaxNumRtnF64Vds::DsMaxNumRtnF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_MAX_NUM_RTN_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3098,9 +3282,9 @@ DecodeResult decodeDsMaxNumRtnF64Vds(const MachineInst *opcode,
 DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_f64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddRtnF64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3118,6 +3302,8 @@ DsAddRtnF64Vds::DsAddRtnF64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3133,9 +3319,9 @@ DecodeResult decodeDsAddRtnF64Vds(const MachineInst *opcode, const DecodeErrorEm
 DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst *inst)
     : Vds("ds_atomic_barrier_arrive_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAtomicBarrierArriveRtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3153,6 +3339,8 @@ DsAtomicBarrierArriveRtnB64Vds::DsAtomicBarrierArriveRtnB64Vds(const MachineInst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ATOMIC_BARRIER_ARRIVE_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3170,8 +3358,8 @@ DecodeResult decodeDsAtomicBarrierArriveRtnB64Vds(const MachineInst *opcode,
 DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
     : Vds("ds_load_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3186,6 +3374,8 @@ DsLoadB64Vds::DsLoadB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3201,8 +3391,8 @@ DecodeResult decodeDsLoadB64Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoad2addrB64Vds)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3216,6 +3406,8 @@ DsLoad2addrB64Vds::DsLoad2addrB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3232,8 +3424,8 @@ DecodeResult decodeDsLoad2addrB64Vds(const MachineInst *opcode,
 DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
     : Vds("ds_load_2addr_stride64_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoad2addrStride64B64Vds)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3247,6 +3439,8 @@ DsLoad2addrStride64B64Vds::DsLoad2addrStride64B64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3263,9 +3457,9 @@ DecodeResult decodeDsLoad2addrStride64B64Vds(const MachineInst *opcode,
 DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
     : Vds("ds_add_rtn_f32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsAddRtnF32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3283,6 +3477,8 @@ DsAddRtnF32Vds::DsAddRtnF32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_ADD_RTN_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3298,9 +3494,9 @@ DecodeResult decodeDsAddRtnF32Vds(const MachineInst *opcode, const DecodeErrorEm
 DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
     : Vds("ds_condxchg32_rtn_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCondxchg32RtnB64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(64, OperandType::OPR_DSMEM, 0), dsmem_in(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3318,6 +3514,8 @@ DsCondxchg32RtnB64Vds::DsCondxchg32RtnB64Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_CONDXCHG32_RTN_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3334,8 +3532,8 @@ DecodeResult decodeDsCondxchg32RtnB64Vds(const MachineInst *opcode,
 DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCondSubU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3351,6 +3549,8 @@ DsCondSubU32Vds::DsCondSubU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_COND_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3367,8 +3567,8 @@ DecodeResult decodeDsCondSubU32Vds(const MachineInst *opcode,
 DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubClampU32Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3384,6 +3584,8 @@ DsSubClampU32Vds::DsSubClampU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_CLAMP_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3400,8 +3602,8 @@ DecodeResult decodeDsSubClampU32Vds(const MachineInst *opcode,
 DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPkAddF16Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3417,6 +3619,8 @@ DsPkAddF16Vds::DsPkAddF16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3432,8 +3636,8 @@ DecodeResult decodeDsPkAddF16Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPkAddBf16Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3449,6 +3653,8 @@ DsPkAddBf16Vds::DsPkAddBf16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3464,8 +3670,8 @@ DecodeResult decodeDsPkAddBf16Vds(const MachineInst *opcode, const DecodeErrorEm
 DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB8D16HiVds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3480,6 +3686,9 @@ DsStoreB8D16HiVds::DsStoreB8D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B8_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3496,8 +3705,8 @@ DecodeResult decodeDsStoreB8D16HiVds(const MachineInst *opcode,
 DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
     : Vds("ds_store_b16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB16D16HiVds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3512,6 +3721,9 @@ DsStoreB16D16HiVds::DsStoreB16D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B16_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3528,8 +3740,8 @@ DecodeResult decodeDsStoreB16D16HiVds(const MachineInst *opcode,
 DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
     : Vds("ds_load_u8_d16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadU8D16Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3543,6 +3755,9 @@ DsLoadU8D16Vds::DsLoadU8D16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U8_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3558,8 +3773,8 @@ DecodeResult decodeDsLoadU8D16Vds(const MachineInst *opcode, const DecodeErrorEm
 DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadU8D16HiVds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3573,6 +3788,9 @@ DsLoadU8D16HiVds::DsLoadU8D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U8_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3589,8 +3807,8 @@ DecodeResult decodeDsLoadU8D16HiVds(const MachineInst *opcode,
 DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
     : Vds("ds_load_i8_d16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadI8D16Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3604,6 +3822,9 @@ DsLoadI8D16Vds::DsLoadI8D16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I8_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3619,8 +3840,8 @@ DecodeResult decodeDsLoadI8D16Vds(const MachineInst *opcode, const DecodeErrorEm
 DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
     : Vds("ds_load_i8_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadI8D16HiVds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(8, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3634,6 +3855,9 @@ DsLoadI8D16HiVds::DsLoadI8D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_I8_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3650,8 +3874,8 @@ DecodeResult decodeDsLoadI8D16HiVds(const MachineInst *opcode,
 DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
     : Vds("ds_load_u16_d16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadU16D16Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3665,6 +3889,9 @@ DsLoadU16D16Vds::DsLoadU16D16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U16_D16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3681,8 +3908,8 @@ DecodeResult decodeDsLoadU16D16Vds(const MachineInst *opcode,
 DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
     : Vds("ds_load_u16_d16_hi", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadU16D16HiVds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(16, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3696,6 +3923,9 @@ DsLoadU16D16HiVds::DsLoadU16D16HiVds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_U16_D16_HI);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -3712,9 +3942,9 @@ DecodeResult decodeDsLoadU16D16HiVds(const MachineInst *opcode,
 DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
     : Vds("ds_cond_sub_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsCondSubRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3732,6 +3962,8 @@ DsCondSubRtnU32Vds::DsCondSubRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_COND_SUB_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3748,9 +3980,9 @@ DecodeResult decodeDsCondSubRtnU32Vds(const MachineInst *opcode,
 DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
     : Vds("ds_sub_clamp_rtn_u32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsSubClampRtnU32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3768,6 +4000,8 @@ DsSubClampRtnU32Vds::DsSubClampRtnU32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_SUB_CLAMP_RTN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3784,9 +4018,9 @@ DecodeResult decodeDsSubClampRtnU32Vds(const MachineInst *opcode,
 DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_rtn_f16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPkAddRtnF16Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3804,6 +4038,8 @@ DsPkAddRtnF16Vds::DsPkAddRtnF16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_RTN_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3820,9 +4056,9 @@ DecodeResult decodeDsPkAddRtnF16Vds(const MachineInst *opcode,
 DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
     : Vds("ds_pk_add_rtn_bf16", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPkAddRtnBf16Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), dsmem_in(32, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -3840,6 +4076,8 @@ DsPkAddRtnBf16Vds::DsPkAddRtnBf16Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PK_ADD_RTN_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -3856,7 +4094,7 @@ DecodeResult decodeDsPkAddRtnBf16Vds(const MachineInst *opcode,
 DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_store_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreAddtidB32Vds)),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   src_operands_[0] = &data0;
   dst_operands_[0] = &dsmem;
@@ -3870,6 +4108,8 @@ DsStoreAddtidB32Vds::DsStoreAddtidB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_ADDTID_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -3886,7 +4126,7 @@ DecodeResult decodeDsStoreAddtidB32Vds(const MachineInst *opcode,
 DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
     : Vds("ds_load_addtid_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadAddtidB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       dsmem(32, OperandType::OPR_DSMEM, 0), m0(32, OperandType::OPR_SDST_M0, 125) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &dsmem;
@@ -3900,6 +4140,8 @@ DsLoadAddtidB32Vds::DsLoadAddtidB32Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_ADDTID_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -3916,9 +4158,9 @@ DecodeResult decodeDsLoadAddtidB32Vds(const MachineInst *opcode,
 DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
     : Vds("ds_permute_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsPermuteB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3929,6 +4171,8 @@ DsPermuteB32Vds::DsPermuteB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_PERMUTE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -3945,9 +4189,9 @@ DecodeResult decodeDsPermuteB32Vds(const MachineInst *opcode,
 DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
     : Vds("ds_bpermute_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsBpermuteB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3958,6 +4202,8 @@ DsBpermuteB32Vds::DsBpermuteB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BPERMUTE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -3974,9 +4220,9 @@ DecodeResult decodeDsBpermuteB32Vds(const MachineInst *opcode,
 DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
     : Vds("ds_bpermute_fi_b32", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsBpermuteFiB32Vds)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -3987,6 +4233,8 @@ DsBpermuteFiB32Vds::DsBpermuteFiB32Vds(const MachineInst *inst)
   data0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   flags_ |= DIRECT_REGISTER_ACCESSES;
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_BPERMUTE_FI_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Other);
 }
 
 namespace detail {
@@ -4003,8 +4251,8 @@ DecodeResult decodeDsBpermuteFiB32Vds(const MachineInst *opcode,
 DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
     : Vds("ds_store_b96", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB96Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -4018,6 +4266,8 @@ DsStoreB96Vds::DsStoreB96Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -4033,8 +4283,8 @@ DecodeResult decodeDsStoreB96Vds(const MachineInst *opcode, const DecodeErrorEmi
 DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
     : Vds("ds_store_b128", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsStoreB128Vds)),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
-      data0(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      data0(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->data0),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
   src_operands_[0] = &addr;
   src_operands_[1] = &data0;
@@ -4048,6 +4298,8 @@ DsStoreB128Vds::DsStoreB128Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -4063,8 +4315,8 @@ DecodeResult decodeDsStoreB128Vds(const MachineInst *opcode, const DecodeErrorEm
 DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
     : Vds("ds_load_tr4_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadTr4B64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -4078,6 +4330,8 @@ DsLoadTr4B64Vds::DsLoadTr4B64Vds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::LDS}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_TR4_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -4094,8 +4348,8 @@ DecodeResult decodeDsLoadTr4B64Vds(const MachineInst *opcode,
 DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
     : Vds("ds_load_tr6_b96", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadTr6B96Vds)),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -4109,6 +4363,8 @@ DsLoadTr6B96Vds::DsLoadTr6B96Vds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::LDS}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_TR6_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -4125,8 +4381,8 @@ DecodeResult decodeDsLoadTr6B96Vds(const MachineInst *opcode,
 DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
     : Vds("ds_load_tr16_b128", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadTr16B128Vds)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -4140,6 +4396,8 @@ DsLoadTr16B128Vds::DsLoadTr16B128Vds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::LDS}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_TR16_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -4156,8 +4414,8 @@ DecodeResult decodeDsLoadTr16B128Vds(const MachineInst *opcode,
 DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
     : Vds("ds_load_tr8_b64", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadTr8B64Vds)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(64, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -4171,6 +4429,8 @@ DsLoadTr8B64Vds::DsLoadTr8B64Vds(const MachineInst *inst)
                                                          amdgpu::MemoryCompletionClass::LDS}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_TR8_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -4187,8 +4447,8 @@ DecodeResult decodeDsLoadTr8B64Vds(const MachineInst *opcode,
 DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
     : Vds("ds_load_b96", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadB96Vds)),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(96, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -4203,6 +4463,8 @@ DsLoadB96Vds::DsLoadB96Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -4218,8 +4480,8 @@ DecodeResult decodeDsLoadB96Vds(const MachineInst *opcode, const DecodeErrorEmit
 DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
     : Vds("ds_load_b128", reinterpret_cast<const OpEncoding *>(inst),
           selected_exec_fn(InstructionExecutionId::DsLoadB128Vds)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      addr(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      addr(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->addr),
       dsmem(128, OperandType::OPR_DSMEM, 0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &addr;
@@ -4234,6 +4496,8 @@ DsLoadB128Vds::DsLoadB128Vds(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::DS_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Lds, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {

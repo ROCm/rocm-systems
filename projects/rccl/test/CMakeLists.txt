@@ -11,6 +11,11 @@ if(BUILD_TESTS)
   option(RCCL_HAS_RMA_IB_PROXY "Build the IB Proxy RMA transport-level tests" ON)
   option(ENABLE_HOST_API_TESTS "Build the host-API tests" ON)
 
+  # Same __hip_atomic_* poison as the rccl target; set before any test target is defined.
+  if(RCCL_POISON_HIP_ATOMICS)
+    add_compile_options(--include=${PROJECT_SOURCE_DIR}/src/include/poison_hip_atomics.h)
+  endif()
+
 
   message("Building rccl unit tests (Installed in /test/rccl-UnitTests)")
   if(ENABLE_MPI_TESTS)
@@ -287,12 +292,14 @@ if(BUILD_TESTS)
     BroadcastTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
+    DiagnosticsTests.cpp
     DoneEventOrderingTests.cpp
     Fp8VerifiableTests.cpp
     GatherTests.cpp
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
     ReduceTests.cpp
@@ -302,17 +309,23 @@ if(BUILD_TESTS)
     P2pChannelScalingTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
+    HipProbeTests.cpp
     SendRecvTests.cpp
+    SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
-    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so they run the b128 paths.
     device/DdaReduceScatterFabricLLTests.cpp
     device/DdaAllReduceFabricLLTests.cpp
+    device/DdaAllReduceFabricLL128PeerParTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
     ProfilerPluginCloseTests.cpp
+    InspectorRingDropTests.cpp
+    ProfilerApiEventRankTests.cpp
+    TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
@@ -359,10 +372,12 @@ if(BUILD_TESTS)
     INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/net/example/nccl)
 
   # dlsym(dlopen(NULL), ...) only finds symbols present in the dynamic symbol table;
-  # export just the one plugin symbol (narrow, unlike a broad -rdynamic).
+  # export only the plugin symbols the tests need (narrow, unlike a broad -rdynamic).
   target_link_options(rccl-UnitTests PRIVATE
     "LINKER:--export-dynamic-symbol=ncclNetPlugin_v12"
-    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13")
+    "LINKER:--export-dynamic-symbol=ncclGinPlugin_v13"
+    "LINKER:--export-dynamic-symbol=ncclTunerPlugin_v7"
+    "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
   # AICOMRCCL-2183: RcclMockFuncs.hpp's empty ncclDebugLog, needed to link the Release-only
   # sources above, overrides librccl.so's own in Debug and silences all library logging. Hidden
@@ -388,6 +403,14 @@ if(BUILD_TESTS)
     LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT tests)
 
+  # InspectorRingDropTests loads the in-tree Inspector plugin; it skips when there is none.
+  # Scoped to that file so the path does not rebuild the rest of rccl-UnitTests.
+  if(TARGET rccl-profiler-inspector)
+    add_dependencies(rccl-UnitTests rccl-profiler-inspector)
+    set_source_files_properties(InspectorRingDropTests.cpp PROPERTIES COMPILE_DEFINITIONS
+      "RCCL_INSPECTOR_PLUGIN_SO=\"$<TARGET_FILE:rccl-profiler-inspector>\"")
+  endif()
+
   # rccl-UnitTestsFixtures: Tests that only use header-only internal dependencies
   # (inline, static, constexpr, template functions) and can run in both Release and Debug.
   if (ROCM_VERSION VERSION_GREATER_EQUAL "60400")
@@ -404,6 +427,7 @@ if(BUILD_TESTS)
       DdaCollCommonTests.cpp
       CheapPostSendFenceTests.cpp
       Gfx1250SendRecvLl128WindowTests.cpp
+      ProfilerOverheadTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
       device/TestFp8Reduce.cpp
@@ -412,8 +436,12 @@ if(BUILD_TESTS)
       device/DdaIpcGpuBarrierOrderingTests.cpp
       device/DdaReduceScatterFabricLLTests.cpp
       device/DdaAllReduceFabricLLTests.cpp
+      device/DdaAllReduceFabricLL128TwoShotTests.cpp
+      device/DdaAllReduceFabricLL128PeerParTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
+      device/DdaLL128ArchGeometryTests.cpp
+      device/DdaReduceScatterFabricLL128PeerParTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestTdmReduceCopy.cpp
@@ -423,6 +451,7 @@ if(BUILD_TESTS)
       device/GinBackendMaskDispatch_test.cpp
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
+      device/SymkWorldPointerGetterTests.cpp
       device/ChannelMaskMapTests.cpp
       device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
@@ -451,6 +480,10 @@ if(BUILD_TESTS)
     endif()
 
     add_executable(rccl-UnitTestsFixtures ${TEST_FIXTURE_SOURCE_FILES})
+
+    # ProfilerOverheadTests loads its in-binary profiler via NCCL_PROFILER_PLUGIN=STATIC_PLUGIN,
+    # i.e. dlsym(dlopen(NULL), ...), which only sees the dynamic symbol table.
+    target_link_options(rccl-UnitTestsFixtures PRIVATE "LINKER:--export-dynamic-symbol=ncclProfiler_v7")
 
     # Unit tests pass generic hipMalloc pointers into load16global/store16global.
     # The gfx942 b128 global-aperture builtins fault on those pointers; use the
@@ -481,9 +514,10 @@ if(BUILD_TESTS)
     set_source_files_properties(device/RcclEpTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/../src/algorithms/rccl_ep)
 
-    # device/TestTdmReduceCopy.cpp drives reduceCopy through common_kernel.h, whose common.h
-    # includes the generated device_table.h.
-    set_source_files_properties(device/TestTdmReduceCopy.cpp PROPERTIES
+    # device/TestTdmReduceCopy.cpp and device/SymkWorldPointerGetterTests.cpp drive
+    # common_kernel.h (directly or via symk.cuh), whose common.h includes the generated
+    # device_table.h.
+    set_source_files_properties(device/TestTdmReduceCopy.cpp device/SymkWorldPointerGetterTests.cpp PROPERTIES
       INCLUDE_DIRECTORIES ${PROJECT_BINARY_DIR}/hipify/gensrc)
 
   if(ENABLE_ROCSHMEM_GIN)
@@ -813,12 +847,14 @@ if(BUILD_TESTS)
       CeAllReduceEligibilityTests.cpp
       CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      GinAllGatherEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
       EnqueueTests.cpp
       LL128RegVariantKernel_test.cpp
       IpcsocketTests.cpp
       TopoEnvPolicyTests.cpp
+      P2pCeChannelCap_test.cpp
       P2pMaxNchannelsTests.cpp
       TopoNicFusionTests.cpp
       NetSocketTests.cpp
@@ -828,6 +864,7 @@ if(BUILD_TESTS)
       PatAlgorithmTests.cpp
       RcclWrapTests.cpp
       SymkBlockWidthTests.cpp
+      SocketCryptTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
@@ -1080,6 +1117,8 @@ if(BUILD_TESTS)
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
+      transport/NetLl128MPITests.cpp
+      transport/LlStepBarrierMPITests.cpp
       transport/ShmMPITests.cpp
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
@@ -1102,6 +1141,8 @@ if(BUILD_TESTS)
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       PatForcedMPITests.cpp
+      BootstrapTlsMPITests.cpp
+      BootstrapStrayPeerMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
       GdrFlushFlagProtoSwitchMPITests.cpp
@@ -1128,10 +1169,13 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaReduceScatterLL128MPITests.cpp
+      DdaBroadcastMPITests.cpp
       DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
       DdaFp8MPITests.cpp
+      DdaAlltoAllInPlaceMPITests.cpp
+      DdaAlltoAllLLBankMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
@@ -1475,9 +1519,9 @@ if(BUILD_TESTS)
     RENAME "CTestTestfile.cmake"
   )
 
-  # Host-only micro-test binaries (rccl-UnitTestsMicro). The host/ CMakeLists
+  # Host-only micro-test binaries (rccl-UnitTestsMicro*). The host/ CMakeLists
   # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
-  # target and returns; invoked standalone it builds rccl-HostUnitTests too.
+  # targets and returns; invoked standalone it builds rccl-HostUnitTests too.
   add_subdirectory(host)
 
   # Those headers are installed by the rocSHMEM sub-build, and targets that do
