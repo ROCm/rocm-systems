@@ -6635,13 +6635,22 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dp
  * @param[in] mipmap HIP mipmapped array to get the memory requirements of
  * @param[in] device Device to get the memory requirements for
  *
- * @returns #hipSuccess, #hipErrorInvalidValue
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle, #hipErrorInvalidDevice,
+ * #hipErrorNotSupported
  *
  * Returns the memory requirements of a HIP mipmapped array in memoryRequirements.
  *
  * The returned value in hipArrayMemoryRequirements::size represents the total size of the HIP
- mipmapped array. The returned value in hipArrayMemoryRequirements::alignment represents the
- alignment necessary for mapping the HIP mipmapped array.
+ * mipmapped array, including all of its mip levels. The returned value in
+ * hipArrayMemoryRequirements::alignment represents the alignment necessary for mapping the HIP
+ * mipmapped array.
+ *
+ * #hipErrorNotSupported is returned for a mipmapped array that does not own its memory, such as
+ * one created on imported external memory.
+ *
+ * @note Unlike CUDA, HIP has no deferred-mapping array flag, so this query is accepted for any
+ * HIP mipmapped array. The values describe the memory backing the array on the device it was
+ * created on.
  */
 hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap, hipDevice_t device);
