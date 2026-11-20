@@ -947,7 +947,7 @@ TEST(InterposerDupTest, FcntlOfdLocksReachTheRealFileTable) {
   int second = open(lock_file.path().c_str(), O_RDWR | O_CLOEXEC);
   ASSERT_GE(second, 0);
 
-  struct flock lease{};
+  struct flock lease {};
   lease.l_type = F_WRLCK;
   lease.l_whence = SEEK_SET;
   lease.l_start = 0;
@@ -957,7 +957,7 @@ TEST(InterposerDupTest, FcntlOfdLocksReachTheRealFileTable) {
   // The lock is open-file-description scoped: a second open of the same path
   // must observe the conflict. F_OFD_GETLK reports the conflicting lock with
   // l_pid set to -1, since an OFD lock is not tied to a process id.
-  struct flock conflict{};
+  struct flock conflict {};
   conflict.l_type = F_WRLCK;
   conflict.l_whence = SEEK_SET;
   conflict.l_start = 0;
@@ -968,13 +968,13 @@ TEST(InterposerDupTest, FcntlOfdLocksReachTheRealFileTable) {
 
   // Unlock through the waiting variant; nothing conflicts, so it returns at
   // once and a third probe no longer reports the lock.
-  struct flock release{};
+  struct flock release {};
   release.l_type = F_UNLCK;
   release.l_whence = SEEK_SET;
   release.l_start = 0;
   release.l_len = 0;
   ASSERT_EQ(fcntl(first, F_OFD_SETLKW, &release), 0) << std::strerror(errno);
-  struct flock clear{};
+  struct flock clear {};
   clear.l_type = F_WRLCK;
   clear.l_whence = SEEK_SET;
   clear.l_start = 0;
