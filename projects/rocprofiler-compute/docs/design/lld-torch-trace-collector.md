@@ -15,6 +15,10 @@ and leaves call-tree construction to analysis.
 | [constants.py](../../src/ml_api_tracing/constants.py) | Framework and user-region identities shared by profiling, analysis, and marker parsing |
 | [trace_selection.py](../../src/ml_api_tracing/profiling/trace_selection.py) | Resolves the frameworks that `--trace-ml-api` selects, using only the standard library |
 | [operator_patterns.py](../../src/ml_api_tracing/analyze/operator_patterns.py) | Matches `--list-operators` and `--operator` selectors to the frameworks a workload traced |
+| [orchestrator.py](../../src/ml_api_tracing/analyze/orchestrator.py) | Runs the analysis steps in order and reports diagnostics |
+| [trace_csv.py](../../src/ml_api_tracing/analyze/trace_csv.py) | Marker and counter file discovery and CSV loading |
+| [pass_matching.py](../../src/ml_api_tracing/analyze/pass_matching.py) | Joining passes, parsing markers, and matching operator calls across passes |
+| [call_tree.py](../../src/ml_api_tracing/analyze/call_tree.py) | Nesting, launcher attachment, traversal, and statistical rollup |
 | [torch_trace_collector.cpp](../../src/lib/torch_trace_collector/torch_trace_collector.cpp) | Process-wide callback installation, range lifetime, and launcher debug info |
 | [argument_capture.cpp](../../src/lib/torch_trace_collector/argument_capture.cpp) | Bounded input rendering and schema-name lookup |
 | [wire_format.h](../../src/lib/torch_trace_collector/wire_format.h) | Native marker serialization |
@@ -153,7 +157,7 @@ analyze exit during parse.
 
 ## Analyze path
 
-`--list-*-operators` / `--*-operator`:
+`--list-operators` / `--operator`:
 
 1. Pair each `ml_api_trace_*_marker_api_trace.csv` with its sibling
    `_counter_collection.csv`.

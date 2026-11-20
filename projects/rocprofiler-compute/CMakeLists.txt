@@ -645,6 +645,38 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_ml_api_tracing_trace_csv
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_trace_csv.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_trace_csv.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_pass_matching
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_pass_matching.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_pass_matching.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_call_tree
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_call_tree.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_call_tree.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_ml_api_tracing_orchestrator
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_orchestrator.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/analyze/test_orchestrator.py ${WORKING_DIR_OPTION}
+)
+
 # Memory chart tests — no GPU required
 add_test(
     NAME test_memory_chart_loader
@@ -1278,6 +1310,10 @@ if(${ENABLE_COVERAGE})
         test_ml_api_tracing_operator_patterns
         test_ml_api_tracing_trace_selection
         test_ml_api_tracing_errors
+        test_ml_api_tracing_trace_csv
+        test_ml_api_tracing_pass_matching
+        test_ml_api_tracing_call_tree
+        test_ml_api_tracing_orchestrator
         test_utils_profile
         test_common
         test_amdsmi_interface

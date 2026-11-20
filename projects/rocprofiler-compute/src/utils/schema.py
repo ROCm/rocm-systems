@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from membw_analysis.models import MemBwAnalysisResult
-from ml_api_tracing.analyze.definitions import CallTreeForest, MlApiTracePair
+from ml_api_tracing.analyze.definitions import CallTreeForest
 
 
 @dataclass
@@ -49,10 +49,6 @@ class Workload:
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     roofline_html_path: Optional[str] = None
     path: str = field(default_factory=str)
-    # Marker CSV / counter CSV pairs, one entry per profiling pass.
-    ml_api_trace_pairs: List[MlApiTracePair] = field(default_factory=list)
-    # Dispatches unmatched on Correlation_ID and GUID.
-    unmatched_kernel_frames: list[pd.DataFrame] = field(default_factory=list)
     # Consolidated marker rows after matching operator calls across passes.
     ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
     # Nested call-tree roots keyed by Thread_Id.

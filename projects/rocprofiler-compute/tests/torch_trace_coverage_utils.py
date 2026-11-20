@@ -23,6 +23,9 @@ import pytest
 import torch
 from common import normalize_kernel_names
 
+from ml_api_tracing.analyze.orchestrator import process_ml_api_trace_output
+from utils.schema import Workload
+
 # dense unary-float name list
 # fmt: off
 _UNARY_FLOAT_ELEMENTWISE_NAMES = (
@@ -2371,7 +2374,7 @@ def _first_tensor_dtype(args: List[Any]) -> Optional[torch.dtype]:
     return None
 
 
-def _schema_returns_single_tensor(schema: object) -> bool:
+def _schema_has_one_return(schema: object) -> bool:
     """Return True when ``schema`` declares exactly one return value."""
     if schema is None:
         return False
@@ -2409,7 +2412,7 @@ def build_args_for_op(
         if (
             overload_suffix in _SINGLE_TENSOR_OUT_OVERLOAD_SUFFIXES
             and short_name not in _OUT_MECHANISM_EXCLUDED_SHORT_NAMES
-            and _schema_returns_single_tensor(op.schema)
+            and _schema_has_one_return(op.schema)
         ):
             base = OP_SPECS.get(short_name)
             if base is not None and base.build is not None:
@@ -2564,11 +2567,7 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
 
     if op_name.startswith("torch.Tensor."):
         method = op_name[len("torch.Tensor.") :]
-        if marker_leaf == op_name:
-            return True
-        if marker_leaf.endswith("Tensor." + method):
-            return True
-        return False
+        return marker_leaf.endswith("Tensor." + method)
 
     if op_name.startswith("torch.") and not op_name.startswith("torch.ops."):
         return marker_leaf == op_name
@@ -3932,9 +3931,6 @@ def multiline_coverage_failure_warning(
 
 def call_trees_from_workload(workload_dir: str) -> Dict[str, List[Any]]:
     """Build analyze call trees from a profiled workload directory."""
-    from utils.schema import Workload
-    from utils.utils_analysis import process_ml_api_trace_output
-
     workload = Workload()
     process_ml_api_trace_output(workload, workload_dir)
     return workload.ml_api_call_trees
