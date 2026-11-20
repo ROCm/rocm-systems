@@ -7,13 +7,20 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 # CMake Toolchain file to define compilers and path to ROCm
 #==================================================================================================
 if (NOT CMAKE_TOOLCHAIN_FILE)
-  set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-linux.cmake")
+  if(CMAKE_HOST_WIN32)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-windows.cmake")
+  else()
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/toolchain-linux.cmake")
+  endif()
   message(STATUS "CMAKE_TOOLCHAIN_FILE: ${CMAKE_TOOLCHAIN_FILE}")
 endif()
 
 # RCCL Tests project
 #==================================================================================================
 project(rccl-tests LANGUAGES CXX)
+if(WIN32)
+  cmake_minimum_required(VERSION 3.22)
+endif()
 
 enable_testing()
 
@@ -22,9 +29,20 @@ enable_testing()
 option(USE_MPI                     "Build RCCL-tests with MPI support."           OFF)
 option(ENABLE_DEVICE_API           "Build with NCCL Device API support (GIN)."    OFF)
 option(ENABLE_ROCSHMEM_GIN         "Build with rocshmem GIN backend support."     OFF)
+if(WIN32 AND (ENABLE_DEVICE_API OR ENABLE_ROCSHMEM_GIN))
+  message(FATAL_ERROR "RCCL device API/GIN is not implemented by the Windows RCCL build. Leave ENABLE_DEVICE_API and ENABLE_ROCSHMEM_GIN OFF.")
+endif()
 option(BUILD_LOCAL_GPU_TARGET_ONLY "Build only for GPUs detected on this machine" OFF)
+if(WIN32)
+  set(_host_unit_default OFF)
+else()
+  set(_host_unit_default ON)
+endif()
 option(BUILD_RCCL_TESTS_HOST_UNIT_TESTS
-       "Build CPU-only host unit tests under test/ (standalone builds only)"   ON)
+       "Build CPU-only host unit tests under test/ (standalone builds only)" ${_host_unit_default})
+if(WIN32 AND BUILD_RCCL_TESTS_HOST_UNIT_TESTS)
+  message(FATAL_ERROR "The CPU-only test harness requires Linux. Set BUILD_RCCL_TESTS_HOST_UNIT_TESTS=OFF to build the Windows performance tests.")
+endif()
 
 if (NOT CMAKE_BUILD_TYPE)
   message(WARNING "CMAKE_BUILD_TYPE is not defined. Setting to Release")
@@ -65,15 +83,22 @@ if (BUILD_LOCAL_GPU_TARGET_ONLY)
 endif()
 
 # Determine which GPU architectures to build for
-set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
+if(WIN32)
+  set(GPU_TARGETS "" CACHE STRING "AMD GPU targets")
+  if(NOT GPU_TARGETS)
+    message(FATAL_ERROR "Set GPU_TARGETS explicitly for the intended hardware, for example -DGPU_TARGETS=gfx1151.")
+  endif()
+else()
+  set(GPU_TARGETS "${DEFAULT_GPUS}" CACHE STRING "Target default GPUs if GPU_TARGETS is not defined.")
+endif()
 
 # Check if clang compiler can offload to GPU_TARGETS
 if (COMMAND rocm_check_target_ids)
   message(STATUS "Checking for ROCm support for GPU targets: " "${GPU_TARGETS}")
   rocm_check_target_ids(SUPPORTED_GPUS TARGETS ${GPU_TARGETS})
 else()
-  message(WARNING "Unable to check for supported GPU targets. Falling back to default GPUs.")
-  set(SUPPORTED_GPUS ${DEFAULT_GPUS})
+  message(WARNING "Unable to validate GPU targets; using the requested GPU_TARGETS.")
+  set(SUPPORTED_GPUS ${GPU_TARGETS})
 endif()
 
 set(GPU_TARGETS "${SUPPORTED_GPUS}")
@@ -93,18 +118,8 @@ else()
 endif()
 set(ENV{ROCM_PATH} ${ROCM_PATH})
 
-if("${CMAKE_CXX_COMPILER}" MATCHES ".*amdclang\\+\\+")
-  message(STATUS "Compiling with amdclang++")
-  set(COMPILER_EXE_NAME amdclang++)
-  set(COMPILER_GREP_STRING "AMD clang version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
-elseif("${CMAKE_CXX_COMPILER}" MATCHES ".*clang\\+\\+")
-  message(STATUS "Compiling with clang++")
-  set(COMPILER_EXE_NAME clang++)
-  set(COMPILER_GREP_STRING "AMD clang version")
-  set(COMPILER_AWK_CMD "awk -F\" \" '{ printf $4}'")
-else()
-  message(FATAL_ERROR "RCCL-Tests can be built only with amdclang++")
+if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  message(FATAL_ERROR "RCCL-Tests requires a Clang-based HIP compiler.")
 endif()
 
 # Set CMAKE flags
@@ -140,17 +155,12 @@ if(NOT "${HIP_COMPILER}" MATCHES "clang")
 endif()
 
 ## Check for compiler version
-find_program(compiler_executable ${COMPILER_EXE_NAME})
-message(STATUS "${COMPILER_EXE_NAME} executable: ${compiler_executable}")
-execute_process(
-  COMMAND         bash "-c" "${compiler_executable} --version | grep \"${COMPILER_GREP_STRING}\" | ${COMPILER_AWK_CMD}"
-  OUTPUT_VARIABLE compiler_version_string)
-message(STATUS "${COMPILER_EXE_NAME} version:    ${compiler_version_string}")
+message(STATUS "C++ compiler: ${CMAKE_CXX_COMPILER} (${CMAKE_CXX_COMPILER_VERSION})")
 
 ## Check for HIP version
 # Use hip_VERSION from find_package(hip) above
 string(REGEX MATCH "^([0-9]+\\.[0-9]+\\.[0-9]+)" hip_version_string "${hip_VERSION}")
-message(STATUS "${COMPILER_EXE_NAME} HIP version:    ${hip_version_string}")
+message(STATUS "HIP version: ${hip_version_string}")
 
 ##Check for ROCm version
 set(EXPLICIT_ROCM_VERSION "" CACHE STRING "Explicit ROCM version to compile to (auto detect if empty)")
@@ -183,7 +193,7 @@ else()
 endif()
 
 ## Check for RCCL
-find_package(RCCL CONFIG REQUIRED HINTS "${CMAKE_PREFIX_PATH}" PATHS "${ROCM_PATH}")
+include(cmake/RcclDependency.cmake)
 if (RCCL_FOUND)
     message(STATUS "RCCL version : ${RCCL_VERSION}")
     message(STATUS "RCCL include path : ${RCCL_INCLUDE_DIRS}")
@@ -222,8 +232,16 @@ set(ROCM_USE_DEV_COMPONENT OFF)  # This repo doesn't have a dev component
 
 # Build the upstream OS abstraction with RCCL's HIP toolchain.
 add_library(nccl_tests_options INTERFACE)
-target_compile_definitions(nccl_tests_options INTERFACE NCCL_OS_LINUX NCCL_GIN_PROXY_ENABLE=1)
-set(NCCL_OS_LINUX ON)
+target_compile_definitions(nccl_tests_options INTERFACE NCCL_GIN_PROXY_ENABLE=1)
+if(WIN32)
+  target_compile_definitions(nccl_tests_options INTERFACE NCCL_OS_WINDOWS WIN32_LEAN_AND_MEAN NOMINMAX _CRT_SECURE_NO_WARNINGS)
+  target_compile_definitions(nccl_tests_options INTERFACE "RCCL_TESTS_LIBRARY_NAME=\"$<TARGET_FILE_NAME:roc::rccl>\"")
+  set(NCCL_OS_WINDOWS ON)
+else()
+  target_compile_definitions(nccl_tests_options INTERFACE NCCL_OS_LINUX)
+  set(NCCL_OS_LINUX ON)
+endif()
+include(cmake/Hipify.cmake)
 add_subdirectory(os)
 
 # Build the upstream verifiable library with the active CUDA or HIP backend.

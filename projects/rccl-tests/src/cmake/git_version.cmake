@@ -19,7 +19,7 @@
 # SOFTWARE.
 
 # Attempt to collect the latest git hash
-execute_process(COMMAND git log --pretty=format:'%h' -n 1
+execute_process(COMMAND git -C "${SOURCE_DIR}" rev-parse --short=12 HEAD
                 OUTPUT_VARIABLE GIT_REV
                 ERROR_QUIET)
 
@@ -29,15 +29,18 @@ if ("${GIT_REV}" STREQUAL "")
 else()
   # Check for changes (denote with a '+') after hash
   execute_process(
-    COMMAND bash -c "git diff --quiet --exit-code || echo +"
-    OUTPUT_VARIABLE GIT_DIFF)
+    COMMAND git -C "${SOURCE_DIR}" diff --quiet HEAD --
+    RESULT_VARIABLE GIT_DIRTY)
+  set(GIT_DIFF "")
+  if(GIT_DIRTY EQUAL 1)
+    set(GIT_DIFF "+")
+  endif()
   # Collect branch information
   execute_process(
-    COMMAND git rev-parse --abbrev-ref HEAD
+    COMMAND git -C "${SOURCE_DIR}" rev-parse --abbrev-ref HEAD
     OUTPUT_VARIABLE GIT_BRANCH)
 
   string(STRIP "${GIT_REV}" GIT_REV)
-  string(SUBSTRING "${GIT_REV}" 1 7 GIT_REV)
   string(STRIP "${GIT_DIFF}" GIT_DIFF)
   string(STRIP "${GIT_BRANCH}" GIT_BRANCH)
 

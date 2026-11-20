@@ -220,6 +220,7 @@ struct testEngine {
 #elif defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
   bool (*getDevCommRequirements)(int deviceImpl, ncclDevCommRequirements* reqs);
 #endif
+  bool usesBias = false;
 };
 
 // DevComm slots per GPU: threadArgs::devComms holds gpu i's DevComms at

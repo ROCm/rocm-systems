@@ -22,3 +22,6 @@ target_include_directories(nccl_test_os
 )
 
 target_link_libraries(nccl_test_os PRIVATE nccl_tests_options)
+if(WIN32)
+  target_link_libraries(nccl_test_os PRIVATE advapi32)
+endif()

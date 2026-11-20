@@ -140,7 +140,11 @@ __host__ __device__ T inhibit(T x) {
 namespace {
   template<typename Y>
   __host__ __device__ Y castTo(uint64_t x) {
-    return Y(x);
+    if constexpr (!IsIntegral<Y>::value && sizeof(Y) == 1) {
+      return Y(static_cast<double>(x));
+    } else {
+      return Y(x);
+    }
   }
   template<typename Y>
   __host__ __device__ Y castTo(float x) {

@@ -23,7 +23,8 @@
 #include <vector>
 #include "cuda.h"
 #include <utility>
-#include <dlfcn.h>
+#include "library.h"
+#include <chrono>
 //#define DEBUG_PRINT
 
 #include "verifiable.h"
@@ -67,14 +68,13 @@ rcclTestsGetSymkInfo_t rcclTestsGetSymkInfo = NULL;
 rcclTestsGetCollImplInfo_t rcclTestsGetCollImplInfo = NULL;
 
 static void loadRcclSyms() {
-  // Resolve optional RCCL symbols from the already-loaded librccl.so.1 (via DT_NEEDED).
-  // Avoid dlopen("librccl.so") which can double-load in build trees with non-symlinked libs.
-  rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     dlsym(RTLD_DEFAULT, "rcclGetAlgoInfo");
-  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     dlsym(RTLD_DEFAULT, "rcclGetAlgoName");
-  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) dlsym(RTLD_DEFAULT, "rcclGetProtocolName");
-  rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     dlsym(RTLD_DEFAULT, "rcclSymKGetInfo");
+  // Resolve optional symbols from the loaded RCCL library without loading a second copy.
+  rcclTestsGetAlgoInfo      = (rcclTestsGetAlgoInfo_t)     rcclTestGetSymbol("rcclGetAlgoInfo");
+  rcclTestsGetAlgoName      = (rcclTestsGetAlgoName_t)     rcclTestGetSymbol("rcclGetAlgoName");
+  rcclTestsGetProtocolName  = (rcclTestsGetProtocolName_t) rcclTestGetSymbol("rcclGetProtocolName");
+  rcclTestsGetSymkInfo      = (rcclTestsGetSymkInfo_t)     rcclTestGetSymbol("rcclSymKGetInfo");
   // Optional (newer librccl). Left NULL on older libs -> reporting falls back.
-  rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) dlsym(RTLD_DEFAULT, "rcclGetCollImplInfo");
+  rcclTestsGetCollImplInfo  = (rcclTestsGetCollImplInfo_t) rcclTestGetSymbol("rcclGetCollImplInfo");
 }
 
 // RCCL_FLOAT8 support
@@ -1195,7 +1195,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
         fprintf(stderr, "# WARN --device_timing=2: no in-kernel device-time "
                         "measurement for this size (timed kernel did not run: non-GIN impl, "
                         "unsupported op/type, count==0, or loop<1); skipping row "
-                        "(size %ld bytes)\n", args->expectedBytes);
+                        "(size %zu bytes)\n", args->expectedBytes);
       }
       skipMetricRow = true;
     } else {
@@ -1219,7 +1219,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
         Allreduce(args, &timedWrong1, /*sum*/4);
         if (timedWrong1) {
           fprintf(stderr, "\nERROR: --devtime_check: timed-kernel output datacheck "
-                          "failed with %lld wrong elements (size %ld bytes)\n",
+                          "failed with %lld wrong elements (size %zu bytes)\n",
                           timedWrong1, args->expectedBytes);
           return testInternalError;
         }
@@ -1247,7 +1247,7 @@ testResult_t BenchTime(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t
   if (!skipMetricRow && rccl_tests_devtime::shouldSkipBenchTimeRow(deltaSec)) {
     if (args->proc == 0 && args->thread == 0) {
       fprintf(stderr, "# WARN: zero or negative elapsed time (deltaSec=%g); "
-                      "skipping row (size %ld bytes)\n", deltaSec, args->expectedBytes);
+                      "skipping row (size %zu bytes)\n", deltaSec, args->expectedBytes);
     }
     skipMetricRow = true;
   }
@@ -1495,7 +1495,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   size_t iter = 0;
 
   do {
-    if (run_cycles > 1) PRINT("# Testing %lu cycle.\n", iter+1);
+    if (run_cycles > 1) PRINT("# Testing %zu cycle.\n", iter+1);
     if (args->reporter) {
       args->reporter->setParameters(iter, args->collTest->name, typeName, opName);
     }
@@ -1507,7 +1507,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       writeBenchmarkLinePreamble(std::max(args->sendBytes, args->expectedBytes), args->nbytes / wordSize(type), typeName, opName, root);
       if (enable_out_of_place) {
         TESTCHECK(BenchTime(args, type, op, root, 0));
-        usleep(delay_inout_place);
+        std::this_thread::sleep_for(std::chrono::microseconds(delay_inout_place));
       }
       if (enable_in_place)
         TESTCHECK(BenchTime(args, type, op, root, 1));
@@ -1698,7 +1698,7 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
   }
 
   char hostname[256] = {0};
-  gethostname(hostname, sizeof(hostname));
+  ncclTestGetHostname(hostname, sizeof(hostname));
   printf("# Network counter collection enabled (RCCL_TESTS_NET_COUNTER_ENABLE=1)\n");
   const char* ib_hca_env = getenv("NCCL_IB_HCA");
   if (ib_hca_env && strlen(ib_hca_env) > 0) {
@@ -2599,14 +2599,13 @@ testResult_t run() {
   // Reserve 1GiB of memory for each 16GiB installed, but limit to a max of 4GiB
   const size_t GB = (1ULL << 30);
   size_t reserveMem =  std::min(DIVUP(maxMem, 16*GB) * 1*GB, 4*GB);
-  // If the program is all_reduce_bias, enable bias
-  if (strcmp(programName, "all_reduce_bias_perf") == 0) test_bias = 1;
+  test_bias = ncclTestEngine.usesBias;
   // We need sendbuff, recvbuff, expected (when datacheck enabled), bias (when bias enabled), plus 1G for the rest.
   size_t memMaxBytes = (maxMem - reserveMem - 1*GB) / (datacheck ? (test_bias ? 4 : 3) : (test_bias ? 3 : 2));
   if (maxBytes > memMaxBytes) {
     maxBytes = memMaxBytes;
     if (minBytes > maxBytes) minBytes = maxBytes;
-    if (proc == 0) printf("#\n# Reducing maxBytes to %ld due to memory limitation\n", maxBytes);
+    if (proc == 0) printf("#\n# Reducing maxBytes to %zu due to memory limitation\n", maxBytes);
   }
 
   const char* tlsPsk = getenv(NCCL_TESTS_TLS_PSK_ENV);
@@ -2618,7 +2617,7 @@ testResult_t run() {
 #else
     // Looked up at run time: a direct reference would keep the binary from loading against
     // an older librccl when it is linked with -z now or run with LD_BIND_NOW.
-    ncclSetEncryption_t setEncryption = (ncclSetEncryption_t) dlsym(RTLD_DEFAULT, "ncclSetEncryption");
+    ncclSetEncryption_t setEncryption = (ncclSetEncryption_t) rcclTestGetSymbol("ncclSetEncryption");
     if (setEncryption == NULL) {
       fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but the RCCL library (%d) has no ncclSetEncryption; 2.32 or newer is required.\n",
         test_ncclVersion);
@@ -2631,7 +2630,11 @@ testResult_t run() {
     NCCLCHECK(setEncryption(&encryption));
     // RCCL keeps its own copy of the key. Dropping the variable keeps it out of RCCL's RAS
     // environment report, which collects every NCCL_* entry, and out of child processes.
+#if defined(NCCL_OS_WINDOWS)
+    _putenv_s(NCCL_TESTS_TLS_PSK_ENV, "");
+#else
     unsetenv(NCCL_TESTS_TLS_PSK_ENV);
+#endif
     if (proc == 0) printf("# Socket encryption: TLS (PSK)\n");
 #else
     fprintf(stderr, NCCL_TESTS_TLS_PSK_ENV " is set, but rccl-tests was built against RCCL %d headers; 2.32 or newer is required.\n",
@@ -2719,7 +2722,11 @@ testResult_t run() {
 
     {
       // Missing symbol: pre-sync librccl; keep previous "just run" behavior.
+#if defined(NCCL_OS_WINDOWS)
+      const bool cuMemOk = false;
+#else
       const bool cuMemOk = !ncclCuMemRuntimeSupported || ncclCuMemRuntimeSupported();
+#endif
       if ((local_register == SYMMETRIC_REGISTER || deviceImpl > 0) && !cuMemOk) {
         if (ncclProc == 0) {
           printf("# SKIP: symmetric memory / device API not supported (cuMem runtime disabled)\n");
