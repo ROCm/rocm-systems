@@ -636,11 +636,9 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 }
                 EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT => write_value(
                     value,
-                    if image_gpu {
-                        image_descriptor::ROW_ALIGNMENT
-                    } else {
-                        0
-                    },
+                    gpu.filter(|_| image_gpu)
+                        .and_then(image_descriptor::Generation::from_gpu)
+                        .map_or(0, image_descriptor::row_pitch_alignment),
                 ),
                 EXT_AGENT_INFO_IMAGE_SUPPORT => write_value(value, image_gpu),
                 _ => INVALID_ARGUMENT,
