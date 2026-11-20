@@ -42,6 +42,7 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
@@ -70,13 +71,17 @@ enum class Workload { Md5, Lag, Hold };
 struct FrameGeometry {
     Rect disp_rect = {};
     uint32_t width = 0, height = 0;          // target (output) size
+    uint32_t chroma_width = 0;               // samples per chroma row: interleaved UV counts both
     uint32_t chroma_height = 0;
     uint32_t num_chroma_planes = 0;
     uint32_t bytes_per_pixel = 1;
     uint32_t bit_depth = 8;
     rocDecVideoSurfaceFormat surface_format = rocDecVideoSurfaceFormat_NV12;
     uint32_t Pitch() const { return width * bytes_per_pixel; }
-    size_t FrameSize() const { return static_cast<size_t>(Pitch()) * (height + chroma_height * num_chroma_planes); }
+    uint32_t ChromaPitch() const { return chroma_width * bytes_per_pixel; }
+    size_t FrameSize() const {
+        return static_cast<size_t>(Pitch()) * height + static_cast<size_t>(ChromaPitch()) * chroma_height * num_chroma_planes;
+    }
 };
 
 struct FrameItem {
@@ -194,8 +199,8 @@ static std::string DigestToString(const uint8_t *digest) {
     return s.str();
 }
 
-// Describe a packed frame (see FrameGeometry) for MD5Generator. The frame is already cropped,
-// so the display rectangle is the whole frame.
+// Describe a packed frame (see FrameGeometry), copied to host memory, for MD5Generator. The frame
+// is already cropped, so the display rectangle is the whole frame.
 static OutputSurfaceInfo DescribePackedFrame(const FrameGeometry &g) {
     OutputSurfaceInfo info = {};
     info.output_width = g.width;
@@ -209,25 +214,28 @@ static OutputSurfaceInfo DescribePackedFrame(const FrameGeometry &g) {
     info.num_chroma_planes = g.num_chroma_planes;
     info.output_surface_size_in_bytes = g.FrameSize();
     info.surface_format = g.surface_format;
-    info.mem_type = OUT_SURFACE_MEM_DEV_COPIED;
+    info.mem_type = OUT_SURFACE_MEM_HOST_COPIED;
     return info;
 }
 
 // Copy the display area of a decoded picture into a packed device buffer. The layout matches
 // what -m 0 (device internal) hashes in videoDecode: the even-rounded target size from the
-// display origin, with 4:2:0 chroma offset by half the top row.
+// display origin, with subsampled chroma offset by half the top row or half the left column.
 static hipError_t CopyFrame(void *const src[3], const uint32_t src_pitch[3], const FrameGeometry &g,
                             uint8_t *dst, hipStream_t stream) {
     const uint32_t row_bytes = g.Pitch();
     const uint8_t *luma = static_cast<const uint8_t *>(src[0]) + g.disp_rect.top * src_pitch[0] + g.disp_rect.left * g.bytes_per_pixel;
     hipError_t status = hipMemcpy2DAsync(dst, row_bytes, luma, src_pitch[0], row_bytes, g.height, hipMemcpyDeviceToDevice, stream);
     uint8_t *dst_plane = dst + static_cast<size_t>(row_bytes) * g.height;
+    const uint32_t chroma_row_bytes = g.ChromaPitch();
+    // Half-height chroma (4:2:0) starts at half the display top; half-width planar chroma (4:2:2)
+    // at half the display left. Interleaved UV keeps the luma offset, as each pair is two samples.
+    const uint32_t top = (g.chroma_height < g.height) ? (g.disp_rect.top >> 1) : g.disp_rect.top;
+    const uint32_t left = (g.chroma_width < g.width) ? (g.disp_rect.left >> 1) : g.disp_rect.left;
     for (uint32_t p = 0; p < g.num_chroma_planes && status == hipSuccess; p++) {
-        // Half-height chroma (4:2:0) starts at half the display top; full-height chroma at the top.
-        uint32_t top = (g.chroma_height < g.height) ? (g.disp_rect.top >> 1) : g.disp_rect.top;
-        const uint8_t *chroma = static_cast<const uint8_t *>(src[1 + p]) + top * src_pitch[1 + p] + g.disp_rect.left * g.bytes_per_pixel;
-        status = hipMemcpy2DAsync(dst_plane, row_bytes, chroma, src_pitch[1 + p], row_bytes, g.chroma_height, hipMemcpyDeviceToDevice, stream);
-        dst_plane += static_cast<size_t>(row_bytes) * g.chroma_height;
+        const uint8_t *chroma = static_cast<const uint8_t *>(src[1 + p]) + top * src_pitch[1 + p] + left * g.bytes_per_pixel;
+        status = hipMemcpy2DAsync(dst_plane, chroma_row_bytes, chroma, src_pitch[1 + p], chroma_row_bytes, g.chroma_height, hipMemcpyDeviceToDevice, stream);
+        dst_plane += static_cast<size_t>(chroma_row_bytes) * g.chroma_height;
     }
     return status;
 }
@@ -286,6 +294,11 @@ static void UpdateGeometry(AsyncDecoder &dec, const RocdecVideoFormat *format) {
     g.bit_depth = format->bit_depth_luma_minus8 + 8;
     g.bytes_per_pixel = format->bit_depth_luma_minus8 > 0 ? 2 : 1;
     g.surface_format = SelectSurfaceFormat(format->chroma_format, format->bit_depth_luma_minus8);
+    // Planar 4:2:0 and 4:2:2 chroma rows are half the luma width; interleaved UV (NV12/P016) and
+    // planar 4:4:4 rows hold as many samples as luma.
+    bool half_width = g.surface_format == rocDecVideoSurfaceFormat_YUV420 || g.surface_format == rocDecVideoSurfaceFormat_YUV420_16Bit ||
+                      g.surface_format == rocDecVideoSurfaceFormat_YUV422 || g.surface_format == rocDecVideoSurfaceFormat_YUV422_16Bit;
+    g.chroma_width = half_width ? g.width / 2 : g.width;
     g.chroma_height = static_cast<uint32_t>(std::ceil(g.height * GetChromaHeightFactor(g.surface_format)));
     g.num_chroma_planes = (format->chroma_format == rocDecVideoChromaFormat_Monochrome) ? 0 : GetChromaPlaneCount(g.surface_format);
 }
@@ -309,8 +322,13 @@ static int ROCDECAPI HandleVideoSequence(void *user_data, RocdecVideoFormat *for
     caps.chroma_format = format->chroma_format;
     caps.bit_depth_minus_8 = format->bit_depth_luma_minus8;
     caps.device_id = dec.opt.device_id;
-    if (rocDecGetDecoderCaps(&caps) != ROCDEC_SUCCESS || !caps.is_supported ||
-        format->coded_width > caps.max_width || format->coded_height > caps.max_height) {
+    rocDecStatus caps_status = rocDecGetDecoderCaps(&caps);
+    if (caps_status != ROCDEC_SUCCESS) {
+        std::cerr << "Error: rocDecGetDecoderCaps failed: " << rocDecGetErrorName(caps_status) << std::endl;
+        dec.failed = true;
+        return 0;
+    }
+    if (!caps.is_supported || format->coded_width > caps.max_width || format->coded_height > caps.max_height) {
         std::cout << "info: Stream format not supported on this GPU" << std::endl;
         dec.unsupported = true;
         return 0;
@@ -521,6 +539,7 @@ static void ConsumerLoop(AsyncDecoder &dec, MD5Generator *md5, std::ofstream *md
     hipStream_t stream = nullptr;
     uint8_t *late_copy_buffer = nullptr;
     size_t late_copy_size = 0;
+    std::vector<uint8_t> host_frame;
     std::mt19937 rng(12345);
     if (hipStreamCreate(&stream) != hipSuccess) {
         StopConsumer(dec, result, "hipStreamCreate failed");
@@ -564,23 +583,38 @@ static void ConsumerLoop(AsyncDecoder &dec, MD5Generator *md5, std::ofstream *md
                     late_copy_size = size;
                 }
             }
+            frame = late_copy_buffer;
             if (late_copy_buffer && (CopyFrame(item.src, item.src_pitch, item.geometry, late_copy_buffer, stream) != hipSuccess ||
                                  hipStreamSynchronize(stream) != hipSuccess)) {
                 result->ok = false;
+                frame = nullptr;
             }
-            frame = late_copy_buffer;
         }
 
-        if (frame) {
-            OutputSurfaceInfo info = DescribePackedFrame(item.geometry);
-            if (md5) md5->UpdateMd5ForFrame(frame, &info);
-            if (md5_frames) {
-                MD5Generator frame_md5;
-                frame_md5.InitMd5();
-                frame_md5.UpdateMd5ForFrame(frame, &info);
-                uint8_t *digest = nullptr;
-                frame_md5.FinalizeMd5(&digest);
-                *md5_frames << item.index << " " << DigestToString(digest) << std::endl;
+        // Copy the frame to the host here rather than in MD5Generator, which logs a failed copy
+        // but cannot report it, so the digest would silently leave the frame out.
+        if (frame && (md5 || md5_frames)) {
+            host_frame.resize(item.geometry.FrameSize());
+            hipError_t status = hipMemcpyDtoH(host_frame.data(), frame, host_frame.size());
+            if (status != hipSuccess) {
+                std::cerr << "Error: hipMemcpyDtoH of frame " << item.index << " failed: " << hipGetErrorName(status) << std::endl;
+                result->ok = false;
+            } else {
+                OutputSurfaceInfo info = DescribePackedFrame(item.geometry);
+                if (md5) md5->UpdateMd5ForFrame(host_frame.data(), &info);
+                if (md5_frames) {
+                    MD5Generator frame_md5;
+                    frame_md5.InitMd5();
+                    frame_md5.UpdateMd5ForFrame(host_frame.data(), &info);
+                    uint8_t *digest = nullptr;
+                    frame_md5.FinalizeMd5(&digest);
+                    *md5_frames << item.index << " " << DigestToString(digest) << std::endl;
+                    if (!*md5_frames) {
+                        std::cerr << "Error: cannot write the MD5 of frame " << item.index << " to the -md5_frames file" << std::endl;
+                        result->ok = false;
+                        md5_frames = nullptr;  // stop writing; the run fails
+                    }
+                }
             }
         }
         result->frames++;
@@ -758,10 +792,16 @@ int main(int argc, char **argv) {
                     std::cerr << "Error: cannot read the reference MD5 from " << opt.md5_check_path << std::endl;
                     return 1;
                 }
+                // Reject a malformed reference, which would otherwise count as a mismatch and let
+                // -expect_mismatch pass whether or not the output was corrupted.
+                if (ref_string.size() != 32 || !std::all_of(ref_string.begin(), ref_string.end(), [](unsigned char c) { return std::isxdigit(c); })) {
+                    std::cerr << "Error: the reference in " << opt.md5_check_path << " is not a 32-digit hexadecimal MD5 digest" << std::endl;
+                    return 1;
+                }
                 std::transform(ref_string.begin(), ref_string.end(), ref_string.begin(), ::tolower);
-                bool match = ref_string.compare(0, 32, digest_string) == 0;
-                if (match) std::cout << "MD5 digest matches the reference MD5 digest: " << ref_string.substr(0, 32) << std::endl;
-                else std::cout << "MD5 digest does not match the reference MD5 digest: " << ref_string.substr(0, 32) << std::endl;
+                bool match = ref_string == digest_string;
+                if (match) std::cout << "MD5 digest matches the reference MD5 digest: " << ref_string << std::endl;
+                else std::cout << "MD5 digest does not match the reference MD5 digest: " << ref_string << std::endl;
                 if (opt.expect_mismatch) {
                     std::cout << "info: -expect_mismatch: " << (match ? "FAILED, the output was not corrupted" : "PASSED, the mismatch was detected") << std::endl;
                     exit_code = match ? 1 : 0;
