@@ -34,14 +34,6 @@ do not register or execute this test.
 # Single instance (this tree) — prints profile / analyze / total seconds
 python3 tests/performance/run_perf_vcopy_nbody.py --iters 5000 --keep
 
-# Local gfx1201 / lean env (skip native-tool cmake build)
-python3 tests/performance/run_perf_vcopy_nbody.py \
-  --experimental \
-  --iters 5000 \
-  --bodies 81920 \
-  --no-native-tool \
-  --keep
-
 # Multi-instance comparison — table with Δ vs the first path
 python3 tests/performance/run_perf_vcopy_nbody.py \
   --rocprof-compute /path/to/checkout-A \
@@ -59,7 +51,6 @@ python3 tests/performance/run_perf_vcopy_nbody.py \
 | `--keep` | Retain workload output after the run |
 | `--device` | HIP device id for the app |
 | `--experimental` | Forward `--experimental` to profile/analyze (e.g. gfx1201) |
-| `--no-native-tool` | Forward `--no-native-tool` to profile |
 
 The profiled app always comes from this tree; only the `rocprof-compute`
 tool path varies across `--rocprof-compute` instances.
