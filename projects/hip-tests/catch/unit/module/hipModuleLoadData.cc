@@ -35,9 +35,8 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
   }
 
   SECTION("Load compiled module from file with generic target in regular fatbin") {
-    if (!isGenericTargetSupported()) {
-      WARN("Skipping section: generic target is not supported on this device.");
-      return;
+    if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+      HIP_SKIP_TEST("No compatible generic image was built for this device.");
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
     HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));
@@ -49,9 +48,8 @@ HIP_TEST_CASE(Unit_hipModuleLoadData_Positive_Basic) {
   }
 
   SECTION("Load compiled module from file with generic target in compressed fatbin") {
-    if (!isGenericTargetSupported()) {
-      WARN("Skipping section: generic target is not supported on this device.");
-      return;
+    if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+      HIP_SKIP_TEST("No compatible generic image was built for this device.");
     }
     const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
     HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));

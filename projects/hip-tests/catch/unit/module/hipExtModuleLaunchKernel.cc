@@ -180,24 +180,32 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_UniformWorkGroup) {
   size_t arraylength = totalWorkGroups * localWorkSize;
   size_t sizeBytes{arraylength * sizeof(int)};
   // Get module and function from module
-  hipModule_t Module;
+  hipModule_t Module = nullptr;
   hipFunction_t Function;
-  SECTION("regular fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileName)); }
-  SECTION("compressed fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed)); }
+  SECTION("regular fatbin") {
+    HIP_CHECK(hipModuleLoad(&Module, fileName));
+    REQUIRE(Module != nullptr);
+  }
+  SECTION("compressed fatbin") {
+    HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed));
+    REQUIRE(Module != nullptr);
+  }
   SECTION("generic target in regular fatbin") {
-    if (!isGenericTargetSupported()) {
-      WARN("Skipping section: generic target is not supported on this device.");
-      return;
+    if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+      HIP_SKIP_TEST("No compatible generic image was built for this device.");
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTarget));
+    REQUIRE(Module != nullptr);
   }
   SECTION("generic target in compressed fatbin") {
-    if (!isGenericTargetSupported()) {
-      WARN("Skipping section: generic target is not supported on this device.");
-      return;
+    if (!isGenericTargetSupported(HIP_TESTS_GENERIC_TARGETS)) {
+      HIP_SKIP_TEST("No compatible generic image was built for this device.");
     }
     HIP_CHECK(hipModuleLoad(&Module, fileNameGenericTargetCompressed));
+    REQUIRE(Module != nullptr);
   }
+  // Catch can revisit this body without entering a section after a skip.
+  if (Module == nullptr) return;
   HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
   // Allocate resources
   int* A = new int[arraylength];

@@ -9,6 +9,7 @@
 #include <iostream>
 #include <assert.h>
 #include <map>
+#include <sstream>
 #include "hip_test_context.hh"
 
 std::vector<std::unordered_set<std::string>> GCNArchFeatMap = {
@@ -106,7 +107,7 @@ bool getGenericTarget(const std::string& agentTarget, std::string& genericTarget
 }
 
 /*
-Return true, if gcnArchName has corresponding generic target;
+Return true, if a compatible generic image for gcnArchName is in builtTargets;
        false, otherwise.
 If gcnArchName is nullptr, it will be queried from deviceId;
        otherwise, deviceId will be ignored.
@@ -137,18 +138,37 @@ Generic GFX9.4 / Data center
 
 --offload-arch=gfx9-4-generic - includes gfx940, gfx941, gfx942, gfx950
 */
-bool isGenericTargetSupported(char* gcnArchName, int deviceId) {
+bool isGenericTargetSupported(const std::string& builtTargets, const char* gcnArchName,
+                              int deviceId) {
   hipDeviceProp_t props{};
   if (gcnArchName == nullptr) {
     if (hipGetDeviceProperties(&props, deviceId) != hipSuccess) return false;
     gcnArchName = props.gcnArchName;
   }
-  std::string target{gcnArchName};
+  const std::string target{gcnArchName};
   std::string genericTarget{};
-  auto pos = target.find(':');
-  if (pos != std::string::npos) {
-    target[pos] = 0;
-    target.resize(pos);
+  const auto pos = target.find(':');
+  if (!getGenericTarget(target.substr(0, pos), genericTarget)) return false;
+
+  // Delimit both sides so a feature cannot match a prefix of another token.
+  const std::string features = (pos == std::string::npos ? "" : target.substr(pos)) + ":";
+  std::istringstream images(builtTargets);
+  for (std::string image; std::getline(images, image, ',');) {
+    std::istringstream parts(image);
+    std::string family;
+    std::getline(parts, family, ':');
+    if (family != genericTarget) continue;
+
+    // Omitted image features are unconstrained. Every explicit feature must
+    // match the device, including both signs of gfx9-4 sramecc and xnack.
+    bool compatible = true;
+    for (std::string feature; std::getline(parts, feature, ':');) {
+      if (feature.empty() || features.find(":" + feature + ":") == std::string::npos) {
+        compatible = false;
+        break;
+      }
+    }
+    if (compatible) return true;
   }
-  return getGenericTarget(target, genericTarget);
+  return false;
 }
