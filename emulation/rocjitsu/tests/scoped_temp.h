@@ -3,11 +3,14 @@
 
 #pragma once
 
+#include <gtest/gtest.h>
+
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -19,11 +22,27 @@ namespace rocjitsu::test {
 
 class ScopedTempFile {
 public:
-  explicit ScopedTempFile(std::string_view prefix) : path_(make_pattern(prefix)) {
-    const int fd = ::mkstemp(path_.data());
+  ScopedTempFile() = default;
+
+  /// @brief Create the resource; check success before using path().
+  /// @details An initial creation failure leaves the path empty. Reinitializing
+  /// an owned resource fails and preserves its existing path.
+  [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix) {
+    if (!path_.empty())
+      return testing::AssertionFailure() << "Temporary resource is already initialized";
+    std::error_code error;
+    const std::filesystem::path directory = std::filesystem::temp_directory_path(error);
+    if (error)
+      return testing::AssertionFailure()
+             << "Failed to locate temporary directory: " << error.message();
+    std::string pattern = (directory / (std::string(prefix) + "XXXXXX")).string();
+    const int fd = ::mkstemp(pattern.data());
     if (fd == -1)
-      throw std::runtime_error("Failed to create temporary file");
+      return testing::AssertionFailure()
+             << "Failed to create temporary file: " << std::strerror(errno);
     (void)::close(fd);
+    path_ = std::move(pattern);
+    return testing::AssertionSuccess();
   }
 
   ~ScopedTempFile() { cleanup(); }
@@ -46,18 +65,19 @@ public:
 
   [[nodiscard]] const std::string &path() const { return path_; }
 
-  void write(std::string_view contents) const {
+  /// @brief Write an initialized file; check success before consuming its contents.
+  [[nodiscard]] testing::AssertionResult write(std::string_view contents) const {
+    if (path_.empty())
+      return testing::AssertionFailure() << "Temporary file is not initialized";
     std::ofstream output(path_, std::ios::binary | std::ios::trunc);
     output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    output.close();
     if (!output)
-      throw std::runtime_error("Failed to write temporary file");
+      return testing::AssertionFailure() << "Failed to write temporary file: " << path_;
+    return testing::AssertionSuccess();
   }
 
 private:
-  static std::string make_pattern(std::string_view prefix) {
-    return (std::filesystem::temp_directory_path() / (std::string(prefix) + "XXXXXX")).string();
-  }
-
   void cleanup() noexcept {
     if (path_.empty())
       return;
@@ -70,9 +90,25 @@ private:
 
 class ScopedTempDirectory {
 public:
-  explicit ScopedTempDirectory(std::string_view prefix) : path_(make_pattern(prefix)) {
-    if (::mkdtemp(path_.data()) == nullptr)
-      throw std::runtime_error("Failed to create temporary directory");
+  ScopedTempDirectory() = default;
+
+  /// @brief Create the resource; check success before using path().
+  /// @details An initial creation failure leaves the path empty. Reinitializing
+  /// an owned resource fails and preserves its existing path.
+  [[nodiscard]] testing::AssertionResult initialize(std::string_view prefix) {
+    if (!path_.empty())
+      return testing::AssertionFailure() << "Temporary resource is already initialized";
+    std::error_code error;
+    const std::filesystem::path directory = std::filesystem::temp_directory_path(error);
+    if (error)
+      return testing::AssertionFailure()
+             << "Failed to locate temporary directory: " << error.message();
+    std::string pattern = (directory / (std::string(prefix) + "XXXXXX")).string();
+    if (::mkdtemp(pattern.data()) == nullptr)
+      return testing::AssertionFailure()
+             << "Failed to create temporary directory: " << std::strerror(errno);
+    path_ = std::move(pattern);
+    return testing::AssertionSuccess();
   }
 
   ~ScopedTempDirectory() { cleanup(); }
@@ -96,10 +132,6 @@ public:
   [[nodiscard]] const std::string &path() const { return path_; }
 
 private:
-  static std::string make_pattern(std::string_view prefix) {
-    return (std::filesystem::temp_directory_path() / (std::string(prefix) + "XXXXXX")).string();
-  }
-
   void cleanup() noexcept {
     if (path_.empty())
       return;

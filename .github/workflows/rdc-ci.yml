@@ -54,9 +54,9 @@ jobs:
 
   rdc_build:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
-    runs-on: lstt_ci_runners
+    runs-on: lstt-ci-runner
     timeout-minutes: 90
-    container: rocm/dev-ubuntu-22.04:7.2
+    container: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644' }}
     outputs:
       TODAY: ${{ steps.metadata.outputs.TODAY }}
 
@@ -215,9 +215,9 @@ jobs:
   rdc_test:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     needs: rdc_build
-    runs-on: lstt_ci_runners
+    runs-on: lstt-ci-runner
     timeout-minutes: 45
-    container: rocm/dev-ubuntu-22.04:7.2
+    container: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -398,10 +398,10 @@ jobs:
   rdc_sanitize:
     name: rdc_sanitize (${{ matrix.sanitizer }})
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
-    runs-on: lstt_ci_runners
+    runs-on: lstt-ci-runner
     timeout-minutes: 120
     continue-on-error: ${{ vars.RDC_SANITIZE_GATING != 'true' }}
-    container: rocm/dev-ubuntu-22.04:7.2
+    container: ${{ vars.RDC_DOCKER_IMAGE || 'rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644' }}
     strategy:
       fail-fast: false
       # One build per sanitizer: in a process with both of GCC's runtimes,
@@ -762,7 +762,7 @@ jobs:
   rdc_clang:
     if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
     needs: rdc_build
-    runs-on: lstt_ci_runners
+    runs-on: lstt-ci-runner
     timeout-minutes: 60
     continue-on-error: ${{ vars.RDC_CLANG_GATING != 'true' }}
     container:
@@ -817,6 +817,9 @@ jobs:
         echo "${version}"
         grep -q '^AMD clang version' <<< "${version}" \
           || { echo "${CXX} is not AMD clang"; exit 1; }
+        # The race tests' reports get file and line from llvm-symbolizer.
+        symbolizer="$(dirname "${CXX}")/llvm-symbolizer"
+        test -x "${symbolizer}" || { echo "no ${symbolizer}"; exit 1; }
 
     - name: Set the cache date and compiler
       shell: bash
@@ -900,6 +903,8 @@ jobs:
       shell: bash
       run: |
         set -euo pipefail
+        # RDC's core only: the ROCr and profiler modules (BUILD_RUNTIME,
+        # BUILD_PROFILER) are built by rdc_build, with GCC.
         cmake \
           -B build-clang \
           -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -1010,6 +1015,9 @@ jobs:
         test "${kernels_ran}" -eq 1 || { echo "rdc_diag_kernel_tests did not run"; failed=1; }
         # Race tests: built, never installed. ThreadSanitizer reports every
         # race it sees, then exits with 66; the test results still pass.
+        # binutils' addr2line cannot read AMD clang's DWARF 5, so the
+        # toolchain's llvm-symbolizer gives the reports their file:line.
+        export TSAN_OPTIONS="external_symbolizer_path=$(dirname "${CXX}")/llvm-symbolizer"
         echo "::group::rdc_race_tests"
         timeout -k 30 "${limit}" build-clang/tests/race/rdc_race_tests \
           --gtest_output="xml:build/test-results-clang-rdc_race_tests.xml" || {
@@ -1078,7 +1086,7 @@ jobs:
     timeout-minutes: 90
     if: ${{ vars.RDC_GPU_TESTS_ENABLED == 'true' }}
     container:
-      image: rocm/dev-ubuntu-22.04:7.2
+      image: rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644
       options: --device=/dev/kfd --device=/dev/dri --group-add video
 
     steps:

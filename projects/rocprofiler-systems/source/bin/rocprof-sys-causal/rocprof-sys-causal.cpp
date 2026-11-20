@@ -3,14 +3,15 @@
 
 #include "rocprof-sys-causal.hpp"
 #include "common/common_utils.hpp"
+#include "common/string_utility.hpp"
 
 #include <timemory/log/macros.hpp>
 
+#include <fmt/format.h>
+
 #include <cmath>
-#include <iomanip>
 #include <iostream>
 #include <map>
-#include <sstream>
 #include <string_view>
 #include <unistd.h>
 
@@ -110,7 +111,8 @@ main(int argc, char** argv)
 
         forward_signals({ SIGINT, SIGTERM, SIGQUIT });
         size_t       _ncount = 0;
-        const size_t _width  = std::log10(_causal_env.size()) + 1;
+        const size_t width =
+            rocprofsys::utility::string::decimal_width(_causal_env.size());
         for(auto const& citr : _causal_env)
         {
             auto const _n        = _ncount++;
@@ -125,10 +127,9 @@ main(int argc, char** argv)
 
             if(_pid == 0)
             {
-                auto _prefix = std::stringstream{};
-                _prefix << std::setw(_width) << std::right << _n << "/"
-                        << std::setw(_width) << std::left << _causal_env.size() << ": ["
-                        << _main_pid << " -> " << getpid() << "] ";
+                auto const prefix =
+                    fmt::format("{:>{}}/{:<{}}: [{} -> {}] ", _n, width,
+                                _causal_env.size(), width, _main_pid, getpid());
 
                 auto _env = _base_env;
                 for(const auto& eitr : citr)
@@ -139,11 +140,11 @@ main(int argc, char** argv)
                 if(_verbose >= 0)
                 {
                     utils::print_environment(_env, get_updated_envs(), _verbose >= 1,
-                                             _prefix.str());
+                                             prefix);
                 }
                 if(_verbose >= 1)
                 {
-                    utils::print_command(to_string_vec(_argv), _prefix.str());
+                    utils::print_command(to_string_vec(_argv), prefix);
                 }
                 _argv.emplace_back(nullptr);
                 auto envp_ptrs = utils::to_c_argv(_env);

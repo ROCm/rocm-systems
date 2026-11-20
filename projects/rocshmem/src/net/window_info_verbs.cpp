@@ -1,0 +1,234 @@
+/******************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *****************************************************************************/
+
+#include "net/window_info_verbs.hpp"
+
+#include "log.hpp"
+
+#include "rocshmem/rocshmem_common.hpp"  // ROCSHMEM_SIGNAL_OPS, rocshmem_cmps
+
+namespace rocshmem {
+
+namespace {
+//! 64-bit comparison predicate for signal_wait_until (rocshmem_cmps).
+bool signal_compare(int cmp, uint64_t a, uint64_t b) {
+  switch (cmp) {
+    case ROCSHMEM_CMP_EQ:
+      return a == b;
+    case ROCSHMEM_CMP_NE:
+      return a != b;
+    case ROCSHMEM_CMP_GT:
+      return a > b;
+    case ROCSHMEM_CMP_GE:
+      return a >= b;
+    case ROCSHMEM_CMP_LT:
+      return a < b;
+    case ROCSHMEM_CMP_LE:
+      return a <= b;
+    default:
+      return true;
+  }
+}
+}  // namespace
+
+int WindowInfoVerbs::reap() {
+  struct ibv_wc wc[16];
+  int n = rma_->poll(ctx_, wc, 16);
+  for (int i = 0; i < n; i++) {
+    if (wc[i].status != IBV_WC_SUCCESS) {
+      LOG_ERROR("host-verbs: WC error status=%d wr_id=%lu", wc[i].status,
+                static_cast<unsigned long>(wc[i].wr_id));
+    }
+    if (outstanding_ > 0) {
+      outstanding_--;
+    }
+  }
+  return n;
+}
+
+void WindowInfoVerbs::wait_all() {
+  while (outstanding_ > 0) {
+    reap();
+  }
+}
+
+void WindowInfoVerbs::make_room(unsigned need) {
+  // Reserve `need` SQ slots: a post into a full SQ returns ENOMEM and is
+  // dropped, yet the caller counts it outstanding and then hangs in wait_all().
+  while (sq_depth_ > 0 &&
+         outstanding_ + need > static_cast<uint64_t>(sq_depth_)) {
+    reap();
+  }
+}
+
+void WindowInfoVerbs::account_post(uint64_t wr_id) {
+  // post_* return 0 on ibv_post_send failure (wr_ids we hand out are always
+  // non-zero). Only count a successful post as outstanding so a failed post
+  // can't wedge wait_all() forever.
+  if (wr_id != 0) {
+    outstanding_++;
+  } else {
+    LOG_ERROR("host-verbs: post failed on ctx %d (dropped)", ctx_);
+  }
+}
+
+void WindowInfoVerbs::put(void *dst, const void *src, size_t n, int pe) {
+  // Ensure the NIC reads the GPU's latest write to the (symmetric-heap) source.
+  hdp_->hdp_flush();
+  make_room();
+  int lane = lane_for(pe);
+  account_post(rma_->post_write(lane, reinterpret_cast<uintptr_t>(src),
+                                rma_->lkey_for(src), rma_->remote_va(pe, dst),
+                                rma_->rkey(pe), static_cast<uint32_t>(n),
+                                next_id_++));
+  wait_all();  // blocking: local completion on return
+}
+
+void WindowInfoVerbs::get(void *dst, const void *src, size_t n, int pe) {
+  make_room();
+  int lane = lane_for(pe);
+  account_post(rma_->post_read(lane, reinterpret_cast<uintptr_t>(dst),
+                               rma_->lkey_for(dst), rma_->remote_va(pe, src),
+                               rma_->rkey(pe), static_cast<uint32_t>(n),
+                               next_id_++));
+  wait_all();
+  // Make the NIC-written data visible to the GPU that will consume it.
+  hdp_->hdp_flush();
+}
+
+void WindowInfoVerbs::put_nbi(void *dst, const void *src, size_t n, int pe) {
+  hdp_->hdp_flush();
+  make_room();
+  int lane = lane_for(pe);
+  account_post(rma_->post_write(lane, reinterpret_cast<uintptr_t>(src),
+                                rma_->lkey_for(src), rma_->remote_va(pe, dst),
+                                rma_->rkey(pe), static_cast<uint32_t>(n),
+                                next_id_++));
+}
+
+void WindowInfoVerbs::get_nbi(void *dst, const void *src, size_t n, int pe) {
+  make_room();
+  int lane = lane_for(pe);
+  account_post(rma_->post_read(lane, reinterpret_cast<uintptr_t>(dst),
+                               rma_->lkey_for(dst), rma_->remote_va(pe, src),
+                               rma_->rkey(pe), static_cast<uint32_t>(n),
+                               next_id_++));
+}
+
+void WindowInfoVerbs::quiet() {
+  wait_all();
+  hdp_->hdp_flush();  // any completed gets are now GPU-visible
+}
+
+// TODO: fetching AMOs land their result in this context's single 8-byte
+// amo_scratch_ slot, so only one may be in flight per context -- these are
+// blocking today, which makes that safe. A future non-blocking fetching-AMO
+// API would need a ring of result slots per context to avoid serializing them.
+uint64_t WindowInfoVerbs::amo_fadd(void *dst, uint64_t add, int pe) {
+  make_room();
+  int lane = lane_for(pe);
+  account_post(rma_->post_fadd(lane, reinterpret_cast<uintptr_t>(amo_scratch_),
+                               amo_scratch_lkey_, rma_->remote_va(pe, dst),
+                               rma_->rkey(pe), add, next_id_++));
+  wait_all();
+  return *reinterpret_cast<volatile uint64_t *>(amo_scratch_);
+}
+
+uint64_t WindowInfoVerbs::amo_cas(void *dst, uint64_t cmp, uint64_t swp,
+                                  int pe) {
+  make_room();
+  int lane = lane_for(pe);
+  account_post(rma_->post_cas(lane, reinterpret_cast<uintptr_t>(amo_scratch_),
+                              amo_scratch_lkey_, rma_->remote_va(pe, dst),
+                              rma_->rkey(pe), cmp, swp, next_id_++));
+  wait_all();
+  return *reinterpret_cast<volatile uint64_t *>(amo_scratch_);
+}
+
+void WindowInfoVerbs::post_signal(int lane, uint64_t *sig_addr, uint64_t signal,
+                                  int sig_op, int pe) {
+  uintptr_t raddr = rma_->remote_va(pe, sig_addr);
+  switch (sig_op) {
+    case ROCSHMEM_SIGNAL_SET:
+      // Ordered 8-byte inline write -- rides the same RC QP after the payload,
+      // so the signal is placed after the data at the responder (no fence).
+      account_post(rma_->post_signal_set(lane, raddr, rma_->rkey(pe), signal,
+                                         next_id_++));
+      break;
+    case ROCSHMEM_SIGNAL_ADD:
+      // Atomic add; the fetched pre-image lands in the scratch and is discarded.
+      account_post(rma_->post_fadd(lane, reinterpret_cast<uintptr_t>(amo_scratch_),
+                                   amo_scratch_lkey_, raddr, rma_->rkey(pe),
+                                   signal, next_id_++));
+      break;
+    default:
+      LOG_ERROR("host-verbs: invalid sig_op %d", sig_op);
+      break;
+  }
+}
+
+void WindowInfoVerbs::put_signal(void *dst, const void *src, size_t n,
+                                 uint64_t *sig_addr, uint64_t signal,
+                                 int sig_op, int pe) {
+  hdp_->hdp_flush();  // NIC reads the latest (GPU) source bytes
+  make_room(2);  // write + signal
+  int lane = lane_for(pe);
+  account_post(rma_->post_write(lane, reinterpret_cast<uintptr_t>(src),
+                                rma_->lkey_for(src), rma_->remote_va(pe, dst),
+                                rma_->rkey(pe), static_cast<uint32_t>(n),
+                                next_id_++));
+  post_signal(lane, sig_addr, signal, sig_op, pe);
+  wait_all();  // blocking: local completion on return
+}
+
+void WindowInfoVerbs::put_signal_nbi(void *dst, const void *src, size_t n,
+                                     uint64_t *sig_addr, uint64_t signal,
+                                     int sig_op, int pe) {
+  hdp_->hdp_flush();
+  make_room(2);  // write + signal
+  int lane = lane_for(pe);
+  account_post(rma_->post_write(lane, reinterpret_cast<uintptr_t>(src),
+                                rma_->lkey_for(src), rma_->remote_va(pe, dst),
+                                rma_->rkey(pe), static_cast<uint32_t>(n),
+                                next_id_++));
+  post_signal(lane, sig_addr, signal, sig_op, pe);  // completed by quiet()
+}
+
+uint64_t WindowInfoVerbs::signal_fetch(const uint64_t *sig_addr) {
+  // Local read: the heap is fine-grained host-coherent, so flush the HDP read
+  // cache and load directly -- no fabric round trip.
+  hdp_->hdp_flush();
+  return *reinterpret_cast<const volatile uint64_t *>(sig_addr);
+}
+
+void WindowInfoVerbs::signal_wait_until(const uint64_t *sig_addr, int cmp,
+                                        uint64_t cmp_val) {
+  for (;;) {
+    hdp_->hdp_flush();
+    uint64_t v = *reinterpret_cast<const volatile uint64_t *>(sig_addr);
+    if (signal_compare(cmp, v, cmp_val)) {
+      return;
+    }
+  }
+}
+
+}  // namespace rocshmem

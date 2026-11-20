@@ -179,6 +179,7 @@ bool Sop1::has_encoded_literal32() const {
 
 Sop1::Sop1(std::string_view mnemonic, const Sop1MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -307,6 +308,7 @@ bool Sopc::has_encoded_literal32() const {
 
 Sopc::Sopc(std::string_view mnemonic, const SopcMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -351,6 +353,7 @@ bool Sopc::has_lit64_0_and_has_lit64_1() {
 
 Sopp::Sopp(std::string_view mnemonic, const SoppMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -363,6 +366,7 @@ bool Sopp::default_encoding() { return true; }
 
 Sopk::Sopk(std::string_view mnemonic, const SopkMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -545,6 +549,7 @@ bool Sop2::has_encoded_literal32() const {
 
 Sop2::Sop2(std::string_view mnemonic, const Sop2MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -593,6 +598,7 @@ bool Sop2::hasImpliedLiteral() { return inst_.op == 69 || inst_.op == 70; }
 
 Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= SMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -849,6 +855,7 @@ bool Vop1::has_encoded_literal32() const {
 
 Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -1276,6 +1283,7 @@ bool Vopc::has_encoded_literal32() const {
 
 Vopc::Vopc(std::string_view mnemonic, const VopcMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -1458,6 +1466,7 @@ bool Vop2::has_encoded_literal32() const {
 
 Vop2::Vop2(std::string_view mnemonic, const Vop2MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2210,6 +2219,7 @@ bool Vop3::has_encoded_literal32() const {
 
 Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2393,6 +2403,7 @@ bool Vop3p::has_encoded_literal32() const {
 Vop3p::Vop3p(std::string_view mnemonic, const Vop3pMachineInst *inst, ExecuteFn exec_fn,
              ExtensionDecodePolicy extension_policy)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2477,6 +2488,7 @@ bool Vop3p::has_dpp16() {
 
 Vds::Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= LDS;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2485,6 +2497,7 @@ Vds::Vds(std::string_view mnemonic, const VdsMachineInst *inst, ExecuteFn exec_f
 
 Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2493,6 +2506,7 @@ Vbuffer::Vbuffer(std::string_view mnemonic, const VbufferMachineInst *inst, Exec
 
 Vimage::Vimage(std::string_view mnemonic, const VimageMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2501,6 +2515,7 @@ Vimage::Vimage(std::string_view mnemonic, const VimageMachineInst *inst, Execute
 
 Vflat::Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2509,6 +2524,7 @@ Vflat::Vflat(std::string_view mnemonic, const VflatMachineInst *inst, ExecuteFn 
 
 Vscratch::Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2517,6 +2533,7 @@ Vscratch::Vscratch(std::string_view mnemonic, const VscratchMachineInst *inst, E
 
 Vglobal::Vglobal(std::string_view mnemonic, const VglobalMachineInst *inst, ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VMEM;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;
@@ -2597,6 +2614,7 @@ bool Vop3SdstEnc::has_encoded_literal32() const {
 Vop3SdstEnc::Vop3SdstEnc(std::string_view mnemonic, const Vop3SdstEncMachineInst *inst,
                          ExecuteFn exec_fn)
     : IsaInstruction<Isa>(mnemonic, exec_fn), inst_(*inst) {
+  flags_ |= VALU;
   size_ = sizeof(OpEncoding);
   raw_encoding_ = reinterpret_cast<const uint32_t *>(&inst_);
   encoding_id_ = raw_encoding_[0] >> 23;

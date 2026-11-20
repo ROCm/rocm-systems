@@ -98,12 +98,130 @@ System Speed-of-Light:
   MFMA FLOPs (F6F4):
     rst: The total number of 4-bit and 6-bit floating-point operations executed on MFMA units, per second. F6/F4 formats are supported in AMD Instinct MI350 series (gfx950) and later only.
     unit: GFLOPs
-  VL1 Lat:
-    rst: Calculated as the average number of cycles that a vL1D cache line request spent in the vL1D cache pipeline.
-  L2 Rd Lat:
-    rst: Calculated as the average number of cycles that the vL1D cache took to issue and receive read requests from the L2 Cache. This number also includes requests for atomics with return values.
-  L2 Wr Lat:
-    rst: Calculated as the average number of cycles that the vL1D cache took to issue and receive acknowledgement of a write request to the L2 Cache. This number also includes requests for atomics without return values.
+Memory chart:
+  Wavefront Occupancy:
+    rst: Resident :ref:`wavefronts <desc-wavefront>` per active :doc:`CU <compute-unit>`, averaged over GPU-active cycles, as a percent of the maximum wavefronts per CU.
+    unit: Percent
+  VGPR:
+    rst: 'The number of architected vector general-purpose registers allocated for the kernel, see :ref:`VALU <desc-valu>`. Note: this may not exactly match the number of VGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  SGPR:
+    rst: 'The number of scalar general-purpose registers allocated for the kernel, see :ref:`SALU <desc-salu>`. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
+  LDS Allocation:
+    rst: 'The number of bytes of :ref:`LDS <desc-lds>` memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
+    unit: Bytes per Workgroup
+  Scratch Allocation:
+    rst: 'The amount of scratch memory requested per :ref:`wavefront <desc-wavefront>`, in KB: the scratch bytes requested per :ref:`work-item <desc-work-item>` multiplied by the wavefront size. Scratch memory is used for stack memory on the accelerator, as well as for register spills and restores.'
+    unit: KB per Wave
+  Workgroups:
+    rst: The number of :ref:`workgroups <desc-workgroup>` in the launch divided by the number of active :doc:`CUs <compute-unit>`.
+    unit: Workgroups per CU
+  Flat Read:
+    rst: The total number of flat read instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  Flat Write:
+    rst: The total number of flat write instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  Flat Atomic:
+    rst: The total number of flat atomic instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  Buffer Read:
+    rst: The total number of buffer read instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  Buffer Write:
+    rst: The total number of buffer write instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  Buffer Atomic:
+    rst: The total number of buffer atomic instructions processed by the :ref:`address processing unit <desc-ta>`, counted once per :ref:`wavefront <desc-wavefront>`, per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  LDS Req:
+    rst: The total number of :ref:`LDS <desc-lds>` instructions (including, but not limited to, read/write/atomics and HIP's ``__shfl`` instructions) executed per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  LDS Util:
+    rst: Indicates what percent of the :ref:`total CU cycles <total-cu-cycles>` the :ref:`LDS <desc-lds>` was actively executing instructions (including, but not limited to, load, store, atomic and HIP's ``__shfl`` operations). Calculated as the ratio of the total number of cycles LDS was active over the total CU cycles.
+    unit: Percent
+  LDS Read:
+    rst: The total number of :ref:`LDS <desc-lds>` load instructions per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  LDS Write:
+    rst: The total number of :ref:`LDS <desc-lds>` store instructions per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  LDS Atomic:
+    rst: The total number of :ref:`LDS <desc-lds>` atomic instructions per :ref:`normalization unit <normalization-units>`.
+    unit: Instructions per Normalization Unit
+  VL1 Hit:
+    rst: The percent of vL1D cache line requests that hit in the vL1D cache, over the total number of cache line requests to the :ref:`vL1D Cache RAM <desc-tc>`. Calculated as 100 minus the percent of requests that were sent to the :doc:`L2 <l2-cache>`.
+    unit: Percent
+  VL1 Coalesce:
+    rst: Indicates how well memory instructions were coalesced by the :ref:`address processing unit <desc-ta>`, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated as the average number of :ref:`thread-requests <thread-requests>` generated per instruction divided by the ideal number of thread-requests per instruction.
+    unit: Percent
+  VL1_L2 Read BW:
+    rst: Bandwidth of read requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
+    unit: Bytes/s
+  VL1_L2 Write BW:
+    rst: Bandwidth of write requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
+    unit: Bytes/s
+  VL1_L2 Atomic BW:
+    rst: Bandwidth of atomic requests from the vL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
+    unit: Bytes/s
+  sL1D Rd:
+    rst: The total number of requests, of any size or type, made to the :ref:`sL1D <desc-sl1d>` per :ref:`normalization unit <normalization-units>`.
+    unit: Requests per Normalization Unit
+  sL1D Hit:
+    rst: The percent of :ref:`sL1D <desc-sl1d>` requests that hit on a previously loaded cache line. Calculated as the ratio of the number of sL1D requests that hit over the number of all sL1D requests.
+    unit: Percent
+  sL1D_L2 Read BW:
+    rst: Bandwidth of read requests from the sL1D cache to the :doc:`L2 <l2-cache>` cache per unit time.
+    unit: Bytes/s
+  IL1 Fetch:
+    rst: The total number of requests made to the :ref:`L1I <desc-l1i>` per :ref:`normalization unit <normalization-units>`.
+    unit: Requests per Normalization Unit
+  IL1 Hit:
+    rst: The percent of :ref:`L1I <desc-l1i>` requests that hit on a previously loaded cache line. Calculated as the ratio of the number of L1I requests that hit over the number of all L1I requests.
+    unit: Percent
+  IL1_L2 Read BW:
+    rst: Bandwidth of read requests from the instruction L1 cache to the :doc:`L2 <l2-cache>` cache per unit time.
+    unit: Bytes/s
+  L2 Hit:
+    rst: The percent of :doc:`L2 <l2-cache>` cache line requests that hit in the L2 cache, over the total number of incoming cache line requests to the L2 cache.
+    unit: Percent
+  L2-Fabric Read BW:
+    rst: The number of bytes read by the L2 over the :ref:`Infinity Fabric interface <l2-fabric>` per unit time.
+    unit: Bytes/s
+  L2-Fabric Write and Atomic BW:
+    rst: The number of bytes sent by the L2 over the :ref:`Infinity Fabric interface <l2-fabric>` by write and atomic operations per unit time.
+    unit: Bytes/s
+  HBM Read BW:
+    rst: Total number of bytes due to L2 read requests routed to :ref:`Infinity Fabric <l2-fabric>` targeting the accelerator's local HBM (DRAM), divided by total duration.
+    unit: Bytes/s
+  HBM Write BW:
+    rst: Total number of bytes due to L2 write requests routed to :ref:`Infinity Fabric <l2-fabric>` targeting the accelerator's local HBM (DRAM), divided by total duration.
+    unit: Bytes/s
+  HBM Atomic BW:
+    rst: Total number of bytes due to L2 atomic requests routed to :ref:`Infinity Fabric <l2-fabric>` targeting the accelerator's local HBM (DRAM), divided by total duration.
+    unit: Bytes/s
+  HBM Write and Atomic BW:
+    rst: Combined bandwidth of write and atomic requests from L2 to the accelerator's local HBM (DRAM), divided by total duration.
+    unit: Bytes/s
+  xGMI Read BW:
+    rst: Total number of bytes due to L2 read requests routed to :ref:`Infinity Fabric <l2-fabric>` (xGMI peer GPU traffic), divided by total duration.
+    unit: Bytes/s
+  xGMI Write BW:
+    rst: Total number of bytes due to L2 write requests routed to :ref:`Infinity Fabric <l2-fabric>` (xGMI peer GPU traffic), divided by total duration.
+    unit: Bytes/s
+  xGMI Atomic BW:
+    rst: Total number of bytes due to L2 atomic requests routed to :ref:`Infinity Fabric <l2-fabric>` (xGMI peer GPU traffic), divided by total duration.
+    unit: Bytes/s
+  PCIe Read BW:
+    rst: Total number of bytes due to L2 read requests routed to PCIe (CPU or non-xGMI connected GPU traffic), divided by total duration.
+    unit: Bytes/s
+  PCIe Write BW:
+    rst: Total number of bytes due to L2 write requests routed to PCIe (CPU or non-xGMI connected GPU traffic), divided by total duration.
+    unit: Bytes/s
+  PCIe Atomic BW:
+    rst: Total number of bytes due to L2 atomic requests routed to PCIe (CPU or non-xGMI connected GPU traffic), divided by total duration.
+    unit: Bytes/s
 Roofline Performance Rates:
   VALU FLOPs (F16):
     rst: 'The total 16-bit floating-point operations executed per second on the VALU. This is presented with the value of the peak empirical F16 FLOPs achievable on the specific accelerator. Note: this does not include any F16 operations from MFMA instructions.'

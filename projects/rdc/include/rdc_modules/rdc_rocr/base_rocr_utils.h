@@ -130,20 +130,6 @@ uint64_t wait_deadline_ms(void);
 /// \returns The deadline as the GPU's failure names it
 std::string wait_deadline_text(uint64_t deadline_ms);
 
-/// A queue for one of the checks, with an error callback and a status block of its own. ROCr
-/// reports an error of a queue, an invalid packet or scratch it cannot allocate, only through
-/// that callback, and suspends the queue, so that a dispatch on a queue without one never
-/// completes. The block is made just before the queue and held by the holder that is released
-/// after the queue's, so that an error ROCr reports late writes into memory that was not freed.
-/// The queue holds the packets the check needs, at most the agent's largest queue: a failed
-/// query of that maximum throws, naming hsa_agent_get_info() and its status, rather than
-/// returning it as the status below.
-/// \param[in] agent Agent the queue is created on
-/// \param[out] status Holder that takes the queue's status block
-/// \param[out] queue Holder that takes the queue
-/// \returns What hsa_queue_create answered
-hsa_status_t create_check_queue(hsa_agent_t agent, QueueStatusHolder* status, QueueHolder* queue);
-
 }  // namespace rdc
 }  // namespace amd
 

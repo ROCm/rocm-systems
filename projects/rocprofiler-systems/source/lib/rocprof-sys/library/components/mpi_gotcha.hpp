@@ -50,7 +50,6 @@ struct mpi_gotcha : comp::base<mpi_gotcha, void>
 
     static bool      update();
     static uintptr_t null_comm() { return std::numeric_limits<uintptr_t>::max(); }
-    static void      disable_comm_intercept();
 
     static void subscribe_to_init_event(
         const std::function<void(int rank, int size)>& _callback);

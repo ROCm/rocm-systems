@@ -274,10 +274,9 @@ int FFMpegVideoDecoder::ReconfigureDecoder(RocdecVideoFormat *p_video_format) {
             } else {
                 delete[] p_frame->frame_ptr;
             }
-            // pop decoded frame
-            vp_frames_.pop_back();
-            p_frame->frame_ptr = nullptr;
         }
+        // pop decoded frame
+        vp_frames_.pop_back();
     }
     output_frame_cnt_ = 0;     // reset frame_count
     if (is_decode_res_changed) {

@@ -142,8 +142,8 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
   hsa_status_t err;
 
   // What this sub-test makes, declared in the reverse of the order in which it is released: the
-  // queue first, then its status block, the signal, the executable and its code object reader,
-  // the buffers last.
+  // GPU's queue first, which goes back to the module unless it must be destroyed, then the
+  // signal, the executable and its code object reader, the buffers last.
   PoolBlockHolder cpu_result_holder(release_context());
   PoolBlockHolder sys_data_holder(release_context());
   PoolBlockHolder dup_sys_data_holder(release_context());
@@ -152,8 +152,7 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
   CodeObjectReaderHolder reader_holder(release_context());
   ExecutableHolder executable_holder(release_context());
   SignalHolder signal_holder(release_context());
-  QueueStatusHolder status_holder(release_context());
-  QueueHolder queue_holder(release_context());
+  CheckQueue check_queue(release_context());
 
   // What this sub-test allocates from each of its two global pools in one block, which is what
   // those pools have to be able to hand out.
@@ -232,14 +231,14 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
     }
   }
 
-  // create queue: the packets this one dispatch needs, at most what the agent allows, rather
-  // than the largest queue the agent has, which is 8 MiB of ring on ROCr.
-  // It carries an error callback and a status block of its own: ROCr reports an error of the
-  // queue only through it, and suspends the queue, so a dispatch on a queue without one never
-  // completes.
-  err = create_check_queue(gpuAgent, &status_holder, &queue_holder);
+  // The GPU's queue, which the module makes at the GPU's first check with the packets one
+  // dispatch needs, at most what the agent allows, rather than the largest queue the agent has,
+  // which is 8 MiB of ring on ROCr, and lends to each check in turn. It carries an error callback
+  // and a status block of its own: ROCr reports an error of the queue only through it, and
+  // suspends the queue, so a dispatch on a queue without one never completes.
+  err = check_queue.acquire(gpuAgent);
   throw_if_error(err, "Fail to call hsa_queue_create().");
-  hsa_queue_t* const queue = queue_holder.get();  // command queue
+  hsa_queue_t* const queue = check_queue.queue();  // command queue
 
   // Allocate the host side buffers (sys_data, dup_sys_data, cpuResult) on system memory and the
   // GPU's result buffer on its own pool, each of kMemoryAllocSize elements of one int, which is
@@ -354,7 +353,7 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
 
   // An error ROCr reported earlier suspended the queue, so this dispatch would never complete:
   // it is seen here, before the doorbell, with the hint the wait below carries.
-  before_doorbell(status_holder.get());
+  before_doorbell(&check_queue);
 
   // write to command queue
   uint64_t index = hsa_queue_load_write_index_relaxed(queue);
@@ -380,7 +379,7 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
     // Wait for the kernel, blocked rather than spinning a core, in hints of a tenth of a second
     // each: the wait ends when the packet processor has taken the signal below 1, when the queue
     // reports an error, or at the deadline, which abandons the work.
-    wait_for_kernel(signal, status_holder.get());
+    wait_for_kernel(signal, &check_queue);
   }
   hsa_signal_store_relaxed(signal, 1);
 
@@ -411,8 +410,8 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_
     RDC_LOG(RDC_DEBUG, "gpu has written to system memory successfully");
   }
 
-  // The holders above release the queue, the signal, the executable, its reader and every
-  // block when this function returns, on this path and on every other.
+  // The holders above give the queue back and release the signal, the executable, its reader and
+  // every block when this function returns, on this path and on every other.
 }
 
 // Test to check cpu can read & write to GPU memory

@@ -374,7 +374,7 @@ hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
   uint32_t* const output = bs->output.as<uint32_t>();
   uint32_t* const input_arr = bs->input_arr.as<uint32_t>();
   uint32_t* const input_arr_local = bs->input_arr_local.as<uint32_t>();
-  hsa_queue_t* const queue = bs->queue.get();
+  hsa_queue_t* const queue = bs->queue.queue();
   const hsa_signal_t signal = bs->signal.get();
 
   // Explanation of BinarySearch algorithm.
@@ -464,7 +464,7 @@ hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
 
     // An error ROCr reported earlier suspended the queue, so nothing put on it now would ever
     // complete: it is seen here, before the doorbell, with the hint the wait below carries.
-    before_doorbell(bs->status.get());
+    before_doorbell(&bs->queue);
 
     // Compute the write index of queue and copy Aql packet into it
     uint64_t que_idx = hsa_queue_load_write_index_relaxed(queue);
@@ -500,7 +500,7 @@ hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
       // the packet processor has taken the signal below 1, when the queue reports an error, or
       // at the deadline, which abandons the work rather than destroying a queue a kernel still
       // runs on.
-      wait_for_kernel(signal, bs->status.get());
+      wait_for_kernel(signal, &bs->queue);
     }
 
     // Reset the signal to its initial value for the next iteration
@@ -583,13 +583,14 @@ void ComputeQueueTest::RunBinarySearchTest(void) {
   }
   throw_if_error(err, "Fail to create signal.");
 
-  // A queue of the packets this check needs, at most what the agent allows, and with no private
-  // or group segment reserved: what the kernel needs of either comes from its packet, where a
-  // reservation of UINT32_MAX costs an APU every scratch slot of every compute unit.
-  // The queue carries an error callback and a status block of its own: ROCr reports an error of
-  // the queue only through it, and suspends the queue, so a dispatch on a queue without one
-  // never completes.
-  err = create_check_queue(bs.gpu_dev, &bs.status, &bs.queue);
+  // The GPU's queue, which the module makes at the GPU's first check and lends to each check in
+  // turn: the packets a check needs, at most what the agent allows, and no private or group
+  // segment reserved, since what the kernel needs of either comes from its packet, where a
+  // reservation of UINT32_MAX costs an APU every scratch slot of every compute unit. The queue
+  // carries an error callback and a status block of its own: ROCr reports an error of the queue
+  // only through it, and suspends the queue, so a dispatch on a queue without one never
+  // completes.
+  err = bs.queue.acquire(bs.gpu_dev);
   throw_if_error(err, "Fail to call hsa_queue_create().");
 
   FindPools(&bs);
