@@ -625,6 +625,30 @@ sopp_op_nop(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr)
   }
 }
 
+/// @brief Get the s_code_end opcode for a target ISA. GFX10 and later only.
+/// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
+inline constexpr util::FailureOr<uint32_t>
+sopp_op_code_end(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return rdna1::kSCodeEndSopp;
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return rdna2::kSCodeEndSopp;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return rdna3::kSCodeEndSopp;
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return rdna3_5::kSCodeEndSopp;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return rdna4::kSCodeEndSopp;
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return cdna5::kSCodeEndSopp;
+  default:
+    return error != nullptr
+               ? error->emit() << "Unimplemented instruction: s_code_end for target architecture"
+               : util::Result::failure();
+  }
+}
+
 /// @brief Get the s_getpc_b64 SOP1 opcode for a target ISA.
 /// @returns Failure for an unsupported architecture; emits a reason when @p error is supplied.
 inline constexpr util::FailureOr<uint32_t>
@@ -984,6 +1008,20 @@ build_s_nop(uint16_t cycles = 0, rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4,
 inline constexpr util::FailureOr<uint32_t>
 build_s_endpgm(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
   util::FailureOr<uint32_t> op = sopp_op_endpgm(arch, error);
+  if (op.failed())
+    return util::Result::failure();
+  return build_sopp_encoding(arch, op.value(), 0, error);
+}
+
+/// @brief Encode an s_code_end instruction for the given target ISA (GFX10 and
+///        later).
+///
+/// @param arch    Target ISA architecture.
+/// @returns The encoded word on success, or failure for an unsupported architecture.
+/// @param error Optional borrowed diagnostic emitter, used only on failure.
+inline constexpr util::FailureOr<uint32_t>
+build_s_code_end(rj_code_arch_t arch, const util::DiagnosticEmitter *error = nullptr) {
+  util::FailureOr<uint32_t> op = sopp_op_code_end(arch, error);
   if (op.failed())
     return util::Result::failure();
   return build_sopp_encoding(arch, op.value(), 0, error);

@@ -367,13 +367,13 @@ TEST(DbiAfterInstSim, ProbeObservesTheResultAndPreservesLiveGuestDefinitions) {
       const uint64_t resume_offset = kind == InstrumentationKind::AfterInst
                                          ? site.instrumentation_offset + site.instrumentation_size
                                          : site.guest_offset + site.guest_size;
-      ASSERT_EQ(resume_offset + sizeof(uint32_t), text.size() * sizeof(uint32_t));
+      ASSERT_EQ(resume_offset + sizeof(uint32_t), test::code_end_offset(text, arch.arch));
       const std::optional<int16_t> resume_delta =
           compute_sopp_branch_simm16(resume_offset, point.anchor_offset + site.guest_size);
       ASSERT_TRUE(resume_delta);
       const util::FailureOr<uint32_t> resume = build_s_branch(*resume_delta, arch.arch);
       ASSERT_TRUE(resume.succeeded());
-      EXPECT_EQ(text.back(), resume.value());
+      EXPECT_EQ(text.at(resume_offset / sizeof(uint32_t)), resume.value());
       test::DbiSim sim;
       ASSERT_NO_FATAL_FAILURE(sim.initialize(arch.sim_arch, arch.wave_size));
       if (wave32)

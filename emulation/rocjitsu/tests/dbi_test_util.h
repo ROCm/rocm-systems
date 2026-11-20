@@ -756,4 +756,22 @@ inline std::optional<uint64_t> patched_entry_text_offset(const AmdGpuCodeObject 
   return kernels.front().entry_text_offset;
 }
 
+/// @brief Byte offset in a patched `.text` where the Instrumentor's code-end
+///        padding starts: the trailing run of `s_nop 0` on CDNA2-4, or of
+///        `s_code_end` on GFX10 and later. CDNA1 has no padding.
+inline uint64_t code_end_offset(const std::vector<uint32_t> &text, rj_code_arch_t arch) {
+  constexpr uint32_t kSNop0 = 0xbf800000u;
+  constexpr uint32_t kSCodeEnd = 0xbf9f0000u;
+  if (arch == ROCJITSU_CODE_ARCH_CDNA1)
+    return text.size() * sizeof(uint32_t);
+  const uint32_t pad = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+                               arch == ROCJITSU_CODE_ARCH_CDNA4
+                           ? kSNop0
+                           : kSCodeEnd;
+  size_t end = text.size();
+  while (end > 0 && text[end - 1] == pad)
+    --end;
+  return end * sizeof(uint32_t);
+}
+
 } // namespace rocjitsu::test

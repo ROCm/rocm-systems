@@ -254,6 +254,21 @@ util::Result append_nop_padding(std::vector<uint8_t> &text, uint64_t byte_count,
                                 rj_code_arch_t arch,
                                 const util::DiagnosticEmitter *error = nullptr);
 
+/// @brief Append the padding LLVM ends `.text` with
+///        (`AMDGPUTargetStreamer::EmitCodeEnd`), so the instruction prefetcher
+///        running ahead of the last instruction reads padding.
+///
+/// @details The pad word runs to the next instruction-cache line, then for a
+/// fill of whole lines: `s_code_end` in 3 lines on GFX10 and later (64-byte
+/// lines on GFX10, 128-byte from GFX11), `s_nop 0` in 16 64-byte lines on
+/// gfx90a, gfx94x and gfx950. gfx908 has no such padding. Lines are counted from
+/// offset 0 of @p text, which must be line-aligned in memory (`.text` is).
+/// @returns Failure for an architecture outside the AMDGPU targets; leaves
+/// @p text unchanged on that failure.
+/// @param error Optional caller-owned diagnostic emitter, used only on failure.
+util::Result append_code_end_padding(std::vector<uint8_t> &text, rj_code_arch_t arch,
+                                     const util::DiagnosticEmitter *error = nullptr);
+
 [[nodiscard]] uint64_t padding_for_residue(uint64_t current_offset, uint64_t target_residue,
                                            uint64_t alignment);
 

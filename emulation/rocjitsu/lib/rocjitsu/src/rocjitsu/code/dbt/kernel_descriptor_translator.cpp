@@ -774,29 +774,6 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
 
 } // namespace
 
-Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-    return Rsrc3Layout::Reserved;
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    return Rsrc3Layout::Gfx9Accum;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-    return Rsrc3Layout::Gfx10;
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-    return Rsrc3Layout::Gfx11;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    return Rsrc3Layout::Gfx120;
-  case ROCJITSU_CODE_ARCH_CDNA5:
-    return Rsrc3Layout::Gfx125;
-  default:
-    return Rsrc3Layout::Incompatible;
-  }
-}
-
 bool rsrc3_carries_verbatim(rj_code_arch_t source_arch, rj_code_arch_t target_arch) {
   // Every neighbouring pair is kept apart deliberately, because each disagrees
   // on bits the other reserves: a GFX11 or GFX12 word on a GFX10 target would
@@ -804,10 +781,6 @@ bool rsrc3_carries_verbatim(rj_code_arch_t source_arch, rj_code_arch_t target_ar
   // set bits 21:14. LLVM requires reserved bits to be zero.
   const Rsrc3Layout source = rsrc3_layout(source_arch);
   return source != Rsrc3Layout::Incompatible && source == rsrc3_layout(target_arch);
-}
-
-bool rsrc3_layout_has_shared_vgpr_count(Rsrc3Layout layout) {
-  return layout == Rsrc3Layout::Gfx10 || layout == Rsrc3Layout::Gfx11;
 }
 
 KernelDescriptorTranslator::KernelDescriptorTranslator(rj_code_arch_t guest_arch,

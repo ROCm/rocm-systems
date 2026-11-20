@@ -2718,6 +2718,140 @@ TEST(CodeObjectPatcher, ReplaceTextGrowsTextAndShiftsFollowingSections) {
   EXPECT_EQ(rodata_word, 0xA5A55A5Au);
 }
 
+// A wave prefetches INST_PREF_SIZE 128-byte lines from its entry at launch. A moved entry gets
+// LLVM's rule from its own line, ceil((code end - entry line) / 128), and never a larger value.
+// An unmoved entry and gfx1250 keep the compiler's value; every other RSRC3 bit is kept.
+TEST(CodeObjectPatcher, RedirectKeepsTheLaunchPrefetchInsideTheCode) {
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  const Section *rodata = find_section(source, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  const uint64_t descriptor_offset = rodata->sectionOffset();
+
+  // Redirects a descriptor holding @p rsrc3 and returns its RSRC3 word.
+  const auto redirected_rsrc3 = [&](rj_code_arch_t arch, uint32_t rsrc3, uint64_t old_entry,
+                                    uint64_t new_entry,
+                                    uint64_t code_end) -> std::optional<uint32_t> {
+    auto local = image;
+    auto descriptor = read_kernel_descriptor_for_test(local.data() + descriptor_offset);
+    descriptor.compute_pgm_rsrc3 = rsrc3;
+    write_kernel_descriptor_for_test(local.data() + descriptor_offset, descriptor);
+    AmdGpuCodeObject seeded(local.data(), local.size());
+    CodeObjectPatcher patcher(seeded);
+    if (!patcher.redirect_kernel_entry(descriptor_offset, old_entry, new_entry, code_end, arch))
+      return std::nullopt;
+    const std::vector<uint8_t> out = patcher.emit();
+    const auto redirected = read_kernel_descriptor_for_test(out.data() + descriptor_offset);
+    EXPECT_EQ(redirected.kernel_code_entry_byte_offset, descriptor.kernel_code_entry_byte_offset +
+                                                            static_cast<int64_t>(new_entry) -
+                                                            static_cast<int64_t>(old_entry));
+    return redirected.compute_pgm_rsrc3;
+  };
+
+  // INST_PREF_SIZE starts at bit 4 on GFX11 and GFX12. The other bits are GFX12's GLG_EN (13)
+  // and GFX11's IMAGE_OP (31) and SHARED_VGPR_COUNT (3:0).
+  struct Case {
+    const char *name;
+    rj_code_arch_t arch;
+    uint32_t other_bits;
+    uint32_t compiler_lines;
+    uint64_t old_entry;
+    uint64_t new_entry;
+    uint64_t code_end;
+    uint32_t expected_lines;
+  };
+  const Case cases[] = {
+      // 300 bytes from a line-aligned entry: two lines and part of a third.
+      {"moved", ROCJITSU_CODE_ARCH_RDNA4, 1u << 13, 200, 0, 512, 812, 3},
+      // The prefetch starts at the line holding the entry: 388 bytes from 512.
+      {"entry inside a line", ROCJITSU_CODE_ARCH_RDNA4, 0, 200, 0, 520, 900, 4},
+      {"never raised", ROCJITSU_CODE_ARCH_RDNA4, 0, 1, 0, 512, 812, 1},
+      {"unmoved", ROCJITSU_CODE_ARCH_RDNA4, 0, 200, 512, 512, 812, 200},
+      {"GFX11 six-bit field", ROCJITSU_CODE_ARCH_RDNA3, (1u << 31) | 5u, 60, 0, 512, 812, 3},
+      {"gfx1250 excluded", ROCJITSU_CODE_ARCH_CDNA5, 0, 200, 0, 512, 812, 200},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(c.name);
+    const std::optional<uint32_t> rsrc3 = redirected_rsrc3(
+        c.arch, c.other_bits | (c.compiler_lines << 4), c.old_entry, c.new_entry, c.code_end);
+    ASSERT_TRUE(rsrc3);
+    EXPECT_EQ(*rsrc3, c.other_bits | (c.expected_lines << 4));
+  }
+
+  // Targets without the field keep the whole word: CDNA's ACCUM_OFFSET and GFX10's
+  // SHARED_VGPR_COUNT share the low bits, and GFX10 reserves 11:4.
+  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA2}) {
+    SCOPED_TRACE(arch);
+    EXPECT_EQ(redirected_rsrc3(arch, 0x00010ff5u, 0, 512, 812), 0x00010ff5u);
+  }
+
+  // No code at or after the new entry.
+  EXPECT_FALSE(redirected_rsrc3(ROCJITSU_CODE_ARCH_RDNA4, 0, 0, 812, 812));
+}
+
+// DBT commits its descriptors through the same clamp: a CDNA4 kernel translated for RDNA4 gets
+// the default INST_PREF_SIZE of 2, lowered to 1 when its entry moves to within a line of the end
+// of the translated code.
+TEST(CodeObjectPatcher, DescriptorTranslationKeepsTheLaunchPrefetchInsideTheCode) {
+  const auto image = make_minimal_amdgpu_elf_with_descriptor_after_text();
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  const Section *rodata = find_section(source, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+
+  constexpr uint64_t kCodeEnd = 300;
+  const auto lines_with_entry_at = [&](uint64_t target_entry) -> std::optional<uint32_t> {
+    KdTranslation translation{};
+    translation.descriptor_file_offset = rodata->sectionOffset();
+    translation.target_wave_size = 32;
+    translation.source_arch = ROCJITSU_CODE_ARCH_CDNA4;
+    translation.target_entry_text_offset = target_entry;
+    CodeObjectPatcher patcher(source);
+    if (!patcher.apply_kernel_descriptor_translation(translation, ROCJITSU_CODE_ARCH_RDNA4,
+                                                     kCodeEnd))
+      return std::nullopt;
+    const std::vector<uint8_t> out = patcher.emit();
+    // GFX12's INST_PREF_SIZE: bits 11:4.
+    return (read_kernel_descriptor_for_test(out.data() + translation.descriptor_file_offset)
+                .compute_pgm_rsrc3 >>
+            4) &
+           0xffu;
+  };
+  EXPECT_EQ(lines_with_entry_at(0), 2u) << "an unmoved entry keeps the translated value";
+  EXPECT_EQ(lines_with_entry_at(256), 1u) << "44 bytes of code follow the moved entry";
+}
+
+// DBT keeps each kernel's entry at its source residue modulo 256, so a kernel placed after a body
+// that outgrew its source position moves to the next 256-byte boundary. Here the first kernel
+// gains RDNA4's workgroup-ID prologue. The second, placed last, is followed by less than a line of
+// code, so its launch prefetch must be one line rather than the two RDNA4 translations otherwise
+// get.
+TEST(BinaryTranslatorE2E, AMovedLastKernelPrefetchesOnlyItsCode) {
+  constexpr uint32_t kCdna4SEndpgm = 0xBF810000u;
+  auto image = make_minimal_amdgpu_elf_with_two_kernel_descriptors({kCdna4SEndpgm, kCdna4SEndpgm});
+  enable_workgroup_id_x_sgpr(image);
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const Section *text = translated.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 2u);
+  const auto last = std::ranges::max_element(kernels, {}, &KernelDescriptorInfo::entry_text_offset);
+  ASSERT_GE(last->entry_text_offset, 256u) << "the second kernel moved";
+  // GFX12's INST_PREF_SIZE: bits 11:4. DBT adds no code-end padding, so the code ends with .text.
+  const uint64_t entry_line = (text->vaddr() + last->entry_text_offset) / 128 * 128;
+  ASSERT_EQ((text->vaddr() + text->size() - entry_line + 127) / 128, 1u);
+  EXPECT_EQ((last->descriptor.compute_pgm_rsrc3 >> 4) & 0xffu, 1u);
+}
+
 // COMPUTE_PGM_RSRC3 is carried over verbatim only when source and target agree on its layout.
 // "GFX10 or later" is not a fine enough test: INST_PREF_SIZE is GFX11+, and IMAGE_OP is GFX11+,
 // so handing a GFX11 or GFX12 word to a GFX10 target would set bits GFX10 requires to be zero.
@@ -2763,7 +2897,8 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
     translation.source_arch = source_arch;
 
     CodeObjectPatcher patcher(seeded);
-    if (!patcher.apply_kernel_descriptor_translation(translation, target_arch))
+    if (!patcher.apply_kernel_descriptor_translation(translation, target_arch,
+                                                     patcher.text_bytes().size()))
       return std::nullopt;
     const auto patched_image = patcher.emit();
     return read_kernel_descriptor_for_test(patched_image.data() +
@@ -2885,8 +3020,8 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
     PatchOutcome outcome;
     outcome.seeded = true;
     CodeObjectPatcher patcher(seeded);
-    outcome.patched =
-        patcher.apply_kernel_descriptor_translation(translation, ROCJITSU_CODE_ARCH_RDNA3);
+    outcome.patched = patcher.apply_kernel_descriptor_translation(
+        translation, ROCJITSU_CODE_ARCH_RDNA3, patcher.text_bytes().size());
     if (!outcome.patched)
       return outcome;
     const auto out = patcher.emit();
@@ -2952,7 +3087,8 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
     translation.target_wave_size = 32;
 
     CodeObjectPatcher patcher(local_co);
-    if (!patcher.apply_kernel_descriptor_translation(translation, arch))
+    if (!patcher.apply_kernel_descriptor_translation(translation, arch,
+                                                     patcher.text_bytes().size()))
       return std::nullopt;
 
     const auto patched_image = patcher.emit();
@@ -3029,7 +3165,8 @@ TEST(CodeObjectPatcher, PreservesPrivateEnableForZeroFixedDynamicStack) {
   translation.target_wave_size = 64;
 
   CodeObjectPatcher patcher(code_object);
-  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(translation, ROCJITSU_CODE_ARCH_CDNA3));
+  ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(translation, ROCJITSU_CODE_ARCH_CDNA3,
+                                                          patcher.text_bytes().size()));
   const auto patched_image = patcher.emit();
   const auto patched_descriptor =
       read_kernel_descriptor_for_test(patched_image.data() + translation.descriptor_file_offset);

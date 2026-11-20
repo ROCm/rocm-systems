@@ -622,6 +622,7 @@ add_executable(
     patch/trampoline_builder_test.cpp
     patch/instrumentor_test.cpp
     code/amdhsa_metadata_test.cpp
+    code/kernel_descriptor_rsrc3_test.cpp
     patch/probe_symbol_test.cpp
     patch/probe_callable_test.cpp
     patch/probe_clobber_test.cpp

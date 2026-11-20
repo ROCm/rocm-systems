@@ -222,7 +222,8 @@ protected:
       ASSERT_EQ(kernels.size(), 1u);
       CodeObjectPatcher redirect(moved);
       ASSERT_TRUE(redirect.redirect_kernel_entry(kernels[0].descriptor_file_offset,
-                                                 input.kernel.entry_text_offset, bootstrap_offset));
+                                                 input.kernel.entry_text_offset, bootstrap_offset,
+                                                 section.size(), arch));
       image = std::move(redirect).emit();
     }
 

@@ -38,6 +38,11 @@ static_assert(kNop0Encoding.succeeded() && kNop1Encoding.succeeded() &&
 constexpr uint32_t kNop0Word = kNop0Encoding.value();
 constexpr uint32_t kNop1Word = kNop1Encoding.value();
 constexpr uint32_t kEndpgmWord = kEndpgmEncoding.value();
+// A patched kernel's .text: the 16-byte original, one 12-byte trampoline ending
+// in its return branch, then RDNA4's code-end padding (s_code_end to a 128-byte
+// line, then 384 bytes more).
+constexpr uint64_t kTrampolineReturnOffset = 24;
+constexpr uint64_t kPatchedTextSize = 512;
 
 class KernelElf {
 public:
@@ -713,7 +718,7 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
     ASSERT_EQ(candidate.text_sections().size(), 1u);
     ASSERT_EQ(result.sites.size(), 1u);
     const Section &emitted_text = *candidate.text_sections().front();
-    ASSERT_EQ(emitted_text.size(), 28u);
+    ASSERT_EQ(emitted_text.size(), kPatchedTextSize);
     std::vector<uint8_t> loaded(0x10000, 0);
     ASSERT_NO_FATAL_FAILURE(replay_load_segments(result.elf_bytes, loaded));
     const uint64_t cave_offset = result.sites.front().instrumentation_offset;
@@ -736,7 +741,7 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
       std::memcpy(&emitted_zero_fill, loaded.data() + range.vaddr, sizeof(emitted_zero_fill));
       EXPECT_EQ(emitted_zero_fill, 0u);
     }
-    if (range.vaddr == 0x200c) {
+    if (range.vaddr == kTextVaddr + kPatchedTextSize) {
       EXPECT_EQ(range.vaddr, emitted_text.vaddr() + emitted_text.size());
     }
   }
@@ -763,7 +768,7 @@ TEST(BiEditSafety, AllowsUnmovedLoadClearOfAppendedTrampoline) {
 
 TEST(BiEditSafety, AllowsUnmovedLoadTouchingFinalTextEnd) {
   expect_unmoved_load_growth_policy(
-      {.vaddr = 0x200c, .file_size = 4, .memory_size = 4, .overlaps_cave = false});
+      {.vaddr = 0x21f0, .file_size = 4, .memory_size = 4, .overlaps_cave = false});
 }
 
 TEST(BiEditSafety, RejectsTextGrowthIntoUnmovedZeroFill) {
@@ -813,12 +818,11 @@ void expect_unedited_load_alias_growth_policy(uint64_t alias_text_offset, bool o
     ASSERT_EQ(candidate.text_sections().size(), 1u);
     ASSERT_EQ(result.sites.size(), 1u);
     const Section &text = *candidate.text_sections().front();
-    ASSERT_EQ(text.size(), 28u);
+    ASSERT_EQ(text.size(), kPatchedTextSize);
     const uint64_t cave_offset = result.sites.front().instrumentation_offset;
     ASSERT_EQ(cave_offset, original_text.size());
     ASSERT_NO_FATAL_FAILURE(expect_anchor_branch_to_cave(text, cave_offset));
-    const uint64_t return_offset = text.size() - sizeof(uint32_t);
-    ASSERT_EQ(return_offset, 24u);
+    const uint64_t return_offset = kTrampolineReturnOffset;
     const std::optional<int16_t> return_displacement =
         compute_sopp_branch_simm16(return_offset, sizeof(uint32_t));
     ASSERT_TRUE(return_displacement);
@@ -854,7 +858,7 @@ TEST(BiEditSafety, RejectsUneditedLoadAliasOverwritingAppendedReturnBranch) {
 }
 
 TEST(BiEditSafety, AllowsUneditedLoadAliasClearOfAppendedText) {
-  expect_unedited_load_alias_growth_policy(256, false);
+  expect_unedited_load_alias_growth_policy(kPatchedTextSize, false);
 }
 
 enum class AnchorLoadBacking { SeparateCopy, SameFile, UneditedWord, ZeroFill };
@@ -1072,7 +1076,7 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
     ASSERT_TRUE(candidate.is_valid());
     ASSERT_EQ(result.sites.size(), 1u);
     const Section &text = *candidate.text_sections().front();
-    ASSERT_EQ(text.vaddr() + text.size(), 0x200cu);
+    ASSERT_EQ(text.vaddr() + text.size(), kTextVaddr + kPatchedTextSize);
     ASSERT_NO_FATAL_FAILURE(
         expect_anchor_branch_to_cave(text, result.sites.front().instrumentation_offset));
     const CodeObjectPatcher emitted_patcher(candidate);
