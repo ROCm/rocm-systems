@@ -12,14 +12,19 @@ import subprocess
 import sys
 import threading
 import uuid
+import zlib
 from pathlib import Path
 from threading import Thread
-from typing import Set
+from typing import Dict, Set
 from unittest.mock import Mock
 
 import config
+from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from memory_chart.loader import Layouts, PanelConfigs
+from memory_chart.render import plot_mem_chart
+from memory_chart.units import display_unit, panel_units
 from utils import csv_compression
+from utils.utils_common import strip_ansi
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 src_candidate = os.path.join(ROOT, "src")
@@ -28,6 +33,7 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 
+MEMORY_CHART_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 SINGLE_PASS_SET = "launch_stats"
 
 SUPPORTED_ARCHS = {
@@ -70,6 +76,55 @@ def memory_chart_archs() -> list[str]:
 def memory_chart_layout_data(arch: str) -> dict:
     """The parsed layout file of an arch's memory chart."""
     return json.loads(Layouts.for_arch(arch).path.read_text(encoding="utf-8"))
+
+
+def memory_chart_values(arch: str) -> Dict[str, float]:
+    """A distinct, plausible value for every memory chart metric of an arch."""
+    values = {}
+    for metric_id, unit in panel_units(PanelConfigs.for_arch(arch)).items():
+        seed = zlib.crc32(metric_id.encode()) % 97
+        kind = display_unit(unit).kind
+        if kind == "percent":
+            values[metric_id] = 1.5 + seed
+        elif kind == "bandwidth":
+            values[metric_id] = (seed + 1) * 4.25e9
+        else:
+            values[metric_id] = seed + 2.0
+    return values
+
+
+def memory_chart_text(arch, values=None, membw=None) -> str:
+    """Plain-text terminal chart for an analysis-config arch (gfx115x stands for
+    its family), by default with memory_chart_values."""
+    if values is None:
+        values = memory_chart_values(arch)
+    units = panel_units(PanelConfigs.for_arch(arch))
+    return strip_ansi(
+        plot_mem_chart(
+            values,
+            chart_title=MEMORY_CHART_TITLE,
+            gpu_arch=arch,
+            units=units,
+            membw=membw,
+        )
+    )
+
+
+def bottleneck(
+    label, level, state="active", value=18.7, children=(), guidance_id=None
+) -> BottleneckNode:
+    """A membw bottleneck node measured by one percentage."""
+    supporting = (SupportingMetric(f"k_{label}", value, "Percent", f"{value}%"),)
+    return BottleneckNode(label, label, level, state, supporting, children, guidance_id)
+
+
+def membw_result(
+    *nodes, guidance_blocks=(), guidance_block_ids=()
+) -> MemBwAnalysisResult:
+    """A full membw result with these root nodes."""
+    return MemBwAnalysisResult(
+        "gfx950", "full", None, nodes, guidance_blocks, guidance_block_ids
+    )
 
 
 def with_metric_change(data: dict, metric: str, **fields) -> dict:

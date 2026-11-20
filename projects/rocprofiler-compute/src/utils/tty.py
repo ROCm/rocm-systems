@@ -5,7 +5,7 @@ import argparse
 import copy
 import textwrap
 from io import StringIO
-from typing import Any, Dict, Optional, TextIO
+from typing import Any, Container, Dict, List, Optional, TextIO
 
 import pandas as pd
 from rich.console import Console as RichConsole
@@ -520,6 +520,100 @@ def _render_membw_guidance_panel(
     return buf.getvalue()
 
 
+def mem_chart_tables(
+    args: argparse.Namespace,
+    runs: Dict[str, Any],
+    panel_id: int,
+    panel: Dict[str, Any],
+    profiling_config: Dict[str, Any],
+) -> List[int]:
+    """Ids of the tables of a panel that show_all draws as the memory chart.
+
+    Empty when the panel draws no chart.
+    """
+    gpu_arch = _gpu_arch(runs)
+    if not _draws_mem_chart(args, runs, gpu_arch, panel_id):
+        return []
+    filter_panel_ids = convert_filter_blocks_to_panel_ids(
+        profiling_config.get("filter_blocks", []), gpu_arch
+    )
+    return [
+        table_config["id"]
+        for data_source in panel["data source"]
+        for table_config in data_source.values()
+        if _table_in_every_run(runs, table_config)
+        and not _hidden_by_profiling_filter(
+            args, panel_id, table_config, filter_panel_ids
+        )
+    ]
+
+
+def mem_chart_values(
+    dfs: Dict[int, pd.DataFrame], table_ids: List[int]
+) -> Dict[str, Any]:
+    """Metric id -> value of the given memory chart tables.
+
+    Values are as evaluated, not rounded to --decimal: the chart rounds each one
+    once, for display.
+    """
+    values: Dict[str, Any] = {}
+    for table_id in table_ids:
+        # Metric tables are indexed by Metric_ID
+        table_df = dfs[table_id]
+        if table_df.index.name == "Metric_ID" and "Value" in table_df.columns:
+            values.update(zip(table_df.index, table_df["Value"]))
+    return values
+
+
+def _gpu_arch(runs: Dict[str, Any]) -> Optional[str]:
+    """GPU architecture of the first run, or None without system info."""
+    first_run = next(iter(runs.values()))
+    return (
+        first_run.sys_info.iloc[0]["gpu_arch"]
+        if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
+        else None
+    )
+
+
+def _table_in_every_run(runs: Dict[str, Any], table_config: Dict[str, Any]) -> bool:
+    """True when build_dfs kept the table in every run, so no -b dropped it."""
+    return all(table_config["id"] in run.dfs for run in runs.values())
+
+
+def _hidden_by_profiling_filter(
+    args: argparse.Namespace,
+    panel_id: int,
+    table_config: Dict[str, Any],
+    filter_panel_ids: Container[int],
+) -> bool:
+    """True for a table the profile's block filter left out.
+
+    An analyze -b replaces that filter, and panels up to 100 are always shown.
+    """
+    return bool(
+        not args.filter_metrics
+        and filter_panel_ids
+        and table_config["id"] not in filter_panel_ids
+        and panel_id not in filter_panel_ids
+        and panel_id > 100
+    )
+
+
+def _draws_mem_chart(
+    args: argparse.Namespace,
+    runs: Dict[str, Any],
+    gpu_arch: Optional[str],
+    panel_id: int,
+) -> bool:
+    """True when the panel's tables are drawn as the memory chart, not as tables."""
+    return (
+        panel_id == MEMORY_CHART_PANEL_ID
+        and not args.debug_table_view
+        and len(runs) == 1
+        and Layouts.for_arch(gpu_arch) is not None
+    )
+
+
 def show_all(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -533,11 +627,7 @@ def show_all(
     comparable_columns = parser.build_comparable_columns(args.time_unit)
 
     first_run = next(iter(runs.values()))
-    gpu_arch = (
-        first_run.sys_info.iloc[0]["gpu_arch"]
-        if hasattr(first_run, "sys_info") and not first_run.sys_info.empty
-        else None
-    )
+    gpu_arch = _gpu_arch(runs)
     filter_panel_ids = convert_filter_blocks_to_panel_ids(
         profiling_config.get("filter_blocks", []), gpu_arch
     )
@@ -564,8 +654,6 @@ def show_all(
             show_roofline(args, runs, output)
 
         panel_content = ""  # store content of all data_source from one panel
-        # Metric id -> value from every table in this panel, drawn as one chart
-        mem_chart_data: dict[str, Any] = {}
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
@@ -573,7 +661,7 @@ def show_all(
                 # (e.g. analyze-mode -b dropped this block). In baseline mode
                 # require the table in every run so per-run dfs[id] lookups
                 # downstream stay safe.
-                if not all(table_config["id"] in run.dfs for run in runs.values()):
+                if not _table_in_every_run(runs, table_config):
                     continue
 
                 # Emit warnings for roofline tables (401, 402)
@@ -590,12 +678,8 @@ def show_all(
                 # - If analysis used -b/--block, ignore profiling block filters
                 # - If profiling had block filters, only show selected tables/panels
                 # - Always show panels with id <= 100
-                if (
-                    not args.filter_metrics
-                    and filter_panel_ids
-                    and table_config["id"] not in filter_panel_ids
-                    and panel_id not in filter_panel_ids
-                    and panel_id > 100
+                if _hidden_by_profiling_filter(
+                    args, panel_id, table_config, filter_panel_ids
                 ):
                     table_id_str = format_table_id(table_config["id"])
 
@@ -634,27 +718,9 @@ def show_all(
                         else:
                             run_data.dfs[table_config["id"]].index = initial_index
 
-                # For the memory chart panel, collect all tables and merge
-                # into a single chart; skip individual table output.
-                # Gate to architectures with a chart layout; others fall back to
-                # normal table output.
-                is_mem_chart = (
-                    panel_id == MEMORY_CHART_PANEL_ID
-                    and not args.debug_table_view
-                    and Layouts.for_arch(gpu_arch) is not None
-                )
-
-                if is_mem_chart and len(runs) == 1:
-                    # The chart rounds each value when it draws it.
-                    # Metric tables are indexed by Metric_ID.
-                    table_df = first_run.dfs[table_config["id"]]
-                    if (
-                        not table_df.empty
-                        and table_df.index.name == "Metric_ID"
-                        and "Value" in table_df.columns
-                    ):
-                        mem_chart_data.update(zip(table_df.index, table_df["Value"]))
-                    # Skip individual table output; merged chart emitted below
+                # Memory chart tables merge into one chart, drawn below. Archs
+                # without a chart layout fall back to normal table output.
+                if _draws_mem_chart(args, runs, gpu_arch, panel_id):
                     continue
 
                 processed_df = process_table_data(
@@ -677,6 +743,10 @@ def show_all(
                 )
 
         # Emit the merged memory chart for the panel.
+        mem_chart_data = mem_chart_values(
+            first_run.dfs,
+            mem_chart_tables(args, runs, panel_id, panel, profiling_config),
+        )
         if mem_chart_data:
             heading = format_mem_chart_heading(args.normal_unit, panel_id=panel_id)
             membw_result = getattr(first_run, "membw_result", None)

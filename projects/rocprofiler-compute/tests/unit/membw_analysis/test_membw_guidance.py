@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from membw_analysis.guidance import render_guidance_blocks
+from membw_analysis.guidance import render_guidance_blocks, rendered_guidance_ids
 
 
 class TestRenderGuidanceBlocks:
@@ -34,6 +34,17 @@ class TestRenderGuidanceBlocks:
         )
         assert len(blocks) == 4
         assert "...and 5 more" in blocks[3]
+
+    def test_rendered_ids_name_each_block_in_order(self):
+        """The ids of the rendered blocks skip ids without a template."""
+        templates = {"a": "Block a", "c": "Block c", "d": "Block d"}
+        ids = ["a", "missing", "c", "d"]
+
+        blocks = render_guidance_blocks(ids, templates, {}, {}, max_blocks=3)
+        rendered = rendered_guidance_ids(ids, templates, max_blocks=3)
+
+        assert rendered == ("a", "c")
+        assert [templates[gid] for gid in rendered] == list(blocks[: len(rendered)])
 
     def test_empty_ids(self):
         assert render_guidance_blocks([], {}, {}, {}) == ()

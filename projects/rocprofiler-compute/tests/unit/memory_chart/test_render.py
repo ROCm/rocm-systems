@@ -5,55 +5,16 @@
 
 import json
 import re
-import zlib
 
 import common
 import pytest
 
-from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
 from memory_chart.loader import Layouts, PanelConfigs, load_layout
 from memory_chart.render import MemChart, plot_mem_chart, progress_bar
-from memory_chart.units import display_unit, panel_units
+from memory_chart.units import panel_units
 from utils.utils_common import strip_ansi
 
-DEFAULT_TITLE = "3. Memory Chart (Normalization: per_kernel)"
 MEMORY_CHART_ARCHS = common.memory_chart_archs()
-
-
-def sample_values(arch: str) -> dict[str, float]:
-    """A distinct, plausible value for every memory chart metric of an arch."""
-    values = {}
-    for metric_id, unit in panel_units(PanelConfigs.for_arch(arch)).items():
-        seed = zlib.crc32(metric_id.encode()) % 97
-        kind = display_unit(unit).kind
-        if kind == "percent":
-            values[metric_id] = 1.5 + seed
-        elif kind == "bandwidth":
-            values[metric_id] = (seed + 1) * 4.25e9
-        else:
-            values[metric_id] = seed + 2.0
-    return values
-
-
-def render(arch, values=None, membw=None):
-    """Plain-text chart for an analysis-config arch (gfx115x stands for its family)."""
-    if values is None:
-        values = sample_values(arch)
-    units = panel_units(PanelConfigs.for_arch(arch))
-    return strip_ansi(
-        plot_mem_chart(
-            values, chart_title=DEFAULT_TITLE, gpu_arch=arch, units=units, membw=membw
-        )
-    )
-
-
-def make_node(label, level, state="active", value=18.7, children=()):
-    supporting = (SupportingMetric(f"k_{label}", value, "Percent", f"{value}%"),)
-    return BottleneckNode(label, label, level, state, supporting, children)
-
-
-def make_membw(*nodes):
-    return MemBwAnalysisResult("gfx950", "full", None, nodes, ())
 
 
 def make_chart(arch, values, membw=None):
@@ -66,12 +27,14 @@ def chart_from_layout(tmp_path, arch, data):
     path = tmp_path / "layout.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     units = panel_units(PanelConfigs.for_arch(arch))
-    return MemChart(load_layout(path), sample_values(arch), units)
+    return MemChart(load_layout(path), common.memory_chart_values(arch), units)
 
 
 def render_layout(tmp_path, arch, data):
     """Plain-text chart of *arch* drawn from the layout *data*."""
-    return strip_ansi(chart_from_layout(tmp_path, arch, data).render(DEFAULT_TITLE))
+    return strip_ansi(
+        chart_from_layout(tmp_path, arch, data).render(common.MEMORY_CHART_TITLE)
+    )
 
 
 def panel_widths(chart):
@@ -101,11 +64,13 @@ def text_box_edge(lines, text):
 
 
 VALUE_SETS = {
-    "full": lambda arch: (sample_values(arch), None),
+    "full": lambda arch: (common.memory_chart_values(arch), None),
     "empty": lambda arch: ({}, None),
     "membw": lambda arch: (
-        sample_values(arch),
-        make_membw(*(make_node(f"{lv} stall", lv) for lv in ("GL1", "GL2", "EA"))),
+        common.memory_chart_values(arch),
+        common.membw_result(
+            *(common.bottleneck(f"{lv} stall", lv) for lv in ("GL1", "GL2", "EA"))
+        ),
     ),
 }
 
@@ -117,8 +82,8 @@ VALUE_SETS = {
 
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_full_metrics_render_every_block_and_label(gpu_arch):
-    output = render(gpu_arch)
-    assert output.splitlines()[0] == DEFAULT_TITLE
+    output = common.memory_chart_text(gpu_arch)
+    assert output.splitlines()[0] == common.MEMORY_CHART_TITLE
     assert "N/A" not in output
     layout = Layouts.for_arch(gpu_arch)
     for block in layout.blocks():
@@ -131,7 +96,7 @@ def test_full_metrics_render_every_block_and_label(gpu_arch):
 
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_empty_metrics_render_one_placeholder_per_value(gpu_arch):
-    output = render(gpu_arch, {})
+    output = common.memory_chart_text(gpu_arch, {})
     layout = Layouts.for_arch(gpu_arch)
     shown = sum(len(b.items) for b in layout.blocks()) + len(layout.arrows)
     assert output.count("N/A") == shown
@@ -141,7 +106,7 @@ def test_empty_metrics_render_one_placeholder_per_value(gpu_arch):
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_rows_have_one_width(gpu_arch):
     # Grid rows (between the scope bar and the legend) line up
-    lines = render(gpu_arch).splitlines()
+    lines = common.memory_chart_text(gpu_arch).splitlines()
     start = next(i for i, line in enumerate(lines) if line.startswith("|-"))
     end = next(i for i, line in enumerate(lines) if line.startswith("Legend"))
     grid = [
@@ -158,19 +123,22 @@ def test_rows_have_one_width(gpu_arch):
 def test_render_does_not_depend_on_term(gpu_arch, monkeypatch):
     # A dumb TERM must not shrink the chart to 80 columns
     monkeypatch.setenv("TERM", "dumb")
-    dumb = render(gpu_arch)
+    dumb = common.memory_chart_text(gpu_arch)
     monkeypatch.setenv("TERM", "xterm-256color")
-    assert render(gpu_arch) == dumb
+    assert common.memory_chart_text(gpu_arch) == dumb
 
 
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_panel_blocks_in_the_columns_share_one_width(gpu_arch):
-    assert len(panel_widths(make_chart(gpu_arch, sample_values(gpu_arch)))) == 1
+    assert (
+        len(panel_widths(make_chart(gpu_arch, common.memory_chart_values(gpu_arch))))
+        == 1
+    )
 
 
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_typical_values_stay_on_their_label_line(gpu_arch):
-    output = render(gpu_arch)
+    output = common.memory_chart_text(gpu_arch)
     assert re.search(r"Scratch Allocation \d+ B", output)
     assert re.search(r"Wavefront Occupancy \d+\.\d%", output)
 
@@ -181,18 +149,22 @@ def test_a_long_scope_label_widens_every_panel(tmp_path):
     data["scope"]["labels"][1] = "A much longer memory label"
     chart = chart_from_layout(tmp_path, "gfx115x", data)
     assert len(panel_widths(chart)) == 1
-    assert "A much longer memory label" in strip_ansi(chart.render(DEFAULT_TITLE))
+    assert "A much longer memory label" in strip_ansi(
+        chart.render(common.MEMORY_CHART_TITLE)
+    )
 
 
 def test_legend_lists_only_what_the_chart_uses():
     # gfx115x has no atomic arrows; gfx1250 has stall metrics
-    assert "Atomic" not in render("gfx115x").splitlines()[-1]
-    assert "Stall" in render("gfx1250").splitlines()[-1]
+    assert "Atomic" not in common.memory_chart_text("gfx115x").splitlines()[-1]
+    assert "Stall" in common.memory_chart_text("gfx1250").splitlines()[-1]
 
 
 def test_unknown_arch_is_an_error():
     with pytest.raises(ValueError, match="gfx1030"):
-        plot_mem_chart({}, chart_title=DEFAULT_TITLE, gpu_arch="gfx1030", units={})
+        plot_mem_chart(
+            {}, chart_title=common.MEMORY_CHART_TITLE, gpu_arch="gfx1030", units={}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -223,7 +195,7 @@ def test_arrows_stay_inside_their_box(gpu_arch, values):
     ],
 )
 def test_drawn_arrows_sit_between_the_box_borders(gpu_arch, box, outer, side):
-    lines = render(gpu_arch).splitlines()
+    lines = common.memory_chart_text(gpu_arch).splitlines()
     top, bottom, _ = box_rows(lines, box)
     outer_top, _, left = box_rows(lines, outer)
     right = lines[outer_top].index("╮", left)
@@ -245,14 +217,16 @@ def test_drawn_arrows_sit_between_the_box_borders(gpu_arch, box, outer, side):
 
 
 def test_gfx950_shows_io_bandwidth_above_and_below_the_grid():
-    output = render("gfx950", {"3.1.35": 2e9, "3.1.40": 3e9})  # xGMI Read, PCIe Atomic
+    output = common.memory_chart_text(
+        "gfx950", {"3.1.35": 2e9, "3.1.40": 3e9}
+    )  # xGMI Read, PCIe Atomic
     assert re.search(r"\|\|  Read BW\s+2\.000 GB/s", output)
     assert re.search(r"\|\|  Atomic BW\s+3\.000 GB/s", output)
     assert output.index("xGMI") < output.index("Compute Units") < output.index("PCIe")
 
 
 def test_blocks_above_and_below_the_grid_line_up_with_their_column():
-    lines = render("gfx950").splitlines()
+    lines = common.memory_chart_text("gfx950").splitlines()
     fabric_left = box_rows(lines, "Data Fabric")[2]
     assert text_box_edge(lines, "xGMI (to Peer GPU)")[1] == fabric_left
     assert text_box_edge(lines, "PCIe (to CPU or Non-xGMI connected GPU)")[1] == (
@@ -262,7 +236,7 @@ def test_blocks_above_and_below_the_grid_line_up_with_their_column():
 
 @pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx942"])
 def test_xgmi_without_counters_draws_a_bare_connector(gpu_arch):
-    output = render(gpu_arch)
+    output = common.memory_chart_text(gpu_arch)
     assert "xGMI (to Peer GPU)" in output
     assert re.search(r"^\s+\|\|$", output, re.MULTILINE)
     assert "PCIe" not in output
@@ -272,7 +246,7 @@ def test_xgmi_without_counters_draws_a_bare_connector(gpu_arch):
     ("gpu_arch", "label"), [("gfx1250", "Buf Stall"), ("gfx115x", "GL2 Stall")]
 )
 def test_stall_metrics_get_a_bar(gpu_arch, label):
-    lines = render(gpu_arch).splitlines()
+    lines = common.memory_chart_text(gpu_arch).splitlines()
     row = next(i for i, line in enumerate(lines) if label in line)
     col = lines[row].index(label)
     assert set(lines[row + 1][col : col + 10]) <= set("█░")
@@ -282,7 +256,7 @@ def test_item_bar_follows_the_layout(tmp_path):
     data = common.memory_chart_layout_data("gfx942")
     no_bar = common.with_metric_change(data, "3.1.25", bar=False)  # L2 Hit
     assert count_bars(render_layout(tmp_path, "gfx942", no_bar)) == (
-        count_bars(render("gfx942")) - 1
+        count_bars(common.memory_chart_text("gfx942")) - 1
     )
 
 
@@ -290,7 +264,7 @@ def test_arrow_style_follows_the_layout(tmp_path):
     data = common.memory_chart_layout_data("gfx942")
     # 3.1.16 is the vL1D -> L2 Read BW arrow
     inline = common.with_metric_change(data, "3.1.16", style="inline")
-    assert not re.search(r"Read BW\s+: ", render("gfx942"))
+    assert not re.search(r"Read BW\s+: ", common.memory_chart_text("gfx942"))
     assert re.search(r"Read BW\s+: ", render_layout(tmp_path, "gfx942", inline))
 
 
@@ -311,7 +285,9 @@ def test_progress_bar_is_clamped(percent, filled):
     ("level", "block"), [("GL1", "vL1D"), ("GL2", "L2"), ("EA", "Data Fabric")]
 )
 def test_active_stall_is_annotated_on_its_block(level, block):
-    output = render("gfx950", membw=make_membw(make_node(f"{level} stall", level)))
+    output = common.memory_chart_text(
+        "gfx950", membw=common.membw_result(common.bottleneck(f"{level} stall", level))
+    )
     lines = output.splitlines()
     index = next(i for i, line in enumerate(lines) if f"[!] {level} stall" in line)
     row = lines[index]
@@ -324,10 +300,13 @@ def test_active_stall_is_annotated_on_its_block(level, block):
 
 
 def test_only_active_leaves_are_annotated():
-    child = make_node("TCP<-UTCL1", "GL1")
-    parent = make_node("TCP stall", "GL1", children=(child,))
-    output = render(
-        "gfx950", membw=make_membw(parent, make_node("idle", "GL2", state="inactive"))
+    child = common.bottleneck("TCP<-UTCL1", "GL1")
+    parent = common.bottleneck("TCP stall", "GL1", children=(child,))
+    output = common.memory_chart_text(
+        "gfx950",
+        membw=common.membw_result(
+            parent, common.bottleneck("idle", "GL2", state="inactive")
+        ),
     )
     assert "[!] TCP<-UTCL1" in output
     assert "[!] TCP stall" not in output
@@ -335,6 +314,8 @@ def test_only_active_leaves_are_annotated():
 
 
 def test_no_active_stalls_draw_as_if_there_were_no_membw():
-    idle = make_membw(make_node("idle", "GL2", state="inactive"))
-    assert render("gfx950", membw=idle) == render("gfx950")
-    assert "Stall" not in render("gfx950").splitlines()[-1]
+    idle = common.membw_result(common.bottleneck("idle", "GL2", state="inactive"))
+    assert common.memory_chart_text("gfx950", membw=idle) == common.memory_chart_text(
+        "gfx950"
+    )
+    assert "Stall" not in common.memory_chart_text("gfx950").splitlines()[-1]
