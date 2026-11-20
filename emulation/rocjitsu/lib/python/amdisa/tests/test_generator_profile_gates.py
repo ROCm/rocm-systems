@@ -7149,8 +7149,11 @@ def test_generated_vop3_compare_dpp_masks_scalar_or_exec_destination(
                 assert 'arith::execute_float_compare<32>' in cmp_true_body
                 assert 'rj_arith_v_cmp_t_f32_w32,' in cmp_true_body
             elif arch == 'rdna3_5':
-                assert 'execute_compare_with_exceptions' in cmp_true_body
-                assert 'inst_.clamp, commit_result' in cmp_true_body
+                assert 'arith::execute_float_compare<32>' in cmp_true_body
+                assert 'rj_arith_v_cmp_t_f32_w32_gfx1150,' in cmp_true_body
+                assert 'RJ_ARITH_FP_DX10_CLAMP_OFF' in cmp_true_body
+                assert 'execute_compare_with_exceptions' not in cmp_true_body
+                assert 'RJ_ARITH_ALU_CLAMP' in cmp_true_body
             else:
                 assert 'execute_v_cmp_t_f32_vop3' in cmp_true_body
 
