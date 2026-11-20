@@ -11,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <sys/wait.h>
@@ -36,6 +37,30 @@ public:
 private:
   std::optional<std::string> original_value_;
   int unset_result_ = -1;
+};
+
+class ScopedEnvironmentVariable {
+public:
+  ScopedEnvironmentVariable(std::string name, std::string value) : name_(std::move(name)) {
+    if (const char *original = std::getenv(name_.c_str()))
+      original_value_ = original;
+    set_result_ = setenv(name_.c_str(), value.c_str(), 1);
+  }
+
+  ~ScopedEnvironmentVariable() {
+    if (original_value_) {
+      setenv(name_.c_str(), original_value_->c_str(), 1);
+    } else {
+      unsetenv(name_.c_str());
+    }
+  }
+
+  int set_result() const { return set_result_; }
+
+private:
+  std::string name_;
+  std::optional<std::string> original_value_;
+  int set_result_ = -1;
 };
 
 std::vector<std::string> copy_environment(char *const *envp) {
@@ -89,13 +114,46 @@ TEST(LaunchPreloadTest, EnvpCacheRebuildsAfterSet) {
   environment.set(name, "before");
 
   const std::vector<std::string> initial = copy_environment(environment.envp());
-  EXPECT_NE(initial.end(), std::ranges::find(initial, before));
+  EXPECT_NE(std::ranges::find(initial, before), initial.end());
 
   environment.set(name, "after");
 
   const std::vector<std::string> rebuilt = copy_environment(environment.envp());
-  EXPECT_EQ(rebuilt.end(), std::ranges::find(rebuilt, before));
-  EXPECT_NE(rebuilt.end(), std::ranges::find(rebuilt, after));
+  EXPECT_EQ(std::ranges::find(rebuilt, before), rebuilt.end());
+  EXPECT_NE(std::ranges::find(rebuilt, after), rebuilt.end());
+}
+
+TEST(LaunchPreloadTest, CanStartWithoutParentEnvironment) {
+  const std::string name = "RJ_LAUNCH_ENV_CLEAR_TEST_" + std::to_string(getpid());
+  ScopedEnvironmentVariable variable(name, "parent");
+  ASSERT_EQ(variable.set_result(), 0);
+
+  rocjitsu::launcher::LaunchEnvironment inherited;
+  EXPECT_STREQ(inherited.get(name), "parent");
+
+  rocjitsu::launcher::LaunchEnvironment clean(rocjitsu::launcher::ParentEnvironment::Omit);
+  EXPECT_EQ(clean.get(name), nullptr);
+
+  clean.set(name, "child");
+  EXPECT_STREQ(clean.get(name), "child");
+}
+
+TEST(LaunchPreloadTest, FailedExecRestoresOriginalEnvironment) {
+  const std::string name = "RJ_LAUNCH_ENV_EXEC_RESTORE_TEST_" + std::to_string(getpid());
+  ScopedEnvironmentVariable variable(name, "parent");
+  ASSERT_EQ(variable.set_result(), 0);
+
+  {
+    rocjitsu::launcher::LaunchEnvironment environment(rocjitsu::launcher::ParentEnvironment::Omit);
+    environment.set(name, "child");
+    char executable[] = "/definitely-not-a-rocjitsu-test-executable";
+    char *argv[] = {executable, nullptr};
+
+    EXPECT_EQ(rocjitsu::launcher::execvp_with_environment(executable, argv, environment), -1);
+  }
+
+  ASSERT_NE(std::getenv(name.c_str()), nullptr);
+  EXPECT_STREQ(std::getenv(name.c_str()), "parent");
 }
 
 TEST(LaunchPreloadTest, DbtGuestToolsDisableAutomaticHotswapLoading) {
