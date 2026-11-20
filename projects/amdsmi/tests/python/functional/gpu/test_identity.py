@@ -153,7 +153,8 @@ class TestGpuIdentity(unittest.TestCase):
 
     def test_get_gpu_driver_info_v2(self):
         self.common.print_func_name("")
-        # Asked before the library's time-limited rpm query, to warm the cache for it.
+        # Asked before the library's time-limited rpm query, so rpm's own caches are warm and
+        # the library's query is not the cold one.
         kmod_versions = _kmod_versions_of_running_kernel()
         self.common.Test_API_Per_GPU(
             amdsmi_get_gpu_driver_info_v2=amdsmi.amdsmi_get_gpu_driver_info_v2
@@ -164,14 +165,18 @@ class TestGpuIdentity(unittest.TestCase):
         dkms = package_format.fullmatch(_dkms_version_of_running_kernel() or "")
         answered = 0
         for gpu in self.common.processors:
-            try:
-                info = amdsmi.amdsmi_get_gpu_driver_info_v2(gpu)
-            except amdsmi.AmdSmiLibraryException:
-                continue
-            answered += 1
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", DeprecationWarning)
-                base = amdsmi.amdsmi_get_gpu_driver_info(gpu)
+                try:
+                    base = amdsmi.amdsmi_get_gpu_driver_info(gpu)
+                except amdsmi.AmdSmiLibraryException as v1_error:
+                    # v2 starts with the v1 call, so it must fail with the same status.
+                    with self.assertRaises(amdsmi.AmdSmiLibraryException) as v2_error:
+                        amdsmi.amdsmi_get_gpu_driver_info_v2(gpu)
+                    self.assertEqual(v2_error.exception.get_error_code(), v1_error.get_error_code())
+                    continue
+            info = amdsmi.amdsmi_get_gpu_driver_info_v2(gpu)
+            answered += 1
             self.assertEqual({key: info[key] for key in base}, base)
             self.assertEqual(
                 set(info) - set(base),
@@ -208,6 +213,9 @@ class TestGpuIdentity(unittest.TestCase):
                 self.assertEqual(info["driver_package"], "amdgpu-kmod")
                 self.assertEqual(info["driver_build_version"], kmod_build)
                 self.assertEqual(info["driver_full_version"], f"{version}-{kmod_build}")
+            elif len(kmod_builds) > 1:
+                self.assertEqual(info["driver_package"], "N/A")
+                self.assertEqual(info["driver_build_version"], "N/A")
             else:
                 # A package is reported only together with its build.
                 self.assertEqual(

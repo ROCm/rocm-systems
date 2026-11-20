@@ -6,13 +6,22 @@
 
 #include <fcntl.h>
 #include <gtest/gtest.h>
+#include <linux/audit.h>
+#include <linux/filter.h>
+#include <linux/seccomp.h>
+#include <sys/prctl.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -36,6 +45,12 @@ using std::chrono_literals::operator""s;
 
 constexpr auto kPackageName = "amdgpu";
 constexpr auto kOtherPackageName = "not-amdgpu";
+// Above the cap on a dkms.conf, so reading it must be refused.
+constexpr size_t kOversizedDkmsConf = (2U * 1024U * 1024U);
+// Parks the saved stdin and stdout above any descriptor the lookup can open.
+constexpr int kSavedFdMin = 100;
+constexpr auto kEndWaitLimit = 20s;
+constexpr auto kEndWaitStep = 10ms;
 constexpr auto kVersionA = "6.19.13-2370380.24.04";
 constexpr auto kVersionB = "6.19.20-2450390.24.04";
 constexpr auto kKernelRelease = "6.8.0-124-generic";
@@ -101,6 +116,35 @@ class DkmsTree {
 auto ActiveDkmsVersion(const DkmsTree& tree, std::string* version) -> amdsmi_status_t {
   return smi_amdgpu_get_active_dkms_version(tree.dkms_root(), kKernelRelease, kKernelMachine,
                                             version);
+}
+
+struct ChildLookup {
+  bool has_returned;
+  bool is_rejected;
+};
+
+// Runs the lookup in a child that is ended when it does not return in time, so a reader that
+// blocks on a FIFO fails the test instead of hanging the suite.
+auto LookUpInChild(const DkmsTree& tree) -> ChildLookup {
+  const auto child = fork();
+  if (child == 0) {
+    auto version = std::string{};
+    const auto status = ActiveDkmsVersion(tree, &version);
+    _exit(((status == AMDSMI_STATUS_NOT_SUPPORTED) && version.empty()) ? 0 : 1);
+  }
+  auto child_status = 0;
+  auto has_returned = false;
+  for (auto waited = 0ms; (!has_returned) && (waited < kEndWaitLimit); waited += kEndWaitStep) {
+    has_returned = (waitpid(child, &child_status, WNOHANG) == child);
+    if (!has_returned) {
+      std::this_thread::sleep_for(kEndWaitStep);
+    }
+  }
+  if (!has_returned) {
+    kill(child, SIGKILL);
+    waitpid(child, &child_status, 0);
+  }
+  return {has_returned, (WIFEXITED(child_status)) && (WEXITSTATUS(child_status) == 0)};
 }
 
 // What uname reports on the host the DkmsTree is built for.
@@ -183,7 +227,7 @@ class FakeRpm {
     auto script = std::string{"#!/bin/sh\n"};
     script += "if [ \"$#\" = 2 ] && [ \"$1\" = --eval ] && [ \"$2\" = '%{_dbpath}' ]; then\n";
     script += eval_body + "  echo '" + named + "'\n  exit 0\nfi\n";
-    script += "[ \"$#\" = 4 ] && [ \"$1\" = -q ] && [ \"$2\" = --qf ] && ";
+    script += "[ \"$#\" = 4 ] && [ \"$1\" = -qa ] && [ \"$2\" = --qf ] && ";
     script += "[ \"$3\" = '%{VERSION}-%{RELEASE}\\n' ] && ";
     script += std::string{"[ \"$4\" = amdgpu-kmod-"} + kKmodRelease + " ] || exit 9\n";
     script += ": > \"$0.queried\"\n" + body;
@@ -209,6 +253,48 @@ class FakeRpm {
   FakeSysfsTree tree_;
 };
 
+constexpr auto kPerlPath = "/usr/bin/perl";
+
+// A stand-in rpm that is no shell script, since a shell sets signal masks for itself. Writes
+// <path>.sig with SigBlk and SigIgn as read from /proc/self/status.
+class SignalProbeRpm {
+ public:
+  SignalProbeRpm() {
+    fs::permissions(RootOf(tree_), fs::perms::owner_all);
+    tree_.WriteFile("db/rpmdb.sqlite", "");
+    const auto db = (fs::path{tree_.root()} / "db").string();
+    const auto sig_file = path() + ".sig";
+    auto script = std::string{"#!"} + kPerlPath + "\n";
+    script += "if ($ARGV[0] eq \"--eval\") { print \"" + db + "\\n\"; exit 0 }\n";
+    script += "open(my $in, \"<\", \"/proc/self/status\") or exit 1;\n";
+    script += "open(my $out, \">\", \"" + sig_file + "\") or exit 1;\n";
+    script += "while (<$in>) { print $out \"$1: $2\\n\" if /^(Sig(?:Blk|Ign)):\\s*(\\S+)/ }\n";
+    script += "print \"6.16.13.000000-2412345.1\\n\";\n";
+    tree_.WriteFile("rpm", script);
+    tree_.SetPermissions("rpm", 0700);
+  }
+
+  auto path() const -> std::string { return tree_.root() + "/rpm"; }
+
+  auto is_runnable() const -> bool {
+    return (access(path().c_str(), X_OK) == 0) && (access(kPerlPath, X_OK) == 0);
+  }
+
+  // The mask the stand-in found for `name`, "SigBlk" or "SigIgn", or empty when it has not run.
+  auto mask(const std::string& name) const -> std::string {
+    auto file = std::ifstream{path() + ".sig"};
+    for (auto key = std::string{}, value = std::string{}; file >> key >> value;) {
+      if (key == name + ":") {
+        return value;
+      }
+    }
+    return {};
+  }
+
+ private:
+  FakeSysfsTree tree_;
+};
+
 auto Prints(std::string_view text, int exit_code = 0) -> std::string {
   return "printf '%s' '" + std::string{text} + "'\nexit " + std::to_string(exit_code) + "\n";
 }
@@ -223,6 +309,9 @@ auto EndProcess(pid_t pid) -> void {
   if ((pid > 0) && (waitpid(pid, nullptr, WNOHANG) == 0) && (kill(pid, SIGKILL) == 0)) {
     waitpid(pid, nullptr, 0);
   }
+  // The library holds a descriptor for a late rpm until its next lookup, which lets go of it.
+  auto none = std::vector<std::string>{};
+  smi_amdgpu_get_kmod_versions("/nonexistent/amdsmi/rpm", kKmodRelease, &none);
 }
 
 // Looks up the kmod versions through a stand-in rpm that runs `setup` and then stays for twice
@@ -264,6 +353,99 @@ auto EndedByItself(const FakeRpm& rpm) -> bool {
   const auto ended = rpm.left("ended");
   EndProcess(rpm.pid());
   return ended;
+}
+
+constexpr auto kFoundByRpm = "6.16.13.000000-2412345.1\n";
+
+// How many times the stand-in made by CountingRpm was asked for the package.
+auto QueryCount(const FakeRpm& rpm) -> std::ptrdiff_t {
+  auto lines = std::ifstream{rpm.path() + ".count"};
+  return std::count(std::istreambuf_iterator<char>{lines}, std::istreambuf_iterator<char>{}, '\n');
+}
+
+// Prints the package once its file <path>.ok exists, and fails until then.
+auto CountingRpm() -> std::unique_ptr<FakeRpm> {
+  return std::make_unique<FakeRpm>("echo x >> \"$0.count\"\n[ -e \"$0.ok\" ] || exit 1\n" +
+                                   Prints(kFoundByRpm));
+}
+
+auto MakeAnswerable(const FakeRpm& rpm) -> void { std::ofstream{rpm.path() + ".ok"}; }
+
+// Whether a stand-in rpm that the lookup left running ended by itself. Leaves it to be reaped.
+auto HasEndedWithoutReaping(const FakeRpm& rpm) -> bool {
+  for (auto waited = 0ms; (!rpm.left("ended")) && (waited < kEndWaitLimit);
+       waited += kEndWaitStep) {
+    std::this_thread::sleep_for(kEndWaitStep);
+  }
+  return rpm.left("ended");
+}
+
+// Waits until the process of a stand-in rpm has ended, whether or not it was reaped.
+auto WaitUntilEnded(pid_t pid) -> void {
+  const auto stat_path = "/proc/" + std::to_string(pid) + "/stat";
+  for (auto waited = 0ms; waited < kEndWaitLimit; waited += kEndWaitStep) {
+    auto stat = std::string{};
+    std::getline(std::ifstream{stat_path}, stat);
+    if ((stat.empty()) || (stat.find(") Z") != std::string::npos)) {
+      return;
+    }
+    std::this_thread::sleep_for(kEndWaitStep);
+  }
+}
+
+#if defined(SYS_pidfd_open) && (defined(__x86_64__) || defined(__aarch64__))
+// Makes pidfd_open fail with ENOSYS for this process and its children, as on a kernel before 5.3
+// or under a seccomp profile that does not list it. It cannot be undone, so only a child calls it.
+auto was_pidfd_open_blocked() -> bool {
+#if defined(__x86_64__)
+  constexpr auto kArch = AUDIT_ARCH_X86_64;
+#else
+  constexpr auto kArch = AUDIT_ARCH_AARCH64;
+#endif
+  sock_filter program[] = {
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, arch)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kArch, 1, 0),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(seccomp_data, nr)),
+      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, SYS_pidfd_open, 0, 1),
+      BPF_STMT(BPF_RET | BPF_K, (SECCOMP_RET_ERRNO | ENOSYS)),
+      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+  };
+  auto filter = sock_fprog{static_cast<unsigned short>(std::size(program)), program};
+  return (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) == 0) &&
+         (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &filter) == 0);
+}
+#else
+auto was_pidfd_open_blocked() -> bool { return false; }
+#endif
+
+constexpr int kNoSeccompExit = 10;
+constexpr int kLateRpmNotLateExit = 11;
+constexpr int kLateRpmNeverNoticedExit = 12;
+constexpr int kDescriptorLeakExit = 13;
+
+// Runs in the child of the test that blocks pidfd_open. Returns 0 when a late rpm without a pidfd
+// is noticed once it ended and leaves no pipe open.
+auto LookUpLateRpmWithoutPidfd(const FakeRpm& slow, const FakeRpm& good) -> int {
+  if (!was_pidfd_open_blocked()) {
+    return kNoSeccompExit;
+  }
+  const auto open_fds = OpenFdCount();
+  auto versions = Versions{};
+  if (smi_amdgpu_get_kmod_versions(slow.path(), kKmodRelease, &versions, 400ms) !=
+      AMDSMI_STATUS_NOT_SUPPORTED) {
+    return kLateRpmNotLateExit;
+  }
+  for (auto waited = 0ms; (!slow.left("ended")) && (waited < 3s); waited += kEndWaitStep) {
+    std::this_thread::sleep_for(kEndWaitStep);
+  }
+  for (auto waited = 0ms; waited < kEndWaitLimit; waited += kEndWaitStep) {
+    if (KmodVersions(good, &versions) == AMDSMI_STATUS_SUCCESS) {
+      return (OpenFdCount() == open_fds) ? 0 : kDescriptorLeakExit;
+    }
+    std::this_thread::sleep_for(kEndWaitStep);
+  }
+  return kLateRpmNeverNoticedExit;
 }
 
 }  // namespace
@@ -628,6 +810,56 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsMissingDkmsConf) {
   EXPECT_EQ(active_version, "");
 }
 
+TEST(SystemUnit, ActiveDkmsVersionDoesNotBlockOnAFifoNobodyWritesTo) {
+  auto tree = DkmsTree{};
+  tree.AddPackage(kVersionA, "");
+  tree.AddKernelSymlink(tree.kernel_dir(kVersionA));
+  ASSERT_EQ(mkfifo((tree.source_tree(kVersionA) / "dkms.conf").c_str(), 0600), 0);
+
+  const auto lookup = LookUpInChild(tree);
+
+  EXPECT_TRUE(lookup.has_returned) << "the lookup blocked on a FIFO";
+  EXPECT_TRUE(lookup.is_rejected);
+}
+
+TEST(SystemUnit, ActiveDkmsVersionRejectsAFifoThatHoldsADkmsConf) {
+  auto tree = DkmsTree{};
+  tree.AddPackage(kVersionA, "");
+  tree.AddKernelSymlink(tree.kernel_dir(kVersionA));
+  const auto fifo = tree.source_tree(kVersionA) / "dkms.conf";
+  ASSERT_EQ(mkfifo(fifo.c_str(), 0600), 0);
+
+  // Filled before the lookup, so a reader that skips the type check reads a valid dkms.conf.
+  const auto reader = open(fifo.c_str(), O_RDONLY | O_NONBLOCK);
+  ASSERT_GE(reader, 0);
+  const auto writer = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+  ASSERT_GE(writer, 0);
+  const auto conf =
+      std::string{"PACKAGE_NAME=\""} + kPackageName + "\"\nPACKAGE_VERSION=\"" + kVersionA + "\"\n";
+  ASSERT_EQ(write(writer, conf.data(), conf.size()), static_cast<ssize_t>(conf.size()));
+  close(writer);
+
+  const auto lookup = LookUpInChild(tree);
+  close(reader);
+
+  EXPECT_TRUE(lookup.has_returned) << "the lookup blocked on a FIFO";
+  EXPECT_TRUE(lookup.is_rejected);
+}
+
+TEST(SystemUnit, ActiveDkmsVersionRejectsOversizedDkmsConf) {
+  auto tree = DkmsTree{};
+  tree.AddPackage(kVersionA);
+  tree.AddKernelSymlink(tree.kernel_dir(kVersionA));
+  {
+    auto conf = std::ofstream{tree.source_tree(kVersionA) / "amd/dkms/dkms.conf", std::ios::app};
+    conf << std::string(kOversizedDkmsConf, '#') << "\n";
+  }
+
+  auto active_version = std::string{"stale"};
+  EXPECT_EQ(ActiveDkmsVersion(tree, &active_version), AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(active_version, "");
+}
+
 TEST(SystemUnit, ActiveDkmsVersionRejectsPackageNameMismatch) {
   auto tree = DkmsTree{};
   tree.AddPackage(kVersionA, kOtherPackageName);
@@ -652,6 +884,12 @@ TEST(SystemUnit, ActiveDkmsVersionRejectsEmptyReleaseOrMachine) {
   auto tree = DkmsTree{};
   tree.AddPackage(kVersionA);
   tree.AddKernelSymlink(tree.kernel_dir(kVersionA));
+  // What an empty release or machine would look up, so only the check rejects it.
+  const auto dkms_root = fs::path{tree.dkms_root()};
+  fs::create_directory_symlink(tree.kernel_dir(kVersionA),
+                               dkms_root / (std::string{"kernel--"} + kKernelMachine));
+  fs::create_directory_symlink(tree.kernel_dir(kVersionA),
+                               dkms_root / (std::string{"kernel-"} + kKernelRelease + "-"));
 
   auto active_version = std::string{"stale"};
   EXPECT_EQ(
@@ -682,6 +920,20 @@ TEST(SystemUnit, KmodVersionReadsBuildFromRpmRelease) {
   EXPECT_TRUE(rpm.left("queried"));
 }
 
+TEST(SystemUnit, KmodVersionLeavesNoDescriptorOpenAfterAnAnswer) {
+  const auto rpm = FakeRpm{Prints("6.16.13.000000-2412345.1\n")};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  // The first lookup is a warm-up: state the library or libc opens lazily is not a leak.
+  auto versions = Versions{};
+  ASSERT_EQ(KmodVersions(rpm, &versions), AMDSMI_STATUS_SUCCESS);
+  const auto open_fds = OpenFdCount();
+  EXPECT_EQ(KmodVersions(rpm, &versions), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(OpenFdCount(), open_fds);
+}
+
 TEST(SystemUnit, KmodVersionListsEveryInstalledVersion) {
   const auto rpm = FakeRpm{Prints("6.16.13.000000-2412345.el9\n6.16.6.000000-2400001.el9\n")};
   if (!rpm.runnable()) GTEST_SKIP() << kNoExecSkip;
@@ -691,8 +943,21 @@ TEST(SystemUnit, KmodVersionListsEveryInstalledVersion) {
   EXPECT_EQ(versions, (Versions{"6.16.13.000000-2412345", "6.16.6.000000-2400001"}));
 }
 
-TEST(SystemUnit, KmodVersionNotSupportedWhenPackageIsNotInstalled) {
-  const auto rpm = FakeRpm{Prints("package amdgpu-kmod is not installed\n", 1)};
+TEST(SystemUnit, KmodVersionListsNothingWhenPackageIsNotInstalled) {
+  // rpm -qa exits 0 with no output for a package that is not installed.
+  const auto rpm = FakeRpm{Prints("")};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  auto versions = Versions{"stale"};
+  EXPECT_EQ(KmodVersions(rpm, &versions), AMDSMI_STATUS_SUCCESS);
+  EXPECT_TRUE(versions.empty());
+  EXPECT_TRUE(rpm.left("queried"));
+}
+
+TEST(SystemUnit, KmodVersionNotSupportedWhenRpmFailsWithoutOutput) {
+  const auto rpm = FakeRpm{Prints("", 1)};
   if (!rpm.runnable()) GTEST_SKIP() << kNoExecSkip;
 
   auto versions = Versions{"stale"};
@@ -797,6 +1062,103 @@ TEST(SystemUnit, KmodVersionKeepsTheCallersDescriptorsOutOfRpm) {
   EXPECT_FALSE(rpm.left("inherited"));
 }
 
+TEST(SystemUnit, KmodVersionStartsRpmWithDefaultSignals) {
+  const auto rpm = SignalProbeRpm{};
+  if (!rpm.is_runnable()) {
+    GTEST_SKIP() << kNoExecSkip << ", or " << kPerlPath << " is missing";
+  }
+
+  // The caller blocks every signal and ignores two. rpm must start with neither.
+  auto blocked = sigset_t{};
+  auto previous_mask = sigset_t{};
+  sigfillset(&blocked);
+  struct sigaction ignore = {};
+  struct sigaction previous_pipe = {};
+  struct sigaction previous_term = {};
+  ignore.sa_handler = SIG_IGN;
+  ASSERT_EQ(sigaction(SIGPIPE, &ignore, &previous_pipe), 0);
+  ASSERT_EQ(sigaction(SIGTERM, &ignore, &previous_term), 0);
+  ASSERT_EQ(pthread_sigmask(SIG_SETMASK, &blocked, &previous_mask), 0);
+  auto versions = Versions{};
+  const auto status = smi_amdgpu_get_kmod_versions(rpm.path(), kKmodRelease, &versions);
+  ASSERT_EQ(pthread_sigmask(SIG_SETMASK, &previous_mask, nullptr), 0);
+  ASSERT_EQ(sigaction(SIGTERM, &previous_term, nullptr), 0);
+  ASSERT_EQ(sigaction(SIGPIPE, &previous_pipe, nullptr), 0);
+
+  // perl ignores other signals by itself, so only the two the caller ignored are checked.
+  constexpr auto kCallerIgnoredBits =
+      ((uint64_t{1} << (SIGTERM - 1)) | (uint64_t{1} << (SIGPIPE - 1)));
+  ASSERT_FALSE(rpm.mask("SigBlk").empty());
+  ASSERT_FALSE(rpm.mask("SigIgn").empty());
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(std::stoull(rpm.mask("SigBlk"), nullptr, 16), uint64_t{0});
+  EXPECT_EQ((std::stoull(rpm.mask("SigIgn"), nullptr, 16) & kCallerIgnoredBits), uint64_t{0});
+}
+
+TEST(SystemUnit, KmodVersionReadsRpmWhenStdioIsClosed) {
+  const auto rpm = FakeRpm{Prints("6.16.13.000000-2412345.1\n")};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  // The pipe then lands on descriptors 0 and 1, where the output end must still reach rpm. This
+  // fails only on glibc older than 2.29, where dup2(fd, fd) keeps close-on-exec.
+  const auto saved_in = fcntl(STDIN_FILENO, F_DUPFD_CLOEXEC, kSavedFdMin);
+  const auto saved_out = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, kSavedFdMin);
+  ASSERT_GE(saved_in, kSavedFdMin);
+  ASSERT_GE(saved_out, kSavedFdMin);
+  close(STDIN_FILENO);
+  close(STDOUT_FILENO);
+  auto versions = Versions{};
+  const auto status = KmodVersions(rpm, &versions);
+  dup2(saved_in, STDIN_FILENO);
+  dup2(saved_out, STDOUT_FILENO);
+  close(saved_in);
+  close(saved_out);
+
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(versions, Versions{"6.16.13.000000-2412345"});
+}
+
+#if defined(__GLIBC__) && ((__GLIBC__ > 2) || ((__GLIBC__ == 2) && (__GLIBC_MINOR__ >= 34)))
+// Before glibc 2.34 the descriptors are listed in the parent, which this race cannot be closed on.
+TEST(SystemUnit, KmodVersionKeepsDescriptorsOpenedDuringTheCallOutOfRpm) {
+  // Counts rpm's descriptors, which are the same on each run when none leaks. Without the close
+  // action a run leaks only now and then, so this fails by chance within the runs.
+  const auto rpm = FakeRpm{"set -- /proc/$$/fd/*\necho $# >> \"$0.fds\"\n" +
+                           Prints("6.16.13.000000-2412345.1\n")};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  auto is_done = std::atomic<bool>{false};
+  auto churn = std::thread{[&is_done] {
+    while (!is_done) {
+      close(open("/dev/null", O_RDONLY));  // not close-on-exec, as a library thread may open
+    }
+  }};
+  constexpr auto kRuns = 300;
+  auto versions = Versions{};
+  auto status = AMDSMI_STATUS_SUCCESS;
+  for (auto run = 0; (run < kRuns) && (status == AMDSMI_STATUS_SUCCESS); ++run) {
+    status = KmodVersions(rpm, &versions);
+  }
+  is_done = true;
+  churn.join();
+
+  EXPECT_EQ(status, AMDSMI_STATUS_SUCCESS);
+  auto counts = std::vector<int>{};
+  auto file = std::ifstream{rpm.path() + ".fds"};
+  for (auto count = 0; file >> count;) {
+    counts.push_back(count);
+  }
+  ASSERT_EQ(counts.size(), static_cast<size_t>(kRuns));
+  const auto lowest = *std::min_element(counts.begin(), counts.end());
+  EXPECT_EQ(std::count(counts.begin(), counts.end(), lowest), kRuns)
+      << "rpm inherited a descriptor opened during the call";
+}
+#endif
+
 TEST(SystemUnit, KmodVersionLetsRpmFinishOutputItDoesNotKeep) {
   // More than a pipe holds: rpm would block, or be ended by SIGPIPE, if the rest were left
   // unread. The stand-in notes that it wrote all of it.
@@ -880,6 +1242,25 @@ TEST(SystemUnit, KmodVersionReadsRpmWhenTheHostIgnoresSigchld) {
   EXPECT_EQ(versions, Versions{"6.16.13.000000-2412345"});
 }
 
+TEST(SystemUnit, KmodVersionNotSupportedWhenRpmFailsAndTheHostIgnoresSigchld) {
+  // No exit status is left, so empty output must not be taken for "package not installed".
+  const auto rpm = FakeRpm{Prints("", 1)};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  struct sigaction ignore = {};
+  struct sigaction previous = {};
+  ignore.sa_handler = SIG_IGN;
+  ASSERT_EQ(sigaction(SIGCHLD, &ignore, &previous), 0);
+  auto versions = Versions{"stale"};
+  const auto status = KmodVersions(rpm, &versions);
+  ASSERT_EQ(sigaction(SIGCHLD, &previous, nullptr), 0);
+
+  EXPECT_EQ(status, AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(versions.empty());
+}
+
 TEST(SystemUnit, KmodVersionNotSupportedWhenRpmCannotBeStarted) {
   // A directory cannot be run.
   const auto not_a_program = FakeSysfsTree{};
@@ -901,12 +1282,254 @@ TEST(SystemUnit, KmodVersionNotSupportedWithoutRpm) {
 }
 
 TEST(SystemUnit, KmodVersionRejectsEmptyRelease) {
-  auto versions = Versions{"stale"};
+  // Without the check the lookup would still fail, but only after it has started rpm.
+  const auto rpm = FakeRpm{Prints(kFoundByRpm), RpmDatabase::kSqlite, "  : > \"$0.evaluated\"\n"};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
 
-  EXPECT_EQ(smi_amdgpu_get_kmod_versions(kRpmPath, "", &versions), AMDSMI_STATUS_NOT_SUPPORTED);
+  auto versions = Versions{"stale"};
+  EXPECT_EQ(smi_amdgpu_get_kmod_versions(rpm.path(), "", &versions), AMDSMI_STATUS_NOT_SUPPORTED);
   EXPECT_TRUE(versions.empty());
+  EXPECT_FALSE(rpm.left("evaluated"));
 }
 
 TEST(SystemUnit, KmodVersionRejectsNullOutput) {
   EXPECT_EQ(smi_amdgpu_get_kmod_versions(kRpmPath, kKmodRelease, nullptr), AMDSMI_STATUS_INVAL);
+}
+
+TEST(SystemUnit, KmodCacheKeepsAFoundAnswer) {
+  const auto rpm = CountingRpm();
+  if (!rpm->runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  MakeAnswerable(*rpm);
+  auto cache = KmodVersionCache{rpm->path(), 0ms};
+
+  EXPECT_EQ(cache.versions(kKmodRelease), Versions{"6.16.13.000000-2412345"});
+  EXPECT_EQ(cache.versions(kKmodRelease), Versions{"6.16.13.000000-2412345"});
+  EXPECT_EQ(QueryCount(*rpm), 1);
+}
+
+TEST(SystemUnit, KmodCacheKeepsTheAnswerThatThePackageIsNotInstalled) {
+  const auto rpm = FakeRpm{"echo x >> \"$0.count\"\n" + Prints("")};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  auto cache = KmodVersionCache{rpm.path(), 0ms};
+
+  EXPECT_TRUE(cache.versions(kKmodRelease).empty());
+  EXPECT_TRUE(cache.versions(kKmodRelease).empty());
+  EXPECT_EQ(QueryCount(rpm), 1);
+}
+
+TEST(SystemUnit, KmodCacheAsksAgainForAFailureOnceTheIntervalHasPassed) {
+  const auto rpm = CountingRpm();
+  if (!rpm->runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  auto cache = KmodVersionCache{rpm->path(), 0ms};
+
+  EXPECT_TRUE(cache.versions(kKmodRelease).empty());
+  MakeAnswerable(*rpm);
+  EXPECT_EQ(cache.versions(kKmodRelease), Versions{"6.16.13.000000-2412345"});
+  EXPECT_EQ(QueryCount(*rpm), 2);
+}
+
+TEST(SystemUnit, KmodCacheKeepsAFailureUntilTheIntervalHasPassed) {
+  const auto rpm = CountingRpm();
+  if (!rpm->runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  auto cache = KmodVersionCache{rpm->path(), std::chrono::hours{1}};
+
+  EXPECT_TRUE(cache.versions(kKmodRelease).empty());
+  MakeAnswerable(*rpm);
+  EXPECT_TRUE(cache.versions(kKmodRelease).empty());
+  EXPECT_EQ(QueryCount(*rpm), 1);
+}
+
+TEST(SystemUnit, KmodCacheAsksAgainForAnotherRelease) {
+  const auto rpm = CountingRpm();
+  if (!rpm->runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  MakeAnswerable(*rpm);
+  auto cache = KmodVersionCache{rpm->path(), std::chrono::hours{1}};
+
+  EXPECT_FALSE(cache.versions(kKmodRelease).empty());
+  EXPECT_TRUE(cache.versions("6.8.0-124-generic").empty());
+  EXPECT_FALSE(cache.versions(kKmodRelease).empty());
+}
+
+TEST(SystemUnit, KmodCacheAsksOnceForCallersThatArriveTogether) {
+  const auto rpm = CountingRpm();
+  if (!rpm->runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  MakeAnswerable(*rpm);
+  auto cache = KmodVersionCache{rpm->path(), std::chrono::hours{1}};
+
+  constexpr size_t kCallers = 8;
+  auto answers = std::vector<Versions>(kCallers);
+  auto callers = std::vector<std::thread>{};
+  for (size_t caller = 0; caller < kCallers; ++caller) {
+    callers.emplace_back(
+        [&cache, &answers, caller] { answers[caller] = cache.versions(kKmodRelease); });
+  }
+  for (auto& caller : callers) {
+    caller.join();
+  }
+
+  for (const auto& answer : answers) {
+    EXPECT_EQ(answer, Versions{"6.16.13.000000-2412345"});
+  }
+  EXPECT_EQ(QueryCount(*rpm), 1);
+}
+
+TEST(SystemUnit, KmodVersionStartsNoRpmWhileALateOneRunsAndReapsItAfterwards) {
+  const auto late = LookUpWithRpmThatDoesNotExit("");
+  if (!late) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  const auto late_pid = late->pid();
+  const auto rpm = FakeRpm{Prints(kFoundByRpm)};
+  if (!rpm.runnable()) {
+    EndProcess(late_pid);
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  auto versions = Versions{"stale"};
+  EXPECT_EQ(KmodVersions(rpm, &versions), AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(versions.empty());
+  EXPECT_FALSE(rpm.left("queried"));
+
+  EXPECT_TRUE(HasEndedWithoutReaping(*late));
+  WaitUntilEnded(late_pid);
+  EXPECT_EQ(KmodVersions(rpm, &versions), AMDSMI_STATUS_SUCCESS);
+  EXPECT_FALSE(fs::exists("/proc/" + std::to_string(late_pid))) << "the late rpm was not reaped";
+}
+
+TEST(SystemUnit, KmodCacheGivesEveryFirstCallerTheListWhileRpmIsSlow) {
+  // The callers arrive while the one lookup runs. None may get an empty answer for it.
+  const auto rpm = FakeRpm{"echo x >> \"$0.count\"\nsleep 0.5\n" + Prints(kFoundByRpm)};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  auto cache = KmodVersionCache{rpm.path(), std::chrono::hours{1}};
+
+  constexpr size_t kCallers = 8;
+  auto answers = std::vector<Versions>(kCallers);
+  auto callers = std::vector<std::thread>{};
+  for (size_t caller = 0; caller < kCallers; ++caller) {
+    callers.emplace_back(
+        [&cache, &answers, caller] { answers[caller] = cache.versions(kKmodRelease); });
+  }
+  for (auto& caller : callers) {
+    caller.join();
+  }
+
+  for (const auto& answer : answers) {
+    EXPECT_EQ(answer, Versions{"6.16.13.000000-2412345"});
+  }
+  EXPECT_EQ(QueryCount(rpm), 1);
+}
+
+TEST(SystemUnit, KmodCacheDoesNotHoldACallerThatHasAnAnswerForTheWholeRpmRun) {
+  // Fails until <path>.ok exists. Once <path>.slow exists it also takes 2 s.
+  const auto rpm = FakeRpm{
+      "if [ -e \"$0.slow\" ]; then : > \"$0.started\"; sleep 2; fi\n"
+      "[ -e \"$0.ok\" ] || exit 1\n" +
+      Prints(kFoundByRpm)};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+  auto cache = KmodVersionCache{rpm.path(), 50ms};
+  EXPECT_TRUE(cache.versions(kKmodRelease).empty());
+  MakeAnswerable(rpm);
+  std::ofstream{rpm.path() + ".slow"};
+  std::this_thread::sleep_for(100ms);
+
+  auto refreshed = Versions{};
+  auto refresher = std::thread{[&cache, &refreshed] { refreshed = cache.versions(kKmodRelease); }};
+  for (auto waited = 0ms; (!rpm.left("started")) && (waited < kEndWaitLimit);
+       waited += kEndWaitStep) {
+    std::this_thread::sleep_for(kEndWaitStep);
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const auto stale = cache.versions(kKmodRelease);
+  const auto waited = std::chrono::steady_clock::now() - start;
+  refresher.join();
+
+  EXPECT_TRUE(stale.empty());
+  EXPECT_LT(waited, 1s);
+  EXPECT_EQ(refreshed, Versions{"6.16.13.000000-2412345"});
+}
+
+TEST(SystemUnit, KmodVersionLeavesALateRpmToWriteItsOutput) {
+  // The stand-in writes after the deadline. If the library had closed its end of the pipe, that
+  // write would end it with SIGPIPE before it notes that it ended.
+  const auto rpm = FakeRpm{"echo $$ > \"$0.pid\"\nsleep 1.5\nprintf '%s' '" +
+                           std::string{kFoundByRpm} + "'\n: > \"$0.ended\"\n"};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  auto versions = Versions{};
+  EXPECT_EQ(smi_amdgpu_get_kmod_versions(rpm.path(), kKmodRelease, &versions, 1s),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(EndedByItself(rpm));
+}
+
+TEST(SystemUnit, KmodVersionStartsNoRpmWhenTheDeadlineHasPassed) {
+  const auto rpm = FakeRpm{Prints(kFoundByRpm), RpmDatabase::kSqlite, "  : > \"$0.evaluated\"\n"};
+  if (!rpm.runnable()) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  // A late rpm from an earlier test would end the lookup before the deadline check is reached.
+  EndProcess(0);
+  auto versions = Versions{"stale"};
+  EXPECT_EQ(smi_amdgpu_get_kmod_versions(rpm.path(), kKmodRelease, &versions, 0ms),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+  // Waits as long as the marker could take on a slow host, and stops at once if it shows up.
+  for (auto waited = 0ms; (!rpm.left("evaluated")) && (waited < 1s); waited += kEndWaitStep) {
+    std::this_thread::sleep_for(kEndWaitStep);
+  }
+  EXPECT_FALSE(rpm.left("evaluated"));
+  EndProcess(0);
+}
+
+TEST(SystemUnit, KmodVersionNoticesALateRpmEndedWhenNoPidfdCanBeOpened) {
+  const auto slow = FakeRpm{"sleep 1\n: > \"$0.ended\"\n"};
+  const auto good = FakeRpm{Prints(kFoundByRpm)};
+  if ((!slow.runnable()) || (!good.runnable())) {
+    GTEST_SKIP() << kNoExecSkip;
+  }
+
+  const auto child = fork();
+  if (child == 0) {
+    _exit(LookUpLateRpmWithoutPidfd(slow, good));
+  }
+  ASSERT_GT(child, 0);
+  auto child_status = 0;
+  auto has_returned = false;
+  for (auto waited = 0ms; (!has_returned) && (waited < (2 * kEndWaitLimit));
+       waited += kEndWaitStep) {
+    has_returned = (waitpid(child, &child_status, WNOHANG) == child);
+    if (!has_returned) {
+      std::this_thread::sleep_for(kEndWaitStep);
+    }
+  }
+  if (!has_returned) {
+    kill(child, SIGKILL);
+    waitpid(child, &child_status, 0);
+  }
+
+  ASSERT_TRUE(has_returned);
+  ASSERT_TRUE(WIFEXITED(child_status));
+  if (WEXITSTATUS(child_status) == kNoSeccompExit) {
+    GTEST_SKIP() << "seccomp cannot be used here to make pidfd_open fail";
+  }
+  EXPECT_EQ(WEXITSTATUS(child_status), 0);
 }

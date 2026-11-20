@@ -6540,15 +6540,12 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
   return status;
 }
 
-// rpm is slow to start, so the amdgpu-kmod versions of the running kernel are asked for once per
-// process. The first answer is kept, also when rpm could not give one.
+// rpm is slow to start, so the amdgpu-kmod versions of the running kernel are kept. A failed
+// lookup is asked again after kKmodRetryInterval.
+static KmodVersionCache g_kmod_version_cache{kRpmPath};
+
 static std::vector<std::string> amdgpu_kmod_versions(std::string_view release) {
-  static const std::vector<std::string> versions = [release] {
-    std::vector<std::string> kmod_versions;
-    smi_amdgpu_get_kmod_versions(kRpmPath, release, &kmod_versions);
-    return kmod_versions;
-  }();
-  return versions;
+  return g_kmod_version_cache.versions(release);
 }
 
 amdsmi_status_t amdsmi_get_gpu_driver_info_v2(amdsmi_processor_handle processor_handle,

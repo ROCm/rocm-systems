@@ -128,7 +128,8 @@ void TestDriverInfoRead::Run(void) {
   const std::string dkms_version = DkmsVersionOfRunningKernel();
   std::smatch dkms;
   const bool has_dkms = std::regex_match(dkms_version, dkms, package_format);
-  // Asked before the library's time-limited rpm query, to warm the cache for it.
+  // Asked before the library's time-limited rpm query, so rpm's own caches are warm and the
+  // library's query is not the cold one.
   const std::vector<std::string> kmod_versions = KmodVersionsOfRunningKernel();
   uint32_t answered = 0;
 
@@ -198,6 +199,9 @@ void TestDriverInfoRead::Run(void) {
       EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_KMOD);
       EXPECT_EQ(build, kmod_build);
       EXPECT_EQ(std::string{info.driver_full_version}, version + "-" + kmod_build);
+    } else if (kmod_builds.size() > 1) {
+      EXPECT_EQ(info.driver_package, AMDSMI_DRIVER_PACKAGE_NONE);
+      EXPECT_EQ(build, "");
     } else if (info.driver_package == AMDSMI_DRIVER_PACKAGE_NONE) {
       EXPECT_EQ(build, "");
       EXPECT_EQ(std::string{info.driver_full_version}, (version == "N/A") ? "" : version);

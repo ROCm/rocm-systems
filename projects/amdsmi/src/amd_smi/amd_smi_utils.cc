@@ -11,6 +11,8 @@
 #include <spawn.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -21,6 +23,7 @@
 #include <cerrno>
 #include <chrono>
 #include <climits>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +34,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <regex>
 #include <sstream>
@@ -1504,6 +1508,10 @@ constexpr std::string_view kAmdgpuKmodPackagePrefix = "amdgpu-kmod-";
 constexpr std::array<std::string_view, 3> kRpmDatabaseFiles = {"Packages", "Packages.db",
                                                                "rpmdb.sqlite"};
 constexpr size_t kRpmQueryMaxOutput = 4096;
+// A dkms.conf is a few lines; the cap only stops a runaway regular file.
+constexpr size_t kDkmsConfMaxSize = (1024U * 1024U);
+constexpr size_t kDkmsConfChunkSize = 4096;
+constexpr int kNoPidFd = -1;
 // Pause between checks for rpm's exit. It starts short: rpm exits right after its output ends.
 constexpr auto kRpmExitPollFirst = std::chrono::microseconds{100};
 constexpr auto kRpmExitPollMax = std::chrono::microseconds{10000};
@@ -1561,10 +1569,10 @@ auto parse_module_version(std::string_view module_version) -> std::optional<Amdg
   return AmdgpuModuleVersion{match[1].str(), match[2].str()};
 }
 
-// A package is taken for the loaded module's when both have the same kernel version. Nothing
-// checks that the module was installed from it.
-auto package_matches_module(const std::optional<AmdgpuPackageVersion>& package,
-                            const std::optional<AmdgpuModuleVersion>& module) -> bool {
+// Nothing checks that the module was installed from the package, only that both have the same
+// kernel version.
+auto is_package_for_module(const std::optional<AmdgpuPackageVersion>& package,
+                           const std::optional<AmdgpuModuleVersion>& module) -> bool {
   return package.has_value() && module.has_value() &&
          (package->kernel_version == module->kernel_version);
 }
@@ -1575,7 +1583,7 @@ auto only_version_of_module(const std::vector<std::string>& versions,
                             const std::optional<AmdgpuModuleVersion>& module) -> std::string {
   auto found = std::string{};
   for (const auto& version : versions) {
-    if ((!package_matches_module(parse_package_version(version), module)) || (version == found)) {
+    if ((!is_package_for_module(parse_package_version(version), module)) || (version == found)) {
       continue;
     }
     if (!found.empty()) {
@@ -1606,12 +1614,47 @@ auto try_parse_dkms_conf_assignment(std::string_view line, std::string_view key)
   return value_part.substr(1, (value_part.size() - 2));
 }
 
-auto read_dkms_conf(std::string_view caller, const fs::path& conf_path) -> std::optional<DkmsConf> {
-  auto instream = std::ifstream{conf_path};
-  if (!instream.is_open()) {
-    log_driver_package_debug(caller, "Cannot open " + conf_path.string());
+auto read_to_end(int fd) -> std::optional<std::string> {
+  auto contents = std::string{};
+  auto chunk = std::array<char, kDkmsConfChunkSize>{};
+  while (true) {
+    const auto bytes = read(fd, chunk.data(), chunk.size());
+    if (bytes == 0) {
+      return contents;
+    }
+    if (bytes > 0) {
+      contents.append(chunk.data(), static_cast<size_t>(bytes));
+    } else if (errno != EINTR) {
+      return std::nullopt;
+    }
+  }
+}
+
+// O_NONBLOCK keeps a FIFO from blocking the open; the type is checked on the opened descriptor.
+auto read_small_regular_file(const fs::path& path) -> std::optional<std::string> {
+  const auto fd = open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOCTTY | O_NONBLOCK);
+  if (fd < 0) {
     return std::nullopt;
   }
+
+  struct stat file_stat = {};
+  const auto is_small_file = (fstat(fd, &file_stat) == 0) && S_ISREG(file_stat.st_mode) &&
+                             (static_cast<size_t>(file_stat.st_size) <= kDkmsConfMaxSize);
+  auto contents = std::optional<std::string>{};
+  if (is_small_file) {
+    contents = read_to_end(fd);
+  }
+  close(fd);
+  return contents;
+}
+
+auto read_dkms_conf(std::string_view caller, const fs::path& conf_path) -> std::optional<DkmsConf> {
+  const auto conf_text = read_small_regular_file(conf_path);
+  if (!conf_text.has_value()) {
+    log_driver_package_debug(caller, "Cannot read " + conf_path.string());
+    return std::nullopt;
+  }
+  auto instream = std::istringstream{*conf_text};
 
   auto package_name = std::string{};
   auto package_version = std::string{};
@@ -1699,9 +1742,100 @@ auto wait_for_rpm(pid_t pid, std::chrono::steady_clock::time_point until, int* s
   }
 }
 
-// Keeps the caller's open descriptors out of rpm, which can outlive the call. They are listed
-// here because glibc older than 2.34 cannot close them in the child; one that another thread
-// opens after the listing is still inherited. Returns 0 or an errno value.
+// P_PIDFD, which glibc older than 2.36 does not declare.
+constexpr auto kWaitIdPidfd = static_cast<idtype_t>(3);
+
+// A pidfd names one process, so a late rpm can be reaped later without a pid-reuse race, also when
+// the host ignores SIGCHLD. Returns kNoPidFd before Linux 5.3, which has no pidfd_open.
+auto open_pidfd(pid_t pid) -> int {
+#ifdef SYS_pidfd_open
+  return static_cast<int>(syscall(SYS_pidfd_open, pid, 0));
+#else
+  static_cast<void>(pid);
+  return kNoPidFd;
+#endif
+}
+
+class PidFd {
+ public:
+  explicit PidFd(int fd) : fd_{fd} {}
+  PidFd(const PidFd&) = delete;
+  auto operator=(const PidFd&) -> PidFd& = delete;
+  ~PidFd() {
+    if (fd_ >= 0) {
+      close(fd_);
+    }
+  }
+  auto release() -> int { return std::exchange(fd_, kNoPidFd); }
+
+ private:
+  int fd_;
+};
+
+// The one rpm that missed its deadline and may still run. Without a pidfd its pid is polled. Its
+// stdout read end stays open until it has ended, so a late write is not a SIGPIPE.
+struct LateRpm {
+  pid_t pid = -1;
+  int pidfd = kNoPidFd;
+  int output_fd = -1;
+};
+std::mutex g_late_rpm_mutex;
+LateRpm g_late_rpm;
+
+auto close_late_rpm(LateRpm* late) -> void {
+  if (late->pidfd >= 0) {
+    close(late->pidfd);
+  }
+  close(late->output_fd);
+  *late = LateRpm{};
+}
+
+auto keep_late_rpm(LateRpm late) -> void {
+  const auto lock = std::lock_guard<std::mutex>{g_late_rpm_mutex};
+  if (g_late_rpm.pid >= 0) {
+    close_late_rpm(&late);
+    return;
+  }
+  g_late_rpm = late;
+}
+
+// True while an rpm that missed its deadline still runs, so that none is started next to it. One
+// that has ended is reaped here.
+auto is_late_rpm_running() -> bool {
+  const auto lock = std::lock_guard<std::mutex>{g_late_rpm_mutex};
+  if (g_late_rpm.pid < 0) {
+    return false;
+  }
+  if (g_late_rpm.pidfd < 0) {
+    // 0 means still running. The pid, or -1 (ECHILD) when SIGCHLD is ignored, means it ended.
+    auto status = 0;
+    if (waitpid(g_late_rpm.pid, &status, WNOHANG) == 0) {
+      return true;
+    }
+    close_late_rpm(&g_late_rpm);
+    return false;
+  }
+  // A poll error keeps the rpm tracked: dropping a running one would let a second one start.
+  auto poll_fd = pollfd{g_late_rpm.pidfd, POLLIN, 0};
+  if (poll(&poll_fd, 1, 0) <= 0) {
+    return true;
+  }
+  // ECHILD when SIGCHLD is ignored or the host reaped it already: nothing is left to reap.
+  auto info = siginfo_t{};
+  waitid(kWaitIdPidfd, static_cast<id_t>(g_late_rpm.pidfd), &info, WEXITED | WNOHANG);
+  close_late_rpm(&g_late_rpm);
+  return false;
+}
+
+// Keeps the caller's open descriptors out of rpm, which can outlive the call. glibc 2.34 closes
+// them in the child, so no thread can open one in between. Returns 0 or an errno value.
+#if defined(__GLIBC__) && ((__GLIBC__ > 2) || ((__GLIBC__ == 2) && (__GLIBC_MINOR__ >= 34)))
+auto add_close_of_open_descriptors(posix_spawn_file_actions_t* actions) -> int {
+  return posix_spawn_file_actions_addclosefrom_np(actions, (STDERR_FILENO + 1));
+}
+#else
+// Older libc: the descriptors are listed here, so one that another thread opens afterwards is
+// still inherited.
 auto add_close_of_open_descriptors(posix_spawn_file_actions_t* actions) -> int {
   auto err_code = std::error_code{};
   auto entry = fs::directory_iterator{"/proc/self/fd", err_code};
@@ -1718,14 +1852,54 @@ auto add_close_of_open_descriptors(posix_spawn_file_actions_t* actions) -> int {
   }
   return err_code.value();
 }
+#endif
+
+// rpm must not inherit a blocked or ignored signal, which would make it survive SIGTERM. Returns 0
+// or an errno value, and leaves `attr` initialized only for 0.
+auto init_default_signals(posix_spawnattr_t* attr) -> int {
+  auto no_signals = sigset_t{};
+  auto all_signals = sigset_t{};
+  sigemptyset(&no_signals);
+  sigfillset(&all_signals);
+  auto err = posix_spawnattr_init(attr);
+  if (err != 0) {
+    return err;
+  }
+  err = posix_spawnattr_setsigmask(attr, &no_signals);
+  if (err == 0) {
+    err = posix_spawnattr_setsigdefault(attr, &all_signals);
+  }
+  if (err == 0) {
+    err = posix_spawnattr_setflags(attr, (POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF));
+  }
+  if (err != 0) {
+    posix_spawnattr_destroy(attr);
+  }
+  return err;
+}
 
 // Runs `<rpm_path> <args>` and returns what it printed, or nothing when rpm failed, printed more
 // than is kept, or had not finished by the deadline.
 auto run_rpm(std::string_view caller, const std::string& rpm_path, std::vector<std::string> args,
              std::chrono::steady_clock::time_point deadline) -> std::optional<std::string> {
+  if (std::chrono::steady_clock::now() >= deadline) {
+    log_driver_package_debug(caller, "No time left to run rpm for: " + args.back());
+    return std::nullopt;
+  }
   int pipe_fds[2] = {-1, -1};
   if (pipe2(pipe_fds, O_CLOEXEC) != 0) {
     log_driver_package_debug(caller, std::string{"pipe2 failed: "} + std::strerror(errno));
+    return std::nullopt;
+  }
+
+  // dup2(fd, fd) leaves close-on-exec set before glibc 2.29, so a write end on stdout would not
+  // reach rpm.
+  const auto write_end = fcntl(pipe_fds[1], F_DUPFD_CLOEXEC, (STDERR_FILENO + 1));
+  close(pipe_fds[1]);
+  pipe_fds[1] = write_end;
+  if (write_end < 0) {
+    close(pipe_fds[0]);
+    log_driver_package_debug(caller, std::string{"fcntl failed: "} + std::strerror(errno));
     return std::nullopt;
   }
 
@@ -1757,8 +1931,15 @@ auto run_rpm(std::string_view caller, const std::string& rpm_path, std::vector<s
     if (spawn_err == 0) {
       spawn_err = add_close_of_open_descriptors(&actions);
     }
+    auto attr = posix_spawnattr_t{};
+    auto has_attr = false;
     if (spawn_err == 0) {
-      spawn_err = posix_spawn(&pid, rpm_path.c_str(), &actions, nullptr, argv.data(), envp);
+      spawn_err = init_default_signals(&attr);
+      has_attr = (spawn_err == 0);
+    }
+    if (has_attr) {
+      spawn_err = posix_spawn(&pid, rpm_path.c_str(), &actions, &attr, argv.data(), envp);
+      posix_spawnattr_destroy(&attr);
     }
     posix_spawn_file_actions_destroy(&actions);
   }
@@ -1768,6 +1949,7 @@ auto run_rpm(std::string_view caller, const std::string& rpm_path, std::vector<s
     log_driver_package_debug(caller, "Cannot run " + rpm_path + ": " + std::strerror(spawn_err));
     return std::nullopt;
   }
+  auto pidfd = PidFd{open_pidfd(pid)};
 
   // Read to the end of the output so rpm never blocks on a full pipe, but keep only the start.
   auto output = std::string{};
@@ -1801,24 +1983,32 @@ auto run_rpm(std::string_view caller, const std::string& rpm_path, std::vector<s
     output.append(buffer, kept);
     truncated = truncated || (kept < static_cast<size_t>(bytes));
   }
-  close(pipe_fds[0]);
-  // The deadline also covers an rpm whose output ended but that does not exit. A late rpm is left
-  // to end by itself. It is not killed, which can leave a Berkeley DB rpm database unusable, and
-  // not signalled or waited for later, when its process id can belong to another process.
+  // A late rpm is not killed, which can leave a Berkeley DB rpm database unusable. Its pipe and
+  // pidfd are kept until is_late_rpm_running() reaps it.
   auto wait_status = 0;
   const auto waited = wait_for_rpm(pid, deadline, &wait_status);
+  if (waited == 0) {
+    keep_late_rpm(LateRpm{pid, pidfd.release(), pipe_fds[0]});
+  } else {
+    close(pipe_fds[0]);
+  }
   if ((!finished) || (waited == 0)) {
     log_driver_package_debug(caller, "rpm did not answer in time for: " + args.back());
     return std::nullopt;
   }
 
-  // A caller that ignores SIGCHLD reaps rpm itself; the output is still checked by its format.
+  // A caller that ignores SIGCHLD reaps rpm itself, so no exit status is left to read.
   if ((waited == pid) && ((!WIFEXITED(wait_status)) || (WEXITSTATUS(wait_status) != 0))) {
     log_driver_package_debug(caller, "rpm failed for: " + args.back());
     return std::nullopt;
   }
   if (truncated) {
     log_driver_package_debug(caller, "rpm printed more than is kept for: " + args.back());
+    return std::nullopt;
+  }
+  // Without an exit status, empty output cannot tell "not installed" from a failed rpm.
+  if ((waited != pid) && output.empty()) {
+    log_driver_package_debug(caller, "rpm gave no exit status and no output for: " + args.back());
     return std::nullopt;
   }
   return output;
@@ -1883,6 +2073,10 @@ auto smi_amdgpu_get_kmod_versions(std::string_view rpm_path, std::string_view re
   if (release.empty()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
+  if (is_late_rpm_running()) {
+    log_driver_package_debug(__func__, "An earlier rpm is still running");
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
 
   auto package = std::string{kAmdgpuKmodPackagePrefix};
   package.append(release);
@@ -1892,13 +2086,13 @@ auto smi_amdgpu_get_kmod_versions(std::string_view rpm_path, std::string_view re
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
   const auto output =
-      run_rpm(__func__, rpm, {"-q", "--qf", "%{VERSION}-%{RELEASE}\\n", package}, deadline);
+      run_rpm(__func__, rpm, {"-qa", "--qf", "%{VERSION}-%{RELEASE}\\n", package}, deadline);
   if (!output.has_value()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
 
-  // rpm prints one line for each installed version. One that is not understood could be the
-  // package of the loaded module, so then none is reported.
+  // rpm prints one line per installed version, or none. One line that is not understood could be
+  // the package of the loaded module, so then none is reported.
   auto versions = std::vector<std::string>{};
   auto lines = std::istringstream{*output};
   for (auto line = std::string{}; std::getline(lines, line);) {
@@ -1912,6 +2106,51 @@ auto smi_amdgpu_get_kmod_versions(std::string_view rpm_path, std::string_view re
 
   *kmod_versions = std::move(versions);
   return AMDSMI_STATUS_SUCCESS;
+}
+
+KmodVersionCache::KmodVersionCache(std::string_view rpm_path, std::chrono::milliseconds retry_after)
+    : rpm_path_{rpm_path}, retry_after_{retry_after} {}
+
+auto KmodVersionCache::versions(std::string_view release) -> std::vector<std::string> {
+  auto lock = std::unique_lock<std::mutex>{mutex_};
+  for (;;) {
+    const auto has_answer_for_release = has_answer_ && (release_ == release);
+    const auto is_fresh =
+        has_answer_for_release &&
+        (is_found_ || ((std::chrono::steady_clock::now() - asked_at_) < retry_after_));
+    // A stale answer is a failure (empty): it is given at once while another caller asks rpm.
+    if (is_fresh || (is_refreshing_ && has_answer_for_release)) {
+      return versions_;
+    }
+    if (!is_refreshing_) {
+      break;
+    }
+    refreshed_.wait(lock);
+  }
+
+  // rpm runs without the lock, so a caller that has an answer is not held up by it.
+  is_refreshing_ = true;
+  lock.unlock();
+  struct EndRefresh {
+    KmodVersionCache* cache;
+    std::unique_lock<std::mutex>* lock;
+    ~EndRefresh() {
+      if (!lock->owns_lock()) {
+        lock->lock();
+      }
+      cache->is_refreshing_ = false;
+      cache->refreshed_.notify_all();
+    }
+  } const end_refresh{this, &lock};
+  auto fresh = std::vector<std::string>{};
+  const auto status = smi_amdgpu_get_kmod_versions(rpm_path_, release, &fresh);
+  lock.lock();
+  is_found_ = (status == AMDSMI_STATUS_SUCCESS);
+  versions_ = std::move(fresh);
+  release_ = release;
+  asked_at_ = std::chrono::steady_clock::now();
+  has_answer_ = true;
+  return versions_;
 }
 
 auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
@@ -1929,10 +2168,10 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
   // so neither it nor its build is reported.
   const AmdgpuPackageVersion* package = nullptr;
   auto package_type = AMDSMI_DRIVER_PACKAGE_NONE;
-  if (package_matches_module(dkms, module)) {
+  if (is_package_for_module(dkms, module)) {
     package = &*dkms;
     package_type = AMDSMI_DRIVER_PACKAGE_DKMS;
-  } else if (package_matches_module(kmod, module)) {
+  } else if (is_package_for_module(kmod, module)) {
     package = &*kmod;
     package_type = AMDSMI_DRIVER_PACKAGE_KMOD;
   } else if (dkms.has_value() || kmod.has_value()) {
@@ -1979,7 +2218,7 @@ auto smi_amdgpu_get_driver_versions(
   const auto module = parse_module_version(module_version);
   if (module.has_value()) {
     smi_amdgpu_get_active_dkms_version(dkms_root, uts.release, uts.machine, &dkms_version);
-    if (!package_matches_module(parse_package_version(dkms_version), module)) {
+    if (!is_package_for_module(parse_package_version(dkms_version), module)) {
       kmod_version = only_version_of_module(kmod_lookup(uts.release), module);
     }
   }

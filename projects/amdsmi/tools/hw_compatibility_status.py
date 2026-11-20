@@ -71,6 +71,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import warnings
 
 
 # ----------------------------------------------------------------------------
@@ -134,6 +135,12 @@ except ImportError as e:
     print("Install the amdsmi Python bindings (e.g. via the ROCm/amd-smi packages),")
     print("or invoke this script with the interpreter that already has them.")
     sys.exit(1)
+
+
+# The v1 driver info call is made on purpose, to report that the API still exists.
+warnings.filterwarnings(
+    "ignore", message=r"amdsmi_get_gpu_driver_info\(\) is deprecated", category=DeprecationWarning
+)
 
 
 def is_root():

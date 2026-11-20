@@ -104,6 +104,18 @@ class TestDriverInfoV2(unittest.TestCase):
                 interface.amdsmi_get_gpu_driver_info_v2(handle)
         self.assertEqual(raised.exception.get_error_code(), wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
 
+    def test_library_error_status_raises(self):
+        handle = wrapper.amdsmi_processor_handle()
+
+        def _stub(_handle, _info_ptr):
+            return wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+
+        # The CLI falls back to v1 on this exception, so a zeroed dict must never replace it.
+        with mock.patch.object(wrapper, "amdsmi_get_gpu_driver_info_v2", _stub, create=True):
+            with self.assertRaises(amdsmi.AmdSmiLibraryException) as raised:
+                interface.amdsmi_get_gpu_driver_info_v2(handle)
+        self.assertEqual(raised.exception.get_error_code(), wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+
     def test_rejects_non_handle(self):
         with self.assertRaises(amdsmi.AmdSmiParameterException):
             interface.amdsmi_get_gpu_driver_info_v2(None)
