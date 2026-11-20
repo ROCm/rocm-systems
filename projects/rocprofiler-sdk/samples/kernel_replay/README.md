@@ -29,7 +29,7 @@ service (same idea as `samples/counter_collection/`).
 | `kernel-replay-basic` | 4 | Replay only. The app still sees one kernel completion. |
 | `kernel-replay-basic-user-data` | 4 max / 2 actual | Carries tool state through `user_data.ptr`; PASS state stops replay through `replay_continue`. |
 | `kernel-replay-counters` | 3 | Dispatch counters; each pass selects a different counter configuration. |
-| `kernel-replay-counters-then-pc-sampling` | — | **Disabled in ctest:** PC sampling ignores localized pass overrides (see API docs). |
+| `kernel-replay-counters-then-pc-sampling` | 4 | Dispatch counters on passes 0–2, then PC sampling on pass 3. Disabled in ctest; run locally on a rebootable machine. |
 | `kernel-replay-att` | 2 | Counters on pass 0, ATT on pass 1. |
 | `kernel-replay-spm` | 2 | Counters on pass 0, SPM on pass 1. |
 | `kernel-replay-opt-out` | 3 / 1 | Replays the `bump` kernel (`block.x == 67`); leaves `nudge` unreplayed. |
@@ -38,8 +38,7 @@ service (same idea as `samples/counter_collection/`).
 ### Advanced: multi-service pass ordering
 
 These two targets share one larger client (`service_sequence_client.cpp`) that runs **five**
-passes with ATT, SPM, and counters in a fixed order (PC sampling slots are present in the source
-but the ctests are **disabled** until PC sampling honors localized overrides).
+passes with ATT, SPM, PC sampling, and counters in a fixed order.
 
 | Sample | Pass order (5 passes) |
 |---|---|

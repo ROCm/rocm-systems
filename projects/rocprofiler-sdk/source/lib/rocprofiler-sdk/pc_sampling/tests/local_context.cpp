@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -42,11 +43,9 @@ as_active(const context::context& ctx)
 }
 }  // namespace
 
-// PC sampling is agent-wide and does not consult local_context_override(). A recorded
-// local stop must succeed (the TLS map is service-agnostic) but must not flip the
-// sampler's enabled flag. Reprogramming PCS hardware per pass is exactly what the
-// sticky override is meant to avoid; until a consumer is wired, collection is a no-op.
-TEST(pc_sampling, local_context_override_does_not_toggle_enabled)
+// A replay-local stop changes the effective request without mutating the context's global
+// start/stop state. The replay loop applies that request to the agent's hardware session.
+TEST(pc_sampling, local_context_override_suspends_effective_request)
 {
     context::context ctx{};
     ctx.context_idx = 72;
@@ -63,14 +62,16 @@ TEST(pc_sampling, local_context_override_does_not_toggle_enabled)
 
         ASSERT_TRUE(kernel_replay::local_context_override({.handle = ctx.context_idx}).has_value());
         EXPECT_FALSE(*kernel_replay::local_context_override({.handle = ctx.context_idx}));
+        EXPECT_FALSE(pc_sampling::is_pc_sample_service_requested(&ctx));
         EXPECT_TRUE(ctx.pc_sampler->enabled.load())
-            << "PC sampling is agent-wide; local stop must not flip the service enabled flag";
+            << "A replay-local stop must not change the context's global state";
     }
 
     EXPECT_TRUE(ctx.pc_sampler->enabled.load());
+    EXPECT_TRUE(pc_sampling::is_pc_sample_service_requested(&ctx));
 }
 
-TEST(pc_sampling, local_context_override_restart_does_not_toggle_enabled)
+TEST(pc_sampling, local_context_override_restart_restores_effective_request)
 {
     context::context ctx{};
     ctx.context_idx = 73;
@@ -85,14 +86,20 @@ TEST(pc_sampling, local_context_override_restart_does_not_toggle_enabled)
               ROCPROFILER_STATUS_SUCCESS);
     kernel_replay::set_toggles_armed(false);
     EXPECT_FALSE(*kernel_replay::local_context_override({.handle = ctx.context_idx}));
+    EXPECT_FALSE(pc_sampling::is_pc_sample_service_requested(&ctx));
     EXPECT_TRUE(ctx.pc_sampler->enabled.load())
-        << "PC sampling ignores a local stop; the sampler stays globally active";
+        << "A replay-local stop must not change the context's global state";
 
     kernel_replay::set_toggles_armed(true);
     EXPECT_EQ(kernel_replay::replay_local_enable_context({.handle = ctx.context_idx}),
               ROCPROFILER_STATUS_SUCCESS);
     kernel_replay::set_toggles_armed(false);
     EXPECT_TRUE(*kernel_replay::local_context_override({.handle = ctx.context_idx}));
+    EXPECT_TRUE(pc_sampling::is_pc_sample_service_requested(&ctx));
     EXPECT_TRUE(ctx.pc_sampler->enabled.load())
-        << "PC sampling ignores a local start; the sampler stays globally active";
+        << "A replay-local start must not change the context's global state";
+
+    ctx.pc_sampler->enabled.store(false);
+    EXPECT_FALSE(pc_sampling::is_pc_sample_service_requested(&ctx))
+        << "A replay-local start must not promote a globally stopped context";
 }

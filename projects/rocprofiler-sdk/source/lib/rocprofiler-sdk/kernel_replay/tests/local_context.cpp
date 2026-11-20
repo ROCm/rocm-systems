@@ -218,10 +218,10 @@ TEST(kernel_replay_local_context, last_write_wins_in_arm_window)
     EXPECT_FALSE(*lc::local_context_override({9}));
 }
 
-// Per-service consumer models used at dispatch time. Dispatch counters and SPM AND the override
-// with the global enabled flag (local start cannot promote a globally stopped context); ATT skips
-// only when forced off; PC sampling is agent-wide and ignores the override (a local stop is a
-// recorded no-op).
+// Per-service consumer models used for each pass. Dispatch counters, SPM, and PC sampling AND the
+// override with the global enabled flag (local start cannot promote a globally stopped context);
+// ATT skips only when forced off. PC sampling applies the result to its agent session at the pass
+// boundary rather than at dispatch.
 TEST(kernel_replay_local_context, simulated_service_consumers)
 {
     const rocprofiler_context_id_t counters{10};
@@ -239,8 +239,10 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
         if(auto ov = lc::local_context_override(id); ov && !*ov) return false;
         return true;
     };
-    const auto pcs_runs = [](rocprofiler_context_id_t) {
-        return true;  // agent-wide; does not consult the override
+    const auto pcs_runs = [](rocprofiler_context_id_t id, bool globally_on) {
+        bool enabled = globally_on;
+        if(auto ov = lc::local_context_override(id)) enabled = enabled && *ov;
+        return enabled;
     };
 
     std::vector<bool> counters_ran{};
@@ -264,13 +266,13 @@ TEST(kernel_replay_local_context, simulated_service_consumers)
         counters_ran.push_back(dispatch_enabled(counters, true));
         att_ran.push_back(att_runs(att));
         spm_ran.push_back(dispatch_enabled(spm, true));
-        pcs_ran.push_back(pcs_runs(pcs));
+        pcs_ran.push_back(pcs_runs(pcs, true));
     }
 
     EXPECT_EQ(counters_ran, (std::vector<bool>{true, true, true, true}));
     EXPECT_EQ(att_ran, (std::vector<bool>{true, false, false, false}));
     EXPECT_EQ(spm_ran, (std::vector<bool>{true, false, false, false}));
-    EXPECT_EQ(pcs_ran, (std::vector<bool>{true, true, true, true}));
+    EXPECT_EQ(pcs_ran, (std::vector<bool>{true, false, false, false}));
 }
 
 // Local start must not resurrect a globally-stopped dispatch service: the override is ANDed with
