@@ -255,7 +255,9 @@ RUNTIME_ENTRY(cl_int, clEnqueueNDRangeKernel,
 
   // Check the work-group count against the device limit. Resolve the local size the same
   // way the device layer will at submit time, in case the app didn't provide it.
-  {
+  if ((device.info().maxWorkGroupCount_[0] != 0) ||
+      ((work_dim > 1) && (device.info().maxWorkGroupCount_[1] != 0)) ||
+      ((work_dim > 2) && (device.info().maxWorkGroupCount_[2] != 0))) {
     amd::NDRange local(ndrange.local());
     const amd::NDRange global(ndrange.global());
     devKernel->FindLocalWorkSize(work_dim, global, local);
