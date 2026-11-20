@@ -26,6 +26,7 @@ struct resolved_value
     config_source  source = config_source::default_value;
 };
 
+/// Parameter id to the value that won the merge. Iterated in id order.
 using resolved_config = std::map<std::string, resolved_value, std::less<>>;
 
 /**
