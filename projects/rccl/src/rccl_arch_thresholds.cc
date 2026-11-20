@@ -234,10 +234,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
-  // From 32 ranks, AllReduce VMM beats LL two-shot / LL128 1.3-3.7x between 2M and nRanks x 512K.
-  .ddaArVmmFirstMinRanks = 32,
-  .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
-  .ddaArVmmFirstMaxPerRank = 512ULL*1024,
+  // Off: peer-parallel LL128 beats AllReduce VMM 2.3-3.4x between 4M and 16M on 32 ranks, so VMM no longer
+  // goes ahead of the LL tiers.
+  .ddaArVmmFirstMinRanks = 0,
+  .ddaArVmmFirstMinBytes = 0,
+  .ddaArVmmFirstMaxPerRank = 0,
   // LL128 one-shot beats the peer-parallel two-shot to 1M / 512K / 256K at 4 / 8 / 16 ranks, i.e. 4M / nRanks.
   .ddaArLL128OneShotRankBytes = 4ULL*1024*1024,
   // Registered sum AllReduce past symMinR2: DDA beats Ring in capture to max(32M, n x 2M)
