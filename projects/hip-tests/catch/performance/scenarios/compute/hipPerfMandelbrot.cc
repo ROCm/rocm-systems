@@ -16,6 +16,7 @@
 #include <vector>
 #include <string>
 #include <map>
+#include <iterator>
 
 typedef struct {
   double x;
@@ -414,7 +415,7 @@ void hipPerfMandelBrot::double_mandel_unroll(uint* out, uint width, float xPos, 
                                              hipStream_t* streams, int blocks,
                                              int threads_per_block, int kernelCnt) {
   int streamCnt = getNumStreams();
-  hipLaunchKernelGGL(float_mandel_unroll_kernel<double>, dim3(blocks), dim3(threads_per_block), 0,
+  hipLaunchKernelGGL(double_mandel_unroll_kernel<double>, dim3(blocks), dim3(threads_per_block), 0,
                      streams[kernelCnt % streamCnt], out, width, xPos, yPos, xStep, yStep, maxIter);
 }
 
@@ -424,6 +425,8 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
 
   funPtr p[] = {&hipPerfMandelBrot::float_mad, &hipPerfMandelBrot::float_mandel_unroll,
                 &hipPerfMandelBrot::double_mad, &hipPerfMandelBrot::double_mandel_unroll};
+  // Four kernels and three coordinates cover every combination in twelve runs.
+  const auto kernelIdx = testCase % std::size(p);
 
   // Maximum iteration count
   maxIter = 32768;
@@ -461,20 +464,9 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
   // Synchronize to make sure all the copies are completed
   HIP_CHECK(hipStreamSynchronize(0));
 
-  int kernelIdx;
-  if (testCase == 0 || testCase == 5 || testCase == 10) {
-    kernelIdx = 0;
-  } else if (testCase == 1 || testCase == 6 || testCase == 11) {
-    kernelIdx = 1;
-  } else if (testCase == 2 || testCase == 7 || testCase == 12) {
-    kernelIdx = 2;
-  } else if (testCase == 3 || testCase == 8 || testCase == 13) {
-    kernelIdx = 3;
-  }
   double totalTime = 0.0;
   for (unsigned int k = 0; k < numLoops; k++) {
-    if ((testCase == 0 || testCase == 1 || testCase == 2 || testCase == 5 || testCase == 6 ||
-         testCase == 7 || testCase == 10 || testCase == 11 || testCase == 12)) {
+    if (kernelIdx < 2) {
       float xStep = static_cast<float>(coords[coordIdx].width / static_cast<double>(width_));
       float yStep = static_cast<float>(-coords[coordIdx].width / static_cast<double>(width_));
       float xPos = static_cast<float>(coords[coordIdx].x - 0.5 * coords[coordIdx].width);
@@ -540,7 +532,7 @@ bool hipPerfMandelBrot::run(unsigned int testCase) {
 
   // Print results except for Warm-up kernel
   if (testCase != 100) {
-    results[kernelName[testCase % 4]].push_back(perf);
+    results[kernelName[kernelIdx]].push_back(perf);
   }
 
   for (uint i = 0; i < numStreams; i++) {
