@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
+#include "cuid_inventory_policy.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "test_common.h"
 
@@ -1115,6 +1116,28 @@ TEST(GpuUnit, CuidComponentListFollowsTheNode) {
   const auto after = Components(&status);
   ASSERT_EQ(status, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(after.size(), before.size()) << "components that came back are not listed";
+}
+
+// The fallback and ordering policies run even without CAP_SYS_ADMIN, a
+// second CPU socket, a partition-capable GPU or a test-only sysfs override.
+TEST(GpuUnit, CuidPartitionFallbackRequiresWholeGpuMode) {
+  const ScopedTempDir dir;
+  ASSERT_TRUE(dir.valid());
+  const std::string path = dir.path() + "/current_compute_partition";
+  EXPECT_FALSE(amdsmi_cuid_detail::may_be_partition(path));
+  for (const char* value : {"SPX\n", "CPX\n", "DPX\n", ""}) {
+    std::ofstream(path) << value;
+    EXPECT_EQ(amdsmi_cuid_detail::may_be_partition(path), strcmp(value, "SPX\n") != 0);
+  }
+  EXPECT_TRUE(amdsmi_cuid_detail::may_be_partition(dir.path()));
+}
+
+TEST(GpuUnit, CuidCpuPathsUseNumericOrdering) {
+  const char* earlier = "/sys/devices/system/cpu/cpu96";
+  const char* later = "/sys/devices/system/cpu/cpu100";
+  EXPECT_LT(amdsmi_cuid_detail::path_compare(earlier, later), 0);
+  EXPECT_GT(amdsmi_cuid_detail::path_compare(later, earlier), 0);
+  EXPECT_EQ(amdsmi_cuid_detail::path_compare(earlier, earlier), 0);
 }
 
 // CPU packages are named by their lowest logical CPU, and the node lists them

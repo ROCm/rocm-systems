@@ -35,6 +35,7 @@
 
 #ifdef BUILD_CUID
 #include "amd_cuid.h"
+#include "cuid_inventory_policy.h"
 #endif
 
 #include "amd_smi/amdsmi.h"
@@ -1416,14 +1417,7 @@ bool cuid_gpu_may_be_partition(amdsmi_bdf_t bdf) {
   bdf.function_number = 0;
   const std::string path =
       cuid_sysfs_root() + "/bus/pci/devices/" + stringify_bdf(bdf) + "/current_compute_partition";
-  const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
-  if (fd < 0) {
-    return errno != ENOENT;
-  }
-  char value[16] = {};
-  const ssize_t length = read(fd, value, sizeof(value) - 1);
-  close(fd);
-  return length < 0 || std::string(value, static_cast<size_t>(length)) != "SPX\n";
+  return amdsmi_cuid_detail::may_be_partition(path);
 }
 
 // A GPU amd-smi has a handle for but the library cannot name has no CUID: it
@@ -1528,27 +1522,6 @@ amdsmi_cuid_source_t cuid_source_for(const amdcuid_id_t& handle) {
   return static_cast<amdsmi_cuid_source_t>(source);
 }
 
-// strcmp with digit runs compared as numbers. A CPU package is named by its
-// lowest logical CPU, /sys/devices/system/cpu/cpu<N>, and "cpu96" has to come
-// before "cpu192" for `node --cuid` to number the packages in socket order.
-int cuid_path_compare(const char* a, const char* b) {
-  while (*a != '\0' && *b != '\0') {
-    if (isdigit(static_cast<unsigned char>(*a)) && isdigit(static_cast<unsigned char>(*b))) {
-      char* a_end = nullptr;
-      char* b_end = nullptr;
-      const unsigned long long x = strtoull(a, &a_end, 10);
-      const unsigned long long y = strtoull(b, &b_end, 10);
-      if (x != y) return x < y ? -1 : 1;
-      a = a_end;
-      b = b_end;
-    } else {
-      if (*a != *b) return static_cast<unsigned char>(*a) < static_cast<unsigned char>(*b) ? -1 : 1;
-      ++a;
-      ++b;
-    }
-  }
-  return static_cast<unsigned char>(*a) - static_cast<unsigned char>(*b);
-}
 
 void copy_cuid_string(const amdcuid_id_t& id, char* out, size_t out_size) {
   const char* str = amdcuid_id_to_string(id);
@@ -1811,7 +1784,7 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
                 return a.info.component_type < b.info.component_type;
               }
               const int bdf = strcmp(a.bdf, b.bdf);
-              return bdf != 0 ? bdf < 0 : cuid_path_compare(a.device_path, b.device_path) < 0;
+              return bdf != 0 ? bdf < 0 : amdsmi_cuid_detail::path_compare(a.device_path, b.device_path) < 0;
             });
 
   const uint32_t written = std::min(capacity, total);
