@@ -552,10 +552,11 @@ collected in the following table.
         | Controls the direct AllGather algorithm. Because the algorithm builds a
           full point-to-point mesh, its queue-pair footprint grows with the square
           of the job size.
-      - | ``-1``: Automatic (default). Not selected on AINIC above 8 nodes.
+      - | Negative (default ``-1``): Automatic. Not selected on AINIC above 8
+          nodes.
         | ``0``: Skips the automatic AINIC check. The size, architecture and
           CTA-policy gates in ``rcclUseAllGatherDirect`` still apply.
-        | Any other value: Disabled.
+        | Any positive value: Disabled.
 
     * - | ``RCCL_HIERARCHICAL_ALLGATHER_MIN_BYTES_PER_RANK``
         | Sets the smallest AllGather, in bytes per rank (``sendcount`` x type
