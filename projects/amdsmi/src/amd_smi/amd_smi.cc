@@ -1326,7 +1326,7 @@ namespace {
 // A CUID library failure in amd-smi's vocabulary. The distinction that has to
 // survive the mapping is "this caller may not know" against "this node cannot
 // answer": they ask different things of an operator.
-amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
+constexpr amdsmi_status_t cuid_status_to_amdsmi(amdcuid_status_t status) {
   switch (status) {
     case AMDCUID_STATUS_SUCCESS:
       return AMDSMI_STATUS_SUCCESS;
@@ -1402,10 +1402,13 @@ std::string cuid_partition_node(amdsmi_processor_handle processor_handle) {
 // A GPU amd-smi has a handle for but the library cannot name has no CUID: it
 // is not a bad handle. Under WSL there is neither a render node nor a PCI
 // function in sysfs for the library to find.
-amdsmi_status_t cuid_lookup_status(amdcuid_status_t status) {
+constexpr amdsmi_status_t cuid_lookup_status(amdcuid_status_t status) {
   return status == AMDCUID_STATUS_DEVICE_NOT_FOUND ? AMDSMI_STATUS_NOT_SUPPORTED
                                                    : cuid_status_to_amdsmi(status);
 }
+
+static_assert(cuid_lookup_status(AMDCUID_STATUS_DEVICE_NOT_FOUND) == AMDSMI_STATUS_NOT_SUPPORTED,
+              "a valid processor absent from the CUID inventory is unsupported");
 
 // Resolve a processor handle to its CUID handle, which is the component's
 // derived CUID. A partition node amdgpu publishes names the partition, and
