@@ -49,7 +49,6 @@ python3 tests/performance/run_perf_vcopy_nbody.py \
 | `--keep` | Retain workload output after the run |
 | `--device` | HIP device id for the app |
 | `--experimental` | Forward `--experimental` to profile/analyze (e.g. gfx1201) |
-| `--no-native-tool` | Forward `--no-native-tool` to profile |
 
 The profiled app always comes from this tree; only the `rocprof-compute`
 tool path varies across `--rocprof-compute` instances.
