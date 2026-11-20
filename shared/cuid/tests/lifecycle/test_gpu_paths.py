@@ -450,6 +450,29 @@ class GpuPaths(unittest.TestCase):
                     rows, {p: r for p, r in before[role].items() if "renderD128" not in p}
                 )
 
+    def test_partition_pci_error_during_reindex_is_local(self):
+        self.stock("dpx")
+        before, _ = self.listing()
+        self.assertEqual(sum(path.endswith("/xcp") for path in before), 2)
+        children = [self.start("reindex", nonroot=role) for role in (False, True)]
+        try:
+            for child in children:
+                self.assertEqual(child.stdout.readline().strip(), "ready")
+            parent = self.devices["0000:03:00.0"]
+            (parent / "device").unlink()
+            (parent / "config").unlink()
+            for child in children:
+                rows, _ = child.communicate("continue\n", timeout=30)
+                self.assertEqual(child.returncode, 0)
+                paths = {row.split("\t")[0] for row in rows.splitlines()}
+                self.assertIn("/sys/class/drm/renderD129", paths)
+                self.assertFalse(any(path.endswith("/xcp") for path in paths))
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                    child.wait()
+
     def test_whole_gpu_requires_readable_pci_identity(self):
         device = self.devices["0000:03:00.0"]
         (device / "config").unlink()

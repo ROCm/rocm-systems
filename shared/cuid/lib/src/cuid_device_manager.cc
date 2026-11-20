@@ -159,6 +159,7 @@ amdcuid_status_t CuidDeviceManager::build_cuid_index() {
     if (status != AMDCUID_STATUS_SUCCESS) {
       if (status != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND &&
           status != AMDCUID_STATUS_UNSUPPORTED && status != AMDCUID_STATUS_PERMISSION_DENIED &&
+          status != AMDCUID_STATUS_PCI_ERROR &&
           !(geteuid() != 0 && status == AMDCUID_STATUS_INVALID_ARGUMENT))
         return status;
       skip(status);

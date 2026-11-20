@@ -263,6 +263,15 @@ int main(int argc, char** argv) {
     }
     return 0;
   }
+  if (action == "reindex") {
+    std::vector<std::string> rows;
+    if (!gpu_listing(rows)) return 1;
+    std::cout << "ready" << std::endl;
+    std::string line;
+    if (!std::getline(std::cin, line) || !gpu_listing(rows)) return 1;
+    for (const auto& row : rows) std::cout << row << '\n';
+    return 0;
+  }
   if (action == "nic-functions") {
     return nic_functions() ? 0 : 1;
   }
