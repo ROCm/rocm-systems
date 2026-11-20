@@ -68,11 +68,9 @@ pub(crate) use events::{CallbackScope, VM_FAULT_CONDVAR};
 #[cfg(test)]
 use events::{hardware_exception_event, memory_fault_event, notify_system_event};
 mod lifecycle;
+pub(crate) use clock::{GpuClock, clock_counters, enable_high_precision_timestamps};
 #[cfg(test)]
-use clock::best_clock_sample;
-pub(crate) use clock::{
-    clock_counters, enable_high_precision_timestamps, translate_gpu_interval, translate_gpu_tick,
-};
+use clock::{best_clock_sample, translate_gpu_tick};
 #[cfg(all(hsa_tool_dispatch, not(test)))]
 pub(crate) use lifecycle::{
     begin_tool_preparation, enter_delegated_tool_cleanup, enter_tool_cleanup,
@@ -682,10 +680,12 @@ impl HsaState {
                 && pc_sampling_supported_by_query(device.gpu().and_then(|gpu| {
                     gpu.pc_sampling_configurations(PcSamplingConfigurationSet::Supported)
                 }));
+            let clock = Arc::new(GpuClock::new(device.clone())?);
             pending.gpus.push(Gpu {
                 scratch: Arc::new(scratch_options.for_gpu(&info)),
                 global_cu_mask: None,
                 cp_caps: Arc::new(Mutex::new(None)),
+                clock,
                 endpoint,
                 xnack_enabled,
                 device,

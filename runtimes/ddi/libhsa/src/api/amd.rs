@@ -251,7 +251,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
     system_tick: *mut u64,
 ) -> Status {
     boundary(|| {
-        let (_call, device) = {
+        let (_call, clock) = {
             let guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -268,13 +268,9 @@ pub unsafe extern "C" fn hsa_amd_profiling_convert_tick_to_system_domain(
             let Some(token) = runtime.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            (token, runtime.gpus[index].device.clone())
+            (token, runtime.gpus[index].clock.clone())
         };
-        let counters = match runtime::clock_counters(&device) {
-            Ok(counters) => counters,
-            Err(error) => return map_error(error),
-        };
-        let translated = match runtime::translate_gpu_tick(counters, agent_tick) {
+        let translated = match clock.tick(agent_tick) {
             Ok(translated) => translated,
             Err(status) => return status,
         };

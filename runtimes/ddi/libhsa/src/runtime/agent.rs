@@ -189,6 +189,8 @@ pub(crate) struct Gpu {
     pub(crate) global_cu_mask: Option<Vec<u32>>,
     /// Confirmed CP capabilities; failed probes remain retryable.
     pub(crate) cp_caps: Arc<Mutex<Option<u32>>>,
+    /// Shared profiling calibration for this activated device's counter epoch.
+    pub(crate) clock: Arc<GpuClock>,
     /// Passive endpoint used for identity and topology queries.
     pub(crate) endpoint: Endpoint,
     /// Process-wide recoverable page-fault mode observed at activation.
