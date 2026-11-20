@@ -112,6 +112,12 @@ VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
 numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
 policy remains in the partially migrated RDNA2 adapter until that migration.
 
+Gfx1150 floating relational predicates use scalar/AVX2/AVX-512 numeric and
+classification kernels on both waves. Compatibility preserves the inherited
+DX10_CLAMP-gated INVALID policy (CLAMP: any NaN; otherwise signaling NaNs).
+Explicit numeric modes leave FP status unused; strict status mode is unsupported.
+No new empirical hardware qualification is claimed for this inherited model.
+
 ## Scalar floating point
 
 gfx12 scalar arithmetic, comparisons, rounding and conversions use rj-arith in

@@ -158,6 +158,9 @@ struct rcclArchThresholds {
   int ddaA2aLL128MaxBlocks;
   size_t ddaA2aLL128MaxBlocksMinBytes;
   size_t ddaA2aLL128MaxBlocksMaxBytes;
+  // DDA LL128 two-shot Broadcast: threads per block (0 = use kDdaLL128BcDefaultThreads).
+  // The two-shot variant benefits from fewer threads (better occupancy at large messages).
+  unsigned ddaLL128BcTwoShotThreads;
 
   // DDA LL128 ReduceScatter batched kernel block size at every size. 0 keeps 512 threads.
   int ddaRsLL128Threads;
