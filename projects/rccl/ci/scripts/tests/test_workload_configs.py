@@ -59,6 +59,35 @@ class WorkflowsMatchConfigs(unittest.TestCase):
         options = callee[True]["workflow_dispatch"]["inputs"]["workload"]["options"]
         self.assertEqual(sorted(options), sorted(tm.WORKLOAD_CONFIGS))
 
+    def test_dispatch_clusters_are_the_configs(self):
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        options = callee[True]["workflow_dispatch"]["inputs"]["cluster"]["options"]
+        self.assertEqual(sorted(options), sorted(tm.CLUSTER_CONFIGS))
+
+    def test_each_job_runs_on_its_clusters_runner(self):
+        caller = load_workflow("therock-rccl-ci-linux.yml")
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        default = callee[True]["workflow_call"]["inputs"]["cluster"]["default"]
+        clusters = set()
+        for job in caller["jobs"].values():
+            if job.get("uses") != "./.github/workflows/therock-rccl-test-madengine.yml":
+                continue
+            cluster = job["with"].get("cluster", default)
+            clusters.add(cluster)
+            self.assertIn(cluster, tm.CLUSTER_CONFIGS)
+            self.assertEqual(job["with"]["test_runs_on"],
+                             f"{cluster}-linux-slurm-scale-runner", job["name"])
+        self.assertEqual(clusters, set(tm.CLUSTER_CONFIGS))
+
+    def test_results_dir_is_each_clusters_results_base(self):
+        callee = load_workflow("therock-rccl-test-madengine.yml")
+        results_dir = callee["jobs"]["test_madengine"]["env"]["RESULTS_DIR"]
+        for name, config in tm.CLUSTER_CONFIGS.items():
+            tree, sep, tail = config["results_base"].partition("/madengine/")
+            self.assertTrue(sep, name)
+            self.assertIn(f"'{tree}'", results_dir, name)
+            self.assertTrue(results_dir.endswith(f"/madengine/{tail}"), name)
+
     def test_scheduled_workloads_exist(self):
         legs = madengine_legs()
         self.assertGreater(len(legs), 1)

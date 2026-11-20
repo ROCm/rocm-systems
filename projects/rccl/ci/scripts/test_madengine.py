@@ -470,7 +470,7 @@ CLUSTER_CONFIGS = {
             # bus bandwidth falls from 56 to 2.4 GB/s.
             "NCCL_IGNORE_CPU_AFFINITY": "1",
         },
-        "results_base": "/shared_nfs/mad/rccl-ci/madengine/perf",
+        "results_base": "/shared_nfs/rccl-ci/madengine/perf",
         "models_dir": "/shared_nfs/mad/data/models",
     },
 }
