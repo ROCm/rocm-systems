@@ -641,6 +641,54 @@ TEST_F(ConSanInputFixture, LdsAccessOrderAtAJoinIncludesEveryPredecessor) {
   EXPECT_EQ(image_, pristine);
 }
 
+TEST_F(ConSanInputFixture, MutuallyExclusiveArmsReceiveSourceOrderedSiteIds) {
+  const std::vector<uint8_t> pristine = image_;
+  const FailureOr<InputProgram> original = inspect(image_);
+  ASSERT_TRUE(original.succeeded()) << error_.message;
+  ASSERT_EQ(original.value().accesses.size(), 2u);
+  ASSERT_EQ(original.value().accesses[0].kind, AccessKind::Write);
+  ASSERT_EQ(original.value().accesses[1].kind, AccessKind::Read);
+  const AmdGpuCodeObject source(image_.data(), image_.size());
+  const Section &text = *source.text_sections().front();
+  const uint64_t entry = original.value().kernel.entry_text_offset;
+  ASSERT_EQ(entry, 0u);
+  const util::FailureOr<uint32_t> conditional =
+      build_sopp_encoding(kTarget.arch, rdna3::kSCbranchScc1Sopp, 9);
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, kTarget.arch);
+  const util::FailureOr<uint32_t> terminator = build_s_endpgm(kTarget.arch);
+  ASSERT_TRUE(conditional.succeeded());
+  ASSERT_TRUE(nop.succeeded());
+  ASSERT_TRUE(terminator.succeeded());
+  // Taken arm: read at +40, then terminate. Fallthrough: write at +8,
+  // then terminate. The topological walk visits the high-PC arm first.
+  std::vector<uint32_t> words(std::max(text.size() / 4, size_t{13}), nop.value());
+  words[0] = conditional.value();
+  for (size_t index = 0; index < 2; ++index) {
+    const uint64_t offset = original.value().accesses[index].original_offset;
+    ASSERT_LE(offset + 8, text.size());
+    std::memcpy(words.data() + (index == 0 ? 2 : 10), text.data() + offset, 8);
+  }
+  words[4] = terminator.value();
+  words[12] = terminator.value();
+  CodeObjectPatcher patcher(source);
+  ASSERT_TRUE(patcher.replace_text(
+      {reinterpret_cast<const uint8_t *>(words.data()), words.size() * sizeof(uint32_t)}));
+  const std::vector<uint8_t> branched = std::move(patcher).emit();
+  const FailureOr<PreparedArtifact> prepared =
+      prepare(branched, kTarget, "lds_producer_consumer", error_);
+  ASSERT_TRUE(prepared.succeeded()) << error_.message;
+  const Manifest &manifest = prepared.value().manifest;
+  ASSERT_EQ(manifest.sites.size(), 2u);
+  EXPECT_EQ(manifest.sites[0].id, 0u);
+  EXPECT_EQ(manifest.sites[0].original_offset, 8u);
+  EXPECT_EQ(manifest.sites[0].access, AccessKind::Write);
+  EXPECT_EQ(manifest.sites[1].id, 1u);
+  EXPECT_EQ(manifest.sites[1].original_offset, 40u);
+  EXPECT_EQ(manifest.sites[1].access, AccessKind::Read);
+  EXPECT_TRUE(validate_prepared(branched, prepared.value(), error_).succeeded()) << error_.message;
+  EXPECT_EQ(image_, pristine);
+}
+
 TEST_F(ConSanInputFixture, MultiBlockCycleFailsClosed) {
   const std::vector<uint8_t> pristine = image_;
   std::vector<uint8_t> cycle;
