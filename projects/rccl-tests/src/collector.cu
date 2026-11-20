@@ -16,8 +16,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <chrono>
+#if !defined(_WIN32)
 #include <dirent.h>
 #include <unistd.h>
+#else
+#include "os.h"
+#endif
 
 // =====================================================================
 // Per-NIC-type counter tables
@@ -217,12 +222,21 @@ static bool CounterMatchesRequestedFilter(const CounterTableEntry& entry) {
 }
 
 bool NetCounterIsEnabled() {
+#if defined(_WIN32)
+  static const bool unavailable = [] {
+    const char* env = getenv("RCCL_TESTS_NET_COUNTER_ENABLE");
+    if (env && atoi(env) > 0) fprintf(stderr, "Linux NIC counters are unavailable on Windows.\n");
+    return false;
+  }();
+  return unavailable;
+#else
   static int enabled = -1;
   if (enabled == -1) {
     const char* env = getenv("RCCL_TESTS_NET_COUNTER_ENABLE");
     enabled = (env && atoi(env) > 0) ? 1 : 0;
   }
   return enabled == 1;
+#endif
 }
 
 std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type) {
@@ -266,7 +280,11 @@ std::vector<std::string> NetCounterFilterIbHca(const char* env, std::vector<std:
   }
 
   std::sort(devs.begin(), devs.end(), [](const std::string& a, const std::string& b) {
+#if defined(_WIN32)
+    return a < b;
+#else
     return strverscmp(a.c_str(), b.c_str()) < 0;
+#endif
   });
   auto matches = [&](const std::string& dev, const Entry& en) {
     return exact ? dev == en.name : dev.compare(0, en.name.size(), en.name) == 0;
@@ -295,6 +313,9 @@ std::vector<std::string> NetCounterFilterIbHca(const char* env, std::vector<std:
 }
 
 std::vector<std::string> NetCounterParseIbHcaList() {
+#if defined(_WIN32)
+  return {};
+#else
   const char* env = getenv("NCCL_IB_HCA");
   if (!env || strlen(env) == 0) { return {}; }
   std::vector<std::string> devs;
@@ -305,6 +326,7 @@ std::vector<std::string> NetCounterParseIbHcaList() {
     closedir(dir);
   }
   return NetCounterFilterIbHca(env, devs);
+#endif
 }
 
 // =====================================================================
@@ -330,6 +352,9 @@ static void ParseIbDevice(const std::string& ib_device,
 // =====================================================================
 
 static std::string RunShellOneLiner(const char* cmd) {
+#if defined(_WIN32)
+  return "";
+#else
   FILE* fp = popen(cmd, "r");
   if (!fp) { return ""; }
   char buf[256] = {0};
@@ -341,6 +366,7 @@ static std::string RunShellOneLiner(const char* cmd) {
   }
   pclose(fp);
   return std::string(buf);
+#endif
 }
 
 std::string NetCounterFindIbDeviceForNic(const std::string& nic) {
@@ -364,6 +390,7 @@ std::string NetCounterFindNicForIbDevice(const std::string& ib_device) {
 }
 
 void NetCounterGetNetworkInterfaces(std::vector<std::string>& interfaces) {
+#if !defined(_WIN32)
   FILE* fp = popen("ls /sys/class/net 2>/dev/null", "r");
   if (fp == NULL) { return; }
 
@@ -387,6 +414,7 @@ void NetCounterGetNetworkInterfaces(std::vector<std::string>& interfaces) {
     }
   }
   pclose(fp);
+#endif
 }
 
 // =====================================================================
@@ -394,6 +422,9 @@ void NetCounterGetNetworkInterfaces(std::vector<std::string>& interfaces) {
 // =====================================================================
 
 NicType NetCounterDetectNicType(const std::string& ib_device) {
+#if defined(_WIN32)
+  return NIC_UNKNOWN;
+#else
   if (ib_device.empty()) return NIC_UNKNOWN;
 
   std::string ib_base;
@@ -420,6 +451,7 @@ NicType NetCounterDetectNicType(const std::string& ib_device) {
   if (strcmp(drv, "mlx5_core") == 0)
     return NIC_MLX5;
   return NIC_UNKNOWN;
+#endif
 }
 
 const char* NicTypeStr(NicType t) {
@@ -499,6 +531,7 @@ void NetCounterParseEthtool(const std::string& text,
 static void CollectEthtoolCounters(const std::string& nic,
                                    const std::vector<CounterDescriptor>& selected,
                                    std::map<std::string, uint64_t>& out) {
+#if !defined(_WIN32)
   bool wanted = false;
   for (const auto& d : selected) { wanted |= (d.source == COUNTER_SRC_ETHTOOL); }
   if (!wanted || nic.empty()) { return; }
@@ -514,6 +547,7 @@ static void CollectEthtoolCounters(const std::string& nic,
   while ((n = fread(buf, 1, sizeof(buf), fp)) > 0) { text.append(buf, n); }
   pclose(fp);
   NetCounterParseEthtool(text, selected, out);
+#endif
 }
 
 // Per counter: key under the port dir, then the device dir, then the fallback
@@ -622,9 +656,8 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
     strncpy(snap.ib_device, ib_dev.c_str(), sizeof(snap.ib_device) - 1);
   }
 
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  snap.timestamp_us = (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+  snap.timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
   snap.nic_type = NetCounterDetectNicType(ib_dev);
 
   CollectEthtoolCounters(nic, selected, snap.counters);
@@ -698,7 +731,11 @@ void NetCounterPrintTable(
 
   char hostname[256] = {0};
 
+#if defined(_WIN32)
+  if (ncclTestGetHostname(hostname, sizeof(hostname)) != 0) {
+#else
   if (gethostname(hostname, sizeof(hostname)) != 0) {
+#endif
     strncpy(hostname, "unknown", sizeof(hostname));
   }
 

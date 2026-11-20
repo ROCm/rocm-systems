@@ -6,38 +6,14 @@
 #
 
 if(TARGET roc::rccl)
-  find_program(HIPIFY_PERL_EXECUTABLE hipify-perl)
-  if(NOT HIPIFY_PERL_EXECUTABLE)
-    message(FATAL_ERROR "hipify-perl is required to build verifiable with RCCL")
-  endif()
-
   set(VERIFIABLE_HIPIFY_DIR "${CMAKE_CURRENT_BINARY_DIR}/hipify")
   set(VERIFIABLE_HIPIFIED_SOURCE "${VERIFIABLE_HIPIFY_DIR}/verifiable.cu.cpp")
   set(VERIFIABLE_HIPIFIED_HEADER "${VERIFIABLE_HIPIFY_DIR}/verifiable.h")
   set(VERIFIABLE_HIPIFIED_FLOAT8 "${VERIFIABLE_HIPIFY_DIR}/rccl_float8.h")
 
-  add_custom_command(
-    OUTPUT
-      "${VERIFIABLE_HIPIFIED_SOURCE}"
-      "${VERIFIABLE_HIPIFIED_HEADER}"
-      "${VERIFIABLE_HIPIFIED_FLOAT8}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${VERIFIABLE_HIPIFY_DIR}"
-    COMMAND "${HIPIFY_PERL_EXECUTABLE}" -quiet-warnings
-            "${CMAKE_CURRENT_SOURCE_DIR}/verifiable.cu"
-            -o "${VERIFIABLE_HIPIFIED_SOURCE}"
-    COMMAND "${HIPIFY_PERL_EXECUTABLE}" -quiet-warnings
-            "${CMAKE_CURRENT_SOURCE_DIR}/verifiable.h"
-            -o "${VERIFIABLE_HIPIFIED_HEADER}"
-    COMMAND "${HIPIFY_PERL_EXECUTABLE}" -quiet-warnings
-            "${CMAKE_SOURCE_DIR}/src/rccl_float8.h"
-            -o "${VERIFIABLE_HIPIFIED_FLOAT8}"
-    DEPENDS
-      "${CMAKE_CURRENT_SOURCE_DIR}/verifiable.cu"
-      "${CMAKE_CURRENT_SOURCE_DIR}/verifiable.h"
-      "${CMAKE_SOURCE_DIR}/src/rccl_float8.h"
-    COMMENT "Hipifying verifiable sources"
-    VERBATIM
-  )
+  rccl_tests_hipify("${VERIFIABLE_HIPIFIED_SOURCE}" "${CMAKE_CURRENT_SOURCE_DIR}/verifiable.cu")
+  rccl_tests_hipify("${VERIFIABLE_HIPIFIED_HEADER}" "${CMAKE_CURRENT_SOURCE_DIR}/verifiable.h")
+  rccl_tests_hipify("${VERIFIABLE_HIPIFIED_FLOAT8}" "${PROJECT_SOURCE_DIR}/src/rccl_float8.h")
 
   add_custom_target(verifiable_hipify
     DEPENDS

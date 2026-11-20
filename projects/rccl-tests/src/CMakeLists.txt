@@ -19,12 +19,7 @@ function(add_rccl_test TEST)
     string(REPLACE "\.cu" "\.cu.cpp" HIP_FILE ${HIP_FILE})
 
     # Create a custom command to create hipified source code
-    add_custom_command(
-        OUTPUT ${HIP_FILE}
-        COMMAND mkdir -p ${HIP_FILE_DIR} && $ ${hipify-perl_executable} -quiet-warnings ${SOURCE_DIR}/${TEST_SOURCE} -o ${HIP_FILE}
-        MAIN_DEPENDENCY ${TEST_SOURCE}
-        COMMENT "Hipifying ${TEST_SOURCE} -> ${HIP_FILE}"
-    )
+    rccl_tests_hipify("${HIP_FILE}" "${SOURCE_DIR}/${TEST_SOURCE}")
 
     set(TEST_TARGET "${TEST}_perf")
     add_executable(${TEST_TARGET} ${HIP_FILE})
@@ -41,7 +36,14 @@ function(add_rccl_test TEST)
     )
     add_relative_test(${TEST} ${TEST_TARGET})
     rocm_install(TARGETS ${TEST_TARGET})
-    # TODO: copy/install DLLs on Windows
+    if(WIN32)
+      add_custom_command(TARGET ${TEST_TARGET} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different $<TARGET_RUNTIME_DLLS:${TEST_TARGET}> $<TARGET_FILE_DIR:${TEST_TARGET}>
+        COMMAND_EXPAND_LISTS VERBATIM)
+      install(FILES $<TARGET_RUNTIME_DLLS:${TEST_TARGET}> DESTINATION bin)
+      set_tests_properties(${TEST} PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:hip::amdhip64>")
+    endif()
     set_target_properties(
         ${TEST_TARGET} PROPERTIES
         INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib;${ROCM_PATH}/lib"
@@ -49,20 +51,8 @@ function(add_rccl_test TEST)
 endfunction()
 
 function(add_relative_test test_name test_target)
-    get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
-    if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
-        set(EXE_PATH ".")
-    endif()
-    get_filename_component(EXE_PATH "${EXE_PATH}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}")
-    get_target_property(EXE_NAME ${test_target} RUNTIME_OUTPUT_NAME)
-    if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
-        get_target_property(EXE_NAME ${test_target} OUTPUT_NAME)
-        if(EXE_NAME STREQUAL "EXE_NAME-NOTFOUND")
-            set(EXE_NAME "${test_target}")
-        endif()
-    endif()
-    file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
-    add_test(NAME "${test_name}" COMMAND "./${rel_path}")
+    add_test(NAME "${test_name}" COMMAND ${test_target} -b 8 -e 1M -f 2 -g 1 -d float -o sum -n 5 -w 1 -c 1)
+    set_tests_properties(${test_name} PROPERTIES TIMEOUT 120 LABELS "gpu" RESOURCE_LOCK rccl_tests_gpu)
 endfunction()
 
 # Collect list of common source files
@@ -82,6 +72,7 @@ set(COMMON_FILES
   gin_resource_sharing.h
   nccl1_compat.h
   rccl_compat.h
+  library.h
   rccl_float8.h
   rccl_vector_types.h
   multimem_ops.h
@@ -93,9 +84,8 @@ set(COMMON_FILES
 
 # Hipify common files (copy of source generated into hipify directory)
 #==================================================================================================
-find_program(hipify-perl_executable hipify-perl)
 set(HIPIFY_DIR "${CMAKE_CURRENT_BINARY_DIR}/hipify")
-set(SOURCE_DIR "${CMAKE_SOURCE_DIR}/src")
+set(SOURCE_DIR "${PROJECT_SOURCE_DIR}/src")
 
 ## Loop over each common file to hipify
 foreach(COMMON_FILE ${COMMON_FILES})
@@ -113,23 +103,20 @@ foreach(COMMON_FILE ${COMMON_FILES})
   list(APPEND HIP_COMMON_SOURCES ${HIP_FILE})
 
   # Create a custom command to create hipified source code
-  add_custom_command(
-    OUTPUT ${HIP_FILE}
-    COMMAND mkdir -p ${HIPIFY_DIR} && $ ${hipify-perl_executable} -quiet-warnings ${SOURCE_DIR}/${COMMON_FILE} -o ${HIP_FILE}
-    MAIN_DEPENDENCY ${COMMON_FILE}
-    COMMENT "Hipifying ${COMMON_FILE} -> ${HIP_FILE}"
-  )
+  rccl_tests_hipify("${HIP_FILE}" "${SOURCE_DIR}/${COMMON_FILE}")
 endforeach()
 
 # Create an initial git_version.cpp file (that will be updated with latest git version)
 #==================================================================================================
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp "")
+if(NOT EXISTS "${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp")
+  file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp" "const char *rcclTestsGitHash = \"Unknown\";\n")
+endif()
 list(APPEND HIP_COMMON_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/git_version.cpp)
 
 #Create a custom target that updates git_version.cpp and executes whenever rccl is built
 add_custom_target(git_version_check
   COMMENT "Updating git_version.cpp if necessary"
-  COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/git_version.cmake
+  COMMAND ${CMAKE_COMMAND} "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}" -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/git_version.cmake
   VERBATIM
 )
 
@@ -138,7 +125,7 @@ add_custom_target(git_version_check
 add_custom_target(hipify DEPENDS ${HIP_COMMON_SOURCES})
 add_library(rccl_common OBJECT ${HIP_COMMON_SOURCES})
 add_dependencies(rccl_common hipify git_version_check)
-target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads dl nccl_test_os nccl_tests_options verifiable)
+target_link_libraries(rccl_common roc::rccl hip::device Threads::Threads ${CMAKE_DL_LIBS} nccl_test_os nccl_tests_options verifiable)
 # dlsym(RTLD_DEFAULT) cannot see symbols of a statically linked RCCL.
 get_target_property(RCCL_LIBRARY_TYPE roc::rccl TYPE)
 if(RCCL_LIBRARY_TYPE STREQUAL "STATIC_LIBRARY")
