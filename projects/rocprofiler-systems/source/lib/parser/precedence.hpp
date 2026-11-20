@@ -20,6 +20,7 @@ struct sourced_values
     typed_values_t values;
 };
 
+/// The value that won the merge for one parameter, and the source that supplied it.
 struct resolved_value
 {
     config_value_t value;
