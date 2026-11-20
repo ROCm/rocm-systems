@@ -143,9 +143,12 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      // Policies are immutable while waves are active. FMAS needs numeric exactness;
-      // FIXUP additionally reports FP status, so give each its own CU.
-      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
+      // Policies are immutable while waves are active. Use strict numeric semantics
+      // for the captured RDNA4 model; CDNA5 inherits the legacy model through
+      // Compatibility without claiming hardware-validated empirical semantics.
+      config.arithmetic = {arch == ROCJITSU_CODE_ARCH_CDNA5
+                               ? amdgpu::ArithmeticSemantics::Compatibility
+                               : amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
       std::unique_ptr<amdgpu::ComputeUnitCore> fmas_cu;
       ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(fmas_cu, "division_fmas",
                                                                       config, &memory, &cache));
@@ -153,7 +156,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
       ASSERT_NE(fmas_wf, nullptr);
       fmas_wf->set_exec(1);
       const uint32_t fmas_base = fmas_wf->vgpr_alloc().base;
-      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpirical};
+      config.arithmetic = {arch == ROCJITSU_CODE_ARCH_CDNA5
+                               ? amdgpu::ArithmeticSemantics::Compatibility
+                               : amdgpu::ArithmeticSemantics::BitExactEmpirical};
       std::unique_ptr<amdgpu::ComputeUnitCore> cu;
       ASSERT_NO_FATAL_FAILURE(
           rocjitsu::test::initialize_compute_unit(cu, "division", config, &memory, &cache));
@@ -205,6 +210,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             fmas_wf->set_vcc_mask(1);
             fmas_cu->write_vgpr(fmas_base, 1, 0x12345678u);
             fmas->execute(*fmas, fmas_wf);
+            ASSERT_FALSE(fmas_wf->instruction_execution_failed());
             const uint64_t fmas_result =
                 fmas_cu->read_vgpr(fmas_base, 0) |
                 (wide ? uint64_t{fmas_cu->read_vgpr(fmas_base + 1, 0)} << 32 : 0);
@@ -220,6 +226,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             wf->set_trapsts(1u << 5); // An unrelated sticky cause must survive.
             wf->clear_pending_alu_causes();
             fixup->execute(*fixup, wf);
+            ASSERT_FALSE(wf->instruction_execution_failed());
             const uint32_t causes = (denorm & 1u) ? 1u << 1 : 1u << 2;
             EXPECT_EQ(result(), (denorm & 1u) ? one : inf);
             EXPECT_EQ(wf->pending_alu_causes(), causes);
