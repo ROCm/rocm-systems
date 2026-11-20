@@ -193,6 +193,9 @@ enum class AMDGpuMetricAttributeId_t {
   SYSTEM_TEMP_OAM_4_5_6_7_3V3_VR,
   SYSTEM_TEMP_IBC_HSC,
   SYSTEM_TEMP_IBC,
+  XGMI_READ_BANDWIDTH_ACC,
+  XGMI_WRITE_BANDWIDTH_ACC,
+  REVISION,
   MAX,
 };
 
@@ -300,6 +303,11 @@ static const auto AMDGpuMetricAttributeIdToString = AMDGpuMetricAttributeIdTrans
      {"TEMPERATURE_AID", "AID (Active Interposer Die) temperature"}},
     {AMDGpuMetricAttributeId_t::TEMPERATURE_XCD,
      {"TEMPERATURE_XCD", "XCD (Accelerator Compute Die) temperature"}},
+    {AMDGpuMetricAttributeId_t::XGMI_READ_BANDWIDTH_ACC,
+     {"XGMI_READ_BANDWIDTH_ACC", "Accumulator for XGMI read bandwidth"}},
+    {AMDGpuMetricAttributeId_t::XGMI_WRITE_BANDWIDTH_ACC,
+     {"XGMI_WRITE_BANDWIDTH_ACC", "Accumulator for XGMI write bandwidth"}},
+    {AMDGpuMetricAttributeId_t::REVISION, {"REVISION", "Revision of the metrics table"}},
 };
 
 /*
@@ -1156,6 +1164,26 @@ static const auto AMDGpuMetricsBaseSchema = details::AMDGpuMetricSchemaMapType_t
              details::AMDGpuMetricAttributeId_t::TEMPERATURE_XCD,
              details::AMDGpuMetricAttributeType_t::TYPE_UINT16,
              details::AMDGpuMetricUnitType_t::CELSIUS),
+         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
+
+    {details::AMDGpuMetricAttributeId_t::XGMI_READ_BANDWIDTH_ACC,
+     details::AMDGpuMetricAttributeData_t{
+         details::AMDGpuMetricAttributeInstance_t(
+             "XGMI Read Bandwidth Accumulator",
+             "Sum of the XGMI read bandwidth in GB/s, added once per accumulation tick",
+             details::AMDGpuMetricAttributeId_t::XGMI_READ_BANDWIDTH_ACC,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
+             details::AMDGpuMetricUnitType_t::GIGABYTE_PER_SECOND_ACCUMULATOR),
+         static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
+
+    {details::AMDGpuMetricAttributeId_t::XGMI_WRITE_BANDWIDTH_ACC,
+     details::AMDGpuMetricAttributeData_t{
+         details::AMDGpuMetricAttributeInstance_t(
+             "XGMI Write Bandwidth Accumulator",
+             "Sum of the XGMI write bandwidth in GB/s, added once per accumulation tick",
+             details::AMDGpuMetricAttributeId_t::XGMI_WRITE_BANDWIDTH_ACC,
+             details::AMDGpuMetricAttributeType_t::TYPE_UINT64,
+             details::AMDGpuMetricUnitType_t::GIGABYTE_PER_SECOND_ACCUMULATOR),
          static_cast<details::AMDGpuMetricAttributeValue_t>(0)}},
 };
 
