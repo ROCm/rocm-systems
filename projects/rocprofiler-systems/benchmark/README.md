@@ -21,7 +21,6 @@ pytest                           # Python tests
 | `src/bench/` | The Python package: CLI, runner, analysis, reports, scenario and snapshot handling, JSON schema |
 | `workloads/` | C++ synthetic test programs (CMake, gtest in `workloads/tests/`); built into `build/` |
 | `tests/` | pytest suite for `src/bench`, including a check that every shipped JSON file is valid |
-| `docs/` | Runnable `examples/` |
 | `resource/scenarios/<group>/` | Scenario definitions (inputs) |
 | `resource/configs/` | rocprof-sys config files (`<tool>.cfg`) shared by the scenarios |
 | `resource/results/<group>/` | Result JSON per scenario (outputs), mirrors `scenarios/` |

@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Every shipped scenario, example and suite file must stay valid after a move or an edit."""
+"""Every shipped scenario and suite file must stay valid after a move or an edit."""
 
 import json
 from pathlib import Path
@@ -11,24 +11,19 @@ from bench import scenario, snapshot
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIOS = sorted((ROOT / "resource" / "scenarios").rglob("*.json"))
-EXAMPLES = sorted((ROOT / "docs" / "examples").glob("*.json"))
 SUITES = sorted((ROOT / "resource" / "snapshots").glob("*.json"))
 
 
 def test_resource_files_are_found():
-    assert SCENARIOS and EXAMPLES and SUITES
+    assert SCENARIOS and SUITES
 
 
-@pytest.mark.parametrize(
-    "path", SCENARIOS + EXAMPLES, ids=lambda p: str(p.relative_to(ROOT))
-)
+@pytest.mark.parametrize("path", SCENARIOS, ids=lambda p: str(p.relative_to(ROOT)))
 def test_scenario_is_valid(path):
     scenario.load(str(path))
 
 
-@pytest.mark.parametrize(
-    "path", SCENARIOS + EXAMPLES, ids=lambda p: str(p.relative_to(ROOT))
-)
+@pytest.mark.parametrize("path", SCENARIOS, ids=lambda p: str(p.relative_to(ROOT)))
 def test_scenario_output_stays_inside_resource_results(path):
     output = json.loads(path.read_text()).get("run", {}).get("output")
     if output:
@@ -36,9 +31,7 @@ def test_scenario_output_stays_inside_resource_results(path):
         assert (ROOT / "resource" / "results") in resolved.parents, resolved
 
 
-@pytest.mark.parametrize(
-    "path", SCENARIOS + EXAMPLES, ids=lambda p: str(p.relative_to(ROOT))
-)
+@pytest.mark.parametrize("path", SCENARIOS, ids=lambda p: str(p.relative_to(ROOT)))
 def test_workload_points_into_build_dir(path):
     workload = Path(
         scenario.resolve_path(json.loads(path.read_text())["workload"], str(path.parent))
@@ -46,9 +39,7 @@ def test_workload_points_into_build_dir(path):
     assert workload.parent == ROOT / "build", workload
 
 
-@pytest.mark.parametrize(
-    "path", SCENARIOS + EXAMPLES, ids=lambda p: str(p.relative_to(ROOT))
-)
+@pytest.mark.parametrize("path", SCENARIOS, ids=lambda p: str(p.relative_to(ROOT)))
 def test_config_files_exist(path):
     doc = scenario.load(str(path))
     for _name, _command, env in scenario.build_commands(doc, str(path.parent)):
