@@ -1,0 +1,285 @@
+#!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+"""Time profile (--no-roof) + analyze for the HipRTC Fibonacci workload.
+
+Pass --rocprof-compute once (or omit for this tree) to print timings. Pass it
+two or more times to print a comparison table with deltas vs the first path.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_APP_PATH = Path(__file__).resolve().parent / "fib_vcopy_nbody_app.py"
+_DEFAULT_ROCPROF = _REPO_ROOT / "src" / "rocprof-compute"
+_WORKLOAD_NAME = "fib_vcopy_nbody"
+
+
+@dataclass
+class PhaseTiming:
+    profile_s: float
+    analyze_s: float
+    total_s: float
+    label: str
+    workload_dir: Path
+
+
+def resolve_rocprof_compute_command(path: Path) -> list[str]:
+    """Map a file or project root to an argv prefix for rocprof-compute."""
+    resolved = path.expanduser().resolve()
+    if resolved.is_dir():
+        src_entry = resolved / "src" / "rocprof-compute"
+        if src_entry.is_file():
+            return [sys.executable, str(src_entry)]
+        for relative in ("bin/rocprof-compute", "install/bin/rocprof-compute"):
+            candidate = resolved / relative
+            if candidate.is_file():
+                return [str(candidate)]
+        raise FileNotFoundError(f"no rocprof-compute under directory: {resolved}")
+    if not resolved.is_file():
+        raise FileNotFoundError(f"rocprof-compute path not found: {resolved}")
+    if resolved.name == "rocprof-compute" and resolved.parent.name == "src":
+        return [sys.executable, str(resolved)]
+    return [str(resolved)]
+
+
+def label_for_path(path: Path) -> str:
+    resolved = path.expanduser().resolve()
+    if resolved.is_file() and resolved.parent.name == "src":
+        return resolved.parents[1].name
+    if resolved.is_dir():
+        return resolved.name
+    return resolved.name
+
+
+def find_workload_dir(search_root: Path) -> Path:
+    """Return the directory containing sysinfo.csv under search_root."""
+    matches = sorted(search_root.rglob("sysinfo.csv"))
+    if not matches:
+        raise FileNotFoundError(f"no sysinfo.csv under {search_root} after profile")
+    return matches[0].parent
+
+
+def run_timed(
+    command: list[str],
+    *,
+    env: dict[str, str],
+    cwd: Path,
+) -> tuple[float, int]:
+    start = time.perf_counter()
+    completed = subprocess.run(command, env=env, cwd=str(cwd), check=False)
+    elapsed = time.perf_counter() - start
+    return elapsed, completed.returncode
+
+
+def run_instance(
+    rocprof_path: Path,
+    *,
+    work_parent: Path,
+    iters: int,
+    bodies: int,
+    device: int,
+    experimental: bool,
+) -> PhaseTiming:
+    label = label_for_path(rocprof_path)
+    instance_dir = work_parent / label
+    instance_dir.mkdir(parents=True, exist_ok=True)
+
+    rocprof_cmd = resolve_rocprof_compute_command(rocprof_path)
+    env = os.environ.copy()
+    repo_src = str(_REPO_ROOT / "src")
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = f"{repo_src}:{existing}" if existing else repo_src
+
+    experimental_args = ["--experimental"] if experimental else []
+    profile_cmd = [
+        *rocprof_cmd,
+        "profile",
+        *experimental_args,
+        "--no-roof",
+        "--overwrite",
+        "-n",
+        _WORKLOAD_NAME,
+        "-d",
+        str(instance_dir),
+        "--",
+        sys.executable,
+        str(_APP_PATH),
+        "--iters",
+        str(iters),
+        "--bodies",
+        str(bodies),
+        "--device",
+        str(device),
+    ]
+    profile_s, profile_rc = run_timed(profile_cmd, env=env, cwd=_REPO_ROOT)
+    if profile_rc != 0:
+        raise RuntimeError(
+            f"profile failed (rc={profile_rc}) for {label}: {profile_cmd}"
+        )
+
+    workload_dir = find_workload_dir(instance_dir)
+    analyze_cmd = [
+        *rocprof_cmd,
+        "analyze",
+        *experimental_args,
+        "-p",
+        str(workload_dir),
+        "-q",
+    ]
+    analyze_s, analyze_rc = run_timed(analyze_cmd, env=env, cwd=_REPO_ROOT)
+    if analyze_rc != 0:
+        raise RuntimeError(
+            f"analyze failed (rc={analyze_rc}) for {label}: {analyze_cmd}"
+        )
+
+    return PhaseTiming(
+        profile_s=profile_s,
+        analyze_s=analyze_s,
+        total_s=profile_s + analyze_s,
+        label=label,
+        workload_dir=workload_dir,
+    )
+
+
+def print_single(timing: PhaseTiming) -> None:
+    print(f"rocprof-compute: {timing.label}")
+    print(f"  workload: {timing.workload_dir}")
+    print(f"  profile_s: {timing.profile_s:.3f}")
+    print(f"  analyze_s: {timing.analyze_s:.3f}")
+    print(f"  total_s:   {timing.total_s:.3f}")
+
+
+def print_comparison(timings: list[PhaseTiming]) -> None:
+    baseline = timings[0]
+    headers = ["metric", baseline.label]
+    for timing in timings[1:]:
+        headers.append(timing.label)
+        headers.append(f"Δ vs {baseline.label}")
+        headers.append(f"% vs {baseline.label}")
+
+    rows: list[list[str]] = []
+    for metric_name, attr in (
+        ("profile_s", "profile_s"),
+        ("analyze_s", "analyze_s"),
+        ("total_s", "total_s"),
+    ):
+        row = [metric_name, f"{getattr(baseline, attr):.3f}"]
+        base_value = getattr(baseline, attr)
+        for timing in timings[1:]:
+            value = getattr(timing, attr)
+            delta = value - base_value
+            pct = (delta / base_value * 100.0) if base_value else 0.0
+            row.append(f"{value:.3f}")
+            row.append(f"{delta:+.3f}")
+            row.append(f"{pct:+.1f}%")
+        rows.append(row)
+
+    widths = [
+        max(len(headers[index]), *(len(row[index]) for row in rows))
+        for index in range(len(headers))
+    ]
+
+    def fmt(cells: list[str]) -> str:
+        return " | ".join(cell.ljust(widths[index]) for index, cell in enumerate(cells))
+
+    print(fmt(headers))
+    print("-+-".join("-" * width for width in widths))
+    for row in rows:
+        print(fmt(row))
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Performance harness: HipRTC Fibonacci vcopy+nbody "
+            "profile (--no-roof) + analyze"
+        )
+    )
+    parser.add_argument(
+        "--rocprof-compute",
+        action="append",
+        type=Path,
+        default=None,
+        help=(
+            "Path to rocprof-compute entrypoint or project root "
+            "(repeatable; default: this tree)"
+        ),
+    )
+    parser.add_argument("--iters", type=int, default=5000)
+    parser.add_argument("--bodies", type=int, default=81920)
+    parser.add_argument(
+        "--device",
+        type=int,
+        default=0,
+        help="HIP device id passed to the app (default: 0)",
+    )
+    parser.add_argument(
+        "-d",
+        "--work-dir",
+        type=Path,
+        default=None,
+        help="Parent directory for workload output",
+    )
+    parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="Retain workload directories after the run",
+    )
+    parser.add_argument(
+        "--experimental",
+        action="store_true",
+        help="Pass --experimental to profile and analyze (e.g. gfx1201)",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    paths = args.rocprof_compute or [_DEFAULT_ROCPROF]
+    work_parent = args.work_dir
+    created_tmp = False
+    if work_parent is None:
+        work_parent = Path(f"/tmp/rocprof-compute-perf-{os.getpid()}")
+        created_tmp = True
+    work_parent.mkdir(parents=True, exist_ok=True)
+
+    timings: list[PhaseTiming] = []
+    try:
+        for path in paths:
+            print(f"=== running {path} ===", flush=True)
+            timings.append(
+                run_instance(
+                    path,
+                    work_parent=work_parent,
+                    iters=args.iters,
+                    bodies=args.bodies,
+                    device=args.device,
+                    experimental=args.experimental,
+                )
+            )
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        if created_tmp and not args.keep:
+            shutil.rmtree(work_parent, ignore_errors=True)
+
+    if len(timings) == 1:
+        print_single(timings[0])
+    else:
+        print_comparison(timings)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
