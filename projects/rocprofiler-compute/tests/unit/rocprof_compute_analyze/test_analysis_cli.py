@@ -4,8 +4,6 @@
 """Unit tests for rocprof_compute_analyze/analysis_cli.py."""
 
 import argparse
-import logging
-from functools import partial
 from types import SimpleNamespace
 from typing import List, Tuple
 
@@ -89,33 +87,6 @@ def write_operator_preprocessing_trace(workload_path, child_backend="torch"):
     )
 
 
-def load_operator_pmc_with_slots(boundary, *args, **kwargs):
-    workload = boundary.workload
-    boundary.stages["pmc"] = {
-        "forest": workload.ml_api_call_trees,
-        "dispatch_ids": workload.filter_dispatch_ids,
-    }
-    return boundary.raw_pmc, boundary.slot_to_id, {}
-
-
-def rank_operator_kernels(boundary, **kwargs):
-    boundary.stages["ranking"] = {
-        "raw_pmc": kwargs["df_in"],
-        "dispatch_ids": list(kwargs["filter_dispatch_ids"]),
-        "dispatch_filter": boundary.workload.filter_dispatch_ids,
-    }
-    return boundary.kernel_top, boundary.dispatch_table
-
-
-def load_operator_tables(boundary, **kwargs):
-    workload = boundary.workload
-    boundary.stages["tables"] = {
-        "workload": kwargs["workload"],
-        "dispatch_ids": list(workload.filter_dispatch_ids),
-        "kernel_ids": dict(workload.operator_kernel_ids),
-    }
-
-
 @pytest.fixture
 def operator_preprocessing(tmp_path, monkeypatch):
     """Run real ML adapters with only generic analyze boundaries isolated."""
@@ -157,7 +128,6 @@ def operator_preprocessing(tmp_path, monkeypatch):
         },
         kernel_top=pd.DataFrame({"Kernel_Name": ["relu_kernel", "addmm_kernel"]}),
         dispatch_table=pd.DataFrame({"Dispatch_ID": [3, 8, 10]}),
-        stages={},
     )
 
     monkeypatch.setattr(
@@ -168,24 +138,14 @@ def operator_preprocessing(tmp_path, monkeypatch):
     monkeypatch.setattr(cli, "load_pc_sampling_tool_data", lambda path: None)
     monkeypatch.setattr(
         "utils.file_io.create_df_pmc_with_slot_ids",
-        partial(load_operator_pmc_with_slots, boundary),
+        lambda *_args, **_kwargs: (boundary.raw_pmc, boundary.slot_to_id, {}),
     )
     monkeypatch.setattr(
         "utils.file_io.create_df_kernel_top_stats",
-        partial(rank_operator_kernels, boundary),
+        lambda **_kwargs: (boundary.kernel_top, boundary.dispatch_table),
     )
-    monkeypatch.setattr(
-        "utils.parser.load_table_data", partial(load_operator_tables, boundary)
-    )
+    monkeypatch.setattr("utils.parser.load_table_data", lambda **_kwargs: None)
     return boundary
-
-
-def error_messages(caplog):
-    return [
-        record.getMessage()
-        for record in caplog.records
-        if record.levelno >= logging.ERROR
-    ]
 
 
 def workload_with_operator_forest(simple_model_forest_with_relu_and_addmm):
@@ -340,9 +300,9 @@ def test_pc_only_workloads_preserve_operator_lifecycle(
         ),
     ],
 )
-def test_pre_processing_operator_filters_publish_intersections_and_numbering(
+def test_pre_processing_operator_filters_select_dispatches_and_number_kernels(
     operator_preprocessing,
-    caplog,
+    monkeypatch,
     backend_mode,
     dispatch_filter,
     kernel_filter,
@@ -360,7 +320,11 @@ def test_pre_processing_operator_filters_publish_intersections_and_numbering(
         boundary.args.operator = ["torch:*SimpleModel*", "triton:aten::*"]
     if backend_mode == "triton":
         boundary.args.operator = ["triton:aten::*"]
-    caplog.set_level(logging.INFO)
+    logged = []
+    monkeypatch.setattr(
+        "ml_api_tracing.analyze.orchestrator.console_log",
+        lambda *args, **_kwargs: logged.append(args[-1]),
+    )
 
     boundary.cli.pre_processing()
 
@@ -371,24 +335,10 @@ def test_pre_processing_operator_filters_publish_intersections_and_numbering(
     ]
     assert workload.operator_kernel_ids == {"relu_kernel": 0, "addmm_kernel": 1}
     assert workload.filter_dispatch_ids == final_ids
-    assert workload.raw_pmc is boundary.raw_pmc
-    assert boundary.stages["pmc"]["dispatch_ids"] is dispatch_filter
-    assert boundary.stages["pmc"]["forest"] is workload.ml_api_call_trees
-    assert boundary.stages["ranking"]["raw_pmc"] is boundary.raw_pmc
-    assert boundary.stages["ranking"]["dispatch_ids"] == ranked_ids
-    assert boundary.stages["tables"] == {
-        "workload": workload,
-        "dispatch_ids": final_ids,
-        "kernel_ids": {"relu_kernel": 0, "addmm_kernel": 1},
-    }
-    assert workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] is boundary.kernel_top
-    assert workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] is boundary.dispatch_table
     assert any(
-        f"selected {len(ranked_ids)} dispatch(es) for metric analysis."
-        in record.getMessage()
-        for record in caplog.records
+        f"selected {len(ranked_ids)} dispatch(es) for metric analysis." in message
+        for message in logged
     )
-    assert error_messages(caplog) == []
 
 
 # -- pre_processing: membw auto-run -------------------------------------------

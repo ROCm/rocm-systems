@@ -169,6 +169,50 @@ def build_deep_display_forest(depth: int) -> CallTreeForest:
     return forest
 
 
+def operator_node(name, invocation, children=(), kernel=None):
+    node = CallTreeNode(name=name, file_name="net.py", line_number=1)
+    node.invocation_ids.add(invocation)
+    if kernel:
+        node.kernels[kernel] = KernelStats(
+            launches=1,
+            total_duration_ns=1000.0,
+            min_duration_ns=1000.0,
+            max_duration_ns=1000.0,
+        )
+    node.children = list(children)
+    return node
+
+
+def summary_node(
+    name,
+    calls=("1",),
+    dispatches=1,
+    total_gpu_ms=1.0,
+    mean_dispatch_ms=1.0,
+    min_dispatch_ms=1.0,
+    max_dispatch_ms=1.0,
+    file_name="",
+    line_number=None,
+):
+    return CallTreeNode(
+        name=name,
+        invocation_ids=set(calls),
+        kernel_launches=dispatches,
+        total_duration_ms=total_gpu_ms,
+        mean_dispatch_ns=(
+            None if mean_dispatch_ms is None else mean_dispatch_ms * 1_000_000
+        ),
+        min_dispatch_ns=(
+            None if min_dispatch_ms is None else min_dispatch_ms * 1_000_000
+        ),
+        max_dispatch_ns=(
+            None if max_dispatch_ms is None else max_dispatch_ms * 1_000_000
+        ),
+        file_name=file_name,
+        line_number=line_number,
+    )
+
+
 def assert_complete_deep_display(output: str, depth: int, leaf_kernel_id: int) -> None:
     call_tree_output, summary_output = output.split(
         "Operator summary (Min/Max/Mean are per-dispatch", 1
@@ -780,24 +824,13 @@ def test_show_matched_operator_report_names_the_bound_patterns(
 def test_call_tree_folds_siblings_again_at_each_level(capsys):
     """Calls of A whose children repeat B a different number of times fold again."""
 
-    def operator(name, invocation, children=(), kernel=None):
-        node = CallTreeNode(name=name, file_name="net.py", line_number=1)
-        node.invocation_ids.add(invocation)
-        if kernel:
-            node.kernels[kernel] = KernelStats(
-                launches=1,
-                total_duration_ns=1000.0,
-                min_duration_ns=1000.0,
-                max_duration_ns=1000.0,
-            )
-        node.children = list(children)
-        return node
-
-    first_a = operator(
-        "A", "1", [operator("B", "11", kernel="k"), operator("B", "12", kernel="k")]
+    first_a = operator_node(
+        "A",
+        "1",
+        [operator_node("B", "11", kernel="k"), operator_node("B", "12", kernel="k")],
     )
-    second_a = operator("A", "2", [operator("B", "21", kernel="k")])
-    parent = operator("P", "0", [first_a, second_a])
+    second_a = operator_node("A", "2", [operator_node("B", "21", kernel="k")])
+    parent = operator_node("P", "0", [first_a, second_a])
     rollup_node_stats(parent)
 
     show_call_tree({"1": [parent]}, {})
@@ -809,36 +842,6 @@ def test_call_tree_folds_siblings_again_at_each_level(capsys):
 
 
 # build_operator_summary
-
-
-def summary_node(
-    name,
-    calls=("1",),
-    dispatches=1,
-    total_gpu_ms=1.0,
-    mean_dispatch_ms=1.0,
-    min_dispatch_ms=1.0,
-    max_dispatch_ms=1.0,
-    file_name="",
-    line_number=None,
-):
-    return CallTreeNode(
-        name=name,
-        invocation_ids=set(calls),
-        kernel_launches=dispatches,
-        total_duration_ms=total_gpu_ms,
-        mean_dispatch_ns=(
-            None if mean_dispatch_ms is None else mean_dispatch_ms * 1_000_000
-        ),
-        min_dispatch_ns=(
-            None if min_dispatch_ms is None else min_dispatch_ms * 1_000_000
-        ),
-        max_dispatch_ns=(
-            None if max_dispatch_ms is None else max_dispatch_ms * 1_000_000
-        ),
-        file_name=file_name,
-        line_number=line_number,
-    )
 
 
 def test_build_operator_summary_empty_input_returns_empty_with_full_schema():

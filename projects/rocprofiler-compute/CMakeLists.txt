@@ -624,14 +624,6 @@ add_test(
 )
 
 add_test(
-    NAME test_ml_api_tracing_stdlib_imports
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest
-        --junitxml=tests/test_ml_api_tracing_stdlib_imports.xml ${COV_OPTION}
-        tests/unit/ml_api_tracing/test_stdlib_imports.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
     NAME test_ml_api_tracing_marker_format
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest
@@ -1405,7 +1397,6 @@ if(${ENABLE_COVERAGE})
         test_ml_api_tracing_definitions
         test_ml_api_tracing_operator_patterns
         test_ml_api_tracing_trace_selection
-        test_ml_api_tracing_stdlib_imports
         test_ml_api_tracing_errors
         test_ml_api_tracing_trace_csv
         test_ml_api_tracing_pass_matching

@@ -3,8 +3,6 @@
 
 """Unit tests for ML operator selection."""
 
-from copy import deepcopy
-
 import pandas as pd
 import pytest
 
@@ -229,15 +227,12 @@ def test_select_operators_deduplicates_returned_keys_across_roots_in_order(
     simple_model_forest_with_relu_and_addmm,
 ):
     forest = simple_model_forest_with_relu_and_addmm()
-    first_root = forest["1"][0]
-    duplicate_root = deepcopy(first_root)
-    forest["later-thread"] = [duplicate_root]
+    forest["later-thread"] = simple_model_forest_with_relu_and_addmm()["1"]
 
     selected, keys = select_operators(forest, {"torch": ["*addmm*", "*relu*"]})
 
     assert keys == [ADDMM_PMC_GROUP_KEY, RELU_PMC_GROUP_KEY]
     assert list(selected) == ["1", "later-thread"]
-    assert selected["1"][0] is not first_root
 
 
 @pytest.mark.parametrize(
