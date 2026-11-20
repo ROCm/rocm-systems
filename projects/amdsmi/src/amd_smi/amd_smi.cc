@@ -1626,28 +1626,42 @@ amdsmi_status_t fill_cuid_component(const amdcuid_id_t& handle,
 
 // Serialize multi-call CUID transactions. Unlike unlocking an inherited
 // mutex, sem_post is async-signal-safe and does not depend on thread identity.
-sem_t cuid_inventory_gate;
-const int cuid_gate_init = sem_init(&cuid_inventory_gate, 0, 1);
+sem_t cuid_fork_gate, cuid_inventory_gate;
+const bool cuid_gates_ready =
+    sem_init(&cuid_fork_gate, 0, 1) == 0 && sem_init(&cuid_inventory_gate, 0, 1) == 0;
 
-void take_inventory_gate() {
-  while (sem_wait(&cuid_inventory_gate) == -1 && errno == EINTR) {
+void wait_gate(sem_t& gate) {
+  while (sem_wait(&gate) == -1 && errno == EINTR) {
   }
 }
-void release_inventory_gate() { sem_post(&cuid_inventory_gate); }
+void prepare_cuid_fork() {
+  // Stop new calls before waiting for the current one. Otherwise a busy
+  // inventory thread can reacquire the semaphore indefinitely ahead of fork.
+  wait_gate(cuid_fork_gate);
+  wait_gate(cuid_inventory_gate);
+}
+void finish_cuid_fork() {
+  sem_post(&cuid_inventory_gate);
+  sem_post(&cuid_fork_gate);
+}
 
 class CuidInventoryGuard {
  public:
   CuidInventoryGuard() {
     // Register on first use, after libamdcuid's startup handler. fork prepare
     // must take our outer gate before it enters the library's inner lock.
-    if (cuid_gate_init != 0) return;
+    if (!cuid_gates_ready) return;
     static const int registered =
-        pthread_atfork(take_inventory_gate, release_inventory_gate, release_inventory_gate);
+        pthread_atfork(prepare_cuid_fork, finish_cuid_fork, finish_cuid_fork);
     held_ = registered == 0;
-    if (held_) take_inventory_gate();
+    if (held_) {
+      wait_gate(cuid_fork_gate);
+      sem_post(&cuid_fork_gate);
+      wait_gate(cuid_inventory_gate);
+    }
   }
   ~CuidInventoryGuard() {
-    if (held_) release_inventory_gate();
+    if (held_) sem_post(&cuid_inventory_gate);
   }
   explicit operator bool() const { return held_; }
   CuidInventoryGuard(const CuidInventoryGuard&) = delete;
