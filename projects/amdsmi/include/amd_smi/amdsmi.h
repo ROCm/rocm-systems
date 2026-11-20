@@ -5591,21 +5591,20 @@ amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle pr
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[inout] pm_metrics A pointerto an array to hold multiple PM metrics. On success,
+ *  @param[out] pm_metrics A pointer to an array to hold multiple PM metrics. On success,
  *  the library will allocate memory of pm_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
- *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
- *  metrics is allocated for pm_metrics array as input, and the number of metrics retrieved
- *  as output. If this parameter is NULL, this function will return
- *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
- *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
- *  provided arguments.
+ *  @param[out] num_of_metrics a pointer to uint32_t to which the number of metrics
+ *  retrieved is written, or 0 on failure. If this parameter is NULL, this function
+ *  returns ::AMDSMI_STATUS_INVAL if the function is supported with the provided
+ *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_OUT_OF_RESOURCES the library could not allocate the array
  *  @return ::amdsmi_status_t
  *
  */
@@ -5631,21 +5630,20 @@ amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(amdsmi_processor_handle processor
  *
  *  @param[in] reg_type The register type
  *
- *  @param[inout] reg_metrics A pointerto an array to hold multiple register metrics. On success,
+ *  @param[out] reg_metrics A pointer to an array to hold multiple register metrics. On success,
  *  the library will allocate memory of reg_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
- *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
- *  metrics is allocated for reg_metrics array as input, and the number of metrics retrieved
- *  as output. If this parameter is NULL, this function will return
- *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
- *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
- *  provided arguments.
+ *  @param[out] num_of_metrics a pointer to uint32_t to which the number of metrics
+ *  retrieved is written, or 0 on failure. If this parameter is NULL, this function
+ *  returns ::AMDSMI_STATUS_INVAL if the function is supported with the provided
+ *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_OUT_OF_RESOURCES the library could not allocate the array
  *  @return ::amdsmi_status_t
  *
  */
