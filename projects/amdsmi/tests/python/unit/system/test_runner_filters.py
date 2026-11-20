@@ -74,8 +74,10 @@ class TestRunnerFilters(unittest.TestCase):
         self.assertEqual(len(self.unloaded), 2)
         self.assertEqual(self._list(), [_ONE, _TWO] + self.unloaded)
 
-    def test_keyword_keeps_the_ids_that_contain_it(self) -> None:
-        self.assertEqual(self._list("-k", "test_one"), [_ONE] + self.unloaded)
+    def test_keyword_matches_anywhere_in_the_id(self) -> None:
+        for pattern in ("test_alpha", "TestAlpha"):
+            with self.subTest(pattern=pattern):
+                self.assertEqual(self._list("-k", pattern), [_ONE, _TWO] + self.unloaded)
 
     def test_keyword_wildcards_match_as_a_glob(self) -> None:
         for pattern in ("Alpha.test_t*", "test_tw?", "test_[st]wo"):
@@ -104,3 +106,9 @@ class TestRunnerFilters(unittest.TestCase):
         ):
             with self.subTest(args=args):
                 self.assertEqual(self._list(*args), [_TWO] + self.unloaded)
+
+    def test_exclude_applies_on_top_of_keyword(self) -> None:
+        self.assertEqual(self._list("-k", "test_alpha", "-x", "test_two"), [_ONE] + self.unloaded)
+
+    def test_exclude_takes_no_wildcards(self) -> None:
+        self.assertEqual(self._list("-x", "test_t*"), [_ONE, _TWO] + self.unloaded)
