@@ -20,7 +20,9 @@ from rocm_bootstrap.targets import lookup_target
 from rocm_bootstrap.tests.conftest import FakePlatform
 from rocm_bootstrap.variant_provider import AMDVariantPlugin
 
+from bundle_test_utils import make_fatbin
 from rocm_kpack.binutils import Toolchain
+from rocm_kpack.kpack import PackedKernelArchive
 from rocm_kpack.wheel_splitter import (
     DatabaseFileRef,
     FatBinaryInfo,
@@ -31,6 +33,8 @@ from rocm_kpack.wheel_splitter import (
     WheelSplitter,
     WheelSplitError,
     _arch_to_bundle_key,
+    _create_single_kpack,
+    _extract_single_binary,
     _bundle_key_to_dist_name,
     compute_dist_info_name,
     compute_wheel_filename,
@@ -391,6 +395,84 @@ class TestBundleKeyToDistName:
             assert (
                 _bundle_key_to_dist_name("amd-torch-device", bundle_key) == expected
             ), f"Failed for {bundle_key}"
+
+
+class TestExtractSingleBinary:
+    def test_toc_index_is_bundle_index(self, tmp_path: Path):
+        """A TU without code for an arch must not shift later TOC indices.
+
+        The kpack transform writes the wrapper (bundle) index into reserved1
+        and the runtime looks up "<binary>#<index>", so gfx1100's code from
+        bundle 2 must be keyed #2 although bundle 1 has no gfx1100 code.
+        """
+        fatbin = tmp_path / "libmulti.so"
+        fatbin.write_bytes(
+            make_fatbin(
+                [
+                    {"gfx942": b"TU0_942", "gfx1100": b"TU0_1100"},
+                    {"gfx942": b"TU1_942"},
+                    {"gfx942": b"TU2_942", "gfx1100": b"TU2_1100"},
+                ]
+            )
+        )
+        staging = tmp_path / "staging"
+
+        refs = _extract_single_binary(fatbin, "torch/lib/libmulti.so", staging)
+
+        got = {
+            (r.architecture, r.source_binary_relpath): r.kernel_file.read_bytes()
+            for r in refs
+        }
+        assert got == {
+            ("gfx942", "torch/lib/libmulti.so#0"): b"TU0_942",
+            ("gfx1100", "torch/lib/libmulti.so#0"): b"TU0_1100",
+            ("gfx942", "torch/lib/libmulti.so#1"): b"TU1_942",
+            ("gfx942", "torch/lib/libmulti.so#2"): b"TU2_942",
+            ("gfx1100", "torch/lib/libmulti.so#2"): b"TU2_1100",
+        }
+
+    @pytest.mark.parametrize(
+        "bundles_a, bundles_b",
+        [
+            # gfx1100 in bundle 1 is the third code object in both binaries.
+            (
+                [{"gfx942": b"A0_942"}, {"gfx942": b"A1_942", "gfx1100": b"A_1100"}],
+                [{"gfx1100": b"B0_1100"}, {"gfx942": b"B1_942", "gfx1100": b"B_1100"}],
+            ),
+            # Identical layout.
+            ([{"gfx1100": b"A_1100"}], [{"gfx1100": b"B_1100"}]),
+        ],
+    )
+    def test_same_basename_binaries_keep_their_payloads(
+        self, tmp_path: Path, bundles_a, bundles_b
+    ):
+        """Binaries with the same file name must not share staging files."""
+        staging = tmp_path / "staging"
+        refs = []
+        for overlay, bundles in [
+            ("a/libops.so", bundles_a),
+            ("b/libops.so", bundles_b),
+        ]:
+            fatbin = tmp_path / overlay
+            fatbin.parent.mkdir(parents=True, exist_ok=True)
+            fatbin.write_bytes(make_fatbin(bundles))
+            refs += _extract_single_binary(fatbin, overlay, staging)
+
+        result = _create_single_kpack(
+            "gfx1100",
+            [r for r in refs if r.architecture == "gfx1100"],
+            "test",
+            tmp_path / "kpack",
+            "none",
+            0,
+        )
+        archive = PackedKernelArchive.read(result.kpack_path)
+
+        last = len(bundles_a) - 1
+        assert archive.get_kernel(f"a/libops.so#{last}", "gfx1100") == b"A_1100"
+        assert archive.get_kernel(f"b/libops.so#{last}", "gfx1100") == b"B_1100"
+        # a/libops.so#0 has no gfx1100 code in the first layout.
+        assert ("a/libops.so#0" in archive.toc) == (last == 0)
 
 
 class TestCreateDeviceWheel:

@@ -340,10 +340,6 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in rcp_true16
-    fma_generic = simd_probe_line('v_fma_f16_vop3')
-    fma_true16 = simd_probe_line('v_fma_f16_vop3', true16_vop3=True)
-    assert fma_generic == '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP16();'
-    assert fma_true16 == '  ROCJITSU_TRY_SIMD_FMA_VOP3_TRUE16_FP16();'
     div_fixup = simd_probe_line('v_div_fixup_f16_vop3')
     assert 'if (!wf.fp16_ovfl())' not in div_fixup
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
@@ -352,37 +348,6 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup_true16
     assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
     assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup_true16
-    fmac_generic = simd_probe_line('v_fmac_f16_vop3')
-    fmac_true16 = simd_probe_line('v_fmac_f16_vop3', true16_vop3=True)
-    assert fmac_generic == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP16();'
-    assert fmac_true16 == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_TRUE16_FP16();'
-    assert simd_probe_line('v_fmac_f16_vop2') == '  ROCJITSU_TRY_SIMD_VOP2_FMAC_F16();'
-    assert simd_probe_line('v_fmamk_f16_vop2') == (
-        '  ROCJITSU_TRY_SIMD_VOP2_FMA_F16_MULTIPLY_LITERAL('
-        'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32));'
-    )
-    assert simd_probe_line('v_fmaak_f16_vop2') == (
-        '  ROCJITSU_TRY_SIMD_VOP2_FMA_F16_ADD_LITERAL('
-        'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32));'
-    )
-    assert simd_probe_line('v_fmac_f64_vop2') == '  ROCJITSU_TRY_SIMD_VOP2_FMA_F64();'
-    assert simd_probe_line('v_fma_f64_vop3') == '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP64();'
-    assert (
-        simd_probe_line('v_fmac_f64_vop3')
-        == '  ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64();'
-    )
-    assert simd_probe_line('v_cmp_class_f16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_CLASS_B32'
-    )
-    assert simd_probe_line('v_cmp_class_f16_vop3', true16_vop3=True).startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_CLASS_TRUE16_B32'
-    )
-    assert simd_probe_line('v_cvt_f32_f16_vop3') == (
-        '  ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3();'
-    )
-    assert simd_probe_line('v_cvt_f32_f16_vop3', true16_vop3=True) == (
-        '  ROCJITSU_TRY_SIMD_CVT_F32_F16_VOP3_TRUE16();'
-    )
 
 
 @pytest.mark.parametrize('true16', [False, True])

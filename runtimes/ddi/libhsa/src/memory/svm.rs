@@ -19,7 +19,7 @@ struct ManagedRange {
 }
 
 /// Finds a complete managed reservation without manufacturing backing.
-fn managed_range(runtime: &HsaState, address: u64, size: u64) -> Result<ManagedRange, Status> {
+fn managed_range(runtime: &HsaSession, address: u64, size: u64) -> Result<ManagedRange, Status> {
     let address_host = usize::try_from(address).map_err(|_| INVALID_ARGUMENT)?;
     let size_host = usize::try_from(size).map_err(|_| INVALID_ARGUMENT)?;
     let (&base, reservation) = runtime
@@ -71,7 +71,7 @@ pub(crate) fn committed_range(ranges: &[(usize, usize)], address: usize) -> Opti
 
 /// Commits only runtime-owned anonymous memory, preserving its reservation.
 fn commit_managed(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     service: &MemoryAdvice,
     range: ManagedRange,
 ) -> Result<(), Status> {
@@ -99,7 +99,7 @@ fn commit_managed(
 /// Makes a managed reservation host-backed before KFD consumes its SVM policy.
 /// External memory and registered VMEM remain owned by their existing paths.
 pub(crate) fn commit_registration(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     service: &MemoryAdvice,
     address: u64,
     size: u64,
@@ -204,7 +204,12 @@ pub(crate) unsafe fn submit_discard(
         {
             return INVALID_ARGUMENT;
         }
-        if !runtime.gpus.first().is_some_and(|gpu| gpu.xnack_enabled) {
+        if !runtime
+            .agents
+            .gpus
+            .first()
+            .is_some_and(|gpu| gpu.xnack_enabled)
+        {
             return XNACK_DISABLED;
         }
         if (dependency_count == 0) != dependencies.is_null()
@@ -287,7 +292,7 @@ pub(crate) unsafe fn submit_discard(
             ranges.push(range);
         }
         for &agent in agents {
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             let location = match svm_location_from_agent(runtime, &service, agent, false) {
@@ -295,19 +300,19 @@ pub(crate) unsafe fn submit_discard(
                 Err(status) => return status,
             };
             locations.push(location);
-            devices.push(runtime.gpus[index].device.clone());
+            devices.push(runtime.agents.gpus[index].device.clone());
         }
         handles.extend_from_slice(dependencies);
         if completion.handle != 0 {
             handles.push(completion);
         }
         runtime.memory_state.reap_finished_workers();
-        let stop = runtime.operation_stop();
-        let cleanup = match runtime.inherit_cleanup() {
+        let stop = runtime.control.operation_stop();
+        let cleanup = match runtime.control.inherit_cleanup() {
             Ok(cleanup) => cleanup,
             Err(status) => return status,
         };
-        let health = runtime.health.clone();
+        let health = runtime.control.health.clone();
         let mut pending = match PendingAsyncRetention::new(
             &mut runtime.signal_state,
             &mut runtime.memory_state,
@@ -326,36 +331,37 @@ pub(crate) unsafe fn submit_discard(
         let worker = match thread::Builder::new()
             .name("rocddi-svm-discard".into())
             .spawn(move || {
-                let _lease = cleanup.map(crate::runtime::ApiLeaseScope::enter);
-                let _devices = devices;
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                    || -> Result<(), Status> {
-                        if !wait_async_dependencies(&worker_handles[..dependency_len], &stop) {
-                            return Err(ERROR);
-                        }
-                        for (index, &range) in ranges.iter().enumerate() {
-                            if stop.load(Ordering::Acquire) {
+                crate::admission::ApiLeaseScope::run_optional(cleanup, || {
+                    let _devices = devices;
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                        || -> Result<(), Status> {
+                            if !wait_async_dependencies(&worker_handles[..dependency_len], &stop) {
                                 return Err(ERROR);
                             }
-                            {
-                                let mut guard = lock()?;
-                                let runtime = initialized_mut(&mut guard)?;
-                                commit_managed(runtime, &service, range)?;
+                            for (index, &range) in ranges.iter().enumerate() {
+                                if stop.load(Ordering::Acquire) {
+                                    return Err(ERROR);
+                                }
+                                {
+                                    let mut guard = lock()?;
+                                    let runtime = initialized_mut(&mut guard)?;
+                                    commit_managed(runtime, &service, range)?;
+                                }
+                                discard_range(&service, range, locations.get(index).copied())?;
                             }
-                            discard_range(&service, range, locations.get(index).copied())?;
-                        }
-                        Ok(())
-                    },
-                ));
-                let retain = result.is_err();
-                if retain {
-                    health.quarantine();
-                }
-                for range in &ranges {
-                    release_async_resources(&[], &[Some(range.reservation)], retain);
-                }
-                finish_async_signal(completion, matches!(result, Ok(Ok(()))));
-                release_async_resources(&worker_handles, &[], false);
+                            Ok(())
+                        },
+                    ));
+                    let retain = result.is_err();
+                    if retain {
+                        health.quarantine();
+                    }
+                    for range in &ranges {
+                        release_async_resources(&[], &[Some(range.reservation)], retain);
+                    }
+                    finish_async_signal(completion, matches!(result, Ok(Ok(()))));
+                    release_async_resources(&worker_handles, &[], false);
+                })
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
