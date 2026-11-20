@@ -205,6 +205,7 @@ class Event : public RuntimeObject {
       return false;
     }
     releaseResources();
+    releasePinnedHwEvents();
     return true;
   }
 

@@ -163,15 +163,17 @@ bool Event::setStatus(int32_t status, uint64_t timeStamp, bool deferRelease) {
   if (status <= CL_COMPLETE) {
     // Before we notify the waiters that this event reached the CL_COMPLETE
     // status, we release all the resources associated with this instance.
-    if (!IS_HIP) {
-      if (deferRelease) {
-        deferResourceRelease_ = true;
-      } else {
+    if (!IS_HIP && deferRelease) {
+      // The command's packets, including its GPU waits, may still be queued, so its resources
+      // and pins are released by ReleaseDeferredResources() once the device completes it
+      deferResourceRelease_ = true;
+    } else {
+      if (!IS_HIP) {
         releaseResources();
       }
+      // The GPU passed the command's waits before it completed
+      releasePinnedHwEvents();
     }
-    // The GPU passed the command's waits before it completed
-    releasePinnedHwEvents();
 
     if (profilingInfo().enabled_) {
       amd::activity_prof::ReportActivity(command());
