@@ -5,8 +5,12 @@
 
 #include "core/trace_cache/sample_type.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <functional>
+#include <iterator>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,6 +21,29 @@ namespace rocprofsys::trace_cache
 /// ROCPROFSYS_USE_EXPERIMENTAL_CALLSTACK_SAMPLER.
 inline constexpr std::string_view k_cpu_snap_display_name =
     "experimental call-stack sampler";
+
+/**
+ * @brief Calculates the start of the slice that ends at the current sample.
+ *
+ * The slice starts at the latest resume in (@p previous_ns, @p current_ns], if
+ * there is such a resume, otherwise at @p previous_ns.
+ *
+ * @param resumes      Times sampling resumed in this process, ascending.
+ * @param previous_ns  The thread's previous sample.
+ * @param current_ns   The current sample.
+ */
+[[nodiscard]] inline std::uint64_t
+slice_start(std::span<const std::uint64_t> resumes, std::uint64_t previous_ns,
+            std::uint64_t current_ns)
+{
+    auto const first_resume_after_current = std::ranges::upper_bound(resumes, current_ns);
+    if(first_resume_after_current == resumes.begin())
+    {
+        return previous_ns;  // no resume at or before current_ns
+    }
+    auto const latest_resume = *std::prev(first_resume_after_current);
+    return latest_resume > previous_ns ? latest_resume : previous_ns;
+}
 
 /**
  * @brief Turns one process's cpu-snap chunks into backtrace_region_sample records.

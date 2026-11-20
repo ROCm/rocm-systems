@@ -19,6 +19,7 @@ set(trace_cache_tests_sources
     test_rocpd_processor.cpp
     test_rocpd_xcp_output.cpp
     test_sample_type.cpp
+    test_sampling_resumes.cpp
     test_storage_parser.cpp
     test_type_registry.cpp
     test_unified_memory_processor.cpp
