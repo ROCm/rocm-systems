@@ -1847,9 +1847,9 @@ typedef struct {
  */
 typedef struct {
   uint32_t process_id;    //!< Process ID
-  uint64_t vram_usage;    //!< VRAM usage
+  uint64_t vram_usage;    //!< VRAM usage in bytes
   uint64_t sdma_usage;    //!< SDMA usage in microseconds
-  uint32_t cu_occupancy;  //!< Compute Unit usage in percent
+  uint32_t cu_occupancy;  //!< Number of CUs utilized
   uint32_t evicted_time;  //!< Time that queues are evicted on a GPU in milliseconds
 } rsmi_process_info_t;
 
