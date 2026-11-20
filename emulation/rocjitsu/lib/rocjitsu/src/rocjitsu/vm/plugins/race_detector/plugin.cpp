@@ -1488,10 +1488,10 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   std::vector<LdsByteRange> ranges;
   ranges.reserve(issue.lds_ranges.size());
   for (const auto &range : issue.lds_ranges) {
-    ranges.push_back({.address = range.address, .bytes = range.bytes});
-    const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
+    const uint64_t bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
     if (bytes == 0)
       continue;
+    ranges.push_back({.address = range.address, .bytes = static_cast<uint32_t>(bytes)});
     const int addr = static_cast<int>(range.address);
     if (issue.is_load)
       detector->validateWriteAfterRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
@@ -1499,12 +1499,9 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
   }
   if (issue.is_load && lds_waw_) {
-    for (const auto &range : ranges) {
-      const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
-      if (bytes != 0)
-        detector->validateWriteAfterWrite(static_cast<int>(range.address), waveId, -1,
-                                          static_cast<int>(bytes), ldsAccessOrder);
-    }
+    for (const auto &range : ranges)
+      detector->validateWriteAfterWrite(static_cast<int>(range.address), waveId, -1,
+                                        static_cast<int>(range.bytes), ldsAccessOrder);
   }
 
   // TENSORcnt counts each tensor instruction (CDNA5 ISA 10.11.1), so one that
