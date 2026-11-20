@@ -421,6 +421,9 @@ amdcuid_status_t read_cpu_ppin(const std::string& cpu_base_path, const std::stri
     if (status != AMDCUID_STATUS_SUCCESS) return status;
     constexpr uint64_t kLockout = 1, kEnable = 2;
     if ((control & kLockout) && !(control & kEnable)) return AMDCUID_STATUS_SUCCESS;
+    // The PPIN is present but gated off. Do not enable hardware or fall back
+    // to a different identifier just because this kernel did not enable it.
+    if (!(control & kEnable)) return AMDCUID_STATUS_FILE_ERROR;
   }
   status = read_ppin_msr(msr_base_path, cpu, msr, ppin);
   if (status != AMDCUID_STATUS_SUCCESS) ppin = 0;

@@ -196,6 +196,18 @@ TEST(cuidtstUnprivileged, PpinOnAnOldKernelWithPpinLockedOutIsAbsent) {
   EXPECT_EQ(ppin, 0u);
 }
 
+TEST(cuidtstUnprivileged, PpinDisabledButNotLockedOutIsUnreadable) {
+  SKIP_UNLESS_X86();
+  FakeCpu cpu;
+  cpu.SetFlags("fpu");
+  cpu.SetKernel("5.4.0-100-generic", true);
+  if (!cpu.SetMsr(0xC00102F0, 0) || !cpu.SetMsr(0xC00102F1, 0))
+    GTEST_SKIP() << "no sparse files here";
+  uint64_t ppin = 0xdeadbeef;
+  EXPECT_EQ(cpu.Read(kAmd, ppin), AMDCUID_STATUS_FILE_ERROR);
+  EXPECT_EQ(ppin, 0u);
+}
+
 TEST(cuidtstUnprivileged, PpinOnAnOldKernelWithoutTheCpuidBitIsAbsent) {
   SKIP_UNLESS_X86();
   FakeCpu cpu;
