@@ -1302,17 +1302,17 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 				ret = HSAKMT_STATUS_ERROR;
 				goto out;
 			}
-			props->OverrideGfxIpVersion.ui32.Major = major & 0x3f;
+			props->OverrideGfxIpVersion.ui32.Major = major & 0xff;
 			props->OverrideGfxIpVersion.ui32.Minor = minor & 0xff;
 			props->OverrideGfxIpVersion.ui32.Stepping = step & 0xff;
                 }
 
 		if (hsa_gfxip) {
-			props->GfxIpVersion.ui32.Major = hsa_gfxip->major & 0x3f;
+			props->GfxIpVersion.ui32.Major = hsa_gfxip->major & 0xff;
 			props->GfxIpVersion.ui32.Minor = hsa_gfxip->minor & 0xff;
 			props->GfxIpVersion.ui32.Stepping = hsa_gfxip->stepping & 0xff;
 		} else {
-			props->GfxIpVersion.ui32.Major = gfxv_major & 0x3f;
+			props->GfxIpVersion.ui32.Major = gfxv_major & 0xff;
 			props->GfxIpVersion.ui32.Minor = gfxv_minor & 0xff;
 			props->GfxIpVersion.ui32.Stepping = gfxv_stepping & 0xff;
 		}
