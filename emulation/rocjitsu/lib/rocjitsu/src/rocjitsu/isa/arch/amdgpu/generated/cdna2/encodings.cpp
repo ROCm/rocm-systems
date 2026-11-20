@@ -273,11 +273,8 @@ Smem::Smem(std::string_view mnemonic, const SmemMachineInst *inst, ExecuteFn exe
 bool Vop1::has_encoded_dpp() const {
   if (!(inst_.src0 == amdgpu::SRC_DPP))
     return false;
-  return inst_.op <= 1 || (inst_.op >= 5 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 14) ||
-         (inst_.op >= 17 && inst_.op <= 20) || (inst_.op >= 27 && inst_.op <= 36) ||
-         inst_.op == 39 || (inst_.op >= 41 && inst_.op <= 47) ||
-         (inst_.op >= 51 && inst_.op <= 52) || inst_.op == 55 ||
-         (inst_.op >= 57 && inst_.op <= 79) || inst_.op == 82;
+  return inst_.op <= 1 || (inst_.op >= 3 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 52) ||
+         inst_.op == 55 || (inst_.op >= 57 && inst_.op <= 79) || inst_.op == 82;
 }
 
 void Vop1::append_mnemonic(std::string &out) const {

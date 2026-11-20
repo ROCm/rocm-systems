@@ -21,6 +21,7 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_MOVK_I32);
 }
 
 namespace detail {
@@ -40,6 +41,7 @@ SVersionSopk::SVersionSopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_VERSION);
 }
 
 namespace detail {
@@ -66,6 +68,7 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  set_amdgpu_operation(amdgpu::Operation::S_CMOVK_I32);
 }
 
 namespace detail {
@@ -91,6 +94,7 @@ SAddkCoI32Sopk::SAddkCoI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ADDK_CO_I32);
 }
 
 namespace detail {
@@ -113,6 +117,7 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_MULK_I32);
 }
 
 namespace detail {
@@ -134,6 +139,7 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_GETREG_B32);
 }
 
 namespace detail {
@@ -155,6 +161,7 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &sdst;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_SETREG_B32);
 }
 
 namespace detail {
@@ -183,6 +190,7 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
+  set_amdgpu_operation(amdgpu::Operation::S_SETREG_IMM32_B32);
 }
 
 namespace detail {
@@ -217,6 +225,8 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
   pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
+  set_amdgpu_operation(amdgpu::Operation::S_CALL_B64);
+  flags_ |= READS_PC;
 }
 
 namespace detail {

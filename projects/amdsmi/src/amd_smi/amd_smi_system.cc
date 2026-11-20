@@ -6,9 +6,11 @@
 #include <dirent.h>
 
 #include <cassert>
+#include <cctype>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -232,26 +234,86 @@ amdsmi_status_t AMDSmiSystem::get_sys_num_of_cpu_sockets(uint32_t* sock_num) {
   return AMDSMI_STATUS_SUCCESS;
 }
 
+namespace {
+const char* g_sys_devices_system_root_override = nullptr;
+
+// A real cpulist/physical_package_id value never exceeds a few thousand; this
+// bounds both the parsed range size (rejecting e.g. "0-4294967295") and lone
+// out-of-range values, so a single malformed sysfs entry can't turn into a
+// multi-billion-iteration loop.
+constexpr uint32_t kMaxPlausibleTopologyValue = 1u << 16;
+
+// Parses `token` as a base-10 uint32_t, requiring every character to be a
+// digit (so "-1", " ", and empty strings are rejected instead of silently
+// wrapping or defaulting to 0) and rejecting values that overflow uint32_t
+// or exceed kMaxPlausibleTopologyValue.
+bool ParsePlausibleUint32(const std::string& token, uint32_t* out) {
+  if (token.empty()) {
+    return false;
+  }
+  for (char c : token) {
+    if (!std::isdigit(static_cast<unsigned char>(c))) {
+      return false;
+    }
+  }
+  errno = 0;
+  char* end = nullptr;
+  unsigned long value = std::strtoul(token.c_str(), &end, 10);  // NOLINT(runtime/int)
+  if (errno == ERANGE || end != token.c_str() + token.size() ||
+      value > kMaxPlausibleTopologyValue) {
+    return false;
+  }
+  *out = static_cast<uint32_t>(value);
+  return true;
+}
+}  // namespace
+
+const char* SysDevicesSystemRoot() {
+  return g_sys_devices_system_root_override ? g_sys_devices_system_root_override
+                                            : "/sys/devices/system";
+}
+
+void SetSysDevicesSystemRootForTesting(const char* path) {
+  g_sys_devices_system_root_override = path;
+}
+
 std::vector<uint32_t> AMDSmiSystem::get_cpu_sockets_from_numa_node(int32_t numa_node) {
   std::vector<uint32_t> sockets;
   if (numa_node < 0) {
     sockets.push_back(std::numeric_limits<int32_t>::max());
     return sockets;
   }
-  std::ifstream node_info("/sys/devices/system/node/node" + std::to_string(numa_node) + "/cpulist");
+  std::string root = SysDevicesSystemRoot();
+  std::ifstream node_info(root + "/node/node" + std::to_string(numa_node) + "/cpulist");
   std::string info;
 
   if (node_info.is_open()) {
     std::getline(node_info, info);
-    std::istringstream iss(info);
-    uint32_t index;
-    while (iss >> index) {
-      std::ifstream cpu_info("/sys/devices/system/cpu/cpu" + std::to_string(index) +
-                             "/topology/physical_package_id");
-      if (cpu_info.is_open()) {
-        uint32_t socket;
-        cpu_info >> socket;
-        sockets.push_back(socket);
+    // cpulist is a comma-separated list of indices and/or "first-last" ranges
+    // (e.g. "0-31,64-95"), not a flat whitespace-separated list of indices.
+    std::istringstream list(info);
+    std::string range;
+    while (std::getline(list, range, ',')) {
+      size_t dash = range.find('-');
+      std::string first_token = dash == std::string::npos ? range : range.substr(0, dash);
+      std::string last_token = dash == std::string::npos ? range : range.substr(dash + 1);
+      uint32_t first = 0;
+      uint32_t last = 0;
+      if (!ParsePlausibleUint32(first_token, &first) || !ParsePlausibleUint32(last_token, &last) ||
+          last < first) {
+        continue;  // malformed or out-of-range token; skip rather than mis-resolve or hang
+      }
+      for (uint32_t index = first; index <= last; ++index) {
+        std::ifstream cpu_info(root + "/cpu/cpu" + std::to_string(index) +
+                               "/topology/physical_package_id");
+        if (cpu_info.is_open()) {
+          std::string socket_str;
+          std::getline(cpu_info, socket_str);
+          uint32_t socket = 0;
+          if (ParsePlausibleUint32(socket_str, &socket)) {
+            sockets.push_back(socket);
+          }
+        }
       }
     }
   }

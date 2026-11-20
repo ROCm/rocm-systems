@@ -32,6 +32,8 @@ ScratchLoadU8Vscratch::ScratchLoadU8Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -64,6 +66,8 @@ ScratchLoadI8Vscratch::ScratchLoadI8Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -96,6 +100,8 @@ ScratchLoadU16Vscratch::ScratchLoadU16Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -128,6 +134,8 @@ ScratchLoadI16Vscratch::ScratchLoadI16Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -160,6 +168,8 @@ ScratchLoadB32Vscratch::ScratchLoadB32Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -192,6 +202,8 @@ ScratchLoadB64Vscratch::ScratchLoadB64Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -224,6 +236,8 @@ ScratchLoadB96Vscratch::ScratchLoadB96Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -256,6 +270,8 @@ ScratchLoadB128Vscratch::ScratchLoadB128Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -288,6 +304,8 @@ ScratchStoreB8Vscratch::ScratchStoreB8Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -320,6 +338,8 @@ ScratchStoreB16Vscratch::ScratchStoreB16Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -351,6 +371,8 @@ ScratchStoreB32Vscratch::ScratchStoreB32Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -382,6 +404,8 @@ ScratchStoreB64Vscratch::ScratchStoreB64Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -413,6 +437,8 @@ ScratchStoreB96Vscratch::ScratchStoreB96Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -444,6 +470,8 @@ ScratchStoreB128Vscratch::ScratchStoreB128Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -475,6 +503,9 @@ ScratchLoadD16U8Vscratch::ScratchLoadD16U8Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_D16_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -512,6 +543,9 @@ ScratchLoadD16I8Vscratch::ScratchLoadD16I8Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_D16_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -549,6 +583,9 @@ ScratchLoadD16B16Vscratch::ScratchLoadD16B16Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_D16_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -586,6 +623,9 @@ ScratchLoadD16HiU8Vscratch::ScratchLoadD16HiU8Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_D16_HI_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -623,6 +663,9 @@ ScratchLoadD16HiI8Vscratch::ScratchLoadD16HiI8Vscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_D16_HI_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -660,6 +703,9 @@ ScratchLoadD16HiB16Vscratch::ScratchLoadD16HiB16Vscratch(const MachineInst *inst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -699,6 +745,9 @@ ScratchStoreD16HiB8Vscratch::ScratchStoreD16HiB8Vscratch(const MachineInst *inst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_D16_HI_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -732,6 +781,9 @@ ScratchStoreD16HiB16Vscratch::ScratchStoreD16HiB16Vscratch(const MachineInst *in
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -766,6 +818,8 @@ ScratchLoadBlockVscratch::ScratchLoadBlockVscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_LOAD_BLOCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -799,6 +853,8 @@ ScratchStoreBlockVscratch::ScratchStoreBlockVscratch(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::SCRATCH_STORE_BLOCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scratch, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {

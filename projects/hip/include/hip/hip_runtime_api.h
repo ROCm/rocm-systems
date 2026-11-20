@@ -657,6 +657,16 @@ typedef enum hipDeviceAttribute_t {
   // Extended attributes for vendors
 } hipDeviceAttribute_t;
 
+/**
+ * @brief Execution affinity types, mirroring CUDA's CUexecAffinityType.
+ */
+typedef enum hipExecAffinityType {
+  hipExecAffinityTypeCUCount = 0,     ///< Compute-unit count affinity (== CU_EXEC_AFFINITY_TYPE_SM_COUNT); always supported
+  hipExecAffinityTypeMax,             ///< Sentinel (== CU_EXEC_AFFINITY_TYPE_MAX)
+  hipExtExecAffinityTypeGranularityCU = 0x1000,   ///< Per-CU CU-mask granularity. Valid only on Rocm device.
+  hipExtExecAffinityTypeGranularityWGP = 0x1001,  ///< Per-WGP CU-mask granularity. Valid only on Rocm device.
+} hipExecAffinityType;
+
 // Flags that can be used with hipGetProcAddress.
 /** Default flag. Equivalent to HIP_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM if compiled with
  *  -fgpu-default-stream=per-thread flag or HIP_API_PER_THREAD_DEFAULT_STREAM macro is
@@ -2594,6 +2604,28 @@ hipError_t hipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int deviceI
  */
 hipError_t hipDeviceFlushGPUDirectRDMAWrites(enum hipFlushGPUDirectRDMAWritesTarget target,
                                              enum hipFlushGPUDirectRDMAWritesScope scope);
+/**
+ * @brief Returns whether the device supports an execution affinity type, and the
+ * device's CU-masking granularity.
+ *
+ * For #hipExecAffinityTypeCUCount, @p pi is always set to 1.
+ *
+ * For #hipExtExecAffinityTypeGranularityCU and #hipExtExecAffinityTypeGranularityWGP,
+ * @p pi reports the granularity the runtime will actually apply to a CU mask on this
+ * device, so exactly one of the two is reported as supported and the other as
+ * unsupported. This is an effective runtime property rather than a fixed hardware one:
+ * WGP granularity is used on gfx10 through gfx12.4 and is controlled by the
+ * GPU_ENABLE_WGP_MODE environment variable, which defaults to 1. Setting
+ * GPU_ENABLE_WGP_MODE=0 makes those devices report CU granularity instead. gfx9 and
+ * gfx12.5 and later always report CU granularity, regardless of that variable.
+ *
+ * @param [out] pi   Set to 1 if @p type is supported, 0 otherwise.
+ * @param [in]  type The ::hipExecAffinityType to query.
+ * @param [in]  dev  The device ordinal to query.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidDevice
+ */
+hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev);
 /**
  * @brief Returns the default memory pool of the specified device
  *
@@ -6112,6 +6144,26 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
  * hipMemHostGetDevicePointer, hipMemsetD8, hipMemsetD16, hipMemsetD32, hipArrayGetInfo
  */
 hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array);
+/**
+ * @brief Gets a HIP array plane from a multiplanar HIP array.
+ *
+ * @note HIP does not implement multiplanar arrays. On AMD devices no array a caller can create
+ * has planes, so well-formed calls always report #hipErrorNotSupported. On NVIDIA devices the
+ * call forwards to cuArrayGetPlane, which succeeds for an array created as multiplanar through
+ * the CUDA driver API.
+ *
+ * @param[out] pPlaneArray - pointer to the returned HIP array that represents a single format
+ * plane of the input HIP array hArray
+ * @param[in] hArray - multiplanar HIP array
+ * @param[in] planeIdx - index of the array plane
+ *
+ * @returns #hipErrorInvalidValue if @p pPlaneArray is nullptr, #hipErrorInvalidHandle if
+ * @p hArray is not a valid array. Otherwise #hipErrorNotSupported on AMD devices, or on NVIDIA
+ * devices #hipSuccess and the requested plane for a multiplanar array.
+ *
+ * @see hipArrayCreate, hipArray3DCreate, hipArrayDestroy
+ */
+hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx);
 /**
  *  @brief Copies data between host and device.
  *

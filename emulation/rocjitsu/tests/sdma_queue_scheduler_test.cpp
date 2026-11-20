@@ -1281,6 +1281,7 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, PreEffectRefusalBlocksAndRetriesSam
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePacketWrite) {
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 11;
@@ -1358,6 +1359,7 @@ TEST(SdmaQueueSchedulerCacheMaintenanceTest, FailedWritebackFaultsQueueBeforePac
   EXPECT_TRUE(legacy_vm.unregister_vmid(kProcessId));
   EXPECT_TRUE(gpu_vm.unregister_address_space(queue_address_space));
 }
+#endif
 
 class SdmaCacheInvalidateTest : public ::testing::TestWithParam<std::pair<bool, bool>> {};
 

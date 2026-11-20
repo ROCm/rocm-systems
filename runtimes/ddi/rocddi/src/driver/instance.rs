@@ -59,6 +59,30 @@ pub(crate) enum DriverInstance {
 }
 
 impl DriverInstance {
+    /// Installs the common controller before a prepared registry is published.
+    pub(crate) fn bind_admission(
+        &mut self,
+        admission: &crate::session::SessionAdmission,
+    ) -> Result<(), Error> {
+        let busy = || Error::Operation {
+            kind: ErrorKind::Busy,
+            detail: "installing a driver requires exclusive ownership",
+        };
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(driver) => Shared::get_mut(driver)
+                .ok_or_else(busy)?
+                .admission
+                .bind(admission),
+            #[cfg(test)]
+            Self::Test(driver) => Shared::get_mut(driver)
+                .ok_or_else(busy)?
+                .admission
+                .bind(admission),
+        }
+    }
     /// Borrows the concrete KFD backend for Linux-specific interop.
     #[allow(
         clippy::unnecessary_wraps,
@@ -292,6 +316,20 @@ pub(crate) enum DeviceDriverState {
 }
 
 impl DeviceDriverState {
+    pub(crate) fn admission(&self) -> &crate::session::SessionAdmission {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd { driver, .. } => driver.admission(),
+            #[cfg(test)]
+            Self::Test { driver, .. } => driver.admission(),
+        }
+    }
+
+    pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        self.admission().enter()
+    }
     /// Driver-local event origin for an activated endpoint.
     #[allow(
         clippy::unnecessary_wraps,
@@ -381,15 +419,21 @@ impl DeviceDriverState {
     }
     /// Subscribes to the activated driver's retained system notifications.
     pub(crate) fn subscribe_events(&self) -> Result<EventSubscription, Error> {
+        let _operation = self.admit()?;
+        let lease = self.admission().lease()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
-            Self::LinuxKfd { state, .. } => {
-                Ok(EventSubscription::LinuxKfd(state.subscribe_events()?))
-            }
+            Self::LinuxKfd { state, .. } => Ok(EventSubscription {
+                inner: NativeEventSubscription::LinuxKfd(state.subscribe_events()?),
+                _lease: lease,
+            }),
             #[cfg(test)]
-            Self::Test { state, .. } => Ok(EventSubscription::Test(state.subscribe_events())),
+            Self::Test { state, .. } => Ok(EventSubscription {
+                inner: NativeEventSubscription::Test(state.subscribe_events()),
+                _lease: lease,
+            }),
         }
     }
 
@@ -458,7 +502,12 @@ impl DeviceDriverState {
 }
 
 /// Concrete observer retained behind the device-independent event contract.
-pub(crate) enum EventSubscription {
+pub(crate) struct EventSubscription {
+    inner: NativeEventSubscription,
+    _lease: crate::session::SessionLease,
+}
+
+enum NativeEventSubscription {
     #[cfg(not(target_os = "linux"))]
     Unavailable(std::convert::Infallible),
     /// Linux KFD observer retained by the generic device event handle.
@@ -472,25 +521,25 @@ pub(crate) enum EventSubscription {
 impl EventSubscription {
     /// Reads the next event available to this observer.
     pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
-        match self {
+        match &mut self.inner {
             #[cfg(not(target_os = "linux"))]
-            Self::Unavailable(never, ..) => match *never {},
+            NativeEventSubscription::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
-            Self::LinuxKfd(subscription) => subscription.poll(),
+            NativeEventSubscription::LinuxKfd(subscription) => subscription.poll(),
             #[cfg(test)]
-            Self::Test(subscription) => subscription.poll(),
+            NativeEventSubscription::Test(subscription) => subscription.poll(),
         }
     }
 
     /// Blocks until a native event may be ready or the timeout expires.
     pub(crate) fn wait_native(&self, timeout: std::time::Duration) -> Result<(), Error> {
-        match self {
+        match &self.inner {
             #[cfg(not(target_os = "linux"))]
-            Self::Unavailable(never, ..) => match *never {},
+            NativeEventSubscription::Unavailable(never, ..) => match *never {},
             #[cfg(target_os = "linux")]
-            Self::LinuxKfd(subscription) => subscription.wait_native(timeout),
+            NativeEventSubscription::LinuxKfd(subscription) => subscription.wait_native(timeout),
             #[cfg(test)]
-            Self::Test(subscription) => subscription.wait_native(timeout),
+            NativeEventSubscription::Test(subscription) => subscription.wait_native(timeout),
         }
     }
 }
@@ -577,6 +626,29 @@ pub(crate) fn unsupported_test_gpu() -> Error {
 
 /// Routes GPU-only operations through a checked GPU driver projection.
 impl GpuDriverRef<'_> {
+    pub(crate) fn core_snapshot(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreDeviceSnapshot, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd { state, .. } => state.core_snapshot(),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
+        }
+    }
+
+    pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd { driver, .. } => driver.admission().enter(),
+            #[cfg(test)]
+            Self::Test { driver, .. } => driver.admission().enter(),
+        }
+    }
     pub(crate) fn asic_family_id(&self) -> u32 {
         match self {
             #[cfg(not(target_os = "linux"))]
@@ -589,6 +661,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn xnack_enabled(&self) -> Result<bool, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -600,6 +673,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn supports_expert_scheduling(&self) -> Result<bool, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -611,6 +685,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn set_persisting_l2_cache_size(&self, size: u32) -> Result<(), Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -622,6 +697,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn available_memory(&self) -> Result<u64, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -633,6 +709,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn available_sdma_engines(&self) -> Result<u32, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -644,6 +721,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn clock_counters(&self) -> Result<ClockCounters, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -658,6 +736,7 @@ impl GpuDriverRef<'_> {
         &self,
         set: PcSamplingConfigurationSet,
     ) -> Result<Vec<PcSamplingConfiguration>, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -669,6 +748,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn surface_config(&self) -> Result<crate::device::gpu::GpuSurfaceConfig, Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -692,6 +772,11 @@ impl GpuDriverRef<'_> {
         handler_address: u64,
         memory_address: u64,
     ) -> Result<(), Error> {
+        let _operation = if handler_address == 0 && memory_address == 0 {
+            None
+        } else {
+            Some(self.admit()?)
+        };
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -706,6 +791,7 @@ impl GpuDriverRef<'_> {
     }
 
     pub(crate) fn spm_acquire(&self) -> Result<(), Error> {
+        let _operation = self.admit()?;
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},
@@ -737,6 +823,14 @@ impl GpuDriverRef<'_> {
         timeout: u32,
         destination: Option<usize>,
     ) -> Result<SpmDestinationReport, SpmDestinationFailure> {
+        let _operation = if destination.is_some() {
+            Some(self.admit().map_err(|error| SpmDestinationFailure {
+                error,
+                report: SpmDestinationReport::default(),
+            })?)
+        } else {
+            None
+        };
         match self {
             #[cfg(not(target_os = "linux"))]
             Self::Unavailable(never, ..) => match *never {},

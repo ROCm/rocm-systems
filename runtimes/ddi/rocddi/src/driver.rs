@@ -10,10 +10,11 @@
     )
 )]
 
-//! Private interface implemented by each concrete device driver.
+//! Backend-specific interfaces and private device-driver contracts.
 //!
-//! [`Driver`] owns discovery, activation, and shutdown. GPU capabilities are
-//! separate traits so each backend implements only the services it provides.
+//! Backend modules expose native operations to runtime frontends. The private
+//! driver contract owns discovery, activation, and shutdown. GPU capabilities
+//! are separate traits so each backend implements only the services it provides.
 //! Allocation and virtual-memory operations remain separate because their
 //! owners can be shared with other device families. Queue creation belongs to
 //! the matching GPU capability; queue operations belong to the returned owner.
@@ -23,12 +24,31 @@ mod instance;
     target_os = "linux",
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
-mod linux_kfd;
+pub mod linux_kfd;
 mod resources;
 #[cfg(test)]
 pub(crate) mod test_driver;
 #[cfg(test)]
 mod tests;
+
+// Keep native driver and registry types out of the public configuration bound.
+mod configuration {
+    /// Routes crate-defined configuration through the session's checked helper.
+    pub trait Apply: Sized {
+        /// Selects a backend using `Session::configure_driver`.
+        fn apply(self, session: &mut crate::session::Session) -> Result<(), crate::Error>;
+    }
+}
+
+/// Typed options accepted by [`crate::session::Session::configure`].
+///
+/// Each configuration type selects its owning backend without exposing native
+/// driver types. This trait is sealed; implementations are supplied by the
+/// compiled driver backends. The backend defines its options and activation
+/// constraints, while the session enforces exclusive access to the driver.
+pub trait DriverConfiguration: configuration::Apply {}
+
+impl<C: configuration::Apply> DriverConfiguration for C {}
 
 pub(crate) use instance::{
     DeviceDriverState, DriverInstance, DriverInstanceId, EndpointSelector, EventSubscription,
@@ -70,8 +90,11 @@ use crate::{Error, ErrorKind};
 
 /// Inert constructors for the driver backends compiled into this target.
 /// Each session constructs fresh instances from this immutable catalog.
-pub(crate) type DriverFactory =
-    fn(DriverContextLifetime, crate::os::ProcessIdentity) -> Result<DriverInstance, Error>;
+pub(crate) type DriverFactory = fn(
+    DriverContextLifetime,
+    crate::os::ProcessIdentity,
+    crate::session::SessionAdmission,
+) -> Result<DriverInstance, Error>;
 
 pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
     #[cfg(all(
@@ -88,9 +111,10 @@ pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
 fn new_linux_kfd(
     lifetime: DriverContextLifetime,
     process: crate::os::ProcessIdentity,
+    admission: crate::session::SessionAdmission,
 ) -> Result<DriverInstance, Error> {
     Ok(DriverInstance::LinuxKfd(Shared::new(
-        KfdDriver::with_context_lifetime(lifetime, process),
+        KfdDriver::with_admission(lifetime, process, admission),
     )?))
 }
 
@@ -135,6 +159,8 @@ pub(crate) trait CachedInfo {
 pub(crate) trait Driver: Send + Sync {
     /// State retained for one endpoint activated through this driver instance.
     type DeviceState: Clone + Send + Sync;
+    /// Session admission shared by every native owner derived from this driver.
+    fn admission(&self) -> &crate::session::SessionAdmission;
     /// Returns the identity stamped into this driver's passive endpoints.
     fn driver_instance(&self) -> DriverInstanceId;
     /// Returns the context policy fixed when this driver was constructed.
@@ -185,6 +211,17 @@ pub(crate) trait Driver: Send + Sync {
     }
     /// Revalidates an endpoint and acquires its device state.
     fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;
+}
+
+/// Driver-owned passive configuration, separate from common lifecycle services.
+pub(crate) trait ConfigurableDriver: Driver {
+    /// Complete set of configuration options understood by this backend.
+    type Configuration;
+
+    /// Replaces pending configuration before activation without native effects.
+    /// Rejects invalid lifecycle state before modifying the stored options.
+    /// Preserves the installed driver's identity and context lifetime.
+    fn configure(&mut self, configuration: Self::Configuration) -> Result<(), Error>;
 }
 
 /// Allocation, registration, and access operations on activated devices.
@@ -343,6 +380,15 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         permissions: DeviceAccess,
     ) -> Result<(), Error>;
     /// Unmaps one host range, retaining its owner if cleanup fails.
+    /// Borrows a still-mapped CPU interval independently of device health.
+    fn diagnostic_virtual_host_mapping(
+        _mapping: &Self::VirtualHostMapping,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "virtual host diagnostics unavailable",
+        })
+    }
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }
 
@@ -358,6 +404,15 @@ pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
     fn check(&self) -> Result<(), Error>;
     /// Samples the native read and write positions without retiring work.
     fn progress(&self) -> Result<(u64, u64), Error>;
+    /// Permanently stops and captures native compute diagnostic state.
+    fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        Err(Error::Operation {
+            kind: crate::ErrorKind::Unsupported,
+            detail: "native core capture unavailable",
+        })
+    }
     /// Stops native execution while retaining the queue's backing.
     fn inactivate(&mut self) -> Result<(), Error>;
     /// Changes the native scheduling priority when supported.
@@ -455,7 +510,7 @@ pub(crate) trait PcSamplingResource {
 
 /// Native fault-mode query, independent of allocation or queue services.
 pub(crate) trait GpuFaultModeOperations: Driver {
-    /// Queries the process-wide XNACK mode without changing it.
+    /// Queries the device's effective XNACK mode without changing it.
     fn xnack_enabled(&self, device: &Self::DeviceState) -> Result<bool, Error>;
 }
 
