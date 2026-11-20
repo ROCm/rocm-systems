@@ -38,7 +38,7 @@ class TestCliSetRestore(unittest.TestCase):
     def setUp(self) -> None:
         self.sweep = test_set.TestSet(methodName="test_command")
         self.sweep.common = mock.Mock(processors=[object()])
-        self.sweep.clk_freq = [{"is_apu": False}]
+        self.sweep.is_apu = [False]
         self.sweep.metric_data = {
             "gpu_data": [{"fan": {"max": "N/A", "speed": "N/A"}, "clock": {}, "perf_level": "AUTO"}]
         }
@@ -65,7 +65,7 @@ class TestCliSetRestore(unittest.TestCase):
         }
 
     def _make_apu(self) -> None:
-        self.sweep.clk_freq[0]["is_apu"] = True
+        self.sweep.is_apu[0] = True
         del self.sweep.metric_data["gpu_data"][0]["fan"]
 
     def _remaining_commands(self, index: int = 0) -> list:
@@ -164,13 +164,23 @@ class TestCliSetRestore(unittest.TestCase):
                         amdsmi.AmdSmiLibraryException(amdsmi.AmdSmiStatus.NOT_SUPPORTED),
                     ]
                 ),
+                amdsmi_shut_down=mock.DEFAULT,
+            ) as functions:
+                flags = test_set.TestSet._read_apu_flags()
+        self.assertEqual(flags, [True, False, False])
+        functions["amdsmi_shut_down"].assert_called_once_with()
+
+    def test_clock_tables_hold_only_clocks(self) -> None:
+        with mock.patch.object(test_set.TestSet, "common", self.sweep.common, create=True):
+            with mock.patch.multiple(
+                amdsmi,
+                amdsmi_get_processor_handles=mock.Mock(return_value=[object()]),
                 amdsmi_get_clk_freq=mock.Mock(return_value={"num_supported": 1}),
                 amdsmi_get_clock_info=mock.Mock(return_value={"clk_deep_sleep": "N/A"}),
                 amdsmi_shut_down=mock.DEFAULT,
-            ) as functions:
-                baseline = test_set.TestSet._read_clk_freq()
-        self.assertEqual([entry.get("is_apu") for entry in baseline], [True, False, False])
-        functions["amdsmi_shut_down"].assert_called_once_with()
+            ):
+                tables = test_set.TestSet._read_clk_freq()
+        self.assertEqual(set(tables[0]), {"SCLK", "MCLK", "FCLK", "SOCCLK"})
 
     def test_reported_power_cap_requires_reset_success(self) -> None:
         limits = self.sweep.static_data["gpu_data"][0]["limit"]
@@ -281,7 +291,7 @@ class TestCliSetRestore(unittest.TestCase):
         self.sweep.partition_data["current_partition"] *= 2
         for dgpu_index in (0, 1):
             with self.subTest(dgpu_index=dgpu_index):
-                self.sweep.clk_freq = [{"is_apu": index != dgpu_index} for index in range(2)]
+                self.sweep.is_apu = [index != dgpu_index for index in range(2)]
                 metrics = [{}, {}]
                 metrics[dgpu_index] = deepcopy(dgpu)
                 self.sweep.metric_data["gpu_data"] = metrics

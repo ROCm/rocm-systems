@@ -7,7 +7,6 @@
 import os
 import shutil
 import tempfile
-from copy import deepcopy
 
 from common.common import amdsmi
 
@@ -39,7 +38,8 @@ class TestSet(TestCliBase):
         return
 
     def _section(self, data: dict, key: str, *, index: int, default: object) -> object:
-        is_apu = self.clk_freq[index]["is_apu"]
+        """``data[key]``, defaulted where an APU's dump omits it; required on a dGPU."""
+        is_apu = self.is_apu[index]
         value = data.get(key, default) if is_apu else data[key]
         if is_apu and value == "N/A":
             value = default
@@ -49,29 +49,24 @@ class TestSet(TestCliBase):
 
     def _restore_commands(self) -> list:
         """Validate the recorded data and prepare cleanup before the sweep writes."""
-        metric_data = deepcopy(self.metric_data)
-        static_data = deepcopy(self.static_data)
-        for index in range(len(self.common.processors)):
-            metric = metric_data["gpu_data"][index]
-            # The APU default metric dump drops the fan section, N/A included.
-            if self.clk_freq[index]["is_apu"] and "fan" in metric:
-                self.fail(f"GPU {index}: APU metric dump has a fan section: {metric['fan']}")
-            for key, default in (
-                ("fan", {"max": "N/A", "speed": "N/A"}),
-                ("clock", {}),
-                ("perf_level", "N/A"),
-            ):
-                metric[key] = self._section(metric, key, index=index, default=default)
-            static = static_data["gpu_data"][index]
-            static["clock"] = self._section(static, "clock", index=index, default={"sys": "N/A"})
         cmds = []
         for index, gpu in enumerate(self.common.processors):
+            metric = self.metric_data["gpu_data"][index]
+            static = self.static_data["gpu_data"][index]
+            # The APU default metric dump drops the fan section, N/A included.
+            if self.is_apu[index] and "fan" in metric:
+                self.fail(f"GPU {index}: APU metric dump has a fan section: {metric['fan']}")
+            fan = self._section(metric, "fan", index=index, default={"max": "N/A", "speed": "N/A"})
+            metric_clock = self._section(metric, "clock", index=index, default={})
+            perf_level = self._section(metric, "perf_level", index=index, default="N/A")
+            static_clock = self._section(static, "clock", index=index, default={"sys": "N/A"})
+
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
             # The driver hides pwm1_max only along with every other fan attribute,
             # pwm1_enable included, so a GPU without max cannot reset its fan. Speed is
             # not used: a runtime-suspended dGPU reports it as "N/A".
-            fan_max = metric_data["gpu_data"][index]["fan"]["max"]
-            if self.clk_freq[index]["is_apu"] or fan_max == "N/A":
+            fan_max = fan["max"]
+            if self.is_apu[index] or fan_max == "N/A":
                 fan_reset = [amdsmi.AmdSmiStatus.NOT_SUPPORTED]
             else:
                 # max fan speed is the hwmon pwm1_max ceiling on every interface
@@ -84,14 +79,14 @@ class TestSet(TestCliBase):
             # set --profile defaults
             # Read from the static baseline: the library is shut down once setup
             # ends, so querying it here fails and the restore was skipped.
-            profile = static_data["gpu_data"][index].get("profile")
+            profile = static.get("profile")
             if isinstance(profile, dict) and profile["current"] in profile["available_profiles"]:
                 cmds.append(
                     (f"amd-smi set --profile {profile['current']} --gpu {index}", self.PASS)
                 )
 
             # set --perf-determinism defaults
-            clock_sys = static_data["gpu_data"][index]["clock"]["sys"]
+            clock_sys = static_clock["sys"]
             if clock_sys != "N/A" and clock_sys["frequency_levels"]:
                 num = len(clock_sys["frequency_levels"])
                 level = f"Level {num - 1}"
@@ -123,9 +118,7 @@ class TestSet(TestCliBase):
 
             # set --compute-partition-mem-alloc-mode defaults
             try:
-                mem_alloc_mode = static_data["gpu_data"][index]["partition"][
-                    "compute_partition_mem_alloc_mode"
-                ]
+                mem_alloc_mode = static["partition"]["compute_partition_mem_alloc_mode"]
             except (KeyError, TypeError):
                 mem_alloc_mode = "N/A"
             if mem_alloc_mode not in ("N/A", "INVALID"):
@@ -140,7 +133,7 @@ class TestSet(TestCliBase):
             # Writes each supported sensor's default_power_cap. Replaying the recorded
             # value did not restore it: min and max were written after it, so the cap
             # was left at max. The current cap is not read, so a cap of 0 still resets.
-            power_limits = static_data["gpu_data"][index]["limit"]
+            power_limits = static["limit"]
             reports_cap = any(
                 isinstance(power_limits[power_type], dict)
                 and power_limits[power_type]["max_power_limit"] != "N/A"
@@ -154,19 +147,19 @@ class TestSet(TestCliBase):
             )
 
             # set --soc-pstate defaults
-            soc_pstate = static_data["gpu_data"][index]["soc_pstate"]
+            soc_pstate = static["soc_pstate"]
             if soc_pstate != "N/A":
                 current = int(soc_pstate["current_id"])
                 cmds.append((f"amd-smi set --soc-pstate {current} --gpu {index}", self.PASS))
 
             # set --xgmi-plpd defaults
-            xgmi_plpd = static_data["gpu_data"][index]["xgmi_plpd"]
+            xgmi_plpd = static["xgmi_plpd"]
             if xgmi_plpd != "N/A":
                 current = int(xgmi_plpd["current_id"])
                 cmds.append((f"amd-smi set --xgmi-plpd {current} --gpu {index}", self.PASS))
 
             # set --ptl-status defaults
-            ptl_state = static_data["gpu_data"][index]["limit"]["ptl_state"]
+            ptl_state = static["limit"]["ptl_state"]
             if ptl_state != "N/A":
                 if ptl_state == "Disabled":
                     ptl_state_value = 0
@@ -177,16 +170,15 @@ class TestSet(TestCliBase):
                 )
 
             # set --ptl-format defaults
-            ptl_format = static_data["gpu_data"][index]["limit"]["ptl_format"]
+            ptl_format = static["limit"]["ptl_format"]
             if ptl_format != "N/A":
                 # TODO: get the right ptl-format
                 cmds.append((f"amd-smi set --ptl-format {ptl_format} --gpu {index}", self.PASS))
 
             # set --clk-limit defaults
-            clock = metric_data["gpu_data"][index]["clock"]
             for clk_type in self.clk_limits:
                 for limit_type in self.limit_types:
-                    value = self._clk_limit_value(clock, clk_type, limit_type)
+                    value = self._clk_limit_value(metric_clock, clk_type, limit_type)
                     if value is not None:
                         # A readable min/max clock does not imply the device
                         # supports setting a limit on it.
@@ -211,12 +203,11 @@ class TestSet(TestCliBase):
             # set --perf-level defaults
             # Last of the clock writes: the reset above forces AUTO, and --clk-limit and
             # --perf-determinism each leave the device on a level of their own.
-            perf_level = metric_data["gpu_data"][index]["perf_level"]
             if perf_level not in ("N/A", "AMDSMI_DEV_PERF_LEVEL_UNKNOWN"):
                 perf_level = _strip_prefix(perf_level, "AMDSMI_DEV_PERF_LEVEL_")
                 cmds.append((f"amd-smi set --perf-level {perf_level} --gpu {index}", self.PASS))
             # set --process-isolation defaults
-            process_isolation = static_data["gpu_data"][index]["process_isolation"]
+            process_isolation = static["process_isolation"]
             # Put back whatever value the sweep left; "N/A" means unreadable, so
             # there is nothing to restore.
             if process_isolation != "N/A":
