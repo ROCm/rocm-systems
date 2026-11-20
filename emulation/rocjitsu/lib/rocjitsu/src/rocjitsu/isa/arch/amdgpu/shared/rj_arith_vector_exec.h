@@ -3,7 +3,11 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+// Generated vector handlers pass entry points from these operation families.
+#include "rj_arith/detail/rj_arith_dot.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
+#include "rj_arith/detail/rj_arith_integer.h"
+#include "rj_arith/detail/rj_arith_register.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/operand.h"
