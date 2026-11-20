@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
@@ -7800,7 +7801,7 @@ TEST(L2CacheTest, CompletionRetiresOnlyTheSelectedRootsCuLines) {
   l2.set_backing_memory(&memory);
   l2.set_gpu_vm(&vm);
   ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  config.arch = rocjitsu::IsaFamily::Cdna3;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 256;

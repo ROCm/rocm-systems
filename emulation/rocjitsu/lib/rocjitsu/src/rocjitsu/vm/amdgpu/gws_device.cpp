@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/gws_device.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -301,7 +302,7 @@ void GwsDevice::sema_release_all(ComputeUnitCore &cu, Wavefront &wf, uint32_t ri
   // The generation wakes every queued P waiter without consuming a credit.
   // GFX11 keeps any banked credits for future arrivals. Other targets clear them.
   ++res.release_gen;
-  if (cu.arch() != ROCJITSU_CODE_ARCH_RDNA3 && cu.arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (cu.arch() != rocjitsu::IsaFamily::Rdna3 && cu.arch() != rocjitsu::IsaFamily::Rdna3_5)
     res.counter = 0;
   // Retire the released waiters' credit reservations now. The generation bump above
   // wakes every currently queued P-waiter regardless of credits, so their arrival

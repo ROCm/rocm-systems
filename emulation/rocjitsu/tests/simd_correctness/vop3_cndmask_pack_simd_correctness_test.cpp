@@ -17,6 +17,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -124,7 +125,7 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop3_cmkpack_mem"), l2("vop3_cmkpack_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -132,7 +133,7 @@ struct Fixture {
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_cmkpack", cfg, &gpu_mem, &l2);
     if (!cu)
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -284,7 +285,7 @@ void check_pack_opsel_high_halves(uint64_t exec) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   const bool flush = (defaults.wf->fp_denorm_mode_f16_f64() & 1u) == 0;
   const bool quiet =
-      amdgpu::fp_mode::quiets_nan(ROCJITSU_CODE_ARCH_CDNA4, defaults.wf->ieee_mode());
+      amdgpu::fp_mode::quiets_nan(rocjitsu::IsaFamily::Cdna4, defaults.wf->ieee_mode());
   const auto canonical = [&](uint16_t half) -> uint16_t {
     if (flush && (half & 0x7c00u) == 0)
       return half & 0x8000u;

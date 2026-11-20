@@ -7,6 +7,7 @@
 #include "decode_test_util.h"
 #include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -299,14 +300,14 @@ ssize_t read_backing_bytes(int fd, void *buffer, size_t size, off_t offset) {
   return static_cast<ssize_t>(size);
 }
 
-uint32_t build_branch_word(rj_code_arch_t arch) {
+uint32_t build_branch_word(rocjitsu::IsaFamily arch) {
   auto word = rocjitsu::build_s_branch(-1, arch);
   if (word.failed())
     throw std::runtime_error("cannot encode branch for KFD test");
   return word.value();
 }
 
-uint32_t build_endpgm_word(rj_code_arch_t arch) {
+uint32_t build_endpgm_word(rocjitsu::IsaFamily arch) {
   auto word = rocjitsu::build_s_endpgm(arch);
   if (word.failed())
     throw std::runtime_error("cannot encode endpgm for KFD test");
@@ -1971,19 +1972,19 @@ protected:
 
 TEST(KfdIoctlHelpersTest, ClassifiesEveryPreGfx12TrapInterruptEncodingFamily) {
   struct EncodingCase {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t profiling_move;
     uint32_t exception_move;
   };
   constexpr EncodingCase kCases[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1, 0xBEFC0073u, 0xBEFC006Fu},
-      {ROCJITSU_CODE_ARCH_CDNA2, 0xBEFC0073u, 0xBEFC006Fu},
-      {ROCJITSU_CODE_ARCH_CDNA3, 0xBEFC0073u, 0xBEFC006Fu},
-      {ROCJITSU_CODE_ARCH_CDNA4, 0xBEFC0073u, 0xBEFC006Fu},
-      {ROCJITSU_CODE_ARCH_RDNA1, 0xBEFC0373u, 0xBEFC036Fu},
-      {ROCJITSU_CODE_ARCH_RDNA2, 0xBEFC0373u, 0xBEFC036Fu},
-      {ROCJITSU_CODE_ARCH_RDNA3, 0xBEFD0073u, 0xBEFD006Fu},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, 0xBEFD0073u, 0xBEFD006Fu},
+      {rocjitsu::IsaFamily::Cdna1, 0xBEFC0073u, 0xBEFC006Fu},
+      {rocjitsu::IsaFamily::Cdna2, 0xBEFC0073u, 0xBEFC006Fu},
+      {rocjitsu::IsaFamily::Cdna3, 0xBEFC0073u, 0xBEFC006Fu},
+      {rocjitsu::IsaFamily::Cdna4, 0xBEFC0073u, 0xBEFC006Fu},
+      {rocjitsu::IsaFamily::Rdna1, 0xBEFC0373u, 0xBEFC036Fu},
+      {rocjitsu::IsaFamily::Rdna2, 0xBEFC0373u, 0xBEFC036Fu},
+      {rocjitsu::IsaFamily::Rdna3, 0xBEFD0073u, 0xBEFD006Fu},
+      {rocjitsu::IsaFamily::Rdna3_5, 0xBEFD0073u, 0xBEFD006Fu},
   };
   constexpr uint32_t kSNop0 = 0xBF800000u;
 
@@ -2001,18 +2002,18 @@ TEST(KfdIoctlHelpersTest, ClassifiesEveryPreGfx12TrapInterruptEncodingFamily) {
   }
 
   EXPECT_FALSE(
-      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(ROCJITSU_CODE_ARCH_CDNA5));
+      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(rocjitsu::IsaFamily::Cdna5));
   EXPECT_FALSE(
-      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(ROCJITSU_CODE_ARCH_RDNA4));
-  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_CDNA5),
+      rocjitsu::kmd::detail::uses_pre_gfx12_trap_interrupt_sites(rocjitsu::IsaFamily::Rdna4));
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(rocjitsu::IsaFamily::Cdna5),
             rocjitsu::kmd::detail::TrapInterruptAbi::Gfx12);
-  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_RDNA4),
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(rocjitsu::IsaFamily::Rdna4),
             rocjitsu::kmd::detail::TrapInterruptAbi::Gfx12);
-  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_RV32I),
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(rocjitsu::IsaFamily::Rv32i),
             rocjitsu::kmd::detail::TrapInterruptAbi::Unsupported);
-  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_RV64I),
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(rocjitsu::IsaFamily::Rv64i),
             rocjitsu::kmd::detail::TrapInterruptAbi::Unsupported);
-  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(ROCJITSU_CODE_ARCH_INVALID),
+  EXPECT_EQ(rocjitsu::kmd::detail::trap_interrupt_abi(rocjitsu::IsaFamily::Invalid),
             rocjitsu::kmd::detail::TrapInterruptAbi::Unsupported);
 }
 
@@ -2250,7 +2251,7 @@ protected:
 TEST_P(KfdCuMaskPlacementTest, CuMaskSelectsOnlyTheRequestedPhysicalUnits) {
   using namespace rocjitsu::amdhsa;
   const CuMaskPlacementCase &test = GetParam();
-  const bool rdna = soc_->arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool rdna = soc_->arch() == rocjitsu::IsaFamily::Rdna4;
   const uint32_t wave_size = rdna ? 32u : 64u;
   const uint32_t workgroups = test.bit < 0 ? 256u : 8u;
   constexpr uint64_t kKernelAddress = 0x10000;
@@ -12069,7 +12070,7 @@ TEST_F(KfdCdna5PeerBindingTest, ControlledOwnerTensorDmaStoresRefreshCachedReque
   owner_wave->set_lds_base(owner_cu->allocate_lds(256));
   owner_wave->set_lds_size(256);
   const std::array<uint32_t, 3> store_words{0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<rocjitsu::Instruction> store(
       rocjitsu::decode_valid(*decoder, store_words.data()));
@@ -20418,9 +20419,9 @@ TEST_F(KfdIoctlTest, DaemonQueueControlUsesSharedUserptrBacking) {
 
 TEST(KfdIoctlStandaloneTest, GetTileConfigReportsRdnaGbAddrConfig) {
   EXPECT_EQ(query_gb_addr_config(std::string(CONFIG_DIR) + "/gfx1100_w7900.json", 7019),
-            rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3));
+            rocjitsu::kmd::gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna3));
   EXPECT_EQ(query_gb_addr_config(std::string(CONFIG_DIR) + "/gfx1201_r9700.json", 8716),
-            rocjitsu::kmd::gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4));
+            rocjitsu::kmd::gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna4));
 }
 
 TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
@@ -27284,7 +27285,7 @@ TEST_F(KfdIoctlTest, AllocationBackingPreservesDeviceDumpIdentity) {
 }
 
 TEST(Gfx10KfdTest, AllDeviceOrdinalsUseTheHardwareApertureTags) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     rocjitsu::amdgpu::GpuMemory first_memory("aperture_mem0"), second_memory("aperture_mem1");
     rocjitsu::SoC first("aperture_soc0", &first_memory, arch);
     rocjitsu::SoC second("aperture_soc1", &second_memory, arch);
@@ -27526,18 +27527,18 @@ TEST(KfdTopologyTest, TrapDebugSupportTracksTheModelledCwsrLayouts) {
 // equivalent boolean support gate.
 TEST(KfdTopologyTest, ArchAndGcSpellingsOfTheCwsrGateAgree) {
   struct Part {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t gfx_target_version;
     const char *name;
   };
   constexpr Part kParts[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1, 90002u, "gfx908"},
-      {ROCJITSU_CODE_ARCH_CDNA2, 90010u, "gfx90a"},
-      {ROCJITSU_CODE_ARCH_CDNA3, 90402u, "gfx942"},
-      {ROCJITSU_CODE_ARCH_CDNA4, 90500u, "gfx950"},
-      {ROCJITSU_CODE_ARCH_CDNA5, 120500u, "gfx1250"},
-      {ROCJITSU_CODE_ARCH_RDNA3, 110000u, "gfx1100"},
-      {ROCJITSU_CODE_ARCH_RDNA4, 120000u, "gfx1200"},
+      {rocjitsu::IsaFamily::Cdna1, 90002u, "gfx908"},
+      {rocjitsu::IsaFamily::Cdna2, 90010u, "gfx90a"},
+      {rocjitsu::IsaFamily::Cdna3, 90402u, "gfx942"},
+      {rocjitsu::IsaFamily::Cdna4, 90500u, "gfx950"},
+      {rocjitsu::IsaFamily::Cdna5, 120500u, "gfx1250"},
+      {rocjitsu::IsaFamily::Rdna3, 110000u, "gfx1100"},
+      {rocjitsu::IsaFamily::Rdna4, 120000u, "gfx1200"},
   };
 
   for (const Part &part : kParts) {
@@ -27548,7 +27549,7 @@ TEST(KfdTopologyTest, ArchAndGcSpellingsOfTheCwsrGateAgree) {
     if (rocjitsu::kmd::cwsr_layout_modelled(part.arch))
       EXPECT_EQ(rocjitsu::kmd::cwsr_arch_for_gc_ip_version(gc_ip), part.arch) << part.name;
     else
-      EXPECT_EQ(rocjitsu::kmd::cwsr_arch_for_gc_ip_version(gc_ip), ROCJITSU_CODE_ARCH_INVALID)
+      EXPECT_EQ(rocjitsu::kmd::cwsr_arch_for_gc_ip_version(gc_ip), rocjitsu::IsaFamily::Invalid)
           << part.name;
   }
 }
@@ -27655,7 +27656,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
   wave->set_gfx12_trap_ctrl_raw(kTrapCtrl);
   wave->set_gfx1250_xnack_state_priv_raw(kXnackStatePriv);
   wave->set_gfx1250_xnack_mask_raw(kXnackMask);
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna5);
   const auto issue = [&](rocjitsu::amdgpu::Wavefront &wf, uint32_t word) {
     auto inst = decoder->decode_window(std::span(&word, 1));
     ASSERT_TRUE(inst.succeeded());
@@ -27709,7 +27710,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
                        ? static_cast<uint32_t>(value.value)
                        : 0;
           },
-          ROCJITSU_CODE_ARCH_CDNA5));
+          rocjitsu::IsaFamily::Cdna5));
       EXPECT_EQ((states[0].state_priv >> 1) & 3u, saved_flags);
       EXPECT_EQ(states[0].state_priv & ((1u << 19) | (1u << 20)), (1u << 19) | (1u << 20));
       EXPECT_EQ(states[0].mode, kMode);
@@ -27725,7 +27726,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapCwsrRoundTripPreservesGfx1250WaveState) {
                       [&](uint64_t address, uint32_t value) {
                         (void)memory->atomic_store(address, sizeof(value), value);
                       },
-                      ROCJITSU_CODE_ARCH_CDNA5)
+                      rocjitsu::IsaFamily::Cdna5)
                       .ok);
       control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
       control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
@@ -27818,7 +27819,7 @@ TEST_F(KfdIoctlCdna5Test, ScratchGrowthPreservesSpillsFromOverlappingDispatches)
     kd.kernel_code_entry_byte_offset = sizeof(kd);
     kd.private_segment_fixed_size = 32u << i;
     std::memcpy(code.data() + i * 4096, &kd, sizeof(kd));
-    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+    util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
     ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
     const uint32_t endpgm = maybe_s_endpgm_3.value();
     std::memcpy(code.data() + i * 4096 + sizeof(kd), &endpgm, sizeof(endpgm));
@@ -28025,7 +28026,7 @@ void KfdIoctlTest::check_debug_resume_across_active_xcc_areas() {
   // workgroup on XCC 0. Restoring padded CWSR LDS bytes for queue 1 would
   // overwrite this unrelated group's sentinel.
   auto *cu0 = xcc0->command_processor()->compute_units().front();
-  const uint32_t live_lds = soc_->arch() == ROCJITSU_CODE_ARCH_CDNA5 ? 256u : 4096u;
+  const uint32_t live_lds = soc_->arch() == rocjitsu::IsaFamily::Cdna5 ? 256u : 4096u;
   const uint32_t first_lds_base = cu0->allocate_lds(live_lds);
   waves[0]->set_lds_base(first_lds_base);
   waves[0]->set_lds_size(live_lds);
@@ -28447,7 +28448,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kCwsrAddress, kCwsrSize, states,
       [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA5));
+      rocjitsu::IsaFamily::Cdna5));
   auto stopped = std::ranges::find_if(states, [](const auto &state) { return state.wave_stopped; });
   ASSERT_NE(stopped, states.end());
   auto running =
@@ -28588,7 +28589,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kRuntimeCwsrAddress, kCwsrSize, runtime_states,
       [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA5));
+      rocjitsu::IsaFamily::Cdna5));
   EXPECT_EQ(runtime_states.front().pc, runtime_wave->pc);
   EXPECT_FALSE(runtime_states.front().wave_stopped)
       << "the runtime freeze is not an architected debugger halt";
@@ -28616,7 +28617,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kRuntimeCwsrAddress, kCwsrSize, recovered_runtime_states,
       [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA5));
+      rocjitsu::IsaFamily::Cdna5));
   EXPECT_EQ(recovered_runtime_states.front().pc, runtime_wave->pc);
 
   // A debugger may edit the saved image before it resumes the queue. Repeating
@@ -28629,7 +28630,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
                   [&](uint64_t address, uint32_t value) {
                     (void)vm_write32(address, value, driver_->local_process_id());
                   },
-                  ROCJITSU_CODE_ARCH_CDNA5)
+                  rocjitsu::IsaFamily::Cdna5)
                   .ok);
   queue_id = runtime_queue.queue_id;
   control.op = KFD_IOC_DBG_TRAP_SUSPEND_QUEUES;
@@ -28642,7 +28643,7 @@ TEST_F(KfdIoctlCdna5Test, DbgTrapHandlerExceptionReportsExactMaskBeforeExplicitC
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kRuntimeCwsrAddress, kCwsrSize, repeated_runtime_states,
       [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA5));
+      rocjitsu::IsaFamily::Cdna5));
   EXPECT_EQ(repeated_runtime_states.front().pc, edited_runtime_pc);
 
   static std::array<uint64_t, 8192> recovery_doorbells{};
@@ -29148,7 +29149,7 @@ TEST_F(KfdIoctlTest, RuntimeSnapshotSettlesTheWaveAfterARetainedFault) {
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       context, area_size, waves,
       [&](uint64_t address) { return vm_read32(address, process->process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA4));
+      rocjitsu::IsaFamily::Cdna4));
   ASSERT_EQ(waves.size(), 2u);
   EXPECT_TRUE(std::ranges::any_of(
       waves, [&](const auto &wave) { return !wave.sgprs.empty() && wave.sgprs[0] == expected; }));
@@ -29773,7 +29774,7 @@ void KfdIoctlTest::check_rejected_memory_violation(bool private_atomic) {
                                             : KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
   const uint32_t expected_cause = private_atomic ? (1u << 8) : kTrapstsXnackError;
   constexpr uint32_t cause_mask = (1u << 8) | kTrapstsXnackError;
-  const auto arch = private_atomic ? ROCJITSU_CODE_ARCH_CDNA5 : ROCJITSU_CODE_ARCH_CDNA4;
+  const auto arch = private_atomic ? rocjitsu::IsaFamily::Cdna5 : rocjitsu::IsaFamily::Cdna4;
   const uint32_t vgprs = private_atomic ? 16u : 4u;
 
   std::vector<uint8_t> code_page(4096);
@@ -30399,7 +30400,7 @@ void KfdIoctlTest::check_cwsr_handler_exec(bool edit) {
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kCwsrAddress, kCwsrSize, states,
       [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA4));
+      rocjitsu::IsaFamily::Cdna4));
   // The debugger sees the application's lanes, and the live register is
   // untouched by having published them.
   EXPECT_EQ(states[0].exec, kInterruptedExec);
@@ -30412,7 +30413,7 @@ void KfdIoctlTest::check_cwsr_handler_exec(bool edit) {
                   [&](uint64_t address, uint32_t value) {
                     (void)vm_write32(address, value, driver_->local_process_id());
                   },
-                  ROCJITSU_CODE_ARCH_CDNA4)
+                  rocjitsu::IsaFamily::Cdna4)
                   .ok);
   control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
   control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
@@ -30439,7 +30440,7 @@ void KfdIoctlTest::check_cwsr_handler_exec(bool edit) {
   ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
       kCwsrAddress, kCwsrSize, states,
       [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-      ROCJITSU_CODE_ARCH_CDNA4));
+      rocjitsu::IsaFamily::Cdna4));
   // The wave has not stopped for the debugger yet -- the handler has only asked
   // -- so the record describes it as running, exactly as it did before.
   EXPECT_FALSE(states[0].wave_stopped);
@@ -30448,7 +30449,7 @@ void KfdIoctlTest::check_cwsr_handler_exec(bool edit) {
                   [&](uint64_t address, uint32_t value) {
                     (void)vm_write32(address, value, driver_->local_process_id());
                   },
-                  ROCJITSU_CODE_ARCH_CDNA4)
+                  rocjitsu::IsaFamily::Cdna4)
                   .ok);
   control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
   control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
@@ -30991,7 +30992,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
     ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
         kCwsrAddress, kCwsrSize, states,
         [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-        ROCJITSU_CODE_ARCH_CDNA4));
+        rocjitsu::IsaFamily::Cdna4));
     auto selected = std::ranges::find_if(states, [&](const auto &state) {
       return step == 0 ? state.group_ids[0] == 0 && state.wave_in_group == 0
                        : state.wave_id == kSteppingWaveId;
@@ -31012,7 +31013,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
                     [&](uint64_t address, uint32_t value) {
                       (void)vm_write32(address, value, driver_->local_process_id());
                     },
-                    ROCJITSU_CODE_ARCH_CDNA4)
+                    rocjitsu::IsaFamily::Cdna4)
                     .ok);
     control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
     control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);
@@ -31036,7 +31037,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
       ASSERT_TRUE(rocjitsu::kmd::deserialize_queue_cwsr(
           kCwsrAddress, kCwsrSize, states,
           [&](uint64_t address) { return vm_read32(address, driver_->local_process_id()); },
-          ROCJITSU_CODE_ARCH_CDNA4));
+          rocjitsu::IsaFamily::Cdna4));
       auto stopped_peer = std::ranges::find_if(
           states, [&](const auto &state) { return state.wave_id != kSteppingWaveId; });
       ASSERT_NE(stopped_peer, states.end());
@@ -31048,7 +31049,7 @@ TEST_F(KfdIoctlTest, DbgTrapSingleStepReportsWhilePeerWaveRuns) {
                       [&](uint64_t address, uint32_t value) {
                         (void)vm_write32(address, value, driver_->local_process_id());
                       },
-                      ROCJITSU_CODE_ARCH_CDNA4)
+                      rocjitsu::IsaFamily::Cdna4)
                       .ok);
       control.op = KFD_IOC_DBG_TRAP_RESUME_QUEUES;
       control.resume_queues.queue_array_ptr = reinterpret_cast<uint64_t>(&queue_id);

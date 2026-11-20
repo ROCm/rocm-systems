@@ -3,6 +3,7 @@
 
 #include "compute_unit_test_util.h"
 #include "instruction_failure_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/cpu_dispatch_pool.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -61,7 +62,7 @@ constexpr uint64_t kProgramBase = 0x100000;
 struct DispatchPoolFixture {
   void initialize(uint32_t cu_count, uint32_t functional_quantum = 1) {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 104;
     cfg.vgprs_per_wf = 256;
