@@ -70,6 +70,7 @@ void DecProc(RocVideoDecoder *p_dec, VideoDemuxer *demuxer, int *pn_frame, int *
             break;
         }
     } while (n_video_bytes);
+    n_frame += p_dec->GetNumOfFlushedFrames();
     if (mem_type == OUT_SURFACE_MEM_NOT_MAPPED) {
         p_dec->WaitForDecodeCompletion();
     }
