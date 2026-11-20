@@ -46,7 +46,6 @@ install(TARGETS rocprofiler_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/roc
                                          COMPONENT asan)
 
 add_subdirectory(rocsys)
-#add_subdirectory(rocprofv2)
 add_subdirectory(versioning)
 
 add_executable(ctrl ctrl.cpp)
