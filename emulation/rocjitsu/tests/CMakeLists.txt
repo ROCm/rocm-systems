@@ -2542,6 +2542,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             $<TARGET_FILE:register_observer_probe>
     )
 
+    if(TARGET rocjitsu_embed)
+        add_dependencies(register_observer_abi_test rocjitsu_embed)
+        add_test(
+            NAME ExecutionPluginAbi.EmbedRegisterAccessModuleLoads
+            COMMAND
+                register_observer_abi_test $<TARGET_FILE:rocjitsu_embed>
+                $<TARGET_FILE:register_observer_probe>
+        )
+    endif()
+
     # Compile as C and link only the shared library's public ABI.
     add_executable(vm_config_c_api_test vm_config_c_api_test.c)
     target_link_libraries(vm_config_c_api_test PRIVATE rocjitsu_shared)
@@ -2612,6 +2622,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     endforeach()
 
     if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+        set(_embedding_library rocjitsu_shared)
+    elseif(TARGET rocjitsu_embed)
+        set(_embedding_library rocjitsu_embed)
+    endif()
+    if(_embedding_library)
         add_executable(vm_embedding_api_test vm_embedding_api_test.cpp)
         target_link_libraries(
             vm_embedding_api_test
@@ -2621,9 +2636,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rj_add_test_path(
             vm_embedding_api_test
             RJ_VM_API_LIBRARY
-            "$<TARGET_FILE:rocjitsu_shared>"
+            "$<TARGET_FILE:${_embedding_library}>"
         )
-        add_dependencies(vm_embedding_api_test rocjitsu_shared rocjitsu_memory)
+        add_dependencies(
+            vm_embedding_api_test
+            ${_embedding_library}
+            rocjitsu_memory
+        )
         gtest_discover_tests(
             vm_embedding_api_test
             PROPERTIES ENVIRONMENT "LD_PRELOAD=" TIMEOUT 30

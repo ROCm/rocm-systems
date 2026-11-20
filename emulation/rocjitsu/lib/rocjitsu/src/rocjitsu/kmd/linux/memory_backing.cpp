@@ -180,18 +180,30 @@ std::string keeper_path() {
     const std::filesystem::path library = util::canonical_host_path(info.dli_fname);
     if (!library.empty()) {
       const std::filesystem::path library_dir = library.parent_path();
-      // The same object is linked into the interposer, CLI, and unit tests.
-      // Resolve each supported installed layout relative to that object.
-      for (const char *relative : {RJ_MEMORY_KEEPER_INSTALL_PATH, RJ_MEMORY_KEEPER_BIN_INSTALL_PATH,
-                                   RJ_MEMORY_KEEPER_TEST_INSTALL_PATH}) {
+      // Only the regular KMD objects are also linked into the CLI and tests.
+      // The embedding image resolves the helper in its own component.
+      const char *const installed_paths[] = {
+          RJ_MEMORY_KEEPER_INSTALL_PATH,
+#ifdef RJ_MEMORY_KEEPER_BIN_INSTALL_PATH
+          RJ_MEMORY_KEEPER_BIN_INSTALL_PATH,
+          RJ_MEMORY_KEEPER_TEST_INSTALL_PATH,
+#endif
+      };
+      for (const char *relative : installed_paths) {
         const auto installed = library_dir / relative;
         if (host_call(libc_passthrough().access, ::access, installed.c_str(), X_OK) == 0)
           return installed.string();
       }
       // Match actual build output directories, not arbitrary descendants: an
       // install staging prefix may itself live beneath the build directory.
-      for (const char *directory : {RJ_MEMORY_KEEPER_BUILD_LIBDIR, RJ_MEMORY_KEEPER_BUILD_BINDIR,
-                                    RJ_MEMORY_KEEPER_BUILD_TESTDIR}) {
+      const char *const build_directories[] = {
+          RJ_MEMORY_KEEPER_BUILD_LIBDIR,
+#ifdef RJ_MEMORY_KEEPER_BUILD_BINDIR
+          RJ_MEMORY_KEEPER_BUILD_BINDIR,
+          RJ_MEMORY_KEEPER_BUILD_TESTDIR,
+#endif
+      };
+      for (const char *directory : build_directories) {
         if (*directory && library_dir == util::canonical_host_path(directory))
           return RJ_MEMORY_KEEPER_BUILD_PATH;
       }
