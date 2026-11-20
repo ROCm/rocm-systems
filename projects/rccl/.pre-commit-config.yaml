@@ -17,7 +17,7 @@
 #   pre-commit run --config projects/rccl/.pre-commit-config.yaml \
 #     --files $(git diff --name-only origin/develop...HEAD)
 #
-#   # clang-tidy, which is too slow for a commit hook and so is manual-stage
+#   # clang-tidy (slow, so manual-stage): staged files only; add --all-files for everything
 #   pre-commit run --config projects/rccl/.pre-commit-config.yaml \
 #     --hook-stage manual clang-tidy
 #
@@ -68,18 +68,14 @@ repos:
 
   # C/C++ static analysis, advisory only. Manual stage: unlike clang-format,
   # clang-tidy needs a parsed translation unit, so it configures a build and
-  # runs hipify first. That is minutes, not seconds, and it ignores the
-  # changed-file list, so it has no business running on `git commit`. CI
-  # invokes it explicitly with --hook-stage manual.
+  # runs hipify first.
   - repo: local
     hooks:
       - id: clang-tidy
         name: clang-tidy (advisory, configures a build)
         language: script
         entry: projects/rccl/maint/run-clang-tidy.sh
-        # The script picks its own files from the compile database.
-        pass_filenames: false
-        always_run: true
+        files: ^projects/rccl/.*\.(c|cc|cpp|cu)$
         stages: [manual]
         verbose: true
 
