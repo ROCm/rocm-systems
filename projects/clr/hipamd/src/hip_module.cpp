@@ -365,12 +365,12 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 
   if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
       launch_params.global_[2] == 0) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
       launch_params.local_[2] == 0) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
@@ -381,7 +381,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
 
   // Make sure dispatch doesn't exceed max workgroup size limit
   if (launch_params.local_.product() > info.maxWorkGroupSize_) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
 
   amd::Kernel* kernel = hip::asKernel(f);
