@@ -35,7 +35,6 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/demangler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/gpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/library_checker.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/locking.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mpi.hpp
     ${CMAKE_CURRENT_LIST_DIR}/mproc.hpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp

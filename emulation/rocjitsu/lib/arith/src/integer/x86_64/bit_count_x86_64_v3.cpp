@@ -44,7 +44,7 @@ void bit_count_x86_64_v3(ExecMask<Lanes> exec_mask, uint32_t *d, const uint32_t 
         value = _mm256_sub_epi32(_mm256_and_si256(x, _mm256_sub_epi32(_mm256_setzero_si256(), x)),
                                  _mm256_set1_epi32(1));
       } else {
-        // rocjitsu clz_u32_simd: propagate the highest bit downward.
+        // Propagate the highest bit downward before counting.
         value = _mm256_or_si256(value, _mm256_srli_epi32(value, 1));
         value = _mm256_or_si256(value, _mm256_srli_epi32(value, 2));
         value = _mm256_or_si256(value, _mm256_srli_epi32(value, 4));

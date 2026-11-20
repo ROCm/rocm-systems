@@ -1665,6 +1665,11 @@
           "test_filter": "AllReduce.ManagedMem"
         },
         {
+          "name": "DdaAllReduceFabricLL128PeerPar",
+          "description": "DDA LL128 peer-parallel AllReduce one-shot and two-shot kernels on gfx1250, with the b128 user-buffer path",
+          "test_filter": "DdaAllReduceFabricLL128PeerPar.*"
+        },
+        {
           "name": "AllReduce.Channels",
           "description": "AllReduce channels",
           "test_filter": "AllReduce.Channels"
