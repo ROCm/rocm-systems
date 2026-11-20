@@ -3440,9 +3440,12 @@ hipError_t hipStreamSynchronize(hipStream_t stream);
  * is enforced on the GPU without blocking the host.
  *
  * This function uses standard default stream semantics. When @p stream is the legacy default
- * stream (hipStreamLegacy or NULL with hipStreamNonBlocking = 0), the wait is inserted after
- * all prior work on every blocking stream of the same device has been observed, and all
- * subsequent work on those blocking streams waits for the wait to complete.
+ * stream (@p hipStreamLegacy, or NULL when the per-thread default stream is not enabled), the
+ * wait is inserted after all prior work on every blocking stream of the same device has been
+ * observed, and all subsequent work on those blocking streams waits for the wait to complete.
+ * When @p stream is the per-thread default stream (@p hipStreamPerThread, or NULL or
+ * @p hipStreamLegacy when the per-thread default stream is enabled), the wait applies only
+ * to that per-thread stream and does not synchronize with other blocking streams on the device.
  *
  * Flags include:
  *   hipEventWaitDefault: Default event creation flag.
@@ -3960,18 +3963,15 @@ hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream);
  *  @returns #hipSuccess, #hipErrorNotInitialized, #hipErrorInvalidValue,
  * #hipErrorLaunchFailure
  *
- * Releases memory associated with the event.  If the event is recording but has not completed
- * recording when hipEventDestroy() is called, the function will return immediately and the
- * completion_future resources will be released later, when the hipDevice is synchronized.
+ *  @p hipEventDestroy returns immediately. An event may be destroyed before it is complete
+ * (i.e., before all work preceding the last hipEventRecord() has finished). Associated resources
+ * are automatically released asynchronously at completion. Any hipStreamWaitEvent() waits that
+ * were already enqueued on other streams or devices before the event is destroyed will still
+ * complete correctly when the recorded work finishes; destroying the event does not break or
+ * cancel those pending waits.
  *
- * An event may be destroyed before it is complete (i.e., before all work preceding the last
- * hipEventRecord() has finished). Associated resources are automatically released asynchronously
- * at completion. Any hipStreamWaitEvent() waits that were already enqueued on other streams or
- * devices before the event is destroyed will still complete correctly when the recorded work
- * finishes; destroying the event does not break or cancel those pending waits.
- *
- * @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventSynchronize, hipEventRecord,
- * hipEventElapsedTime
+ * @see hipEventCreate, hipEventCreateWithFlags, hipEventQuery, hipEventSynchronize,
+ * hipEventRecord, hipEventElapsedTime
  *
  * @returns #hipSuccess
  */
