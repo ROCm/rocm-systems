@@ -3952,7 +3952,7 @@ typedef struct {
  *
  *  @param[in,out] count As input, the number of entries @p components can
  *                 hold. As output, the number of components on the node, even
- *                 when that is more than were written.
+ *                 when that is more than were written. Set to zero on inventory errors.
  *
  *  @param[out] components Array of @p count entries allocated by the caller,
  *              or nullptr to learn the count only.

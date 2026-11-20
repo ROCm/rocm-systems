@@ -1706,7 +1706,8 @@ amdsmi_status_t amdsmi_cuid_collect_components(
     } else if (status == AMDSMI_STATUS_NO_DATA || status == AMDSMI_STATUS_INVAL ||
                status == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
       found->clear();
-      return status;
+      // This is the internal property buffer, not the caller's component array.
+      return status == AMDSMI_STATUS_INSUFFICIENT_SIZE ? AMDSMI_STATUS_UNEXPECTED_SIZE : status;
     }
   }
   return AMDSMI_STATUS_SUCCESS;
@@ -1760,6 +1761,9 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
   }
 
 #ifdef BUILD_CUID
+  const uint32_t capacity = components == nullptr ? 0 : *count;
+  *count = 0;
+
   // The library discovers components once and keeps them, so a call that
   // answers "what is on this node" has to rediscover first, or a hot-added
   // function never shows and a removed one is listed for the life of the
@@ -1807,7 +1811,6 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
               return bdf != 0 ? bdf < 0 : cuid_path_compare(a.device_path, b.device_path) < 0;
             });
 
-  const uint32_t capacity = components == nullptr ? 0 : *count;
   const uint32_t written = std::min(capacity, total);
   if (written > 0) {
     memcpy(components, found.data(), written * sizeof(found[0]));

@@ -331,7 +331,8 @@ TEST(GpuUnit, CuidListingFailsOnANodeWideStatus) {
       component->vendor_id = static_cast<uint16_t>(100 + i);
       return i == 2 ? failure : AMDSMI_STATUS_SUCCESS;
     };
-    EXPECT_EQ(amdsmi_cuid_collect_components(4, fill, &found), failure);
+    EXPECT_EQ(amdsmi_cuid_collect_components(4, fill, &found),
+              failure == AMDSMI_STATUS_INSUFFICIENT_SIZE ? AMDSMI_STATUS_UNEXPECTED_SIZE : failure);
     EXPECT_TRUE(found.empty());
   }
 }
@@ -953,8 +954,9 @@ TEST(GpuUnit, CuidWithoutAMachineIdThereIsNoTemporaryCuid) {
       ExpectNoCuidReported(info);
       EXPECT_EQ(string_status, status);
     }
-    uint32_t count = 0;
+    uint32_t count = 123;
     const amdsmi_status_t list_status = amdsmi_get_cuid_components(&count, nullptr);
+    EXPECT_EQ(count, 0u);
     if (list_status == AMDSMI_STATUS_NO_PERM && geteuid() != 0) return;
     EXPECT_EQ(list_status, AMDSMI_STATUS_NO_DATA);
     return;
