@@ -46,6 +46,7 @@
 #include <atomic>
 #include <cinttypes>
 #include <climits>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -229,7 +230,11 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
                              node_props.EngineId.ui32.Stepping), sramecc, xnack);
   }
 
-  assert(isa != nullptr && "ISA registry inconsistency.");
+  if (isa == nullptr) {
+    assert(false && "ISA registry inconsistency.");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_INVALID_ISA,
+                              "ISA registry inconsistency: could not find ISA for GPU.");
+  }
 
   // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the
   // strict variant by name so the reported ISA and code-object
@@ -528,7 +533,11 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
                                 core::MemoryRegion::AllocateExecutable |
                                     core::MemoryRegion::AllocateExecutableBlitKernelObject |
                                     core::MemoryRegion::AllocateNonPaged);
-  assert(code_buf != NULL && "Code buffer allocation failed");
+  if (code_buf == nullptr) {
+    assert(false && "Code buffer allocation failed");
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                              "Failed to allocate code buffer for shader.");
+  }
 
   memset(code_buf, 0, code_buf_size);
 
@@ -4048,6 +4057,13 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
   // Pass the sampling information to the kernel driver to create PC
   // sampling session.
   HSAKMT_STATUS retkmt = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId));
+
+  if (pcs::PcsDebugEnabled()) {
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] hsaKmtPcSamplingCreate: interval=%llu units=%d -> retkmt=%d\n",
+            (unsigned long long)sampleInfo.value, (int)sampleInfo.units, (int)retkmt);
+  }
+
   if (retkmt != HSAKMT_STATUS_SUCCESS) {
     return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
             : HSA_STATUS_ERROR;
@@ -4534,6 +4550,12 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
   HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), session.ThunkId()));
   hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
+  if (pcs::PcsDebugEnabled()) {
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] hsaKmtPcSamplingDestroy: node=%u thunkId=%u -> retKmt=%d\n",
+            (unsigned)node_id(), (unsigned)session.ThunkId(), (int)retKmt);
+  }
+
   pcs_data_t* pcs_data = nullptr;
 
   if (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
@@ -4689,6 +4711,11 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
             int written = snprintf(thread_name, sizeof(thread_name), "%s_XCC%u",
                                    thread_data->thread_name_base, xcc_id);
             assert(written > 0 && (size_t)written < sizeof(thread_name));
+            // snprintf leaves the buffer indeterminate on an encoding error, and
+            // the assert above is compiled out under NDEBUG. The thread name is
+            // diagnostic only, so fall back to a fixed label rather than passing
+            // an indeterminate buffer on.
+            if (written < 0) snprintf(thread_name, sizeof(thread_name), "pcs_xcc");
 
             agent->PcSamplingThreadPerXCC(*pcs_data, xcc_id, thread_name);
           } catch (...) {
@@ -4798,6 +4825,12 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   // Must happen before session.stop() so that isActive() check in flush spin loop
   // doesn't race with trap handlers still writing to buffers.
   HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
+
+  if (pcs::PcsDebugEnabled()) {
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] hsaKmtPcSamplingStop: node=%u thunkId=%u method=%d -> retKmt=%d\n",
+            (unsigned)node_id(), (unsigned)session.ThunkId(), (int)method, (int)retKmt);
+  }
 
   // Now safe to mark session inactive - trap handlers are quiesced
   session.stop();

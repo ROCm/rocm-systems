@@ -43,6 +43,9 @@
 #include "pcs_runtime.h"
 
 #include <assert.h>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <mutex>
 
 #include "core/inc/runtime.h"
@@ -57,6 +60,14 @@ namespace pcs {
 // Each thread invoking the callback has its own copy, eliminating the need
 // for cross-thread mutex serialization.
 thread_local PcsRuntime::PcSamplingSession::data_ready_info_t pending_sample_copy = {};
+
+bool PcsDebugEnabled() {
+  static const bool enabled = [] {
+    const char* env = getenv("HSA_PCS_DEBUG");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+  }();
+  return enabled;
+}
 
 #define IS_BAD_PTR(ptr)                                          \
 do {                                                           \
@@ -141,6 +152,12 @@ PcsRuntime::PcSamplingSession::PcSamplingSession(
   }
 
   if (!interval || !buffer_size || (buffer_size % (2 * sample_size_))) {
+    if (PcsDebugEnabled()) {
+      fprintf(stderr,
+              "[HSA_PCS_DEBUG] create: rejected locally - method=%d interval=%zu "
+              "buffer_size=%zu sample_size=%zu\n",
+              (int)method, interval, buffer_size, sample_size_);
+    }
     valid_ = false;
     return;
   }
@@ -152,6 +169,13 @@ PcsRuntime::PcSamplingSession::PcSamplingSession(
   csd.buffer_size = buffer_size;
   csd.data_ready_callback = data_ready_callback;
   csd.client_callback_data = client_callback_data;
+
+  if (PcsDebugEnabled()) {
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] create: method=%d units=%d interval=%zu latency=%zu "
+            "buffer_size=%zu sample_size=%zu\n",
+            (int)method, (int)units, interval, latency, buffer_size, sample_size_);
+  }
 }
 
 void PcsRuntime::PcSamplingSession::GetHsaKmtSamplingInfo(HsaPcSamplingInfo* sampleInfo) {
@@ -180,11 +204,21 @@ void PcsRuntime::PcSamplingSession::GetHsaKmtSamplingInfo(HsaPcSamplingInfo* sam
       sampleInfo->units = HSA_PC_SAMPLING_UNIT_INTERVAL_INSTRUCTIONS;
       break;
   }
+
+  if (PcsDebugEnabled()) {
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] GetHsaKmtSamplingInfo: value=%llu (kmt_method=%d kmt_units=%d)\n",
+            (unsigned long long)sampleInfo->value, (int)sampleInfo->method,
+            (int)sampleInfo->units);
+  }
 }
 
 hsa_status_t PcSamplingDataCopyCallback(void* _session, size_t bytes_to_copy, void* destination) {
+  // assert() is compiled out under NDEBUG, so these were unchecked in a release
+  // build and a null destination reached memcpy() inside DataCopyCallback.
   assert(_session);
   assert(destination);
+  if (_session == nullptr || destination == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   PcsRuntime::PcSamplingSession* session =
       reinterpret_cast<PcsRuntime::PcSamplingSession*>(_session);
@@ -272,6 +306,20 @@ hsa_status_t PcsRuntime::PcSamplingSession::HandleSampleData(uint8_t* buf1, size
     break;
   }
 
+  if (PcsDebugEnabled()) {
+    size_t num_samples = sample_size_ ? ((buf1_sz + buf2_sz) / sample_size_) : 0;
+    debug_add_delivered(num_samples, lost_sample_count);
+    double elapsed_us =
+        std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() -
+                                                   debug_start_time_)
+            .count();
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] flush: t=%.1fus samples=%zu running_total=%zu "
+            "lost_this=%zu lost_total=%zu record_size=%zu\n",
+            elapsed_us, num_samples, debug_total_delivered(), lost_sample_count,
+            debug_total_lost(), sample_size_);
+  }
+
   csd.data_ready_callback(csd.client_callback_data, buf1_sz + buf2_sz, lost_sample_count,
                           &PcSamplingDataCopyCallback,
                           /* hsa_callback_data*/ this);
@@ -356,9 +404,20 @@ hsa_status_t PcsRuntime::PcSamplingDestroy(hsa_ven_amd_pcs_t handle) {
     debug_warning(false && "Cannot find PcSampling session");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(pcSamplingSessionIt->second.agent);
+  PcSamplingSession& session = pcSamplingSessionIt->second;
+  AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(session.agent);
 
-  hsa_status_t ret = gpu_agent->PcSamplingDestroy(pcSamplingSessionIt->second);
+  hsa_status_t ret = gpu_agent->PcSamplingDestroy(session);
+
+  if (PcsDebugEnabled()) {
+    double elapsed_us = std::chrono::duration<double, std::micro>(
+                            std::chrono::steady_clock::now() - session.debug_start_time())
+                            .count();
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] destroy: total_delivered=%zu total_lost=%zu duration_us=%.1f\n",
+            session.debug_total_delivered(), session.debug_total_lost(), elapsed_us);
+  }
+
   pc_sampling_.erase(pcSamplingSessionIt);
   return ret;
 }
@@ -382,9 +441,21 @@ hsa_status_t PcsRuntime::PcSamplingStop(hsa_ven_amd_pcs_t handle) {
     debug_warning(false && "Cannot find PcSampling session");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(pcSamplingSessionIt->second.agent);
+  PcSamplingSession& session = pcSamplingSessionIt->second;
+  AMD::GpuAgentInt* gpu_agent = static_cast<AMD::GpuAgentInt*>(session.agent);
 
-  return gpu_agent->PcSamplingStop(pcSamplingSessionIt->second);
+  hsa_status_t ret = gpu_agent->PcSamplingStop(session);
+
+  if (PcsDebugEnabled()) {
+    double elapsed_us = std::chrono::duration<double, std::micro>(
+                            std::chrono::steady_clock::now() - session.debug_start_time())
+                            .count();
+    fprintf(stderr,
+            "[HSA_PCS_DEBUG] stop: total_delivered=%zu total_lost=%zu duration_us=%.1f\n",
+            session.debug_total_delivered(), session.debug_total_lost(), elapsed_us);
+  }
+
+  return ret;
 }
 
 hsa_status_t PcsRuntime::PcSamplingFlush(hsa_ven_amd_pcs_t handle) {
