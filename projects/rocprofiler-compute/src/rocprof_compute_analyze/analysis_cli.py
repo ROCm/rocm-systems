@@ -167,7 +167,7 @@ class cli_analysis(OmniAnalyze_Base):
                             "Skipping roofline charting: "
                             f"gpu arch {gpu_arch} not in soc {soc}",
                         )
-                    if is_roofline_valid:
+                    elif is_roofline_valid:
                         soc_obj = soc[gpu_arch]
 
                         roof_obj = Roofline(
