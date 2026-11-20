@@ -107,6 +107,12 @@
         }
       ]
     },
+    "net_plugin_selection_mseg": {
+      "extends": "net_plugin_selection",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
+    },
 
     "net_ib_base": {
       "extends": "default",
@@ -165,6 +171,12 @@
         }
       ]
     },
+    "net_ib_gdr_flush_mseg": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
+    },
     "net_ib_gdr_flush_flag_base": {
       "extends": "net_ib_base",
       "num_ranks": 2,
@@ -191,6 +203,12 @@
           "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
+    },
+    "net_ib_gdr_flush_flag_mseg": {
+      "extends": "net_ib_gdr_flush_flag",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
     "net_ib_gdr_flush_flag_4qps": {
       "extends": "net_ib_gdr_flush_flag_base",
@@ -247,6 +265,19 @@
         }
       ]
     },
+    "net_ib_initialization_mseg": {
+      "extends": "net_ib_initialization",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Init_DefaultIsIbMseg",
+          "description": "With NCCL_MULTI_SEGMENT_REGISTER=1 and NCCL_NET unset, the fixture drives IB-MSEG, so these suites cannot pass on net_ib",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbMsegUnderMultiSegmentRegister"
+        }
+      ]
+    },
 
     "net_ib_properties": {
       "extends": "net_ib_base",
@@ -276,6 +307,12 @@
           }
         }
       ]
+    },
+    "net_ib_properties_mseg": {
+      "extends": "net_ib_properties",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
 
     "net_ib_connection": {
@@ -319,6 +356,12 @@
         }
       ]
     },
+    "net_ib_connection_mseg": {
+      "extends": "net_ib_connection",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
+    },
 
     "net_ib_memory": {
       "extends": "net_ib_base",
@@ -345,6 +388,12 @@
           "test_filter": "NetIbMPITest.DeregisterNullHandle"
         }
       ]
+    },
+    "net_ib_memory_mseg": {
+      "extends": "net_ib_memory",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
 
     "net_ib_transfer": {
@@ -401,6 +450,12 @@
           "test_filter": "NetIbMPITest.MultidirectionalTransfer"
         }
       ]
+    },
+    "net_ib_transfer_mseg": {
+      "extends": "net_ib_transfer",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
 
     "net_ib_flush": {
@@ -601,6 +656,12 @@
           "test_filter": "NetIbWqeLatMonTest.*"
         }
       ]
+    },
+    "net_ib_wqe_lat_mseg": {
+      "extends": "net_ib_wqe_lat",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
 
     "net_ib_wqe_lat_multi_qp_split": {
@@ -1169,6 +1230,12 @@
         { "name": "NetIB_GIN_PeerMem_AggregatedMixedBatchCompletesInPostingOrder_Ctx2_1MiB", "description": "GIN peermem: aggregated iget/iput/iput-signal batch completes in posting order (Ctx2, 1MiB, RegMr)", "test_filter": "CtxAndSize/RmaMPITest.AggregatedMixedBatchCompletesInPostingOrder/Ctx2_1MiB_RegMr" },
         { "name": "NetIB_GIN_PeerMem_AggregatedIPutSignalStress", "description": "GIN peermem: 4096 aggregated iput-signals, one doorbell per 16-op window (RegMr)", "test_filter": "RmaMPIStressTest.AggregatedIPutSignalStress" }
       ]
+    },
+    "net_ib_gin_peermem_mseg": {
+      "extends": "net_ib_gin_peermem",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
     "net_ib_gin_dmabuf": {
       "extends": "net_ib_base",
@@ -1753,9 +1820,21 @@
       "enabled": true
     },
     {
+      "name": "NET - Plugin selection from NCCL_NET (IB-MSEG)",
+      "description": "The test fixture's NCCL_NET resolution under NCCL_MULTI_SEGMENT_REGISTER=1: IB and unset select IB-MSEG (IB-CAST on AINIC), so the (IB-MSEG) NET IB suites drive the IB-MSEG plugin. The library's own selection is covered by the host plugin tests (single rank, no NIC required).",
+      "config": "net_plugin_selection_mseg",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Initialization",
       "description": "InfiniBand plugin initialization and device enumeration",
       "config": "net_ib_initialization",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Initialization (IB-MSEG)",
+      "description": "InfiniBand plugin initialization and device enumeration. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_initialization_mseg",
       "enabled": true
     },
     {
@@ -1765,9 +1844,21 @@
       "enabled": true
     },
     {
+      "name": "NET IB - GDR Flush (Whitebox ncclIbIflush) (IB-MSEG)",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_gdr_flush_mseg",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
       "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes",
       "config": "net_ib_gdr_flush_flag",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank) (IB-MSEG)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_gdr_flush_flag_mseg",
       "enabled": true
     },
     {
@@ -1795,9 +1886,21 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Device Properties (IB-MSEG)",
+      "description": "InfiniBand device property queries. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_properties_mseg",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Connection Setup",
       "description": "InfiniBand listen/connect/accept and error handling",
       "config": "net_ib_connection",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Connection Setup (IB-MSEG)",
+      "description": "InfiniBand listen/connect/accept and error handling. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_connection_mseg",
       "enabled": true
     },
     {
@@ -1807,9 +1910,21 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Memory Registration (IB-MSEG)",
+      "description": "InfiniBand memory registration and deregistration. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_memory_mseg",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Data Transfer",
       "description": "InfiniBand send/recv with various sizes",
       "config": "net_ib_transfer",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (IB-MSEG)",
+      "description": "InfiniBand send/recv with various sizes. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_transfer_mseg",
       "enabled": true
     },
     {
@@ -1864,6 +1979,12 @@
       "name": "NET IB - WQE Latency Monitor",
       "description": "AICOMRCCL-2013: per-QP WQE latency monitor on live net_ib connections, default QP layout",
       "config": "net_ib_wqe_lat",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - WQE Latency Monitor (IB-MSEG)",
+      "description": "AICOMRCCL-2013: per-QP WQE latency monitor on live net_ib connections, default QP layout. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_wqe_lat_mseg",
       "enabled": true
     },
     {
@@ -2062,6 +2183,12 @@
       "name": "NET IB - GIN Peermem",
       "description": "GIN plugin tests with peermem support",
       "config": "net_ib_gin_peermem",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - GIN Peermem (IB-MSEG)",
+      "description": "GIN plugin tests with peermem support. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_gin_peermem_mseg",
       "enabled": true
     },
     {

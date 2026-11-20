@@ -34,7 +34,8 @@
  * override the globals for their scope; WqeLatMonEnvEnabledRecordsSends runs
  * only when the environment itself enables the monitor.
  *
- * net_ib only: the fixture always drives ncclNetIb, whatever NCCL_NET says.
+ * net_ib or its IB-MSEG copy: the fixture drives ncclNetIbMseg when NCCL_NET or
+ * NCCL_MULTI_SEGMENT_REGISTER selects it, and ncclNetIb otherwise (IB-CAST has no monitor).
  */
 
 namespace {
@@ -99,8 +100,10 @@ protected:
 
     void SetUp() override {
         NetIbMPITest::SetUp();
-        net_ = &ncclNetIb;
+        if (net_ != &ncclNetIbMseg) net_ = &ncclNetIb;
     }
+
+    const WqeLatMonitor& M() const { return net_ == &ncclNetIbMseg ? WqeLatIbMseg() : WqeLatNetIb(); }
 
     // Agreed across ranks before either acts on it: a rank returning alone
     // would leave its peer blocked in the next MPI_Barrier until the suite
@@ -246,7 +249,7 @@ protected:
         RunSyncTransfers(s.pair, s.buf, s.mhandle, sizes, kWqeLatTagBase);
 
         struct ncclIbWqeLatCommState st;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
+        EXPECT_EQ(M().getCommState(s.comm, &st), ncclSuccess);
         logWqeLatState(tag, st);
         const WqeLatTotals t = sumWqeLat(st);
         EXPECT_EQ(t.inflight, 0u);
@@ -267,7 +270,7 @@ protected:
             for (int q = 0; q < st.nqps; q++) {
                 const struct ncclIbWqeLatStats& s = st.qps[q].stats;
                 if (s.count == 0) continue;
-                if (s.maxNs > ncclIbWqeLatThresholdNs) {
+                if (s.maxNs > *M().thresholdNs) {
                     EXPECT_GT(s.slowCount, 0u) << "qp " << q << " max=" << s.maxNs;
                 } else {
                     EXPECT_EQ(s.slowCount, 0u) << "qp " << q << " max=" << s.maxNs;
@@ -308,8 +311,7 @@ protected:
 TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvKnobs) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
 
-    struct ncclIbWqeLatMon dummy;
-    ncclIbWqeLatMonInit(&dummy);
+    M().init();
 
     const char* thrEnv = getenv("NCCL_IB_WQE_LATENCY_THRESHOLD_NS");
     const char* repEnv = getenv("NCCL_IB_WQE_LATENCY_REPORT");
@@ -318,16 +320,16 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvKnobs) {
     TEST_INFO("Rank %d: NCCL_IB_WQE_LATENCY_THRESHOLD_NS=%s NCCL_IB_WQE_LATENCY_REPORT=%s -> enabled=%d thr=%lu "
               "report=%d",
               MPIEnvironment::world_rank, thrEnv ? thrEnv : "(unset)", repEnv ? repEnv : "(unset)",
-              ncclIbWqeLatEnabled ? 1 : 0, (unsigned long)ncclIbWqeLatThresholdNs, ncclIbWqeLatReportEnabled ? 1 : 0);
+              *M().enabled ? 1 : 0, (unsigned long)*M().thresholdNs, *M().report ? 1 : 0);
 
     if (thr > 0) {
-        EXPECT_TRUE(ncclIbWqeLatEnabled);
-        EXPECT_EQ(ncclIbWqeLatThresholdNs, (uint64_t)thr);
-        EXPECT_EQ(ncclIbWqeLatReportEnabled, report);
+        EXPECT_TRUE(*M().enabled);
+        EXPECT_EQ(*M().thresholdNs, (uint64_t)thr);
+        EXPECT_EQ(*M().report, report);
     } else {
-        EXPECT_FALSE(ncclIbWqeLatEnabled);
-        EXPECT_EQ(ncclIbWqeLatThresholdNs, 0u);
-        EXPECT_FALSE(ncclIbWqeLatReportEnabled);
+        EXPECT_FALSE(*M().enabled);
+        EXPECT_EQ(*M().thresholdNs, 0u);
+        EXPECT_FALSE(*M().report);
     }
 }
 
@@ -348,7 +350,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDisabledRecordsNothing) {
     RunSyncTransfers(s.pair, s.buf, s.mhandle, std::vector<size_t>(20, kSmallBufferSize), kWqeLatTagBase);
 
     struct ncclIbWqeLatCommState st;
-    EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
+    EXPECT_EQ(M().getCommState(s.comm, &st), ncclSuccess);
     logWqeLatState("disabled", st);
     const WqeLatTotals t = sumWqeLat(st);
     EXPECT_EQ(t.count, 0u);
@@ -415,7 +417,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDelayedPollIsSlow) {
     } else {
         PostSendWithRetry(s.pair.sendComm, s.buf, kSmallBufferSize, kWqeLatTagBase, s.mhandle, &request);
         std::this_thread::sleep_for(std::chrono::milliseconds(kDelayMs));
-        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &before), ncclSuccess);
+        EXPECT_EQ(M().getCommState(s.comm, &before), ncclSuccess);
         logWqeLatState("before-poll", before);
         const WqeLatTotals t = sumWqeLat(before);
         EXPECT_EQ(t.count, 0u);
@@ -427,7 +429,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonDelayedPollIsSlow) {
 
     if (rank == 1) {
         struct ncclIbWqeLatCommState after;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &after), ncclSuccess);
+        EXPECT_EQ(M().getCommState(s.comm, &after), ncclSuccess);
         logWqeLatState("after-poll", after);
         const WqeLatTotals t = sumWqeLat(after);
         EXPECT_EQ(t.count, (uint64_t)after.nqpsPerRequest);
@@ -466,7 +468,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonBusyPollReportsStall) {
     RunSyncTransfers(s.pair, s.buf, s.mhandle, std::vector<size_t>(1, kSize), kWqeLatTagBase);
 
     struct ncclIbWqeLatCommState st;
-    EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
+    EXPECT_EQ(M().getCommState(s.comm, &st), ncclSuccess);
     logWqeLatState("stall", st);
     int stalledQps = 0;
     for (int q = 0; q < st.nqps; q++) {
@@ -515,7 +517,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
     }
     struct ncclIbWqeLatCommState posted{};
     if (rank == 1) {
-        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &posted), ncclSuccess);
+        EXPECT_EQ(M().getCommState(s.comm, &posted), ncclSuccess);
         logWqeLatState("posted", posted);
         const WqeLatTotals t = sumWqeLat(posted);
         EXPECT_EQ(t.count, 0u);
@@ -529,7 +531,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
 
     if (rank == 1) {
         struct ncclIbWqeLatCommState st;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
+        EXPECT_EQ(M().getCommState(s.comm, &st), ncclSuccess);
         logWqeLatState("pipelined", st);
         const WqeLatTotals t = sumWqeLat(st);
         EXPECT_EQ(t.inflight, 0u);
@@ -545,7 +547,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
                      kWqeLatTagBase + kPipelined);
     if (rank == 1) {
         struct ncclIbWqeLatCommState st;
-        EXPECT_EQ(ncclIbWqeLatGetCommState(s.comm, &st), ncclSuccess);
+        EXPECT_EQ(M().getCommState(s.comm, &st), ncclSuccess);
         logWqeLatState("after-sync", st);
         const WqeLatTotals t = sumWqeLat(st);
         EXPECT_EQ(t.count, (uint64_t)sumWqeLat(posted).tracking + (uint64_t)kSyncAfter * st.nqpsPerRequest);
@@ -571,10 +573,9 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvEnabledRecordsSends) {
     }
     // The globals are only parsed on the first ncclIbWqeLatMonInit, which in
     // the library runs at QP creation; fire it before asserting on them.
-    struct ncclIbWqeLatMon dummy;
-    ncclIbWqeLatMonInit(&dummy);
+    M().init();
     AssertInitAndGetDevices(nullptr);
-    ASSERT_TRUE(ncclIbWqeLatEnabled);
+    ASSERT_TRUE(*M().enabled);
 
     CheckSyncTransfersAreCounted("env", /*expectSummaries=*/envReportExpected());
 }

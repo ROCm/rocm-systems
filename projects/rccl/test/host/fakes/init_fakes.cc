@@ -131,6 +131,7 @@ void ResetInitFakes() {
   ResetTopoStubs();
   ResetTransportStubs();
   ResetTransportNetIbFakes();
+  ResetNetIbMultisegFakes();
   ResetTuningFakes();
   g_cuMemHostEnable = 0;
   g_ncclNetInitResult = ncclSuccess;

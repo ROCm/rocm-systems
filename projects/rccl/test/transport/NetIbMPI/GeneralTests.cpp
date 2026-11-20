@@ -21,12 +21,14 @@
 // without loading the cast plugin.
 
 TEST(NetPluginSelection, ResolvesNameCaseInsensitively) {
-    EXPECT_EQ(ResolveNetPlugin("IB"), &ncclNetIb);
-    EXPECT_EQ(ResolveNetPlugin("ib"), &ncclNetIb);
-    EXPECT_EQ(ResolveNetPlugin("Ib"), &ncclNetIb);
+    EXPECT_EQ(ResolveNetPlugin("IB"), IbSlotNetPlugin());
+    EXPECT_EQ(ResolveNetPlugin("ib"), IbSlotNetPlugin());
+    EXPECT_EQ(ResolveNetPlugin("Ib"), IbSlotNetPlugin());
     EXPECT_EQ(ResolveNetPlugin("IB-CAST"), &netIbCast);
     EXPECT_EQ(ResolveNetPlugin("ib-cast"), &netIbCast);
     EXPECT_EQ(ResolveNetPlugin("Ib-Cast"), &netIbCast);
+    EXPECT_EQ(ResolveNetPlugin("IB-MSEG"), &ncclNetIbMseg);
+    EXPECT_EQ(ResolveNetPlugin("ib-mseg"), &ncclNetIbMseg);
 }
 
 TEST(NetPluginSelection, RocmIbSelectsTheIbCastPlugin) {
@@ -47,7 +49,7 @@ TEST(NetPluginSelection, LibraryMapperBacksThePluginChoice) {
 }
 
 TEST(NetPluginSelection, UnsetFollowsAinicDefault) {
-    ncclNet_t* expected = rcclUseAinic() ? &netIbCast : &ncclNetIb;
+    ncclNet_t* expected = rcclUseAinic() ? &netIbCast : IbSlotNetPlugin();
     EXPECT_EQ(ResolveNetPlugin(nullptr), expected);
 }
 
@@ -64,7 +66,7 @@ TEST(NetPluginSelection, NonIbAndUnknownNamesAreDistinguishable) {
     EXPECT_FALSE(IsSocketNetName("NO-SUCH-NET"));
 
     // Guards against a future prefix/substring compare: only whole names match.
-    for (const char* almost : {"IB-CAST-EXTRA", "IB-CAS", "ROCM", "ROCM-IB-2", "SOCK"}) {
+    for (const char* almost : {"IB-CAST-EXTRA", "IB-CAS", "IB-MSE", "IB-MSEG-2", "ROCM", "ROCM-IB-2", "SOCK"}) {
         EXPECT_EQ(ResolveNetPlugin(almost), nullptr) << almost << " must not resolve";
         EXPECT_FALSE(IsSocketNetName(almost)) << almost << " must not resolve to Socket";
     }
@@ -80,7 +82,9 @@ static ncclNet_t* ExpectedPluginFor(const char* env) {
         {"IB", &ncclNetIb},
         {"IB-CAST", &netIbCast},
         {"ROCM-IB", &netIbCast},
+        {"IB-MSEG", &ncclNetIbMseg},
     };
+    if (strcasecmp(env, "IB") == 0 && ncclParamMultiSegmentRegister()) return &ncclNetIbMseg;
     for (const auto& e : kExpected) {
         if (strcasecmp(env, e.env) == 0) return e.plugin;
     }
@@ -105,6 +109,17 @@ TEST_F(NetIbMPITest, DefaultPluginIsIbCastOnAinic) {
     if (getenv("NCCL_NET") != nullptr) GTEST_SKIP() << "NCCL_NET is set; this pins the unset default";
     ASSERT_NE(net_, nullptr);
     EXPECT_EQ(net_, &netIbCast) << "NCCL_NET unset on AINIC but the fixture selected " << net_->name;
+    TEST_INFO("Rank %d: NCCL_NET unset resolved to plugin %s", MPIEnvironment::world_rank, net_->name);
+}
+
+// IB-MSEG configs only: pins the fixture's choice, so the "(IB-MSEG)" suites cannot drive net_ib. The library's
+// own selection is covered by the host plugin tests.
+TEST_F(NetIbMPITest, DefaultPluginIsIbMsegUnderMultiSegmentRegister) {
+    if (getenv("NCCL_NET") != nullptr) GTEST_SKIP() << "NCCL_NET is set; this pins the unset default";
+    if (!ncclParamMultiSegmentRegister()) GTEST_SKIP() << "NCCL_MULTI_SEGMENT_REGISTER is not 1";
+    if (rcclUseAinic()) GTEST_SKIP() << "AINIC keeps IB-CAST under the switch";
+    ASSERT_NE(net_, nullptr);
+    EXPECT_EQ(net_, &ncclNetIbMseg) << "NCCL_MULTI_SEGMENT_REGISTER=1 but the fixture selected " << net_->name;
     TEST_INFO("Rank %d: NCCL_NET unset resolved to plugin %s", MPIEnvironment::world_rank, net_->name);
 }
 

@@ -313,6 +313,12 @@
         }
       ]
     },
+    "net_ib_gdr_flush_mseg": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
+    },
     "net_ib_gdr_flush_flag_base": {
       "extends": "net_ib_base",
       "num_ranks": 2,
@@ -339,6 +345,12 @@
           "test_filter": "GdrFlushFlagTest.Enabled_FusedNicKeepsRdmaReadFlush"
         }
       ]
+    },
+    "net_ib_gdr_flush_flag_mseg": {
+      "extends": "net_ib_gdr_flush_flag",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
     "net_ib_gdr_flush_flag_4qps": {
       "extends": "net_ib_gdr_flush_flag_base",
@@ -412,6 +424,19 @@
         }
       ]
     },
+    "net_ib_initialization_mseg": {
+      "extends": "net_ib_initialization",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_Init_DefaultIsIbMseg",
+          "description": "With NCCL_MULTI_SEGMENT_REGISTER=1 and NCCL_NET unset, the fixture drives IB-MSEG, so these suites cannot pass on net_ib",
+          "test_filter": "NetIbMPITest.DefaultPluginIsIbMsegUnderMultiSegmentRegister"
+        }
+      ]
+    },
     "net_ib_properties": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -427,6 +452,12 @@
           "test_filter": "NetIbMPITest.GetDevicePropertiesInvalidDevice"
         }
       ]
+    },
+    "net_ib_properties_mseg": {
+      "extends": "net_ib_properties",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
     "net_ib_connection": {
       "extends": "net_ib_base",
@@ -444,6 +475,12 @@
         }
       ]
     },
+    "net_ib_connection_mseg": {
+      "extends": "net_ib_connection",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
+    },
     "net_ib_memory": {
       "extends": "net_ib_base",
       "timeout": 120,
@@ -459,6 +496,12 @@
           "test_filter": "NetIbMPITest.RegisterGpuMemory"
         }
       ]
+    },
+    "net_ib_memory_mseg": {
+      "extends": "net_ib_memory",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
     "net_ib_transfer": {
       "extends": "net_ib_base",
@@ -504,6 +547,12 @@
           "test_filter": "NetIbMPITest.MultipleOutstandingSendRecv"
         }
       ]
+    },
+    "net_ib_transfer_mseg": {
+      "extends": "net_ib_transfer",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
     },
     "net_ib_coverage_env": {
       "extends": "net_ib_base",
@@ -2921,8 +2970,8 @@
         },
         {
           "name": "Resiliency_GidChangeRefresh",
-          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery; excludes plain net_ib recovery until AICOMNET-433 adds its UC capability gate",
-          "test_filter": "Transport/NetIbGidChangeTest.*-Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIb"
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery; excludes net_ib and IB-MSEG recovery until AICOMNET-433 adds their UC capability gate",
+          "test_filter": "Transport/NetIbGidChangeTest.*-Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIb:Transport/NetIbGidChangeTest.PortRecoveryRefreshesStaleCommGid/NetIbMseg"
         }
       ]
     },
@@ -5755,9 +5804,21 @@
       "enabled": true
     },
     {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-MSEG)",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_gdr_flush_mseg",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank)",
       "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes",
       "config": "net_ib_gdr_flush_flag",
+      "enabled": true
+    },
+    {
+      "name": "GDR Flush Flag - Default QPs (2-Node, 2-Rank) (IB-MSEG)",
+      "description": "Remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1) over 2 ranks on 2 nodes. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_gdr_flush_flag_mseg",
       "enabled": true
     },
     {
@@ -5791,9 +5852,21 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Initialization Tests (IB-MSEG)",
+      "description": "InfiniBand plugin initialization and device enumeration. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_initialization_mseg",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Device Properties",
       "description": "InfiniBand device property queries",
       "config": "net_ib_properties",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Device Properties (IB-MSEG)",
+      "description": "InfiniBand device property queries. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_properties_mseg",
       "enabled": true
     },
     {
@@ -5803,15 +5876,33 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Connection Setup (IB-MSEG)",
+      "description": "InfiniBand connection lifecycle and rapid reconnect tests. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_connection_mseg",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Memory Registration",
       "description": "InfiniBand memory registration tests",
       "config": "net_ib_memory",
       "enabled": true
     },
     {
+      "name": "NET IB - Memory Registration (IB-MSEG)",
+      "description": "InfiniBand memory registration tests. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_memory_mseg",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Data Transfer",
       "description": "InfiniBand data transfer and stress tests",
       "config": "net_ib_transfer",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Data Transfer (IB-MSEG)",
+      "description": "InfiniBand data transfer and stress tests. On IB-MSEG (NCCL_MULTI_SEGMENT_REGISTER=1).",
+      "config": "net_ib_transfer_mseg",
       "enabled": true
     },
     {

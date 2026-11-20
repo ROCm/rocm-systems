@@ -189,6 +189,12 @@
         }
       ]
     },
+    "net_plugin_selection_mseg": {
+      "extends": "net_plugin_selection",
+      "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1"
+      }
+    },
     "net_ib_base": {
       "extends": "default",
       "is_gtest": true,
@@ -7288,6 +7294,12 @@
       "name": "NET - Plugin selection from NCCL_NET",
       "description": "NCCL_NET name resolution guardrails: case-insensitive matching, the ROCM-IB alias, and no silent fallback to plain IB on an unknown name (single rank, no NIC required)",
       "config": "net_plugin_selection",
+      "enabled": true
+    },
+    {
+      "name": "NET - Plugin selection from NCCL_NET (IB-MSEG)",
+      "description": "The test fixture's NCCL_NET resolution under NCCL_MULTI_SEGMENT_REGISTER=1: IB and unset select IB-MSEG (IB-CAST on AINIC), so the (IB-MSEG) NET IB suites drive the IB-MSEG plugin. The library's own selection is covered by the host plugin tests (single rank, no NIC required).",
+      "config": "net_plugin_selection_mseg",
       "enabled": true
     },
     {

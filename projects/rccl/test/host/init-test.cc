@@ -2265,8 +2265,8 @@ hipError_t FakeDevicePropsWithArch(hipDeviceProp_t* prop, const char* arch) {
 }
 }  // namespace
 
-// A rank can use RCCL_IB_GDR_FLUSH_FLAG only on the internal IB net, with net_ib's own conditions met, on a
-// GPU whose fine-grained VRAM the proxy can write (gfx942/gfx950).
+// A rank can use RCCL_IB_GDR_FLUSH_FLAG only on the internal IB net (or IB-MSEG, below), with net_ib's own
+// conditions met, on a GPU whose fine-grained VRAM the proxy can write (gfx942/gfx950).
 TEST_F(InitMicrotest, FillInfo_IbGdrFlushFlagNeedsNetIbLocalSupportAndArch) {
   FillInfoComm c;
   auto run = [&](ncclNet_t* net, bool localSupport, const char* arch) {
@@ -2283,6 +2283,22 @@ TEST_F(InitMicrotest, FillInfo_IbGdrFlushFlagNeedsNetIbLocalSupportAndArch) {
   EXPECT_FALSE(run(&ncclNetIb, false, "gfx950")) << "net_ib rules it out (or the flag is off)";
   EXPECT_FALSE(run(&ncclNetIb, true, "gfx90a")) << "no CPU-writable fine-grained VRAM";
   EXPECT_FALSE(run(&ncclNetIb, true, "gfx1250")) << "no CPU-writable fine-grained VRAM";
+}
+
+// IB-MSEG answers for itself through its own copy of the local check; net_ib's answer does not count for it.
+TEST_F(InitMicrotest, FillInfo_IbGdrFlushFlagOnIbMsegUsesTheForksLocalSupport) {
+  FillInfoComm c;
+  c.get()->ncclNet = &ncclNetIbMseg;
+  g_hipGetDeviceProperties = [](hipDeviceProp_t* prop, int) { return FakeDevicePropsWithArch(prop, "gfx950"); };
+  for (bool ibSupport : {false, true}) {
+    for (bool msegSupport : {false, true}) {
+      g_ibGdrFlushFlagLocalSupport = ibSupport;
+      g_ibMsegGdrFlushFlagLocalSupport = msegSupport;
+      ncclPeerInfo info{};
+      EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
+      EXPECT_EQ(msegSupport, info.ibGdrFlushFlag) << "net_ib " << ibSupport << " IB-MSEG " << msegSupport;
+    }
+  }
 }
 
 namespace {
@@ -2350,7 +2366,22 @@ TEST_F(InitMicrotest, SetIbGdrFlushFlag_MixedReportedByRankZeroAndOtherNetsUntou
   IbGdrFlushFlagComm t({false, false}, &otherNet);
   t.Run();
   EXPECT_FALSE(t.comm.get()->ibGdrFlushFlag);
-  EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "only an ncclNetIb context holds the decision";
+  EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << "only an IB or IB-MSEG context holds the decision";
+  EXPECT_TRUE(g_ibMsegSetGdrFlushFlagCalls.empty()) << "only an IB or IB-MSEG context holds the decision";
+}
+
+// An IB-MSEG context holds the decision through the fork's setter, never net_ib's.
+TEST_F(InitMicrotest, SetIbGdrFlushFlag_IbMsegContextTakesTheDecision) {
+  for (bool capable : {true, false}) {
+    g_ibSetGdrFlushFlagCalls.clear();
+    g_ibMsegSetGdrFlushFlagCalls.clear();
+    IbGdrFlushFlagComm t({true, capable}, &ncclNetIbMseg);
+    t.Run();
+    EXPECT_EQ(capable, t.comm.get()->ibGdrFlushFlag);
+    ASSERT_EQ(1u, g_ibMsegSetGdrFlushFlagCalls.size()) << capable;
+    EXPECT_EQ(std::make_pair((void*)&t.ctx, capable ? 1 : 0), g_ibMsegSetGdrFlushFlagCalls[0]);
+    EXPECT_TRUE(g_ibSetGdrFlushFlagCalls.empty()) << capable;
+  }
 }
 
 // A net context shared with the parent keeps the parent's decision; the votes, which carry the parent's

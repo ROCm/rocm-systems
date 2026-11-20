@@ -34,6 +34,7 @@
 #include <climits>
 #include <random>
 #include <thread>
+#include <utility>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -85,6 +86,9 @@ __global__ void observeFlagsThenData(const uint64_t* flags, int first, int count
 
 class GdrFlushFlagTest : public NetIbMPITest {
 protected:
+    // The resolved plugin's flag entry points; null for plugins without the flag (IB-CAST).
+    const rcclIbGdrFlushOps* Flag() const { return rcclIbGdrFlushOpsFor(net_); }
+
     // Flag entries checked for stray writes beyond the connection's QPs.
     static constexpr int kFlagCheckEntries = 512;
     static constexpr int kTightTimeoutMs   = 10000;
@@ -158,8 +162,8 @@ protected:
     std::string EnableFlagForComm() {
         std::string why;
         if (!flagEnvEnabled()) why = "requires RCCL_IB_GDR_FLUSH_FLAG=1";
-        else if (net_ != &ncclNetIb) why = "the flag is ncclNetIb only";
-        else if (!ncclIbGdrFlushFlagLocalSupport())
+        else if (Flag() == nullptr) why = "the flag is on the IB and IB-MSEG plugins only";
+        else if (!Flag()->localSupport())
             why = "adaptive routing, out-of-order RQ, ID-based matching or resiliency rules the flag out";
         else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
         else if (expectedFlagCount() > kMaxWaitQps) why = "the flag needs at most 8 QPs per request";
@@ -167,8 +171,8 @@ protected:
         MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (skip && why.empty()) why = "peer rank cannot run the flag path";
         if (skip) return why;
-        ncclIbSetGdrFlushFlag(initCtx_, 1);
-        threadCtxInit_ = [](void* ctx) { ncclIbSetGdrFlushFlag(ctx, 1); };
+        Flag()->setFlag(initCtx_, 1);
+        threadCtxInit_ = [ops = Flag()](void* ctx) { ops->setFlag(ctx, 1); };
         return std::string();
     }
 
@@ -176,7 +180,7 @@ protected:
     // on, whatever RCCL_IB_GDR_FLUSH_FLAG says.
     std::string DisabledSkipReason() {
         std::string why;
-        if (net_ != &ncclNetIb) why = "the flag is ncclNetIb only";
+        if (Flag() == nullptr) why = "the flag is on the IB and IB-MSEG plugins only";
         else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
         int skip = why.empty() ? 0 : 1;
         MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
@@ -201,7 +205,7 @@ protected:
     // Rank 0 reports whether the recv comm set up the flag; both ranks
     // receive the answer so they leave the test together.
     bool FlagSetUp(const ConnectionPair& pair, uint64_t** flags) {
-        uint64_t* f = (MPIEnvironment::world_rank == 0) ? ncclIbGetGpuFlushFlag(pair.recvComm) : nullptr;
+        uint64_t* f = (MPIEnvironment::world_rank == 0) ? Flag()->gpuFlag(pair.recvComm) : nullptr;
         int ok = (MPIEnvironment::world_rank == 0) ? (f != nullptr) : 0;
         MPI_Bcast(&ok, 1, MPI_INT, 0, MPI_COMM_WORLD);
         if (flags) *flags = f;
@@ -247,7 +251,7 @@ protected:
 
     bool PostFlaggedRecv(void* recvComm, bool flag, int n, void** bufs, size_t* sizes, int* tags,
                          void** mhs, void** req, std::string* err) {
-        ncclIbSetGpuFlushFlagHint(recvComm, flag ? 1 : 0);
+        Flag()->setGpuFlagHint(recvComm, flag ? 1 : 0);
         ncclResult_t r = PostRecv(recvComm, n, bufs, sizes, tags, mhs, req);
         if (r != ncclSuccess || *req == nullptr) {
             if (err) *err = "irecv() failed: rc=" + std::to_string(r);
@@ -318,7 +322,7 @@ protected:
                          bool flagged, uint64_t id, uint64_t descBefore, const char* what) {
         const int count = expectedFlagCount();
         const int first = expectedFirstQp(id);
-        const uint64_t desc = ncclIbGetGpuFlushFlagSeq(recvComm);
+        const uint64_t desc = Flag()->gpuFlagSeq(recvComm);
         if (flagged) {
             EXPECT_EQ(desc, expectedDesc(id)) << what << ": descriptor of flagged request id " << id;
             EXPECT_TRUE(WaitFlags(flags, first, count, id + 1))
@@ -340,14 +344,19 @@ TEST_F(GdrFlushFlagTest, Ordering_EachDisqualifierRulesTheFlagOut) {
     constexpr int64_t kAutoMatching = -2, kByIndex = 0, kById = 1;
     const int noAr[2] = {0, 0}, oneAr[2] = {0, 1};
 
-    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, noAr));
-    EXPECT_TRUE(ncclIbGdrFlushFlagOrdered(0, 0, kByIndex, 2, noAr));
+    for (const auto& impl : {std::make_pair("IB", &ncclIbGdrFlushFlagOrdered),
+                             std::make_pair("IB-MSEG", &IbMsegGdrFlushFlagOrdered)}) {
+        SCOPED_TRACE(impl.first);
+        const auto ordered = impl.second;
+        EXPECT_TRUE(ordered(0, 0, kAutoMatching, 2, noAr));
+        EXPECT_TRUE(ordered(0, 0, kByIndex, 2, noAr));
 
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(1, 0, kAutoMatching, 2, noAr)) << "NCCL_IB_OOO_RQ";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 1, kAutoMatching, 2, noAr)) << "NCCL_IB_RESILIENCY_PORT_FAILOVER";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kById, 2, noAr)) << "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 2, oneAr)) << "adaptive routing";
-    EXPECT_FALSE(ncclIbGdrFlushFlagOrdered(0, 0, kAutoMatching, 0, noAr)) << "no IB device";
+        EXPECT_FALSE(ordered(1, 0, kAutoMatching, 2, noAr)) << "NCCL_IB_OOO_RQ";
+        EXPECT_FALSE(ordered(0, 1, kAutoMatching, 2, noAr)) << "NCCL_IB_RESILIENCY_PORT_FAILOVER";
+        EXPECT_FALSE(ordered(0, 0, kById, 2, noAr)) << "NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=1";
+        EXPECT_FALSE(ordered(0, 0, kAutoMatching, 2, oneAr)) << "adaptive routing";
+        EXPECT_FALSE(ordered(0, 0, kAutoMatching, 0, noAr)) << "no IB device";
+    }
 }
 
 // Enabled: the flag page starts zeroed with a clear descriptor, and a
@@ -369,7 +378,7 @@ TEST_F(GdrFlushFlagTest, Enabled_FlagsZeroedAndHintDefaultsOff) {
 
     std::vector<uint64_t> snap;
     if (rank == 0) {
-        EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u);
+        EXPECT_EQ(Flag()->gpuFlagSeq(pair.recvComm), 0u);
         EXPECT_EQ(firstNonZeroQpFlag(flags), -1);
         snap = SnapshotFlags(flags);
     }
@@ -443,7 +452,7 @@ TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
             EXPECT_TRUE(PostFlaggedRecv(pair.recvComm, /*flag=*/true, 1, bufs, sizes, tags, mhs, &req, &err))
                 << err;
             EXPECT_TRUE(req && TightWait(req, nullptr, &err)) << err;
-            EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
+            EXPECT_EQ(Flag()->gpuFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
             EXPECT_TRUE(FlushAndWait(pair.recvComm, 1, bufs, sizes, mhs, &err)) << err;
             EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err)) << err;
         } else {
@@ -466,7 +475,7 @@ TEST_F(GdrFlushFlagTest, Enabled_ListenCommOffKeepsRdmaReadFlush) {
     AssertInitAndGetDevices(nullptr);
     const std::string why = EnableFlagForComm();
     if (!why.empty()) GTEST_SKIP() << why;
-    listenCommInit_ = [](void* listenComm) { ncclIbSetListenGdrFlushFlag(listenComm, 0); };
+    listenCommInit_ = [ops = Flag()](void* listenComm) { ops->setListenFlag(listenComm, 0); };
 
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
@@ -495,7 +504,7 @@ TEST_F(GdrFlushFlagTest, Enabled_ListenCommOffKeepsRdmaReadFlush) {
             EXPECT_TRUE(PostFlaggedRecv(pair.recvComm, /*flag=*/true, 1, bufs, sizes, tags, mhs, &req, &err))
                 << err;
             EXPECT_TRUE(req && TightWait(req, nullptr, &err)) << err;
-            EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
+            EXPECT_EQ(Flag()->gpuFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
             EXPECT_TRUE(FlushAndWait(pair.recvComm, 1, bufs, sizes, mhs, &err)) << err;
             EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err)) << err;
         } else {
@@ -554,7 +563,7 @@ TEST_F(GdrFlushFlagTest, Enabled_FusedNicKeepsRdmaReadFlush) {
         void* mhs[1] = {mh};
         EXPECT_TRUE(PostFlaggedRecv(pair.recvComm, /*flag=*/true, 1, bufs, sizes, tags, mhs, &req, &err)) << err;
         EXPECT_TRUE(req && TightWait(req, nullptr, &err)) << err;
-        EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
+        EXPECT_EQ(Flag()->gpuFlagSeq(pair.recvComm), 0u) << "descriptor published without the flag";
         EXPECT_TRUE(FlushAndWait(pair.recvComm, 1, bufs, sizes, mhs, &err)) << err;
         EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err)) << err;
     } else {
@@ -611,7 +620,7 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
             size_t sizes[1] = {size};
             int tags[1] = {tag};
             void* mhs[1] = {mh};
-            const uint64_t descBefore = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
+            const uint64_t descBefore = Flag()->gpuFlagSeq(pair.recvComm);
             const bool posted = PostFlaggedRecv(pair.recvComm, flagged, 1, bufs, sizes, tags, mhs, &req, &err);
             EXPECT_TRUE(posted) << err;
             int got[1] = {0};
@@ -750,7 +759,7 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
             while (!pending.empty() && !HasFailure()) {
                 for (size_t i = 0; i < pending.size();) {
                     Op& op = ops[pending[i]];
-                    const uint64_t descBefore = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
+                    const uint64_t descBefore = Flag()->gpuFlagSeq(pair.recvComm);
                     int done = 0;
                     int got[kMaxN] = {0};
                     if (TestRequest(op.req, &done, got) != ncclSuccess) {
@@ -902,7 +911,7 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
             EXPECT_EQ(res->mismatches, 0ull)
                 << "iter " << it << " size=" << size << (b ? " uncached" : " coarse")
                 << ": GPU read stale payload after the flag, first bad byte " << res->firstBad;
-            EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), expectedDesc(it));
+            EXPECT_EQ(Flag()->gpuFlagSeq(pair.recvComm), expectedDesc(it));
         } else {
             const bool posted = TightSend(pair.sendComm, bufs[b], size, it, mhs[b], &req, &err);
             EXPECT_TRUE(posted) << err;
@@ -951,7 +960,7 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
         ASSERT_TRUE(FlagSetUp(pair, &flags)) << "cycle " << cycle;
         std::vector<uint64_t> snap;
         if (rank == 0) {
-            EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), 0u) << "cycle " << cycle;
+            EXPECT_EQ(Flag()->gpuFlagSeq(pair.recvComm), 0u) << "cycle " << cycle;
             EXPECT_EQ(firstNonZeroQpFlag(flags), -1) << "cycle " << cycle << ": QP flags not zeroed";
             snap = SnapshotFlags(flags);
         }
@@ -970,7 +979,7 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
                 size_t rs[1] = {size};
                 int rt[1] = {i};
                 void* rh[1] = {mh};
-                descBefore = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
+                descBefore = Flag()->gpuFlagSeq(pair.recvComm);
                 if (!PostFlaggedRecv(pair.recvComm, hints[i], 1, rb, rs, rt, rh, &req, &err)) {
                     ADD_FAILURE() << "cycle " << cycle << ": " << err;
                     break;
@@ -1034,7 +1043,7 @@ TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
             return result;
         };
         if (hipSetDevice(hipDev) != hipSuccess) return fail("hipSetDevice failed");
-        uint64_t* flags = (rank == 0) ? ncclIbGetGpuFlushFlag(pair.recvComm) : nullptr;
+        uint64_t* flags = (rank == 0) ? Flag()->gpuFlag(pair.recvComm) : nullptr;
         if (rank == 0 && !flags) return fail("flag not set up");
         if (rank == 0 && firstNonZeroQpFlag(flags) != -1) return fail("QP flags not zeroed");
         const std::vector<uint64_t> snap = (rank == 0) ? SnapshotFlags(flags) : std::vector<uint64_t>();
@@ -1061,10 +1070,10 @@ TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
                 size_t rs[1] = {size};
                 int rt[1] = {tag};
                 void* rh[1] = {mh};
-                const uint64_t descBefore = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
+                const uint64_t descBefore = Flag()->gpuFlagSeq(pair.recvComm);
                 if (!PostFlaggedRecv(pair.recvComm, flagged, 1, rb, rs, rt, rh, &req, &err)) return fail(err);
                 if (!TightWait(req, nullptr, &err)) return fail("iter " + std::to_string(it) + ": " + err);
-                const uint64_t desc = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
+                const uint64_t desc = Flag()->gpuFlagSeq(pair.recvComm);
                 if (flagged) {
                     if (desc != expectedDesc(it))
                         return fail("iter " + std::to_string(it) + ": descriptor " + std::to_string(desc));

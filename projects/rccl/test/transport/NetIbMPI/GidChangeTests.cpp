@@ -8,6 +8,7 @@
 
 #if defined(MPI_TESTS_ENABLED) && defined(ENABLE_FAULT_INJECTION)
 
+#include <cstddef>
 #include <fstream>
 
 #include "ibvcore.h"
@@ -36,18 +37,42 @@ struct GidTransport {
     ncclResult_t (*getRecoveryGidIndex)(void*, int, int*);
     ncclResult_t (*getProbingGidIndex)(void*, int, int*);
     ncclResult_t (*driveQpToError)(void*, int);
+    // Null for transports whose port recovery does not use UC QPs (net_ib_cast).
+    ncclResult_t (*ucSupported)(int, int*);
 };
 
 const GidTransport kNetIb = {
     "NetIb", &ncclNetIb, ncclIbGidGetDev, ncclIbGidSetDev, ncclIbGidGetComm, ncclIbGidSetComm,
     ncclIbGidChangeEvent, ncclIbGidGetQpState, ncclIbGidGetDevState, ncclIbGidGetRecoveryGidIndex,
-    ncclIbGidGetProbingGidIndex, ncclIbGidDriveQpToError,
+    ncclIbGidGetProbingGidIndex, ncclIbGidDriveQpToError, ncclIbGidUcSupported,
 };
 
 const GidTransport kNetIbCast = {
     "NetIbCast", &netIbCast, ncclIbCastGidGetDev, ncclIbCastGidSetDev, ncclIbCastGidGetComm, ncclIbCastGidSetComm,
     ncclIbCastGidChangeEvent, ncclIbCastGidGetQpState, ncclIbCastGidGetDevState, ncclIbCastGidGetRecoveryGidIndex,
-    ncclIbCastGidGetProbingGidIndex, ncclIbCastGidDriveQpToError,
+    ncclIbCastGidGetProbingGidIndex, ncclIbCastGidDriveQpToError, nullptr,
+};
+
+// net_ib_multiseg's GID structs are net_ib's under fork names, so the IbMseg hooks fit this table.
+static_assert(sizeof(IbMsegGidState) == sizeof(ncclIbGidState), "IbMsegGidState must mirror ncclIbGidState");
+static_assert(offsetof(IbMsegGidState, gid) == offsetof(ncclIbGidState, gid), "IbMsegGidState.gid offset");
+static_assert(offsetof(IbMsegGidState, ibDev) == offsetof(ncclIbGidState, ibDev), "IbMsegGidState.ibDev offset");
+static_assert(sizeof(IbMsegGidQpState) == sizeof(ncclIbGidQpState), "IbMsegGidQpState must mirror ncclIbGidQpState");
+static_assert(offsetof(IbMsegGidQpState, queryOk) == offsetof(ncclIbGidQpState, queryOk),
+              "IbMsegGidQpState.queryOk offset");
+
+const GidTransport kNetIbMseg = {
+    "NetIbMseg", &ncclNetIbMseg,
+    [](int d, ncclIbGidState* o) { return IbMsegGidGetDev(d, reinterpret_cast<IbMsegGidState*>(o)); },
+    [](int d, const ncclIbGidState* i) { return IbMsegGidSetDev(d, reinterpret_cast<const IbMsegGidState*>(i)); },
+    [](void* c, int d, ncclIbGidState* o) { return IbMsegGidGetComm(c, d, reinterpret_cast<IbMsegGidState*>(o)); },
+    [](void* c, int d, const ncclIbGidState* i) {
+        return IbMsegGidSetComm(c, d, reinterpret_cast<const IbMsegGidState*>(i));
+    },
+    IbMsegGidChangeEvent,
+    [](void* c, ncclIbGidQpState* o) { return IbMsegGidGetQpState(c, reinterpret_cast<IbMsegGidQpState*>(o)); },
+    IbMsegGidGetDevState, IbMsegGidGetRecoveryGidIndex, IbMsegGidGetProbingGidIndex, IbMsegGidDriveQpToError,
+    IbMsegGidUcSupported,
 };
 
 bool SameGid(const ncclIbGidState& a, const ncclIbGidState& b) {
@@ -183,13 +208,13 @@ protected:
     // With NCCL_IB_RESILIENCY_PORT_RECOVERY=1 every net_ib connect creates UC port recovery QPs,
     // so a NIC without UC (bnxt_re) fails the connect itself. Collective.
     bool NetIbRecoveryLacksUc() {
-        if (T().net != &ncclNetIb) return false;
+        if (T().ucSupported == nullptr) return false;
         const char* recoveryEnv = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
         bool ok = true;
         if (recoveryEnv && strcmp(recoveryEnv, "1") == 0) {
             for (int dev = 0; dev < GetPhysicalDeviceCount(); dev++) {
                 int uc = 0;
-                ok = ok && ncclIbGidUcSupported(dev, &uc) == ncclSuccess && uc == 1;
+                ok = ok && T().ucSupported(dev, &uc) == ncclSuccess && uc == 1;
             }
         }
         return !AllRanks(ok);
@@ -327,7 +352,7 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     const char* recoveryEnv = getenv("NCCL_IB_RESILIENCY_PORT_RECOVERY");
     if (!failoverEnv || strcmp(failoverEnv, "1") != 0) GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_FAILOVER=1";
     if (!recoveryEnv || strcmp(recoveryEnv, "1") != 0) GTEST_SKIP() << "Requires NCCL_IB_RESILIENCY_PORT_RECOVERY=1";
-    if (T().net == &ncclNetIb && !AllRanks(!rcclUseAinic()))
+    if (T().net != &netIbCast && !AllRanks(!rcclUseAinic()))
         GTEST_SKIP() << "net_ib port recovery resets QPs, which AINIC does not support";
 
     const int rank = MPIEnvironment::world_rank;
@@ -474,7 +499,7 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     TeardownConnection(recvComm, listenComm, sendComm, mhandle);
 }
 
-INSTANTIATE_TEST_SUITE_P(Transport, NetIbGidChangeTest, ::testing::Values(&kNetIb, &kNetIbCast),
+INSTANTIATE_TEST_SUITE_P(Transport, NetIbGidChangeTest, ::testing::Values(&kNetIb, &kNetIbCast, &kNetIbMseg),
                          [](const ::testing::TestParamInfo<const GidTransport*>& info) {
                              return std::string(info.param->name);
                          });

@@ -36,6 +36,7 @@
 #include "nccl_rma.h"
 #include "plugin.h"
 
+#include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/transport_stubs.h"
@@ -63,6 +64,7 @@ const char* ncclGetPluginLibName(ncclPluginType) { return ""; }
 // compile; only their addresses need to exist for initPluginLibsOnceFunc.
 ncclRma_t ncclRmaIbProxy{};
 ncclRma_t IbCastRmaIbProxy{};
+ncclRma_t IbMsegRmaIbProxy{};
 ncclRma_t ncclRmaSocketProxy{};
 
 // ncclRmaInit tail-calls this once a plugin is assigned; never reached by the
@@ -299,7 +301,8 @@ class RmaInternalBackendTest : public ::testing::Test {
     pluginCount = 0;
   }
 
-  std::vector<const ncclRma_t*> Internal(const char* net, bool ainic, const char* netPlugin = nullptr) {
+  std::vector<const ncclRma_t*> Internal(const char* net, bool ainic, const char* netPlugin = nullptr,
+                                         int64_t multiSegment = 0) {
     if (net) {
       SetMicroEnv("NCCL_NET", net);
     } else {
@@ -312,6 +315,8 @@ class RmaInternalBackendTest : public ::testing::Test {
     }
     SetMicroEnv("NCCL_RMA_PLUGIN", "none");
     g_rcclUseAinicValue = ainic;
+    ScopedHook<int64_t(const char*, int64_t)> param(g_loadParam,
+                                                    ParamOverride({{"MULTI_SEGMENT_REGISTER", multiSegment}}));
     initPluginLibsOnceFunc();
     // With NCCL_RMA_PLUGIN=none and no GIN or NET plugin library, every entry is internal.
     std::vector<const ncclRma_t*> out;
@@ -321,6 +326,8 @@ class RmaInternalBackendTest : public ::testing::Test {
   // IB-CAST first, the generic IB backend as its fallback, then socket.
   const std::vector<const ncclRma_t*> kCast{&IbCastRmaIbProxy, &ncclRmaIbProxy, &ncclRmaSocketProxy};
   const std::vector<const ncclRma_t*> kIb{&ncclRmaIbProxy, &ncclRmaSocketProxy};
+  // RCCL: IB-MSEG's RMA backend in the generic IB slot.
+  const std::vector<const ncclRma_t*> kMseg{&IbMsegRmaIbProxy, &ncclRmaSocketProxy};
 };
 
 // The data path picks IB-CAST on an AINIC host with NCCL_NET unset (plugin/net.cc), and
@@ -357,6 +364,22 @@ TEST_F(RmaInternalBackendTest, ExternalNetPluginOnAinicIsIb) {
 TEST_F(RmaInternalBackendTest, NetPluginNoneOrEmptyOnAinicIsIbCast) {
   EXPECT_EQ(Internal(nullptr, /*ainic=*/true, "none"), kCast);
   EXPECT_EQ(Internal(nullptr, /*ainic=*/true, ""), kCast);
+}
+
+// NCCL_MULTI_SEGMENT_REGISTER=1 or NCCL_NET=IB-MSEG puts IB-MSEG's RMA backend in the generic IB slot.
+TEST_F(RmaInternalBackendTest, MultiSegmentRegisterPicksTheForkBackend) {
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/false, nullptr, 0), kIb);
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/false, nullptr, 1), kMseg);
+  EXPECT_EQ(Internal("IB", /*ainic=*/false, nullptr, 1), kMseg);
+  EXPECT_EQ(Internal("IB-MSEG", /*ainic=*/false, nullptr, 0), kMseg);
+}
+
+// IB-CAST's own RMA backend leads whenever the internal NET plugin is IB-CAST (raw NCCL_NET=IB-CAST, ROCM-IB
+// or AINIC autodetect), so the switch leaves it in front of the generic IB fallback.
+TEST_F(RmaInternalBackendTest, MultiSegmentRegisterKeepsTheIbCastBackend) {
+  EXPECT_EQ(Internal("IB-CAST", /*ainic=*/false, nullptr, 1), kCast);
+  EXPECT_EQ(Internal("ROCM-IB", /*ainic=*/true, nullptr, 1), kCast);
+  EXPECT_EQ(Internal(nullptr, /*ainic=*/true, nullptr, 1), kCast);
 }
 
 }  // namespace

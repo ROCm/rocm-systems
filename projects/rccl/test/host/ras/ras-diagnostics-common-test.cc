@@ -576,6 +576,24 @@ TEST_F(RasDiagnosticsCommonMicrotest, CollectCommSnapshotsTreatsRcclIbCastAsVerb
   rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
 }
 
+TEST_F(RasDiagnosticsCommonMicrotest, CollectCommSnapshotsTreatsRcclIbMsegAsVerbs) {
+  ncclNet_t ibMseg = {.name = "IB-MSEG"};
+  ncclNet_t ibMsegPrefix = {.name = "IB-MSEGX"};
+  OwnedComm c0(10, 20, 30, 0), c1(10, 20, 30, 1);
+  c0.comm->ncclNet = &ibMseg;
+  c1.comm->ncclNet = &ibMsegPrefix;
+  InstallNcclComms({c0.comm.get(), c1.comm.get()});
+
+  const rasDiagnosticsContext unfiltered = UnfilteredContext();
+  rasDiagnosticsCommSnapshot* snapshots = nullptr;
+  int nSnapshots = -1;
+  ASSERT_EQ(ncclSuccess, rasDiagnosticsCollectCommSnapshots(&unfiltered, false, &snapshots, &nSnapshots));
+  ASSERT_EQ(2, nSnapshots);
+  EXPECT_TRUE(snapshots[0].netIbVerbs);
+  EXPECT_FALSE(snapshots[1].netIbVerbs);
+  rasDiagnosticsFreeCommSnapshots(snapshots, nSnapshots);
+}
+
 TEST_F(RasDiagnosticsCommonMicrotest, CollectCommSnapshotsQueriesNetDevicesOnlyForVerbsPluginsWhenAsked) {
   // Verbs plugin names match exactly or followed by '_' or ' '; a name that merely shares the prefix does not.
   ncclNet_t ibExt = {.name = "IBext_v10"};

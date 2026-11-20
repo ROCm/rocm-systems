@@ -42,10 +42,13 @@
 // internal RMA IB proxy plugin (declared in src/include/rma.h).
 extern ncclRma_t ncclRmaIbProxy;
 extern ncclRma_t IbCastRmaIbProxy;
+extern ncclRma_t IbMsegRmaIbProxy;
 
 // The RMA proxy has no makeVDevice of its own and reads the table these populate.
 extern ncclNet_t ncclNetIb;
 extern ncclNet_t netIbCast;
+extern ncclNet_t ncclNetIbMseg;
+extern int64_t ncclParamMultiSegmentRegister();
 
 namespace RCCLRmaTests
 {
@@ -61,7 +64,10 @@ inline ncclRma_t* GetRmaPlugin()
     if (envNet == nullptr) return nullptr;
 
     if (strcasecmp(envNet, "IB-CAST") == 0) return &IbCastRmaIbProxy;
-    if (strcasecmp(envNet, "IB") == 0) return &ncclRmaIbProxy;
+    if (strcasecmp(envNet, "IB-MSEG") == 0) return &IbMsegRmaIbProxy;
+    // NCCL_MULTI_SEGMENT_REGISTER=1 serves IB with IB-MSEG, as src/plugin/rma.cc does.
+    if (strcasecmp(envNet, "IB") == 0)
+        return ncclParamMultiSegmentRegister() ? &IbMsegRmaIbProxy : &ncclRmaIbProxy;
 
     return nullptr;
 }
@@ -496,10 +502,12 @@ protected:
         return done != 0;
     }
 
-    // Only net_ib at the default batch size signals just a batch's tail, so one completion retires the whole batch.
+    // Only net_ib and its IB-MSEG copy at the default batch size signal just a batch's tail, so one completion
+    // retires the whole batch.
     bool RetiresBatchOnTailCompletion() const
     {
-        return rma_ == &ncclRmaIbProxy && std::getenv("NCCL_RMA_IB_WR_BATCHSIZE") == nullptr;
+        return (rma_ == &ncclRmaIbProxy || rma_ == &IbMsegRmaIbProxy) &&
+               std::getenv("NCCL_RMA_IB_WR_BATCHSIZE") == nullptr;
     }
 
     bool PollUntilDone(void* request, int timeoutMs = kDefaultPollTimeoutMs)
@@ -719,7 +727,8 @@ protected:
         if(cachedVdev >= 0) return cachedVdev;
 
         // Shares net_ib's device table, so the vNIC goes through the net plugin.
-        ncclNet_t* net = (rma_ == &IbCastRmaIbProxy) ? &netIbCast : &ncclNetIb;
+        ncclNet_t* net = (rma_ == &IbCastRmaIbProxy) ? &netIbCast
+                       : (rma_ == &IbMsegRmaIbProxy) ? &ncclNetIbMseg : &ncclNetIb;
 
         if(nDevices_ < 2)
         {

@@ -42,6 +42,7 @@ static void ObserveSfence();
 #include "fakes/nccl_fakes.h"
 #include "fakes/net_ib_cast_common_fakes.h"
 #include "fakes/net_ib_cast_connect_fakes.h"
+#include "fakes/net_ib_multiseg_fakes.h"
 #include "fakes/proxy_fakes.h"
 #include "fakes/rccl_wrap_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
@@ -357,6 +358,8 @@ class NetMicrotestBase : public ::testing::Test {
   ncclProxyState proxyState_{};
   ncclNet_t savedNetIb_{};
   bool usingNetIb_ = false;
+  ncclNet_t savedNetIbMseg_{};
+  bool usingNetIbMseg_ = false;
 
   // Runs the proxy on ncclNetIb, wired to the fake net (a copy of vtable_ as it is now). net.cc keys
   // IB-only paths off that address.
@@ -365,6 +368,14 @@ class NetMicrotestBase : public ::testing::Test {
     usingNetIb_ = true;
     ncclNetIb = vtable_;
     proxyState_.ncclNet = &ncclNetIb;
+  }
+
+  // The same on ncclNetIbMseg, net_ib's IB-MSEG copy.
+  void UseIbMsegPlugin() {
+    if (!usingNetIbMseg_) savedNetIbMseg_ = ncclNetIbMseg;
+    usingNetIbMseg_ = true;
+    ncclNetIbMseg = vtable_;
+    proxyState_.ncclNet = &ncclNetIbMseg;
   }
 
   void SetUp() override {
@@ -388,6 +399,7 @@ class NetMicrotestBase : public ::testing::Test {
 
   void TearDown() override {
     if (usingNetIb_) ncclNetIb = savedNetIb_;
+    if (usingNetIbMseg_) ncclNetIbMseg = savedNetIbMseg_;
     g_activeNet = nullptr;
     rcclPrimaryNicInfo = {rcclIBNicTypeUnknown, 0, 0};
     ncclGdrCopy = nullptr;
@@ -399,6 +411,7 @@ class NetMicrotestBase : public ::testing::Test {
     ResetTopoStubs();
     ResetNetIbCastCommonFakes();
     ResetNetIbCastConnectFakes();
+    ResetNetIbMultisegFakes();
     ResetTransportNetIbConnectNetFakes();
     ResetTransportNetIbFakes();
     ResetTransportP2pFakes();
@@ -1399,6 +1412,21 @@ TEST_F(NetProxySetupMicrotest, RecvSetup_IbPlugin_PassesGdrFlushFlagToListenComm
     EXPECT_EQ(g_ibSetListenGdrFlushFlagCalls[0].first, &net_.listenComm);
     EXPECT_EQ(g_ibSetListenGdrFlushFlagCalls[0].second, flag);
   }
+}
+
+TEST_F(NetProxySetupMicrotest, RecvSetup_IbMsegPlugin_PassesGdrFlushFlagToTheForksListenComm) {
+  UseIbMsegPlugin();
+  for (int flag : {1, 0}) {
+    SCOPED_TRACE(flag);
+    ResetConn();
+    g_ibMsegSetListenGdrFlushFlagCalls.clear();
+    req_.gdrFlushFlag = flag;
+    ASSERT_EQ(RecvSetup(), ncclSuccess);
+    ASSERT_EQ(g_ibMsegSetListenGdrFlushFlagCalls.size(), 1u);
+    EXPECT_EQ(g_ibMsegSetListenGdrFlushFlagCalls[0].first, &net_.listenComm);
+    EXPECT_EQ(g_ibMsegSetListenGdrFlushFlagCalls[0].second, flag);
+  }
+  EXPECT_TRUE(g_ibSetListenGdrFlushFlagCalls.empty());
 }
 
 TEST_F(NetProxySetupMicrotest, Setup_WrongRequestSize_RejectedWithoutResources) {
@@ -2646,13 +2674,14 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
   sendNetResources* r = AddConn();
   r->isP2p = 1;
   struct RestoreIbPlugins {
-    ncclNet_t ib = ncclNetIb, cast = netIbCast;
+    ncclNet_t ib = ncclNetIb, cast = netIbCast, mseg = ncclNetIbMseg;
     ~RestoreIbPlugins() {
       ncclNetIb = ib;
       netIbCast = cast;
+      ncclNetIbMseg = mseg;
     }
   } restore;
-  ncclNetIb = netIbCast = vtable_;
+  ncclNetIb = netIbCast = ncclNetIbMseg = vtable_;
   void* policyHandle = nullptr;
   int policyP2p = -1;
   ScopedHook ib(g_rcclNetP2pPolicy, [&](void* h, int p2p) {
@@ -2681,6 +2710,22 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
   EXPECT_EQ(castHandle, args_.handle);
   EXPECT_EQ(castP2p, 1);
   EXPECT_EQ(ib.calls, 1);
+
+  void* msegHandle = nullptr;
+  int msegP2p = -1;
+  ScopedHook mseg(g_ibMsegNetP2pPolicy, [&](void* h, int p2p) {
+    msegHandle = h;
+    msegP2p = p2p;
+    return ncclSuccess;
+  });
+  AddConn()->isP2p = 1;
+  proxyState_.ncclNet = &ncclNetIbMseg;
+  EXPECT_EQ(Connect(2), ncclSuccess);
+  EXPECT_EQ(mseg.calls, 1);
+  EXPECT_EQ(msegHandle, args_.handle);
+  EXPECT_EQ(msegP2p, 1);
+  EXPECT_EQ(ib.calls, 1);
+  EXPECT_EQ(cast.calls, 1);
 }
 
 TEST_F(NetSendProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol) {
@@ -3235,6 +3280,7 @@ TEST_F(NetRecvProxyConnectMicrotest, IbGdrFlushFlag_AllocatesZeroedSeqAndReturns
 
   EXPECT_EQ(flagComm, &net_.recvComm);
   EXPECT_EQ(r->gdrFlushFlag, flags);
+  EXPECT_EQ(r->gdrFlushOps, rcclIbGdrFlushOpsFor(&ncclNetIb));
   ASSERT_NE(r->gdrFlushSeq, nullptr);
   EXPECT_EQ(devAllocs_, 2);  // the buffer bank, then the sequence
   EXPECT_EQ(lastSize, NCCL_STEPS * sizeof(uint64_t));
@@ -3244,6 +3290,34 @@ TEST_F(NetRecvProxyConnectMicrotest, IbGdrFlushFlag_AllocatesZeroedSeqAndReturns
   EXPECT_EQ(lastFlags, (unsigned)hipDeviceMallocFinegrained);
 #endif
   for (int i = 0; i < NCCL_STEPS; i++) EXPECT_EQ(r->gdrFlushSeq[i], 0u) << "slot " << i;
+  EXPECT_EQ(resp_.gdrFlushFlag, flags);
+  EXPECT_EQ(resp_.gdrFlushSeq, r->gdrFlushSeq);
+}
+
+TEST_F(NetRecvProxyConnectMicrotest, IbMsegGdrFlushFlag_ReturnsTheForksFlag) {
+  UseIbMsegPlugin();
+  uint64_t flags[8] = {};
+  void* flagComm = nullptr;
+  ScopedHook msegFlag(g_ibMsegGetGpuFlushFlag, [&](void* comm) {
+    flagComm = comm;
+    return flags;
+  });
+  ScopedHook ibFlag(g_ibGetGpuFlushFlag, [](void*) -> uint64_t* { return nullptr; });
+  ScopedHook alloc(g_hipExtMallocWithFlags, [&](void** p, size_t n, unsigned) {
+    ++devAllocs_;
+    *p = Alloc(n);
+    return hipSuccess;
+  });
+  recvNetResources* r = AddRecvConn(0, 1);
+  r->needFlush = ncclTopoFlushAlways;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(flagComm, &net_.recvComm);
+  EXPECT_EQ(ibFlag.calls, 0);
+  EXPECT_EQ(r->gdrFlushFlag, flags);
+  EXPECT_EQ(r->gdrFlushOps, rcclIbGdrFlushOpsFor(&ncclNetIbMseg));
+  ASSERT_NE(r->gdrFlushSeq, nullptr);
   EXPECT_EQ(resp_.gdrFlushFlag, flags);
   EXPECT_EQ(resp_.gdrFlushSeq, r->gdrFlushSeq);
 }
@@ -5291,6 +5365,7 @@ TEST_F(NetRecvProgressMicrotest, Post_Dedicated_PostsSliceSizedSlot) {
 }
 
 TEST_F(NetRecvProgressMicrotest, Post_GdrFlushFlag_HintsWhetherTheReceiveIsSimple) {
+  res_.gdrFlushOps = rcclIbGdrFlushOpsFor(&ncclNetIb);
   uint64_t flags[8] = {};
   auto post = [&](int protocol, uint64_t* flag) {
     args_ = std::make_unique<ncclProxyArgs>();
@@ -5314,6 +5389,28 @@ TEST_F(NetRecvProgressMicrotest, Post_GdrFlushFlag_HintsWhetherTheReceiveIsSimpl
     EXPECT_EQ(g_ibSetGpuFlushFlagHintCalls[0].first, &net_.recvComm);
     EXPECT_EQ(g_ibSetGpuFlushFlagHintCalls[0].second, p == NCCL_PROTO_SIMPLE ? 1 : 0);
   }
+}
+
+TEST_F(NetRecvProgressMicrotest, Post_GdrFlushFlag_IbMsegHintsThroughTheFork) {
+  res_.gdrFlushOps = rcclIbGdrFlushOpsFor(&ncclNetIbMseg);
+  uint64_t flags[8] = {};
+  for (int p : {NCCL_PROTO_SIMPLE, NCCL_PROTO_LL}) {
+    SCOPED_TRACE(p);
+    g_ibMsegSetGpuFlushFlagHintCalls.clear();
+    args_ = std::make_unique<ncclProxyArgs>();
+    args_->state = ncclProxyOpReady;
+    args_->protocol = p;
+    args_->sliceSteps = args_->chunkSteps = 1;
+    args_->collAPI = ncclFuncRecv;
+    args_->nPeers = args_->nChannels = 1;
+    res_.gdrFlushFlag = flags;
+    AddSub(1);
+    ASSERT_EQ(Progress(), ncclSuccess);
+    ASSERT_EQ(g_ibMsegSetGpuFlushFlagHintCalls.size(), 1u);
+    EXPECT_EQ(g_ibMsegSetGpuFlushFlagHintCalls[0].first, &net_.recvComm);
+    EXPECT_EQ(g_ibMsegSetGpuFlushFlagHintCalls[0].second, p == NCCL_PROTO_SIMPLE ? 1 : 0);
+  }
+  EXPECT_TRUE(g_ibSetGpuFlushFlagHintCalls.empty());
 }
 
 TEST_F(NetRecvProgressMicrotest, Post_PipelineFull_Waits) {
@@ -5506,6 +5603,7 @@ TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_PublishesFlagSeqInsteadOfFl
   NeedGdrFlush();
   uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
   res_.gdrFlushFlag = flags;
+  res_.gdrFlushOps = rcclIbGdrFlushOpsFor(&ncclNetIb);
   res_.gdrFlushSeq = seq;
   void* seqComm = nullptr;
   ScopedHook flagSeq(g_ibGetGpuFlushFlagSeq, [&](void* comm) {
@@ -5525,11 +5623,29 @@ TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_PublishesFlagSeqInsteadOfFl
   }
 }
 
+TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_IbMsegPublishesTheForksFlagSeq) {
+  NeedGdrFlush();
+  uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
+  res_.gdrFlushFlag = flags;
+  res_.gdrFlushOps = rcclIbGdrFlushOpsFor(&ncclNetIbMseg);
+  res_.gdrFlushSeq = seq;
+  ScopedHook msegSeq(g_ibMsegGetGpuFlushFlagSeq, [](void*) { return uint64_t{0xabcdef}; });
+  ScopedHook ibSeq(g_ibGetGpuFlushFlagSeq, [](void*) { return uint64_t{1}; });
+  ncclProxySubArgs& sub = AddSub(1);
+
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
+
+  EXPECT_TRUE(net_.iflushes.empty());
+  EXPECT_EQ(ibSeq.calls, 0);
+  EXPECT_EQ(seq[sub.base % NCCL_STEPS], 0xabcdefu);
+}
+
 TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_SkipsGroupedSubPastItsLastStep) {
   NeedGdrFlush();
   res_.maxRecvs = 2;
   uint64_t flags[8] = {}, seqA[NCCL_STEPS] = {}, seqB[NCCL_STEPS] = {};
   res_.gdrFlushFlag = flags;
+  res_.gdrFlushOps = rcclIbGdrFlushOpsFor(&ncclNetIb);
   res_.gdrFlushSeq = seqA;
   ncclProxySubArgs& a = AddSub(1);
   // Another connection on the same recv comm, with one more step than `a`.
@@ -5556,6 +5672,7 @@ TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_SkipsGroupedSubPastItsLastS
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_GpuFlagWait_NothingToFlush_PublishesNothing) {
+  res_.gdrFlushOps = rcclIbGdrFlushOpsFor(&ncclNetIb);
   uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
   ScopedHook flagSeq(g_ibGetGpuFlushFlagSeq, [](void*) { return uint64_t{0x123456}; });
   for (bool emptyStep : {true, false}) {
@@ -5585,6 +5702,7 @@ TEST_F(NetRecvProgressMicrotest, Receive_GroupedSubWithoutFlagSeq_FlushesInstead
   res_.maxRecvs = 2;
   uint64_t flags[8] = {}, seq[NCCL_STEPS] = {};
   res_.gdrFlushFlag = flags;
+  res_.gdrFlushOps = rcclIbGdrFlushOpsFor(&ncclNetIb);
   res_.gdrFlushSeq = seq;
   AddSub(1);
   // Another connection on the same recv comm whose sequence was never allocated.

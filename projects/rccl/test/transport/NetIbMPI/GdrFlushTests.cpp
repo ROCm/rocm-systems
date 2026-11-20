@@ -202,6 +202,8 @@ protected:
         if (rank == 0) {
             ncclResult_t got = (net_ == &netIbCast)
                                    ? ncclIbCastGdrFlushGetScratch(pair.recvComm, 0, &hostMem, &gpuMem)
+                               : (net_ == &ncclNetIbMseg)
+                                   ? IbMsegGdrFlushGetScratch(pair.recvComm, 0, &hostMem, &gpuMem)
                                    : ncclIbGdrFlushGetScratch(pair.recvComm, 0, &hostMem, &gpuMem);
             if (got != ncclSuccess || hostMem == nullptr || gpuMem == nullptr) skip = 1;
         }

@@ -153,6 +153,7 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNet net-test.cc
     fakes/nccl_stubs.cc
     fakes/net_ib_cast_common_fakes.cc
     fakes/net_ib_cast_connect_fakes.cc
+    fakes/net_ib_multiseg_fakes.cc
     fakes/os_fakes.cc
     fakes/proxy_fakes.cc
     fakes/rccl_wrap_fakes.cc

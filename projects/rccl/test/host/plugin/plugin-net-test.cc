@@ -79,7 +79,7 @@ struct CollScript {
   int finalizeCalls = 0;
 };
 
-enum { kExtA, kExtB, kIb, kSocket, kIbCast, kNumNets };
+enum { kExtA, kExtB, kIb, kSocket, kIbCast, kIbMseg, kNumNets };
 NetScript g_net[kNumNets];
 CollScript g_coll[2];
 
@@ -228,6 +228,7 @@ static void NetDebugLog(ncclDebugLogLevel level, unsigned long flags, const char
 ncclNet_t ncclNetIb = FakeNet<kIb>::Make("IB");
 ncclNet_t ncclNetSocket = FakeNet<kSocket>::Make("Socket");
 ncclNet_t netIbCast = FakeNet<kIbCast>::Make("IB-CAST");
+ncclNet_t ncclNetIbMseg = FakeNet<kIbMseg>::Make("IB-MSEG");
 
 namespace {
 
@@ -401,6 +402,37 @@ TEST_F(PluginNetMicrotest, ListPicksIbCastForAinicOrNcclNetIbCast) {
     EXPECT_EQ(Lib(pluginCount - 2).ncclNet, c.expected)
         << "NCCL_NET=" << (c.net ? c.net : "-") << " NCCL_NET_PLUGIN=" << (c.netPlugin ? c.netPlugin : "-")
         << " ainic=" << c.ainic;
+    EXPECT_EQ(Lib(pluginCount - 1).ncclNet, &ncclNetSocket);
+  }
+}
+
+// NCCL_MULTI_SEGMENT_REGISTER=1 or NCCL_NET=IB-MSEG puts IB-MSEG where net_ib would go; IB-CAST and AINIC
+// keep IB-CAST.
+TEST_F(PluginNetMicrotest, ListPicksIbMsegUnderTheSwitchOrByName) {
+  struct Case {
+    int64_t multiSegment;
+    const char* net;
+    const char* netPlugin;
+    bool ainic;
+    ncclNet_t* expected;
+  } cases[] = {
+      {1, nullptr, nullptr, false, &ncclNetIbMseg},  {1, "IB", nullptr, true, &ncclNetIbMseg},
+      {1, "IB-CAST", "ext", false, &ncclNetIbMseg},  {1, nullptr, "ext", true, &ncclNetIbMseg},
+      {1, "IB-MSEG", nullptr, true, &ncclNetIbMseg}, {1, nullptr, nullptr, true, &netIbCast},
+      {1, "IB-CAST", nullptr, false, &netIbCast},    {1, "ROCM-IB", nullptr, false, &netIbCast},
+      {0, "IB-MSEG", nullptr, false, &ncclNetIbMseg}, {0, "ib-mseg", "ext", false, &ncclNetIbMseg},
+      {0, "IB-MSEG", nullptr, true, &ncclNetIbMseg},
+  };
+  for (const Case& c : cases) {
+    ScopedHook<int64_t(const char*, int64_t)> param{g_loadParam,
+                                                    ParamOverride({{"MULTI_SEGMENT_REGISTER", c.multiSegment}})};
+    ClearMicroEnv();
+    if (c.net) SetMicroEnv("NCCL_NET", c.net);
+    g_rcclUseAinicValue = c.ainic;
+    BuildList(c.netPlugin);
+    EXPECT_EQ(Lib(pluginCount - 2).ncclNet, c.expected)
+        << "MULTI_SEGMENT_REGISTER=" << c.multiSegment << " NCCL_NET=" << (c.net ? c.net : "-")
+        << " NCCL_NET_PLUGIN=" << (c.netPlugin ? c.netPlugin : "-") << " ainic=" << c.ainic;
     EXPECT_EQ(Lib(pluginCount - 1).ncclNet, &ncclNetSocket);
   }
 }
@@ -689,6 +721,42 @@ TEST_F(PluginNetMicrotest, NetInitHonoursNetNameCaseInsensitively) {
 TEST_F(PluginNetMicrotest, NetInitWithoutAUsablePluginIsInvalidUsage) {
   BuildList("none");
   comm_->config.netName = "nope";
+  EXPECT_EQ(ncclNetInit(comm_.get()), ncclInvalidUsage);
+}
+
+TEST_F(PluginNetMicrotest, NetInitServesIbWithIbMsegUnderMultiSegmentRegister) {
+  ScopedHook<int64_t(const char*, int64_t)> param{g_loadParam, ParamOverride({{"MULTI_SEGMENT_REGISTER", 1}})};
+  for (const char* name : {"IB", "ib", "IB-MSEG"}) {
+    BuildList("none");
+    comm_->config.netName = name;
+    ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess) << name;
+    EXPECT_EQ(comm_->ncclNet, &ncclNetIbMseg) << name;
+  }
+}
+
+// AINIC keeps IB-CAST in the IB slot; the switch serves "IB" only through IB-MSEG, never through IB-CAST.
+TEST_F(PluginNetMicrotest, NetInitDoesNotServeIbWithIbCastUnderMultiSegmentRegister) {
+  ScopedHook<int64_t(const char*, int64_t)> param{g_loadParam, ParamOverride({{"MULTI_SEGMENT_REGISTER", 1}})};
+  g_rcclUseAinicValue = true;
+  BuildList("none");
+  ASSERT_EQ(Lib(pluginCount - 2).ncclNet, &netIbCast);
+  comm_->config.netName = "IB";
+  EXPECT_EQ(ncclNetInit(comm_.get()), ncclInvalidUsage);
+  EXPECT_EQ(g_net[kIbCast].initCalls, 0);
+}
+
+TEST_F(PluginNetMicrotest, NetInitMatchesIbMsegByNameWithoutTheSwitch) {
+  SetMicroEnv("NCCL_NET", "IB-MSEG");
+  BuildList("none");
+  comm_->config.netName = "IB-MSEG";
+  ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
+  EXPECT_EQ(comm_->ncclNet, &ncclNetIbMseg);
+}
+
+TEST_F(PluginNetMicrotest, NetInitDoesNotServeIbWithIbMsegWithoutTheSwitch) {
+  SetMicroEnv("NCCL_NET", "IB-MSEG");
+  BuildList("none");
+  comm_->config.netName = "IB";
   EXPECT_EQ(ncclNetInit(comm_.get()), ncclInvalidUsage);
 }
 

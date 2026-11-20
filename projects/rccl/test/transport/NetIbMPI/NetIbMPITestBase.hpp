@@ -11,6 +11,7 @@
 #include <hip/hip_runtime.h>
 #include "MPITestBase.hpp"
 #include "NetIbCastInspect.hpp"
+#include "NetIbMsegInspect.hpp"
 #include "NetIbFaultInject.hpp"
 #include "NetIbQpSharingInspect.hpp"
 #include "QpShareRefModel.hpp"
@@ -184,22 +185,30 @@ inline bool IsRealRequest(void* request) {
 extern ncclNet_t ncclNetIb;
 // External NET IB-CAST plugin (WRR scheduler, multi-QP, AINIC features)
 extern ncclNet_t netIbCast;
+// External NET IB-MSEG plugin (net_ib_multiseg, net_ib's copy for multi-segment registration)
+extern ncclNet_t ncclNetIbMseg;
 
-// Keep the next three in sync with src/plugin/net.cc: if the library and the
+// Keep the next four in sync with src/plugin/net.cc: if the library and the
 // tests disagree about which plugin an NCCL_NET value selects, a suite can
 // silently exercise a plugin it was not meant to cover.
 inline const char* CanonicalNetName(const char* env) {
     return rcclCanonicalNetName(env);
 }
 
+// The plugin in the internal IB slot, which also serves "IB": IB-MSEG under NCCL_MULTI_SEGMENT_REGISTER=1.
+inline ncclNet_t* IbSlotNetPlugin() {
+    return ncclParamMultiSegmentRegister() ? &ncclNetIbMseg : &ncclNetIb;
+}
+
 // nullptr means "names no internal IB plugin", so the caller can tell "wrong
 // suite for this config" from "typo" instead of silently falling back to IB.
 inline ncclNet_t* ResolveNetPlugin(const char* env) {
-    static ncclNet_t* const plugins[] = {&ncclNetIb, &netIbCast};
+    static ncclNet_t* const plugins[] = {&ncclNetIb, &netIbCast, &ncclNetIbMseg};
     const char* name = CanonicalNetName(env);
-    // Unset: the library picks IB-CAST on AINIC and IB elsewhere, unless
+    // Unset: the library picks IB-CAST on AINIC and the IB slot elsewhere, unless
     // NCCL_NET_PLUGIN names an external plugin (src/plugin/net.cc:310).
-    if (name == nullptr) return rcclUseAinic() ? &netIbCast : &ncclNetIb;
+    if (name == nullptr) return rcclUseAinic() ? &netIbCast : IbSlotNetPlugin();
+    if (strcasecmp(name, ncclNetIb.name) == 0) return IbSlotNetPlugin();
     for (auto* p : plugins) {
         if (strcasecmp(name, p->name) == 0) return p;
     }
@@ -384,8 +393,8 @@ protected:
             }
             net_ = &ncclNetIb;
             FAIL() << "NCCL_NET=" << env << " names no internal IB plugin; expected one of "
-                   << ncclNetIb.name << ", " << netIbCast.name << " or ROCM-IB (alias for "
-                   << netIbCast.name << ")";
+                   << ncclNetIb.name << ", " << netIbCast.name << ", " << ncclNetIbMseg.name
+                   << " or ROCM-IB (alias for " << netIbCast.name << ")";
         }
         TEST_INFO("Rank %d: Using plugin %s (NCCL_NET=%s)", MPIEnvironment::world_rank,
                   net_->name, env ? env : "<unset>");
