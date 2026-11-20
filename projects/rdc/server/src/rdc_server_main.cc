@@ -237,7 +237,10 @@ bool RDCServer::Run() {
     std::lock_guard<std::mutex> lock(mutex_);
     server_ = builder.BuildAndStart();
     if (!server_) {
-      std::cerr << "Failed to listen on " << server_address_ << std::endl;
+      // A root rdcd does not read the lock file of a non-root one, so it meets a non-root rdcd
+      // on its port here.
+      std::cerr << "Failed to listen on " << server_address_
+                << ". Is rdcd already running? If not, check the address and port." << std::endl;
       return false;
     }
     if (stop_requested_) {
@@ -291,6 +294,9 @@ static void WriteFromSignalHandler(int fd, const char* text, size_t text_len, in
 }
 
 static void HandleSignal(int sig) {
+  // The signal can come between a call of the interrupted thread and its errno check, and a
+  // failed write(2) here sets errno.
+  const int saved_errno = errno;
   static const char kCaught[] = "Caught signal ";
   WriteFromSignalHandler(STDOUT_FILENO, kCaught, sizeof(kCaught) - 1, sig);
 
@@ -315,6 +321,7 @@ static void HandleSignal(int sig) {
       static const char kUnexpected[] = "Unexpected signal caught: ";
       WriteFromSignalHandler(STDERR_FILENO, kUnexpected, sizeof(kUnexpected) - 1, sig);
   }
+  errno = saved_errno;
 }
 
 static void InitializeSignalHandling(void) {
@@ -421,6 +428,22 @@ static bool FileIsLocked(std::string fn) {
   return true;
 }
 
+// Writes all of `text`; false, with errno set, if a write fails.
+static bool WriteAll(int fd, const std::string& text) {
+  size_t done = 0;
+  while (done < text.size()) {
+    ssize_t n = write(fd, text.data() + done, text.size() - done);
+    if (n < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return false;
+    }
+    done += static_cast<size_t>(n);
+  }
+  return true;
+}
+
 [[noreturn]] static void ExitAlreadyRunning(const char* lock_file) {
   std::cerr << "File " << lock_file << " is locked. Is rdcd already running?" << std::endl;
   exit(1);
@@ -432,7 +455,6 @@ static bool FileIsLocked(std::string fn) {
 static void ExitIfAlreadyRunning(bool is_root) {
   const char* lock_fn = is_root ? kDaemonLockFileRoot : kDaemonLockFile;
   int lock_fh;
-  ssize_t fsz;
 
   if (!is_root && FileIsLocked(kDaemonLockFileRoot)) {
     ExitAlreadyRunning(kDaemonLockFileRoot);
@@ -479,13 +501,15 @@ static void ExitIfAlreadyRunning(bool is_root) {
   }
   umask(kRSMIUMask);
 
-  std::string pid_str = std::to_string(getpid());
-  // Best effort: if this fails, digits of an earlier, longer pid may follow this one.
+  // The pid is for people: rdcd runs without it. If the truncation fails, digits of an earlier,
+  // longer pid may follow this one; if only the write fails, the file holds part of the pid or
+  // none.
   if (ftruncate(lock_fh, 0) != 0) {
     perror(("Failed to truncate lock file " + std::string(lock_fn)).c_str());
   }
-  fsz = write(lock_fh, pid_str.c_str(), pid_str.size());
-  assert(static_cast<unsigned int>(fsz) == pid_str.size());
+  if (!WriteAll(lock_fh, std::to_string(getpid()))) {
+    perror(("Failed to write the pid into lock file " + std::string(lock_fn)).c_str());
+  }
 }
 
 static void MakeDaemon(bool is_root) {

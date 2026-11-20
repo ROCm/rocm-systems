@@ -80,7 +80,7 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Field watches with a `max_keep_samples` above 2147483647, such as `UINT32_MAX`, no longer crash `rdcd` or the process that embeds RDC.
 
-- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port. It printed "Server listening" and then crashed.
+- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port, and the message asks whether `rdcd` is already running. It printed "Server listening" and then crashed.
 
 - `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
 

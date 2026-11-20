@@ -102,7 +102,8 @@ def test_rdcd_exits_with_an_error_when_its_port_is_in_use(tools, tmp_path):
         port = busy.getsockname()[1]
         code, out = _run([d.rdcd_path, "-u", "-p", str(port)], d.env, "port in use")
     assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
-    assert f"Failed to listen on 0.0.0.0:{port}" in out, out[-3000:]
+    hint = "Is rdcd already running? If not, check the address and port."
+    assert f"Failed to listen on 0.0.0.0:{port}. {hint}" in out, out[-3000:]
     assert "Server listening" not in out, out[-3000:]
     if a_lock_file_is_missing:
         assert "Bad file descriptor" not in out, out[-3000:]
@@ -307,6 +308,7 @@ def _stop(proc):
         out = proc.communicate()[0]
         pytest.fail(f"rdcd did not stop on SIGTERM\n{out[-3000:]}")
     assert proc.returncode == 0, f"rdcd exited with {proc.returncode}\n{out[-3000:]}"
+    return out
 
 
 def _env_for_nobody(d, log_dir):
@@ -315,9 +317,11 @@ def _env_for_nobody(d, log_dir):
 
 
 @contextlib.contextmanager
-def _writable_dir():
+def _writable_dir(user):
+    """A directory that only `user` (and root) can write into."""
     path = tempfile.mkdtemp(prefix="rdcd-nobody-")
-    os.chmod(path, 0o1777)
+    os.chown(path, user.pw_uid, user.pw_gid)
+    os.chmod(path, 0o700)
     try:
         yield path
     finally:
@@ -342,7 +346,7 @@ def test_rdcd_refuses_a_lock_file_of_another_user(tools, tmp_path):
         with open(ROOT_LOCK, "x"):
             pass
         os.chown(ROOT_LOCK, nobody.pw_uid, nobody.pw_gid)
-        os.chmod(ROOT_LOCK, 0o666)
+        os.chmod(ROOT_LOCK, 0o600)  # root opens it anyway (CAP_DAC_OVERRIDE): only the owner counts
         d = Rdcd(tools, tmp_path)
         code, out = _run([d.rdcd_path, "-u", "-p", str(_free_port())], d.env, "foreign lock file")
     assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
@@ -377,7 +381,7 @@ def test_rdcd_writes_only_its_pid_into_the_lock_file(tools, tmp_path):
     with _set_aside(ROOT_LOCK):
         with open(ROOT_LOCK, "x") as f:
             f.write("9999999999")  # a longer pid of an earlier rdcd
-        os.chmod(ROOT_LOCK, 0o644)
+        os.chmod(ROOT_LOCK, 0o600)
         d = Rdcd(tools, tmp_path).start()
         try:
             with open(ROOT_LOCK) as f:
@@ -392,7 +396,7 @@ def test_a_locked_file_in_tmp_does_not_stop_a_root_rdcd(tools, tmp_path):
     # Any local user can create /tmp/rdcd.lock and lock it.
     nobody, _ = _nobody()
     with _set_aside(USER_LOCK):
-        fd = os.open(USER_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+        fd = os.open(USER_LOCK, os.O_RDWR | os.O_CREAT, 0o600)
         try:
             os.fchown(fd, nobody.pw_uid, nobody.pw_gid)
             fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -415,8 +419,8 @@ def test_a_second_rdcd_exits_with_1(tools, tmp_path):
 
 @pytest.mark.parametrize("mode", [0o644, 0o600], ids=["readable", "unreadable"])
 def test_an_unlocked_root_lock_file_does_not_stop_a_non_root_rdcd(tools, tmp_path, mode):
-    _, as_nobody = _nobody()
-    with _set_aside(ROOT_LOCK), _set_aside(USER_LOCK), _writable_dir() as log_dir:
+    nobody, as_nobody = _nobody()
+    with _set_aside(ROOT_LOCK), _set_aside(USER_LOCK), _writable_dir(nobody) as log_dir:
         with open(ROOT_LOCK, "x"):
             pass
         os.chmod(ROOT_LOCK, mode)
@@ -432,8 +436,8 @@ def test_an_unlocked_root_lock_file_does_not_stop_a_non_root_rdcd(tools, tmp_pat
 @pytest.mark.parametrize("mode", [0o644, 0o600], ids=["readable", "unreadable"])
 def test_a_non_root_rdcd_next_to_a_root_rdcd(tools, tmp_path, mode):
     # A non-root rdcd can tell that the root rdcd runs only if it can read its lock file.
-    _, as_nobody = _nobody()
-    with _set_aside(ROOT_LOCK), _set_aside(USER_LOCK), _writable_dir() as log_dir:
+    nobody, as_nobody = _nobody()
+    with _set_aside(ROOT_LOCK), _set_aside(USER_LOCK), _writable_dir(nobody) as log_dir:
         root = Rdcd(tools, tmp_path).start()  # creates ROOT_LOCK; _set_aside puts the old one back
         try:
             os.chmod(ROOT_LOCK, mode)
@@ -448,6 +452,48 @@ def test_a_non_root_rdcd_next_to_a_root_rdcd(tools, tmp_path, mode):
                 _stop(_start(cmd, env, port))
         finally:
             assert root.stop() == 0, root.output()
+
+
+def test_a_root_rdcd_next_to_a_non_root_rdcd_on_its_port(tools, tmp_path):
+    # A root rdcd does not read /tmp/rdcd.lock, which any user can lock, so it meets a non-root
+    # rdcd only at the port: it cannot listen there (SO_REUSEPORT lets only sockets of one user
+    # share a port), and its message says what is probably wrong.
+    nobody, as_nobody = _nobody()
+    with _set_aside(ROOT_LOCK), _set_aside(USER_LOCK), _writable_dir(nobody) as log_dir:
+        d = Rdcd(tools, tmp_path)
+        port = _free_port()
+        cmd = [d.rdcd_path, "-u", "-p", str(port)]
+        other = _start(as_nobody + cmd, _env_for_nobody(d, log_dir), port)
+        try:
+            code, out = _run(cmd, d.env, "root rdcd on the port of a non-root rdcd")
+        finally:
+            _stop(other)
+    assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
+    assert f"Failed to listen on 0.0.0.0:{port}. Is rdcd already running?" in out, out[-3000:]
+
+
+# Runs a command with a file size limit of 0: a write that would make a file larger fails
+# with EFBIG. The shell ignores SIGXFSZ, which would end rdcd instead, and the command keeps
+# that across exec.
+_NO_FILE_GROWTH = ["sh", "-c", 'trap "" XFSZ; ulimit -f 0; exec "$@"', "sh"]
+
+
+def test_rdcd_reports_a_pid_it_cannot_write_into_its_lock_file(tools, tmp_path):
+    _need_root()
+    with _set_aside(ROOT_LOCK):
+        with open(ROOT_LOCK, "x") as f:
+            f.write("9999999999")  # the pid of an earlier rdcd, which rdcd truncates
+        os.chmod(ROOT_LOCK, 0o600)
+        d = Rdcd(tools, tmp_path)
+        # No fake call log: it could not grow either.
+        env = {k: v for k, v in d.env.items() if k != "RDC_FAKE_LOG"}
+        port = _free_port()
+        proc = _start(_NO_FILE_GROWTH + [d.rdcd_path, "-u", "-p", str(port)], env, port)
+        out = _stop(proc)
+        with open(ROOT_LOCK) as f:
+            content = f.read()
+    assert f"Failed to write the pid into lock file {ROOT_LOCK}: File too large" in out, out[-3000:]
+    assert content == "", content
 
 
 @pytest.mark.parametrize("bad", [["--no-such-option"], ["-a"]], ids=["unknown", "no-argument"])
