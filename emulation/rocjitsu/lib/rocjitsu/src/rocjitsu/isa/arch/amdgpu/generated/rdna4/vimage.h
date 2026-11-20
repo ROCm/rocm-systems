@@ -649,7 +649,9 @@ public:
   Operand rsrc;
 };
 
-class ImageBvhDualIntersectRayVimage : public Vimage {
+class ImageBvhDualIntersectRayVimage
+    : public amdgpu::ImageAddressInstruction<
+          Vimage, false, amdgpu::ImageAddressForm{.kind = amdgpu::ImageAddressKind::Dual}> {
 public:
   ImageBvhDualIntersectRayVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
@@ -658,7 +660,9 @@ public:
   Operand rsrc;
 };
 
-class ImageBvh8IntersectRayVimage : public Vimage {
+class ImageBvh8IntersectRayVimage
+    : public amdgpu::ImageAddressInstruction<
+          Vimage, false, amdgpu::ImageAddressForm{.kind = amdgpu::ImageAddressKind::Bvh8}> {
 public:
   ImageBvh8IntersectRayVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);

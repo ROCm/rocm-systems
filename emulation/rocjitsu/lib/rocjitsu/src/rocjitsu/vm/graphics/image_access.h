@@ -40,15 +40,30 @@ inline bool image_depth_comparison(uint32_t function, float reference, float dep
   }
 }
 
+using ImageLodResults = std::array<std::array<float, 2>, 64>;
+
+struct ImageLodQuery {
+  uint32_t mask = 0;
+  ImageLodResults results{};
+};
+
 /// @brief Ray inputs and resource controls captured before a BVH memory request.
 struct BvhIntersectionAccess {
   struct Ray {
     std::array<float, 3> origin{}, direction{}, inverse{};
     float extent = 0;
     uint16_t flags = 0;
+    uint8_t instance_mask = 0;
+    bool hp64_pair = false;
+    std::array<uint8_t, 2> types{};
+    std::array<unsigned, 2> blocks{}; // Number of 64-byte blocks fetched per node.
     Gfx11BvhNodeType node_type = Gfx11BvhNodeType::Triangle0;
   };
   std::array<Ray, 64> rays{};
+  BvhForm form = BvhForm::Bvh;
+  std::array<uint32_t, 6> transform_registers{};
+  uint64_t instance_lanes = 0; // Slots that return a transformed ray and four result words.
+  bool compressed = false, hp64 = false, wide_sort = false, triangles_first = false;
   uint8_t grow = 0, sort = 0;
   bool sort_enabled = false, barycentrics = false, pointer_flags = false;
 };

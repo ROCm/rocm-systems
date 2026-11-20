@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -565,6 +566,15 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       cu.write_vgpr(d.dst_reg_base + data_words, lane,
                     (uint32_t{status.levels[lane]} << 16) | cause);
     }
+  }
+  if (d.image_lod) {
+    RegisterAccess regs(wf);
+    for (uint64_t mask = d.exec_mask; mask; mask &= mask - 1) {
+      const auto lane = std::countr_zero(mask);
+      const auto &lod = d.image_lod->results[lane];
+      write_image_lod(regs, d.dst_reg_base, lane, d.image_lod->mask, lod[0], lod[1]);
+    }
+    return MemoryAccessCompletion::Complete;
   }
   if (d.bvh) {
     complete_bvh_intersection(wf, cu, d);

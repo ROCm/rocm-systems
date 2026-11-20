@@ -2156,6 +2156,18 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf,
   if (defs != classified.end()) {
     if (scalar_result) {
       append(*scalar_result, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask);
+    } else if (texel && texel->bvh && bvh_two_results(texel->bvh->form)) {
+      const auto &bvh = *texel->bvh;
+      const auto append_vgprs = [&](uint32_t reg, uint8_t width, uint64_t lanes) {
+        if (lanes)
+          append({RegClass::VGPR, static_cast<uint16_t>(reg - wf.vgpr_alloc().base), width}, lanes,
+                 0xf);
+      };
+      append_vgprs(texel->dst_reg_base, 10, texel->exec_mask & ~bvh.instance_lanes);
+      append_vgprs(texel->dst_reg_base + 2, 2, bvh.instance_lanes);
+      append_vgprs(texel->dst_reg_base + 6, 2, bvh.instance_lanes);
+      for (auto reg : bvh.transform_registers)
+        append_vgprs(reg, 1, bvh.instance_lanes);
     } else {
       std::array<RegisterRef, kBlockDwordCount> registers{};
       unsigned count = 0;
@@ -3126,8 +3138,12 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   }
   const bool deferred_texel_feedback =
       config_.memory_wait_checks_enabled() && (inst->flags() & CONDITIONAL_LAST_VGPR_DEF);
+  const bool deferred_bvh_results =
+      config_.memory_wait_checks_enabled() &&
+      (inst->amdgpu_operation() == Operation::IMAGE_BVH_DUAL_INTERSECT_RAY ||
+       inst->amdgpu_operation() == Operation::IMAGE_BVH8_INTERSECT_RAY);
   const bool check_prepared_memory =
-      deferred_texel_feedback ||
+      deferred_texel_feedback || deferred_bvh_results ||
       (wait_state && !wait_state->empty() && inst->is_memory_wait_producer() &&
        MemoryWaitScoreboard::needs_prepared_payload_lanes(*inst, config_.arch));
   bool wait_checked = false;

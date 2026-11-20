@@ -2829,7 +2829,7 @@ def _derive_mimg(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'image_query')
     if upper.startswith('IMAGE_MSAA_LOAD'):
         return InstructionSemantics(name, 'image_load')
-    if upper in ('IMAGE_BVH_INTERSECT_RAY', 'IMAGE_BVH64_INTERSECT_RAY'):
+    if upper.startswith('IMAGE_BVH') and upper.endswith('_INTERSECT_RAY'):
         return InstructionSemantics(name, 'image_bvh')
     return InstructionSemantics(name, 'nop')
 

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "image_msaa.h"
+#include "image_address.h"
 
 #include <bit>
 
@@ -144,6 +145,32 @@ uint64_t gfx11_msaa_address(uint64_t base, uint32_t x, uint32_t y, uint32_t laye
   for (uint32_t bit = 0; bit < block_log2; ++bit)
     offset |= (std::popcount(inputs & masks[bit]) & 1u) << bit;
   return (base + (block << block_log2)) ^ offset;
+}
+
+uint64_t gfx12_msaa_address(uint64_t base, uint32_t x, uint32_t y, uint32_t layer, uint32_t sample,
+                            uint32_t pitch, uint32_t height, uint32_t bytes, uint32_t sample_log2,
+                            uint32_t swizzle) {
+  if (!sample_log2) {
+    const auto layout = image_mip_layout(true, swizzle, bytes, pitch, height, 1, 0);
+    const auto layer_base = image_layer_base(true, base, layout->slice_size, layer, bytes, swizzle);
+    return *gfx12_image_address(layer_base, x, y, pitch, bytes, swizzle);
+  }
+  // AddrLib GFX12_SW_*_2D_{2,4,8}xAA. All fragment bits precede X and Y.
+  // Below bit 8, interleave starting with X. From bit 8 up, start with Y.
+  const unsigned block_bits = swizzle == 4 ? 18 : 4 * swizzle + 4;
+  const unsigned first = std::countr_zero(bytes) + sample_log2;
+  unsigned xb = 0, yb = 0;
+  uint32_t offset = sample * bytes;
+  for (unsigned bit = first; bit < block_bits; ++bit) {
+    const bool axis_x = bit < 8 ? (bit - first) % 2 == 0 : bit % 2 == 1;
+    const unsigned value = axis_x ? (x >> xb++) : (y >> yb++);
+    offset |= (value & 1u) << bit;
+  }
+  const uint64_t columns = (pitch + (1u << xb) - 1) >> xb;
+  const uint64_t rows = (height + (1u << yb) - 1) >> yb;
+  const uint64_t block = (layer * rows + (y >> yb)) * columns + (x >> xb);
+  const uint64_t mask = (1ull << block_bits) - 1;
+  return (base & ~mask) + (block << block_bits) + ((base & mask) ^ offset);
 }
 
 } // namespace rocjitsu::amdgpu

@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "rocjitsu/vm/graphics/bvh_intersection.h"
 #include "util/data_types.h"
 #include "util/except.h"
 #include <algorithm>
@@ -601,23 +602,43 @@ void ImageGetResinfoVimage::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageBvhIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::BVHCNT;
+  if (amdgpu::prepare_gfx12_bvh(wf, *d, inst_, amdgpu::BvhForm::Bvh).failed())
+    return;
+  set_data(std::move(d));
 }
 
 void ImageBvh64IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::BVHCNT;
+  if (amdgpu::prepare_gfx12_bvh(wf, *d, inst_, amdgpu::BvhForm::Bvh64).failed())
+    return;
+  set_data(std::move(d));
 }
 
 void ImageBvhDualIntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::BVHCNT;
+  if (amdgpu::prepare_gfx12_bvh(wf, *d, inst_, amdgpu::BvhForm::Dual).failed())
+    return;
+  set_data(std::move(d));
 }
 
 void ImageBvh8IntersectRayVimage::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto d = acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  d->is_load = true;
+  d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
+  d->wait_counter_type = amdgpu::WaitCounterType::BVHCNT;
+  if (amdgpu::prepare_gfx12_bvh(wf, *d, inst_, amdgpu::BvhForm::Bvh8).failed())
+    return;
+  set_data(std::move(d));
 }
 
 void ImageAtomicAddFltVimage::execute_impl(amdgpu::Wavefront &wf) {

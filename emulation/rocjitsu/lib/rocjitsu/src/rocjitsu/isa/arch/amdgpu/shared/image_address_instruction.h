@@ -8,7 +8,7 @@
 
 namespace rocjitsu::amdgpu {
 
-enum class ImageAddressKind { Sample, ResourceInfo, Bvh, Bvh64 };
+enum class ImageAddressKind { Sample, ResourceInfo, Bvh, Bvh64, Dual, Bvh8 };
 
 struct ImageAddressForm {
   ImageAddressKind kind = ImageAddressKind::Sample;
@@ -26,8 +26,10 @@ struct ImageAddressForm {
 /// instruction decoding, modifier printing and the execution callback.
 template <typename Encoding, bool gfx10, ImageAddressForm Form>
 class ImageAddressInstruction : public Encoding {
+  static constexpr bool extended_ray =
+      Form.kind == ImageAddressKind::Dual || Form.kind == ImageAddressKind::Bvh8;
   static constexpr bool ray =
-      Form.kind == ImageAddressKind::Bvh || Form.kind == ImageAddressKind::Bvh64;
+      extended_ray || Form.kind == ImageAddressKind::Bvh || Form.kind == ImageAddressKind::Bvh64;
   static constexpr bool gfx12 = requires(typename Encoding::OpEncoding e) { e.vaddr0; };
 
   bool reads_address_inputs() const {
@@ -55,6 +57,9 @@ class ImageAddressInstruction : public Encoding {
   // BVH explicitly names the base of each vector (node, extent, origin,
   // direction and inverse direction). A16 combines the two direction groups.
   unsigned ray_group_width(unsigned group) const {
+    if constexpr (extended_ray)
+      return bvh_group_widths(Form.kind == ImageAddressKind::Dual ? BvhForm::Dual : BvhForm::Bvh8,
+                              false)[group];
     return gfx11_bvh_group_widths(Form.kind == ImageAddressKind::Bvh64, this->inst_.a16)[group];
   }
 
@@ -132,11 +137,30 @@ public:
     for (unsigned i = 0; i < words; ++i)
       if (m.image_coordinates[i] < 256)
         uses.expand({RegClass::VGPR, static_cast<uint16_t>(m.image_coordinates[i]), 1});
+    // An instance updates only words 2, 3, 6 and 7 of the ten-word result.
+    // Both transformed address groups are already live through their input use.
+    if constexpr (extended_ray)
+      for (unsigned i : {0u, 1u, 4u, 5u, 8u, 9u})
+        if (this->inst_.vdata + i < 256)
+          uses.expand({RegClass::VGPR, static_cast<uint16_t>(this->inst_.vdata + i), 1});
     if constexpr (Form.sample_result)
       if (const auto preserved = preserved_half())
         uses.expand(*preserved);
   }
+  void implicit_defs(RegisterSet &defs) const override {
+    Encoding::implicit_defs(defs);
+    if constexpr (extended_ray)
+      for (unsigned group : {this->inst_.vaddr2, this->inst_.vaddr3})
+        for (unsigned i = 0; i < 3 && group + i < 256; ++i)
+          defs.expand({RegClass::VGPR, static_cast<uint16_t>(group + i), 1});
+  }
   bool implicit_preservation_uses(RegisterSet &uses) const override {
+    if constexpr (extended_ray) {
+      for (unsigned i : {0u, 1u, 4u, 5u, 8u, 9u})
+        if (this->inst_.vdata + i < 256)
+          uses.expand({RegClass::VGPR, static_cast<uint16_t>(this->inst_.vdata + i), 1});
+      return true;
+    }
     if constexpr (!Form.sample_result)
       return Encoding::implicit_preservation_uses(uses);
     if (const auto preserved = preserved_half()) {

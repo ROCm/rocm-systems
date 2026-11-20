@@ -262,6 +262,18 @@ constexpr std::array<unsigned, 5> gfx11_bvh_group_widths(bool wide, bool a16) {
   return {1u + wide, 1, 3, 3, a16 ? 0u : 3u};
 }
 
+enum class BvhForm { Bvh, Bvh64, Dual, Bvh8 };
+
+constexpr bool bvh_two_results(BvhForm form) {
+  return form == BvhForm::Dual || form == BvhForm::Bvh8;
+}
+
+constexpr std::array<unsigned, 5> bvh_group_widths(BvhForm form, bool a16) {
+  if (bvh_two_results(form))
+    return {2, 2, 3, 3, form == BvhForm::Dual ? 2u : 1u};
+  return gfx11_bvh_group_widths(form == BvhForm::Bvh64, a16);
+}
+
 // GFX10.3 and GFX11 consume 11/12 words for a 32/64-bit pointer, or 8/9 with A16.
 constexpr uint32_t bvh_address_words(bool wide, bool a16) {
   const auto widths = gfx11_bvh_group_widths(wide, a16);

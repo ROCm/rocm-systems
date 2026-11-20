@@ -40,8 +40,6 @@ enum class ImageTransferMode {
   Msaa
 };
 
-using ImageLodResults = std::array<std::array<float, 2>, 64>;
-
 inline bool uses_native_2d_sampler(const Wavefront &wf, uint32_t resource, uint32_t sampler,
                                    uint32_t dim, bool unorm) {
   const RegisterAccess registers(wf);
@@ -261,10 +259,13 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
   }
   if (atomic && (bytes != atomic_bytes || compressed))
     return unsupported();
-  const uint32_t fragment_log2 = (resource_words[3] >> 16) & 15;
-  if (multisample && (gfx12 || compressed || bc || !fragment_log2 || fragment_log2 > 3 ||
-                      !std::has_single_bit(bytes) || bytes > 16 || (resource_words[3] & 0xf000) ||
-                      (swizzle != 24 && swizzle != 27 && swizzle != 28 && swizzle != 31)))
+  const uint32_t fragment_log2 = descriptor.last_level;
+  const bool msaa_swizzle = gfx12
+                                ? swizzle >= 1 && swizzle <= 4
+                                : swizzle == 24 || swizzle == 27 || swizzle == 28 || swizzle == 31;
+  if (multisample &&
+      (compressed || bc || (!gfx12 && !fragment_log2) || fragment_log2 > 3 ||
+       !std::has_single_bit(bytes) || bytes > 16 || descriptor.base_level || !msaa_swizzle))
     return unsupported();
   const uint32_t max_level = multisample ? 0 : descriptor.max_level;
   const auto mip_range = rdna_image_mip_range(arch, resource_words[1], resource_words[3]);
@@ -608,9 +609,9 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
       const uint32_t first = quad_fragments ? std::min(fragment, samples - 1) & ~3u : fragment;
       const uint32_t count = quad_fragments ? 4 : 1;
       for (uint32_t i = 0; i < count; ++i) {
-        const uint64_t address =
-            gfx11_msaa_address(base, x, y, layer, (first + i) % samples, surface_pitch, height,
-                               bytes, fragment_log2, swizzle);
+        const uint64_t address = (gfx12 ? gfx12_msaa_address : gfx11_msaa_address)(
+            base, x, y, layer, (first + i) % samples, surface_pitch, height, bytes, fragment_log2,
+            swizzle);
         if (quad_fragments) {
           auto &tap = state.graphics_sample->taps[i];
           tap.addresses[lane] = address;
@@ -1133,6 +1134,30 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
   } else if (!state.is_load)
     capture_buffer_format_store(wf, state, state.dst_reg_base, packed);
   return util::Result::success();
+}
+
+inline util::Result prepare_gfx12_image_sample(Wavefront &wf, VectorMemState &state,
+                                               uint32_t resource, uint32_t data,
+                                               ImageAddressRegisters coords, ImageFields controls,
+                                               uint32_t sampler, ImageSampleMode mode) {
+  if (controls.dmask && !controls.r128 && !controls.tfe && !controls.lwe &&
+      use_linear_image_path(wf, resource, sampler, controls.dim, controls.unorm, true)) {
+    state.dst_reg_base = wf.vgpr_alloc().base + data;
+    const unsigned count = controls.gather ? 4u : std::popcount(controls.dmask);
+    const unsigned words = controls.d16 ? (count + 1) / 2 : count;
+    const bool fits = data < wf.num_vgprs() && words <= wf.num_vgprs() - data;
+    return prepare_image_sample(wf, state, resource, sampler, coords, controls, mode, fits);
+  }
+  return prepare_image_transfer(wf, state, resource, data, coords, controls, sampler, mode);
+}
+
+inline util::Result prepare_gfx12_image_lod(Wavefront &wf, VectorMemState &state, uint32_t resource,
+                                            uint32_t data, ImageAddressRegisters coords,
+                                            ImageFields controls, uint32_t sampler) {
+  state.image_lod = std::make_unique<ImageLodQuery>();
+  state.image_lod->mask = controls.dmask;
+  return prepare_image_transfer(wf, state, resource, data, coords, controls, sampler,
+                                ImageSampleMode::Implicit, &state.image_lod->results);
 }
 
 /// Compute LODs before writing any lane: VDATA may alias quad coordinates,

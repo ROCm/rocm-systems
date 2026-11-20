@@ -1970,6 +1970,8 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::BVHCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH_INTERSECT_RAY);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
@@ -1999,6 +2001,8 @@ ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *in
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::BVHCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH64_INTERSECT_RAY);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
@@ -2017,17 +2021,20 @@ DecodeResult decodeImageBvh64IntersectRayVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh_dual_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageBvhDualIntersectRayVimage)),
+    : ImageAddressInstruction(
+          "image_bvh_dual_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::ImageBvhDualIntersectRayVimage)),
       vdata(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(384, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  dst_operands_[1] = &vaddr;
-  src_operands_[0] = &rsrc;
-  num_src_ = 1;
-  num_dst_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  num_src_ = 2;
+  num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::BVHCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH_DUAL_INTERSECT_RAY);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
@@ -2046,17 +2053,20 @@ DecodeResult decodeImageBvhDualIntersectRayVimage(const MachineInst *opcode,
 } // namespace detail
 
 ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst)
-    : Vimage("image_bvh8_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
-             selected_exec_fn(InstructionExecutionId::ImageBvh8IntersectRayVimage)),
+    : ImageAddressInstruction(
+          "image_bvh8_intersect_ray", reinterpret_cast<const OpEncoding *>(inst),
+          selected_exec_fn(InstructionExecutionId::ImageBvh8IntersectRayVimage)),
       vdata(320, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(352, OperandType::OPR_VGPR, 0),
       rsrc(128, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->rsrc) {
   dst_operands_[0] = &vdata;
-  dst_operands_[1] = &vaddr;
-  src_operands_[0] = &rsrc;
-  num_src_ = 1;
-  num_dst_ = 2;
+  src_operands_[0] = &vaddr;
+  src_operands_[1] = &rsrc;
+  num_src_ = 2;
+  num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::BVHCNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH8_INTERSECT_RAY);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);

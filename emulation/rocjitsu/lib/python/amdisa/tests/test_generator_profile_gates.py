@@ -9313,7 +9313,10 @@ def test_generated_vflat_metadata_has_two_counter_obligations(
     [
         ('rdna3', 'IMAGE_SAMPLE', 2),
         ('rdna3_5', 'IMAGE_SAMPLE', 2),
-        ('rdna4', 'IMAGE_SAMPLE', 2),
+        ('rdna4', 'IMAGE_SAMPLE', 1),
+        ('rdna4', 'IMAGE_MSAA_LOAD', 1),
+        ('rdna4', 'IMAGE_GET_LOD', 1),
+        ('rdna4', 'IMAGE_BVH8_INTERSECT_RAY', 1),
         ('rdna3', 'IMAGE_ATOMIC_ADD', 1),
         ('rdna4', 'IMAGE_ATOMIC_ADD_UINT', 1),
         ('rdna3', 'IMAGE_BVH_INTERSECT_RAY', 1),

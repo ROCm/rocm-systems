@@ -1532,6 +1532,25 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
             !--range.width)
           return;
       }
+      if (inst.data() && inst.data()->tag() == GLOBAL_MEM) {
+        const auto &state = *inst.data_as<VectorMemState>();
+        if (state.bvh && bvh_two_results(state.bvh->form) && state.bvh->instance_lanes) {
+          const unsigned base = state.dst_reg_base - wf.vgpr_alloc().base;
+          for (unsigned word = 0; word < range.width; ++word) {
+            const unsigned index = range.index + word;
+            uint64_t written_lanes = vector_lanes;
+            if (index >= base && index < base + 10) {
+              const unsigned result_word = index - base;
+              if (result_word == 0 || result_word == 1 || result_word == 4 || result_word == 5 ||
+                  result_word == 8 || result_word == 9)
+                written_lanes &= ~state.bvh->instance_lanes;
+            }
+            access({RegClass::VGPR, static_cast<uint16_t>(index), 1}, written_lanes, bytes, true,
+                   order);
+          }
+          return;
+        }
+      }
       if (vector_replay)
         xcnt_ordered_write(range, vector_lanes, bytes);
       access(range, vector_lanes, bytes, true, order);
