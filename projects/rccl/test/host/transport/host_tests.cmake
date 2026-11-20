@@ -101,8 +101,7 @@ macro(rccl_add_transport_micro_binary _name _test)
     COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/transport
       ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h and the other cast headers
-    COMMON_DEFS ${_MICRO_TRANSPORT_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_transport.yaml")
+    COMMON_DEFS ${_MICRO_TRANSPORT_DEFS})
 endmacro()
 
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportCollNet coll-net-test.cc

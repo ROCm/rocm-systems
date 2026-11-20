@@ -40,7 +40,6 @@ macro(rccl_add_graph_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} graph/${_test}
     OBJECT_PREFIX rccl-graph-obj
     COMMON_DEFS ${_MICRO_GRAPH_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_graph.yaml"
     ${ARGN})
 endmacro()
 
@@ -49,7 +48,6 @@ macro(rccl_add_graph_fakes_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} graph/${_test}
     OBJECT_PREFIX rccl-graph-fakes-obj
     COMMON_DEFS ${_MICRO_GRAPH_DEFS} RCCL_MICRO_GRAPH_FAKES
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_graph.yaml"
     ${ARGN})
 endmacro()
 

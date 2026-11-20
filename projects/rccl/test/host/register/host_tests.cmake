@@ -21,8 +21,7 @@ set(_MICRO_REGISTER_DEFS
 macro(rccl_add_register_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} register/${_test} ${ARGN}
     OBJECT_PREFIX rccl-register-obj
-    COMMON_DEFS ${_MICRO_REGISTER_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_register.yaml")
+    COMMON_DEFS ${_MICRO_REGISTER_DEFS})
 endmacro()
 
 rccl_add_register_micro_binary(rccl-UnitTestsMicroRegister register-test.cc

@@ -14,8 +14,7 @@ macro(rccl_add_devcomm_micro_binary _name _test)
     COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
       ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device.h includes rccl_ptr.h unqualified
-    COMMON_DEFS ${_MICRO_DEVCOMM_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_devcomm.yaml")
+    COMMON_DEFS ${_MICRO_DEVCOMM_DEFS})
 endmacro()
 
 rccl_add_devcomm_micro_binary(rccl-UnitTestsMicroDevcomm devcomm-test.cc

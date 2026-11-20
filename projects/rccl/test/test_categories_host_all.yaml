@@ -1,0 +1,49 @@
+# rccl-UnitTestsHostAll — shared/ctest schema.
+
+test_categories:
+  quick: &host_all_quick
+    description: "Smoke — every host-only test binary (no GPU, no librccl/HIP runtime), sub-second each."
+    # The front door publishes every fronted binary's cases, so selecting all of them is the
+    # whole of this suite. Nothing to enumerate, and nothing to drift when a binary is added.
+    test_patterns:
+      - "*"
+    exclude_windows:
+      - "*"
+    labels:
+      - "rccl"
+      - "quick"
+      - "smoke"
+      - "precheck"
+      - "microtest"
+  standard:
+    <<: *host_all_quick
+    labels:
+      - "rccl"
+      - "standard"
+      - "regression"
+      - "microtest"
+  comprehensive:
+    <<: *host_all_quick
+    labels:
+      - "rccl"
+      - "comprehensive"
+      - "comprehensive_regression"
+      - "microtest"
+  full:
+    <<: *host_all_quick
+    labels:
+      - "rccl"
+      - "full"
+      - "full_regression"
+      - "microtest"
+
+# The whole host tree runs in ~30s instrumented, and touches no GPU and no network, so nothing
+# here should approach 120s: a run that does has a hang in it, not a slow machine. The per-binary
+# yamls this replaces each allowed 600s, which for one sub-second binary said nothing at all.
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 120
+    standard: 120
+    comprehensive: 120
+    full: 120

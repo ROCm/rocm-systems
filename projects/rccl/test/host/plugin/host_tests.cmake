@@ -47,8 +47,7 @@ set(_MICRO_PLUGIN_DEFS
 macro(rccl_add_plugin_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} plugin/${_test} ${ARGN}
     OBJECT_PREFIX rccl-plugin-obj
-    COMMON_DEFS ${_MICRO_PLUGIN_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_plugin.yaml")
+    COMMON_DEFS ${_MICRO_PLUGIN_DEFS})
 endmacro()
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginGinPluginInit gin-plugin-init-test.cc

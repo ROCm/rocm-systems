@@ -16,8 +16,7 @@ macro(rccl_add_gin_micro_binary _name _test)
     COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/include/plugin
       ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
-    COMMON_DEFS ${_MICRO_GIN_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin.yaml")
+    COMMON_DEFS ${_MICRO_GIN_DEFS})
 endmacro()
 
 rccl_add_gin_micro_binary(rccl-UnitTestsMicroGinHost gin-host-test.cc

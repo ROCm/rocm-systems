@@ -63,8 +63,7 @@ macro(rccl_add_misc_micro_binary _name _test)
     OBJECT_PREFIX rccl-misc-obj
     COMMON_INCLUDES
       ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # net_ib_ops_fault.h, included unqualified
-    COMMON_DEFS ${_MICRO_MISC_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_misc.yaml")
+    COMMON_DEFS ${_MICRO_MISC_DEFS})
 endmacro()
 
 rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscAmdsmiWrap amdsmi-wrap-test.cc
@@ -194,13 +193,15 @@ rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscLatencyProfilerCollTrace laten
 foreach(_fake ionic ionic-no-gda mlx5)
   string(REGEX REPLACE "-.*" "" _dv "${_fake}")
   add_library(rccl-micro-dv-provider-fake-${_fake} SHARED fakes/dv_provider_fake.cc)
-  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON)
+  set_target_properties(rccl-micro-dv-provider-fake-${_fake} PROPERTIES NO_SONAME ON
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${RCCL_MICRO_SUBDIR}")
+  if(BUILD_TESTS)
+    install(TARGETS rccl-micro-dv-provider-fake-${_fake}
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}/${RCCL_MICRO_SUBDIR} COMPONENT tests)
+  endif()
   target_compile_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE --offload-host-only)
   target_link_options(rccl-micro-dv-provider-fake-${_fake} PRIVATE -no-hip-rt -Wl,-soname,lib${_dv}.so)
   add_dependencies(rccl-UnitTestsMicroMiscDvsymbols rccl-micro-dv-provider-fake-${_fake})
-  if(BUILD_TESTS)
-    install(TARGETS rccl-micro-dv-provider-fake-${_fake} LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT tests)
-  endif()
 endforeach()
 target_compile_definitions(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE DV_PROVIDER_FAKE_IONIC_NO_GDA)
 target_link_options(rccl-micro-dv-provider-fake-ionic-no-gda PRIVATE

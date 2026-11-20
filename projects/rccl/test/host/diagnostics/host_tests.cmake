@@ -10,8 +10,7 @@ set(_MICRO_DIAGNOSTICS_DEFS
 macro(rccl_add_diagnostics_micro_binary _name _test)
   rccl_add_unit_micro_binary(${_name} diagnostics/${_test} ${ARGN}
     OBJECT_PREFIX rccl-diagnostics-obj
-    COMMON_DEFS ${_MICRO_DIAGNOSTICS_DEFS}
-    CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+    COMMON_DEFS ${_MICRO_DIAGNOSTICS_DEFS})
 endmacro()
 
 rccl_add_diagnostics_micro_binary(rccl-UnitTestsMicroDiagnosticsIbWriteBw diag-ib-write-bw-test.cc
