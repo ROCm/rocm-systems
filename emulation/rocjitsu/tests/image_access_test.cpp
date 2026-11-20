@@ -10539,6 +10539,29 @@ TEST_P(ImageSamplerControlTest, UnbackedSamplerChecksTheNonNullResourceFirst) {
   }
 }
 
+TEST_P(ImageSamplerControlTest, Gfx12LinkedResidencyReadUsesScaledMapAndReturnsLod) {
+  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+    GTEST_SKIP();
+  bind_sample_image({.width = 1024, .height = 32, .pitch = 1024});
+  // The texture descriptor has parent dimensions, but its base points to a
+  // 32x4 byte map with native 128-byte rows. Type 4 is the linked Read view.
+  cu_->write_sgpr(sb_ + 3, cu_->read_sgpr(sb_ + 3) | (4u << 25));
+  cu_->write_sgpr(sb_ + 5, (1u << 24) | (5u << 15) | (3u << 10));
+  memory_.write32(kBase + 256, 7);
+  memory_.write32(kBase + 260, 255);
+  wf_->set_exec(5);
+  write_coordinates(0, {std::bit_cast<uint32_t>(0.015625f), std::bit_cast<uint32_t>(0.5f), 0});
+  write_coordinates(2, {std::bit_cast<uint32_t>(0.125f), std::bit_cast<uint32_t>(0.5f), 0});
+  for (bool linear : {false, true}) {
+    bind_sampler({.linear_xy = linear});
+    fill_destination(0xdeadbeef);
+    ASSERT_TRUE(sample(SampleTestOperation::Zero));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), std::bit_cast<uint32_t>(0.875f));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 2), std::bit_cast<uint32_t>(31.875f));
+    EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 1), 0xdeadbeefu);
+  }
+}
+
 TEST_P(ImageSamplerControlTest, LinkedResourcesStopBeforeSampleLoadOrStore) {
   const bool gfx9 = arch_is_cdna_4_or_lower(arch());
   bind_sample_image(Image{});

@@ -292,6 +292,10 @@ void complete_image_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemStat
         return values;
       }
       values = unpack_format(format, d.buffer_selectors, bytes);
+      if (d.image_residency_map) {
+        const float lod = std::bit_cast<float>(values[0]) * 0.125f;
+        values[0] = std::bit_cast<uint32_t>(lod);
+      }
       for (uint32_t i = 0; i < d.buffer_components; ++i) {
         const uint32_t selector = (d.buffer_selectors >> (3 * i)) & 7;
         if (border && valid && selector >= 4) {

@@ -374,6 +374,7 @@ public:
   std::optional<ImageBlockFormat> image_bc_format;
   std::array<uint8_t, 64> image_bc_texels{};
   bool image_sampling = false;
+  bool image_residency_map = false;
   std::unique_ptr<ImageFeedback> image_status;
   // Completion supplies the status write mask before the wave can resume.
   std::unique_ptr<MemoryWaitScoreboard::DeferredWrite> feedback_wait;

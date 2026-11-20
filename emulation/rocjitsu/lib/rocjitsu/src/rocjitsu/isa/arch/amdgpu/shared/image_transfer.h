@@ -157,7 +157,28 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
   };
   if (image_descriptor_is_unbound(arch, resource_words[1], resource_words[3]))
     return empty_transfer();
-  const ImageResource descriptor = decode_image_resource(resource_words, arch, controls.r128);
+  ImageResource descriptor = decode_image_resource(resource_words, arch, controls.r128);
+  // PAL's linked residency-map read uses the parent's extents but addresses
+  // a separate map whose rows contain one unsigned 5.3 LOD byte per texel.
+  const bool linked_read =
+      gfx12 && descriptor.linked_resource && ((resource_words[3] >> 25) & 7) == 4 &&
+      state.is_load && !atomic && !query && !controls.r128 && !a16 && !d16 && !feedback &&
+      !controls.unorm && !controls.offset && !controls.compare && !controls.gather && mask == 1 &&
+      sample_mode == ImageSampleMode::Zero && dim == kImageDim2d && descriptor.type == kImage2d &&
+      descriptor.data_format == 22 && !descriptor.swizzle_mode && !descriptor.compressed &&
+      !descriptor.base_level && !descriptor.last_level && !descriptor.max_level &&
+      !descriptor.min_lod && !descriptor.depth_scale && descriptor.width_scale < 16 &&
+      descriptor.height_scale < 16 && (descriptor.width >> descriptor.width_scale) &&
+      (descriptor.height >> descriptor.height_scale);
+  if (linked_read) {
+    descriptor.width >>= descriptor.width_scale;
+    descriptor.height >>= descriptor.height_scale;
+    descriptor.data_format = 3; // R8_USCALED, before converting to a fractional LOD.
+    descriptor.linked_resource = false;
+    descriptor.pitch = 1;
+    resource_words[4] = 0; // Use the native pitch of the map.
+    state.image_residency_map = true;
+  }
   const uint32_t type = descriptor.type;
   if (controls.r128 && type != kImage1d && type != kImage2d && type != kImage2dMsaa)
     return unsupported();
@@ -179,7 +200,8 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
     wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
     return util::Result::failure();
   }
-  const uint32_t warn_lod = rdna_image_lod_warning_threshold(arch, resource_words[5]);
+  const uint32_t warn_lod =
+      linked_read ? 0 : rdna_image_lod_warning_threshold(arch, resource_words[5]);
   if (!query && (state.is_load || atomic) &&
       (warn_lod || controls.tfe || controls.lwe || image_may_have_sparse_pages(wf))) {
     state.image_status = std::make_unique<ImageFeedback>();
@@ -369,6 +391,14 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
     for (uint32_t i = 0; i < sampler_words.size(); ++i)
       sampler_words[i] = read_scalar_selector(wf, sampler + i);
     const ImageSampler decoded_sampler = decode_image_sampler(sampler_words, arch);
+    if (linked_read &&
+        (decoded_sampler.clamp[0] != ImageClamp::Edge ||
+         decoded_sampler.clamp[1] != ImageClamp::Edge || decoded_sampler.force_unnormalized ||
+         decoded_sampler.mip_filter != ImageMipFilter::None || decoded_sampler.max_aniso_ratio ||
+         sampler_words[3])) {
+      wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+      return util::Result::failure();
+    }
     if (has_unimplemented_image_sampler_controls(decoded_sampler)) {
       wf.report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
       return util::Result::failure();
@@ -387,8 +417,9 @@ prepare_image_transfer(Wavefront &wf, VectorMemState &state, uint32_t resource, 
         uses_native_2d_sampler(wf, resource, sampler, dim, controls.unorm));
     needs_gradients = graphics_image_needs_gradients(query, fixed_level ? 0u : max_level, dim,
                                                      controls.gather, sampler_words[2]);
-    mag_filter = static_cast<uint32_t>(decoded_sampler.mag_filter);
-    min_filter = static_cast<uint32_t>(decoded_sampler.min_filter);
+    // Linked residency-map reads select one texel even for XY linear samplers.
+    mag_filter = linked_read ? 0 : static_cast<uint32_t>(decoded_sampler.mag_filter);
+    min_filter = linked_read ? 0 : static_cast<uint32_t>(decoded_sampler.min_filter);
     // Cube sampling uses the major footprint without anisotropic taps.
     // Retain the sampler's LOD bias and mip performance controls below.
     if (dim == kImageDimCube) {

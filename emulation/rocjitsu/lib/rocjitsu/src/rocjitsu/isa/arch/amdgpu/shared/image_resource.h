@@ -144,7 +144,7 @@ bool use_linear_image_path(rj_code_arch_t arch, uint32_t resource, uint32_t samp
   if (type < kImage1d)
     return true;
   if (word(5) & (1u << 24))
-    return true;
+    return arch != ROCJITSU_CODE_ARCH_RDNA4 || !sample;
   if (!feedback && rdna_image_lod_warning_threshold(arch, word(5)))
     return false;
   if ((word(6) & (1u << 21)) && ((word(6) >> 24) || word(7)))
