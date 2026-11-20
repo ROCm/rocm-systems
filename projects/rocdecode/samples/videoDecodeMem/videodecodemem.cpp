@@ -60,7 +60,9 @@ public:
     // Fill in the buffer owned by the demuxer
     int GetData(uint8_t *p_buf, int n_buf) {
         // We read a file for this example. You may get your data from network or somewhere else
-        return static_cast<int>(fp_in_.read(reinterpret_cast<char*>(p_buf), n_buf).gcount());
+        int n_read = static_cast<int>(fp_in_.read(reinterpret_cast<char*>(p_buf), n_buf).gcount());
+        // FFmpeg expects AVERROR_EOF at the end of the stream; it keeps retrying a read that returns 0.
+        return n_read > 0 ? n_read : AVERROR_EOF;
     }
     size_t GetBufferSize() { return io_buffer_size_; };
 
