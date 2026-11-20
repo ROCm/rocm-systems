@@ -5,8 +5,9 @@
 requires = [
     # >=61 is required to read the PEP 621 [project] table (incl. name) and the
     # dynamic version from setup.py; older setuptools silently produces an
-    # "UNKNOWN" distribution name.
-    "setuptools>=61.0",
+    # "UNKNOWN" distribution name. 61.2 is the first to accept the dynamic
+    # dependencies from setup.py.
+    "setuptools>=61.2",
     "wheel",
     "cmake>=3.20",
     # Cap the major version: the CMake glue re-enables RTTI/exceptions by poking
@@ -19,8 +20,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "rocshmem4py"
 # Version is computed in setup.py: the base release plus a PEP 440 local
-# segment recording the linked rocSHMEM version, e.g. "0.1.0+rocshmem3.6.0".
-dynamic = ["version"]
+# segment recording the linked rocSHMEM version, e.g. "0.1.0+rocshmem3.6.0",
+# unless ROCSHMEM4PY_VERSION_SUFFIX replaces it.
+# Dependencies come from setup.py so packagers can add runtime requirements.
+dynamic = ["version", "dependencies"]
 description = "Python bindings for ROCm OpenSHMEM (rocSHMEM) runtime library"
 readme = "README.md"
 requires-python = ">=3.8"

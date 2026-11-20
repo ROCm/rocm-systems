@@ -298,6 +298,27 @@ target_link_options(_rocshmem4py PRIVATE
   -lhsa-runtime64
 )
 
+# Optional RPATH for packaged wheels, e.g. $ORIGIN/_rocm_sdk_core/lib. Set after
+# linking because ROCm compiler configs can force --enable-new-dtags; patchelf
+# writes DT_RPATH, which LD_LIBRARY_PATH cannot override.
+set(ROCSHMEM4PY_INSTALL_RPATH "" CACHE STRING
+    "Colon-separated RPATH for the extension; replaces the build RPATH")
+if(ROCSHMEM4PY_INSTALL_RPATH)
+  find_program(ROCSHMEM4PY_PATCHELF patchelf)
+  if(NOT ROCSHMEM4PY_PATCHELF)
+    message(FATAL_ERROR "rocshmem4py: ROCSHMEM4PY_INSTALL_RPATH needs patchelf")
+  endif()
+  # Link with the requested RPATH so `cmake --install` keeps it as is.
+  string(REPLACE ":" ";" _ROCSHMEM4PY_RPATH "${ROCSHMEM4PY_INSTALL_RPATH}")
+  set_target_properties(_rocshmem4py PROPERTIES
+    BUILD_WITH_INSTALL_RPATH ON
+    INSTALL_RPATH "${_ROCSHMEM4PY_RPATH}")
+  add_custom_command(TARGET _rocshmem4py POST_BUILD
+    COMMAND "${ROCSHMEM4PY_PATCHELF}" --set-rpath "${ROCSHMEM4PY_INSTALL_RPATH}"
+            --force-rpath "$<TARGET_FILE:_rocshmem4py>"
+    VERBATIM)
+endif()
+
 # setuptools positions the .so via CMAKE_LIBRARY_OUTPUT_DIRECTORY; install(.)
 # lands the extension at the wheel root for built distributions.
 install(TARGETS _rocshmem4py LIBRARY DESTINATION .)

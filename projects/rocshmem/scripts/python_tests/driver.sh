@@ -30,12 +30,14 @@
 #   rocshmem_python_driver.sh <python_src_dir> <test_type> <log_dir> [hostfile]
 #
 #   python_src_dir : Path to rocshmem python/ source directory (for pip install)
-#   test_type      : "all", "basic", "collective", "raw"
+#   test_type      : "all", "basic", "collective", "raw", "build"
 #                    - raw:        torch-free ctypes/HIP smoke tests
 #                                  (runs on torch-less hosts)
 #                    - basic:      single-PE tensor API tests  (require torch)
 #                    - collective: multi-PE tensor API tests   (require torch)
-#                    - all:        pytest discovery over tests/ (auto-picks new files)
+#                    - build:      GPU-free packaging tests in build_tests/
+#                    - all:        build, then pytest discovery over tests/
+#                                  (auto-picks new files)
 #   log_dir        : Directory for test output logs
 #   hostfile       : (optional) MPI hostfile for multi-node
 #
@@ -54,7 +56,7 @@ ValidateInput() {
   if [ $1 -lt 3 ]; then
     echo "Usage: $0 <python_src_dir> <test_type> <log_dir> [hostfile]"
     echo "  python_src_dir : Path to rocshmem python/ source directory"
-    echo "  test_type      : all, basic, collective, raw"
+    echo "  test_type      : all, basic, collective, raw, build"
     echo "  log_dir        : Directory for test output logs"
     echo "  hostfile       : (optional) MPI hostfile"
     exit 1
@@ -137,7 +139,37 @@ TestRaw() {
   ExecPythonTest "raw" 2 "$PYTHON_SRC_DIR/tests/test_smoke.py"
 }
 
+# GPU-free packaging tests; single process, not under mpirun. Fail instead of
+# skipping when the wheel cannot be built here.
+TestBuild() {
+  local TEST_LOG_NAME="python_build"
+  local -a cmd
+  cmd=( env ROCSHMEM4PY_REQUIRE_WHEEL_BUILD_TESTS=1
+        timeout $((30 * 60))
+        python3 -m pytest "$PYTHON_SRC_DIR/build_tests" -v --tb=long -rA --color=no )
+  echo "Test:   $TEST_LOG_NAME"
+  echo "# ${cmd[*]}" > "$LOG_DIR/$TEST_LOG_NAME.log"
+
+  # Build requirements for the tests' --no-build-isolation wheel builds.
+  python3 -m pip install "setuptools>=61.2" wheel "nanobind>=2.12.0,<3.0" patchelf \
+    >> "$LOG_DIR/$TEST_LOG_NAME.log" 2>&1
+  if [ $? -ne 0 ]; then
+    echo "FAILED: $TEST_LOG_NAME (build requirement install)"
+    DRIVER_RETURN_STATUS=1
+    FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
+    return
+  fi
+
+  "${cmd[@]}" 2>&1 | tee -a "$LOG_DIR/$TEST_LOG_NAME.log"
+  if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    echo "FAILED: $TEST_LOG_NAME"
+    DRIVER_RETURN_STATUS=1
+    FAILED_LIST="$FAILED_LIST $TEST_LOG_NAME"
+  fi
+}
+
 TestAll() {
+  TestBuild
   # Use pytest discovery instead of a hardcoded file list so newly added
   # test_*.py files are automatically included in CI.
   ExecPythonTest "all" 2 "$PYTHON_SRC_DIR/tests"
@@ -155,8 +187,8 @@ HOSTFILE=$4
 ValidateLogDir "$LOG_DIR"
 DetectGPUs
 
-# Ensure rocshmem4py is installed
-if ! python3 -c "import rocshmem4py" 2>/dev/null; then
+# Ensure rocshmem4py is installed (the build tests build their own wheels)
+if [ "$TEST" != "build" ] && ! python3 -c "import rocshmem4py" 2>/dev/null; then
   echo "Installing rocshmem4py from $PYTHON_SRC_DIR ..."
   pip install -e "$PYTHON_SRC_DIR" || { echo "pip install failed"; exit 1; }
 fi
@@ -177,9 +209,12 @@ case $TEST in
   "raw")
     TestRaw
     ;;
+  "build")
+    TestBuild
+    ;;
   *)
     echo "Unknown test type: $TEST"
-    echo "Valid types: all, basic, collective, raw"
+    echo "Valid types: all, basic, collective, raw, build"
     exit 1
     ;;
 esac
