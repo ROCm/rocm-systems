@@ -4,6 +4,10 @@
  * SPDX-License-Identifier: MIT
  */
 
+// This translation unit tests device assertions even in Release builds.
+// Undefine NDEBUG before the HIP headers choose their assert implementation.
+#undef NDEBUG
+
 #include <cstdlib>
 #include <hip_test_common.hh>
 #include <csetjmp>
@@ -62,10 +66,6 @@ bool isAbortOnErrorEnabled() {
  */
 HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelPass) {
 
-#ifdef NDEBUG
-  HIP_SKIP_TEST(HipTest::SkipReason::kAssertionsDisabled);
-#endif
-
 #if HT_AMD
   if (isAbortOnErrorEnabled()) {
     HIP_SKIP_TEST("Test incompatible with aborts enabled through HIP_SKIP_ABORT_ON_GPU_ERROR.");
@@ -100,10 +100,6 @@ HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelPass) {
  *  - HIP_VERSION >= 5.2
  */
 HIP_TEST_CASE(Unit_Assert_Positive_Basic_KernelFail) {
-
-#ifdef NDEBUG
-  HIP_SKIP_TEST(HipTest::SkipReason::kAssertionsDisabled);
-#endif
 
 #if HT_AMD
   if (isAbortOnErrorEnabled()) {
