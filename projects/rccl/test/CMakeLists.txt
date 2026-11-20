@@ -309,6 +309,7 @@ if(BUILD_TESTS)
     P2pChannelScalingTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
+    HipProbeTests.cpp
     SendRecvTests.cpp
     SendRecvSingleRankTests.cpp
     StandaloneTests.cpp

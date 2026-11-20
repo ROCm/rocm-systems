@@ -8117,9 +8117,11 @@ TEST(ArithBridgeTest, DivisionDx10ClampAndFixupStatus) {
   }
 }
 
+// Active RDNA3 OMOD is accepted in strict exact (W7900 captures); a reserved modifier bit is the
+// rejected request that must leave the condition untouched even with empty EXEC.
 TEST(ArithBridgeTest, EmptyScaleValidatesBeforeCommittingCondition) {
   for (uint32_t lanes : {32u, 64u}) {
-    for (bool unsupported : {false, true}) {
+    for (bool invalid : {false, true}) {
       BridgeFixture fixture(true, lanes, {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
       ASSERT_FALSE(::testing::Test::HasFatalFailure());
       fixture.wave->set_mode_raw(0xd0); // OMOD active: FP32 output flushing, IEEE clear.
@@ -8128,12 +8130,47 @@ TEST(ArithBridgeTest, EmptyScaleValidatesBeforeCommittingCondition) {
       rdna3::Operand operand(32, rdna3::OperandType::OPR_VGPR, 0);
       arith::execute_division<32, arith::DivisionOperation::Scale>(
           *fixture.wave, rj_arith_v_div_scale_f32_w32, rj_arith_v_div_scale_f32_w64,
-          fixture.cu->arithmetic_flags(), unsupported ? RJ_ARITH_ALU_OMOD_2 : 0, operand, operand,
-          operand, operand, true, [&](uint64_t value) { condition = value; });
-      EXPECT_EQ(fixture.wave->instruction_execution_failed(), unsupported);
-      EXPECT_EQ(condition, unsupported ? 0x1234u : 0u);
+          fixture.cu->arithmetic_flags(), RJ_ARITH_ALU_OMOD_2 | (invalid ? 1ULL << 30 : 0), operand,
+          operand, operand, operand, true, [&](uint64_t value) { condition = value; });
+      EXPECT_EQ(fixture.wave->instruction_execution_failed(), invalid);
+      EXPECT_EQ(condition, invalid ? 0x1234u : 0u);
       EXPECT_TRUE(fixture.recorder->writes.empty());
     }
+  }
+}
+
+// The decoded path carries an active RDNA3 output modifier to a lane that receives the scaled
+// result. W7900 capture (gfx1100, MODE 0x100: DX10_CLAMP set, IEEE clear, FP32 denormals
+// flushed): 0x7f000000 scaled by the window and then mul:2 overflows to infinity under nearest
+// rounding, and the condition stays clear.
+TEST(ArithBridgeTest, DecodedScaleAppliesOutputModifierToActiveLanes) {
+  for (uint32_t lanes : {32u, 64u}) {
+    BridgeFixture fixture(true, lanes, {ArithmeticSemantics::BitExactEmpiricalNoFpStatus});
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    // OMOD applies only with FP32 output denormals flushed and IEEE clear.
+    fixture.wave->set_mode_raw(0xc0u | Wavefront::DX10_CLAMP_BIT);
+    const unsigned last = lanes - 1;
+    fixture.wave->set_exec(uint64_t(1) << last);
+    const uint32_t operands[] = {0x7f000000u, 0x3f800000u, 0x3f800000u};
+    for (unsigned input = 0; input < 3; ++input) {
+      fixture.cu->write_vgpr(fixture.base() + 2 * input, last, operands[input]);
+    }
+    fixture.cu->write_vgpr(fixture.base() + 4, last, 0xa5a5a5a5u);
+    const auto sb = fixture.wave->sgpr_alloc().base;
+    fixture.cu->write_sgpr(sb + 4, 0x12345678);
+    fixture.cu->write_sgpr(sb + 5, 0xabcdef01);
+
+    const auto words = rdna3::build_vop3_sdst_enc(
+        rdna3::kVDivScaleF32Vop3SdstEnc,
+        {.vdst = 4, .sdst = 4, .src0 = 256, .src1 = 258, .src2 = 260, .omod = 1});
+    auto instruction = fixture.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_TRUE(
+        fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave).succeeded());
+
+    EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 4, last), 0x7f800000u);
+    EXPECT_EQ(fixture.cu->read_sgpr(sb + 4), 0u);
+    EXPECT_EQ(fixture.cu->read_sgpr(sb + 5), lanes == 64 ? 0u : 0xabcdef01U);
   }
 }
 
@@ -15790,6 +15827,77 @@ TEST(ArithBridgeTest, Gfx1250BinaryCompatibilityCauses) {
       EXPECT_EQ(f.wave->trapsts(), 0x80U | c.causes);
       EXPECT_EQ(f.wave->pending_alu_causes(), c.causes);
     }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250DualRoundThenFlushBoundary) {
+  for (unsigned op : {32U, 34U, 7U}) {
+    BridgeFixture f(ROCJITSU_CODE_ARCH_CDNA5);
+    f.wave->set_exec(1);
+    f.wave->set_mode_raw(0x50);
+    const bool wide = op != 7;
+    f.cu->write_vgpr(f.base(), 0, wide ? 0U : 0x00800000U);
+    f.cu->write_vgpr(f.base() + 1, 0, 0x00100000U);
+    f.cu->write_vgpr(f.base() + 2, 0, wide ? 0xffffffffU : 0x3f7fffffU);
+    f.cu->write_vgpr(f.base() + 3, 0, 0x3fefffffU);
+    f.cu->write_vgpr(f.base() + 4, 0, 0U);
+    f.cu->write_vgpr(f.base() + 5, 0, 0U);
+    // VOPD3 X is the tested arithmetic; Y copies a disjoint VGPR.
+    const std::array<uint32_t, 3> words = {0xcf000000U | (op << 18) | (8U << 12) | 256U,
+                                           258U | (2U << 16) | (4U << 24),
+                                           6U | (2U << 8) | (4U << 16) | (9U << 24)};
+    auto instruction = f.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_EQ(instruction.value()->flags() & INVALID_VOPD_OPERANDS, 0U);
+    ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), wide ? 0U : 0x00800000U);
+    if (wide) {
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 7, 0), 0x00100000U);
+    }
+  }
+}
+
+TEST(ArithBridgeTest, Gfx1250DualFmaNegatedAddend) {
+  BridgeFixture f(ROCJITSU_CODE_ARCH_CDNA5);
+  f.wave->set_exec(1);
+  f.wave->set_mode_raw(0xf0);
+  f.cu->write_vgpr(f.base(), 0, 0x40000000U);
+  f.cu->write_vgpr(f.base() + 2, 0, 0x40400000U);
+  f.cu->write_vgpr(f.base() + 4, 0, 0x3f800000U);
+  const std::array<uint32_t, 3> words = {0xcf000000U | (19U << 18) | (8U << 12) | 256U,
+                                         258U | (4U << 9) | (2U << 16) | (4U << 24),
+                                         6U | (2U << 8) | (4U << 16) | (9U << 24)};
+  auto instruction = f.decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  ASSERT_EQ(instruction.value()->flags() & INVALID_VOPD_OPERANDS, 0U);
+  ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+  EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), 0x40a00000U);
+}
+
+TEST(ArithBridgeTest, Gfx1250DualMulRejectsUnqualifiedStatus) {
+  for (bool scalar : {false, true}) {
+    struct RestoreScalar {
+      bool previous = util::force_scalar();
+      ~RestoreScalar() { util::set_force_scalar_for_testing(previous); }
+    } restore;
+    util::set_force_scalar_for_testing(scalar);
+    BridgeFixture f(ROCJITSU_CODE_ARCH_CDNA5, 32,
+                    ArithmeticPolicy{ArithmeticSemantics::BitExactEmpirical});
+    f.wave->set_exec(1);
+    f.wave->set_mode_raw(0xf0);
+    f.wave->set_trapsts(0x10);
+    f.cu->write_vgpr(f.base(), 0, 0x7f7fffffU);
+    f.cu->write_vgpr(f.base() + 2, 0, 0x40000000U);
+    const std::array<uint32_t, 3> words = {0xcf000000U | (3U << 18) | (8U << 12) | 256U,
+                                           258U | (2U << 16), 6U | (2U << 8) | (9U << 24)};
+    auto instruction = f.decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    ASSERT_EQ(instruction.value()->flags() & INVALID_VOPD_OPERANDS, 0U);
+    EXPECT_FALSE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), 0x3c003c00U);
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 9, 0), 0x3c003c00U);
+    EXPECT_EQ(f.wave->trapsts(), 0x10U);
+    EXPECT_EQ(f.wave->pending_alu_causes(), 0U);
   }
 }
 
