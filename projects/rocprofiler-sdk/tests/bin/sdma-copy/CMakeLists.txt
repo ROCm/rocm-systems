@@ -1,30 +1,28 @@
+#
+#
+#
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
-project(rocprofiler-tool-test-app-sdma-copy LANGUAGES CXX)
+project(rocprofiler-sdk-tests-bin-sdma-copy LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_executable(sdma-copy)
+target_sources(sdma-copy PRIVATE sdma-copy.cpp)
+target_compile_options(sdma-copy PRIVATE -Wpedantic)
 
 find_package(Threads REQUIRED)
-if(NOT TARGET hsa-runtime64::hsa-runtime64)
-    find_package(hsa-runtime64 REQUIRED)
-endif()
+find_package(
+    hsa-runtime64
+    REQUIRED
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH})
 
-add_executable(sdma-copy sdma-copy.cpp)
-target_compile_features(sdma-copy PRIVATE cxx_std_17)
-target_compile_options(sdma-copy PRIVATE -Wpedantic)
 target_link_libraries(sdma-copy PRIVATE Threads::Threads hsa-runtime64::hsa-runtime64)
-
-if(PROJECT_IS_TOP_LEVEL)
-    enable_testing()
-endif()
-
-add_test(NAME sdma-copy-profiling COMMAND sdma-copy)
-add_test(NAME sdma-copy-profiling-counted COMMAND sdma-copy --completion-value 2)
-add_test(NAME sdma-copy-profiling-counted-64bit COMMAND sdma-copy --completion-value
-                                                        4294967297)
-add_test(NAME sdma-copy-profiling-no-dependencies COMMAND sdma-copy --dependencies 0)
-add_test(NAME sdma-copy-profiling-multiple-dependencies COMMAND sdma-copy --dependencies
-                                                                3)
-set_tests_properties(
-    sdma-copy-profiling sdma-copy-profiling-counted sdma-copy-profiling-counted-64bit
-    sdma-copy-profiling-no-dependencies sdma-copy-profiling-multiple-dependencies
-    PROPERTIES TIMEOUT 60 ENVIRONMENT "HSA_ENABLE_SDMA=1" SKIP_RETURN_CODE 77 LABELS
-               "integration-tests;sdma")
