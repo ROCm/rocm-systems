@@ -226,9 +226,14 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
       if (prior != 0) wait_hint = HSA_WAIT_STATE_ACTIVE;
 
   // Ensure that all signals in the list can be slept on.
+  HsaEvent* overflow = core::Runtime::runtime_singleton_->GetEventPool()->overflow();
   if (wait_hint != HSA_WAIT_STATE_ACTIVE) {
     for (uint32_t i = 0; i < signal_count; i++) {
-      if (signals[i]->EopEvent() == NULL) {
+      HsaEvent* event = signals[i]->EopEvent();
+      // Signals outside this list can raise the shared overflow event, so a wait-all
+      // in KFD could return with one event "fired" too early and then wait for an
+      // event of an already satisfied signal that never fires again. Poll instead.
+      if (event == NULL || (wait_on_all && overflow != nullptr && event == overflow)) {
         wait_hint = HSA_WAIT_STATE_ACTIVE;
         break;
       }
