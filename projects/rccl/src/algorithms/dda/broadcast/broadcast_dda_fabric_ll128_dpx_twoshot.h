@@ -6,31 +6,38 @@
  *
  * Each physical MI450 package is split into two logical ranks.  Running
  * scale-in and scale-up traffic concurrently degrades bandwidth (~58%
- * scale-up, ~70% scale-in remain).  This kernel uses the in-package link
- * only in phase 1a to deliver scatter chunks from root to rootSib; all
- * remaining traffic (phase 1b scatter and phase 2 all-gather) is purely
- * scale-up.
+ * scale-up, ~70% scale-in remain).  This kernel minimises concurrent link
+ * usage by separating sibling traffic from non-root peer traffic within
+ * each rank's code path.
  *
- *   Phase 1a (scale-in):  root writes rootSib's half of the scatter chunks
- *                          into staging slots on rootSib's scratch.
- *   Phase 1b (scale-up):  root scatters its own half directly from sendbuff;
- *                          rootSib cut-through forwards from staging slots.
- *                          Together they scatter all N-2 chunks.
- *   Phase 2  (scale-up):  standard SPX all-gather — each non-root polls its
- *                          scatter slot, fans out to all gather slots, then
- *                          polls gather slots for every other chunk.
- *                          rootSib receives via gather slots; root polls
- *                          one padding slice per non-root as a completion
- *                          signal (it already has all data from sendbuff).
+ * col = blockIdx.x identifies which of the N-2 non-root peers this block
+ * services.  col % 2 == rootLocal determines column ownership:
+ *   colIsRoot  == true  → root scatters this chunk directly to the peer
+ *                          (scale-up); rootSib receives this chunk from
+ *                          non-root all-gather fan-out (scale-up).
+ *   colIsRoot  == false → root stages this chunk to rootSib scratch
+ *                          (scale-in); rootSib cut-through forwards it
+ *                          to the peer scatter slot (scale-up).
+ *
+ * Root path (two separate loops per block):
+ *   Sibling loop   (!colIsRoot): stage chunk[col] → rootSib staging slot
+ *                                 over the in-package (scale-in) link.
+ *   Non-root loop  ( colIsRoot): scatter chunk[col] → peer scatter slot
+ *                                 over the scale-up fabric.
+ *   Completion poll: one padding slice per non-root from own gather slot.
+ *
+ * rootSib path (two separate loops per block):
+ *   Sibling loop   (!colIsRoot): poll staging slot written by root, cut-
+ *                                 through forward to peer scatter slot
+ *                                 (scale-up); clear staging; write recvbuff.
+ *   Non-root loop  ( colIsRoot): poll own gather slot written by non-root
+ *                                 all-gather fan-out; write recvbuff; clear.
+ *
+ * Non-root path: standard SPX all-gather with DPX column mapping.
  *
  * Chunk sizing: cs = ceil(totalSlices / (N-2))  (excludes both co-roots).
  * Grid:         dim3(N-2, bpp) — blockIdx.x == col (0..N-3).
  * col → rank:   peer(col) = col < min(root, rootSib) ? col : col + 2
- *
- * Known limitation: within a single kernel launch root's phase 1a blocks
- * (scale-in writes) and phase 1b blocks (scale-up writes) may execute
- * concurrently, mixing traffic on the root package.  Correctness is
- * maintained by LL128 flags; serialisation is deferred to a future revision.
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -146,26 +153,12 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
   // ROOT role
   // =========================================================================
   if (isRoot) {
-    if (colIsRoot) {
-      // ---- Phase 1b: scatter chunk[col] from sendbuff to peer's scatter slot ----
-      uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords;
-      for (size_t s = gwarp; s < chunkSlices; s += wstride) {
-        const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
-        const size_t dOff    = chunkOff(col) + s * (size_t)kDdaLL128DataBytesPerSlice;
-        const size_t rem     = totalBytes > dOff ? totalBytes - dOff : 0;
-        const int    elt     = rem < (size_t)kDdaLL128DataBytesPerSlice
-                                 ? (int)rem : kDdaLL128DataBytesPerSlice;
-        uint64_t regs[kDdaLL128WordsPerThread];
-        if (elt > 0)
-          ddaLL128LoadRegsBatched<int8_t>(regs, sendbuff + dOff, elt, lane, flagLane);
-        else
-          for (int u = 0; u < kDdaLL128WordsPerThread; ++u) regs[u] = 0;
-        ddaLL128StoreWire(scatterDst + wireOff, regs, flag, flagLane);
-        if (elt > 0 && sendbuff != reinterpret_cast<const int8_t*>(recvbuff))
-          ddaLL128StoreRegs<int8_t>(recvbuff + dOff, regs, elt, lane, flagLane);
-      }
-    } else {
-      // ---- Phase 1a: stage chunk[col] into rootSib's gather[peer] (scale-in) ----
+    // ---- Sibling loop: stage rootSib's chunks over the in-package (scale-in) link ----
+    // Runs on blocks where col is owned by rootSib (!colIsRoot).
+    // root reads chunk[col] from sendbuff and stores into rootSib's staging slot
+    // (peerScratch[rootSib].gather[peer]).  rootSib will poll and forward in its
+    // own sibling loop below.  recvbuff write is fused here.
+    if (!colIsRoot) {
       uint64_t* stagingDst =
         reinterpret_cast<uint64_t*>(peerScratch[rootSib]) + gatherOff +
         (uint64_t)peer * slotWireWords;
@@ -186,8 +179,31 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
       }
     }
 
-    // ---- Phase 2 (root side): poll one padding slice per non-root as completion signal ----
-    // Root already has all data from sendbuff; this poll just gates exit.
+    // ---- Non-root scatter loop: scatter root's chunks over the scale-up fabric ----
+    // Runs on blocks where col is owned by root (colIsRoot).
+    // root reads chunk[col] from sendbuff and writes directly to peer's scatter slot.
+    // recvbuff write is fused here.
+    if (colIsRoot) {
+      uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords;
+      for (size_t s = gwarp; s < chunkSlices; s += wstride) {
+        const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
+        const size_t dOff    = chunkOff(col) + s * (size_t)kDdaLL128DataBytesPerSlice;
+        const size_t rem     = totalBytes > dOff ? totalBytes - dOff : 0;
+        const int    elt     = rem < (size_t)kDdaLL128DataBytesPerSlice
+                                 ? (int)rem : kDdaLL128DataBytesPerSlice;
+        uint64_t regs[kDdaLL128WordsPerThread];
+        if (elt > 0)
+          ddaLL128LoadRegsBatched<int8_t>(regs, sendbuff + dOff, elt, lane, flagLane);
+        else
+          for (int u = 0; u < kDdaLL128WordsPerThread; ++u) regs[u] = 0;
+        ddaLL128StoreWire(scatterDst + wireOff, regs, flag, flagLane);
+        if (elt > 0 && sendbuff != reinterpret_cast<const int8_t*>(recvbuff))
+          ddaLL128StoreRegs<int8_t>(recvbuff + dOff, regs, elt, lane, flagLane);
+      }
+    }
+
+    // ---- Completion poll: one padding slice per non-root ----
+    // root already holds all data from sendbuff; this poll gates exit only.
     const uint64_t* myGather =
       reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + gatherOff +
       (uint64_t)peer * slotWireWords;
@@ -202,9 +218,12 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
   // ROOTSIB role
   // =========================================================================
   else if (isRootSib) {
+    // ---- Sibling loop: poll staging slot written by root, cut-through to peer scatter slot ----
+    // Runs on blocks where col is owned by rootSib (!colIsRoot).
+    // rootSib polls peerScratch[rootSib].gather[peer] (the staging slot root wrote over
+    // scale-in), forwards the wire words directly to peerScratch[peer].scatter_slot
+    // (scale-up), clears the staging slot, and fuses the recvbuff write.
     if (!colIsRoot) {
-      // ---- Phase 1b: cut-through forward staging → peer's scatter slot ----
-      // Staging slot: peerScratch[rootSib].gather[peer]  (written by root in 1a)
       const uint64_t* stagingSrc =
         reinterpret_cast<const uint64_t*>(peerScratch[rootSib]) + gatherOff +
         (uint64_t)peer * slotWireWords;
@@ -219,16 +238,17 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
         if (!ddaLL128PollWireBatched(stagingSrc + wireOff, vr, flag, lane, params))
           break;
         ddaLL128StoreWire(scatterDst + wireOff, vr, flag, flagLane);
-        // Clear staging slot so non-roots can reuse gather[peer] in phase 2.
         ddaLL128ClearWire(const_cast<uint64_t*>(stagingSrc) + wireOff, lane);
-        // Fuse recvbuff write for rootSib's own data.
         if (elt > 0)
           ddaLL128StoreRegs<int8_t>(recvbuff + dOff, vr, elt, lane, flagLane);
       }
-    } else {
-      // ---- Phase 2 (rootSib side): poll gather[peer] for root's non-root chunks ----
-      // colIsRoot columns: non-roots will write gather[peer] on rootSib's scratch
-      // during their all-gather fan-out.  rootSib polls and writes recvbuff.
+    }
+
+    // ---- Non-root allgather receive loop: poll gather slots written by non-roots ----
+    // Runs on blocks where col is owned by root (colIsRoot).
+    // Non-roots fan out to rootSib's gather[peer] during the all-gather phase.
+    // rootSib polls, writes recvbuff, and clears.
+    if (colIsRoot) {
       const uint64_t* myGather =
         reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + gatherOff +
         (uint64_t)peer * slotWireWords;
