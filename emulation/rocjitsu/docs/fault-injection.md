@@ -355,8 +355,9 @@ emulation/rocjitsu/build/tools/rj_code_mutate \
 
 The `--address-vgpr` argument is the encoded 8-bit selector, not a physical VGPR
 number. Listing reports `address_bank`; for gfx1250, allocation is checked for
-`256 * address_bank + address-vgpr`. The selected register's runtime value remains
-the caller's responsibility.
+`256 * address_bank + address-vgpr`. The caller must initialize that full VGPR
+with the intended runtime address: bank 1 with selector 6 reads v262, so initialize
+v262. The mutation preserves the bank and does not initialize register values.
 
 To list the supported LDS instructions in a gfx1200 or gfx1201 wave32 or wave64 kernel and mutate one,
 choose an address register whose runtime value the caller has initialized. Here
@@ -508,7 +509,7 @@ provider dependencies. To run the focused suites:
 
 ```bash
 ctest --test-dir emulation/rocjitsu/build --show-only \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'
 ctest --test-dir emulation/rocjitsu/build --output-on-failure --no-tests=error \
-  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CheckedTextEdits'
+  -R 'FaultMutationCli|FaultDropBarrier|FaultLds|CdnaLds|CheckedTextEdits'
 ```

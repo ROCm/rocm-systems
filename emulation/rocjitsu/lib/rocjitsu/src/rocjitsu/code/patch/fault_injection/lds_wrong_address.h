@@ -75,12 +75,14 @@ discover_lds_wrong_address(const FaultMutationContext &, std::string_view, Fault
 /// @brief Select an exact handle or a zero-based source-order ordinal.
 [[nodiscard]] FailureOr<LdsSelection>
 select_lds_wrong_address(const LdsInventory &, const LdsSelector &, FaultMutationError &);
-/// @brief Emit one replacement from the pristine context using a distinct allocated VGPR.
-/// @details The caller must initialize that register with an appropriate runtime address.
+/// @brief Emit one replacement using a distinct, allocated address VGPR selector.
+/// @details replacement_selector is an encoded eight-bit selector. The caller must initialize
+/// VGPR 256 * selection.site().address_bank + replacement_selector with the runtime address.
+/// For example, bank 1 and selector 6 use v262, so the caller must initialize v262.
+/// The mutation preserves the selected bank; it does not initialize or change register values.
 /// Static checks establish neither runtime execution nor detector qualification.
-[[nodiscard]] FailureOr<LdsResult> apply_lds_wrong_address(const FaultMutationContext &,
-                                                           const LdsSelection &,
-                                                           std::optional<uint32_t>,
-                                                           FaultMutationError &);
+[[nodiscard]] FailureOr<LdsResult>
+apply_lds_wrong_address(const FaultMutationContext &context, const LdsSelection &selection,
+                        std::optional<uint32_t> replacement_selector, FaultMutationError &error);
 
 } // namespace rocjitsu

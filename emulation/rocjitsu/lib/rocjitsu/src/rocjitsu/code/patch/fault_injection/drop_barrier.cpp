@@ -21,10 +21,6 @@
 
 namespace rocjitsu {
 
-using fault_mutation_detail::reject;
-using fault_mutation_detail::translate_edit_error;
-using fault_mutation_detail::validate_source_header;
-
 // Cached per-kernel qualification, owned by the context and any returned inventories.
 // Its weak source link lets a retained inventory detect context expiry.
 struct FaultBarrierRecord {
@@ -49,20 +45,22 @@ FailureOr<DropBarrierSelection> select_drop_barrier(const FaultBarrierInventory 
   error = {};
   const std::shared_ptr<const FaultBarrierRecord> &record = inventory.record_;
   if (!record || record->source.expired())
-    return reject(error, FaultMutationErrorCode::BadIdentity, "expired or unbound inventory");
+    return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                 "expired or unbound inventory");
   // TODO(hanchung): Add a better barrier-selection heuristic while preserving explicit selection
   // and reproducibility.
   if (selector.exact) {
     if (selector.exact->record_.lock() != record)
-      return reject(error, FaultMutationErrorCode::BadIdentity,
-                    "exact selector belongs to another source or kernel");
+      return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                   "exact selector belongs to another source or kernel");
     return *selector.exact;
   }
   if (record->barriers.empty())
-    return reject(error, FaultMutationErrorCode::NoCandidates, "no complete qualified barriers");
+    return reject_fault_mutation(error, FaultMutationErrorCode::NoCandidates,
+                                 "no complete qualified barriers");
   if (selector.ordinal >= record->barriers.size())
-    return reject(error, FaultMutationErrorCode::OrdinalOutOfRange,
-                  "logical barrier ordinal out of range");
+    return reject_fault_mutation(error, FaultMutationErrorCode::OrdinalOutOfRange,
+                                 "logical barrier ordinal out of range");
   DropBarrierSelection selection;
   selection.owner_ = record->owner;
   selection.barrier_ = record->barriers[selector.ordinal];
@@ -146,7 +144,7 @@ FailureOr<FaultBarrierInventory> discover_drop_barriers(const FaultMutationConte
   // Preserve header and recipe-policy error precedence before structural analysis.
   const std::span<const uint8_t> image = context.image();
   Elf64_Ehdr header = {};
-  if (validate_source_header(image, header, error).failed())
+  if (validate_fault_mutation_source_header(image, header, error).failed())
     return Result::failure();
   const rj_code_target_id_t target = context.source().target_id();
   const IsaTargetRegistry &registry = default_isa_target_registry();
@@ -155,8 +153,9 @@ FailureOr<FaultBarrierInventory> discover_drop_barriers(const FaultMutationConte
   if (!target_facts || !binding || !static_barrier_policy(target, registry) ||
       (header.e_flags & EF_AMDGPU_MACH) != binding->elf_machine ||
       (header.e_flags & ~uint32_t{0xfff}) != 0)
-    return reject(error, FaultMutationErrorCode::UnsupportedTarget,
-                  "requires a registered complete-barrier target with matching ELF flags");
+    return reject_fault_mutation(
+        error, FaultMutationErrorCode::UnsupportedTarget,
+        "requires a registered complete-barrier target with matching ELF flags");
   const FailureOr<const FaultSourceFacts *> facts = context.source_facts(entry, error);
   if (facts.failed())
     return Result::failure();
@@ -169,13 +168,13 @@ FailureOr<FaultBarrierInventory> discover_drop_barriers(const FaultMutationConte
         return record->owner.entry == entry;
       });
   if (matches > 1)
-    return reject(error, FaultMutationErrorCode::AmbiguousSelection,
-                  "exact entry name identifies multiple descriptors");
+    return reject_fault_mutation(error, FaultMutationErrorCode::AmbiguousSelection,
+                                 "exact entry name identifies multiple descriptors");
   if (entry.empty() || matches == 0) {
     std::string message = "entry must match one exact kernel name; descriptor entries:";
     for (const std::shared_ptr<const FaultBarrierRecord> &record : kernels)
       message += " " + record->owner.entry;
-    return reject(error, FaultMutationErrorCode::BadIdentity, std::move(message));
+    return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity, std::move(message));
   }
   const std::shared_ptr<const FaultBarrierRecord> record = *std::ranges::find_if(
       kernels, [&](const std::shared_ptr<const FaultBarrierRecord> &candidate) {
@@ -195,8 +194,8 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
                                                 FaultMutationError &error) {
   error = {};
   if (!selection.belongs_to(context))
-    return reject(error, FaultMutationErrorCode::BadIdentity,
-                  "selection belongs to another or expired source context");
+    return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
+                                 "selection belongs to another or expired source context");
   const std::shared_ptr<const FaultBarrierRecord> record = selection.record_.lock();
   // Only selection can bind the private record and validated ordinal. The matching
   // live context retains that immutable record throughout apply.
@@ -213,8 +212,8 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
   std::unique_ptr<Instrumentor> instrumentor = std::move(fork).value();
   const FailureOr<uint32_t> encoded_nop = build_s_nop(0, target->family);
   if (encoded_nop.failed())
-    return reject(error, FaultMutationErrorCode::UnsupportedTarget,
-                  "target cannot encode the Drop replacement NOP");
+    return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedTarget,
+                                 "target cannot encode the Drop replacement NOP");
   const uint32_t nop = encoded_nop.value();
   for (const StaticBarrierMember &member : barrier.members) {
     InstructionReplacement replacement = {.expected_bytes = member.bytes,
@@ -230,7 +229,7 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
   }
   InstrumentedCodeObject applied = instrumentor->patch();
   if (applied.edit_error) {
-    error = translate_edit_error(*applied.edit_error);
+    error = translate_fault_mutation_edit_error(*applied.edit_error);
     return Result::failure();
   }
   if (!applied.errors.empty()) {
@@ -240,7 +239,8 @@ FailureOr<DropBarrierResult> apply_drop_barrier(const FaultMutationContext &cont
         message += "; ";
       message += diagnostic;
     }
-    return reject(error, FaultMutationErrorCode::ValidationFailure, std::move(message));
+    return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
+                                 std::move(message));
   }
   DropBarrierResult result = {
       .selection = selection,

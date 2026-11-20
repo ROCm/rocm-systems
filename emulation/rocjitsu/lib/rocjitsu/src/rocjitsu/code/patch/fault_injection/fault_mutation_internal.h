@@ -31,14 +31,10 @@ public:
   std::unique_ptr<Instrumentor> instrumentor;
 };
 
-namespace fault_mutation_detail {
-
-Result reject(FaultMutationError &error, FaultMutationErrorCode code, std::string message,
-              uint64_t offset = 0);
-Result validate_source_header(std::span<const uint8_t> image, Elf64_Ehdr &header,
-                              FaultMutationError &error);
-FaultMutationError translate_edit_error(const TextEditError &edit);
-
-} // namespace fault_mutation_detail
+Result reject_fault_mutation(FaultMutationError &error, FaultMutationErrorCode code,
+                             std::string message, uint64_t offset = 0);
+Result validate_fault_mutation_source_header(std::span<const uint8_t> image, Elf64_Ehdr &header,
+                                             FaultMutationError &error);
+FaultMutationError translate_fault_mutation_edit_error(const TextEditError &edit);
 
 } // namespace rocjitsu
