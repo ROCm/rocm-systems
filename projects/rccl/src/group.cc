@@ -859,14 +859,43 @@ static void ncclGroupSymmetricJobFree(void* _job) {
   delete job;
 }
 
+// The bootstrap consensus that requires sibling local ranks to prepare concurrently is reached
+// only when the first symmetric kernel can actually be selected. Checking communicator capability
+// alone creates and joins one host thread per local rank for every ordinary collective.
+static bool ncclPlannerMayInitializeSymmetric(struct ncclComm* comm) {
+  if (comm->symkState.initialized) return false;
+  for (struct ncclTaskColl* task = comm->planner.collSorter.head; task != nullptr; task = task->next) {
+    if (task->symkExtract == RCCL_SYMK_EXTRACT_DENY) continue;
+    int tuningFunc = ncclTuningFuncIndex(task->func);
+    if (tuningFunc < 0) continue;
+    // A global forced selection wins over the per-call mask, but the tuning
+    // context still records which implementations that override enabled.
+    uint64_t effAlgMask = comm->tuningContext.forced[tuningFunc] ? 0 : task->algMask;
+    bool symTuningEnabled = false;
+    for (int i = NCCL_TUNING_SYM_KERNEL_ID_OFFSET; i < NCCL_TUNING_CE_METHOD_ID_OFFSET; i++) {
+      uint64_t bit = 1ULL << i;
+      if (comm->tuningContext.enabled[i][tuningFunc] && (effAlgMask == 0 || (effAlgMask & bit))) {
+        symTuningEnabled = true;
+        break;
+      }
+    }
+    if (!symTuningEnabled) continue;
+    ncclDevRedOp_t symkOp = task->opHost == ncclAvg ? ncclDevSumPostDiv : task->opDev.op;
+    if (ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count)) return true;
+  }
+  return false;
+}
+
 static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
-  // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
-  // When this process owns multiple ranks, prepare them concurrently so the
-  // first rank cannot block before its sibling ranks enter the same consensus.
+  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  // Concurrent prepare is needed only while a queued task can still trigger the first symk init consensus.
+  // When this process owns multiple ranks, prepare them concurrently so the first rank cannot
+  // block before its sibling ranks enter the same consensus.
   bool const needsConcurrentSymmetricPrepare =
-    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
+    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique &&
+    ncclPlannerMayInitializeSymmetric(comm);
   if (needsConcurrentSymmetricPrepare) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);

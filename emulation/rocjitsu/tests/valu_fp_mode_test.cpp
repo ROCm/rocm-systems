@@ -90,10 +90,12 @@ struct ArithmeticCase {
 
 void PrintTo(const ArithmeticCase &test, std::ostream *stream) { *stream << test.name; }
 
-// RDNA arithmetic uses rj-arith's default-host contract. Other architectures
+// Migrated arithmetic uses rj-arith's default-host contract. Other architectures
 // retain their explicit legacy host-isolation cases.
 bool uses_default_host_controls(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+         arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 // Select default host controls while allowing ordinary arithmetic to raise sticky flags.
@@ -1370,15 +1372,39 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
     rj_code_arch_t arch;
     uint32_t word;
   };
-  // V_MUL_LEGACY_F32 on CDNA4, V_MUL_DX9_ZERO_F32 on RDNA3/4 and CDNA5.
-  for (const MulArch &architecture : {MulArch{ROCJITSU_CODE_ARCH_CDNA4, 0xd2a10006u},
+  // V_MUL_LEGACY_F32 on CDNA3/4, V_MUL_DX9_ZERO_F32 on RDNA3/4 and CDNA5.
+  for (const MulArch &architecture : {MulArch{ROCJITSU_CODE_ARCH_CDNA3, 0xd2a10006u},
+                                      MulArch{ROCJITSU_CODE_ARCH_CDNA4, 0xd2a10006u},
                                       MulArch{ROCJITSU_CODE_ARCH_RDNA3, 0xd5070006u},
                                       MulArch{ROCJITSU_CODE_ARCH_RDNA4, 0xd5070006u},
                                       MulArch{ROCJITSU_CODE_ARCH_CDNA5, 0xd5070006u}}) {
+    if (architecture.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
+        architecture.arch == ROCJITSU_CODE_ARCH_CDNA4 ||
+        architecture.arch == ROCJITSU_CODE_ARCH_CDNA5) {
+      struct Sample {
+        const char *name;
+        uint32_t a, b, expected;
+      };
+      // Inherited legacy MUL quiets NaNs even without IEEE mode and flushes
+      // after rounding, so promotion to minimum normal survives output flushing.
+      for (const auto &sample :
+           {Sample{"ZeroInfinity", 0, 0x7f800000U, 0},
+            Sample{"QuietNan", 0x7f812345U, 0x3f800000U, 0x7fc12345U},
+            Sample{"NormalPromotion", 0x00800000U, 0x3f7fffffU, 0x00800000U}}) {
+        cases.push_back({"MulArch" + std::to_string(architecture.arch) + sample.name,
+                         architecture.arch,
+                         {architecture.word, 0x00020300U},
+                         {{0, sample.a}, {1, sample.b}},
+                         {{6, sample.expected}},
+                         0,
+                         FE_TONEAREST});
+      }
+    }
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
       for (bool negative : {false, true}) {
         for (bool clamp : {false, true}) {
-          for (int host_rounding : {FE_TONEAREST, FE_TOWARDZERO}) {
+          // Migrated arithmetic assumes the default host FP environment.
+          for (int host_rounding : {FE_TONEAREST}) {
             const uint32_t sign = negative ? 0x80000000u : 0u;
             const bool infinity =
                 rounding == 0 || (rounding == 1 && !negative) || (rounding == 2 && negative);
@@ -1393,10 +1419,7 @@ std::vector<ArithmeticCase> modifier_environment_cases() {
                              {{0, sign | 0x7f7fffffu}, {1, 0x3f800000u}},
                              {{6, expected}},
                              rounding,
-                             (architecture.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                              architecture.arch == ROCJITSU_CODE_ARCH_RDNA4)
-                                 ? FE_TONEAREST
-                                 : (host_rounding)});
+                             host_rounding});
           }
         }
       }
@@ -4839,9 +4862,6 @@ std::vector<DotLane> dot_family_lanes() {
                        uint32_t src1, uint32_t acc, uint32_t gfx1201,
                        std::optional<uint32_t> gfx1100, std::vector<uint32_t> modes,
                        SimdPathExpectation simd = {}) {
-    if (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
-        simd.path == amdgpu::SimdFastPath::VOP3P_DOT_INT)
-      simd = expect_simd_fallback();
     lanes.push_back(
         {name, opcode, modifiers, {src0, src1, acc}, gfx1201, gfx1100, std::move(modes), simd});
   };
@@ -4936,41 +4956,40 @@ std::vector<DotLane> dot_family_lanes() {
       0xc8bff16cu, {}, fp8_modes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
-  // These lanes must also take the integer DOT SIMD path.
+  // Library backends are checked by the direct arithmetic CPU-level tests.
   const uint16_t dot4_iu8 = rdna4::kVDot4I32Iu8Vop3p;
   const uint16_t dot4_u8 = rdna4::kVDot4U32U8Vop3p;
   const uint16_t dot8_iu4 = rdna4::kVDot8I32Iu4Vop3p;
   const uint16_t dot8_u4 = rdna4::kVDot8U32U4Vop3p;
   const std::vector<uint32_t> int_modes{0xf0u, 0x00u};
-  const SimdPathExpectation int_simd = expect_simd_path(amdgpu::SimdFastPath::VOP3P_DOT_INT);
   add("Dot4Iu8HighHalfSrc0", dot4_iu8, {.opsel = 1}, 0x32bf5f5eu, 0xf9c54f6bu, 0x00b85d08u,
-      0x00b97fe8u, 0x00b97fe8u, int_modes, int_simd);
+      0x00b97fe8u, 0x00b97fe8u, int_modes);
   add("Dot4Iu8LowHalves", dot4_iu8, {.opsel_hi = 0}, 0xe9d6d2a3u, 0xffffffefu, 0x00000031u,
-      0x0002d2e7u, 0x0002d2e7u, int_modes, int_simd);
+      0x0002d2e7u, 0x0002d2e7u, int_modes);
   add("Dot4U8LowHalves", dot4_u8, {.opsel_hi = 0}, 0x2e1ae63eu, 0x14771051u, 0x00dc74cbu,
-      0x00dcb8c7u, 0x00dcb8c7u, int_modes, int_simd);
+      0x00dcb8c7u, 0x00dcb8c7u, int_modes);
   add("Dot8Iu4HighHalfSrc0", dot8_iu4, {.opsel = 1}, 0x8d7fb53du, 0x64aeeb2fu, 0x5385deddu,
-      0x5385e247u, 0x5385e247u, int_modes, int_simd);
+      0x5385e247u, 0x5385e247u, int_modes);
   add("Dot8Iu4LowHalves", dot8_iu4, {.opsel_hi = 0}, 0x041e0e34u, 0x3f5b683eu, 0xb7a86fa9u,
-      0xb7a8710bu, 0xb7a8710bu, int_modes, int_simd);
+      0xb7a8710bu, 0xb7a8710bu, int_modes);
   add("Dot8U4LowHalves", dot8_u4, {.opsel_hi = 0}, 0xfffffffdu, 0x00000c75u, 0xffffd984u,
-      0xffffdc40u, 0xffffdc40u, int_modes, int_simd);
+      0xffffdc40u, 0xffffdc40u, int_modes);
   // Selection combined with signedness and CLAMP: the selected elements are
   // negative and C is near the limit, so each modifier changes the result.
   add("Dot4Iu8HighHalfSrc1SignedClamp", dot4_iu8, {.neg = 2, .opsel = 2, .clamp = 1}, 0x7f7f8080u,
-      0x88887777u, 0x800002cfu, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x88887777u, 0x800002cfu, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4Iu8HighHalfSrc0SignedClamp", dot4_iu8, {.neg = 3, .opsel = 1, .clamp = 1}, 0xffff8000u,
-      0x7fffffffu, 0x80000000u, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x7fffffffu, 0x80000000u, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4Iu8MixedHalvesSigned", dot4_iu8, {.neg = 3, .opsel_hi = 2}, 0x7fffffffu, 0xffffffffu, 0u,
-      0x00000004u, 0x00000004u, int_modes, int_simd);
+      0x00000004u, 0x00000004u, int_modes);
   add("Dot8Iu4HighHalfSrc1SignedClamp", dot8_iu4, {.neg = 2, .opsel = 2, .clamp = 1}, 0x88887777u,
-      0x88887777u, 0x80000059u, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x88887777u, 0x80000059u, 0x80000000u, 0x80000000u, int_modes);
   add("Dot8Iu4LowHalvesSignedClamp", dot8_iu4, {.neg = 1, .opsel_hi = 0, .clamp = 1}, 0x77778888u,
-      0x7f807f80u, 0x8000014eu, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x7f807f80u, 0x8000014eu, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4U8HighHalfSrc0Clamp", dot4_u8, {.opsel = 1, .clamp = 1}, 0x80000000u, 0xffffffffu,
-      0xffff8000u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
+      0xffff8000u, 0xffffffffu, 0xffffffffu, int_modes);
   add("Dot8U4LowHalvesClamp", dot8_u4, {.opsel_hi = 0, .clamp = 1}, 0x0bffe1c2u, 0x00000015u,
-      0xffffffe8u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
+      0xffffffe8u, 0xffffffffu, 0xffffffffu, int_modes);
   return lanes;
 }
 
@@ -5421,11 +5440,8 @@ SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool fo
 void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
                             bool uses_arith = false, amdgpu::ArithmeticPolicy policy = {}) {
   uses_arith = test.arith_host_contract || (uses_arith && uses_default_host_controls(test.arch));
-  const int host_rounding = test.host_rounding;
-  if (uses_arith) {
-    ASSERT_EQ(host_rounding, FE_TONEAREST) << test.name;
-    ASSERT_EQ(test.mxcsr_bits & test.mxcsr_mask & ~0x3fu, 0x1f80u & test.mxcsr_mask) << test.name;
-  }
+  // Migrated handlers assume default host controls; guest MODE remains unchanged.
+  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
@@ -5467,7 +5483,8 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
 #if RJ_HOST_ARCH_X86
     // Sticky flags from earlier tests must not hide exception-state leaks.
     const uint32_t host_mxcsr =
-        (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
+        uses_arith ? 0x1f80u | (test.mxcsr_bits & _MM_EXCEPT_MASK)
+                   : (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
     _mm_setcsr(host_mxcsr);
 #endif
     const int initial_rounding = std::fegetround();
@@ -5483,6 +5500,7 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
     if (uses_arith) {
       // Arithmetic may raise sticky flags, but must leave host controls unchanged.
       EXPECT_EQ(restored_mxcsr & ~_MM_EXCEPT_MASK, host_mxcsr & ~_MM_EXCEPT_MASK);
+      EXPECT_EQ(restored_mxcsr & host_mxcsr & _MM_EXCEPT_MASK, host_mxcsr & _MM_EXCEPT_MASK);
     } else if (test.mxcsr_mask != 0) {
       EXPECT_EQ(restored_mxcsr, host_mxcsr);
     }
