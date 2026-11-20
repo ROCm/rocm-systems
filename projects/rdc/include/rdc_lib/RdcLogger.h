@@ -23,19 +23,24 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_RDCLOGGER_H_
 #include <chrono>  // NOLINT
 #include <iostream>
+#include <mutex>
+#include <sstream>
 #include <string>
 
 #define RDC_ERROR 0
 #define RDC_INFO 1
 #define RDC_DEBUG 2
 
-#define RDC_LOG(debug_level, msg)                                                             \
-  do {                                                                                        \
-    auto& logger = amd::rdc::RdcLogger::getLogger();                                          \
-    if (logger.should_log((debug_level))) {                                                   \
-      logger.get_ostream() << logger.get_log_header((debug_level), __FILE__, __LINE__) << msg \
-                           << std::endl;                                                      \
-    }                                                                                         \
+// The line is composed apart and written in one call, so that lines from concurrent threads
+// do not run into each other.
+#define RDC_LOG(debug_level, msg)                                                              \
+  do {                                                                                         \
+    auto& logger = amd::rdc::RdcLogger::getLogger();                                           \
+    if (logger.should_log((debug_level))) {                                                    \
+      std::ostringstream rdc_log_line;                                                         \
+      rdc_log_line << logger.get_log_header((debug_level), __FILE__, __LINE__) << msg << '\n'; \
+      logger.write_line(rdc_log_line.str());                                                   \
+    }                                                                                          \
   } while (0)
 
 namespace amd {
@@ -55,9 +60,16 @@ class RdcLogger {
 
   std::string get_log_header(uint32_t severity, const char* file, int line);
 
+  // Writes a whole line, with its newline, and flushes; safe to call from several threads.
+  void write_line(const std::string& line) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    os_ << line << std::flush;
+  }
+
  private:
   std::ostream& os_;
   uint32_t log_level_;
+  std::mutex mutex_;
 };
 
 }  // namespace rdc
