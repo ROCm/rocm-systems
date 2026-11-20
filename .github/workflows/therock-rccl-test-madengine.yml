@@ -374,7 +374,8 @@ jobs:
               exit 0 ;;
           esac
           echo "Releasing SLURM job ${name}"
-          scancel --me --name "${name}" || echo "::warning::scancel --name ${name} failed"
+          # --user rather than --me, which SPUR's scancel lacks.
+          scancel --user "$(id -un)" --name "${name}" || echo "::warning::scancel --name ${name} failed"
 
       - name: Upload results
         if: always()

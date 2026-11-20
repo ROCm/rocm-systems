@@ -96,8 +96,10 @@ OVERLAY_LIBS = {CANDIDATE: "rccl_libs", BASELINE: "rccl_libs_baseline"}
 SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
 
 # Must not predate ROCm/madengine#213: the A/B runs madengine inside salloc.
+# Nor #246: before it every container got --cap-add SYS_ADMIN, which
+# docker-authz on Crusoe refuses.
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
-MADENGINE_REF = "00ee3e80c0a308599633caf74e5d91a72164a2fe"  # develop, has #190 and #213
+MADENGINE_REF = "32b9f30a609be88020a7083097700541a158d451"  # develop, has #190, #213 and #246
 MAD_REPO = "https://github.com/ROCm/MAD.git"
 MAD_REF = "36339bd825f9c3772e35a54adfeba9635d6765da"  # mad-rccl, has MAD#279, #280 and #284
 MAD_BRANCH = "mad-rccl"
@@ -431,6 +433,39 @@ CLUSTER_CONFIGS = {
         "results_base": "/apps/rccl-ci/madengine/perf",
         # Mounted read-only at /models for the inference workloads.
         "models_dir": "/apps/data/models",
+    },
+    "crusoe": {
+        "gpu_target": "gfx950",
+        "scheduler": "spur",
+        "slurm_partition": "amd-spur-v2",
+        "slurm_qos": "amd-collectives-qos",
+        "slurm_account": "amd-collectives",
+        "slurm_no_gres": False,
+        # The images' own rdma-core carries the ionic provider.
+        "mount_host_ib_libs": False,
+        # The nodes' docker-authz plugin refuses the whole run over either one.
+        "docker_run_options_denied": ["--privileged", "-v /run/udev:/run/udev:ro"],
+        "nccl_env": {
+            "NCCL_NET": "IB",
+            "NCCL_IB_DISABLE": "0",
+            "NCCL_IB_HCA": "ionic_0:1,ionic_1:1,ionic_2:1,ionic_3:1,ionic_4:1,ionic_5:1,ionic_6:1,ionic_7:1",
+            "NCCL_IB_GID_INDEX": "1",
+            "NCCL_SOCKET_IFNAME": "ens3",
+            "NCCL_DEBUG": "WARN",
+            "NCCL_NET_PLUGIN": "none",
+            "RCCL_AINIC_ROCE": "1",
+            "RCCL_FORCE_ENABLE_DMABUF": "1",
+            "NCCL_DMABUF_ENABLE": "1",
+            "NCCL_NET_GDR_LEVEL": "SYS",
+            "RDMAV_DRIVERS": "ionic",
+            "IBV_DRIVERS": "ionic",
+            # HIP init narrows the process CPU mask to cores 0-7 on these
+            # 236-vCPU VMs, and RCCL pins every rank's threads there: 2N
+            # bus bandwidth falls from 56 to 2.4 GB/s.
+            "NCCL_IGNORE_CPU_AFFINITY": "1",
+        },
+        "results_base": "/shared_nfs/mad/rccl-ci/madengine/perf",
+        "models_dir": "/shared_nfs/mad/data/models",
     },
 }
 
@@ -1618,6 +1653,9 @@ def generate_manifest(
 
     docker_mounts = dict(workload_config.get("docker_mounts", {}))
     docker_run_opts = workload_config.get("docker_run_options", "")
+    for denied in cluster_config.get("docker_run_options_denied", ()):
+        docker_run_opts = " ".join(re.sub(
+            rf"(?:^|\s){re.escape(denied)}(?=\s|$)", " ", docker_run_opts).split())
 
     # Mount the host's rdma-core stack into the container.
     # The host's libibverbs has a compiled-in provider search path of
@@ -2264,10 +2302,14 @@ def run_ab_in_one_allocation(
     job_name = f"rccl-ab-{workload_name}-{run_tag}"
     (work_dir / "allocation.name").write_text(job_name + "\n")
 
-    cmd = [
-        "salloc",
-        "--nodes", str(nodes),
-        "--ntasks-per-node", "1",
+    # SPUR's salloc has no --ntasks-per-node (it starts one task per node
+    # anyway), binds no GPUs unless asked to, and takes no command: it runs
+    # what its shell reads on stdin.
+    spur = cluster_config.get("scheduler") == "spur"
+    cmd = ["salloc", "--nodes", str(nodes)]
+    if not spur:
+        cmd += ["--ntasks-per-node", "1"]
+    cmd += [
         "--exclusive",
         "--partition",
         cluster_config.get("slurm_partition", workload_config["slurm_partition"]),
@@ -2277,6 +2319,11 @@ def run_ab_in_one_allocation(
     qos = cluster_config.get("slurm_qos", "")
     if qos:
         cmd += ["--qos", qos]
+    account = cluster_config.get("slurm_account", "")
+    if account:
+        cmd += ["--account", account]
+    if spur:
+        cmd += ["--gpus-per-node", str(workload_config["gpus_per_node"])]
     # Set from a repository variable by the workflow: the nodes to avoid are
     # the cluster's business and their names do not belong in this file.
     exclude = os.environ.get("MADENGINE_SLURM_EXCLUDE", "").strip()
@@ -2286,9 +2333,15 @@ def run_ab_in_one_allocation(
                 f"MADENGINE_SLURM_EXCLUDE is not a SLURM hostlist: {exclude!r}"
             )
         cmd += ["--exclude", exclude]
-    cmd += ["bash", str(script_path)]
+    shell_input = None
+    if spur:
+        shell_input = f"exec bash {shlex.quote(str(script_path))}\n"
+    else:
+        cmd += ["bash", str(script_path)]
 
     log.info("Running: %s", " ".join(cmd))
+    if shell_input:
+        log.info("  its shell reads: %s", shell_input.strip())
     log.info("Phases: %s", ", ".join(p for p, _ in phases))
     log.info("Timeout: %d minutes (includes time spent queueing)", timeout_minutes)
 
@@ -2308,7 +2361,11 @@ def run_ab_in_one_allocation(
 
     # Own process group: killing salloc alone leaves run_phases.sh and its
     # madengine/srun children running on the allocation.
-    proc = subprocess.Popen(cmd, cwd=work_dir, env=env, start_new_session=True)
+    proc = subprocess.Popen(cmd, cwd=work_dir, env=env, start_new_session=True,
+                            stdin=subprocess.PIPE if shell_input else None, text=True)
+    if shell_input:
+        proc.stdin.write(shell_input)
+        proc.stdin.close()
 
     def release_allocation(reason: str) -> None:
         """Give the nodes back: cancel the job, then kill the whole group.
@@ -2322,8 +2379,10 @@ def run_ab_in_one_allocation(
         try:
             # By name, not by the id in allocation.txt: the name also reaches
             # a request that is still queued, which has no id there yet.
+            # --user rather than --me, which SPUR's scancel lacks.
+            user = pwd.getpwuid(os.getuid()).pw_name
             try:
-                subprocess.run(["scancel", "--me", "--name", job_name], timeout=60)
+                subprocess.run(["scancel", "--user", user, "--name", job_name], timeout=60)
             except (OSError, subprocess.SubprocessError) as exc:
                 log.warning("scancel --name %s failed: %s", job_name, exc)
         finally:

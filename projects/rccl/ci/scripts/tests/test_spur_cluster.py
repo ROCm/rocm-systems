@@ -1,0 +1,127 @@
+"""Tests for running test_madengine.py on Crusoe, a SPUR cluster.
+
+Run from projects/rccl/ci/scripts:  python3 -m unittest discover -s tests
+"""
+
+import json
+import os
+import pwd
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+sys.path.insert(0, os.fspath(Path(__file__).resolve().parent.parent))
+import test_madengine as tm
+
+WORKLOAD = "llama-3.1-70b-training"
+CONFIG = tm.WORKLOAD_CONFIGS[WORKLOAD]
+RUBY = tm.CLUSTER_CONFIGS["ruby"]
+CRUSOE = tm.CLUSTER_CONFIGS["crusoe"]
+
+
+class TempWork(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.work = Path(tmp.name) / "work"
+        (self.work / "scripts" / "primus_megatron-lm").mkdir(parents=True)
+
+    def manifest(self, cluster: dict) -> dict:
+        path = tm.generate_manifest(WORKLOAD, CONFIG, cluster, "img", 2, self.work)
+        return json.loads(path.read_text())
+
+
+class ManifestTest(TempWork):
+    def test_docker_authz_refused_options_dropped(self):
+        opts = self.manifest(CRUSOE)["built_models"]["overlay"][
+            "additional_docker_run_options"]
+        self.assertNotIn("--privileged", opts)
+        self.assertNotIn("/run/udev", opts)
+        for kept in ("--group-add render", "--device=/dev/infiniband",
+                     "--cap-add IPC_LOCK", "--ulimit memlock=-1", "-v /sys:/sys:ro"):
+            self.assertIn(kept, opts)
+        self.assertNotIn("libibverbs", opts, "the image's own rdma-core must win")
+        self.assertNotIn("  ", opts)
+
+    def test_ruby_options_unchanged(self):
+        opts = self.manifest(RUBY)["built_models"]["overlay"][
+            "additional_docker_run_options"]
+        self.assertTrue(opts.startswith(CONFIG["docker_run_options"]), opts)
+
+    def test_denied_options_cover_every_workload(self):
+        for name, config in tm.WORKLOAD_CONFIGS.items():
+            rest = config.get("docker_run_options", "")
+            for denied in CRUSOE["docker_run_options_denied"]:
+                rest = rest.replace(denied, "")
+            self.assertNotIn("--privileged", rest, name)
+            self.assertNotIn("/run/udev", rest, name)
+
+    def test_rccl_env(self):
+        m = self.manifest(CRUSOE)
+        for env in (m["context"]["docker_env_vars"], m["deployment_config"]["env_vars"]):
+            self.assertEqual(env["NCCL_IB_HCA"].split(","),
+                             [f"ionic_{i}:1" for i in range(8)])
+            self.assertEqual(env["NCCL_IB_GID_INDEX"], "1")
+            self.assertEqual(env["NCCL_IGNORE_CPU_AFFINITY"], "1")
+            self.assertEqual(env["GLOO_SOCKET_IFNAME"], "ens3")
+
+
+class AllocationTest(TempWork):
+    def run_allocation(self, cluster: dict, timeout: bool = False) -> mock.MagicMock:
+        popen = mock.MagicMock()
+        if timeout:
+            popen.return_value.wait.side_effect = [
+                subprocess.TimeoutExpired("salloc", 60), 0]
+        else:
+            popen.return_value.wait.return_value = 0
+        self.subprocess_run = mock.MagicMock()
+        phases = [(tm.BASELINE, self.work / "ab" / tm.BASELINE)]
+        with mock.patch.dict(os.environ, {"MADENGINE_SLURM_EXCLUDE": ""}), \
+                mock.patch.object(tm.subprocess, "Popen", popen), \
+                mock.patch.object(tm.subprocess, "run", self.subprocess_run), \
+                mock.patch.object(tm.os, "killpg"):
+            tm.run_ab_in_one_allocation(
+                phases, self.work, 2, WORKLOAD, CONFIG, cluster, timeout_minutes=1)
+        return popen
+
+    @staticmethod
+    def option(cmd: list[str], name: str) -> str:
+        return cmd[cmd.index(name) + 1]
+
+    def test_spur_salloc_takes_the_script_on_stdin(self):
+        popen = self.run_allocation(CRUSOE)
+        cmd = popen.call_args.args[0]
+        script = self.work / "ab" / "run_phases.sh"
+        self.assertNotIn("--ntasks-per-node", cmd)
+        self.assertNotIn("bash", cmd)
+        self.assertEqual(self.option(cmd, "--gpus-per-node"), "8")
+        self.assertEqual(self.option(cmd, "--account"), "amd-collectives")
+        self.assertEqual(self.option(cmd, "--qos"), "amd-collectives-qos")
+        self.assertEqual(self.option(cmd, "--partition"), "amd-spur-v2")
+        self.assertEqual(popen.call_args.kwargs["stdin"], subprocess.PIPE)
+        popen.return_value.stdin.write.assert_called_once_with(f"exec bash {script}\n")
+        popen.return_value.stdin.close.assert_called_once()
+
+    def test_slurm_salloc_unchanged(self):
+        popen = self.run_allocation(RUBY)
+        cmd = popen.call_args.args[0]
+        self.assertEqual(self.option(cmd, "--ntasks-per-node"), "1")
+        self.assertEqual(cmd[-2:], ["bash", str(self.work / "ab" / "run_phases.sh")])
+        self.assertNotIn("--account", cmd)
+        self.assertNotIn("--gpus-per-node", cmd)
+        self.assertIsNone(popen.call_args.kwargs["stdin"])
+
+    def test_release_cancels_by_user_and_name(self):
+        self.run_allocation(CRUSOE, timeout=True)
+        name = (self.work / "allocation.name").read_text().strip()
+        user = pwd.getpwuid(os.getuid()).pw_name
+        scancel = [c.args[0] for c in self.subprocess_run.call_args_list
+                   if c.args[0][0] == "scancel"]
+        self.assertEqual(scancel, [["scancel", "--user", user, "--name", name]])
+
+
+if __name__ == "__main__":
+    unittest.main()
