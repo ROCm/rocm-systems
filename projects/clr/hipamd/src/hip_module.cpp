@@ -908,6 +908,10 @@ hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                                   device->info().maxGridDim_, 1, 1, 1, 1, 1, 1,
                                   false);
 
+  if (!launch_params.IsValidConfig()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, startEvent,
                                     stopEvent));
 }
