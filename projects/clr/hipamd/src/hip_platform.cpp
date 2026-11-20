@@ -118,6 +118,14 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // So this calculates how many blocks we can fit.
   const int aligned_input_size = amd::alignUp(inputBlockSize, wrkGrpInfo->wavefrontSize_);
   *maxBlocksPerCU = alu_limited_threads / aligned_input_size;
+  // Also cap by physical wavefront-slot limit: each CU can only schedule a
+  // fixed number of wavefronts, so the number of blocks per CU is bounded by
+  // floor(total_wave_slots / waves_per_block).  This ensures that cooperative
+  // launches sized from the occupancy API never exceed physical residency.
+  const uint32_t waves_per_block = aligned_input_size / wrkGrpInfo->wavefrontSize_;
+  const int wave_slot_limit_per_cu = waves_per_block > 0
+      ? static_cast<int>(alu_occupancy / waves_per_block) : INT_MAX;
+  *maxBlocksPerCU = std::min(*maxBlocksPerCU, wave_slot_limit_per_cu);
   // Unless those blocks are further constrained by LDS size.
   *maxBlocksPerCU = std::min(*maxBlocksPerCU, lds_occupancy_wgs);
 
@@ -130,8 +138,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 
   // Return optimal block size: min of ALU limit and requested size
   *bestBlockSize = std::min(alu_limited_threads, aligned_input_size);
-  // Calculate blocks per CU for full occupancy
-  const int bestBlocksPerCU = alu_limited_threads / (*bestBlockSize);
+  // Calculate blocks per CU for full occupancy, capped by wavefront-slot and LDS limits
+  int bestBlocksPerCU = alu_limited_threads / (*bestBlockSize);
+  bestBlocksPerCU = std::min(bestBlocksPerCU, wave_slot_limit_per_cu);
   const uint32_t maxCUs = (wrkGrpInfo->isWGPMode_ != device.settings().enableWgpMode_)
       ? (wrkGrpInfo->isWGPMode_
           ? device.info().maxComputeUnits_ / 2
