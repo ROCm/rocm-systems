@@ -622,6 +622,8 @@ def _workload_commands(field_ids):
         ("discovery", "-l"),
         ("dmon", "-e", ",".join(map(str, field_ids[:half])), *dmon),
         ("dmon", "-e", ",".join(map(str, field_ids[half:])), *dmon),
+        # Health watches no longer poll EEPROM_CONFIG_VALID; telemetry callers still can.
+        ("dmon", "-e", "3005", *dmon),
         ("topo", "-i", "0"),
         ("topo", "-i", "1"),
         ("link", "-l"),
