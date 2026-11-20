@@ -167,7 +167,7 @@ class Layouts:
 
 
 class PanelConfigs:
-    """The memory chart panel config of each analysis-config arch, read on first use."""
+    """The memory chart panel config of each config arch, read on first use."""
 
     _by_arch: dict[str, Optional[dict[str, Any]]] = {}
 

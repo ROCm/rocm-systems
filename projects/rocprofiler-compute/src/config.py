@@ -5,7 +5,6 @@ from pathlib import Path
 
 # NB: Creating a new module to share global vars across modules
 rocprof_compute_home = Path(__file__).resolve().parent
-analysis_configs_dir = rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
 # One directory of view files per metric library arch, read by utils/analysis_views.py.
 analysis_views_dir = rocprof_compute_home / "rocprof_compute_soc" / "views"
 # Built by tools/instruction_pipeline_generator.py, read by PC sampling analysis.
