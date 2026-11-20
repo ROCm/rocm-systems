@@ -180,6 +180,14 @@ public:
   /// Both ranges share the issuing instruction's wait and barrier lifetime.
   void attachSrc2Source(EventId id, IntervalSet sourceReads);
 
+  /// A tensor transfer whose descriptor requests it arrives at the barrier
+  /// cell at `cell` when the transfer completes (CDNA5 ISA 11.2.2), updating
+  /// the cell's 64 bits atomically. The cell shares the transfer's wait and
+  /// barrier lifetime, so the arrival takes no TENSORcnt slot of its own. A
+  /// write of the cell that is not an atomic of the cell's width races with
+  /// it until the transfer is ordered before the write.
+  void attachBarrierArrive(EventId transfer, uint32_t cell);
+
   /// True only when the complete access lies in the CU's logical LDS backing.
   bool validLdsRange(uint64_t address, uint64_t bytes) const {
     return bytes != 0 && address < ldsSizeBytes_ && bytes <= ldsSizeBytes_ - address;
@@ -306,13 +314,16 @@ private:
   bool anyCheckedLdsEvent(WaveId accessor, bool isWrite, MemoryOrderClass currentMemoryOrder,
                           int start, int end, Matches matches) const;
 
-  /// Whether `matches` holds for any LDS source-operand read that a write by
+  /// Whether `matches` holds for any attached LDS read that a write by
   /// `accessor` has to be checked against: all but the accessor's own that are
   /// ordered with the write, and another wave's that a barrier has ordered
-  /// before it. Stops at the first read for which `matches` returns true.
+  /// before it or that was handed off to the accessor. Stops at the first read
+  /// for which `matches` returns true.
+  void attachLdsRead(EventId id, IntervalSet bytes, bool barrierArrive);
+
   template <typename Matches>
-  bool anyCheckedSrc2Read(WaveId accessor, MemoryOrderClass currentMemoryOrder,
-                          Matches matches) const;
+  bool anyCheckedAttachedRead(WaveId accessor, MemoryOrderClass currentMemoryOrder,
+                              Matches matches) const;
 
   /// Whether a barrier has ordered another wave's completed event before
   /// `accessor`'s access.
@@ -405,13 +416,17 @@ private:
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
 
-  /// Events that read LDS as a source operand, scanned whole during write
-  /// validation: they are few, and stay here until they retire.
-  struct Src2Event {
+  /// LDS bytes an event reads besides its own intervals: the source operand of
+  /// an SRC2 instruction, or the barrier cell a tensor transfer arrives at.
+  /// They share the event's wait and barrier lifetime. Scanned whole during
+  /// write validation: they are few, and stay here until the event retires.
+  struct AttachedLdsRead {
     EventId id;
-    IntervalSet sourceReads;
+    IntervalSet bytes;
+    /// The bytes are a barrier cell, which the event updates atomically.
+    bool barrierArrive = false;
   };
-  std::vector<Src2Event> src2Events;
+  std::vector<AttachedLdsRead> attachedLdsReads;
 
   /// LDS write events whose LDS access is in flight (for scanning during read
   /// validation). Once the access completes the event is in its wave's

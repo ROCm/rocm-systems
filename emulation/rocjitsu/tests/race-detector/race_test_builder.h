@@ -39,6 +39,7 @@ public:
       waves_.push_back(&detector_->getWaveRaceState(w));
     }
     ended_.assign(numWaves, false);
+    tensorTransfers_.assign(numWaves, EventId{});
   }
 
   // -- Memory events --
@@ -397,8 +398,9 @@ public:
   /// Arrive at the barrier cell at `cell`, as the plugin does: the DS arrive
   /// instructions validate and register an aligned 64-bit atomic on the cell,
   /// on DSCNT in the LDS class or on ASYNCCNT in the async-load class; a tensor
-  /// transfer's arrival is validated but registers no event. `completes` says
-  /// whether the arrival changes the cell's phase.
+  /// transfer's arrival is validated and attaches the cell to the wave's
+  /// latest tensor transfer, if it has issued one since its last tensor
+  /// arrival. `completes` says whether the arrival changes the cell's phase.
   void cellArrive(int wave, int cell, BarrierCellArrival kind, bool completes) {
     const bool tensor = kind == BarrierCellArrival::Tensor;
     const bool ds = kind == BarrierCellArrival::Ds;
@@ -413,7 +415,10 @@ public:
     // An arrival updates the cell atomically: it is checked as a read, against
     // writes of the cell, and never against reads of it.
     detector_->validateRead(cell, WaveId{wave}, lane, kBarrierCellBytes, order, kBarrierCellBytes);
-    if (!tensor) {
+    if (tensor) {
+      if (const EventId transfer = std::exchange(tensorTransfers_[wave], {}); transfer.isValid())
+        detector_->attachBarrierArrive(transfer, static_cast<uint32_t>(cell));
+    } else {
       IntervalSet intervals;
       intervals.append(cell, cell + kBarrierCellBytes);
       intervals.finalize();
@@ -585,8 +590,8 @@ private:
     }
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-    waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations,
-                                        memoryOrder);
+    tensorTransfers_[wave] = waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type,
+                                                                 ranges, obligations, memoryOrder);
   }
 
   std::unique_ptr<RaceDetector> detector_;
@@ -596,6 +601,8 @@ private:
   uint64_t defaultExec_;
   int pc_ = 0; // Auto-incrementing fake PC for event registration.
   std::vector<bool> ended_;
+  /// Each wave's latest tensor transfer that no tensor arrival has taken.
+  std::vector<EventId> tensorTransfers_;
   uint64_t nextWorkgroupGeneration_ = 0;
 };
 

@@ -94,13 +94,24 @@ void RaceDetector::indexLdsIntervals(EventId eid) {
 }
 
 void RaceDetector::attachSrc2Source(EventId id, IntervalSet sourceReads) {
-  if (sourceReads.empty())
+  attachLdsRead(id, std::move(sourceReads), /*barrierArrive=*/false);
+}
+
+void RaceDetector::attachBarrierArrive(EventId transfer, uint32_t cell) {
+  IntervalSet bytes;
+  bytes.append(static_cast<int>(cell), static_cast<int>(cell) + kBarrierCellBytes);
+  bytes.finalize();
+  attachLdsRead(transfer, std::move(bytes), /*barrierArrive=*/true);
+}
+
+void RaceDetector::attachLdsRead(EventId id, IntervalSet bytes, bool barrierArrive) {
+  if (bytes.empty())
     return;
   events_.markLdsSourceReads(id);
   const auto owner =
       events_.ldsOrder(id) == MemoryOrderClass::LDS ? events_.waveId(id) : WaveId{-1};
-  adjustByteCounts(sourceReads, byteReadCounts, +1, owner);
-  src2Events.push_back({id, std::move(sourceReads)});
+  adjustByteCounts(bytes, byteReadCounts, +1, owner);
+  attachedLdsReads.push_back({id, std::move(bytes), barrierArrive});
 }
 
 void RaceDetector::markEventWaveComplete(EventId eventId) { events_.markComplete(eventId); }
@@ -396,11 +407,15 @@ bool RaceDetector::satisfyEventWaitCounter(EventId eventId, amdgpu::WaitCounterT
 }
 
 void RaceDetector::retireLdsIntervals(EventId eventId) {
-  const auto src2 = std::ranges::find(src2Events, eventId, &Src2Event::id);
-  if (src2 != src2Events.end()) {
-    adjustByteCounts(src2->sourceReads, byteReadCounts, -1);
-    std::iter_swap(src2, src2Events.end() - 1);
-    src2Events.pop_back();
+  // An event can have both a source operand and a barrier cell attached.
+  for (size_t index = 0; index < attachedLdsReads.size();) {
+    if (attachedLdsReads[index].id != eventId) {
+      ++index;
+      continue;
+    }
+    adjustByteCounts(attachedLdsReads[index].bytes, byteReadCounts, -1);
+    std::swap(attachedLdsReads[index], attachedLdsReads.back());
+    attachedLdsReads.pop_back();
   }
   const auto &bytes = events_.ldsIntervals(eventId);
   if (!events_.hasLiveLdsIntervals(eventId))
@@ -459,15 +474,15 @@ bool RaceDetector::anyCheckedLdsEvent(WaveId accessor, bool isWrite,
 }
 
 template <typename Matches>
-bool RaceDetector::anyCheckedSrc2Read(WaveId accessor, MemoryOrderClass currentMemoryOrder,
-                                      Matches matches) const {
-  for (const Src2Event &source : src2Events) {
+bool RaceDetector::anyCheckedAttachedRead(WaveId accessor, MemoryOrderClass currentMemoryOrder,
+                                          Matches matches) const {
+  for (const AttachedLdsRead &source : attachedLdsReads) {
     const EventId id = source.id;
     if (events_.waveId(id) == accessor) {
       if (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                             events_.ldsOrder(id) == currentMemoryOrder))
         continue;
-    } else if (ordered(accessor, id)) {
+    } else if (ordered(accessor, id) || handedOffTo(accessor, id)) {
       continue;
     }
     if (matches(source))
@@ -484,19 +499,19 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
-  anyCheckedLdsEvent(wave, /*isWrite=*/false, currentMemoryOrder, addr, addr + nBytes,
-                     [&](EventId eventId) {
-    if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
-      return false;
-    // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
-        byte && !handedOffTo(wave, eventId)) {
-      raceHandler(
-          {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
-    }
-    // Report every conflicting event.
-    return false;
-  });
+  anyCheckedLdsEvent(
+      wave, /*isWrite=*/false, currentMemoryOrder, addr, addr + nBytes, [&](EventId eventId) {
+        if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
+          return false;
+        // Report a byte both accesses touch, not the start of this access.
+        if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
+            byte && !handedOffTo(wave, eventId)) {
+          raceHandler(
+              {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
+        }
+        // Report every conflicting event.
+        return false;
+      });
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
@@ -507,28 +522,33 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
     return;
   }
 
-  anyCheckedSrc2Read(wave, currentMemoryOrder, [&](const Src2Event &source) {
-    if (const auto byte = source.sourceReads.firstOverlap(addr, addr + nBytes)) {
+  anyCheckedAttachedRead(wave, currentMemoryOrder, [&](const AttachedLdsRead &source) {
+    // An atomic of the cell's width cannot interleave with an arrival.
+    if (source.barrierArrive && atomicBytes == kBarrierCellBytes)
+      return false;
+    if (const auto byte = source.bytes.firstOverlap(addr, addr + nBytes)) {
       RaceViolation violation{
           RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, source.id};
-      violation.conflictsWithSrc2Read = true;
+      (source.barrierArrive ? violation.conflictsWithBarrierArrive
+                            : violation.conflictsWithSrc2Read) = true;
       raceHandler(violation);
     }
     // Report every conflicting event.
     return false;
   });
-  anyCheckedLdsEvent(wave, /*isWrite=*/true, currentMemoryOrder, addr, addr + nBytes,
-                     [&](EventId eventId) {
-    if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
-      return false;
-    // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
-        byte && !handedOffTo(wave, eventId)) {
-      raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
-    }
-    // Report every conflicting event.
-    return false;
-  });
+  anyCheckedLdsEvent(
+      wave, /*isWrite=*/true, currentMemoryOrder, addr, addr + nBytes, [&](EventId eventId) {
+        if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
+          return false;
+        // Report a byte both accesses touch, not the start of this access.
+        if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
+            byte && !handedOffTo(wave, eventId)) {
+          raceHandler(
+              {RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
+        }
+        // Report every conflicting event.
+        return false;
+      });
 }
 
 bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
@@ -542,10 +562,12 @@ bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool is
     return false;
   // Scan the events once for the whole instruction, by the rules the per-lane
   // checks apply, so a clean access does not repeat the scan for each lane.
-  if (isWrite && anyCheckedSrc2Read(wave, currentMemoryOrder, [&](const Src2Event &source) {
-        return std::ranges::any_of(accessed, [&](const Interval &interval) {
-          return source.sourceReads.overlapsRange(interval.start, interval.end);
-        });
+  if (isWrite &&
+      anyCheckedAttachedRead(wave, currentMemoryOrder, [&](const AttachedLdsRead &source) {
+        return !(source.barrierArrive && atomicBytes == kBarrierCellBytes) &&
+               std::ranges::any_of(accessed, [&](const Interval &interval) {
+                 return source.bytes.overlapsRange(interval.start, interval.end);
+               });
       }))
     return true;
   // The fast path found a chunk with live bytes, so `accessed` is not empty.

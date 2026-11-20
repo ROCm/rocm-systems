@@ -222,10 +222,11 @@ public:
   ///   UNORDERED, since the ISA does not specify the timing of its LDS
   ///   accesses; passing TENSOR would skip conflicts with the wave's own
   ///   pending transfers.
-  void registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
-                             std::span<const LdsByteRange> ranges,
-                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                             MemoryOrderClass memoryOrder);
+  /// @returns The allocated event ID, or an invalid ID if no event was created.
+  EventId registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
+                                std::span<const LdsByteRange> ranges,
+                                std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                                MemoryOrderClass memoryOrder);
 
   /// @brief Register an event using the caller's finalized LDS intervals.
   /// @details Intervals must contain only accessed bytes within the LDS backing

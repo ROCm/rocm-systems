@@ -111,6 +111,10 @@ struct RaceWavefrontState : WavefrontState {
   };
   std::vector<LdsOperandRead> lds_operand_reads;
 
+  /// The event of the tensor transfer the wave is executing, until the
+  /// transfer's barrier arrival, if it has one, attaches its cell to it.
+  EventId tensor_transfer;
+
   struct MixedLdsAccess {
     struct Lane {
       int address;
