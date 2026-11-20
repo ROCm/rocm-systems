@@ -219,9 +219,8 @@ public:
   /// A GFX11+ wave prefetches INST_PREF_SIZE instruction-cache lines from its
   /// entry at launch, and a prefetch past the loaded code object faults. The
   /// compiler sized it for the original entry, so when the entry moves on a
-  /// GFX11 or GFX12.0 target it is lowered to the lines from the new entry's
-  /// line to the end of the code, and never raised. gfx1250 keeps the
-  /// compiler's value even when the entry moves.
+  /// GFX11+ target it is lowered to the lines from the new entry's line to the
+  /// end of the code, and never raised.
   ///
   /// @returns false if the descriptor does not fit in the image, or if the new
   /// entry is at or past @p code_end_text_offset.

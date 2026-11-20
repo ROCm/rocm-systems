@@ -19,6 +19,7 @@
 #include "rocjitsu/code/dbt/virtual_lds.h"
 #include "rocjitsu/code/dbt/waitcnt_translator.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
@@ -15050,6 +15051,77 @@ TEST(BinaryTranslatorE2E, Gfx1250PreservesSourceInstPrefSize) {
       kSourceInstPrefSize);
   EXPECT_EQ(RJ_AMDHSA_BITS_GET(target.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT),
             5u);
+}
+
+// A kernel that moves during translation gets the compiler's INST_PREF_SIZE lowered to the code
+// that follows its new entry, as on every GFX11+ target. Here A0 rewrites kernel0's WMMA into a
+// longer sequence, so kernel1 moves past the next 256-byte boundary into the last line of .text.
+// Unlike the regression above, all of kernel1's code stays inside the prefetch. The unmoved
+// kernel0 and the rest of kernel1's RSRC3 keep their values.
+TEST(BinaryTranslatorE2E, Gfx1250MovedLastKernelPrefetchesOnlyItsCode) {
+  using namespace rocjitsu::amdhsa;
+
+  constexpr auto wmma =
+      rocjitsu::cdna5::build_vop3p(rocjitsu::cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
+                                   {.vdst = 8, .src0 = 256, .src1 = 264, .src2 = 272});
+  constexpr uint32_t kGfx1250SEndpgm = 0xBFB00000u;
+  constexpr uint32_t kSourceInstPrefSize = 107u;
+  auto image = rocjitsu::test_support::make_minimal_amdgpu_elf_with_two_kernel_descriptors(
+      {wmma[0], wmma[1], kGfx1250SEndpgm});
+  rocjitsu::test_support::write_value_for_test<uint32_t>(
+      image, offsetof(rocjitsu::Elf64_Ehdr, e_flags), rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  rocjitsu::AmdGpuCodeObject layout(image.data(), image.size());
+  ASSERT_TRUE(layout.is_valid());
+  const auto *text_section = layout.text_sections().front();
+  const auto *rodata = rocjitsu::test_support::find_section(layout, ".rodata");
+  ASSERT_NE(rodata, nullptr);
+  // kernel1 enters at the s_endpgm after the WMMA.
+  rocjitsu::test_support::write_kernel_descriptor_entry_offset(
+      image.data() + rodata->sectionOffset() + sizeof(kernel_descriptor_t),
+      static_cast<int64_t>(text_section->vaddr() + sizeof(wmma)) -
+          static_cast<int64_t>(rodata->vaddr() + sizeof(kernel_descriptor_t)));
+  for (uint64_t descriptor_offset = rodata->sectionOffset();
+       descriptor_offset < rodata->sectionOffset() + 2 * sizeof(kernel_descriptor_t);
+       descriptor_offset += sizeof(kernel_descriptor_t)) {
+    auto descriptor =
+        rocjitsu::test_support::read_kernel_descriptor_for_test(image.data() + descriptor_offset);
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE,
+                       kSourceInstPrefSize);
+    RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT, 5);
+    rocjitsu::test_support::write_kernel_descriptor_for_test(image.data() + descriptor_offset,
+                                                             descriptor);
+  }
+
+  rocjitsu::AmdGpuCodeObject source(image.data(), image.size());
+  rocjitsu::BinaryTranslator translator(
+      ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+      gfx1250_revision_options(rocjitsu::ProcessorRevision::Gfx1250B0,
+                               rocjitsu::ProcessorRevision::Gfx1250A0));
+  const auto result = translator.translate(source);
+  ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
+                                                          : result.diagnostics.front().message);
+
+  rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(translated.is_valid());
+  const rocjitsu::Section *text = translated.text_sections().front();
+  const std::vector<rocjitsu::KernelDescriptorInfo> kernels =
+      rocjitsu::scan_kernel_descriptors(result.elf_bytes, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 2u);
+  for (const rocjitsu::KernelDescriptorInfo &kernel : kernels) {
+    SCOPED_TRACE(kernel.kernel_name);
+    const uint32_t rsrc3 = kernel.descriptor.compute_pgm_rsrc3;
+    EXPECT_EQ(RJ_AMDHSA_BITS_GET(rsrc3, COMPUTE_PGM_RSRC3_GFX125_NAMED_BAR_CNT), 5u);
+    if (kernel.entry_text_offset == 0) {
+      EXPECT_EQ(RJ_AMDHSA_BITS_GET(rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE),
+                kSourceInstPrefSize)
+          << "the unmoved kernel keeps the compiler's value";
+      continue;
+    }
+    ASSERT_GE(kernel.entry_text_offset, 256u) << "kernel1 moved";
+    const uint64_t entry_line = (text->vaddr() + kernel.entry_text_offset) / 128 * 128;
+    ASSERT_EQ((text->vaddr() + text->size() - entry_line + 127) / 128, 1u);
+    EXPECT_EQ(RJ_AMDHSA_BITS_GET(rsrc3, COMPUTE_PGM_RSRC3_GFX12_PLUS_INST_PREF_SIZE), 1u);
+  }
 }
 
 // Zero is a legitimate request: INST_PREF_SIZE == 0 disables the instruction preload for the
