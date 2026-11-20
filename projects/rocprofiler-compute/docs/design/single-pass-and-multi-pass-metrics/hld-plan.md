@@ -174,7 +174,7 @@ TCC: an L2 channel map can change between replays, so the counters one expressio
 
 ### Phase 2 — splitting multi-pass metrics into single-pass parts
 
-A multi-pass metric cannot fit one pass. Split it into parts whose counters each fit one pass, and write each part as a collectable: a named formula that metric formulas use as `$name`, like the built-in `$GRBM_GUI_ACTIVE_PER_XCD`. The built-in variables are collectables too. Each arch's collectables are in `analysis_configs/collectables/<arch>_collectables.yaml`; the metric library keeps the same ones in its `collectables.yaml`.
+A multi-pass metric cannot fit one pass. Split it into parts whose counters each fit one pass, and write each part as a collectable: a named formula that metric formulas use as `$name`, like the built-in `$GRBM_GUI_ACTIVE_PER_XCD`. The built-in variables are collectables too. Each arch's collectables are in its metric library's `collectables.yaml`.
 
 Analyze computes a collectable on the first pass that holds all of its counters. A metric that names counters only through collectables reads each collectable from its own pass, and combines them with the operators every formula uses:
 

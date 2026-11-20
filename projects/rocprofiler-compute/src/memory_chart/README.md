@@ -75,7 +75,7 @@ All fields are required.
 
 | Field | Meaning |
 |---|---|
-| `archs` | GPUs that use the layout, as analysis config folder names such as `gfx950` or `gfx115x`. |
+| `archs` | GPUs that use the layout, as metric library arch names such as `gfx950` or `gfx115x`. |
 | `description` | One line that says what the chart shows. |
 | `scope` | `labels` holds the two labels of the bar above the grid. `split` is the id of the block where the second label starts. |
 | `blocks` | All blocks of the chart, in any order. |
@@ -104,7 +104,7 @@ All fields are required.
 
 | Field | Meaning |
 |---|---|
-| `metric_id` | Id of the metric in panel 3 of the analysis config, such as `3.1.24`. |
+| `metric_id` | Id of the row in the memory chart view (panel 3), such as `3.1.24`. |
 | `title` | Label shown before the value. |
 | `category` | Kind of metric. It sets the color; see [Categories](#categories). |
 | `bar` | `true` draws a bar under the value. Use it only for percentages, and never in a `list` block. |
@@ -116,7 +116,7 @@ All fields are required.
 | `from` | yes | Id of the block where the arrow starts. |
 | `to` | yes | Id of the block where the arrow ends. |
 | `direction` | yes | `forward` points at `to`, `backward` points at `from`, and `both` points at both. |
-| `metric_id` | yes | Id of the metric in panel 3 of the analysis config. |
+| `metric_id` | yes | Id of the row in the memory chart view (panel 3). |
 | `title` | yes | Label shown with the value. |
 | `category` | yes | `read`, `write`, `atomic`, or `neutral`. It sets the color. |
 | `style` | yes | `inline` draws one line, such as `Read : 100`. `stacked` draws the title, the value, and the arrow on separate lines. |
