@@ -31,6 +31,48 @@ use rocddi::session::{DriverContextLifetime, Session};
 
 #[test]
 #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+fn gfx1201_code_cache_publication_contract() -> Result<(), Box<dyn Error>> {
+    let mut session = Session::new(DriverContextLifetime::Process)?;
+    let mut selected = None;
+    session.enumerate(&mut |endpoint| {
+        if endpoint
+            .gpu()
+            .is_some_and(|gpu| (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1))
+        {
+            selected = Some(endpoint);
+        }
+        Ok(())
+    })?;
+    let endpoint = selected.ok_or_else(|| io::Error::other("GFX1201 endpoint is unavailable"))?;
+    let device = session.activate(&endpoint)?;
+    let gpu = device.gpu()?;
+    let mut code = device.allocate(
+        MemoryKind::System,
+        4096,
+        4096,
+        DeviceAccess::READ | DeviceAccess::EXECUTE,
+    )?;
+    if let Err(failure) = gpu.invalidate_code_cache(
+        code.device_address(&device)?,
+        code.info().size,
+        &AtomicBool::new(false),
+    ) {
+        if failure.operands_may_be_live {
+            std::mem::forget(code);
+            std::mem::forget(device);
+            std::mem::forget(session);
+        }
+        return Err(Box::new(failure.error));
+    }
+    code.free()?;
+    drop(code);
+    drop(device);
+    session.destroy()?;
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
 fn gfx1201_kernel_queue_refresh_contract() -> Result<(), Box<dyn Error>> {
     let mut session = Session::new(DriverContextLifetime::Process)?;
     let mut selected = None;

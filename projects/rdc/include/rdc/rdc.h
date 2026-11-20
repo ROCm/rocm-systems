@@ -1054,7 +1054,8 @@ rdc_status_t rdc_connect(const char* ipAndPort, rdc_handle_t* p_rdc_handle, cons
  *  @brief Disconnect from rdcd daemon.
  *
  *  @details Disconnect from rdcd daemon, and p_rdc_handle becomes invalid
- *  after this call.
+ *  after this call. It stops the policy callbacks registered on the handle
+ *  and waits for a running one to return.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from rdc_connect().
  *
@@ -1425,9 +1426,17 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t 
  *
  *  @param[in] update_freq  How often to update fields in usec.
  *
- *  @param[in] max_keep_age How long to keep data for fields in seconds.
+ *  @param[in] max_keep_age How long to keep data for fields in seconds. 0 keeps
+ *  no samples: each is dropped soon after it arrives. See max_keep_samples for
+ *  how the limits of several watches of one field combine.
  *
- *  @param[in] max_keep_samples Maximum number of samples to keep. 0=no limit.
+ *  @param[in] max_keep_samples Maximum number of samples to keep. 0 keeps no
+ *  samples: each is dropped soon after it arrives. To keep every sample, pass a
+ *  large value, such as UINT32_MAX. When several watches cover a field, each
+ *  limit is the largest that any of them sets, also after a watch ends: a new
+ *  watch can raise a limit but not lower it until RDC stops tracking the field,
+ *  which it does only when no watch covers the field and its last update is
+ *  older than the largest max_keep_age set for it.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_CONFLICT is returned if the field group is already watched for the GPU group.
@@ -1608,6 +1617,10 @@ const char* rdc_diagnostic_result_string(rdc_diag_result_t result);
  *
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned for an unknown condition or action.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
+ *  @retval ::RDC_ST_NOT_SUPPORTED is returned if a GPU of the group cannot report
+ *  the retired pages that a ::RDC_POLICY_COND_MAX_PAGE_RETRIED condition needs.
  */
 rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_policy_t policy);
@@ -1671,7 +1684,9 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
 /**
  *  @brief Register a function to be called when policy condition is meet.
  *
- *  @details Register the RDC policy callback
+ *  @details Register the RDC policy callback. On a handle from rdc_connect(),
+ *  the callback runs on a thread that the library starts for the group. The
+ *  callback may call rdc_policy_unregister(), but not rdc_disconnect().
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1680,6 +1695,11 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
  *  @param[in] callback  The callback function to be called when condition meet.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_CONFLICT On a handle from rdc_connect(): a callback is
+ *  already registered for the group, or rdc_policy_unregister() for the group
+ *  has not returned yet.
+ *  @retval ::RDC_ST_INSUFF_RESOURCES On a handle from rdc_connect(): the
+ *  thread for the callback could not start.
  */
 rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  rdc_policy_register_callback callback);
@@ -1687,7 +1707,14 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
 /**
  *  @brief un-register a policy callback function for a conditioin.
  *
- *  @details Un-register the policy callback for a condition.
+ *  @details Un-register the policy callback for a condition. On a handle from
+ *  rdc_connect(), it waits for a running callback of the group to return.
+ *  Called from a callback, it does not wait: a callback of the group that is
+ *  running or about to run can still run after it returns, also once the
+ *  group is registered again. On a handle from rdc_start_embedded(), a check
+ *  that is already running may still call the callback after this returns,
+ *  once for each policy and GPU of the group that meets the policy's
+ *  condition.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *

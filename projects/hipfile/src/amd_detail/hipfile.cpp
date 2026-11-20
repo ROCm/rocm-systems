@@ -263,8 +263,8 @@ catch (const std::invalid_argument &) {
 catch (const FileNotRegistered &) {
     return -hipFileHandleNotRegistered;
 }
-catch (const Hip::RuntimeError &e) {
-    return -e.error;
+catch (const Hip::RuntimeError &) {
+    return -hipFileHipDriverError;
 }
 catch (...) {
     return -hipFileInternalError;

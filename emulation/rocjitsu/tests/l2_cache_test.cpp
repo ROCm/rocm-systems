@@ -4091,6 +4091,7 @@ private:
   size_t size_;
 };
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes) {
   constexpr uint32_t kVmid = 41;
   constexpr uint64_t kGpuAddress = 0x140000;
@@ -4176,6 +4177,7 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   EXPECT_EQ(retried_second, kSecondValue);
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
 }
+#endif
 
 TEST(DeviceCacheCoherenceTest, PartialL2WritebackInvalidatesCleanMemorySideCopies) {
   constexpr uint64_t kFirstAddress = 0x1000;
@@ -4258,6 +4260,7 @@ TEST(DeviceCacheCoherenceTest, PartialL2WritebackInvalidatesCleanMemorySideCopie
   EXPECT_EQ(hierarchy.physical->load<uint32_t>(kDirtyMemorySideAddress), 0x6d6d6d6du);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry) {
   constexpr uint32_t kVmid = 42;
   constexpr uint64_t kGpuAddress = 0x150000;
@@ -4334,6 +4337,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
                                            scans_before_failure.second + 1}));
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
 }
+#endif
 
 TEST(DeviceCacheCoherenceTest, FailedMemorySideEvictionRestoresDirtyVictimForRetry) {
   constexpr uint32_t kFirstVmid = 100;

@@ -50,7 +50,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_field_get_value_since(uint32_t gpu_index,
   }
 
   // TODO(bill_liu): Optimize it using the binary search
-  auto cache_values = cache_samples_ite->second;
+  const auto& cache_values = cache_samples_ite->second;
   for (auto cache_value = cache_values.begin(); cache_value != cache_values.end(); cache_value++) {
     if (cache_value->last_time >= since_time_stamp) {
       // move to next potential timestamp
@@ -87,11 +87,12 @@ rdc_status_t RdcCacheManagerImpl::evict_cache(uint32_t gpu_index, rdc_field_t fi
     return RDC_ST_NOT_FOUND;
   }
 
-  // Check max_keep_samples
+  // Check max_keep_samples: drop the oldest samples beyond the limit. The limit
+  // is below size() here, so it fits std::ptrdiff_t.
   auto& cache_values = cache_samples_ite->second;
-  int item_remove = cache_values.size() - max_keep_samples;
-  if (item_remove > 0) {
-    cache_values.erase(cache_values.begin(), cache_values.begin() + item_remove);
+  if (cache_values.size() > max_keep_samples) {
+    cache_values.erase(cache_values.begin(),
+                       cache_values.end() - static_cast<std::ptrdiff_t>(max_keep_samples));
   }
 
   // Check max_keep_age

@@ -125,10 +125,16 @@ protected:
             GTEST_SKIP() << gated;
         }
 
+        constexpr int    kBackToBackCalls = 8;
+        constexpr size_t kBackToBackCount = 1 << 20;
+
         // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
         SymBuf            sendSym;
         SymBuf            recvSym;
-        const std::string noSym = allocSymBufsSkipReason({{maxCount, &sendSym}, {maxCount * nRanks, &recvSym}});
+        SymBuf            copySym;
+        const std::string noSym = allocSymBufsSkipReason({{maxCount, &sendSym},
+                                                          {maxCount * nRanks, &recvSym},
+                                                          {kBackToBackCalls * kBackToBackCount * nRanks, &copySym}});
         if(!noSym.empty())
         {
             GTEST_SKIP() << noSym;
@@ -193,6 +199,43 @@ protected:
                 ASSERT_MPI_TRUE(ok);
             }
         }
+
+        // No sync between calls, so a launch can overlap a peer's previous one. Each call sends its own slice and
+        // its output is copied out on the stream before the next call overwrites recv.
+        uint8_t* send   = static_cast<uint8_t*>(sendSym.ptr);
+        uint8_t* recv   = static_cast<uint8_t*>(recvSym.ptr);
+        uint8_t* copies = static_cast<uint8_t*>(copySym.ptr);
+        ASSERT_MPI_EQ(hipSuccess,
+                      initializeBufferWithPattern<uint8_t>(send, kBackToBackCalls * kBackToBackCount,
+                                                           [rank](size_t i) { return agStValue(rank, i); }));
+        for(int call = 0; call < kBackToBackCalls; call++)
+        {
+            ASSERT_MPI_EQ(ncclSuccess,
+                          ncclAllGather(send + call * kBackToBackCount, recv, kBackToBackCount, ncclUint8,
+                                        getActiveCommunicator(), getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess,
+                          hipMemcpyAsync(copies + call * kBackToBackCount * nRanks, recv, kBackToBackCount * nRanks,
+                                         hipMemcpyDeviceToDevice, getActiveStream()));
+        }
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+        size_t  errIdx{};
+        uint8_t expVal{}, actVal{};
+        bool    ok = verifyBufferData<uint8_t>(
+            copies, kBackToBackCalls * kBackToBackCount * nRanks,
+            [nRanks](size_t j) {
+                const size_t call = j / (kBackToBackCount * nRanks);
+                const int    peer = static_cast<int>(j / kBackToBackCount % nRanks);
+                return agStValue(peer, call * kBackToBackCount + j % kBackToBackCount);
+            },
+            0, 0, &errIdx, &expVal, &actVal);
+        if(!ok)
+        {
+            ADD_FAILURE() << kernel << " back-to-back mismatch, call=" << errIdx / (kBackToBackCount * nRanks)
+                          << " index=" << errIdx << " expected=" << static_cast<int>(expVal)
+                          << " got=" << static_cast<int>(actVal);
+        }
+        ASSERT_MPI_TRUE(ok);
     }
 
     ncclResult_t allocSymBuf(size_t bytes, SymBuf& sb)
