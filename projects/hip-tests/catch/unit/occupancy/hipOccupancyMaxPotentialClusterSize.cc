@@ -44,12 +44,12 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation") {
   config.blockDim = {1024};
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
 
-  if (!IsOccupancyClusterRangeArch(props.gcnArchName)) {
-    HIP_SKIP_TEST("occupancy cluster range checks require gfx1250, gfx1250-strict, or gfx1251");
-  }
-
   if (!props.clusterLaunch) {
     HIP_SKIP_TEST("cluster launches are not supported on this device");
+  }
+
+  if (!IsOccupancyClusterRangeArch(props.gcnArchName)) {
+    HIP_SKIP_TEST("occupancy cluster range checks require gfx1250, gfx1250-strict, or gfx1251");
   }
 
   HIP_CHECK(
