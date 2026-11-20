@@ -409,12 +409,35 @@ __device__ __forceinline__ void issue_store_chunk(void *global_addr, const void 
 }
 
 // --- Wait primitives -------------------------------------------------------
+namespace _detail {
+// MaskType: the stage mask operand newer compilers require (0 = every stage, as before), or none.
+template <typename... MaskType>
+struct asyncmark_builtins {
+  __device__ __forceinline__ static void mark() { __builtin_amdgcn_asyncmark(MaskType{0}...); }
+
+  template <uint16_t Cnt>
+  __device__ __forceinline__ static void wait() {
+    __builtin_amdgcn_wait_asyncmark(Cnt, MaskType{0}...);
+  }
+};
+
+// Probe in a function's return type: clang asserts on AMDGPU builtin calls outside a function.
+template <typename StageMask>
+auto select_asyncmark_builtins(int)
+    -> decltype(__builtin_amdgcn_asyncmark(StageMask{}), asyncmark_builtins<StageMask>{});
+
+template <typename StageMask>
+asyncmark_builtins<> select_asyncmark_builtins(long);
+
+using asyncmark_builtins_t = decltype(select_asyncmark_builtins<unsigned int>(0));
+}  // namespace _detail
+
 // Tile-granular: one mark per issued tile.
-__device__ __forceinline__ void mark() { __builtin_amdgcn_asyncmark(); }
+__device__ __forceinline__ void mark() { _detail::asyncmark_builtins_t::mark(); }
 
 template <uint16_t Cnt>
 __device__ __forceinline__ void wait_mark() {
-  __builtin_amdgcn_wait_asyncmark(Cnt);
+  _detail::asyncmark_builtins_t::template wait<Cnt>();
 }
 
 // Op-granular: waits until at most Cnt async ops are in flight (Cnt immediate).
