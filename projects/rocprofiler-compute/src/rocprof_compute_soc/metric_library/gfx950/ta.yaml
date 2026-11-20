@@ -21,5 +21,5 @@ ta.global_generic_rd_insts_for_lds:
   description: >-
     The total number of global & generic memory read instructions that return data
     directly to LDS, executed on all compute units on the accelerator, per normalization
-    unit. These operations bypass the register file and write results directly into
-    LDS memory.
+    unit. These operations bypass the register file and write results directly into LDS
+    memory.

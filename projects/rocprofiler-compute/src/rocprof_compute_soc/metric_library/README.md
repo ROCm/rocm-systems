@@ -43,27 +43,46 @@ compute.salu_util:
   formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Indicates what percent of the kernel's duration the SALU was busy executing
-    instructions. ...
+    Percentage of the kernel's duration the SALU was busy executing instructions. ...
   peak: 100
 ```
 
 | Field | Meaning |
 |---|---|
-| `name` | A name specific to the hardware, in title case, unique on the arch. An id has one name and one unit on every arch. |
+| `name` | A name specific to the hardware that says what its counters count, in title case, unique on the arch. An id has one name and one unit on every arch. |
 | `formula` | The one equation of the metric on this arch. |
 | `unit` | One spelling per unit, such as `GB/s` or `Percent`. |
-| `description` | What the metric counts; it matches its formula, unit and counters. May be empty. |
+| `description` | What the metric counts, following [Descriptions](#descriptions). May be empty. |
 | `peak` | Optional. The theoretical peak. |
 | `peak_empirical` | Optional. The roofline benchmark's ceiling, as `$<ceiling>_empirical_peak`. |
 
-A description starts from the panel's words, with these edits:
+## Descriptions
 
-- plain ASCII (`->` for an arrow, no trademark mark);
-- no sentence about how a panel shows the metric ("also presented as a percent of the
-  peak");
-- no panel 3000 `Equation:` sentence, since `formula` holds the equation;
-- no TODO note.
+A description says what the metric counts, following these rules:
+
+1. **Accuracy.** It matches the formula, the unit and the event definitions of the
+   counters.
+2. **Content.** What is counted, how it is counted where that helps (for example per
+   wavefront), and optionally how to read the value, for example "High VALU counts
+   indicate compute-intensive kernels."
+3. **One description per id.** An id has the same description on every arch where its
+   formula means the same.
+4. **Rates.** Measured byte rates say "divided by total duration"; FLOP and IOP rates
+   say "per second". A peak bandwidth says which peak it gives.
+5. **Normalization.** A normalized metric, whose unit is `(<Quantity> + $normUnit)`, does
+   not name the normalization; the unit shows it, for example "Bytes per kernel".
+6. **Percentages.** A percentage starts with "Percentage of".
+7. **Terms.** "wavefront", not "wave"; "for example", not "e.g." or "for instance";
+   "Graphics Level Arbiter", not "Graphic Level Arbiter"; "Scalable Data SOC (SDP)".
+8. **Library text only.** No sentence about how a panel shows the metric ("also
+   presented as a percent of the peak"), no see-reference, no `Equation:` sentence
+   (`formula` holds the equation) and no TODO note. A note about the formula is a YAML
+   comment next to it.
+9. **Spelling and grammar.** Correct English spelling and grammar.
+10. **Characters.** Plain ASCII (`->` for an arrow, no trademark mark), ending with a
+    period.
+11. **Layout.** Filled to 88 columns, on the `description:` line when it fits there. The
+    `yaml-format-fix` pre-commit hook (`tools/format_yaml.py --fix`) does this.
 
 ## Sets
 
