@@ -1569,6 +1569,96 @@ queue_fail:
     TEST_END
 }
 
+void KFDSVMRangeTest::RegisterReadOnlyTest(int gpuNode) {
+
+    if (!SVMAPISupported_GPU(gpuNode)) {
+        LOG() << "Skipping test: SVM not supported on gpuNode." << gpuNode << std::endl;
+        return;
+    }
+
+    if (!hsakmt_is_dgpu()) {
+        LOG() << "Skipping test: userptr registration is a no-op on APU." << std::endl;
+        return;
+    }
+
+    const HSAuint64 size = PAGE_SIZE;
+    HsaMemFlags flags = {0};
+    flags.ui32.HostAccess = 1;
+    flags.ui32.ReadOnly = 1;
+
+    HSAuint32 *pBuf = reinterpret_cast<HSAuint32 *>(mmap(NULL, size, PROT_READ | PROT_WRITE,
+                                                        MAP_ANONYMOUS | MAP_PRIVATE, -1, 0));
+    ASSERT_NE_GPU(MAP_FAILED, reinterpret_cast<void *>(pBuf), gpuNode);
+    for (HSAuint64 i = 0; i < size / sizeof(HSAuint32); i++)
+        pBuf[i] = 0x5A5A5A5A;
+
+    HSAuint64 gpuVA = 0;
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, pBuf, size,
+                                   flags), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, pBuf, size, &gpuVA),
+                       gpuNode);
+    if (gpuVA != reinterpret_cast<HSAuint64>(pBuf)) {
+        LOG() << "Skipping test: userptr fell back to the legacy path." << std::endl;
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx,
+                                       reinterpret_cast<void *>(gpuVA)), gpuNode);
+        EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx,
+                                       reinterpret_cast<void *>(gpuVA)), gpuNode);
+        munmap(pBuf, size);
+        return;
+    }
+
+    HSA_SVM_ATTRIBUTE attr = {HSA_SVM_ATTR_SET_FLAGS, 0};
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, size, 1, &attr),
+                       gpuNode);
+    EXPECT_NE_GPU(0u, attr.value & HSA_SVM_FLAG_GPU_RO, gpuNode);
+
+    SDMAQueue sdmaQueue;
+    ASSERT_SUCCESS_GPU(sdmaQueue.Create(gpuNode), gpuNode);
+    HsaSVMRange sysBuffer(size, gpuNode);
+
+    sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                    sysBuffer.As<void *>(), pBuf, size));
+    sdmaQueue.Wait4PacketConsumption();
+    EXPECT_EQ_GPU(sysBuffer.As<HSAuint32 *>()[0], 0x5A5A5A5Au, gpuNode);
+
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pBuf), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf), gpuNode);
+
+    /* A writable registration of the reused VA must drop the stale GPU_RO */
+    flags.ui32.ReadOnly = 0;
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags, m_hsakmt_current_ctx, pBuf, size,
+                                   flags), gpuNode);
+    ASSERT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtMapMemoryToGPU, m_hsakmt_current_ctx, pBuf, size, &gpuVA),
+                       gpuNode);
+
+    attr = {HSA_SVM_ATTR_SET_FLAGS, 0};
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtSVMGetAttr, m_hsakmt_current_ctx, pBuf, size, 1, &attr),
+                       gpuNode);
+    EXPECT_EQ_GPU(0u, attr.value & HSA_SVM_FLAG_GPU_RO, gpuNode);
+
+    sysBuffer.Fill(0xA5A5A5A5);
+    sdmaQueue.PlaceAndSubmitPacket(SDMACopyDataPacket(sdmaQueue.GetFamilyId(),
+                    pBuf, sysBuffer.As<void *>(), size));
+    sdmaQueue.Wait4PacketConsumption();
+    EXPECT_TRUE_GPU(WaitOnValue(pBuf, 0xA5A5A5A5), gpuNode);
+
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU, m_hsakmt_current_ctx, pBuf), gpuNode);
+    EXPECT_SUCCESS_GPU(HSAKMT_CALL(hsaKmtDeregisterMemory, m_hsakmt_current_ctx, pBuf), gpuNode);
+    EXPECT_SUCCESS_GPU(sdmaQueue.Destroy(), gpuNode);
+    munmap(pBuf, size);
+}
+
+TEST_P(KFDSVMRangeTest, RegisterReadOnlyTest) {
+    TEST_REQUIRE_ENV_CAPABILITIES(ENVCAPS_64BITLINUX);
+    TEST_START(TESTPROFILE_RUNALL);
+
+    ASSERT_SUCCESS(KFDTestLaunch([this](int gpuNode) {
+        this->RegisterReadOnlyTest(gpuNode);
+    }));
+
+    TEST_END
+}
+
 /*
  * Test SMI HMM SVM profiling event
  * Use separate thread to read event the same way as ROCr and ROCProfiler

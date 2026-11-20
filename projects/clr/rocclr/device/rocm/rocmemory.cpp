@@ -1195,7 +1195,8 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
       deviceMemory_ =
-          dev().hostLock(owner()->getHostMem(), owner()->getSize(), getHostMemorySegment(memFlags));
+          dev().hostLock(owner()->getHostMem(), owner()->getSize(), getHostMemorySegment(memFlags),
+                         (memFlags & ROCCLR_MEM_PIN_READ_ONLY) != 0);
     } else {
       deviceMemory_ = owner()->getHostMem();
     }

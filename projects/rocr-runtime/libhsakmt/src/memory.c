@@ -276,9 +276,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryCtx(HsaKFDContext *ctx,
 		/* TODO: support mixed APU and dGPU configurations */
 		return HSAKMT_STATUS_SUCCESS;
 
-	HsaMemFlags flags;
+	HsaMemFlags flags = {0};
 	flags.ui32.CoarseGrain = 1;
-	flags.ui32.ExtendedCoherent = 0;
 	return hsakmt_fmm_register_memory(ctx,
 				   MemoryAddress, MemorySizeInBytes,
 				   NULL, 0, flags);
@@ -345,9 +344,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryToNodesCtx(HsaKFDContext *ctx,
 			NumberOfNodes, NodeArray);
 
 	if (ret == HSAKMT_STATUS_SUCCESS) {
-		HsaMemFlags flags;
+		HsaMemFlags flags = {0};
 		flags.ui32.CoarseGrain = 1;
-		flags.ui32.ExtendedCoherent = 0;
 
 		ret = hsakmt_fmm_register_memory(ctx,
 					  MemoryAddress, MemorySizeInBytes,
