@@ -6,11 +6,13 @@
 #include "common/floating_point.h"
 #include "common/half_reference.h"
 #include "common/semantics.h"
+#include "mfma/broadcast_test.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <random>
 
@@ -45,8 +47,9 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
                           : kF16PositiveInfinityBits;
   }
   const auto levels = supported_cpu_levels();
-  for (uint64_t controls :
-       {0ULL, 1ULL | (1ULL << 3) | (3ULL << 7), 4ULL | (13ULL << 3) | (7ULL << 7), 7ULL}) {
+  const std::array<uint64_t, 4> control_cases = {0, 1 | (1 << 3) | (3 << 7),
+                                                 4 | (13 << 3) | (7 << 7), 7};
+  for (uint64_t controls : control_cases) {
     std::array<std::array<float, 64>, OutputRegs> expected{};
     for (int batch = 0; batch < Batch; ++batch) {
       for (int row = 0; row < M; ++row) {
@@ -55,15 +58,24 @@ void arithmetic(Entry entry, uint32_t factor_mask = UINT32_MAX) {
           const int reg = batch * (M * M / 64) + row / (4 * (64 / M)) * 4 + row % 4;
           const int lane = batch % groups * M + row / 4 % (64 / M) * groups * M + col;
           float sum = std::bit_cast<float>(input[2 * InputRegs + reg][lane]);
-          // Reference indexing follows the legacy GFX9 executor; do not call
-          // the implementation's layout helpers from this test.
+          // Reference indexing follows the GFX9 layout and captured broadcasts;
+          // do not call the implementation's layout helpers from this test.
           auto read = [&](int operand, int index, int k) {
             const int per_lane = K / (64 / (M * Batch));
             int source_lane = batch * M + k / per_lane * M * Batch + index;
             int cbsz = int(controls & 7), blgp = int(controls >> 7 & 7);
             if (operand == 0 && cbsz > 0 && cbsz <= 4) {
-              int size = 64 >> cbsz;
-              source_lane = source_lane % size + size * (int(controls >> 3 & 15) % (1 << cbsz));
+              if constexpr (Batch > 1) {
+                const int blocks = 1 << cbsz;
+                if (blocks <= 64 / M) {
+                  const int selected =
+                      (source_lane / M / blocks) * blocks + int(controls >> 3 & 15) % blocks;
+                  source_lane = selected * M + source_lane % M;
+                }
+              } else {
+                int size = 64 >> cbsz;
+                source_lane = source_lane % size + size * (int(controls >> 3 & 15) % (1 << cbsz));
+              }
             }
             if (operand == 1 && blgp) {
               if (blgp <= 2) {
@@ -289,3 +301,28 @@ TEST(MfmaF32, mfma_f32_16x16x4_f32_w64) {
   arithmetic<16, 4, 1, false, true>(rj_arith_v_mfma_f32_16x16x4_f32_w64);
 }
 } // namespace
+
+TEST(MfmaBroadcast, F32HardwareCapture) {
+  const auto encode = [](int value) { return std::bit_cast<uint32_t>(float(value)); };
+  expect_hardware_broadcast<4, 1, 32>(rj_arith_v_mfma_f32_4x4x1_16b_f32_w64, encode);
+  expect_hardware_broadcast<16, 1, 32>(rj_arith_v_mfma_f32_16x16x1_4b_f32_w64, encode);
+  expect_hardware_broadcast<32, 1, 32>(rj_arith_v_mfma_f32_32x32x1_2b_f32_w64, encode);
+}
+
+TEST(MfmaBroadcast, F16HardwareCapture) {
+  const auto encode = [](int value) {
+    return uint32_t(std::bit_cast<uint16_t>(_Float16(value))) * 0x10001u;
+  };
+  expect_hardware_broadcast<4, 4, 16>(rj_arith_v_mfma_f32_4x4x4_16b_f16_w64, encode);
+  expect_hardware_broadcast<16, 4, 16>(rj_arith_v_mfma_f32_16x16x4_4b_f16_w64, encode);
+  expect_hardware_broadcast<32, 4, 16>(rj_arith_v_mfma_f32_32x32x4_2b_f16_w64, encode);
+}
+
+TEST(MfmaBroadcast, BF16HardwareCapture) {
+  const auto encode = [](int value) {
+    return (std::bit_cast<uint32_t>(float(value)) >> 16) * 0x10001u;
+  };
+  expect_hardware_broadcast<4, 4, 16>(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64, encode);
+  expect_hardware_broadcast<16, 4, 16>(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64, encode);
+  expect_hardware_broadcast<32, 4, 16>(rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64, encode);
+}

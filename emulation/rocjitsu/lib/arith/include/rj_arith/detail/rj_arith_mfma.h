@@ -53,6 +53,29 @@ constexpr uint64_t RJ_ARITH_MFMA_CBSZ_MASK = 7ULL;
 constexpr uint64_t RJ_ARITH_MFMA_ABID_SHIFT = 3ULL;
 constexpr uint64_t RJ_ARITH_MFMA_BLGP_SHIFT = 7ULL;
 
+// Batched gfx942/gfx950 F32/F16/BF16/I8 forms broadcast within adjacent M-lane
+// blocks. MI300X and MI355X captures agree with the CDNA3/4 ISA (5-August-2025)
+// section 13.3.6.1 ABID description, which contradicts the full-wave formulas
+// in CDNA3 section 7.1.5.1 and CDNA4 section 7.1.6.1.
+//
+// Arithmetic and register reads share this Wave64 mapping. The caller supplies
+// lane 0..63 and a matrix block width of 4, 16 or 32, or zero for full-wave groups.
+// Reserved CBSZ or groups wider than the wave retain identity; ABID wraps within
+// the selected group. These fallbacks do not define hardware's reserved controls.
+static inline uint32_t rj_arith_mfma_a_source_lane(uint32_t lane, uint32_t cbsz, uint32_t abid,
+                                                   uint32_t matrix_block_lanes) {
+  if (cbsz == 0 || cbsz > 4) {
+    return lane;
+  }
+  const uint32_t blocks = 1u << cbsz;
+  const uint32_t width = matrix_block_lanes ? matrix_block_lanes : 64u / blocks;
+  if (width > 64u / blocks) {
+    return lane;
+  }
+  const uint32_t group_size = width * blocks;
+  return (lane / group_size) * group_size + (abid % blocks) * width + (lane % width);
+}
+
 // FP32 factors use M*K*batch/64 VGPRs each; outputs use M*M*batch/64.
 // Controls, semantics and overlap follow the dense MFMA contract below.
 int rj_arith_v_mfma_f32_32x32x1_2b_f32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,

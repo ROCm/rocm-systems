@@ -4,11 +4,13 @@
 // Dense integer MFMA/WMMA: signedness, lane controls, wrap/saturation and overlap.
 #include "common/cpu.h"
 #include "common/semantics.h"
+#include "mfma/broadcast_test.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
 #include <array>
 #include <bit>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <random>
 namespace {
@@ -64,8 +66,17 @@ template <int M, int K, int Batch, bool Wmma = false> void arithmetic(Entry entr
               source_lane = batch * M + k / per_lane * M * Batch + i;
               int size = int(controls & 7), permutation = int(controls >> 7 & 7);
               if (a && size > 0 && size <= 4) {
-                int n = 64 >> size;
-                source_lane = source_lane % n + n * (int(controls >> 3 & 15) % (1 << size));
+                if constexpr (Batch > 1) {
+                  const int blocks = 1 << size;
+                  if (blocks <= 64 / M) {
+                    const int selected =
+                        (source_lane / M / blocks) * blocks + int(controls >> 3 & 15) % blocks;
+                    source_lane = selected * M + source_lane % M;
+                  }
+                } else {
+                  int n = 64 >> size;
+                  source_lane = source_lane % n + n * (int(controls >> 3 & 15) % (1 << size));
+                }
               }
               if (!a && permutation) {
                 if (permutation <= 2) {
@@ -187,3 +198,10 @@ TEST(DenseIntegerMatrix, wmma_i32_16x16x64_iu8_w32) {
   arithmetic<16, 64, 1, true>(rj_arith_v_wmma_i32_16x16x64_iu8_w32);
 }
 } // namespace
+
+TEST(MfmaBroadcast, I8HardwareCapture) {
+  const auto encode = [](int value) { return uint32_t(value) * 0x01010101u; };
+  expect_hardware_broadcast<4, 4, 8, true>(rj_arith_v_mfma_i32_4x4x4_16b_i8_w64, encode);
+  expect_hardware_broadcast<16, 4, 8, true>(rj_arith_v_mfma_i32_16x16x4_4b_i8_w64, encode);
+  expect_hardware_broadcast<32, 4, 8, true>(rj_arith_v_mfma_i32_32x32x4_2b_i8_w64, encode);
+}
