@@ -95,3 +95,13 @@ find_package(
 target_link_libraries(hsa_code_object_testapp PRIVATE hsa-runtime64::hsa-runtime64)
 
 add_dependencies(hsa_code_object_testapp generate_hsaco_targets_code_object)
+
+add_executable(hsa_dispatch_time_testapp)
+target_sources(hsa_dispatch_time_testapp PRIVATE hsa_dispatch_time_app.cpp)
+target_compile_definitions(hsa_dispatch_time_testapp
+                           PRIVATE HSACO_DIR="${PROJECT_BINARY_DIR}")
+target_link_libraries(
+    hsa_dispatch_time_testapp
+    PRIVATE stdc++fs Threads::Threads hsa-runtime64::hsa-runtime64
+            rocprofiler-sdk::tests-common-library)
+add_dependencies(hsa_dispatch_time_testapp generate_hsaco_targets_code_object)

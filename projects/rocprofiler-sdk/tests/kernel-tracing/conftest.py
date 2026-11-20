@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import csv
 import json
 import pytest
 
@@ -32,6 +33,20 @@ def pytest_addoption(parser):
         action="store",
         default="kernel-tracing-test.json",
         help="Input JSON",
+    )
+    parser.addoption("--application-times", help="Application dispatch timestamps CSV")
+    parser.addoption("--kernel-trace", help="Kernel trace CSV")
+
+
+@pytest.fixture
+def dispatch_times(request):
+    def read_csv(option):
+        with open(request.config.getoption(option)) as inp:
+            return list(csv.DictReader(inp))
+
+    return (
+        read_csv("--application-times"),
+        read_csv("--kernel-trace"),
     )
 
 
