@@ -2464,11 +2464,13 @@ hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D* pCopy, hipStream_t stream, bool
     if (status != hipSuccess) {
       return status;
     }
-    // Transfers from device memory to pageable host memory and transfers from any
-    // host memory to any host memory are synchronous with respect to the host.
-    // Device to Device copies do not need to host side synchronization.
-    if (dstMemoryType == hipMemoryTypeHost || ((pCopy->srcMemoryType == hipMemoryTypeHost) &&
-                                               (pCopy->dstMemoryType == hipMemoryTypeHost))) {
+    // Copies involving pageable host memory and copies between any two host
+    // allocations are synchronous with respect to the host. The effective types
+    // above already classify pinned host allocations as device operands.
+    // Device to device copies do not require host synchronization.
+    if (srcMemoryType == hipMemoryTypeHost || dstMemoryType == hipMemoryTypeHost ||
+        ((pCopy->srcMemoryType == hipMemoryTypeHost) &&
+         (pCopy->dstMemoryType == hipMemoryTypeHost))) {
       isAsync = false;
     } else if ((pCopy->srcMemoryType == hipMemoryTypeDevice) &&
                (pCopy->dstMemoryType == hipMemoryTypeDevice)) {
