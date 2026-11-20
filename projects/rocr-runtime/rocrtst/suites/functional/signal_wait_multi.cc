@@ -5,6 +5,7 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <thread>
 #include <vector>
 
@@ -186,50 +187,77 @@ void SignalWaitMultiTest::TestWaitAllReportsSatisfyingValues(void) {
 }
 
 /*
- * Test Name: TestInterruptNotifyRaceStress
+ * Test Name: TestAsyncHandlerWakeRaceStress
  * Scope: Regression / Stress
  *
- * Purpose: Stress test for the race between StoreReleaseAndNotify and concurrent
- * waiters registering in InterruptSignal::WaitRelaxed and Signal::WaitMultiple.
- * Without the seq_cst fence pairing added in the fix, the notifier could observe
- * InWaiting()==false while a waiter had already committed to sleeping, causing
- * hsa_amd_signal_wait_any to hang indefinitely. QMCPACK (a Quantum Monte Carlo
- * workload that exercises hipGraph and GPU signal completion paths heavily) was
- * used as an application-level validation for this change.
+ * Purpose: Regression test for the lost-wakeup hang fixed in rocm-systems#10463
+ * (ROCM-21824, merged 2026-08-21). Every call to hsa_amd_signal_async_handler
+ * causes the runtime to call StoreReleaseAndNotify(1) on the internal
+ * control.wake interrupt signal so the async-events loop picks up the newly
+ * registered signal. The race: the async-events loop had exhausted its ~200 µs
+ * polling window and was incrementing waiting_++ on control.wake (about to call
+ * hsaKmtWaitOnMultipleEvents) at the exact moment the registration called
+ * StoreReleaseAndNotify. Without the fix, StoreReleaseAndNotify observed
+ * InWaiting()==false and skipped hsaKmtSetEvent; the loop then slept without
+ * ever adding the new signal to its monitored set, so the registered completion
+ * handler never fired — a hang. QMCPACK hit this because every hipGraphLaunch
+ * registers one async handler (one StoreReleaseAndNotify per launch).
  *
- * Expected Results: All iterations complete without hanging, satisfying_index is
- * 0 (signals[0] satisfies), and the test finishes within timeout.
+ * This test registers a one-shot async handler on a fresh signal, immediately
+ * fires the signal, and asserts the handler fires within a 2-second deadline.
+ * Without the fix the loop eventually misses a registration wake, sleeps
+ * indefinitely, and the test fails with a timeout.
+ *
+ * Expected Results: All kIterations handlers fire within 2 seconds total.
  */
-void SignalWaitMultiTest::TestInterruptNotifyRaceStress(void) {
-  constexpr int kIterations = 10000;
+void SignalWaitMultiTest::TestAsyncHandlerWakeRaceStress(void) {
+  constexpr int kIterations = 2000;
 
-  hsa_signal_t signals[2];
-  ASSERT_EQ(HSA_STATUS_SUCCESS, CreateSignal(0, &signals[0]));
-  ASSERT_EQ(HSA_STATUS_SUCCESS, CreateSignal(0, &signals[1]));
+  std::atomic<int> fired{0};
 
-  // Producer rapidly alternates the signal value. The consumer uses
-  // hsa_amd_signal_wait_any with BLOCKED hint, exercising the interrupt-signal
-  // wait path and the internal StoreReleaseAndNotify wake mechanism.
-  std::atomic<bool> stop{false};
-  std::thread producer([&]() {
-    while (!stop.load(std::memory_order_relaxed)) {
-      hsa_signal_store_screlease(signals[0], 1);
-      hsa_signal_store_screlease(signals[0], 0);
-    }
-  });
-
-  hsa_signal_condition_t conds[2] = {HSA_SIGNAL_CONDITION_EQ, HSA_SIGNAL_CONDITION_EQ};
-  hsa_signal_value_t vals[2] = {1, 1};
+  // One-shot handler: increments the counter and returns false (do not
+  // re-register). Cast avoids a lambda-with-capture in a C callback context.
+  struct Ctx { std::atomic<int>* fired; };
+  auto handler = [](hsa_signal_value_t, void* arg) -> bool {
+    static_cast<Ctx*>(arg)->fired->fetch_add(1, std::memory_order_release);
+    return false;
+  };
+  Ctx ctx{&fired};
 
   for (int i = 0; i < kIterations; ++i) {
-    hsa_signal_store_relaxed(signals[0], 0);
-    hsa_signal_value_t sat_val = 0;
-    hsa_amd_signal_wait_any(2, signals, conds, vals, timeout_hint_,
-                            HSA_WAIT_STATE_BLOCKED, &sat_val);
-    ASSERT_EQ(1, sat_val) << "iteration " << i;
+    // Create a signal with initial value 1; condition fires when it reaches 0.
+    hsa_signal_t signal;
+    ASSERT_EQ(HSA_STATUS_SUCCESS, CreateSignal(1, &signal));
+
+    // Register the handler. Internally the runtime calls
+    // StoreReleaseAndNotify(1) on control.wake so the async-events loop
+    // thread picks up this new signal. This is the exact call that raced
+    // with the loop's waiting_++ in ROCM-21824.
+    ASSERT_EQ(HSA_STATUS_SUCCESS,
+              hsa_amd_signal_async_handler(signal, HSA_SIGNAL_CONDITION_EQ, 0,
+                                           handler, &ctx));
+
+    // Occasionally yield to let the async loop's 200 µs polling window expire
+    // and transition to its kernel-sleep path, widening the race window.
+    if (i % 50 == 0) std::this_thread::sleep_for(std::chrono::microseconds(500));
+
+    // Satisfy the condition. If the loop missed the registration wake it won't
+    // be watching this signal and the handler will not fire.
+    hsa_signal_store_screlease(signal, 0);
   }
 
-  stop.store(true, std::memory_order_release);
-  hsa_signal_store_screlease(signals[0], 1);  // unblock producer's last iteration
-  producer.join();
+  // All handlers must fire within 2 seconds. Without the fix the async loop
+  // eventually gets stuck sleeping and this deadline is exceeded.
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (fired.load(std::memory_order_acquire) < kIterations) {
+    ASSERT_LT(std::chrono::steady_clock::now(), deadline)
+        << "Async-handler wake race: only " << fired.load() << " of "
+        << kIterations << " handlers fired before deadline. "
+        << "The async-events loop likely missed a StoreReleaseAndNotify wake "
+        << "on control.wake and is sleeping without monitoring a signal.";
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+
+  EXPECT_EQ(kIterations, fired.load());
 }

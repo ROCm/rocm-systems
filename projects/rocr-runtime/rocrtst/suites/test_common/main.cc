@@ -301,10 +301,10 @@ TEST(rocrtstFunc, Signal_Wait_All_Satisfying_Values) {
   RunCustomTestEpilog(&swm);
 }
 
-TEST(rocrtstFunc, Signal_Interrupt_Notify_Race_Stress) {
+TEST(rocrtstFunc, Signal_Async_Handler_Wake_Race_Stress) {
   SignalWaitMultiTest swm;
   if (!RunCustomTestProlog(&swm)) return;
-  swm.TestInterruptNotifyRaceStress();
+  swm.TestAsyncHandlerWakeRaceStress();
   RunCustomTestEpilog(&swm);
 }
 

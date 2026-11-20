@@ -44,8 +44,8 @@ class SignalWaitMultiTest : public TestBase {
     // @Brief: Verify hsa_amd_signal_wait_all reports satisfying values
     void TestWaitAllReportsSatisfyingValues(void);
 
-    // @Brief: Stress test for the StoreReleaseAndNotify/WaitRelaxed race fix
-    void TestInterruptNotifyRaceStress(void);
+    // @Brief: Regression for async-handler registration missing control.wake wake (ROCM-21824)
+    void TestAsyncHandlerWakeRaceStress(void);
 
  protected:
     // @Brief: Timeout hint passed to the wait APIs, in timestamp ticks
