@@ -29,6 +29,7 @@
 
 #include "tile_layout.hpp"
 #include "util.hpp"
+#include "lds_stage_policy.hpp"
 
 namespace rocshmem {
 
@@ -134,10 +135,10 @@ __device__ __forceinline__ void tile_memcpy_contig(char* dst, char* src,
                                                    size_t bytes,
                                                    int worker_id) {
   if constexpr (Scope == TileScope::Wave) {
-    memcpy_wave<Kind>(dst, src, bytes);
+    memcpy_wave_lds_stage<Kind>(dst, src, bytes);
   } else if constexpr (Scope == TileScope::Wg) {
-    tile_memcpy_contig_wg<Kind>(dst, src, bytes, worker_id,
-                                get_flat_block_size());
+    tile_memcpy_contig_wg_lds_stage<Kind>(dst, src, bytes, worker_id,
+                                          get_flat_block_size());
   } else {
     memcpy_lane<Kind>(dst, src, bytes);
   }

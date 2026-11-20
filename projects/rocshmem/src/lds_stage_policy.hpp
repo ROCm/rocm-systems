@@ -34,6 +34,11 @@
 
 namespace rocshmem {
 
+// Defined in tile_memcpy_device.hpp
+template <MemcpyKind Kind>
+__device__ void tile_memcpy_contig_wg(char* dst, char* src, size_t bytes, int worker_id,
+                                       int worker_count);
+
 #if defined(ROCSHMEM_LDS_STAGE_BACKEND_TDM) || defined(ROCSHMEM_LDS_STAGE_BACKEND_ASYNC)
 // Caps constmem.lds_stage_tile_bytes at half the available scratch capacity
 // (for double buffering) and rounds down to a whole element so tiles don't
@@ -144,6 +149,45 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   memcpy_wave<Kind>(dst, src, size);
 }
 
+// Like memcpy_wg_lds_stage, but falls back to tile_memcpy_contig_wg (not
+// memcpy_wg) to avoid call-frame overhead at typical few-KiB tile sizes.
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void tile_memcpy_contig_wg_lds_stage(
+    char* dst, char* src, size_t bytes, int worker_id, int worker_count) {
+  constexpr int LoadPolicy = is_put(Kind)
+      ? lds_stage::tdm::make_cache_policy(lds_stage::tdm::LoadTemporalHint::Default,
+                                          lds_stage::tdm::Scope::Wgp)
+      : lds_stage::tdm::make_cache_policy(lds_stage::tdm::LoadTemporalHint::NonTemporal,
+                                          lds_stage::tdm::Scope::System);
+  constexpr int StorePolicy = is_put(Kind)
+      ? lds_stage::tdm::make_cache_policy(lds_stage::tdm::StoreTemporalHint::NonTemporal,
+                                          lds_stage::tdm::Scope::System)
+      : lds_stage::tdm::make_cache_policy(lds_stage::tdm::StoreTemporalHint::Default,
+                                          lds_stage::tdm::Scope::Wgp);
+
+  if (bytes < (is_put(Kind) ? constmem.lds_stage_put_threshold : constmem.lds_stage_get_threshold)) {
+    tile_memcpy_contig_wg<Kind>(dst, src, bytes, worker_id, worker_count);
+    return;
+  }
+  const lds_stage::LdsRegistration reg = lds_stage::get_lds();
+  if (reg.ptr != nullptr && reg.bytes >= 16) {
+    const uint32_t tile_bytes = resolve_tile_bytes(reg.bytes);
+    if (tile_bytes > 0) {
+      if (is_thread_zero_in_block()) {
+        lds_stage::tdm::copy_pipelined_deep<LoadPolicy, StorePolicy>(dst, src, bytes, reg.ptr,
+                                                                      tile_bytes);
+      }
+      const size_t covered = lds_stage::covered_bytes(bytes, tile_bytes);
+      if (covered < bytes) {
+        tile_memcpy_contig_wg<Kind>(dst + covered, src + covered, bytes - covered, worker_id,
+                                    worker_count);
+      }
+      return;
+    }
+  }
+  tile_memcpy_contig_wg<Kind>(dst, src, bytes, worker_id, worker_count);
+}
+
 #elif defined(ROCSHMEM_LDS_STAGE_BACKEND_ASYNC)
 
 // Every thread tiles together (striped across lanes), no single-lane
@@ -221,6 +265,37 @@ template <MemcpyKind Kind = MemcpyKind::Put>
   memcpy_wave<Kind>(dst, src, size);
 }
 
+// Like memcpy_wg_lds_stage, but falls back to tile_memcpy_contig_wg (not
+// memcpy_wg) to avoid call-frame overhead at typical few-KiB tile sizes.
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void tile_memcpy_contig_wg_lds_stage(
+    char* dst, char* src, size_t bytes, int worker_id, int worker_count) {
+  if (bytes < (is_put(Kind) ? constmem.lds_stage_put_threshold : constmem.lds_stage_get_threshold)) {
+    tile_memcpy_contig_wg<Kind>(dst, src, bytes, worker_id, worker_count);
+    return;
+  }
+  const lds_stage::LdsRegistration reg = lds_stage::get_lds();
+  if (reg.ptr != nullptr && reg.bytes >= 16) {
+    const uint32_t tile_bytes = resolve_tile_bytes(reg.bytes);
+    if (tile_bytes > 0) {
+      constexpr int LoadPolicy = static_cast<int>(cache_policy_aux(
+        is_put(Kind) ? CachePolicy::Standard : CachePolicy::SystemScope));
+      constexpr int StorePolicy = static_cast<int>(cache_policy_aux(
+        is_put(Kind) ? CachePolicy::SystemScope : CachePolicy::Standard));
+      lds_stage::async_lds::copy_pipelined_deep_mark<LoadPolicy, StorePolicy>(
+        dst, src, bytes, reg.ptr, tile_bytes, static_cast<uint32_t>(get_flat_block_id()),
+        static_cast<uint32_t>(get_flat_block_size()));
+      const size_t covered = lds_stage::covered_bytes(bytes, tile_bytes);
+      if (covered < bytes) {
+        tile_memcpy_contig_wg<Kind>(dst + covered, src + covered, bytes - covered, worker_id,
+                                    worker_count);
+      }
+      return;
+    }
+  }
+  tile_memcpy_contig_wg<Kind>(dst, src, bytes, worker_id, worker_count);
+}
+
 #else
 
 // Neither backend is built/usable here: plain copy.
@@ -234,6 +309,12 @@ template <MemcpyKind Kind = MemcpyKind::Put>
 [[maybe_unused]] __device__ __forceinline__ void memcpy_wave_lds_stage(void* dst, void* src,
                                                                         size_t size) {
   memcpy_wave<Kind>(dst, src, size);
+}
+
+template <MemcpyKind Kind = MemcpyKind::Put>
+[[maybe_unused]] __device__ __forceinline__ void tile_memcpy_contig_wg_lds_stage(
+    char* dst, char* src, size_t bytes, int worker_id, int worker_count) {
+  tile_memcpy_contig_wg<Kind>(dst, src, bytes, worker_id, worker_count);
 }
 
 #endif
