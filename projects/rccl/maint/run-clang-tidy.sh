@@ -199,11 +199,22 @@ fi
 ARGS=(-p "$BUILD_DIR" -quiet -j "$(nproc)" -config-file "${RCCL_ROOT}/.clang-tidy"
   "${RUN_CLANG_TIDY_ARGS[@]}")
 if [[ ${#FILTERS[@]} -gt 0 ]]; then
-  # run-clang-tidy takes one unanchored regex over the compile database paths.
-  # Escape the dots and OR the files together; repo-relative paths such as
-  # projects/rccl/src/x.cc still match the hipified copies, and x.cu matches
-  # x.cu.cpp.
-  FILTER_REGEX="$(printf '%s\n' "${FILTERS[@]}" | sed 's/\./\\./g' | paste --serial --delimiters='|')"
+  # run-clang-tidy takes one unanchored regex over the compile database paths,
+  # which point at the hipified copies under ${BUILD_DIR}/hipify/. Reduce each
+  # path to one relative to projects/rccl (pre-commit passes repo-relative
+  # paths such as projects/rccl/src/x.cc), then anchor it to /hipify/ and the
+  # end so src/init.cc does not also match src/transport/init.cc. x.cu is
+  # hipified to x.cu.cpp.
+  FILTER_REGEX="$(printf '%s\n' "${FILTERS[@]}" \
+    | sed -E 's|^(.*/)?projects/rccl/||; s|^\./||; s/\./\\./g; s|^|/hipify/|; s|$|(\\.cpp)?$|' \
+    | paste --serial --delimiters='|')"
+  # A filter that matches nothing would analyse nothing and read as clean.
+  if ! sed -nE 's|^ *"file": "(.*)",?$|\1|p' "${BUILD_DIR}/compile_commands.json" \
+    | grep -E "$FILTER_REGEX" >/dev/null; then
+    echo "ERROR: none of the given paths is in ${BUILD_DIR}/compile_commands.json:" >&2
+    printf '         %s\n' "${FILTERS[@]}" >&2
+    exit 2
+  fi
   ARGS+=("$FILTER_REGEX")
 fi
 
