@@ -41,9 +41,17 @@ destination register is consumed.
 
 ### Barrier
 
-Called when a wavefront executes an `s_barrier` instruction. Plugins
-that track inter-wave synchronization within a workgroup use this to
-update epoch or ordering state.
+Called as waves synchronize through a barrier. Three steps are reported
+separately. A completed round *notifies* waves: `onAmdgpuBarrierResolved`
+lists them. The round *arms* the wait of each notified wave whose
+completion bit it set: `onAmdgpuBarrierRoundCompleted` lists those. A wave
+*passes* its wait: `onAmdgpuBarrierWaitPassed` names the round that
+released it. On gfx1250, where `s_barrier_signal` and `s_barrier_wait` are
+separate instructions, a wave is ordered after a round only from the
+moment it passes its wait, so plugins that track inter-wave
+synchronization update each wave's ordering state there. A target with a
+single `s_barrier` instruction reports all three steps when the barrier
+resolves.
 
 ### Waitcnt
 

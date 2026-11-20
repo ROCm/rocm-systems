@@ -412,6 +412,8 @@ int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// DDA LL128 Broadcast thread count from the arch table, or 0 when it sets none.
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
 // DDA LL128 ReduceScatter batched kernel block size from the arch table, or 0 when it sets none.
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
 // Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.
