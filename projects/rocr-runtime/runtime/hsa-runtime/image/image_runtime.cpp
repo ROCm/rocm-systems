@@ -153,7 +153,10 @@ hsa_status_t ImageRuntime::GetMipmapArraySizeAndAlignment(
 }
 
 hsa_status_t FindKernelArgPool(hsa_amd_memory_pool_t pool, void* data) {
-  assert(data != nullptr);
+  if (data == nullptr) {
+    assert(false && "FindKernelArgPool: data is nullptr");
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   hsa_status_t err;
   hsa_amd_segment_t segment;
@@ -161,16 +164,25 @@ hsa_status_t FindKernelArgPool(hsa_amd_memory_pool_t pool, void* data) {
   size_t size;
 
   err = AMD::hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
-  assert(err == HSA_STATUS_SUCCESS);
+  if (err != HSA_STATUS_SUCCESS) {
+    assert(false && "hsa_amd_memory_pool_get_info SEGMENT failed");
+    return err;
+  }
 
   if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
 
   err = AMD::hsa_amd_memory_pool_get_info(
       pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
-  assert(err == HSA_STATUS_SUCCESS);
+  if (err != HSA_STATUS_SUCCESS) {
+    assert(false && "hsa_amd_memory_pool_get_info GLOBAL_FLAGS failed");
+    return err;
+  }
 
   err = AMD::hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &size);
-  assert(err == HSA_STATUS_SUCCESS);
+  if (err != HSA_STATUS_SUCCESS) {
+    assert(false && "hsa_amd_memory_pool_get_info SIZE failed");
+    return err;
+  }
 
   if (((HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT & flag) == 1) && (size != 0)) {
     *(reinterpret_cast<hsa_amd_memory_pool_t*>(data)) = pool;
