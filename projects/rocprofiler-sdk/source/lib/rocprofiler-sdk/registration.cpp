@@ -1668,15 +1668,7 @@ rocprofiler_set_api_table(const char* name,
 #endif
         rocprofiler::thread_trace::code_object::initialize(hsa_api_table);
 
-        // install rocprofiler API wrappers
-        rocprofiler::hsa::update_table(hsa_api_table->core_, lib_instance);
-        rocprofiler::hsa::update_table(hsa_api_table->amd_ext_, lib_instance);
-        rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
-        rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
-        rocprofiler::hsa::update_table(hsa_api_table->tools_, lib_instance);
-
-        // install queue interposition AFTER update_table so our wrappers
-        // sit outermost in core_ and chain through the tracing functors
+        auto enable_queue_interposition = false;
         {
             auto non_queue_interposition_contexts = rocprofiler::context::get_registered_contexts(
                 [](const rocprofiler::context::context* ctx) {
@@ -1704,7 +1696,7 @@ rocprofiler_set_api_table(const char* name,
 
             // if non_queue_interposition_contexts is empty, default to inline intercept.
             // if non_queue_interposition_contexts is not empty, default to non-inline intercept.
-            auto enable_queue_interposition = rocprofiler::common::get_env(
+            enable_queue_interposition = rocprofiler::common::get_env(
                 "ROCPROFILER_QUEUE_INTERPOSITION", non_queue_interposition_contexts.empty());
 
             // With no registered context there is nothing to intercept for. Installing the inline
@@ -1732,13 +1724,25 @@ rocprofiler_set_api_table(const char* name,
             // report the final decision on inline vs non-inline intercept
             ROCP_INFO << "[queue-interposition] ROCPROFILER_QUEUE_INTERPOSITION="
                       << (enable_queue_interposition ? "true" : "false");
-
-            // (eventually) we will want to always install the intercepts so that dynamic enablement
-            // of inline intercept can occur when conditions allow.
-            if(enable_queue_interposition)
-                rocprofiler::hsa::queue_interposition::interposition_init(
-                    hsa_api_table->core_, enable_queue_interposition);
         }
+
+        if(!enable_queue_interposition)
+            rocprofiler::hsa::dispatch_time_init(hsa_api_table, lib_instance);
+
+        // install rocprofiler API wrappers
+        rocprofiler::hsa::update_table(hsa_api_table->core_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->tools_, lib_instance);
+
+        // install queue interposition AFTER update_table so our wrappers
+        // sit outermost in core_ and chain through the tracing functors
+        // (eventually) we will want to always install the intercepts so that dynamic enablement
+        // of inline intercept can occur when conditions allow.
+        if(enable_queue_interposition)
+            rocprofiler::hsa::queue_interposition::interposition_init(hsa_api_table->core_,
+                                                                      enable_queue_interposition);
 
         // Replay device thread trace contexts started before hsa_init(). Must run
         // after queue_controller_init + interposition; starting SQTT earlier hangs the GPU.
