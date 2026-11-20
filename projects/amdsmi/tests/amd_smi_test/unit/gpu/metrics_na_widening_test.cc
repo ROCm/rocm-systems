@@ -9,7 +9,6 @@
 #include <string>
 #include <tuple>
 
-#include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "test_common.h"
 
@@ -96,14 +95,5 @@ TEST(GpuUnit, ApuV24PowerValidValuesPassThrough) {
     ASSERT_NO_FATAL_FAILURE(CopyApuV24(v, v, &apu));
     EXPECT_EQ(apu.average_socket_power, v);
     EXPECT_EQ(apu.average_gfx_power, v);
-  }
-}
-
-// amdsmi_get_gpu_activity widens the uint16 activity metrics into uint32 fields with this helper.
-TEST(GpuUnit, TranslateUmaxWidensUint16Na) {
-  PRINT_VERBOSITY();
-  EXPECT_EQ(translate_umax_or_assign_value<uint32_t>(kU16Max, kU16Max), kU32Max);
-  for (uint16_t v : {uint16_t{0}, uint16_t{100}, static_cast<uint16_t>(kU16Max - 1)}) {
-    EXPECT_EQ(translate_umax_or_assign_value<uint32_t>(v, v), v);
   }
 }

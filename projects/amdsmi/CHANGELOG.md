@@ -62,10 +62,6 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
-- **`amdsmi_get_gpu_activity()` now reports an unavailable usage as `UINT32_MAX`**.  
-  - The `amdsmi_engine_usage_t` fields are `uint32_t`, but `gfx_activity`, `umc_activity` and `mm_activity` were copied from the `uint16_t` GPU metrics fields, so an unavailable usage arrived as `0x0000FFFF`. They now report `0xFFFFFFFF`, matching the other `uint32_t` fields.
-  - C, Go and Rust callers that compare against `0xFFFF` must also accept `0xFFFFFFFF`. The Python interface and the CLI already render both as `N/A`.
-
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  
   - A newer library's structures can be larger than the module allocates, so it is now skipped, and an older library loads with a warning. To load a specific library anyway, set `AMDSMI_LIB_OVERRIDE` to its absolute path.
 
