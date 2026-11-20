@@ -57,6 +57,7 @@ class Workload:
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     roofline_html_path: Optional[str] = None
+    mem_chart_html_path: Optional[str] = None
     path: str = field(default_factory=str)
     # Marker CSV / counter CSV pairs, one entry per profiling pass.
     ml_api_trace_pairs: list[MlApiTracePair] = field(default_factory=list)

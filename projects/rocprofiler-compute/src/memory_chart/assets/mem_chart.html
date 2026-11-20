@@ -1,0 +1,28 @@
+<div class="report-app">
+  <div class="report-toolbar">
+    <h1 id="mem-chart-heading" class="mem-chart-heading"></h1>
+    <span id="mem-chart-selection" class="mem-chart-selection"
+          aria-live="polite"></span>
+    <span class="report-hint">Ctrl+scroll (&#8984;+scroll on Mac) to zoom &middot;
+      drag to pan &middot; double-click to fit</span>
+    <button type="button" id="mem-chart-fit"
+            class="report-btn report-btn-sm"
+            title="Fit the whole chart in the view">Fit chart</button>
+    <button type="button" id="mem-chart-export-png"
+            class="report-btn report-btn-sm"
+            title="Download the chart as a PNG image">Export PNG</button>
+    <button type="button" id="mem-chart-theme-toggle"
+            class="report-btn report-btn-sm" aria-pressed="false">Dark mode</button>
+  </div>
+  <div class="report-body">
+    <main class="mem-chart-main">
+      <div id="mem-chart-diagram" class="mem-chart-diagram" tabindex="0"
+           aria-label="Memory chart. Hold Ctrl or Command and scroll to zoom, drag to pan, double-click to fit."></div>
+      <div id="mem-chart-legend" class="mem-chart-legend"
+           aria-label="Legend"></div>
+      <section id="mem-chart-guidance" class="mem-chart-guidance"
+               aria-label="Memory bandwidth guidance"></section>
+    </main>
+  </div>
+  <noscript>This memory chart needs JavaScript.</noscript>
+</div>

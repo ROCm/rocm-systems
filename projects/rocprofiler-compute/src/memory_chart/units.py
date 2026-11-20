@@ -11,7 +11,7 @@ on a chart has a unit with no rule here.
 import math
 import re
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Mapping, Optional, Union
 
 from utils.utils_common import metric_ids_by_name
 
@@ -57,6 +57,11 @@ def display_unit(unit: Optional[str]) -> Optional[DisplayUnit]:
         return None
     counted = match.group(1)
     return DisplayUnit("count", " " + _COUNT_SHORT.get(counted, counted.lower()))
+
+
+def unit_of(units: Mapping[str, str], metric_id: str) -> DisplayUnit:
+    """How the chart displays a metric, given the config units by metric id."""
+    return display_unit(units.get(metric_id)) or PLAIN
 
 
 def panel_units(panel_config: dict[str, Any]) -> dict[str, str]:

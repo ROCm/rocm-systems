@@ -10,7 +10,7 @@ without a GPU or a profile.
 from collections import defaultdict
 from dataclasses import dataclass
 from io import StringIO
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
@@ -18,15 +18,14 @@ from rich.table import Table
 from rich.text import Text
 
 from membw_analysis.models import MemBwAnalysisResult
-from membw_analysis.summary import active_leaves
+from membw_analysis.summary import stalls_at
 from memory_chart.loader import Layout, LayoutArrow, LayoutBlock, Layouts
 from memory_chart.units import (
     PERCENT,
-    PLAIN,
     DisplayUnit,
-    display_unit,
     format_value,
     numeric,
+    unit_of,
 )
 
 COLORS = {
@@ -43,7 +42,7 @@ COLORS = {
     "neutral": "default",
 }
 
-_LEGEND_ENTRIES: tuple[tuple[str, str, str], ...] = (
+LEGEND_ENTRIES: Tuple[Tuple[str, str, str], ...] = (
     ("<----", "Read", "read"),
     ("---->", "Write", "write"),
     ("<--->", "Atomic", "atomic"),
@@ -107,6 +106,36 @@ def progress_bar(percent: Union[int, float, str, None]) -> str:
 # ---------------------------------------------------------------------------
 
 
+def edge_segments(layout: Layout) -> List[Dict[Optional[str], List[LayoutArrow]]]:
+    """The arrows from each column to the next, grouped by the block they line up
+    with.
+
+    An arrow lines up with the end whose column has several blocks, or that is
+    nested; the key None holds the arrows centred between two single blocks. A
+    block is at least as tall as the arrows that line up with it, so each arrow
+    runs straight between its two blocks.
+    """
+    blocks = {block.id: block for block in layout.blocks()}
+    edges: List[Dict[Optional[str], List[LayoutArrow]]] = [
+        defaultdict(list) for _ in range(len(layout.columns) - 1)
+    ]
+    for arrow in layout.arrows:
+        source, target = blocks[arrow.source], blocks[arrow.target]
+        if target.row == 0:
+            edges[source.column][_anchor(layout, blocks, arrow)].append(arrow)
+    return [dict(segments) for segments in edges]
+
+
+def _anchor(
+    layout: Layout, blocks: Dict[str, LayoutBlock], arrow: LayoutArrow
+) -> Optional[str]:
+    for end in (arrow.target, arrow.source):
+        block = blocks[end]
+        if block.parent or len(layout.columns[block.column]) > 1:
+            return end
+    return None
+
+
 @dataclass(frozen=True)
 class Placement:
     """Arrow lines placed in an edge column, beside their anchor block."""
@@ -135,7 +164,7 @@ class MemChart:
         # The bordered blocks in the columns, which share one width
         self.panels = [b for b in layout.top_level_blocks() if b.style == "panel"]
         self.text_width = self._text_widths()
-        self.edges = [self._edge(i) for i in range(len(layout.columns) - 1)]
+        self.edges = edge_segments(layout)
         self._fit_scope_labels()
         self.height, self.total_height = self._heights()
         self.top = self._block_tops()
@@ -144,7 +173,7 @@ class MemChart:
     # -- metric lookups ----------------------------------------------------
 
     def _unit(self, metric: str) -> DisplayUnit:
-        return display_unit(self.units.get(metric)) or PLAIN
+        return unit_of(self.units, metric)
 
     def _shown(self, metric: str) -> str:
         return format_value(self.values.get(metric), self._unit(metric))
@@ -237,27 +266,6 @@ class MemChart:
         return lines
 
     # -- edges -------------------------------------------------------------
-
-    def _anchor(self, arrow: LayoutArrow) -> Optional[str]:
-        """Block an arrow lines up with; None to centre it in the edge.
-
-        An arrow lines up with the end whose column has several blocks, or that
-        is nested. Arrows between two single blocks are centred.
-        """
-        for end in (arrow.target, arrow.source):
-            block = self.blocks[end]
-            if block.parent or len(self.layout.columns[block.column]) > 1:
-                return end
-        return None
-
-    def _edge(self, column: int) -> dict[Optional[str], list[LayoutArrow]]:
-        """Arrows from *column* to the next, grouped by anchor block."""
-        segments: dict[Optional[str], list[LayoutArrow]] = defaultdict(list)
-        for arrow in self.layout.arrows:
-            source, target = self.blocks[arrow.source], self.blocks[arrow.target]
-            if target.row == 0 and source.column == column:
-                segments[self._anchor(arrow)].append(arrow)
-        return segments
 
     def _request_label_width(
         self, segments: dict[Optional[str], list[LayoutArrow]]
@@ -534,7 +542,7 @@ def _legend(*, include_atomic: bool, include_stall: bool) -> str:
     }
     items = [
         f"{_colored(symbol, COLORS[key])} {label}"
-        for symbol, label, key in _LEGEND_ENTRIES
+        for symbol, label, key in LEGEND_ENTRIES
         if key not in skip
     ]
     return f"[dim]Legend:[/dim] {'  '.join(items)}"
@@ -571,12 +579,6 @@ def _stall_rows(
     membw: Optional[MemBwAnalysisResult], level: Optional[str]
 ) -> list[_StallRow]:
     """Active leaf bottlenecks of membw at *level*, in tree order."""
-    if membw is None or level is None:
-        return []
     return [
-        _StallRow(
-            f"[!] {node.label}", node.supporting[0].value if node.supporting else None
-        )
-        for node in active_leaves(membw.nodes)
-        if node.level == level
+        _StallRow(f"[!] {node.label}", value) for node, value in stalls_at(membw, level)
     ]

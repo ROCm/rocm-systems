@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from memory_chart.loader import Layouts, PanelConfigs
 from memory_chart.render import MemChart
-from memory_chart.units import PLAIN, display_unit, panel_units
+from memory_chart.units import panel_units, unit_of
 
 # Values as shown on the chart, before the unit's scale is undone
 _PLACEHOLDERS = {"percent": 42.0, "bandwidth": 123.456, "count": 1234, "value": 12.5}
@@ -28,7 +28,7 @@ _PLACEHOLDERS = {"percent": 42.0, "bandwidth": 123.456, "count": 1234, "value": 
 
 def placeholder_values(metrics: set[str], units: dict[str, str]) -> dict[str, float]:
     """A plausible value for each metric, by unit."""
-    shown = {m: display_unit(units.get(m)) or PLAIN for m in metrics}
+    shown = {m: unit_of(units, m) for m in metrics}
     return {m: _PLACEHOLDERS[unit.kind] / unit.scale for m, unit in shown.items()}
 
 
