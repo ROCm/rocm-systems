@@ -1,0 +1,26 @@
+# The Systems PR Bot (systems-pr-bot.yml) waits for a check named
+# "pre-commit" (checks.required_check_runs in tools/systems_pr_bot/policy.yml)
+# and fails after its timeout if none appears. hipFile's linters still run in
+# their own workflows, so for now this job only provides that check.
+
+name: "hipFile pre-commit"
+
+on:
+  pull_request:
+    paths:
+      - 'projects/hipfile/**'
+      - '.github/workflows/hipfile-*.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pre-commit:
+    name: pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder for the Systems PR Bot
+        run: echo "hipFile's linters run in their own workflows."
