@@ -3,6 +3,7 @@
 
 #include <fcntl.h>
 #include <pthread.h>
+#include <semaphore.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -25,7 +26,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <new>
 #include <optional>
 #include <queue>
 #include <set>
@@ -1652,20 +1652,38 @@ amdsmi_status_t fill_cuid_component(const amdcuid_id_t& handle,
   return AMDSMI_STATUS_SUCCESS;
 }
 
-// One amdsmi_get_cuid_components() at a time: a second refresh between the
-// listing and the per-component reads would drop handles the first has just
-// been given.
-std::mutex cuid_inventory_mutex;
+// Serialize multi-call CUID transactions. Unlike unlocking an inherited
+// mutex, sem_post is async-signal-safe and does not depend on thread identity.
+sem_t cuid_inventory_gate;
+const int cuid_gate_init = sem_init(&cuid_inventory_gate, 0, 1);
 
-// A child forked while another thread is inside amdsmi_get_cuid_components()
-// inherits the mutex locked by a thread it does not have, and its first call
-// would never return. libamdcuid remakes its own mutexes in the child; this
-// one is not among them, and nothing it guards survives the fork, so the child
-// simply starts with an unlocked one. Registered when the library loads, since a
-// function-local static would leave its own guard locked in a child forked while
-// another thread was first through it.
-void cuid_inventory_mutex_in_child() { new (&cuid_inventory_mutex) std::mutex(); }
-const int cuid_inventory_atfork = pthread_atfork(nullptr, nullptr, cuid_inventory_mutex_in_child);
+void take_inventory_gate() {
+  while (sem_wait(&cuid_inventory_gate) == -1 && errno == EINTR) {
+  }
+}
+void release_inventory_gate() { sem_post(&cuid_inventory_gate); }
+
+class CuidInventoryGuard {
+ public:
+  CuidInventoryGuard() {
+    // Register on first use, after libamdcuid's startup handler. fork prepare
+    // must take our outer gate before it enters the library's inner lock.
+    if (cuid_gate_init != 0) return;
+    static const int registered = pthread_atfork(take_inventory_gate, release_inventory_gate,
+                                                 release_inventory_gate);
+    held_ = registered == 0;
+    if (held_) take_inventory_gate();
+  }
+  ~CuidInventoryGuard() {
+    if (held_) release_inventory_gate();
+  }
+  explicit operator bool() const { return held_; }
+  CuidInventoryGuard(const CuidInventoryGuard&) = delete;
+  CuidInventoryGuard& operator=(const CuidInventoryGuard&) = delete;
+
+ private:
+  bool held_ = false;
+};
 
 }  // namespace
 #endif  // BUILD_CUID
@@ -1713,7 +1731,8 @@ amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handl
 #ifdef BUILD_CUID
   // A BDF lookup can itself rediscover the node on a miss. Use the same
   // exclusive guard as the listing through the last property read.
-  const std::lock_guard<std::mutex> inventory_lock(cuid_inventory_mutex);
+  const CuidInventoryGuard inventory_lock;
+  if (!inventory_lock) return AMDSMI_STATUS_API_FAILED;
   amdcuid_id_t handle = {};
   const amdsmi_status_t lookup = cuid_handle_for(processor_handle, handle);
   if (lookup != AMDSMI_STATUS_SUCCESS) {
@@ -1745,7 +1764,8 @@ amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_componen
   // answers "what is on this node" has to rediscover first, or a hot-added
   // function never shows and a removed one is listed for the life of the
   // process.
-  const std::lock_guard<std::mutex> inventory_lock(cuid_inventory_mutex);
+  const CuidInventoryGuard inventory_lock;
+  if (!inventory_lock) return AMDSMI_STATUS_API_FAILED;
   // Its only failure is "found nothing", which the listing below reports.
   (void)amdcuid_refresh();
 
