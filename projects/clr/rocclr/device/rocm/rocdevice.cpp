@@ -1195,6 +1195,7 @@ bool Device::populateOCLDeviceConstants() {
 
   assert(cachesize[0] > 0);
   info_.globalMemCacheSize_ = cachesize[0];
+  info_.l3CacheSize_ = cachesize[2];
 
   info_.globalMemCacheType_ = CL_READ_WRITE_CACHE;
 

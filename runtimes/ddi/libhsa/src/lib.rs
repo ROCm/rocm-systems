@@ -46,23 +46,31 @@ core::arch::global_asm!(include_str!(concat!(
     "/api_trace_dispatch_linux.S"
 )));
 
+mod admission;
+mod agent;
 #[cfg(all(hsa_tool_dispatch, not(test)))]
 mod api_trace;
 mod callback_arg;
+mod clock;
+mod config;
+mod core_dump;
 mod debugger;
 mod dispatch;
+mod events;
 mod ffi;
-mod image_abi;
-mod image_gfx12;
+mod image;
 mod isa;
+mod lifecycle;
 mod loader;
+mod logging;
 mod memory;
 mod pc_sampling;
 mod platform;
 mod queue;
 mod queue_intercept;
-mod runtime;
+mod session;
 mod signal;
+mod status;
 mod tool_events;
 
 mod api;

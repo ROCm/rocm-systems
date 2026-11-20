@@ -2650,6 +2650,16 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
   EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
 }
 
+// A device that reports no memory-pool support skips pool creation and leaves comm->memPool unset.
+TEST_F(InitMicrotest, CommAlloc_MemPoolsUnsupported_SkipsPoolCreate) {
+  InstallCommAllocSuccess();
+  g_hipMemPoolResult = hipErrorNotSupported;  // would fail init if commAlloc still created the pool
+  g_hipMemoryPoolsSupported = 0;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+  EXPECT_EQ(nullptr, comm->memPool);
+}
+
 namespace {
 // void + out-param, not a return value: gtest's ASSERT_* only unwinds a void-returning function.
 void AllocedComm(AllocedCommPtr& comm, int ndev = 8, int rank = 0) {
@@ -10826,6 +10836,7 @@ struct Tr_AllGatherInfo {
   int nc;
   int romeTopoModelIdx;
   int treeCompact;
+  bool blocking;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];
@@ -11610,6 +11621,28 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerReportsLowerMinNetBw_FoldsDownToIt)
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, minBw.calls);
   EXPECT_FLOAT_EQ(kPeerBw, c.get()->minNetBw);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_AllRanksBlockingAgreesAcrossLocalAndPeerModes) {
+  for (int rankCount : {1, 2, 4}) {
+    const int modeCount = 1 << rankCount;
+    for (int blockingMask = 0; blockingMask < modeCount; ++blockingMask) {
+      for (int selfRank = 0; selfRank < rankCount; ++selfRank) {
+        SCOPED_TRACE(testing::Message() << "ranks=" << rankCount << " blockingMask=" << blockingMask
+                                       << " selfRank=" << selfRank);
+        TransportsRankComm comm(rankCount, selfRank);
+        comm.get()->config.blocking = (blockingMask >> selfRank) & 1;
+        comm.get()->allRanksBlocking = blockingMask != modeCount - 1;
+        Tr_ReachAllGather3(comm, "gfx900");
+        const auto gathers = Tr_InstallGathers(comm, {}, [&](int peer, Tr_AllGatherInfo& row) {
+          if (peer == selfRank) EXPECT_EQ(row.blocking, comm.get()->config.blocking != 0);
+          row.blocking = ((blockingMask >> peer) & 1) != 0;
+        });
+        EXPECT_EQ(kTrPostsetReached, initTransportsRank(comm.get(), nullptr, comm.timers()));
+        EXPECT_EQ(comm.get()->allRanksBlocking, blockingMask == modeCount - 1);
+      }
+    }
+  }
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_AnyPeerNotAllNvlink_ClearsIsAllNvlink) {

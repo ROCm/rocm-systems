@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/lds_allocation.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
@@ -39,6 +40,7 @@ enum class DecodedMemorySpace : uint8_t {
   LOCAL,   ///< Explicit local data share (DS).
   SCRATCH, ///< Explicit scratch/private memory.
   FLAT,    ///< Generic FLAT memory, resolved through the apertures.
+  GDS,     ///< Device-wide global data share or streamout register.
 };
 
 /// @brief Report name for a route. Stable; consumers key output on it.
@@ -71,6 +73,8 @@ constexpr const char *decoded_memory_space_name(DecodedMemorySpace space) {
     return "scratch";
   case DecodedMemorySpace::FLAT:
     return "flat";
+  case DecodedMemorySpace::GDS:
+    return "gds";
   case DecodedMemorySpace::UNKNOWN:
     break;
   }
@@ -104,6 +108,10 @@ struct ImageSampleFootprint {
 struct MemoryAccessObservation {
   /// @brief Instruction mnemonic; points at static storage.
   std::string_view mnemonic;
+  /// @brief Decoded operation identity, independent of its display spelling.
+  Operation operation = Operation::Unknown;
+  /// @brief Decoded addressing family before dynamic aperture resolution.
+  MemoryAddressing addressing = MemoryAddressing::None;
   uint64_t pc = 0;              ///< PC of the issuing wavefront.
   uint32_t compute_unit_id = 0; ///< Component id of the compute unit that issued it.
   uint32_t dispatch_id = 0;
@@ -187,8 +195,12 @@ struct MemoryAccessObservation {
   /// @brief Lanes producing a nominal pipeline request, before backing checks.
   ///
   /// @details Wave64 transpose loads can fetch on behalf of more than one lane.
-  /// GWS can hold a contributing VGPR lane while issuing a zero-byte request.
+  /// GFX10 ordered count selects only the first valid lane for its contribution.
   uint64_t request_lane_mask = 0;
+  /// GFX10 ordered count sends one wave-level GDS request at addresses[0], even
+  /// with empty EXEC or an unallocated destination. request_lane_mask identifies
+  /// its single VGPR contribution, if any. This mask identifies its VGPR writes.
+  std::optional<uint64_t> ordered_count_result_lane_mask;
   /// @brief Lanes whose addresses are swizzled scratch; see
   ///        @ref scratch_element_stride_bytes. A FLAT wave can mix these with
   ///        global lanes.
@@ -247,6 +259,7 @@ struct MemoryAccessObservation {
   /// @brief Address each lane accesses, @ref wavefront_size entries.
   ///
   /// @details Only entries selected by @ref valid_lane_mask are meaningful.
+  /// Streamout register operations leave this span and the byte-request masks empty.
   /// Ordinary FLAT LDS lanes report effective allocation addresses on either
   /// route, which can still be outside the LDS backing. CDNA5 DDS lanes also
   /// undergo LDS-base arithmetic, but their values identify neither a DDS
@@ -296,8 +309,12 @@ struct MemoryAccessObservation {
   /// applying retained_bytes() to each LDS address set. Global lanes of a
   /// mixed FLAT instruction use their own backing.
   std::optional<LdsAllocationRange> lds_allocation;
+  /// Issue-time LDS source addresses for LDS-to-buffer stores. Apply the
+  /// allocation bound to each requesting lane's payload of bytes_per_lane()
+  /// bytes. addresses continues to describe its global destination.
+  std::span<const uint32_t> lds_source_addresses;
 
-  /// CDNA4 native DS lanes with no access to the first or second LDS address.
+  /// Lanes with a suppressed native DS access, including the CDNA1 SRC2 read.
   /// Allocation bounds and coincident offsets suppress byte effects while
   /// nominal requests and register/counter dependencies remain observable.
   uint64_t ds_suppressed_lanes = 0;

@@ -42,7 +42,7 @@ fn satisfied_single_wait_does_not_take_lifecycle_mutex() {
 
 #[test]
 fn admitted_single_wait_reads_nonzero_signal_after_admission_closes() {
-    let gate = Arc::new(crate::runtime::InFlightTracker::new_process());
+    let gate = Arc::new(crate::admission::InFlightTracker::new_process());
     gate.open(7);
     let slot = Arc::new(AmdSignal::user(5));
     let handle = HsaSignal {
@@ -55,7 +55,7 @@ fn admitted_single_wait_reads_nonzero_signal_after_admission_closes() {
     let worker_gate = gate.clone();
     let worker_slot = slot.clone();
     let worker = std::thread::spawn(move || {
-        let _test_gate = crate::runtime::install_test_public_raw_gate(worker_gate);
+        let _test_gate = crate::admission::install_test_public_raw_gate(worker_gate);
         pause_after_wait_admission(admitted_send, release_recv);
         // SAFETY: The worker retains the signal slot until this wait exits.
         let observed = unsafe {
@@ -796,7 +796,7 @@ fn shutdown_cancels_unbounded_multi_signal_waits() {
 
 #[test]
 fn closing_admission_releases_unbounded_waits() {
-    let gate = Arc::new(crate::runtime::InFlightTracker::new());
+    let gate = Arc::new(crate::admission::InFlightTracker::new());
     let stop = Arc::new(AtomicBool::new(false));
     let signal = Arc::new(AmdSignal::user(3));
     let (ready_send, ready_recv) = std::sync::mpsc::channel();
@@ -826,6 +826,7 @@ fn closing_admission_releases_unbounded_waits() {
                         compare_value: values[0],
                         timeout_hint: u64::MAX,
                         wait_state_hint: WAIT_STATE_BLOCKED,
+                        yielding_poll: false,
                         order: Ordering::Acquire,
                     },
                 ) as u32

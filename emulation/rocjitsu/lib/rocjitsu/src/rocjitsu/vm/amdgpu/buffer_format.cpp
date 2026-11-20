@@ -742,23 +742,6 @@ std::array<uint32_t, 4> image_sample_values(const VectorMemState &state, uint32_
 } // namespace
 
 void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const VectorMemState &d) {
-  if (d.image_status) {
-    const auto &status = *d.image_status;
-    const uint64_t misses = status.written_misses();
-    const uint64_t warnings = status.written_warnings();
-    if (warnings && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-                     wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
-      wf.set_mode_raw(wf.mode_raw() | (1u << 10)); // MODE.LOD_CLAMPED is sticky.
-    if (warnings && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
-      wf.set_gfx12_excp_flag_user_extra_raw(wf.gfx12_excp_flag_user_extra_raw() | (1u << 31));
-    const uint32_t data_words = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
-    for (uint64_t lanes = misses | warnings; lanes; lanes &= lanes - 1) {
-      const uint32_t lane = std::countr_zero(lanes);
-      const uint32_t cause = (misses & (uint64_t{1} << lane)) ? 1u : 2u;
-      cu.write_vgpr(d.dst_reg_base + data_words, lane,
-                    (uint32_t{status.levels[lane]} << 16) | cause);
-    }
-  }
   if (d.image_sampling || d.graphics_sample || d.image_bc_format ||
       (d.image_status && !d.image_sample)) {
     complete_image_load(wf, cu, d);
