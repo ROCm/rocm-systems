@@ -551,6 +551,7 @@ class CodeGenerator:
         'global_store_async_from_lds': 'async_store',
         'global_load_addtid': 'vmem_load',
         'global_store_addtid': 'vmem_store',
+        'global_writeback': 'vmem_store',
         'buffer_load': 'vmem_load',
         'buffer_store': 'vmem_store',
         'buffer_store_from_lds': 'vmem_store',
@@ -1720,6 +1721,7 @@ class CodeGenerator:
                 'flat_load',
                 'gl1_inv',
                 'gl1_wbinv',
+                'global_writeback',
                 'global_load_addtid',
                 'global_load_async_to_lds',
                 'image_bvh',
@@ -9481,6 +9483,12 @@ class CodeGenerator:
                 '  amdgpu::write_scalar_selector(wf, dst_sel + 1, static_cast<uint32_t>(counter >> 32));'
             )
 
+        if cls == 'global_writeback':
+            return (
+                '  (void)wf;\n'
+                '  set_data(std::make_unique<amdgpu::GlobalWritebackState>(inst_.scope));'
+            )
+
         if cls == 'gl1_wbinv':
             return '  wf.cu().l1_vector().flush_all();'
 
@@ -10443,7 +10451,7 @@ class CodeGenerator:
             )
         exec_masked = not (
             self._MEMORY_ISSUE_KINDS[sem_class] == 'scalar'
-            or sem.semantic_class in ('ds_gws', 'ds_ordered_count')
+            or sem.semantic_class in ('ds_gws', 'ds_ordered_count', 'global_writeback')
             or (
                 sem.semantic_class.startswith('ds_read_tr_')
                 and self.isa_spec.profile.ds_transpose_ignores_exec

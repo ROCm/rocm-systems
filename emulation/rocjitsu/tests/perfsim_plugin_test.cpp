@@ -612,6 +612,45 @@ TEST_F(PerfsimPluginTest, GpuCompilerSimV13StagesUntilDispatchIsAccepted) {
   EXPECT_NE(line_with_prefix(trace, "end 43 "), trace.size());
 }
 
+TEST_F(PerfsimPluginTest, ForwardsGlobalWritebackAsAnInstructionWithoutLaneAccesses) {
+  WaveFixture fixture(1);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<PerfsimPlugin>();
+  ASSERT_TRUE(plugin->initialize(plugin_config().c_str()).succeeded());
+  ASSERT_TRUE(group->add(std::move(plugin)));
+  fixture.l2->set_backing_memory(fixture.memory.get());
+  fixture.cu->set_plugin_group(group);
+  group->onInit();
+
+  auto info = dispatch_info(1);
+  info.grid_size_y = info.grid_size_z = info.workgroup_count = 1;
+  group->onAmdgpuDispatchPacketProcessed(info);
+  group->onAmdgpuDispatchExecutionBegin(info.dispatch_id);
+  auto *wave = fixture.wave(info.dispatch_id, 0, {0, 0, 0}, 0, 0, 0);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  group->onAmdgpuWavefrontDispatched(*wave);
+  // GLOBAL_WB SYS followed by S_ENDPGM.
+  constexpr std::array<uint32_t, 4> code{0xee0b007c, 0x000c0000, 0, 0xbfb00000};
+  fixture.memory->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code),
+                             wave->pc);
+  for (unsigned step = 0; step < 4 && !wave->is_halted(); ++step)
+    fixture.cu->step();
+  ASSERT_TRUE(wave->is_halted());
+  group->onAmdgpuDispatchExecutionEnd(info.dispatch_id);
+  group->onShutdown();
+
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_NE(line_with_prefix(trace, "begin 1 "), trace.size());
+  const auto wb = line_with_prefix(trace, "instruction 1 ");
+  ASSERT_LT(wb + 1, trace.size());
+  EXPECT_NE(trace[wb].find(" ee0b007c "), std::string::npos);
+  EXPECT_NE(trace[wb + 1].find(" bfb00000 "), std::string::npos);
+  EXPECT_EQ(line_with_prefix(trace, "memory "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 1 "), trace.size());
+}
+
 TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentity) {
   WaveFixture fixture(1);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());

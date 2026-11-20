@@ -474,7 +474,10 @@ void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
     l2->flush_all(wf.process_id());
 }
 
-void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) {
+  (void)wf;
+  set_data(std::make_unique<amdgpu::GlobalWritebackState>(inst_.scope));
+}
 
 void GlobalAtomicSwapB32Vglobal::execute_impl(amdgpu::Wavefront &wf) {
   std::unique_ptr<amdgpu::VectorMemState> d =

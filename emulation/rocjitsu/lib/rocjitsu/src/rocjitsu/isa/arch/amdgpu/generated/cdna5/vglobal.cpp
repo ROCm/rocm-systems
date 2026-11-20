@@ -923,6 +923,9 @@ GlobalWbVglobal::GlobalWbVglobal(const MachineInst *inst)
               selected_exec_fn(InstructionExecutionId::GlobalWbVglobal)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::STORECNT,
+                                                         amdgpu::MemoryCompletionClass::VMEM}},
+                        false);
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::GLOBAL_WB);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Global, amdgpu::MemoryKind::Cache);

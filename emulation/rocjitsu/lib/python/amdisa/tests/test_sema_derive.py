@@ -2295,7 +2295,7 @@ class TestDeriveFlatLoad:
         ('name', 'semantic_class'),
         [
             ('GLOBAL_INV', 'gl1_inv'),
-            ('GLOBAL_WB', 'true_nop'),
+            ('GLOBAL_WB', 'global_writeback'),
             ('GLOBAL_WBINV', 'gl1_wbinv'),
         ],
     )

@@ -58,6 +58,14 @@ enum MemPipelineTag : uint8_t {
   GLOBAL_MEM = 2,
   LOCAL_MEM = 3,
   TENSOR_DMA = 4,
+  GLOBAL_WRITEBACK = 5,
+};
+
+/// Wave-wide cache maintenance has a store completion and no addressed lanes.
+class GlobalWritebackState final : public DynamicInstState {
+public:
+  explicit GlobalWritebackState(uint8_t scope) : scope(scope) { set_tag(GLOBAL_WRITEBACK); }
+  const uint8_t scope;
 };
 
 /// Host allocation policy for retired ordinary memory instructions. The six

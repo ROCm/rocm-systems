@@ -304,7 +304,8 @@ bool ffm_omits_memory_access(amdgpu::Operation operation) {
          operation == amdgpu::Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64 ||
          operation == amdgpu::Operation::DS_ATOMIC_BARRIER_ARRIVE_RTN_B64 ||
          operation == amdgpu::Operation::GLOBAL_LOAD_BLOCK ||
-         operation == amdgpu::Operation::GLOBAL_STORE_BLOCK;
+         operation == amdgpu::Operation::GLOBAL_STORE_BLOCK ||
+         operation == amdgpu::Operation::GLOBAL_WB;
 }
 
 uint32_t ffm_memory_data_size(const amdgpu::MemoryAccessObservation &access) {
@@ -1001,9 +1002,7 @@ struct PerfsimPlugin::Impl {
     // Current FFM does not emit ON_MEMORY_ACCESS for scalar memory.
     if (access.route == amdgpu::MemoryRoute::SCALAR)
       return;
-    // FFM executes these LDS operations without recording a regular-memory
-    // event. Preserve the instruction callback but suppress RocJITsu's routing
-    // observation.
+    // FFM records these instructions without a regular memory access.
     if (ffm_omits_memory_access(access.operation))
       return;
 

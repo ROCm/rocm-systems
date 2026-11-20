@@ -1503,6 +1503,38 @@ TEST(L2CacheTest, ScopedFlushInvalidatesCleanLine) {
   EXPECT_EQ(observed, kReplacement);
 }
 
+TEST(L2CacheTest, GlobalWritebackPublishesEachDirtyByteToItsOwningAddressSpace) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t first_vmid = 73;
+  constexpr uint32_t other_vmid = 74;
+  constexpr uint64_t address = 0x800;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto first = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  auto other = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  ASSERT_TRUE(vm.register_translated(first_vmid, translator, first));
+  ASSERT_TRUE(vm.register_translated(other_vmid, translator, other));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+
+  std::array<uint8_t, L2Cache::LINE_SIZE> line{};
+  line[0] = 0x31;
+  line[1] = 0x72;
+  ASSERT_EQ(l2.writeback_line(address, line.data(), 0, 1, Mtype::RW, first_vmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(l2.writeback_line(address, line.data(), 1, 1, Mtype::RW, other_vmid),
+            VmAccessOutcome::Complete);
+  first->write_outcome = VmAccessOutcome::Unavailable;
+  EXPECT_EQ(l2.writeback_global_scope(3), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(first->load<uint32_t>(address), 0u);
+  first->write_outcome = VmAccessOutcome::Complete;
+  ASSERT_EQ(l2.writeback_global_scope(3), VmAccessOutcome::Complete);
+  EXPECT_EQ(first->load<uint32_t>(address), 0x31u);
+  EXPECT_EQ(other->load<uint32_t>(address), 0x7200u);
+}
+
 TEST(L2CacheTest, FailedDirectDirtyFlushRetainsLineForRetry) {
   constexpr uint32_t kVmid = 74;
   constexpr uint64_t kAddress = 0x800;

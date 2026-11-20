@@ -549,6 +549,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     cdna5_prefetch_test.cpp
+    global_writeback_test.cpp
     ds_memory_snapshot_test.cpp
     rdna1_memory_test.cpp
     ds_gws_test.cpp

@@ -1829,6 +1829,7 @@ VmAccessOutcome ComputeUnitCore::route_prepared_memory_inst(std::unique_ptr<Inst
     return scalar_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   case LOCAL_MEM:
     return local_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
+  case GLOBAL_WRITEBACK:
   case GLOBAL_MEM:
     return global_mem_pipeline_.issue_deferred(inst, wf, observe_routed_access);
   default:
@@ -2446,6 +2447,11 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
   access.pre_routing_addresses = pre_routing_addresses;
 
   switch (route_tag) {
+  case GLOBAL_WRITEBACK:
+    access.route = MemoryRoute::GLOBAL;
+    access.is_load = false;
+    access.wait_counter = WaitCounterType::STORECNT;
+    break;
   case SCALAR_MEM: {
     const auto &state = *inst.data_as<ScalarMemState>();
     access.route = MemoryRoute::SCALAR;

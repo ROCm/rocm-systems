@@ -1677,6 +1677,14 @@ protected:
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+    if (inst->amdgpu_operation() == Operation::GLOBAL_WB) {
+      inst->execute(*inst, waves[wave]);
+      MemoryAccessObservation access;
+      access.route = MemoryRoute::GLOBAL;
+      access.is_load = false;
+      access.wait_counter = WaitCounterType::STORECNT;
+      fixture.plugin_group_->onAmdgpuMemoryAccessRouted(access, *inst, *waves[wave]);
+    }
   }
 
   EventStatus event_status(int event) {

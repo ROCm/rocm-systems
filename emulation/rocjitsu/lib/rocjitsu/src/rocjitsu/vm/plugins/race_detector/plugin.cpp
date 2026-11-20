@@ -198,7 +198,7 @@ void register_counter_slot(WaveRaceState &race, const InstructionSnapshot &instr
 
 /// The counter slot a gfx1250 wait-counter producer without memory issue
 /// metadata takes when it issues, and whether it returns data:
-/// - GLOBAL_INV counts on LOADcnt, and GLOBAL_WB and GLOBAL_WBINV on STOREcnt
+/// - GLOBAL_INV counts on LOADcnt and GLOBAL_WBINV on STOREcnt
 ///   (CDNA5 ISA 5.7.1.2), in order with the VMEM operations on that counter, as
 ///   LLVM orders GLOBAL_INV with VMEM reads. None is skipped for EXEC zero
 ///   (CDNA5 ISA 3.2.2.1).
@@ -218,7 +218,7 @@ std::optional<CounterOnlySlot> counter_only_slot(amdgpu::Operation operation) {
   using amdgpu::WaitCounterType;
   if (operation == amdgpu::Operation::GLOBAL_INV)
     return CounterOnlySlot{{WaitCounterType::LOADCNT, MemoryCompletionClass::VMEM}, true};
-  if (operation == amdgpu::Operation::GLOBAL_WB || operation == amdgpu::Operation::GLOBAL_WBINV)
+  if (operation == amdgpu::Operation::GLOBAL_WBINV)
     return CounterOnlySlot{{WaitCounterType::STORECNT, MemoryCompletionClass::VMEM}, false};
   if (operation == amdgpu::Operation::DS_PERMUTE_B32 ||
       operation == amdgpu::Operation::DS_BPERMUTE_B32 ||
@@ -900,6 +900,12 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   assert(decoded && "memory instruction reached the race detector without issue metadata");
   if (!decoded)
     return;
+  if (inst.data()->tag() == amdgpu::GLOBAL_WRITEBACK) {
+    const auto obligations = decoded->counter_obligations();
+    register_counter_slot(*rs, instruction, obligations, memoryOrderForObligations(obligations),
+                          false);
+    return;
+  }
   const auto arch = wf.cu().arch();
   auto routed = routed_flat_issue_info(access, *decoded, arch, inst);
   // Address-dependent FLAT acquires only its routed domains. Admit them before

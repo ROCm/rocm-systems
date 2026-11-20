@@ -1849,6 +1849,9 @@ void qualify_buffer_residency(VectorMemState &d, const GpuVmAccess &vm) {
 }
 
 VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
+  if (inst.data()->tag() == GLOBAL_WRITEBACK)
+    return l2_ ? l2_->writeback_global_scope(inst.data_as<GlobalWritebackState>()->scope)
+               : VmAccessOutcome::Complete;
   auto &d = *inst.data_as<VectorMemState>();
   if (rejects_atomic_operation(d, wf, false))
     return VmAccessOutcome::Malformed;
@@ -2229,6 +2232,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_texel_access(VectorMemState &d, Wave
 
 MemoryAccessCompletion GlobalMemPipeline::complete_access(Instruction &inst, Wavefront &wf,
                                                           MemoryAccessDeferredCompletion complete) {
+  if (inst.data()->tag() == GLOBAL_WRITEBACK)
+    return MemoryAccessCompletion::Complete;
   auto &d = *inst.data_as<VectorMemState>();
   if (d.flat_memory_violation && d.rejects_private_atomic(d.lane_mask)) {
     wf.request_unmaskable_memory_trap();

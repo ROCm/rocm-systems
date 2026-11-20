@@ -442,6 +442,9 @@ public:
   /// correct for a global flush. Retained only for call-site signature symmetry.
   VmAccessOutcome flush_all(uint32_t vmid = 0);
 
+  /// Publish this L2's dirty bytes when the requested scope exceeds its coherence domain.
+  [[nodiscard]] VmAccessOutcome writeback_global_scope(uint8_t scope);
+
   /// Apply CDNA4 BUFFER_INV to this XCD's noncoherent lines. Device scope
   /// retains a sole L2. System scope applies regardless of the topology.
   VmAccessOutcome invalidate_buffer_scope(bool system_scope);

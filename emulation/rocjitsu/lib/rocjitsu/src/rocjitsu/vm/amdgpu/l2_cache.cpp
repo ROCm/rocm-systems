@@ -1417,6 +1417,15 @@ VmAccessOutcome L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
   return flush_line_locked(addr, vmid);
 }
 
+VmAccessOutcome L2Cache::writeback_global_scope(uint8_t scope) {
+  // V$ and the memory-side cache are write-through. A single L2 is already
+  // device-coherent; separate XCD L2s share their next backing level.
+  if (scope < 2 || (scope == 2 && !coherence_->has_multiple_l2_caches()))
+    return VmAccessOutcome::Complete;
+  auto maintenance_lock = acquire_cache_maintenance();
+  return flush_dirty_locked();
+}
+
 VmAccessOutcome L2Cache::invalidate_buffer_scope(bool system_scope) {
   // Consult the device before taking an L2 lock, matching the lock order used
   // by device-wide atomics. Only the issuing XCD's L2 performs the invalidation.

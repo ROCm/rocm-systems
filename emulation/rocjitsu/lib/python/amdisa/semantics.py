@@ -2205,7 +2205,7 @@ def _derive_flat(name: str) -> InstructionSemantics | None:
     if upper == 'GLOBAL_INV':
         return InstructionSemantics(name, 'gl1_inv')
     if upper == 'GLOBAL_WB':
-        return InstructionSemantics(name, 'true_nop')
+        return InstructionSemantics(name, 'global_writeback')
     if upper == 'GLOBAL_WBINV':
         return InstructionSemantics(name, 'gl1_wbinv')
     if upper in ('FLAT_PREFETCH_B8', 'GLOBAL_PREFETCH_B8'):
