@@ -2031,7 +2031,7 @@ systemctl<span class="w"> </span>show<span class="w"> </span><span class="s2">"<
 <span class="w">  </span>-p<span class="w"> </span>Id<span class="w"> </span>-p<span class="w"> </span>AllowedCPUs<span class="w"> </span>-p<span class="w"> </span>EffectiveCPUs<span class="w"> </span>-p<span class="w"> </span>ControlGroup
 </code></pre></div>
 <p>The sample wrapper below places the complete <code>/usr/bin/time</code>, <code>taskset</code>, <code>perf</code>,
-RocJITsu, and workload chain in a transient sibling scope, then drops privileges
+rocjitsu, and workload chain in a transient sibling scope, then drops privileges
 before measurement. Its pinned CPU pair is a subset of the reservation. Pass
 every required runtime input explicitly to <code>systemd-run</code>; do not measure only
 the client process.</p>

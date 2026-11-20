@@ -2295,7 +2295,7 @@ even when the new instruction is scalar memory or GDS. Mixed-class pressure
 that does not identify a completed event remains conservatively pending. VMCNT
 is handled the same way for its 63-entry ordered non-FLAT VMEM class.</p>
 <p>The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow <code>s_sendmsg*</code> fallback applies
+through rocjitsu's memory pipelines. A narrow <code>s_sendmsg*</code> fallback applies
 issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
 through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
 <code>s_sendmsg_rtn_*</code>, which also counts its returned data (CDNA5 ISA 5.4). On
@@ -2527,7 +2527,7 @@ ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class=
 </code></pre></div>
 <p>To run the HIP cases locally, follow the corpus's
 <a href="https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration">race-suite instructions</a>
-and point the wrapper at the RocJITsu build being tested. Set
+and point the wrapper at the rocjitsu build being tested. Set
 <code>ROCJITSU_RACE_CONFIG</code> to <code>tests/race-detector/race_test_gfx942_config.json</code> for gfx942,
 <code>tests/race-detector/race_test_config.json</code> for gfx950, <code>configs/gfx1151.json</code> for
 gfx1151 or <code>configs/gfx1250_mi455x.json</code> for gfx1250, using absolute paths from

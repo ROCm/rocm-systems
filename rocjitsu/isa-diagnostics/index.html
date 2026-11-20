@@ -1567,7 +1567,7 @@
 
 
 <h1 id="isa-diagnostics">ISA diagnostics<a class="headerlink" href="#isa-diagnostics" title="Permanent link">&para;</a></h1>
-<p>RocJITsu checks for these explicitly undefined ISA conditions:</p>
+<p>rocjitsu checks for these explicitly undefined ISA conditions:</p>
 <table>
 <thead>
 <tr>
@@ -1632,7 +1632,7 @@ instruction. Other checks use operands already calculated for execution; they
 do not scan register allocations, track lane conflicts or maintain an access
 history.</p>
 <p>These small checks run unconditionally, independently of memory-wait checking,
-in both RocJITsu and Mirage. They have no CLI or configuration switch.
+in both rocjitsu and Mirage. They have no CLI or configuration switch.
 A warning on a defined instruction is a checker bug and should be reported.</p>
 <p>Combined offsets are checked before alignment masks are applied. CDNA1–4 and
 RDNA1–3.5 scalar-buffer operations are excluded: their separate manual sections do not

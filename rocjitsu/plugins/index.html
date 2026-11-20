@@ -2297,7 +2297,7 @@ for the other borrowed parts of an <code>Instruction</code>.</p>
 </ul>
 <h3 id="perfsim-compatibility-plugin">Perfsim compatibility plugin<a class="headerlink" href="#perfsim-compatibility-plugin" title="Permanent link">&para;</a></h3>
 <p>The optional Linux-only Perfsim adapter loads a separately built Perfsim backend at
-runtime. RocJITsu does not build, link, vendor, or install Perfsim and does not
+runtime. rocjitsu does not build, link, vendor, or install Perfsim and does not
 write a persistent Perfsim trace; Perfsim continues to own its <code>GPUCSIM_*</code>
 configuration and reports. See the <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md">Perfsim adapter README</a>
 for the runtime-first setup, independent build boundary, compatibility
@@ -2346,7 +2346,7 @@ mirage<span class="w"> </span>session<span class="w"> </span>start<span class="w
 take required arguments, or runs that need custom sink settings, are
 configured through a profile or an explicit <code>--config &lt;file&gt;</code>.</p>
 <h3 id="plugin-loader-boundary">Plugin loader boundary<a class="headerlink" href="#plugin-loader-boundary" title="Permanent link">&para;</a></h3>
-<p>Plugins are repository-owned components built and shipped with rocJitsu. The
+<p>Plugins are repository-owned components built and shipped with rocjitsu. The
 loader boundary does not provide compatibility or versioning for independently
 built plugins; the host and plugins must always be rebuilt together.</p>
 <p>Each plugin <code>.so</code> exports three <code>extern "C"</code> functions:</p>
@@ -2624,7 +2624,7 @@ plugins may override the observation-only
 instead override <code>onAmdgpuMemoryAccessRouted(access, wf)</code>, avoiding a shared
 identity lookup. Plugins that also need the decoded instruction may override
 the context-preserving <code>onAmdgpuMemoryAccessRouted(access, inst, wf)</code> form.
-RocJITsu calls the most specific form; its defaults forward through the
+rocjitsu calls the most specific form; its defaults forward through the
 wavefront-aware form to the observation-only form. The borrowed instruction and
 wavefront already reflect the selected route and are valid only during the
 callback.</p>

@@ -2211,7 +2211,7 @@ Zero findings with missing evidence does not establish that unobserved accesses
 were safe.</p>
 <h2 id="how-to-use">How to use<a class="headerlink" href="#how-to-use" title="Permanent link">&para;</a></h2>
 <p>This example runs a <strong>gfx1250 wave32</strong> assembly fixture with 64 threads in one
-workgroup through the rocJitsu simulator; no physical gfx1250 GPU is required.
+workgroup through the rocjitsu simulator; no physical gfx1250 GPU is required.
 The AMDHSA code-object-v5 image, entry, target, and wave mode must match the
 simulator configuration. A runner option does not change an image's wave mode.</p>
 <p>The <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/patch/consan/consan_hsa_runner.cpp">controlled HSA runner</a> supplies this
@@ -2372,7 +2372,7 @@ catalogue nor require the device compiler.</p>
 together. Define its question, scope, required evidence, and behavior under loss:</p>
 <ul>
 <li><strong>Compiler:</strong> select operations and lower probes while preserving guest state
-  and executing each original operation once. Reuse rocJitsu's code-object
+  and executing each original operation once. Reuse rocjitsu's code-object
   parsing, ISA decoders/builders, and ELF rewriting/relocation through the
   <a href="../dbi-design/">shared DBI machinery</a>.</li>
 <li><strong>Offline analyzer:</strong> qualify the saved evidence and implement checks,

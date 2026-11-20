@@ -1774,7 +1774,7 @@ nodes. Earlier single-guest P2P, four-GPU, and two-guest NET controls remain
 useful regressions but do not pass this gate.</p>
 <h2 id="topology-and-driver-contract">Topology and driver contract<a class="headerlink" href="#topology-and-driver-contract" title="Permanent link">&para;</a></h2>
 <p>Run four independent nodes on one physical host. In VFIO mode, each node is
-its own QEMU guest and rocJITsu VMM. Each node has at least two modeled GPUs
+its own QEMU guest and rocjitsu VMM. Each node has at least two modeled GPUs
 and runs one RCCL process per GPU, for at least eight ranks in one
 communicator. In emulated KFD mode, run the equivalent four isolated node
 projections, at least two GPUs and one process per GPU on each node. Give each
@@ -1805,7 +1805,7 @@ memory-controller, MMHUB, HDP, UTC/TLB, or related behavior belongs in modular
 hardware models reached through the stock register, packet, and discovery
 interfaces.</p>
 <p>The QEMU/VFIO run must also use stock QEMU and libvfio-user peer transport
-interfaces. A rocJITsu-specific extension to <code>VFIO_USER_DMA_MAP</code> does not
+interfaces. A rocjitsu-specific extension to <code>VFIO_USER_DMA_MAP</code> does not
 satisfy this gate. Peer BAR access must retain its local fabric effects and
 fail-closed lifetime checks through a standard transport path. A NET-only
 fallback does not satisfy this requirement.</p>
@@ -1830,7 +1830,7 @@ emulated KFD mode from the same directory with the current binaries:</p>
 </code></pre></div>
 <h3 id="capture-source-and-runtime-provenance">Capture source and runtime provenance<a class="headerlink" href="#capture-source-and-runtime-provenance" title="Permanent link">&para;</a></h3>
 <p>Immediately before building the binaries for a fresh run, save the source
-revision, tracked changes, and untracked rocJITsu source files. Run these
+revision, tracked changes, and untracked rocjitsu source files. Run these
 commands from <code>emulation/rocjitsu</code>, then repeat the capture after the build;
 set <code>pod_capture_dir=/tmp/rocjitsu-pod-evidence/source-after-build</code> for the
 second capture so it does not overwrite the first. If the source state changed,
@@ -1849,7 +1849,7 @@ tar<span class="w"> </span>-C<span class="w"> </span>../..<span class="w"> </spa
 <span class="w">  </span>-cf<span class="w"> </span><span class="s2">"</span><span class="nv">$pod_capture_dir</span><span class="s2">/untracked.tar"</span>
 </code></pre></div>
 <p>Archive any other untracked source named by <code>source-status.txt</code> if it affects
-the build; the tar command above covers only rocJITsu's untracked files.</p>
+the build; the tar command above covers only rocjitsu's untracked files.</p>
 <p>The controllers hash their executable, manifest, and logs in <code>result.json</code>;
 the emulated controller also hashes itself and its node helper. Hash the VFIO
 launcher and helpers, including the shared verification module, separately
@@ -1913,7 +1913,7 @@ are dropped. Bound each rank, guest, VMM, and the complete run; require clean
 rank and guest teardown, zero launcher status, and no remaining VFIO sockets.
 Record the exact manifest, guest network layout, commands and environment,
 driver source/package and module hashes, firmware and user-space versions,
-QEMU and rocJITsu binary hashes, seed, message sizes, iteration count,
+QEMU and rocjitsu binary hashes, seed, message sizes, iteration count,
 per-rank case results, channel evidence, route totals, and complete logs.</p>
 <p>The two-host cluster run and cacheable peer-coherence qualification are later
 gates. The selected A0 peer PTE is UC, so this gate does not require a

@@ -2143,13 +2143,13 @@
   
 
 
-<h1 id="rocjitsu-arithmetic-library-design">Rocjitsu Arithmetic Library design<a class="headerlink" href="#rocjitsu-arithmetic-library-design" title="Permanent link">&para;</a></h1>
-<p>This document describes the Rocjitsu Arithmetic Library (<code>rj-arith</code>), located in
+<h1 id="rocjitsu-arithmetic-library-design">rocjitsu Arithmetic Library design<a class="headerlink" href="#rocjitsu-arithmetic-library-design" title="Permanent link">&para;</a></h1>
+<p>This document describes the rocjitsu Arithmetic Library (<code>rj-arith</code>), located in
 <a href="https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu/lib/arith"><code>lib/arith/</code></a>. It implements GPU arithmetic on a CPU. Its interface follows GPU
 instructions and register layouts; its implementation uses portable C++ and
 CPU-specific SIMD arithmetic.</p>
 <h2 id="scope-and-contract">Scope and contract<a class="headerlink" href="#scope-and-contract" title="Permanent link">&para;</a></h2>
-<p>GETREG/SETREG hardware-register access stays in Rocjitsu’s VM. Its register mapping,
+<p>GETREG/SETREG hardware-register access stays in rocjitsu’s VM. Its register mapping,
 privilege checks, topology, and execution side effects are outside this arithmetic library.</p>
 <p>The library is a collection of C entry points mapping one-to-one to GPU instructions.
 Each aims to reproduce the instruction's arithmetic, synchronously on the calling
@@ -2184,7 +2184,7 @@ Vector entry points retain explicit wave widths even when a lane-wise builtin
 has none. Where no builtin distinguishes different instruction contracts,
 architecture suffixes disambiguate them. Scalar instructions omit wave width.</p>
 <p>The C interface constrains the API to a narrow, hermetic surface rather than
-making Rocjitsu a C project. Typed <code>constexpr</code> constants work in both languages.
+making rocjitsu a C project. Typed <code>constexpr</code> constants work in both languages.
 C++17 header checks always run; C23 checks run only when a compiler probe succeeds.
 Skipping C checks on older toolchains is intentional, including current CI.
 The project itself does not require C23.</p>
@@ -2293,10 +2293,10 @@ Modes 2 and 3 reject unsupported behavior rather than silently falling back to
 loose arithmetic.</p>
 <h3 id="compatibility-mode">Compatibility mode<a class="headerlink" href="#compatibility-mode" title="Permanent link">&para;</a></h3>
 <p>Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
-Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
+Each entry point selects the arithmetic and FP status policy matching rocjitsu's
 previous behavior. This can retain instruction-specific details beyond the
 other modes, such as rounding FP16 results before applying OMOD.
-FP32 MUL retains Rocjitsu's inherited numerical and exception-classification
+FP32 MUL retains rocjitsu's inherited numerical and exception-classification
 models inside the library for Compatibility; explicit mode 3 uses its separately
 qualified reporting domain. Gfx12 binary arithmetic and selection likewise own
 their inherited Compatibility causes in the library. Their status storage must
@@ -2317,7 +2317,7 @@ causes across the wave, including denormal pairs in the other Wave64 half.
 The simulator only commits the comparison mask and causes.
 Dual FP32 arithmetic slots share the wave’s</p>
 <p>exception flags. Explicit numeric-only modes suppress these additional flags.
-Rocjitsu's <a href="../configuration/#cpu-arithmetic-policy"><code>arithmetic.semantics</code></a>
+rocjitsu's <a href="../configuration/#cpu-arithmetic-policy"><code>arithmetic.semantics</code></a>
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without <code>RJ_ARITH_SEMANTICS_</code>.
 <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/arith/COVERAGE.md">Instruction coverage</a> describes the migrated families.
@@ -2352,7 +2352,7 @@ not necessarily the correctly rounded mathematical result. Missing required supp
 and special-value behavior can differ by architecture, and CPU SIMD paths must
 implement the same instruction contracts. This small duplication keeps those
 hardware-specific policies under the arithmetic library's ownership.</p>
-<p>Exact arithmetic follows validated Rocjitsu models or simple ISA-defined behavior.
+<p>Exact arithmetic follows validated rocjitsu models or simple ISA-defined behavior.
 Sources and evidence stay beside the code and tests; optimizing a model does not
 establish that it matches hardware.</p>
 <p>SIMD and scalar paths implement the same contract. Scalar fallbacks handle values

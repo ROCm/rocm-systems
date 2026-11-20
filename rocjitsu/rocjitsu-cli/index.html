@@ -2445,7 +2445,7 @@
   
 
 
-<h1 id="rocjitsu-cli-and-transport-layer-design"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 19V7H4v12zm0-16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm-7 14v-2h5v2zm-3.42-4L5.57 9H8.4l3.3 3.3c.39.39.39 1.03 0 1.42L8.42 17H5.59z"/></svg></span> Rocjitsu CLI and Transport Layer Design<a class="headerlink" href="#rocjitsu-cli-and-transport-layer-design" title="Permanent link">&para;</a></h1>
+<h1 id="rocjitsu-cli-and-transport-layer-design"><span class="twemoji" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 19V7H4v12zm0-16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm-7 14v-2h5v2zm-3.42-4L5.57 9H8.4l3.3 3.3c.39.39.39 1.03 0 1.42L8.42 17H5.59z"/></svg></span> rocjitsu CLI and Transport Layer Design<a class="headerlink" href="#rocjitsu-cli-and-transport-layer-design" title="Permanent link">&para;</a></h1>
 <h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
 <p>The <code>rocjitsu</code> CLI is the primary entry point for running applications on
 the simulated GPU. It operates in four modes:</p>
@@ -2500,12 +2500,12 @@ the shared engine can safely continue. Recovering one client while preserving
 the others requires a separate queue/process recovery mechanism.</p>
 <h3 id="the-fork-boundary">The fork boundary<a class="headerlink" href="#the-fork-boundary" title="Permanent link">&para;</a></h3>
 <p>A child created with <code>fork()</code> before the parent has started a GPU backend can
-initialize its own rocJITsu context. This supports Python forkserver workers.
+initialize its own rocjitsu context. This supports Python forkserver workers.
 The child handler replaces unused interposer bookkeeping and the host mapping
 lock, while preserving the invocation metadata used to find the configuration
 and daemon. It does not acquire or destroy inherited locks.</p>
 <p><strong>After the parent starts a backend, forked children must <code>exec</code> before using
-rocJITsu.</strong> The child may inherit locks held by threads that no longer exist, so
+rocjitsu.</strong> The child may inherit locks held by threads that no longer exist, so
 GPU endpoint opens fail with <code>ENODEV</code> until <code>exec</code> initializes a fresh context.
 This restriction applies to local and daemon clients, including after their GPU
 descriptors have been closed. Inheriting real GPU descriptors also prevents
@@ -2653,7 +2653,7 @@ destroys the topology root (VirtualMachine), which destroys the driver.</p>
 <td>VFIO-user server</td>
 <td><code>rocjitsu --config ... --vfio-socket ...</code> (repeat per local GPU)</td>
 <td>Guest AMDGPU driver through PCI/VFIO</td>
-<td>rocJITsu process</td>
+<td>rocjitsu process</td>
 </tr>
 </tbody>
 </table>
