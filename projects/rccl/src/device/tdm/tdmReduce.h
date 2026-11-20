@@ -133,8 +133,9 @@ __device__ __forceinline__ void reduceCopyTdm(int nThreads, int& thread, uint64_
           tdmReduceWait();
           tdmReduceCombine<RedFn, PreOpSrcs, /*First=*/false>(redFn, acc, in, s, postOp && s == nSrcs - 1);
         }
-        // The lanes' LDS writes must be visible to the mover before it reads the tile back out.
-        __threadfence_block();
+        // The lanes' LDS writes must land before the mover reads the tile back out. An LDS-only release waits on DScnt
+        // alone; on gfx1250 __threadfence_block() also waits for every outstanding global store.
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
       }
       for (int d = 0; d < MaxDsts && d < nDsts; d++)
         tdmReduceStoreTile(cvta_to_global(dstPtrFn(d)) + cursor, tile, bytes);
