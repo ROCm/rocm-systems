@@ -3719,7 +3719,27 @@ def amdsmi_get_gpu_cper_entries(
                 serial_number = board_info.get("product_serial", "")
             except Exception:
                 serial_number = ""
+
+        # Helper to safely decode C byte arrays
+        def safe_decode_bytes(byte_array):
+            """Convert ctypes byte array to string, handling non-UTF8 data."""
+            try:
+                # Convert to bytes if it's a ctypes array
+                if hasattr(byte_array, "raw"):
+                    raw_bytes = bytes(byte_array.raw)
+                else:
+                    raw_bytes = bytes(byte_array)
+                # Try UTF-8 first, strip null bytes
+                return raw_bytes.rstrip(b"\x00").decode("utf-8", errors="replace")
+            except (AttributeError, TypeError):
+                # If conversion fails, return hex representation
+                try:
+                    return "".join(f"{b:02x}" for b in bytes(byte_array))
+                except:
+                    return str(byte_array)
+
         # Create a dictionary for the CPER entry.
+        # Note: 'source' will be determined from FRU parsing in the CLI layer
         cper_entry = {
             "error_severity": amdsmi_wrapper.amdsmi_cper_sev_t__enumvalues.get(
                 entry_ptr.contents.error_severity, "AMDSMI_CPER_SEV_UNUSED"
@@ -3728,18 +3748,18 @@ def amdsmi_get_gpu_cper_entries(
             .lower(),
             "notify_type": _notifyTypeToString(entry_ptr.contents.notify_type.b),
             "timestamp": formatted_timestamp,
-            "signature": entry_ptr.contents.signature,
+            "signature": safe_decode_bytes(entry_ptr.contents.signature),
             "revision": entry_ptr.contents.revision,
             "signature_end": hex(entry_ptr.contents.signature_end),
             "sec_cnt": entry_ptr.contents.sec_cnt,
             "record_length": entry_ptr.contents.record_length,
-            "serial_number": serial_number,
-            "platform_id": entry_ptr.contents.platform_id,
-            "creator_id": entry_ptr.contents.creator_id,
-            "record_id": entry_ptr.contents.record_id,
+            "serial_number": serial_number if serial_number else "N/A",
+            "platform_id": safe_decode_bytes(entry_ptr.contents.platform_id),
+            "creator_id": safe_decode_bytes(entry_ptr.contents.creator_id),
+            "record_id": safe_decode_bytes(entry_ptr.contents.record_id),
             "flags": entry_ptr.contents.flags,
             "persistence_info": entry_ptr.contents.persistence_info,
-            "source": "gpu",
+            "source": "unknown",  # Will be determined from FRU in CLI
             # "reserved" : entry_ptr.contents.reserved
             # "cper_valid_bit" : entry_ptr.contents.cper_valid_bits,
             # "partition_id" : entry_ptr.contents.partition_id,
@@ -3836,6 +3856,31 @@ def amdsmi_get_fabric_cper_entries(
             f"{bcd(ts.seconds):02d}"
         )
 
+        # Helper to safely decode C byte arrays
+        def safe_decode_bytes(byte_array):
+            """Convert ctypes byte array to string, handling non-UTF8 data."""
+            try:
+                # Convert to bytes if it's a ctypes array
+                if hasattr(byte_array, "raw"):
+                    raw_bytes = bytes(byte_array.raw)
+                else:
+                    raw_bytes = bytes(byte_array)
+                # Try UTF-8 first, strip null bytes
+                return raw_bytes.rstrip(b"\x00").decode("utf-8", errors="replace")
+            except (AttributeError, TypeError):
+                # If conversion fails, return hex representation
+                try:
+                    return "".join(f"{b:02x}" for b in bytes(byte_array))
+                except:
+                    return str(byte_array)
+
+        def safe_decode_guid(guid_struct):
+            """Convert GUID structure to hex string."""
+            try:
+                return "".join(f"{b:02x}" for b in bytes(guid_struct.b))
+            except:
+                return str(guid_struct)
+
         cper_entry = {
             "error_severity": amdsmi_wrapper.amdsmi_cper_sev_t__enumvalues.get(
                 entry_ptr.contents.error_severity, "AMDSMI_CPER_SEV_UNUSED"
@@ -3844,17 +3889,17 @@ def amdsmi_get_fabric_cper_entries(
             .lower(),
             "notify_type": _notifyTypeToString(entry_ptr.contents.notify_type.b),
             "timestamp": formatted_timestamp,
-            "signature": entry_ptr.contents.signature,
+            "signature": safe_decode_bytes(entry_ptr.contents.signature),
             "revision": entry_ptr.contents.revision,
             "signature_end": hex(entry_ptr.contents.signature_end),
             "sec_cnt": entry_ptr.contents.sec_cnt,
             "record_length": entry_ptr.contents.record_length,
-            "platform_id": entry_ptr.contents.platform_id,
-            "creator_id": entry_ptr.contents.creator_id,
-            "record_id": entry_ptr.contents.record_id,
+            "platform_id": safe_decode_bytes(entry_ptr.contents.platform_id),
+            "creator_id": safe_decode_bytes(entry_ptr.contents.creator_id),
+            "record_id": safe_decode_bytes(entry_ptr.contents.record_id),
             "flags": entry_ptr.contents.flags,
             "persistence_info": entry_ptr.contents.persistence_info,
-            "partition_id": entry_ptr.contents.partition_id,
+            "partition_id": safe_decode_guid(entry_ptr.contents.partition_id),
             "source": "fabric",
         }
 
