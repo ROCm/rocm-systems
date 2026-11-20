@@ -437,10 +437,20 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyn
   task.opDev.op = ncclDevSum;
   task.datatype = ncclFloat32;
   task.count = 1024;
-  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
+  int tuningFunc = ncclTuningFuncIndex(task.func);
+  ASSERT_GE(tuningFunc, 0);
+  comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][tuningFunc] = 1;
+  ncclTaskColl unsupported = task;
+  unsupported.func = ncclFuncScatter;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &unsupported, unsupported.count * sizeof(float));
   ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
-  ScopedHook symkAvailable(g_symkAvailable,
-                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
+  int availabilityCalls = 0;
+  ScopedHook symkAvailable(
+      g_symkAvailable,
+      [&availabilityCalls](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) {
+        availabilityCalls++;
+        return false;
+      });
   int prepareCalls = 0;
   ScopedHook prepareTasks(
       g_ncclPrepareTasks,
@@ -459,6 +469,7 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyn
   ASSERT_EQ(ncclSuccess,
             ncclPrepareTasksAndCollPreconnect(comm.get(), &simInfo, &asyncCollJobs));
   EXPECT_EQ(1, prepareCalls);
+  EXPECT_EQ(1, availabilityCalls);
   EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 }
 
