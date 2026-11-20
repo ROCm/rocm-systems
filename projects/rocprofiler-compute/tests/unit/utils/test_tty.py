@@ -1002,12 +1002,11 @@ def test_show_all_debug_table_view_skips_per_kernel_roofline_layout(
     per-kernel layout."""
     roofline_called = False
 
-    def _spy(*_a, **_k) -> bool:
+    def _spy(*_a, **_k) -> None:
         nonlocal roofline_called
         roofline_called = True
-        return False
 
-    monkeypatch.setattr("utils.tty.is_roofline_shown", _spy)
+    monkeypatch.setattr("utils.tty.show_roofline", _spy)
     panel = make_roofline_panel()
     monkeypatch.setattr(
         "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
