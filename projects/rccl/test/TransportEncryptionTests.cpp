@@ -4,10 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// NCCL 2.32.3 (AICOMRCCL-3381): ncclSetEncryption() turns on TLS for RCCL's own sockets.
-// RCCL builds without a TLS backend unless TLS_BACKEND=OPENSSL3, so a stored PSK must then
-// fail the next connect rather than fall back to plaintext. dlsym and a mirrored config
-// keep this file building against an nccl.h that predates the API.
+// ncclSetEncryption(): a stored PSK must bring the bootstrap up over TLS or refuse it, never plaintext.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -20,21 +17,13 @@
 namespace RcclUnitTesting {
 namespace {
 
-// Layout of ncclEncryptionConfig_t (ncclEncryptionConfig_v23200).
-struct EncryptionConfig {
-  size_t size;
-  unsigned int magic;
-  unsigned int version;
-  int mode;  // NCCL_ENCRYPTION_MODE_NONE = 0, NCCL_ENCRYPTION_MODE_PSK = 1
-  const char* psk;
-};
-using SetEncryptionFn = ncclResult_t (*)(const EncryptionConfig*);
-
-constexpr int kModePsk = 1;
 constexpr char kPsk[] = "rccl-transport-encryption-key-32";  // the 32-byte minimum
 
-EncryptionConfig makeConfig(int mode, const char* psk) {
-  return {sizeof(EncryptionConfig), NCCL_API_MAGIC, NCCL_VERSION_CODE, mode, psk};
+ncclEncryptionConfig_t makeConfig(int mode, const char* psk) {
+  ncclEncryptionConfig_t config = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+  config.mode = mode;
+  config.psk = psk;
+  return config;
 }
 
 // The one rank connects to the bootstrap root that ncclGetUniqueId started.
@@ -48,26 +37,23 @@ ncclResult_t initOneRank(ncclComm_t* comm) {
 
 TEST(TransportEncryption, PskGatesBootstrapSockets) {
   RUN_ISOLATED_TEST("TransportEncryption.PskGatesBootstrapSockets", []() {
-    auto setEncryption = reinterpret_cast<SetEncryptionFn>(dlsym(RTLD_DEFAULT, "ncclSetEncryption"));
-    ASSERT_NE(setEncryption, nullptr) << "librccl does not export ncclSetEncryption";
-
     // Refused: no initializer magic, no key, a 31-byte key, an unknown mode.
-    EncryptionConfig config = makeConfig(kModePsk, kPsk);
+    ncclEncryptionConfig_t config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk);
     config.magic = 0;
-    EXPECT_EQ(setEncryption(&config), ncclInvalidArgument);
-    config = makeConfig(kModePsk, nullptr);
-    EXPECT_EQ(setEncryption(&config), ncclInvalidArgument);
-    config = makeConfig(kModePsk, kPsk + 1);
-    EXPECT_EQ(setEncryption(&config), ncclInvalidArgument);
-    config = makeConfig(kModePsk + 1, kPsk);
-    EXPECT_EQ(setEncryption(&config), ncclInvalidArgument);
+    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
+    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, nullptr);
+    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
+    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk + 1);
+    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
+    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK + 1, kPsk);
+    EXPECT_EQ(ncclSetEncryption(&config), ncclInvalidArgument);
 
     int deviceCount = 0;
     if (hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount < 1) GTEST_SKIP() << "requires a GPU";
     ASSERT_EQ(hipSetDevice(0), hipSuccess);
 
-    config = makeConfig(kModePsk, kPsk);
-    ASSERT_EQ(setEncryption(&config), ncclSuccess);
+    config = makeConfig(NCCL_ENCRYPTION_MODE_PSK, kPsk);
+    ASSERT_EQ(ncclSetEncryption(&config), ncclSuccess);
     ncclComm_t comm = nullptr;
     ncclResult_t res = initOneRank(&comm);
     if (res == ncclSuccess) {
@@ -80,7 +66,7 @@ TEST(TransportEncryption, PskGatesBootstrapSockets) {
     }
 
     // A NULL config resets to NCCL_ENCRYPTION_MODE_NONE: the same init then runs in plaintext.
-    ASSERT_EQ(setEncryption(nullptr), ncclSuccess);
+    ASSERT_EQ(ncclSetEncryption(nullptr), ncclSuccess);
     ASSERT_EQ(initOneRank(&comm), ncclSuccess);
     EXPECT_EQ(ncclCommDestroy(comm), ncclSuccess);
   });
