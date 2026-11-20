@@ -124,8 +124,8 @@ gfx12 scalar arithmetic, comparisons, rounding and conversions use rj-arith in
 every semantics, including Compatibility. Compatibility retains the inherited
 scalar FP-status model; arithmetic and conversions still reject explicit mode 3
 where reporting is not qualified. Scalar comparisons and rounding support mode 3.
-The VM owns SGPR/SCC writes and trap delivery. gfx1150 retains its legacy scalar
-FP implementation pending migration; gfx1250 has its own documented library policy.
+The VM owns SGPR/SCC writes and trap delivery. gfx1150 and gfx1250 use the
+architecture-specific library policies documented below.
 
 ## Older native FP16 FMA
 
@@ -197,3 +197,12 @@ in modes 2 and 3.
 The old true16-dot emitter loses its last production users and is deleted.
 Its semantic classes now route directly to the shared library binding, along
 with the migrated HostF32 packed and accumulating forms on CDNA1/2 and RDNA2.
+
+## gfx1150 scalar floating point
+
+All 58 scalar FP forms used by Rocjitsu support Loose and Compatibility.
+Compatibility preserves the inherited software model, including guest rounding,
+IEEE-dependent NaNs and FP status. The 30 gfx1150-specific arithmetic, selection,
+rounding and conversion entry points do not advertise new empirical qualification;
+comparisons share the existing raw-bit predicates. Scalar operations have one
+SGPR value per operand, so there is no lane-vector SIMD backend to select.

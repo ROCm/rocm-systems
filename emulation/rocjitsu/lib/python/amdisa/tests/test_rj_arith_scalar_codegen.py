@@ -317,3 +317,33 @@ def test_cdna_first_zero_is_independent_of_other_scalar_migration(arch, bits):
     )
     assert 'scc' not in body
     assert gen_scalar(context(arch, 'S_FF1_I32_B32', ['dst'], ['src'])) is not None
+
+
+@pytest.mark.parametrize(
+    'name',
+    [
+        'S_ADD_F16',
+        'S_MIN_F32',
+        'S_MAX_F16',
+        'S_CVT_HI_F32_F16',
+        'S_FMAC_F32',
+        'S_CVT_PK_RTZ_F16_F32',
+    ],
+)
+def test_gfx1150_scalar_policy_and_commit(name):
+    inputs = 1 if name == 'S_CVT_HI_F32_F16' else 2
+    body = gen_scalar(context('rdna3_5', name, ['dst'], ['a', 'b'][:inputs]))
+    assert f'rj_arith_{name.lower()}_gfx1150' in body
+    assert 'RJ_ARITH_FP_IEEE_MODE' in body
+    assert '!wf.dx10_clamp()' in body
+    assert body.index('instruction_execution_failed()') < body.index('const int status')
+    assert body.index('status != RJ_ARITH_SUCCESS') < body.index(
+        'write_scalar(dst, result)'
+    )
+
+
+@pytest.mark.parametrize(
+    'name', ['S_MIN_NUM_F16', 'S_MAX_NUM_F32', 'S_MINIMUM_F16', 'S_MAXIMUM_F32']
+)
+def test_gfx1150_does_not_advertise_newer_selection_forms(name):
+    assert gen_scalar(context('rdna3_5', name, ['dst'], ['a', 'b'])) is None

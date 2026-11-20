@@ -968,13 +968,6 @@ def test_generated_scc_accesses_match_mrisa(isa_name, profile_type):
 
             if sem is not None:
                 body = generator._gen_execute_body(inst, sem, enc.enc_name)
-                if 'scalar_fp::compare<' in body:
-                    implementation = (
-                        _repo_root()
-                        / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa'
-                        / 'arch/amdgpu/shared/scalar_fp.h'
-                    ).read_text()
-                    body += _generated_function_body(implementation, 'void compare(')
                 body_reads_scc = 'read_scc()' in body
                 body_writes_scc = 'write_scc(' in body
                 if body_reads_scc != mrisa_reads_scc:
@@ -3977,40 +3970,6 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
             inst, semantics.instructions[name], enc.enc_name
         )
 
-        if numeric_sources and arch_name == 'rdna3_5':
-            implementation = (
-                _repo_root()
-                / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa'
-                / 'arch/amdgpu/shared/scalar_fp.h'
-            ).read_text()
-            # This target shares the typed reader between arithmetic and
-            # conversions. Check the generated call and the actual source path.
-            for operand in inst.src_operands:
-                assert operand.data_format_name == 'FMT_NUM_F16', name
-            reader = _generated_function_body(implementation, 'uint32_t read(')
-            assert 'std::is_same_v<Fmt, F16>' in reader
-            assert 'amdgpu::read_scalar_f16_carrier(op, wf, high)' in reader
-            assert '>> (high ? 16 : 0)' in reader
-            if name == 'S_MIN_F16':
-                assert (
-                    'select<amdgpu::scalar_fp::F16, amdgpu::minmax::LegacyMin>(wf, sdst, ssrc0, ssrc1)'
-                    in body
-                )
-                selection = _generated_function_body(implementation, 'void select(')
-                assert (
-                    'read<Fmt>(wf, lhs)' in selection
-                    and 'read<Fmt>(wf, rhs)' in selection
-                )
-            else:
-                suffix = ', true' if high else ''
-                assert (
-                    f'convert<amdgpu::scalar_fp::F16, amdgpu::scalar_fp::F32>(wf, sdst, ssrc0{suffix})'
-                    in body
-                )
-                conversion = _generated_function_body(implementation, 'void convert(')
-                assert 'read<From>(wf, src, high)' in conversion
-            continue
-
         for operand in inst.src_operands:
             if operand.name in numeric_sources:
                 assert operand.data_format_name == 'FMT_NUM_F16', name
@@ -4026,9 +3985,13 @@ def test_scalar_f16_source_lowering_uses_numeric_operand_format(arch_name):
         if not numeric_sources:
             assert 'read_scalar_f16_carrier' not in body, name
         if high:
-            if arch_name in ('rdna4', 'cdna5'):
+            if arch_name in ('rdna4', 'cdna5', 'rdna3_5'):
                 # The rj-arith entry point selects the high half of the carrier.
-                suffix = '_gfx1250' if arch_name == 'cdna5' else ''
+                suffix = (
+                    '_gfx1250'
+                    if arch_name == 'cdna5'
+                    else '_gfx1150' if arch_name == 'rdna3_5' else ''
+                )
                 assert f'rj_arith_s_cvt_hi_f32_f16{suffix}(' in body
             else:
                 assert '>> 16' in body, name
