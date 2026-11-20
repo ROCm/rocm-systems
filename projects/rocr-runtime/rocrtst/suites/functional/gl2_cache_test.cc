@@ -42,6 +42,9 @@ void GL2CacheTest::Run(void) {
     return;
   }
   TestBase::Run();
+  if (subtest_) {
+    subtest_();
+  }
 }
 
 void GL2CacheTest::DisplayTestInfo(void) {
@@ -74,7 +77,15 @@ void GL2CacheTest::QueryMaxPersistingCacheSize() {
     err = hsa_agent_get_info(gpus[idx],
         (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
         &maxSize);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+    if (err == static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED)) {
+      std::cout << "    GPU[" << idx
+                << "] persisting L2 cache not supported, skipping"
+                << std::endl;
+      continue;
+    }
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS)
+        << "GPU[" << idx << "] unexpected max cache query failure";
 
     std::stringstream ss;
     ss << "    GPU[" << idx << "] Max persisting L2 cache size: "
@@ -128,14 +139,16 @@ void GL2CacheTest::SetPersistingCacheSize() {
     err = hsa_agent_get_info(gpus[idx],
         (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
         &maxSize);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-    if (maxSize == 0) {
+    if (err == static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED)
+        || maxSize == 0) {
       std::cout << "    GPU[" << idx
                 << "] does not support persisting L2 cache, skipping set test"
                 << std::endl;
       continue;
     }
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS)
+        << "GPU[" << idx << "] unexpected max cache query failure";
 
     size_t setSize = maxSize / 2;
     err = hsa_amd_agent_set_attribute(gpus[idx],
@@ -168,14 +181,16 @@ void GL2CacheTest::SetAndReadBackPersistingCacheSize() {
     err = hsa_agent_get_info(gpus[idx],
         (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
         &maxSize);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-    if (maxSize == 0) {
+    if (err == static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED)
+        || maxSize == 0) {
       std::cout << "    GPU[" << idx
                 << "] does not support persisting L2 cache, skipping"
                 << std::endl;
       continue;
     }
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS)
+        << "GPU[" << idx << "] unexpected max cache query failure";
 
     size_t setSize = maxSize / 4;
     err = hsa_amd_agent_set_attribute(gpus[idx],
@@ -215,14 +230,16 @@ void GL2CacheTest::NegativeInvalidSize() {
     err = hsa_agent_get_info(gpus[idx],
         (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
         &maxSize);
-    ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-    if (maxSize == 0) {
+    if (err == static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED)
+        || maxSize == 0) {
       std::cout << "    GPU[" << idx
                 << "] does not support persisting L2 cache, skipping"
                 << std::endl;
       continue;
     }
+    ASSERT_EQ(err, HSA_STATUS_SUCCESS)
+        << "GPU[" << idx << "] unexpected max cache query failure";
 
     size_t overSize = maxSize + 1;
     err = hsa_amd_agent_set_attribute(gpus[idx],
@@ -235,6 +252,103 @@ void GL2CacheTest::NegativeInvalidSize() {
        << " > max " << maxSize << ") correctly rejected";
     resultList_.push_back(ss.str());
     std::cout << ss.str() << std::endl;
+  }
+
+  std::cout << "    Subtest finished" << std::endl;
+  std::cout << kSubTestSeparator << std::endl;
+}
+
+void GL2CacheTest::QueryStatusConsistency() {
+  hsa_status_t err;
+  PrintSubtestHeader("Query Status Consistency (max vs current)");
+
+  std::vector<hsa_agent_t> gpus;
+  err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
+  ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+  ASSERT_GT(gpus.size(), 0u);
+
+  for (uint32_t idx = 0; idx < gpus.size(); ++idx) {
+    size_t maxSize = 0;
+    hsa_status_t maxErr = hsa_agent_get_info(gpus[idx],
+        (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE,
+        &maxSize);
+
+    size_t currentSize = 0;
+    hsa_status_t currentErr = hsa_agent_get_info(gpus[idx],
+        (hsa_agent_info_t)HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE,
+        &currentSize);
+
+    std::stringstream ss;
+
+    if (maxErr != HSA_STATUS_SUCCESS && currentErr != HSA_STATUS_SUCCESS) {
+      ASSERT_EQ(maxErr,
+                static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED))
+          << "GPU[" << idx << "] max query failed with unexpected error";
+      ASSERT_EQ(currentErr,
+                static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED))
+          << "GPU[" << idx << "] current query failed with unexpected error";
+      ss << "    GPU[" << idx
+         << "] Both queries returned NOT_SUPPORTED — consistent (unsupported HW)";
+      resultList_.push_back(ss.str());
+      std::cout << ss.str() << std::endl;
+      continue;
+    }
+
+    if (maxErr == HSA_STATUS_SUCCESS) {
+      // If max query succeeds, the value must not be zero. A zero max under
+      // SUCCESS would let SetAgentAttribute reject every request silently
+      // (review comment #6).
+      ASSERT_GT(maxSize, 0u) << "GPU[" << idx
+          << "] max query returned SUCCESS but maxSize is 0";
+      ss << "    GPU[" << idx << "] Max query: status=SUCCESS, maxSize="
+         << maxSize << " bytes (non-zero verified)";
+    } else {
+      ASSERT_EQ(maxErr,
+                static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED))
+          << "GPU[" << idx << "] max query failed with unexpected error";
+      ss << "    GPU[" << idx << "] Max query: NOT_SUPPORTED"
+         << " (current query succeeded independently)";
+    }
+    resultList_.push_back(ss.str());
+    std::cout << ss.str() << std::endl;
+
+    ss.str("");
+    if (currentErr == HSA_STATUS_SUCCESS) {
+      ss << "    GPU[" << idx << "] Current query: status=SUCCESS, currentSize="
+         << currentSize << " bytes";
+    } else {
+      ASSERT_EQ(currentErr,
+                static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED))
+          << "GPU[" << idx << "] current query failed with unexpected error";
+      ss << "    GPU[" << idx << "] Current query: NOT_SUPPORTED"
+         << " (max query succeeded independently)";
+    }
+    resultList_.push_back(ss.str());
+    std::cout << ss.str() << std::endl;
+
+    // If max succeeded but current failed (or vice versa), that's fine —
+    // each field is independently queried. But if max succeeded, verify
+    // that set+readback also works.
+    if (maxErr == HSA_STATUS_SUCCESS && currentErr == HSA_STATUS_SUCCESS) {
+      size_t setSize = maxSize / 2;
+      err = hsa_amd_agent_set_attribute(gpus[idx],
+          HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE,
+          &setSize);
+      ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+
+      size_t readBack = 0;
+      err = hsa_agent_get_info(gpus[idx],
+          (hsa_agent_info_t)HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE,
+          &readBack);
+      ASSERT_EQ(err, HSA_STATUS_SUCCESS);
+      ASSERT_EQ(readBack, setSize);
+
+      ss.str("");
+      ss << "    GPU[" << idx << "] Set " << setSize
+         << ", read back " << readBack << " — consistency verified";
+      resultList_.push_back(ss.str());
+      std::cout << ss.str() << std::endl;
+    }
   }
 
   std::cout << "    Subtest finished" << std::endl;
