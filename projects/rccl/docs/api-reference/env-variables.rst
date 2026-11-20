@@ -597,7 +597,8 @@ Network and topology
 ====================
 
 The network and topology environment variables for RCCL are collected
-in the following table.
+in the following table. The ``IB-MSEG`` network plugin, a copy of the ``IB``
+transport, reads the same ``NCCL_IB_*`` and ``RCCL_IB_*`` variables as ``IB``.
 
 .. list-table::
     :header-rows: 1
@@ -620,12 +621,13 @@ in the following table.
     * - | ``NCCL_IB_QUERY_PORT_SPEED``
         | Controls whether RCCL queries the port speed with
           ``ibv_query_port_speed`` (``IBVERBS_1.16``) when it initializes
-          devices. Applies to both the ``IB`` and ``IB-CAST`` transports. If
-          the installed ``libibverbs`` does not export this function, or the
-          query fails, RCCL falls back to the port's ``active_speed_ex``
-          (for ``XDR`` or newer rates) or ``active_speed``, combined with
-          ``active_width``. Disabling it also turns off runtime speed-change
-          detection, which only the ``IB`` transport supports.
+          devices. Applies to the ``IB``, ``IB-MSEG`` and ``IB-CAST``
+          transports. If the installed ``libibverbs`` does not export this
+          function, or the query fails, RCCL falls back to the port's
+          ``active_speed_ex`` (for ``XDR`` or newer rates) or ``active_speed``,
+          combined with ``active_width``. Disabling it also turns off runtime
+          speed-change detection, which only the ``IB`` and ``IB-MSEG``
+          transports support.
       - | ``1``: Query the port speed (default).
         | ``0``: Use ``active_speed_ex``/``active_speed`` and
           ``active_width`` only.
@@ -839,6 +841,8 @@ in the following table.
           vNIC chosen by ``NCCL_IB_SUBNET_AWARE_ROUTING``), a request spans
           more than 8 QPs, or the flag memory cannot be registered. LL and
           LL128 receives never use the flag.
+        | The same applies to the ``IB-MSEG`` network plugin when
+          ``NCCL_MULTI_SEGMENT_REGISTER=1`` or ``NCCL_NET=IB-MSEG`` selects it.
         | On gfx950 with 2 to 8 nodes of 8 GPUs, a communicator using it also
           adjusts the ``ncclAllReduce`` algorithm and protocol choice from
           16 MB per node upward, and switches ``ncclReduceScatter`` from LL128

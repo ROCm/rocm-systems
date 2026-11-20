@@ -17,6 +17,7 @@ ncclResult_t ncclRmaFinalize(struct ncclComm* comm);
 
 extern ncclRma_t ncclRmaIbProxy;
 extern ncclRma_t IbCastRmaIbProxy;
+extern ncclRma_t IbMsegRmaIbProxy; // RCCL: net_ib_multiseg (NCCL_MULTI_SEGMENT_REGISTER=1 or NCCL_NET=IB-MSEG)
 extern ncclRma_t ncclRmaSocketProxy;
 
 #endif

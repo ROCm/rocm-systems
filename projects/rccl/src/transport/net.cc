@@ -152,6 +152,7 @@ struct recvNetResources {
   uint64_t* gdcSync;
   uint64_t* gdcFlush;
   uint64_t* gdrFlushFlag; // GPU waits on this flag instead of the proxy flushing
+  const struct rcclIbGdrFlushOps* gdrFlushOps; // the flag's entry points, set with gdrFlushFlag
   // Per-step flag value the GPU waits for, in CPU-writable VRAM so the GPU
   // does not need an extra host memory round trip after reading the tail.
   uint64_t* gdrFlushSeq;
@@ -1255,7 +1256,8 @@ static ncclResult_t recvProxySetup(struct ncclProxyConnection* connection, struc
 
   if (respSize != sizeof(ncclNetHandle_t)) return ncclInternalError;
   NCCLCHECK(proxyState->ncclNet->listen(proxyState->netContext, req->netDev, respBuff, &resources->netListenComm));
-  if (proxyState->ncclNet == &ncclNetIb) ncclIbSetListenGdrFlushFlag(resources->netListenComm, req->gdrFlushFlag);
+  const struct rcclIbGdrFlushOps* gdrFlush = rcclIbGdrFlushOpsFor(proxyState->ncclNet);
+  if (gdrFlush) gdrFlush->setListenFlag(resources->netListenComm, req->gdrFlushFlag);
   *done = 1;
 
   return ncclSuccess;
@@ -1306,6 +1308,9 @@ static ncclResult_t sendProxyConnect(struct ncclProxyConnection* connection, str
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (proxyState->ncclNet == &netIbCast) {
     NCCLCHECK(rcclCastNetP2pPolicy(req->handle, resources->isP2p));
+  }
+  if (proxyState->ncclNet == &ncclNetIbMseg) {
+    NCCLCHECK(IbMsegNetP2pPolicy(req->handle, resources->isP2p)); // RCCL: net_ib_multiseg keeps net_ib's P2P policy
   }
 #endif
 
@@ -1814,8 +1819,9 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
   map->gdrFlushFlag = NULL;
   map->gdrFlushSeq = NULL;
 #if defined(__HIP_PLATFORM_AMD__)
-  if (proxyState->ncclNet == &ncclNetIb && map->sameProcess && resources->useGdr && resources->needFlush &&
-      resources->gdcFlush == NULL && ncclIbGetGpuFlushFlag(resources->netRecvComm) != NULL) {
+  const struct rcclIbGdrFlushOps* gdrFlush = rcclIbGdrFlushOpsFor(proxyState->ncclNet);
+  if (gdrFlush && map->sameProcess && resources->useGdr && resources->needFlush && resources->gdcFlush == NULL &&
+      gdrFlush->gpuFlag(resources->netRecvComm) != NULL) {
 #if defined(HIP_UNCACHED_MEMORY)
     const unsigned int seqFlags = hipDeviceMallocUncached;
 #else
@@ -1824,7 +1830,8 @@ static ncclResult_t recvProxyConnect(struct ncclProxyConnection* connection, str
     if (hipExtMallocWithFlags((void**)&resources->gdrFlushSeq, NCCL_STEPS * sizeof(uint64_t), seqFlags) == hipSuccess) {
       for (int i = 0; i < NCCL_STEPS; i++) __atomic_store_n(resources->gdrFlushSeq + i, 0, __ATOMIC_RELAXED);
       std::atomic_thread_fence(std::memory_order_seq_cst);
-      resources->gdrFlushFlag = ncclIbGetGpuFlushFlag(resources->netRecvComm);
+      resources->gdrFlushFlag = gdrFlush->gpuFlag(resources->netRecvComm);
+      resources->gdrFlushOps = gdrFlush;
       map->gdrFlushFlag = resources->gdrFlushFlag;
       map->gdrFlushSeq = resources->gdrFlushSeq;
     } else {
@@ -2287,7 +2294,9 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                                 (subCount == 1);
         if (!checkedNetAttr++) setXferNetAttrs(proxyState, args, 0);
         if (ignoreCompletion) *requestPtr = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
-        if (resources->gdrFlushFlag) ncclIbSetGpuFlushFlagHint(resources->netRecvComm, p == NCCL_PROTO_SIMPLE);
+        if (resources->gdrFlushFlag) {
+          resources->gdrFlushOps->setGpuFlagHint(resources->netRecvComm, p == NCCL_PROTO_SIMPLE);
+        }
         NCCLCHECK(proxyState->ncclNet->irecv(resources->netRecvComm, subCount, ptrs, sizes, tags, mhandles, phandles,
                                              requestPtr));
         if (*requestPtr) {
@@ -2360,7 +2369,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
               }
             }
             if (gpuFlagWait) {
-              uint64_t flagSeq = ncclIbGetGpuFlushFlagSeq(resources->netRecvComm);
+              uint64_t flagSeq = resources->gdrFlushOps->gpuFlagSeq(resources->netRecvComm);
               for (int i = 0; i < subGroup->groupSize; i++) {
                 struct ncclProxySubArgs* sub = subGroup + i;
                 if (step < sub->nsteps) {

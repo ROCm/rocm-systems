@@ -71,6 +71,15 @@ extern int64_t ncclParamDmaBufEnable();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 extern ncclNet_t netIbCast;
+extern ncclNet_t ncclNetIbMseg; // RCCL: IB-MSEG, via NCCL_MULTI_SEGMENT_REGISTER=1 or NCCL_NET=IB-MSEG
+extern ncclResult_t IbMsegNetP2pPolicy(void* handle, int isP2p); // RCCL: net_ib_multiseg's rcclNetP2pPolicy
+// RCCL: net_ib_multiseg's copies of the ncclIb* GDR flush flag entry points above.
+bool IbMsegGdrFlushFlagLocalSupport();
+void IbMsegSetGdrFlushFlag(void* netContext, int enable);
+void IbMsegSetListenGdrFlushFlag(void* listenComm, int enable);
+uint64_t* IbMsegGetGpuFlushFlag(void* recvComm);
+uint64_t IbMsegGetGpuFlushFlagSeq(void* recvComm);
+void IbMsegSetGpuFlushFlagHint(void* recvComm, int need);
 extern ncclResult_t rcclCastNetP2pPolicy(void* handle, int isP2p);
 
 enum rcclIBNicType {
@@ -107,6 +116,12 @@ inline const char* rcclCanonicalNetName(const char* envNetName) {
   return envNetName;
 }
 
+extern int64_t ncclParamMultiSegmentRegister();
+// RCCL: whether IB-MSEG takes the internal IB slot (NET and RMA) unless IB-CAST leads; envNet is canonical.
+inline bool rcclIbMsegRequested(const char* envNet) {
+  return ncclParamMultiSegmentRegister() || (envNet && strcasecmp(envNet, "IB-MSEG") == 0);
+}
+
 /**
  * @brief Get the primary NIC info
  *
@@ -120,5 +135,29 @@ extern rcclIBNicInfo rcclPrimaryNic();
  */
 extern bool rcclUseAinic();
 #endif
+
+// RCCL: RCCL_IB_GDR_FLUSH_FLAG entry points of the transport behind a net vtable (net_ib or its IB-MSEG
+// copy), or NULL for a net without the flag. inline: the unit-test binaries compile init.cc without net.cc.
+struct rcclIbGdrFlushOps {
+  bool (*localSupport)();
+  void (*setFlag)(void* netContext, int enable);
+  void (*setListenFlag)(void* listenComm, int enable);
+  uint64_t* (*gpuFlag)(void* recvComm);
+  uint64_t (*gpuFlagSeq)(void* recvComm);
+  void (*setGpuFlagHint)(void* recvComm, int need);
+};
+inline const struct rcclIbGdrFlushOps* rcclIbGdrFlushOpsFor(const ncclNet_t* net) {
+  static const struct rcclIbGdrFlushOps ib = {ncclIbGdrFlushFlagLocalSupport, ncclIbSetGdrFlushFlag,
+                                              ncclIbSetListenGdrFlushFlag,    ncclIbGetGpuFlushFlag,
+                                              ncclIbGetGpuFlushFlagSeq,       ncclIbSetGpuFlushFlagHint};
+  if (net == &ncclNetIb) return &ib;
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  static const struct rcclIbGdrFlushOps mseg = {IbMsegGdrFlushFlagLocalSupport, IbMsegSetGdrFlushFlag,
+                                                IbMsegSetListenGdrFlushFlag,    IbMsegGetGpuFlushFlag,
+                                                IbMsegGetGpuFlushFlagSeq,       IbMsegSetGpuFlushFlagHint};
+  if (net == &ncclNetIbMseg) return &mseg;
+#endif
+  return nullptr;
+}
 
 #endif

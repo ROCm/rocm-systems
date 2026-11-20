@@ -1,0 +1,24 @@
+set(NET_IB_MULTISEG_SOURCES
+    src/transport/net_ib_multiseg/common.cc
+    src/transport/net_ib_multiseg/common_mseg.h
+    src/transport/net_ib_multiseg/connect.cc
+    src/transport/net_ib_multiseg/connect_mseg.h
+    src/transport/net_ib_multiseg/gdr.cc
+    src/transport/net_ib_multiseg/gin.cc
+    src/transport/net_ib_multiseg/gin_mseg.h
+    src/transport/net_ib_multiseg/init.cc
+    src/transport/net_ib_multiseg/net_ib_gid_inspect.cc
+    src/transport/net_ib_multiseg/net_ib_gid_inspect_mseg.h
+    src/transport/net_ib_multiseg/net_ib_wqe_lat_inspect.cc
+    src/transport/net_ib_multiseg/net_ib_wqe_lat_inspect_mseg.h
+    src/transport/net_ib_multiseg/p2p.cc
+    src/transport/net_ib_multiseg/p2p_mseg.h
+    src/transport/net_ib_multiseg/p2p_resiliency.cc
+    src/transport/net_ib_multiseg/p2p_resiliency_mseg.h
+    src/transport/net_ib_multiseg/p2p_resiliency_recovery.cc
+    src/transport/net_ib_multiseg/p2p_resiliency_recovery_mseg.h
+    src/transport/net_ib_multiseg/reg.cc
+    src/transport/net_ib_multiseg/wqe_lat_mon.cc
+    src/transport/net_ib_multiseg/wqe_lat_mon_mseg.h
+)
+set(NET_IB_MULTISEG_SOURCES ${NET_IB_MULTISEG_SOURCES} PARENT_SCOPE)

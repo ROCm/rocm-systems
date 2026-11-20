@@ -1395,8 +1395,9 @@ static void rcclSetIbGdrFlushFlag(struct ncclComm* comm, struct ncclComm* parent
   int nCapable = 0;
   for (int i = 0; i < comm->nRanks; i++) nCapable += comm->peerInfo[i].ibGdrFlushFlag;
   comm->ibGdrFlushFlag = nCapable == comm->nRanks;
-  if (comm->ncclNet == &ncclNetIb && !(parent && comm->netContext == parent->netContext)) {
-    ncclIbSetGdrFlushFlag(comm->netContext, comm->ibGdrFlushFlag);
+  const struct rcclIbGdrFlushOps* gdrFlush = rcclIbGdrFlushOpsFor(comm->ncclNet);
+  if (gdrFlush && !(parent && comm->netContext == parent->netContext)) {
+    gdrFlush->setFlag(comm->netContext, comm->ibGdrFlushFlag);
   }
   if (comm->rank == 0 && nCapable > 0 && !comm->ibGdrFlushFlag) {
     ATTN("RCCL_IB_GDR_FLUSH_FLAG: %d of %d ranks can use it, using the RDMA read flush on every rank", nCapable,
@@ -1430,7 +1431,8 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   CUDACHECK(cudaGetDeviceProperties(&prop, comm->cudaDev));
   info->totalGlobalMem = ROUNDUP(prop.totalGlobalMem, (1ULL << 32));
   // The proxy writes the GDR flush flags through the CPU mapping of fine-grained VRAM (gfx942/gfx950).
-  info->ibGdrFlushFlag = comm->ncclNet == &ncclNetIb && ncclIbGdrFlushFlagLocalSupport() &&
+  const struct rcclIbGdrFlushOps* gdrFlush = rcclIbGdrFlushOpsFor(comm->ncclNet);
+  info->ibGdrFlushFlag = gdrFlush && gdrFlush->localSupport() &&
                          (IsArchMatch(prop.gcnArchName, "gfx942") || IsArchMatch(prop.gcnArchName, "gfx950"));
   NCCLCHECK(ncclCudaDriverVersion(&info->cudaDriverVersion));
   const char* mlopartStr = strstr(prop.name, "MLOPart");

@@ -33,6 +33,7 @@ static bool rasDiagnosticsNetPluginSupported(const char* name) {
     // [RCCL] RCCL's internal verbs transport (net_ib_cast/common.cc). It keeps no live port speed, so the
     // live-speed fixup below stays IB-only.
     "IB-CAST",
+    "IB-MSEG", // RCCL: net_ib_multiseg; no live-speed fixup, which reads net_ib's ncclIbDevs
 #endif
   };
   if (name == nullptr) return false;

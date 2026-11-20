@@ -11,6 +11,8 @@ set(RCCL_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
 
 # net_ib_cast: populate NET_IB_CAST_SOURCES and NET_IB_CAST_INCLUDE_DIRS
 add_subdirectory(transport/net_ib_cast)
+# net_ib_multiseg: populate NET_IB_MULTISEG_SOURCES
+add_subdirectory(transport/net_ib_multiseg)
 
 # devcomm: populate DEVCOMM_SOURCES and DEVCOMM_INCLUDE_DIRS
 add_subdirectory(devcomm)
@@ -750,6 +752,7 @@ endif()
 list(APPEND SRC_FILES ${SMI_SOURCES})
 # NET_IB_CAST_SOURCES already carry the src/ prefix (set by transport/net_ib_cast/CMakeLists.txt)
 list(APPEND SRC_FILES ${NET_IB_CAST_SOURCES})
+list(APPEND SRC_FILES ${NET_IB_MULTISEG_SOURCES})
 # DEVCOMM_SOURCES already carry the src/ prefix (set by devcomm/CMakeLists.txt)
 list(APPEND SRC_FILES ${DEVCOMM_SOURCES})
 

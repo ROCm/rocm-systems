@@ -230,6 +230,7 @@ static void initPluginLibsOnceFunc() {
 
   // Add internal ib plugin. [RCCL] IB-CAST's RMA backend (which also backs GIN over IB-CAST) goes first
   // when plugin/net.cc's internal NET plugin is IB-CAST, with the generic IB one after it as a fallback.
+  ncclRma_t* ibRma = &ncclRmaIbProxy;
   {
     const char* envNetPlugin = ncclGetEnv("NCCL_NET_PLUGIN");
     const bool extNetPluginRequested = envNetPlugin && envNetPlugin[0] != '\0' && strcasecmp(envNetPlugin, "none") != 0;
@@ -241,10 +242,13 @@ static void initPluginLibsOnceFunc() {
       pluginLibs[pluginCounter].version = ncclRmaVersion[0];
       pluginCounter++;
     }
+    // RCCL: IB-MSEG's RMA backend takes the generic IB slot, as in plugin/net.cc.
+    if (!useCast && rcclIbMsegRequested(envNet)) ibRma = &IbMsegRmaIbProxy;
     pluginInternalCount = useCast ? 3 : 2;
-    INFO(NCCL_INIT | NCCL_NET, "RMA/Plugin: internal RMA backend %s", useCast ? "IB-CAST, then IB" : "IB");
+    INFO(NCCL_INIT | NCCL_NET, "RMA/Plugin: internal RMA backend %s",
+         useCast ? "IB-CAST, then IB" : (ibRma == &IbMsegRmaIbProxy ? "IB-MSEG" : "IB"));
   }
-  pluginLibs[pluginCounter].ncclRma = &ncclRmaIbProxy;
+  pluginLibs[pluginCounter].ncclRma = ibRma;
   pluginLibs[pluginCounter].state = ncclRmaPluginStateInitReady;
   pluginLibs[pluginCounter].version = ncclRmaVersion[0];
   pluginCounter++;

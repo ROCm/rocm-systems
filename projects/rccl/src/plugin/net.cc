@@ -343,6 +343,8 @@ static void initPluginLibsOnceFunc() {
     if ((envNet && strcasecmp(envNet, "IB-CAST") == 0 && !extNetPluginRequested) ||
         (!envNet && rcclUseAinic() && !extNetPluginRequested)) {
       ncclNetPluginRegisterInternal(&pluginCounter, &netIbCast, 0);
+    } else if (rcclIbMsegRequested(envNet)) {
+      ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetIbMseg, 0);
     } else {
 #endif
       ncclNetPluginRegisterInternal(&pluginCounter, &ncclNetIb, 0);
@@ -389,7 +391,13 @@ ncclResult_t ncclNetInit(struct ncclComm* comm) {
     }
 #endif
     if ((netPluginLibs[pluginIndex].ncclNetPluginState >= ncclNetPluginStateInitReady) &&
-        (!comm->config.netName || (strcasecmp(comm->config.netName, netPluginLibs[pluginIndex].ncclNet->name) == 0))) {
+        (!comm->config.netName || (strcasecmp(comm->config.netName, netPluginLibs[pluginIndex].ncclNet->name) == 0)
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+         // RCCL: with NCCL_MULTI_SEGMENT_REGISTER=1, IB-MSEG serves requests for IB.
+         || (netPluginLibs[pluginIndex].ncclNet == &ncclNetIbMseg && ncclParamMultiSegmentRegister() &&
+             strcasecmp(comm->config.netName, "IB") == 0)
+#endif
+             )) {
       // plugin init must be done by all comms to setup the context, therefore we use ">="
       NCCLCHECK(ncclNetPluginInit(comm, &netPluginLibs[pluginIndex]));
       if (netPluginLibs[pluginIndex].ncclNetPluginState == ncclNetPluginStateEnabled) {
