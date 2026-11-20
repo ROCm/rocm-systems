@@ -288,6 +288,23 @@ if(WIN32 AND USING_THE_ROCK)
   set_test_env(rocDecode_Missing_VA_Lib_Test)
 endif()
 
+# Linux only - rocDecodeEmptyVaProfileTest: rocDecGetDecoderCaps must fail, rather than report every
+# codec as unsupported, when the VA driver loads but exposes no decode profile. A stub VA driver
+# built by the test stands in for such a driver.
+if(NOT WIN32)
+  add_test(
+    NAME
+    rocDecode_Empty_VA_Profile_Test
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+              --build-and-test "${ROCM_PATH}/share/rocdecode/test/rocDecodeEmptyVaProfileTest"
+                                "${CMAKE_CURRENT_BINARY_DIR}/rocdecodeemptyvaprofiletest"
+              --build-generator "${CMAKE_GENERATOR}"
+              --test-command "rocdecodeemptyvaprofiletest"
+  )
+  set_test_env(rocDecode_Empty_VA_Profile_Test)
+endif()
+
 if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   # 8 - videoDecode HEVC
   add_test(
