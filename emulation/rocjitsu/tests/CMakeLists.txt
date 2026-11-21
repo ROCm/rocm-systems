@@ -2017,6 +2017,8 @@ rj_add_test(
     REQUIRES_INTERPOSER
     NAME "SystemGraphTest.DaemonStartsSelectedNode"
     COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_with_runtime_directory.py
         ${RJ_CLI}
         --daemon
         --config
@@ -2026,8 +2028,6 @@ rj_add_test(
         --
         /bin/true
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    # AF_UNIX sun_path is short; the source/build checkout may be much longer.
-    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-system-graph"
     TIMEOUT 60
 )
 
@@ -2387,6 +2387,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(
         hsa_hotswap_rocjitsu_unit_test
         PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
     )
@@ -2427,6 +2428,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(
         translation_store_test
         PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
     )
@@ -4828,7 +4830,7 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_test_path(daemon_test RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN "hip_instruction_failure_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_INTERPOSER_DUP_BIN "interposer_dup_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_DAEMON_LOGGING_CONFIG "${_rj_installed_daemon_logging_config}")
-        target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
+        target_link_libraries(daemon_test PRIVATE GTest::gtest_main flatbuffers)
         add_dependencies(
             daemon_test
             rocjitsu_bin
