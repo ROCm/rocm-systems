@@ -1043,6 +1043,19 @@ TEST_F(InitMicrotest, P2pSchedule_NetGroups_RecordA2aPeerRange_NoPxnCountsEveryR
   EXPECT_EQ(4, c.get()->p2pA2aMaxPeers);
 }
 
+// 3 nodes x 4 ranks, groupSize 2 -> 6 groups, visited as recv groups 0,5,3,4,1,2; only 0 and 1 are local.
+// p2pnChannels 2 puts two groups in each epoch: {0,5} {3,4} {1,2} -> 2, 4 and 2 NET peers without PXN.
+TEST_F(InitMicrotest, P2pSchedule_NetGroups_A2aPeerRangeSpansUnevenEpochs) {
+  SetParams({{"P2P_SCHEDULE_GROUP_SIZE", 2}});
+  g_pxnDisable = [](ncclComm*) { return 1; };
+  P2pScheduleComm c(/*nNodes=*/3, /*node=*/0, /*localRank=*/0, /*nRanks=*/12,
+                    /*maxLocalRanks=*/4, {4, 4, 4});
+  c.get()->p2pnChannels = 2;
+  ASSERT_EQ(ncclSuccess, ncclP2pSchedule(c.get()));
+  EXPECT_EQ(2, c.get()->p2pA2aMinPeers);
+  EXPECT_EQ(4, c.get()->p2pA2aMaxPeers);
+}
+
 // Every peer resolves in the local topo, so no epoch has NET peers and the INT_MAX sentinel collapses to 0.
 TEST_F(InitMicrotest, P2pSchedule_SingleNode_NoNetPeers_A2aRangeIsZero) {
   P2pScheduleComm c(/*nNodes=*/1, /*node=*/0, /*localRank=*/0, /*nRanks=*/4,
