@@ -79,7 +79,8 @@ static const std::unordered_map<amdsmi_evt_notification_type_t, rdc_field_t>
 const uint32_t kMaxRSMIEvents = 64;
 
 // The mask of a GPU whose events RDC does not know: AMD SMI could not find the GPU when RDC last
-// changed its mask, or the mask write failed. AMD SMI may send some of the GPU's events or none.
+// changed its mask, the mask write failed, or the stop of its events failed. AMD SMI may send some
+// of the GPU's events or none.
 // No mask that listeners want has every bit set (RDC knows 13 events), so the GPU's next try
 // writes its mask again, or with no listener left writes 0 and stops its events.
 static const uint64_t kMaskUnknown = ~uint64_t{0};
@@ -196,23 +197,26 @@ rdc_status_t RdcNotificationImpl::apply_mask_locked(uint32_t gpu_id, GpuListener
 
   if (wanted == 0) {
     // No listener left. Each call leaves AMD SMI without events for the GPU, and a stop that
-    // fails may have closed them anyway, so the next listener initializes them again.
+    // fails may have closed them anyway, so the next listener initializes them again. After a
+    // failed stop the events may still be open: the mask is unknown, so every call, and the
+    // destructor, try to stop them again. The tries of calls that do not name the GPU are logged
+    // as debug messages.
     rdc_status_t result = RDC_ST_OK;
     ret = amdsmi_set_gpu_event_notification_mask(processor_handle, 0);
     if (ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "amdsmi_set_gpu_event_notification_mask() returned "
-                             << ret << " for device " << gpu_id);
+      RDC_LOG(named ? RDC_ERROR : RDC_DEBUG, "amdsmi_set_gpu_event_notification_mask() returned "
+                                                 << ret << " for device " << gpu_id);
       result = Smi2RdcError(ret);
     }
     ret = amdsmi_stop_gpu_event_notification(processor_handle);
     if (ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR,
+      RDC_LOG(named ? RDC_ERROR : RDC_DEBUG,
               "amdsmi_stop_gpu_event_notification() returned " << ret << " for device " << gpu_id);
       if (result == RDC_ST_OK) {
         result = Smi2RdcError(ret);
       }
     }
-    gpu->mask = 0;
+    gpu->mask = ret == AMDSMI_STATUS_SUCCESS ? 0 : kMaskUnknown;
     return result;
   }
 
