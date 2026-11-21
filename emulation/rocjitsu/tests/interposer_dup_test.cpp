@@ -6624,6 +6624,10 @@ TEST(InterposerForkTest, ChildFailsClosedOnAnUnclassifiablePath) {
   // Well past PATH_MAX, so resolution cannot produce a comparable absolute path.
   const std::string overlong = "/" + std::string(PATH_MAX + 64, 'x');
 
+  rocjitsu::test::ScopedTempDirectory directory;
+  ASSERT_TRUE(directory.initialize("rj-missing-"));
+  const std::string missing = directory.path() + "/missing";
+
   const pid_t child = fork();
   ASSERT_GE(child, 0) << "fork failed: " << std::strerror(errno);
   if (child == 0) {
@@ -6637,7 +6641,7 @@ TEST(InterposerForkTest, ChildFailsClosedOnAnUnclassifiablePath) {
       _exit(41);
     // ...and a path that IS classifiable still reports its own error, so failing
     // closed has not swallowed ordinary errno reporting.
-    if (open("/tmp/rocjitsu-no-such-file-here", O_RDONLY | O_CLOEXEC) >= 0)
+    if (open(missing.c_str(), O_RDONLY | O_CLOEXEC) >= 0)
       _exit(42);
     if (errno != ENOENT)
       _exit(43);

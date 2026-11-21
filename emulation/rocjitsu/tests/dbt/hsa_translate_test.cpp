@@ -24,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
@@ -339,10 +340,14 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
 
   // Dump translated CO for offline inspection.
   {
-    auto *f = std::fopen("/tmp/translated_mfma16.co", "wb");
-    if (f) {
-      std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
-      std::fclose(f);
+    std::error_code error;
+    const auto temporary = std::filesystem::temp_directory_path(error);
+    if (!error) {
+      const auto output = temporary / "translated_mfma16.co";
+      if (auto *f = std::fopen(output.c_str(), "wb")) {
+        std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
+        std::fclose(f);
+      }
     }
   }
 
