@@ -1116,7 +1116,11 @@ void
 save(ArchiveT& ar, HSA_ENGINE_VERSION data)
 {
     ROCP_SDK_SAVE_DATA_BITFIELD("uCodeSDMA", uCodeSDMA);
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
     ROCP_SDK_SAVE_DATA_BITFIELD("uCodeCompute", uCodeCompute);
+#else
+    ROCP_SDK_SAVE_DATA_BITFIELD("uCodeRes", uCodeRes);
+#endif
 }
 
 template <typename ArchiveT>

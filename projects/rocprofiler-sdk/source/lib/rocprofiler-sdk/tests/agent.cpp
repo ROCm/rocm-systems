@@ -328,8 +328,12 @@ TEST(rocprofiler_lib, agent)
             EXPECT_EQ(agent->family_id, hsa_agent->family_id) << msg;
         }
         EXPECT_EQ(agent->fw_version.ui32.uCode, hsa_agent->ucode_version & 0x3ff) << msg;
-        EXPECT_EQ(agent->sdma_fw_version.uCodeCompute, hsa_agent->ucode_version & 0xfff) << msg;
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
+        EXPECT_EQ(agent->sdma_fw_version.uCodeCompute, hsa_agent->ucode_version & 0xffff) << msg;
         EXPECT_EQ(agent->sdma_fw_version.uCodeSDMA, hsa_agent->sdma_ucode_version) << msg;
+#else
+        EXPECT_EQ(agent->sdma_fw_version.Value, hsa_agent->sdma_ucode_version & 0x3ff) << msg;
+#endif
 
         if(hsa_agent->shader_engs > 0)
         {

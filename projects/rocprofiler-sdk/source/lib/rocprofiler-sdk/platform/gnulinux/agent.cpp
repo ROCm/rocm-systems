@@ -648,17 +648,21 @@ enumerate()
             // fw_version keeps the historical 10-bit microcode. Bits above that
             // stay zero, which is what masking the whole word with 0x3ff did.
             agent_info.fw_version.Value = fw_version & 0x3ff;
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
+            // uCodeCompute is 16 bits: KFD's mec_fw_version is a uint16_t.
             agent_info.sdma_fw_version.uCodeSDMA    = sdma_fw_version & 0x3ff;
-            agent_info.sdma_fw_version.uCodeCompute = fw_version & 0xfff;
-            agent_info.gfxip_version.ui32.Major =
-                (agent_info.gfx_target_version / 10000) % 100;
-            agent_info.gfxip_version.ui32.Minor = (agent_info.gfx_target_version / 100) % 100;
+            agent_info.sdma_fw_version.uCodeCompute = fw_version & 0xffff;
+#else
+            agent_info.sdma_fw_version.Value = sdma_fw_version & 0x3ff;
+#endif
+            agent_info.gfxip_version.ui32.Major    = (agent_info.gfx_target_version / 10000) % 100;
+            agent_info.gfxip_version.ui32.Minor    = (agent_info.gfx_target_version / 100) % 100;
             agent_info.gfxip_version.ui32.Stepping = agent_info.gfx_target_version % 100;
-            agent_info.workgroup_max_size = workgrp_max;  // hardcoded in hsa-runtime
-            agent_info.workgroup_max_dim  = {workgrp_max, workgrp_max, workgrp_max};
-            agent_info.grid_max_size      = grid_max;  // hardcoded in hsa-runtime
-            agent_info.grid_max_dim       = {grid_max_x, grid_max_y, grid_max_z};
-            agent_info.cu_count           = agent_info.simd_count / agent_info.simd_per_cu;
+            agent_info.workgroup_max_size          = workgrp_max;  // hardcoded in hsa-runtime
+            agent_info.workgroup_max_dim           = {workgrp_max, workgrp_max, workgrp_max};
+            agent_info.grid_max_size               = grid_max;  // hardcoded in hsa-runtime
+            agent_info.grid_max_dim                = {grid_max_x, grid_max_y, grid_max_z};
+            agent_info.cu_count                    = agent_info.simd_count / agent_info.simd_per_cu;
 
             // fallback in case drmOpenRender or amdgpu_device_initialize fails
             auto _set_default_agent_names = [&agent_info]() {

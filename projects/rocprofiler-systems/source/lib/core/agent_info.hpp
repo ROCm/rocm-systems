@@ -51,17 +51,21 @@ to_json_string(const rocprofiler_agent_v0_t& agent_data)
     data["max_engine_clk_ccompute"]    = agent_data.max_engine_clk_ccompute;
     data["max_engine_clk_fcompute"]    = agent_data.max_engine_clk_fcompute;
 
-    data["sdma_fw_version"]["uCodeSDMA"]    = agent_data.sdma_fw_version.uCodeSDMA;
+    data["sdma_fw_version"]["uCodeSDMA"] = agent_data.sdma_fw_version.uCodeSDMA;
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
     data["sdma_fw_version"]["uCodeCompute"] = agent_data.sdma_fw_version.uCodeCompute;
+#endif
 
     data["fw_version"]["uCode"]    = agent_data.fw_version.ui32.uCode;
     data["fw_version"]["Major"]    = agent_data.fw_version.ui32.Major;
     data["fw_version"]["Minor"]    = agent_data.fw_version.ui32.Minor;
     data["fw_version"]["Stepping"] = agent_data.fw_version.ui32.Stepping;
 
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
     data["gfxip_version"]["Major"]    = agent_data.gfxip_version.ui32.Major;
     data["gfxip_version"]["Minor"]    = agent_data.gfxip_version.ui32.Minor;
     data["gfxip_version"]["Stepping"] = agent_data.gfxip_version.ui32.Stepping;
+#endif
 
     data["capability"]["HotPluggable"]  = agent_data.capability.ui32.HotPluggable;
     data["capability"]["HSAMMUPresent"] = agent_data.capability.ui32.HSAMMUPresent;
