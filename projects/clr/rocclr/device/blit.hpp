@@ -275,7 +275,7 @@ class HostBlitManager : public device::BlitManager {
   virtual ~HostBlitManager() {}
 
   //! Creates HostBlitManager object
-  virtual bool create(amd::Device& device) { return true; }
+  virtual bool create(amd::Device& device) override { return true; }
 
   //! Copies a buffer object to system memory
   virtual bool readBuffer(
@@ -285,7 +285,7 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to system memory
   virtual bool readBufferRect(
@@ -296,7 +296,7 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies an image object to system memory
   virtual bool readImage(
@@ -308,7 +308,7 @@ class HostBlitManager : public device::BlitManager {
       size_t slicePitch,                                    //!< Slice pitch for host memory
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies system memory to a buffer object
   virtual bool writeBuffer(
@@ -318,7 +318,7 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies system memory to a buffer object
   virtual bool writeBufferRect(
@@ -329,7 +329,7 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies system memory to an image object
   virtual bool writeImage(
@@ -341,7 +341,7 @@ class HostBlitManager : public device::BlitManager {
       size_t slicePitch,                                    //!< Slice pitch for host memory
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to another buffer object
   virtual bool copyBuffer(
@@ -352,7 +352,7 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to another buffer object
   virtual bool copyBufferRect(
@@ -363,12 +363,12 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
-  ) const;
+  ) const override;
 
   //! Copies multiple pitched boxes between buffer objects in a batch
   bool CopyBufferRectBatch(
@@ -378,12 +378,12 @@ class HostBlitManager : public device::BlitManager {
   //! Copies pageable host-to-device operations in a batch
   virtual bool WriteBufferBatch(
       const std::vector<amd::BatchWriteMemoryOp>& write_ops  //!< Batch of write operations
-  ) const;
+  ) const override;
 
   //! Copies device-to-pageable-host operations in a batch
   virtual bool ReadBufferBatch(
       const std::vector<amd::BatchReadMemoryOp>& read_ops  //!< Batch of read operations
-  ) const;
+  ) const override;
 
   //! Copies an image object to a buffer object
   virtual bool copyImageToBuffer(
@@ -396,7 +396,7 @@ class HostBlitManager : public device::BlitManager {
       size_t rowPitch = 0,                                  //!< Pitch for buffer
       size_t slicePitch = 0,                                //!< Slice for buffer
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to an image object
   virtual bool copyBufferToImage(
@@ -409,7 +409,7 @@ class HostBlitManager : public device::BlitManager {
       size_t rowPitch = 0,                                  //!< Pitch for buffer
       size_t slicePitch = 0,                                //!< Slice for buffer
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies an image object to another image object
   virtual bool copyImage(
@@ -420,7 +420,7 @@ class HostBlitManager : public device::BlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Fills a buffer memory with a pattern data
   virtual bool fillBuffer(device::Memory& memory,       //!< Memory object to fill with pattern
@@ -431,7 +431,7 @@ class HostBlitManager : public device::BlitManager {
                           const amd::Coord3D& size,     //!< Size of the fill region
                           bool entire = false,          //!< Entire buffer will be updated
                           bool forceBlit = false        //!< Force GPU Blit for fill
-  ) const;
+  ) const override;
 
   //! Fills an image memory with a pattern data
   virtual bool fillImage(device::Memory& dstMemory,   //!< Memory object to fill with pattern
@@ -439,7 +439,7 @@ class HostBlitManager : public device::BlitManager {
                          const amd::Coord3D& origin,  //!< Destination origin
                          const amd::Coord3D& size,    //!< Size of the copy region
                          bool entire = false          //!< Entire buffer will be updated
-  ) const;
+  ) const override;
 
   uint32_t sRGBmap(float fc) const;
 
