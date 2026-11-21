@@ -327,6 +327,7 @@ if(BUILD_TESTS)
     ProfilerApiEventRankTests.cpp
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
+    ProxyProtocolTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
