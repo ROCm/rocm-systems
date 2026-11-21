@@ -73,6 +73,38 @@ elseif(ENABLE_WSL_BACKEND)
     endif()
 endif()
 
+# The shipped layout snapshot describes x86-64 Linux. Read it at configure
+# time so source tarballs, shallow checkouts and installed tests need no Git.
+set(abi_canary "${CMAKE_CURRENT_SOURCE_DIR}/unit/system/shipped_output_test.cc")
+if(
+    CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$"
+    AND CMAKE_SIZEOF_VOID_P EQUAL 8
+)
+    set(baseline "${CMAKE_CURRENT_SOURCE_DIR}/../../abi/shipped.json")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${baseline}")
+    file(READ "${baseline}" shipped_json)
+    foreach(
+        type
+        fabric_info
+        driver_info
+        version
+        enumeration_info
+        gpu_metrics
+        board_info
+        power_info
+        pcie_info
+        error_count
+        vram_info
+        topology_nearest
+    )
+        string(JSON size GET "${shipped_json}" header types "amdsmi_${type}_t" size)
+        set_property(SOURCE "${abi_canary}" APPEND PROPERTY COMPILE_DEFINITIONS "SHIPPED_${type}_SIZE=${size}")
+    endforeach()
+else()
+    list(REMOVE_ITEM unitSources "${abi_canary}")
+endif()
+
 set(TEST "amdsmitst")
 
 # Harness sources at the root of this directory. Listed explicitly (rather than

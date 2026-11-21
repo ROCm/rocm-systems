@@ -102,7 +102,7 @@ repos:
             Test the blocking ABI gate (tests/abi_check/abi_gate.py) on synthetic headers.
         entry: python3 -B projects/amdsmi/tests/abi_check/abi_gate_test.py
         language: python
-        additional_dependencies: [libclang==18.1.1]
+        additional_dependencies: [libclang==18.1.1, PyYAML==6.0.3]
         pass_filenames: false
         files: ^projects/amdsmi/(tests/abi_check/abi_gate|abi/)
     -   id: amdsmi-license-headers

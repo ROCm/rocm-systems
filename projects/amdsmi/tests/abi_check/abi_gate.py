@@ -26,6 +26,7 @@ import tempfile
 
 HEADER = "projects/amdsmi/include/amd_smi/amdsmi.h"
 EXCEPTIONS = "projects/amdsmi/abi/abi_exceptions.json"
+SHIPPED = "projects/amdsmi/abi/shipped.json"
 CHANGELOG = "projects/amdsmi/CHANGELOG.md"
 WORKTREE = "WORKTREE"
 
@@ -867,8 +868,8 @@ def _semantic_breaks(old, new):
     return breaks
 
 
-def diff(old, new, policy=None):
-    """Breaking changes from snapshot old to snapshot new."""
+def layout_diff(old, new, policy=None):
+    """Compare layouts, signatures and constants, independently of documentation."""
     append_only = (policy or {}).get("append_only", {})
     canon = _alias_map(old, new)
     breaks = []
@@ -937,8 +938,11 @@ def diff(old, new, policy=None):
         breaks.append(
             Break(("macros", name), value, nvalue, [["", "value", _fmt(value), _fmt(nvalue)]])
         )
-    breaks += _semantic_breaks(old, new)
     return breaks
+
+
+def diff(old, new, policy=None):
+    return layout_diff(old, new, policy) + _semantic_breaks(old, new)
 
 
 def _all_enumerators(snap):
@@ -1164,6 +1168,129 @@ def _snapshot_ref(repo, ref, cache={}):
     return cache[key]
 
 
+def elf_contract(library):
+    """Read the ELF without loading it; keep @ and @@ (the default symbol version)."""
+
+    def read(*args):
+        try:
+            return subprocess.run(
+                ["readelf", "--wide", *args, library],
+                capture_output=True,
+                text=True,
+                env={**os.environ, "LC_ALL": "C"},
+                check=True,
+            ).stdout
+        except (OSError, subprocess.CalledProcessError) as exc:
+            raise GateError(f"could not inspect {library}: {exc}") from exc
+
+    soname = re.search(r"\(SONAME\).*?\[([^]]+)\]", read("--dynamic"))
+    if not soname:
+        raise GateError(f"{library} has no DT_SONAME")
+    exports = set()
+    for line in read("--dyn-syms").splitlines():
+        fields = line.split()
+        if len(fields) < 8 or not fields[0].rstrip(":").isdigit():
+            continue
+        _, _, _, kind, binding, visibility, section, name = fields[:8]
+        if (
+            kind in ("FUNC", "IFUNC", "OBJECT", "TLS")
+            and binding in ("GLOBAL", "WEAK", "UNIQUE")
+            and visibility in ("DEFAULT", "PROTECTED")
+            and section not in ("UND", "ABS")
+        ):
+            exports.add(name)
+    if not exports:
+        raise GateError(f"{library} has no exported symbols")
+    return {"soname": soname[1], "exports": sorted(exports)}
+
+
+def header_soname(header):
+    major = header["macros"].get("AMDSMI_LIB_VERSION_MAJOR")
+    if type(major) is not int:
+        raise GateError("missing integer AMDSMI_LIB_VERSION_MAJOR")
+    return f"libamd_smi.so.{major}"
+
+
+def capture(repo, ref, library):
+    source = subprocess.run(
+        ["git", "-C", repo, "rev-parse", "--verify", f"{ref}^{{commit}}"],
+        capture_output=True,
+        text=True,
+    )
+    if source.returncode:
+        raise GateError(f"cannot resolve release commit {ref}")
+    source = source.stdout.strip()
+    snap = _snapshot_ref(repo, source)
+    if snap is None:
+        raise GateError(f"{HEADER} missing at {source}")
+    elf = elf_contract(library)
+    if header_soname(snap) != elf["soname"]:
+        raise GateError(f"{ref} expects {header_soname(snap)}, not {elf['soname']}")
+    return {
+        "source": source,
+        "elf": elf,
+        "header": {k: snap[k] for k in ("types", "aliases", "functions", "macros")},
+        "append_only": load_exceptions(_git_show(repo, source, EXCEPTIONS))["append_only"],
+    }
+
+
+def shipped_elf_errors(old, new):
+    errors = []
+    if old["soname"] != new["soname"]:
+        errors.append(f"expected {old['soname']}, found {new['soname']}")
+    errors.extend(f"missing export {s}" for s in sorted(set(old["exports"]) - set(new["exports"])))
+    return errors
+
+
+def shipped_header_errors(baseline, header):
+    expected = baseline["elf"]["soname"]
+    if header_soname(header) != expected:
+        return [f"baseline expects {expected}, header selects {header_soname(header)}"]
+    return [
+        f"{path_str(b.path)}: {_fmt(b.old)} -> {_fmt(b.new)}"
+        for b in layout_diff(baseline["header"], header, {"append_only": baseline["append_only"]})
+    ]
+
+
+def load_shipped(text):
+    try:
+        b = json.loads(text)
+        if (
+            not re.fullmatch(r"[0-9a-f]{40}", b["source"])
+            or not b["elf"]["exports"]
+            or header_soname(b["header"]) != b["elf"]["soname"]
+            or not b["header"]["types"]
+            or not b["header"]["functions"]
+            or not isinstance(b["append_only"], dict)
+        ):
+            raise ValueError("incomplete or inconsistent snapshot")
+        return b
+    except (KeyError, ValueError, TypeError) as exc:
+        raise GateError(f"invalid shipped ABI baseline: {exc}") from exc
+
+
+def check_shipped_refs(repo, base, new, header):
+    before = _git_show(repo, base, SHIPPED)
+    after = _git_show(repo, new, SHIPPED)
+    if after is None:
+        return None, [f"{SHIPPED} removed"] if before is not None else []
+    proposed = load_shipped(after)
+    errors = shipped_header_errors(proposed, header)
+    if before is not None and before != after:
+        # Refreshing the release snapshot must not erase a shipped obligation. Only
+        # a different SONAME starts a new contract; the PR/base check still applies.
+        previous = load_shipped(before)
+        if previous["elf"]["soname"] == proposed["elf"]["soname"]:
+            relaxed = (proposed["append_only"].keys() - previous["append_only"].keys()) & previous[
+                "header"
+            ]["types"].keys()
+            errors.extend(f"cannot mark shipped type {t} append_only" for t in sorted(relaxed))
+            errors += shipped_header_errors(previous, proposed["header"])
+            errors += shipped_elf_errors(previous["elf"], proposed["elf"])
+            errors += shipped_header_errors(previous, header)
+    return proposed["source"], errors
+
+
 def _c_int(value):
     return f"{value}ULL" if value >= 0 else f"{value}LL"
 
@@ -1286,6 +1413,10 @@ def gate(repo, old_ref, new_ref, release_ref=None, compile_check=True):
         "advisory": [],
     }
     result["errors"] += consistency_errors(_git_show(repo, new_ref, HEADER))
+    shipped_ref, shipped_errors = check_shipped_refs(repo, old_ref, new_ref, new)
+    if shipped_ref:
+        result["refs"]["shipped"] = shipped_ref
+    result["errors"].extend(f"shipped ABI: {e}" for e in shipped_errors)
     kept = {_retires(e) for e in exc["breaks"]}
     for e in old_exc["breaks"]:
         if _retires(e) and _retires(e) not in kept:
@@ -1386,6 +1517,10 @@ def render_summary(result):
     out.append(
         f"Compared `{refs['new']}` against base `{refs['base']}` and release `{refs['release'] or '-'}`."
     )
+    if refs.get("shipped"):
+        out.append(
+            f"Checked the shipped ABI from `{refs['shipped']}` (not overridable by acknowledge)."
+        )
     out.append("")
     if result["blocking"]:
         out.append(
@@ -1491,6 +1626,16 @@ def main(argv=None):
     p.add_argument("old")
     p.add_argument("new")
 
+    p = sub.add_parser("capture", help="Print a shipped ABI baseline from a release pin and ELF")
+    p.add_argument("--release", required=True, help="rocm-systems commit in the package manifest")
+    p.add_argument("--library", required=True, help="Packaged x86-64 Linux ESMI-on libamd_smi.so")
+
+    p = sub.add_parser("shipped", help="Check a header or system library against the shipped ABI")
+    p.add_argument("--baseline", help=f"Snapshot file (default: {SHIPPED} in the checkout)")
+    group = p.add_mutually_exclusive_group(required=True)
+    group.add_argument("--new", help=f"Header ref to check, or {WORKTREE}")
+    group.add_argument("--library", help="Built x86-64 Linux ESMI-on libamd_smi.so (no GPU needed)")
+
     p = sub.add_parser("snapshot", help="Print the layout snapshot of a header file as JSON")
     p.add_argument("header")
 
@@ -1508,7 +1653,27 @@ def main(argv=None):
     args = parser.parse_args(argv)
     repo = os.path.abspath(args.repo)
     try:
-        if args.cmd == "snapshot":
+        if args.cmd == "capture":
+            print(json.dumps(capture(repo, args.release, args.library), indent=1, sort_keys=True))
+        elif args.cmd == "shipped":
+            try:
+                with open(args.baseline or os.path.join(repo, SHIPPED), encoding="utf-8") as f:
+                    baseline = load_shipped(f.read())
+            except OSError as exc:
+                raise GateError(f"could not read shipped baseline: {exc}") from exc
+            if args.library:
+                errors = shipped_elf_errors(baseline["elf"], elf_contract(args.library))
+            else:
+                snap = _snapshot_ref(repo, args.new)
+                if snap is None:
+                    raise GateError(f"{HEADER} missing at {args.new}")
+                errors = shipped_header_errors(baseline, snap)
+            print(
+                f"{args.library or args.new} vs {baseline['elf']['soname']} at {baseline['source']}:"
+            )
+            print("\n".join(errors) if errors else "PASS")
+            return 1 if errors else 0
+        elif args.cmd == "snapshot":
             with open(args.header, encoding="utf-8") as f:
                 print(json.dumps(snapshot_text(f.read()), indent=1, sort_keys=True))
         elif args.cmd == "latest-release":
