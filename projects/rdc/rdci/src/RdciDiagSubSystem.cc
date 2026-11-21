@@ -28,6 +28,8 @@ THE SOFTWARE.
 
 #include <ctime>
 #include <iomanip>
+#include <memory>
+#include <new>
 #include <string>
 
 #include "common/rdc_utils.h"
@@ -150,9 +152,13 @@ void RdciDiagSubSystem::process() {
   }
 
   rdc_status_t result;
-  rdc_diag_response_t response;
+  // About 7 MB: on the heap, not on the stack.
+  std::unique_ptr<rdc_diag_response_t> response(new (std::nothrow) rdc_diag_response_t());
+  if (response == nullptr) {
+    throw RdcException(RDC_ST_INSUFF_RESOURCES, "Not enough memory for the diagnostic results");
+  }
   result = rdc_diagnostic_run(rdc_handle_, group_id_, run_level_, config_test_.c_str(),
-                              config_test_.length(), &response, nullptr);
+                              config_test_.length(), response.get(), nullptr);
 
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
@@ -160,16 +166,16 @@ void RdciDiagSubSystem::process() {
   }
 
   // (3) Check diagnostic results
-  for (uint32_t i = 0; i < response.results_count; i++) {
-    const rdc_diag_test_result_t& test_result = response.diag_info[i];
+  for (uint32_t i = 0; i < response->results_count; i++) {
+    const rdc_diag_test_result_t& test_result = response->diag_info[i];
     std::cout << std::setw(26) << std::left << get_test_name(test_result.test_case) + ":"
               << rdc_diagnostic_result_string(test_result.status) << "\n";
   }
 
   // (4) diagnostic detail information
   std::cout << " =============== Diagnostic Details ==================\n";
-  for (uint32_t i = 0; i < response.results_count; i++) {
-    const rdc_diag_test_result_t& test_result = response.diag_info[i];
+  for (uint32_t i = 0; i < response->results_count; i++) {
+    const rdc_diag_test_result_t& test_result = response->diag_info[i];
     if (test_result.info[0] != '\0') {
       std::cout << std::setw(26) << std::left << get_test_name(test_result.test_case) + ":"
                 << test_result.info << "\n";

@@ -21,8 +21,10 @@ THE SOFTWARE.
 */
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCSMIDIAGNOSTICIMPL_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCSMIDIAGNOSTICIMPL_H_
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
@@ -42,14 +44,23 @@ class RdcSmiDiagnosticImpl {
                                     rdc_diag_test_result_t* result);
 
  private:
-  rdc_diag_result_t check_temperature_level(uint32_t gpu_index, amdsmi_temperature_type_t type,
-                                            char msg[MAX_DIAG_MSG_LENGTH],
-                                            char per_gpu_msg[MAX_DIAG_MSG_LENGTH]);
+  // What the GPU parameters check found on one GPU.
+  struct GpuLimits {
+    uint32_t compared = 0;  // limits compared with the current value
+    uint32_t crossed = 0;   // limits the current value is at or beyond
+    rdc_diag_result_t status = RDC_DIAG_RESULT_PASS;
+    std::vector<std::string> messages;  // a sentence per crossed limit
+
+    void compare(const std::string& sensor, int64_t current, int64_t limit, bool upper,
+                 const char* name, rdc_diag_result_t level);
+  };
+
+  void check_temperature_level(amdsmi_processor_handle processor_handle,
+                               amdsmi_temperature_type_t type, GpuLimits* gpu) const;
   std::string get_temperature_string(amdsmi_temperature_type_t type) const;
 
-  rdc_diag_result_t check_voltage_level(uint32_t gpu_index, amdsmi_voltage_type_t type,
-                                        char msg[MAX_DIAG_MSG_LENGTH],
-                                        char per_gpu_msg[MAX_DIAG_MSG_LENGTH]);
+  void check_voltage_level(amdsmi_processor_handle processor_handle, amdsmi_voltage_type_t type,
+                           GpuLimits* gpu) const;
   std::string get_voltage_string(amdsmi_voltage_type_t type) const;
 };
 

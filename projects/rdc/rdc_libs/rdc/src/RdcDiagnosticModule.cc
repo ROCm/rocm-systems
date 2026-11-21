@@ -21,6 +21,9 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
 
+#include <algorithm>
+#include <array>
+#include <iterator>
 #include <map>
 #include <vector>
 
@@ -30,6 +33,23 @@ THE SOFTWARE.
 
 namespace amd {
 namespace rdc {
+namespace {
+
+// The tests of a short run, and of every longer one.
+constexpr std::array<rdc_diag_test_cases_t, 5> kShortRunTests = {
+    RDC_DIAG_COMPUTE_PROCESS, RDC_DIAG_NODE_TOPOLOGY, RDC_DIAG_GPU_PARAMETERS,
+    RDC_DIAG_COMPUTE_QUEUE, RDC_DIAG_SYS_MEM_CHECK};
+static_assert(kShortRunTests.size() <= static_cast<size_t>(MAX_TEST_CASES),
+              "a run's results must fit in rdc_diag_response_t::diag_info");
+
+// A module's test-case array starts out filled with RDC_DIAG_TEST_LAST, which no test case has, so
+// an entry that the module reports but does not write is not taken for a test case.
+bool is_test_case(rdc_diag_test_cases_t test_case) {
+  const int value = static_cast<int>(test_case);
+  return value >= RDC_DIAG_TEST_FIRST && value < RDC_DIAG_TEST_LAST;
+}
+
+}  // namespace
 
 rdc_status_t RdcDiagnosticModule::rdc_diag_test_cases_query(
     rdc_diag_test_cases_t test_cases[MAX_TEST_CASES], uint32_t* test_case_count) {
@@ -39,11 +59,25 @@ rdc_status_t RdcDiagnosticModule::rdc_diag_test_cases_query(
   auto ite = diagnostic_modules_.begin();
   *test_case_count = 0;
   for (; ite != diagnostic_modules_.end(); ite++) {
+    // Each module writes into an array of its own, as its parameter promises.
+    rdc_diag_test_cases_t module_cases[MAX_TEST_CASES];
+    std::fill(std::begin(module_cases), std::end(module_cases), RDC_DIAG_TEST_LAST);
     uint32_t count = 0;
-    rdc_status_t status =
-        (*ite)->rdc_diag_test_cases_query(&(test_cases[*test_case_count]), &count);
-    if (status == RDC_ST_OK) {
-      *test_case_count += count;
+    rdc_status_t status = (*ite)->rdc_diag_test_cases_query(module_cases, &count);
+    if (status != RDC_ST_OK) {
+      continue;
+    }
+    count = std::min<uint32_t>(count, MAX_TEST_CASES);
+    for (uint32_t i = 0; i < count; i++) {
+      if (!is_test_case(module_cases[i])) {
+        continue;
+      }
+      if (*test_case_count < MAX_TEST_CASES) {
+        test_cases[(*test_case_count)++] = module_cases[i];
+      } else {
+        RDC_LOG(RDC_ERROR, "More than " << MAX_TEST_CASES << " test cases, dropped test case "
+                                        << module_cases[i]);
+      }
     }
   }
   return RDC_ST_OK;
@@ -59,14 +93,18 @@ rdc_status_t RdcDiagnosticModule::rdc_test_case_run(rdc_diag_test_cases_t test_c
     return RDC_ST_BAD_PARAMETER;
   }
 
-  // Init test status
+  // Init test status: a module that returns without writing the result leaves it skipped.
+  *result = {};
+  result->test_case = test_case;
+  result->status = RDC_DIAG_RESULT_SKIP;
   auto ite = testcases_to_module_.find(test_case);
   if (ite == testcases_to_module_.end()) {
-    result->status = RDC_DIAG_RESULT_SKIP;
     strncpy_with_null(result->info, "Not implemented", MAX_DIAG_MSG_LENGTH);
     return RDC_ST_NOT_SUPPORTED;
   }
 
+  // gpu_index holds a group's entities, at most RDC_GROUP_MAX_ENTITIES.
+  gpu_count = std::min<uint32_t>(gpu_count, RDC_GROUP_MAX_ENTITIES);
   rdc_status_t status = ite->second->rdc_test_case_run(test_case, gpu_index, gpu_count, config,
                                                        config_size, result, callback);
   return status;
@@ -83,21 +121,12 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
     return RDC_ST_BAD_PARAMETER;
   }
 
-  std::vector<rdc_diag_test_cases_t> tests_to_search_for;
-  if (level >= RDC_DIAG_LVL_SHORT) {  // Short run and above
-    tests_to_search_for.push_back(RDC_DIAG_COMPUTE_PROCESS);
-    tests_to_search_for.push_back(RDC_DIAG_NODE_TOPOLOGY);
-    tests_to_search_for.push_back(RDC_DIAG_GPU_PARAMETERS);
-    tests_to_search_for.push_back(RDC_DIAG_COMPUTE_QUEUE);
-    tests_to_search_for.push_back(RDC_DIAG_SYS_MEM_CHECK);
-  }
-
   std::vector<rdc_diag_test_cases_t> tests_to_run;
   if (is_custom) {
-    RDC_LOG(RDC_ERROR, "Custom diagnostic run not supported yet");
-  } else {
+    RDC_LOG(RDC_DEBUG, "Custom diagnostic run not supported yet");
+  } else if (level >= RDC_DIAG_LVL_SHORT) {  // Short run and above
     // respect level
-    for (auto& test : tests_to_search_for) {
+    for (auto& test : kShortRunTests) {
       if (testcases_to_module_.find(test) != testcases_to_module_.end()) {
         tests_to_run.push_back(test);
       } else {
@@ -119,8 +148,9 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
           "Test " + std::to_string(i + 1) + " / " + std::to_string(tests_to_run.size());
       callback->callback(callback->cookie, log.data());
     }
-    response->diag_info[i].test_case = tests_to_run[i];
-    // NOTE: rdc_test_case_run reuses the diagnostic_run callback
+    // NOTE: rdc_test_case_run reuses the diagnostic_run callback; it also clamps the count. Its
+    // status is not the run's: each test's outcome is in its result, and rdcd sends no results
+    // for a run that does not return RDC_ST_OK.
     rdc_test_case_run(tests_to_run[i], const_cast<uint32_t*>(gpus.entity_ids), gpus.count, config,
                       config_size, &(response->diag_info[i]), callback);
     response->results_count++;
@@ -155,11 +185,15 @@ RdcDiagnosticModule::RdcDiagnosticModule(std::list<RdcDiagnosticPtr> diagnostic_
   // find test cases
   for (auto& ite : diagnostic_modules_) {
     rdc_diag_test_cases_t test_cases[MAX_TEST_CASES];
+    std::fill(std::begin(test_cases), std::end(test_cases), RDC_DIAG_TEST_LAST);
     uint32_t test_count = 0;
     rdc_status_t status = ite->rdc_diag_test_cases_query(test_cases, &test_count);
     if (status == RDC_ST_OK) {
+      test_count = std::min<uint32_t>(test_count, MAX_TEST_CASES);
       for (uint32_t index = 0; index < test_count; index++) {
-        testcases_to_module_.insert({test_cases[index], ite});
+        if (is_test_case(test_cases[index])) {
+          testcases_to_module_.insert({test_cases[index], ite});
+        }
       }
     }
   }
