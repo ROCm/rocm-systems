@@ -27,10 +27,9 @@ unless otherwise noted.
 Enumeration types
 *****************
 
-Concrete target identifiers and instruction property flags.
+Concrete target identifiers.
 
 .. doxygenenum:: rj_code_target_id_t
-.. doxygenenum:: rj_code_inst_flags_e
 
 Opaque handle types
 *******************
@@ -121,7 +120,6 @@ basic block.
 
 .. doxygenfunction:: rj_code_inst_mnemonic
 .. doxygenfunction:: rj_code_inst_size
-.. doxygenfunction:: rj_code_inst_flags
 .. doxygenfunction:: rj_code_inst_disassemble
 .. doxygenfunction:: rj_code_inst_next
 

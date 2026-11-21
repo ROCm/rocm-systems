@@ -4,6 +4,24 @@
 //! Pending HSA prefetch destinations layered over completed native locations.
 
 use crate::ffi::{HsaAgent, INVALID_ARGUMENT, OUT_OF_RESOURCES, Status};
+use crate::memory::copy_svm::svm_agent_from_location;
+use crate::session::HsaSession;
+use rocddi::memory::advice::AdviceLocation;
+
+/// Reserves a pending range using the same agent representation as native queries.
+pub(crate) fn prepare(
+    runtime: &mut HsaSession,
+    address: u64,
+    size: u64,
+    location: AdviceLocation,
+) -> Result<PreparedPrefetch, Status> {
+    // Native system memory has one location even when HSA exposes several CPUs.
+    let agent = svm_agent_from_location(runtime, location)?;
+    runtime
+        .memory_state
+        .pending_prefetches
+        .prepare(address, size, agent)
+}
 
 /// A disjoint portion of the most recently issued prefetch covering its bytes.
 #[derive(Clone, Copy)]
@@ -14,7 +32,7 @@ struct PendingRange {
     end: u64,
     /// Worker whose retirement removes this range.
     operation: u64,
-    /// Requested destination, visible before native migration starts.
+    /// Canonical destination, visible before native migration starts.
     agent: HsaAgent,
 }
 
@@ -42,7 +60,7 @@ pub(crate) struct PendingPrefetches {
 
 impl PendingPrefetches {
     /// Reserves all publication storage without replacing earlier destinations.
-    pub(crate) fn prepare(
+    fn prepare(
         &mut self,
         address: u64,
         size: u64,
@@ -188,6 +206,60 @@ mod tests {
     /// Reads a fully pending range; consulting native state would fail the test.
     fn pending_agent(state: &PendingPrefetches, start: u64, size: u64) -> u64 {
         state.query(start, size, |_, _| Err(ERROR)).unwrap().handle
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn cpu_destinations_remain_uniform_across_pending_and_completed_ranges() {
+        use crate::agent::Cpu;
+        use crate::ffi::CPU_AGENT;
+        use crate::memory::copy_svm::svm_location_from_agent;
+        use crate::session::testing::session_without_devices;
+        use rocddi::session::{DriverContextLifetime, Session};
+
+        let session = Session::new(DriverContextLifetime::Session).unwrap();
+        // Selecting the provider requires no discovery or device acquisition.
+        let service = session.memory_advice().unwrap();
+        let mut runtime = session_without_devices(session);
+        runtime.agents.cpus = (0..2)
+            .map(|native_node| Cpu {
+                node: None,
+                native_node,
+                name: "CPU".into(),
+                compute_units: 1,
+                maximum_clock_mhz: 0,
+                memory_bytes: 0,
+                apu: false,
+            })
+            .collect();
+
+        for handle in [CPU_AGENT, CPU_AGENT + 1] {
+            let location =
+                svm_location_from_agent(&runtime, &service, HsaAgent { handle }, false).unwrap();
+            assert_eq!(location, AdviceLocation::System);
+            let prepared = prepare(&mut runtime, 0x2000, 0x1000, location).unwrap();
+            let operation = prepared.operation();
+            runtime.memory_state.pending_prefetches.publish(prepared);
+            assert_eq!(
+                pending_agent(&runtime.memory_state.pending_prefetches, 0x2000, 0x1000),
+                CPU_AGENT
+            );
+            for completed in [false, true] {
+                if completed {
+                    runtime.memory_state.pending_prefetches.retire(operation);
+                }
+                for (address, size) in [(0x2000, 0x1000), (0x1000, 0x3000)] {
+                    let agent =
+                        runtime
+                            .memory_state
+                            .pending_prefetches
+                            .query(address, size, |_, _| {
+                                svm_agent_from_location(&runtime, AdviceLocation::System)
+                            });
+                    assert_eq!(agent.unwrap().handle, CPU_AGENT);
+                }
+            }
+        }
     }
 
     #[test]
