@@ -987,23 +987,23 @@ def gen_float16_conversion(ctx: ExecuteContext) -> str | None:
 def gen_wide_scaled_narrow(ctx: ExecuteContext) -> str | None:
     """Bind gfx950/gfx1250 narrowing with architecture-specific tuple resolution."""
     name = ctx.inst.name
-    full_scale = ctx.arch_name == 'cdna5'
-    names = WIDE_SCALED_NARROW_GFX1250_NAMES if full_scale else SCALED_FP6_NARROW_NAMES
+    gfx1250 = ctx.arch_name == 'cdna5'
+    names = WIDE_SCALED_NARROW_GFX1250_NAMES if gfx1250 else SCALED_FP6_NARROW_NAMES
     if ctx.arch_name not in ('cdna4', 'cdna5') or name not in names or not ctx.is_vop3:
         return None
     stochastic = '_SR_' in name
     f32 = name.endswith('_F32')
-    interleaved = f32 and not stochastic and not full_scale
+    interleaved = f32 and not stochastic and not gfx1250
     ternary = stochastic or interleaved
     if len(ctx.dst_ops) != 1 or len(ctx.src_ops) != (3 if ternary else 2):
         return None
-    api = 'rj_arith_' + name.lower() + ('_gfx1250' if full_scale else '_gfx950')
+    api = 'rj_arith_' + name.lower() + ('_gfx1250' if gfx1250 else '_gfx950')
     registers = [('destination', ctx.dst_ops[0]), ('source_a', ctx.src_ops[0])]
     if interleaved:
         registers.append(('source_b', ctx.src_ops[1]))
     lines = []
     for label, operand in registers:
-        if full_scale:
+        if gfx1250:
             lines += [
                 f'  auto {label}_offset = Isa::resolved_vgpr_offset(wf, {operand}.opr_type_, {operand}.encoding_value_, {operand}.vgpr_msb_role());',
                 f'  if (!{label}_offset) {{ wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue); return; }}',
@@ -1016,22 +1016,22 @@ def gen_wide_scaled_narrow(ctx: ExecuteContext) -> str | None:
             f'  const uint32_t {label}_base = wf.vgpr_alloc().base + amdgpu::apply_gpr_idx(wf, *{label}_offset, {operand}.vgpr_msb_role());',
         ]
     source_b = 'source_b_base' if interleaved else '0'
-    pk8 = full_scale and '_PK8_' in name
+    pk8 = gfx1250 and '_PK8_' in name
     words = (
         (8 if f32 else 4)
         if pk8
-        else ((16 if f32 else 8) if full_scale else (32 if f32 and stochastic else 16))
+        else ((16 if f32 else 8) if gfx1250 else (32 if f32 and stochastic else 16))
     )
     seed = '&' + ctx.src_ops[1] if stochastic else 'nullptr'
-    policy = ', true' if full_scale else ''
+    policy = ', true' if gfx1250 else ''
     if pk8:
         policy += ', 1' if '_FP4_' in name else ', 2'
     flags = 'wf.cu().arithmetic_flags()'
     if pk8 and '_FP4_' not in name:
         flags += ' | (wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0)'
-    if f32 and not full_scale:
+    if f32 and not gfx1250:
         flags += ' | (!(wf.fp_denorm_mode_f32() & 1) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)'
-    wave64 = 'nullptr' if full_scale else wave_api(api, 64)
+    wave64 = 'nullptr' if gfx1250 else wave_api(api, 64)
     lines += [
         f'  amdgpu::arith::execute_wide_scaled_narrow<{str(ternary).lower()}{policy}>(wf, {wave_api(api, 32)}, {wave64},',
         f'      {flags}, destination_base, source_a_base, {source_b}, {words},',
