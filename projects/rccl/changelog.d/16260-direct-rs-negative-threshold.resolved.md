@@ -1,0 +1,1 @@
+* Fixed a hang on multi-node gfx950 `ncclReduceScatter` with a negative `RCCL_DIRECT_REDUCE_SCATTER_THRESHOLD`. The host selected direct ReduceScatter while the kernel ran the ring path. A negative value now disables direct ReduceScatter.
