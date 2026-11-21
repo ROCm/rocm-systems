@@ -202,6 +202,7 @@ symbol.
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
 | everything `src/graph/*.cc` calls outside `src/graph` (the `graph/` binaries except `rccl-UnitTestsMicroGraph{Dev,RcclGraphGen,Trees}`) | `fakes/graph_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
+| `src/hier_host.cc` (targets that compile `rccl_wrap.cc`, `collectives.cc` or `init.cc` but not the real file) | `fakes/hier_host_fakes.{h,cc}` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |
 | `src/debug.cc` (`ncclDebugLog`, `ncclDebugLevelMask`, `ncclSetThreadName`, ...) | `fakes/nccl_fakes.cc` |

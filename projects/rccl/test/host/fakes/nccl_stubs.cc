@@ -70,7 +70,9 @@ ncclResult_t ncclCheckMultiRank(struct ncclComm* comm) { ::abort(); }
 void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
+static ncclResult_t DefaultNcclDdaFabricCommInit(struct ncclComm*) { ::abort(); }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaFabricCommInit = DefaultNcclDdaFabricCommInit;
+ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { return g_ncclDdaFabricCommInit(comm); }
 static ncclResult_t DefaultNcclDdaIpcCommClosePeerMappings(struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommClosePeerMappings =
     DefaultNcclDdaIpcCommClosePeerMappings;
@@ -79,7 +81,9 @@ ncclResult_t ncclDdaIpcCommClosePeerMappings(struct ncclComm* comm) {
 }
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
-bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
+static bool DefaultNcclDdaUseFabricPath(struct ncclComm*) { return false; }
+std::function<bool(struct ncclComm*)> g_ncclDdaUseFabricPath = DefaultNcclDdaUseFabricPath;
+bool ncclDdaUseFabricPath(struct ncclComm* comm) { return g_ncclDdaUseFabricPath(comm); }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 bool g_devrIsOneLsaTeamValue = true;
 bool ncclDevrIsOneLsaTeam(struct ncclComm*) { return g_devrIsOneLsaTeamValue; }
@@ -290,6 +294,8 @@ void ResetNcclStubs() {
   g_ncclCommSplit = DefaultNcclCommSplit;
   g_collTraceDestroy = DefaultCollTraceDestroy;
   g_ncclDdaIpcCommClosePeerMappings = DefaultNcclDdaIpcCommClosePeerMappings;
+  g_ncclDdaFabricCommInit = DefaultNcclDdaFabricCommInit;
+  g_ncclDdaUseFabricPath = DefaultNcclDdaUseFabricPath;
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;
