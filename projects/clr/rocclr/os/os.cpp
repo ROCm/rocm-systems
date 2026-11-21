@@ -34,7 +34,7 @@ bool Os::isValidFileDesc(const amd::Os::FileDesc& desc) {
 }
 
 // ================================================================================================
-void* Os::loadLibrary(const char* libraryname) {
+void* Os::loadLibrary(const char* libraryname, bool searchCwd) {
   void* handle;
 
   // Try with the system library prefix and extension instead.
@@ -94,7 +94,7 @@ void* Os::loadLibrary(const char* libraryname) {
   str.append(Os::libraryExtension());
 
   handle = Os::loadLibrary_(str.c_str());
-  if (handle != NULL || str.find(fileSeparator()) != std::string::npos) {
+  if (handle != NULL || !searchCwd || str.find(fileSeparator()) != std::string::npos) {
     return handle;
   }
 

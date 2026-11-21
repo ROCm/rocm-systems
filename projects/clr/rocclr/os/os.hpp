@@ -236,8 +236,9 @@ class Os : AllStatic {
 
   //! checks if file descriptor is valid
   static bool isValidFileDesc(const amd::Os::FileDesc& desc);
-  //! Load the shared library named by \a filename
-  static void* loadLibrary(const char* filename);
+  //! Load the shared library named by \a filename; with \a searchCwd false a bare name isn't
+  //! retried from the current directory
+  static void* loadLibrary(const char* filename, bool searchCwd = true);
   //! Unload the shared library.
   static void unloadLibrary(void* handle);
   //! Return the address of the function identified by \a name.

@@ -119,8 +119,7 @@ void append_prop_fields(std::ostringstream& os, const hipDeviceProp_t& prop) {
 }
 
 std::string collect_comgr_version() {
-  std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib);
-  if (!amd::Comgr::IsReady()) return "";  // comgr not loaded: nothing to record
+  if (!amd::Comgr::Load()) return "";  // comgr not loaded: nothing to record
 
   size_t major = 0;
   size_t minor = 0;

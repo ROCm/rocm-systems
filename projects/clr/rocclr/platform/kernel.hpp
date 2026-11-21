@@ -15,6 +15,7 @@
 #include <vector>
 #include <cstdlib>  // for malloc
 #include <string>
+#include <string_view>
 #include "device/device.hpp"
 
 enum FGSStatus {
@@ -322,41 +323,11 @@ class Kernel : public RuntimeObject {
 
   // Templated find function to retrieve the right value based on string
   template <typename V, typename T, size_t N>
-  static V FindValue(const T (&structure)[N], const std::string& name);
+  static V FindValue(const T (&structure)[N], std::string_view name);
 
   // Templated find function to retrieve cl_int values.
   template <typename T, size_t N>
-  static cl_int FindValue(const T (&structure)[N], const std::string& name);
-
-  struct ArgFieldMapType {
-    const char* name;
-    ArgField value;
-  };
-
-  struct ArgValueKindType {
-    const char* name;
-    amd::KernelParameterDescriptor::Desc value;
-  };
-
-  struct ArgAccQualType {
-    const char* name;
-    cl_kernel_arg_access_qualifier value;
-  };
-
-  struct ArgAddrSpaceQualType {
-    const char* name;
-    cl_kernel_arg_address_qualifier value;
-  };
-
-  struct AttrFieldMapType {
-    const char* name;
-    AttrField value;
-  };
-
-  struct CodePropFieldMapType {
-    const char* name;
-    CodePropField value;
-  };
+  static cl_int FindValue(const T (&structure)[N], std::string_view name);
 
   struct ArgAccQualV3Type {
     const char* name;
@@ -384,13 +355,6 @@ class Kernel : public RuntimeObject {
   };
 
   // Static const structure initialization.
-  static const ArgFieldMapType kArgFieldMap[];
-  static const ArgValueKindType kArgValueKind[];
-  static const ArgAccQualType kArgAccQual[];
-  static const ArgAddrSpaceQualType kArgAddrSpaceQual[];
-  static const AttrFieldMapType kAttrFieldMap[];
-  static const CodePropFieldMapType kCodePropFieldMap[];
-
   static const ArgAccQualV3Type kArgAccQualV3[];
   static const ArgAddrSpaceQualV3Type kArgAddrSpaceQualV3[];
   static const KernelFieldMapV3Type kKernelFieldMapV3[];

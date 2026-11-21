@@ -404,6 +404,8 @@ bool Program::createKernels(void* binary, size_t binSize, bool useUniformWorkGro
         kernel->setUniformWorkGroupSize(useUniformWorkGroupSize);
       }
     }
+    // The kernel maps point into the code object; the kernels hold what they need
+    kernelMetadataMap_.clear();
   }
   executable_ = loader_->CreateExecutable(HSA_PROFILE_FULL, nullptr);
   if (executable_ == nullptr) {

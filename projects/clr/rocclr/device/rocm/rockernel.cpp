@@ -13,12 +13,7 @@ namespace amd::roc {
 bool Kernel::init() { return GetAttrCodePropMetadata(); }
 
 bool Kernel::postLoad() {
-  // Set the kernel symbol name and size/alignment based on the kernel metadata
-  // NOTE: kernel name is used to get the kernel code handle in V2,
-  //       but kernel symbol name is used in V3
-  if (codeObjectVer() == 2) {
-    symbolName_ = name();
-  }
+  // Set the kernel size/alignment based on the kernel metadata
   kernargSegmentAlignment_ = amd::alignUp(std::max(kernargSegmentAlignment_, 128u),
                                           device().info().globalMemCacheLineSize_);
 
@@ -152,13 +147,8 @@ bool Kernel::postLoad() {
   }
 
   // handle the printf metadata if any
-  std::vector<std::string> printfStr;
-  if (!GetPrintfStr(&printfStr)) {
-    return false;
-  }
-
-  if (!printfStr.empty()) {
-    InitPrintf(printfStr);
+  if (!prog().printfStrings().empty()) {
+    InitPrintf(prog().printfStrings());
   }
   // Add kernel to the map of all kernels on the device
   program()->rocDevice().AddKernel(*this);
