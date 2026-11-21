@@ -35,6 +35,79 @@ Before reaching for the scripts, two in-library facilities are often enough:
   ``-DBUILD_DEBUG_TRACE_HOST=ON`` or ``-DBUILD_DEBUG_TRACE_DEVICE=ON``. See
   :ref:`rocshmem-api-env-variables`.
 
+Build-time analysis
+--------------------
+
+``scripts/analysis/build_time_report.py`` is the single entry point for *where an
+all_backends build spends its time*. One run against a finished build's
+``build/`` directory:
+
+.. code-block:: bash
+
+  python3 scripts/analysis/build_time_report.py --build-dir build
+
+parses ``.ninja_log`` once and produces everything that previously needed
+three separate scripts, plus the dependency graphs that used to be
+hand-maintained:
+
+* a per-component time budget and slowest-individual-edges table (text, to
+  stdout)
+* a ``-ftime-trace`` phase/template-instantiation summary (text, to stdout),
+  if the build was configured with ``-DROCSHMEM_BUILD_TIME_TRACE=ON`` — skipped
+  with a note otherwise
+* a Gantt-style ``build-timeline.svg``, showing the real parallel overlap
+  between build phases instead of a flat per-component total
+* ``build-dependency-graph.dot`` / ``build-dependency-graph-compact.dot``,
+  rendered to ``.svg`` (and ``.png`` with ``--png``) if Graphviz's ``dot`` is
+  on ``PATH``
+* a single ``build-time-analysis.md`` report stitching all of the above
+  together (``--no-report`` to skip; ``--report PATH`` to change where it's
+  written)
+
+It recognizes rocSHMEM's device-bitcode / ``device_bitcode_tester`` HSACO
+build shape specifically — the serial ``opt``/``clang -x ir`` codegen chain
+that gates ``rocshmem_functional_tests`` — and renders it as its own lane in
+the timeline alongside the parallel compile/link phases. It also detects,
+straight from ``build.ninja``, which target that chain's
+``add_dependencies(${PROJECT_NAME}, device_bitcode_tester_hsacos)`` actually
+gates (so the graph and report stay correct even if that wiring moves) and
+whether ``examples``/``rocshmem_unit_tests`` exist in this configuration at
+all (commonly absent when no external MPI was found) — grayed out in the
+graph rather than reported with stale numbers when they're missing.
+
+.. image:: images/diagrams/build-timeline.svg
+  :alt: Gantt-style timeline of an all_backends build, showing parallel
+        compile/link phases overlapping the serial device-bitcode and
+        HSACO-tester chains.
+
+.. image:: images/diagrams/build-dependency-graph-compact.svg
+  :alt: Compact dependency graph of the all_backends build, from configure
+        through the device-bitcode library, the HSACO tester chain, and
+        every downstream link target, with measured durations attached.
+
+Both use a solid node border for a timed build action (a small circle beside
+it carries the measured duration) and a dashed border for an
+artifact/target/install rule with no duration of its own. The full-detail
+graph is also available as a download:
+:download:`build-dependency-graph.dot <images/diagrams/build-dependency-graph.dot>`.
+
+These are a point-in-time snapshot (durations will drift build-to-build);
+re-run ``build_time_report.py`` against a fresh ``build/`` directory rather than
+trusting the checked-in files for anything but relative scale.
+
+``build_time_report.py`` needs ``build/build_timing.log`` only for the
+configure/install stage split in its "Summary" section (everything else
+comes from ``.ninja_log``/``build.ninja``/``-ftime-trace`` JSON directly).
+That file isn't produced by a plain ``scripts/build_configs/all_backends``
+invocation — run the build through ``scripts/analysis/timed_build.sh``
+instead to get it, with no change to ``all_backends``/``_common.sh``
+themselves:
+
+.. code-block:: bash
+
+  mkdir build && cd build
+  ../scripts/analysis/timed_build.sh -DROCSHMEM_BUILD_TIME_TRACE=ON -DGPU_TARGETS=gfx950
+
 Codegen regression analysis
 ---------------------------
 
