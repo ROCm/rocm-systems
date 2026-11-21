@@ -53,7 +53,7 @@ rccl_assert_source_line("${_rccl_src_root}/init.cc"
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
   "NCCL_PARAM(CGAClusterSize, \"CGA_CLUSTER_SIZE\", NCCL_CONFIG_UNDEF_INT)"
   "fakes/comm_fakes.cc: ncclParamCGAClusterSize()")
-rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+rccl_assert_source_line("${_rccl_src_root}/rccl_scheduler/rccl_scheduler.cc"
   "RCCL_PARAM(DdaEnable, \"DDA_ENABLE\", 1)" "fakes/rccl_wrap_fakes.cc: rcclParamDdaEnable()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rccl_wrap_fakes.cc"
   "int64_t g_rcclParamDdaEnable = 1" "the DdaEnable fake default")
@@ -292,37 +292,36 @@ foreach(_pin
 endforeach()
 # Pin the copied function-name table and its order to init.cc.
 foreach(_func_str_line
-    "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
-    "\"AlltoAllPivot\", \"AlltoAllGda\", \"AlltoAllvGda\","
-    "\"SendRecv\"};")
+    "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 3] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
+    "\"AlltoAllGda\", \"AlltoAllvGda\", \"SendRecv\"};")
   rccl_assert_source_line("${_rccl_src_root}/init.cc" "${_func_str_line}"
     "ras/client-support-test.cc: ncclFuncStr")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/ras/client-support-test.cc" "${_func_str_line}"
     "the production ncclFuncStr table")
 endforeach()
-# dda-coll-seams.cc copies these rccl_wrap.cc DDA param defaults; pin both copies.
+# dda-coll-seams.cc copies these rccl_scheduler.cc DDA param defaults; pin both copies.
 foreach(_dda_param
     "RCCL_PARAM(DdaLL, \"DDA_LL\", 1)"
     "RCCL_PARAM(DdaLLOneShotThreshold, \"DDA_LL_ONESHOT_THRESHOLD\", (size_t)(1) * 1024 * 1024)"
     "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)"
     "RCCL_PARAM(DdaLL128AsyncWire, \"DDA_LL128_ASYNC_WIRE\", 0)"
     "RCCL_PARAM(DdaLL128ArPeerParallel, \"DDA_LL128_AR_PEER_PARALLEL\", 1)")
-  rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
+  rccl_assert_source_line("${_rccl_src_root}/rccl_scheduler/rccl_scheduler.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc" "${_dda_param}"
-    "the rccl_wrap.cc DDA param")
+    "the rccl_scheduler.cc DDA param")
 endforeach()
-rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+rccl_assert_source_line("${_rccl_src_root}/rccl_scheduler/rccl_scheduler.cc"
   "RCCL_PARAM(DdaLLTwoShotThreshold, \"DDA_LL_TWOSHOT_THRESHOLD\", (size_t)(2) * 1024 * 1024)"
   "dda-coll-seams.cc: DefaultDdaLLTwoShotThreshold()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc"
   "DefaultDdaLLTwoShotThreshold(const ncclComm*) { return (size_t)(2) * 1024 * 1024; }"
-  "the rccl_wrap.cc DdaLLTwoShotThreshold default")
-rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+  "the rccl_scheduler.cc DdaLLTwoShotThreshold default")
+rccl_assert_source_line("${_rccl_src_root}/rccl_scheduler/rccl_scheduler.cc"
   "RCCL_PARAM(DdaLL128TwoShotThreshold, \"DDA_LL128_TWOSHOT_THRESHOLD\", (size_t)(64) * 1024 * 1024)"
   "dda-coll-seams.cc: DefaultDdaLL128TwoShotThreshold()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc"
   "DefaultDdaLL128TwoShotThreshold(const ncclComm*) { return (size_t)(64) * 1024 * 1024; }"
-  "the rccl_wrap.cc DdaLL128TwoShotThreshold default")
+  "the rccl_scheduler.cc DdaLL128TwoShotThreshold default")
 unset(_func_str_line)
 # fakes/topo_stubs.cc copies the AMD arm of topoPathTypeStr; pin both copies to one spelling.
 foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fakes/topo_stubs.cc")
@@ -1031,6 +1030,26 @@ set_source_files_properties(
 set(_MICRO_ROOT_TEST_INCLUDES
   ${RCCL_HOST_HIPIFY_DIR}/src/devcomm              # devcomm_v22902.h, included unqualified
   ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device) # device.h includes rccl_ptr.h unqualified
+# wrap-test.cc and tuning/rccl_wrap_wrapper.cc compile rccl_tuning.cc and the scheduler as one TU.
+set(_RCCL_SELECTION_SRCS rccl_tuning.cc
+  rccl_scheduler/rccl_scheduler.cc
+  rccl_scheduler/sched_conditions.cc
+  rccl_scheduler/sched_describe.cc
+  rccl_scheduler/arch/default_rules.cc
+  rccl_scheduler/arch/gfx1250_rules.cc
+  rccl_scheduler/backends/ce_backends.cc
+  rccl_scheduler/backends/dda_backends.cc
+  rccl_scheduler/backends/general_backends.cc
+  rccl_scheduler/backends/gin_backends.cc
+  rccl_scheduler/backends/symmetric_backends.cc)
+set(_RCCL_SELECTION_UNITY_CC "${CMAKE_CURRENT_BINARY_DIR}/rccl_selection_unity.cc")
+set(_rccl_selection_unity "")
+foreach(_src IN LISTS _RCCL_SELECTION_SRCS)
+  string(APPEND _rccl_selection_unity "#include \"${RCCL_HOST_HIPIFY_DIR}/src/${_src}\"\n")
+endforeach()
+file(WRITE "${_RCCL_SELECTION_UNITY_CC}.in" "${_rccl_selection_unity}")
+configure_file("${_RCCL_SELECTION_UNITY_CC}.in" "${_RCCL_SELECTION_UNITY_CC}" COPYONLY)
+unset(_rccl_selection_unity)
 set(_MICRO_ROOT_TEST_DEFS
   COMM_DUMP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/commDump.cc"
   DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/dev_runtime.cc"
@@ -1038,7 +1057,7 @@ set(_MICRO_ROOT_TEST_DEFS
   GROUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/group.cc"
   RCCL_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_dev_runtime.cc"
   SYM_KERNELS_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc"
-  WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc")
+  WRAP_CC_PATH="${_RCCL_SELECTION_UNITY_CC}")
 # Not rccl-root-obj: these share COMMON_DEFS/COMMON_INCLUDES, so their objects need their own prefix.
 set(_MICRO_ROOT_TEST_ARGS
   OBJECT_PREFIX rccl-root-tests-obj
@@ -1132,9 +1151,10 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroProcessIsolatedRunner process-isol
 
 rccl_add_unit_micro_binary(rccl-UnitTestsMicroTimer timer-test.cc ${_MICRO_ROOT_TEST_ARGS})
 
-# wrap-test.cc includes rccl_wrap.cc. Production librccl always compiles the LL128
+# wrap-test.cc includes rccl_tuning.cc and the scheduler. Production librccl always compiles the LL128
 # arm; without this the broadcast protocol tests exercise the compiled-out fallback.
-set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
+set_source_files_properties(wrap-test.cc PROPERTIES COMPILE_DEFINITIONS
+  "ENABLE_LL128;RCCL_POLICY_SNAPSHOT_PATH=\"${CMAKE_CURRENT_LIST_DIR}/tuning/rccl_policy_snapshot.txt\"")
 # channel_fakes.cc compiles the real channel-layout arithmetic from src/channel.cc (see the comment there).
 set_source_files_properties(fakes/channel_fakes.cc PROPERTIES
   COMPILE_DEFINITIONS CHANNEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/channel.cc")

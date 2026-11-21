@@ -38,7 +38,7 @@ test_categories:
       - "GroupRegisterSymmetricDevCommTest.*"
       - "GroupCleanupTest.*"
       - "AsyncJobLaunchDirectTest.*"
-      # rccl_wrap.cc
+      # rccl_tuning.cc, rccl_scheduler/
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCeColl)

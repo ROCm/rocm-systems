@@ -55,7 +55,6 @@ set(SRC_FILES
   device/all_gather_v.h
   device/all_reduce.h
   device/alltoall_gda.h
-  device/alltoall_pivot.h
   device/alltoallv_gda.h
   device/broadcast.h
   device/ce_reduce.cc
@@ -601,7 +600,21 @@ set(SRC_FILES
   ras/rasnet.cc
   rccl_arch_thresholds.cc
   rccl_dev_runtime.cc
-  rccl_wrap.cc
+  rccl_scheduler/rccl_scheduler.h
+  rccl_scheduler/rccl_scheduler.cc
+  rccl_scheduler/sched_conditions.cc
+  rccl_scheduler/sched_describe.cc
+  rccl_scheduler/arch/default_rules.cc
+  rccl_scheduler/arch/gfx1250_rules.cc
+  rccl_scheduler/arch/gfx1250_thresholds.h
+  rccl_scheduler/arch/gfx950_thresholds.h
+  rccl_scheduler/arch/gfx942_thresholds.h
+  rccl_scheduler/backends/ce_backends.cc
+  rccl_scheduler/backends/dda_backends.cc
+  rccl_scheduler/backends/general_backends.cc
+  rccl_scheduler/backends/gin_backends.cc
+  rccl_scheduler/backends/symmetric_backends.cc
+  rccl_tuning.cc
   register/coll_reg.cc
   register/register.cc
   register/sendrecv_reg.cc

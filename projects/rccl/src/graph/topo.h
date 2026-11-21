@@ -261,8 +261,7 @@ struct ncclTopoSystem {
   int netGdrLevel;
   int tuning;
 
-  bool pivotA2AEnabled;
-  int pivotA2ANumBiRings;
+  bool romeAllReduceTuning;  // model-specific AllReduce tree/ring override in enqueue
   bool treeDefined;
   bool ll128Enabled;
 #ifdef ENABLE_WARP_SPEED

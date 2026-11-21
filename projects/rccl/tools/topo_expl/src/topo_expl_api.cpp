@@ -83,7 +83,7 @@ static ncclFunc_t toNcclFunc(TopoExplFunc func) {
   switch (func) {
     case TOPO_FUNC_ALLGATHER: return ncclFuncAllGather;
     case TOPO_FUNC_ALLREDUCE: return ncclFuncAllReduce;
-    case TOPO_FUNC_ALLTOALL: return ncclFuncAlltoAllPivot;
+    case TOPO_FUNC_ALLTOALL: return ncclFuncAlltoAll;
     case TOPO_FUNC_ALLTOALL_GDA: return ncclFuncAlltoAllGda;
     case TOPO_FUNC_ALLTOALLV_GDA: return ncclFuncAlltoAllvGda;
     case TOPO_FUNC_BROADCAST: return ncclFuncBroadcast;

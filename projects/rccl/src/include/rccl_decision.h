@@ -71,43 +71,8 @@ enum : rcclBackendMask_t {
 
 // Returns the preferred backend mask for this communicator given the active
 // CTAPolicy and any force-CE env vars.  RCCL_BACKEND_ALL means "no preference"
-// (zero overhead on the default path).  Defined in rccl_wrap.cc.
+// (zero overhead on the default path).  Defined in rccl_scheduler/rccl_scheduler.cc.
 struct ncclComm;
 rcclBackendMask_t rcclAllReducePreferredBackends(const struct ncclComm* comm);
-
-// Working state for the single-pass preferred/fallback backend search used by
-// rcclSelectXxx().  Each selector initialises its own instance; the preferred
-// mask may differ per collective based on what backends are available for it.
-struct rcclCandSearch {
-  rcclBackendMask_t  preferred;
-  rcclCollDecision*  decision;
-  rcclCollDecision   bestFallback;
-  bool               bestFallbackFound;
-  bool               bestPreferredFound;
-};
-
-// Record one eligible candidate into the search state.  Called in priority
-// order; stops updating once both slots are filled.
-// inWindow: true when the candidate is within its tuning size window.
-//   - bestFallback is only set when inWindow=true (fallback must be a good default).
-//   - bestPreferred is set when the candidate matches the preferred mask AND either
-//     (a) preferred is explicit (not ALL, so a deliberate policy choice), or
-//     (b) the candidate is in its tuning window.
-//   Existing callers omit inWindow and get true by default (no behaviour change).
-static inline void rcclCandSearchRecord(rcclCandSearch& s,
-                                        rcclBackendMask_t family,
-                                        const rcclCollDecision& cand,
-                                        bool inWindow = true) {
-  if (inWindow && !s.bestFallbackFound) {
-    s.bestFallback      = cand;
-    s.bestFallbackFound = true;
-  }
-  const bool qualifiesAsPreferred = (s.preferred & family) &&
-                                    (s.preferred != RCCL_BACKEND_ALL || inWindow);
-  if (!s.bestPreferredFound && qualifiesAsPreferred) {
-    *s.decision          = cand;
-    s.bestPreferredFound = true;
-  }
-}
 
 #endif // RCCL_DECISION_H_

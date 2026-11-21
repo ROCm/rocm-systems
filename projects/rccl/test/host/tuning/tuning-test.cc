@@ -157,9 +157,8 @@ ncclSymkKernelMask TuningSymkNonGenkKernelMask() { return g_tuningSymkNonGenkKer
 int64_t TuningParamSymGenkEnable() { return g_tuningSymGenkEnable(); }
 const char* TuningSymkKernelIdToString(int) { return "micro-sym-kernel"; }
 
-const char* TuningFuncStr[NCCL_NUM_FUNCTIONS + 4] = {
-    "Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "AlltoAllPivot", "AlltoAllGda",
-    "AlltoAllvGda", "SendRecv"};
+const char* TuningFuncStr[NCCL_NUM_FUNCTIONS + 3] = {
+    "Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce", "AlltoAllGda", "AlltoAllvGda", "SendRecv"};
 static_assert(NCCL_NUM_FUNCTIONS == 5, "TuningFuncStr mirrors src/init.cc; add the new function name");
 
 ncclResult_t TuningPluginInit(void** context, uint64_t commId, size_t nRanks, size_t nNodes,

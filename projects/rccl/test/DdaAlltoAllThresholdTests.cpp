@@ -93,17 +93,13 @@ TEST_F(DdaAlltoAllThresholdTest, FewerThanEightRanks_Disabled)
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
 }
 
-// AlltoAll has no symmetric kernel, so symmetric memory leaves DDA in place; only CE makes it yield.
+// AlltoAll has no symmetric kernel, so symmetric memory leaves DDA in place.
 TEST_F(DdaAlltoAllThresholdTest, SymmetricSupport_StillTakesDda)
 {
     mockComm_.reset("gfx950:sramecc+:xnack-");
     mockComm_.comm.symmetricSupport = 1;
-    const size_t totalBytes = testAlltoAllTotalBytes(
-        kAlltoAllFloat32CountAt4MbThreshold, mockComm_.comm.nRanks, ncclFloat32);
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
         mockComm_.get(), kAlltoAllFloat32CountAt4MbThreshold, ncclFloat32));
-    EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(mockComm_.get(), totalBytes, /*ceAlltoAllAllowed=*/false));
-    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(mockComm_.get(), totalBytes, /*ceAlltoAllAllowed=*/true));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx950_4KbPerRank_UsesInKernelStagingCopy)

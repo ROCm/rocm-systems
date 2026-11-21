@@ -830,7 +830,6 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
       devWork.profilerEnabled = ncclProfilerPluginLoaded() && (task->eActivationMask & ncclProfileKernelCh);
       if (task->regBufType & NCCL_NET_REG_BUFFER) devWork.netRegUsed = 1;
       if (task->regBufType & (NCCL_IPC_REG_BUFFER | NCCL_NVLS_REG_BUFFER)) devWork.regUsed = 1;
-      devWork.pivotA2ANumBiRings = comm->topo->pivotA2ANumBiRings;
       devWork.opCount = task->opCount;
 
       struct ncclWorkList* workNode;
@@ -3229,7 +3228,7 @@ static void initCollCostTable(float** collCostTable) {
 
 // numPipeOps: number of pipelined ops. Can be greater than 1 in aggregation mode. Used to adjust latency.
 // Narrowing the table here does not bind the whole pipeline: getAlgoInfo's arch windows and
-// rcclUpdateCollectiveProtocol (rccl_wrap.cc) rewrite the choice after this returns, a tuner plugin may
+// rcclUpdateCollectiveProtocol (rccl_tuning.cc) rewrite the choice after this returns, a tuner plugin may
 // refill a blanked cell, and a CE/DDA backend is picked in rcclSelect*() before the task exists.
 static ncclResult_t updateCollCostTable(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes,
                                         int collNetSupport, int nvlsSupport, int numPipeOps, int userAlgoInput,
@@ -3479,7 +3478,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   }
   nt = nt / comm->WarpSize < 3 ? 3 * comm->WarpSize : nt;
 #endif
-  if (info->func == ncclFuncAllReduce && comm->topo->pivotA2ANumBiRings == 3) {
+  if (info->func == ncclFuncAllReduce && comm->topo->romeAllReduceTuning) {
     static int userTuneInput = -2;
     if (userTuneInput == -2) {
       const char* protoStr = getenv("NCCL_PROTO");
@@ -3709,9 +3708,6 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
               info->algorithm == NCCL_ALGO_NVLS           ? ncclPatternNvls :
               info->algorithm == NCCL_ALGO_COLLNET_DIRECT ? ncclPatternCollnetDirect :
                                                             ncclPatternRing;
-    break;
-  case ncclFuncAlltoAllPivot:
-    pattern = ncclPatternRing;
     break;
   case ncclFuncAlltoAllGda:
     pattern = ncclPatternRing;
@@ -4405,7 +4401,7 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
 
     size_t elementSize = ncclTypeSize(t->datatype);
     if (t->func == ncclFuncAllGather || t->func == ncclFuncBroadcast || t->func == ncclFuncAlltoAll ||
-        t->func == ncclFuncAlltoAllPivot || t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
+        t->func == ncclFuncAlltoAllGda || t->func == ncclFuncAlltoAllvGda) {
       t->count *= elementSize;
       t->datatype = ncclInt8;
       elementSize = 1;

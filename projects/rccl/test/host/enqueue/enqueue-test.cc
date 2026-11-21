@@ -1185,9 +1185,9 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_AllReduce_EachAlgorithmSelectsItsPatte
 }
 
 TEST_F(EnqueueMicrotest, CalcCollChunking_AlltoAllVariants_AlwaysRingPattern) {
-  // Three funcs share an unconditional ncclPatternRing, independent of algorithm.
+  // Both GDA funcs share an unconditional ncclPatternRing, independent of algorithm.
   ChunkComm cc;
-  for (auto f : {ncclFuncAlltoAllPivot, ncclFuncAlltoAllGda, ncclFuncAlltoAllvGda}) {
+  for (auto f : {ncclFuncAlltoAllGda, ncclFuncAlltoAllvGda}) {
     for (int algo : {NCCL_ALGO_RING, NCCL_ALGO_TREE, NCCL_ALGO_NVLS}) {
       auto t = MakeTask(f, algo, NCCL_PROTO_SIMPLE);
       auto r = RunChunking(cc, t, 4, 1 << 20);
@@ -1970,8 +1970,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_SingleRank_ShortCircuitsToRingSimpl
 }
 
 TEST_F(EnqueueMicrotest, UpdateCollCostTable_AlltoAllFuncs_TakeTheSameFastPath) {
-  // Three funcs share the nRanks==1 short circuit even at many ranks.
-  for (auto f : {ncclFuncAlltoAllPivot, ncclFuncAlltoAllGda, ncclFuncAlltoAllvGda}) {
+  // Both GDA funcs share the nRanks==1 short circuit even at many ranks.
+  for (auto f : {ncclFuncAlltoAllGda, ncclFuncAlltoAllvGda}) {
     ResetEnqueueTestDeps();
     CostComm cc(/*nRanks=*/8);
     CostTable tbl;
@@ -6857,10 +6857,10 @@ TEST_F(EnqueueMicrotest, LaunchPrepare_InPlaceSelfPairOnly_ReturnsEmptyPlanToPoo
 // Topology, arch, tuner, NVLS and CollNet arms of topoGetAlgoInfo, getAlgoInfo, updateCollCostTable, calcCollChunking.
 // ===========================================================================
 
-TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ThreePivotBiRings_PicksTreeLlUpToTheCutoffThenRingSimple) {
+TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_RomeAllReduceTuning_PicksTreeLlUpToTheCutoffThenRingSimple) {
 #ifdef ENABLE_WARP_SPEED
   GTEST_SKIP() << "Known gap: rcclSetWarpSpeedAuto's final channel writeback "
-                  "overwrites the pivot override's 24-channel result";
+                  "overwrites the Rome override's 24-channel result";
 #endif
   // Each case seeds the opposite pick as cheapest, so the override must replace both fields.
   struct {
@@ -6872,7 +6872,7 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ThreePivotBiRings_PicksTreeLlUpToTheCut
   for (const auto& c : cases) {
     AlgoInfoComm cc;
     cc.get()->nChannels = 32;
-    cc.base.topo().pivotA2ANumBiRings = 3;
+    cc.base.topo().romeAllReduceTuning = true;
     auto task = CostTask(ncclFuncAllReduce);
     CostTable tbl;
     const bool wantTree = c.algo == NCCL_ALGO_TREE;

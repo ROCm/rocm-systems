@@ -108,8 +108,10 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_IB_USE_INLINE` / `NCCL_IB_ECE_ENABLE` / `NCCL_IB_WARN_RAIL_LOCAL` / `NCCL_GDR_FLUSH_DISABLE` default literals changed from `0`/`1` to the equivalent `false`/`true`; behavior is unchanged.
 
 ### Removed
+* Removed the AlltoAll pivot algorithm (`RCCL_A2A_PIVOT`, `ncclFuncAlltoAllPivot`, its device kernel) and the `RCCL_ALL_TO_ALL_PIVOT_ENABLE` and `RCCL_PIVOT_ALLTOALL_ENABLE` variables. It was off by default. Other `rcclAddonAlgos_t` and `ncclFunc_t` values keep their numbers.
 
 ### Resolved issues
+* Fixed the eager CE 2-shot ReduceScatter not printing its per-collective COLL line or advancing `opCount`, unlike CE 2-shot AllReduce and the native path.
 * Fixed `NCCL_CE_BATCH_CAPTURE_ENABLE=1` producing wrong results under HIP graph capture. `hipMemcpyBatchAsync` does not support graph capture, so Copy Engine copies recorded into a graph now always use per-copy `hipMemcpyAsync`, as with the variable unset, and RCCL logs once that it ignored the variable.
 * Fixed hierarchical Copy Engine `ncclAlltoAllv` failing with `ncclInvalidArgument` on rail-only host RMA (`NCCL_CROSS_NIC=0`). Like `ncclAlltoAll`, it puts to every remote rank, so it now falls back to the kernel path unless host RMA reaches every rank.
 * When mlx5 data-direct DMA-BUF registration is missing or fails, RCCL uses `ibv_reg_dmabuf_mr` and reports a failed data-direct attempt once per protection domain. A missing `mlx5dv_reg_dmabuf_mr` leaves data-direct off.

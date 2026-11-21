@@ -32,9 +32,8 @@
 
 // src/init.cc defines this; nothing on the micro link line does, and parseList() needs it as
 // its prefix table. RcclAssertSourceLine pins the first line, the static_assert the count.
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
-                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
-                                                   "SendRecv"};
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 3] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
+                                                   "AlltoAllGda", "AlltoAllvGda", "SendRecv"};
 static_assert(NCCL_NUM_FUNCTIONS == 5, "ncclFuncStr mirrors src/init.cc; add the new function name");
 
 // src/sym_kernels.cc defines this; the generated sym_kernels_host.cc carries only

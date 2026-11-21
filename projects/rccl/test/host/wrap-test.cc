@@ -42,8 +42,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <functional>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -5043,8 +5046,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
@@ -5074,8 +5075,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
@@ -5506,14 +5505,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceZeroRegMaxDisablesCeForSymmetri
   });
 }
 
-// DDA fabric LL: gfx1250 arch, rcclAllReduceShouldTakeDdaPath eligible
+// DDA fabric LL: gfx1250 arch, DDA eligible
 // (seam), and the LL-specific eligibility check passes.
 TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLLChosenOnGfx1250) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_DdaFabricLLChosenOnGfx1250",
       []() {
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -5547,8 +5544,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeTwoShotBeatsEligibleDdaO
           return deft;
         };
         g_ceImplemented = true;
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook llEligible(g_allReduceDdaFabricLLEligible,
                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ScopedHook symRequested(g_isSymmetricKernelRequested,
@@ -5664,8 +5659,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenWhenLLNotEligibl
           if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
           return def;
         };
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -5697,8 +5690,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricLL128ChosenAboveLegacyThres
           if (std::strcmp(env, "RCCL_DDA_LL128_THRESHOLD") == 0) return INT64_MAX;
           return def;
         };
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ll128Eligible(g_allReduceDdaFabricLL128Eligible,
                                  [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) {
                                    return true;
@@ -5726,8 +5717,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_DdaFabricVmmChosenWhenNeitherLLNorLL128Eligible",
       []() {
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook vmmEligible(g_allReduceDdaFabricEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         // g_allReduceDdaFabricLLEligible / LL128Eligible left at their default (false).
@@ -5751,8 +5740,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_DdaIpcChosenOnNonGfx1250Arch",
       []() {
-        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
-                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; });
         ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
         ncclComm* comm = MakeCommWithArch("gfx942"); // not gfx1250
@@ -5924,99 +5911,30 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_LiveModeProbesCapturingGraph) {
 }
 
 // ===========================================================================
-// rcclCandSearch / rcclCandSearchRecord -- rccl_decision.h.
+// Scheduler policy snapshot.
 //
-// Header-only inline; plain (non-isolated) microtests exercise the tracking
-// logic directly without going through rcclSelectAllReduce.
+// The rows of every arch policy as text (rcclPolicyDescribe). A rule change
+// shows up here as a readable diff. When the change is intended, rerun with
+// RCCL_POLICY_SNAPSHOT_UPDATE=1 to rewrite the snapshot file.
 // ===========================================================================
 
-TEST(WrapMicrotest, CandSearchRecord_FirstEligibleSetsFallback) {
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 3;
-  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_CE, cand);
-  EXPECT_TRUE(s.bestFallbackFound);
-  EXPECT_EQ(NCCL_ALGO_TREE, s.bestFallback.algo);
-  EXPECT_EQ(3, s.bestFallback.nMaxChannels);
-}
-
-TEST(WrapMicrotest, CandSearchRecord_AllMaskMatchesAnythingAndSetsDecision) {
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_RING; cand.nMaxChannels = 7;
-  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_SYMMETRIC, cand);
-  EXPECT_TRUE(s.bestPreferredFound);
-  EXPECT_EQ(NCCL_ALGO_RING, out.algo);
-  EXPECT_EQ(7, out.nMaxChannels);
-}
-
-TEST(WrapMicrotest, CandSearchRecord_MismatchedFamilySkipsDecision) {
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE;
-  rcclCandSearch s{RCCL_BACKEND_CE, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_SYMMETRIC, cand);
-  EXPECT_TRUE(s.bestFallbackFound)  << "fallback must still be recorded on mask miss";
-  EXPECT_FALSE(s.bestPreferredFound) << "preferred must NOT be set on mask miss";
-}
-
-TEST(WrapMicrotest, CandSearchRecord_MatchingFamilySetsDecision) {
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 5;
-  rcclCandSearch s{RCCL_BACKEND_DDA, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_DDA, cand);
-  EXPECT_TRUE(s.bestPreferredFound);
-  EXPECT_EQ(NCCL_ALGO_TREE, out.algo);
-  EXPECT_EQ(5, out.nMaxChannels);
-}
-
-TEST(WrapMicrotest, CandSearchRecord_SubsequentCallsIgnoredAfterPreferredFound) {
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision first{}; first.algo = NCCL_ALGO_RING; first.nMaxChannels = 2;
-  rcclCollDecision second{}; second.algo = NCCL_ALGO_TREE; second.nMaxChannels = 9;
-  rcclCandSearch s{RCCL_BACKEND_CE, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_CE, first);
-  rcclCandSearchRecord(s, RCCL_BACKEND_CE, second);
-  EXPECT_EQ(NCCL_ALGO_RING, out.algo) << "first preferred match must not be overwritten";
-  EXPECT_EQ(2, out.nMaxChannels);
-}
-
-TEST(WrapMicrotest, CandSearchRecord_FallbackNotOverwrittenByLaterEligible) {
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision first{}; first.algo = NCCL_ALGO_RING; first.nMaxChannels = 1;
-  rcclCollDecision second{}; second.algo = NCCL_ALGO_TREE; second.nMaxChannels = 8;
-  rcclCandSearch s{RCCL_BACKEND_SYMMETRIC, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_CE, first);
-  rcclCandSearchRecord(s, RCCL_BACKEND_CE, second);
-  EXPECT_EQ(NCCL_ALGO_RING, s.bestFallback.algo) << "first eligible candidate wins fallback";
-  EXPECT_EQ(1, s.bestFallback.nMaxChannels);
-  EXPECT_FALSE(s.bestPreferredFound) << "SYMMETRIC was never offered so preferred must not be set";
-}
-
-TEST(WrapMicrotest, CandSearchRecord_OutOfWindowWithAllMaskFillsNeither) {
-  // inWindow=false + preferred=ALL: the (preferred != ALL || inWindow) guard
-  // blocks preferred, and the inWindow guard blocks fallback -- neither slot fills.
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_TREE; cand.nMaxChannels = 4;
-  rcclCandSearch s{RCCL_BACKEND_ALL, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_CE, cand, /*inWindow=*/false);
-  EXPECT_FALSE(s.bestFallbackFound)  << "out-of-window candidate must not fill fallback";
-  EXPECT_FALSE(s.bestPreferredFound) << "out-of-window candidate must not fill preferred when preferred=ALL";
-}
-
-TEST(WrapMicrotest, CandSearchRecord_OutOfWindowWithExplicitMaskSetsPreferred) {
-  // inWindow=false + explicit preferred mask: preferred fires (explicit policy
-  // beats the window guard) but fallback does not (inWindow still gates it).
-  rcclCollDecision out{}, fb{};
-  rcclCollDecision cand{}; cand.algo = NCCL_ALGO_RING; cand.nMaxChannels = 6;
-  rcclCandSearch s{RCCL_BACKEND_DDA, &out, fb, false, false};
-  rcclCandSearchRecord(s, RCCL_BACKEND_DDA, cand, /*inWindow=*/false);
-  EXPECT_TRUE(s.bestPreferredFound)  << "explicit preferred mask must set preferred regardless of inWindow";
-  EXPECT_EQ(NCCL_ALGO_RING, out.algo);
-  EXPECT_FALSE(s.bestFallbackFound)  << "out-of-window candidate must not fill fallback";
+TEST(WrapMicrotest, SchedulerPolicy_MatchesSnapshot) {
+  const std::string got =
+      rcclPolicyDescribe(kRcclGfx1250Policy) + "\n" + rcclPolicyDescribe(kRcclDefaultPolicy);
+  const char* update = std::getenv("RCCL_POLICY_SNAPSHOT_UPDATE");
+  if (update != nullptr && std::strcmp(update, "1") == 0) {
+    std::ofstream(RCCL_POLICY_SNAPSHOT_PATH) << got;
+    GTEST_SKIP() << "rewrote " << RCCL_POLICY_SNAPSHOT_PATH;
+  }
+  std::ifstream in(RCCL_POLICY_SNAPSHOT_PATH);
+  ASSERT_TRUE(in.good()) << RCCL_POLICY_SNAPSHOT_PATH;
+  std::stringstream want;
+  want << in.rdbuf();
+  EXPECT_EQ(want.str(), got) << "policy changed; rerun with RCCL_POLICY_SNAPSHOT_UPDATE=1 if intended";
 }
 
 // ===========================================================================
-// rcclAllReducePreferredBackends -- rccl_wrap.cc.
+// rcclAllReducePreferredBackends -- rccl_scheduler.cc.
 //
 // Unit tests for the flag->mask translation. Plain (non-isolated) microtests;
 // g_loadParam controls RCCL_PARAM values. MakeSelectComm() gives a zeroed
@@ -6090,8 +6008,6 @@ using HookFor = ScopedHook<typename HookSig<Slot>::type>;
 
 // AllReduce DDA path taken and its LL tier eligible; ArVmmEligible adds the VMM tier.
 struct ArDdaHooks {
-  HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda{
-      g_allReduceShouldTakeDdaPath, [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool) { return true; }};
   HookFor<decltype(g_allReduceDdaFabricLLEligible)> llEligible{
       g_allReduceDdaFabricLLEligible, [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; }};
 };
@@ -6205,9 +6121,6 @@ class RegisteredAr {
                                                                    EXPECT_EQ(comm_, c);
                                                                    return mustEnqueue_;
                                                                  }};
-  HookFor<decltype(g_allReduceShouldTakeDdaPath)> shouldTakeDda_{
-      g_allReduceShouldTakeDdaPath,
-      [](const struct ncclComm*, size_t, ncclDataType_t, bool symEligible, bool) { return !symEligible; }};
   HookFor<decltype(g_allReduceDdaFabricLL128Eligible)> ll128EligibleHook_{
       g_allReduceDdaFabricLL128Eligible,
       [this](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t op) {
@@ -6671,7 +6584,7 @@ TEST(WrapMicrotest, DdaArRegisteredWindowBounds) {
 // ===========================================================================
 // rcclSelectAllReduce -- preferred-backend mask integration tests.
 //
-// Drive rcclCandSearch / rcclAllReducePreferredBackends end-to-end: force
+// Drive the scheduler search / rcclAllReducePreferredBackends end-to-end: force
 // flags control which mask is returned; the scan selects the preferred
 // backend when eligible, or warns and falls back otherwise.
 //
@@ -6821,7 +6734,6 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceDdaFallsBackWhenDdaIneligible) 
           if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
           return def;
         };
-        // g_allReduceShouldTakeDdaPath defaults false -> DDA ineligible
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -8315,7 +8227,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstNeedsVmmEligible) {
 // Under CTA_POLICY_ZERO the preferred backend is RCCL_BACKEND_CE. The vmmFirst
 // block used to return early, silently bypassing the preferred/fallback warning
 // when CE 2-shot is unavailable (ceARTmpBuf==NULL). After the fix it records via
-// rcclCandSearchRecord so the search arbitrates: VMM becomes the bestFallback, the
+// the scheduler search so it arbitrates: VMM becomes the bestFallback, the
 // preferred mask is not satisfied, and the "preferred backend" warning fires.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstFallsBackUnderZeroPolicy) {
   RUN_ISOLATED_TEST(

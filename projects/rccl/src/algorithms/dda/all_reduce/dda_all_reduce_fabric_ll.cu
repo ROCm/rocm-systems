@@ -278,7 +278,7 @@ template <typename T>
 using DdaArLL128Kernel = void (*)(T* const*, T*, const T*, size_t, int, int, uint32_t*, int, size_t, size_t,
                                   dda::common::DdaKernelParams);
 
-// Whether `cap` bounds the launch: a call DDA takes over from another backend (rccl_wrap.cc).
+// Whether `cap` bounds the launch: a call DDA takes over from another backend (rccl_scheduler/).
 static inline bool ddaArCapped(rcclDdaLaunchCap cap) {
   return cap.blocks != 0 || cap.threads != 0;
 }

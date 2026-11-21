@@ -66,8 +66,6 @@ static int64_t CollTraceLoadParam(char const* env, int64_t deftVal, int64_t, int
   auto it = g_params.find(env);
   return it == g_params.end() ? deftVal : it->second;
 }
-// collectives_fakes.cc's rcclParamAlltoAllPivotEnable reads this. Nothing here calls it, but the ppc64le link keeps
-// the reference that --gc-sections drops on x86.
 std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char* env, int64_t deftVal) {
   return CollTraceLoadParam(env, deftVal, 0, nullptr, nullptr);
 };

@@ -34,14 +34,13 @@
 #include "topo_expl_impl.h"
 #include "amdsmi_wrap.h"
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+4] = { "AllGather", "AllReduce", "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv" };
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS+3] = { "AllGather", "AllReduce", "AlltoAllGda", "AlltoAllvGda", "Broadcast", "Reduce", "ReduceScatter", "SendRecv" };
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = { "Tree", "Ring", "CollNetDirect", "CollNetChain", "NVLS", "NVLSTree", "PAT" };
 const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = { "LL", "LL128", "Simple" };
 
 extern NodeModel *node_model;
 
 RCCL_PARAM(P2pNetDisable, "P2P_NET_DISABLE", 0);
-RCCL_PARAM(PivotAlltoallEnable, "PIVOT_ALLTOALL_ENABLE", 1);
 RCCL_PARAM(LL128ForceEnable, "LL128_FORCE_ENABLE", 0);
 
 NCCL_PARAM(GraphDumpFileRank, "GRAPH_DUMP_FILE_RANK", 0);
@@ -847,9 +846,7 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
   comm->topo->nRanks = comm->nRanks;
   // init netGdrLevel
   comm->topo->netGdrLevel = -2;
-  // init Pivot A2A related fields
-  comm->topo->pivotA2AEnabled = false;
-  comm->topo->pivotA2ANumBiRings = 0;
+  comm->topo->romeAllReduceTuning = false;
   // LL128
   comm->topo->ll128Enabled = false;
   // Topology hint if tree has been defined by model or User
@@ -1013,7 +1010,6 @@ ncclResult_t initTransportsRank_1(struct ncclComm* comm, struct allGatherInfo *a
     allGather3Data[rank].nc = std::max(allGather3Data[rank].nc, 4/ringGraph.nChannels);
   if (ringGraph.nChannels > MAXCHANNELS/2)
     allGather3Data[rank].nc = 1;
-  allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   comm->topo->ll128Enabled =  comm->topo->ll128Enabled || rcclParamLL128ForceEnable();
   allGather3Data[rank].ll128Enabled = comm->topo->ll128Enabled;
 
@@ -1116,7 +1112,6 @@ ncclResult_t initTransportsRank_3(struct ncclComm* comm, struct allGatherInfo *a
     allTopoRanks[i] = &allGather3Data[i].topoRanks;
     nc = std::min(allGather3Data[i].nc, nc);
     // Make sure we align all ranks so that the tuning is consistent across ranks
-    comm->topo->pivotA2AEnabled = comm->topo->pivotA2AEnabled && allGather3Data[i].pivotA2AEnabled;
     comm->topo->ll128Enabled = comm->topo->ll128Enabled && allGather3Data[i].ll128Enabled;
     for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
       graphs[a]->nChannels = std::min(allGather3Data[i].graphInfo[a].nChannels, graphs[a]->nChannels);

@@ -88,7 +88,7 @@ typedef enum {
   ncclFuncAlltoAll = 8,
   ncclFuncScatter = 9,
   ncclFuncGather = 10,
-  ncclFuncAlltoAllPivot = 11,
+  // 11 was the retired AlltoAll pivot.
   ncclFuncAlltoAllGda = 12,
   ncclFuncAlltoAllvGda = 13,
   ncclFuncAllGatherV = 14,

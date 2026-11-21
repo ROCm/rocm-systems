@@ -696,7 +696,7 @@ class CollectivesMicrotest : public ::testing::Test {
 
 // String helpers
 
-// ncclFuncAlltoAllPivot is RCCL-only and has no case. Pins AICOMRCCL-2981; a fix flips this pin.
+// Slot 11 (the retired AlltoAll pivot) has no case. Pins AICOMRCCL-2981; a fix flips this pin.
 TEST_F(CollectivesMicrotest, FuncToString_NamesEveryHostFunc) {
   const std::vector<std::pair<ncclFunc_t, const char*>> names = {
       {ncclFuncAllGather, "AllGather"}, {ncclFuncAllReduce, "AllReduce"},   {ncclFuncAlltoAll, "AlltoAll"},
@@ -704,7 +704,7 @@ TEST_F(CollectivesMicrotest, FuncToString_NamesEveryHostFunc) {
       {ncclFuncRecv, "Recv"},           {ncclFuncReduce, "Reduce"},         {ncclFuncReduceScatter, "ReduceScatter"},
       {ncclFuncScatter, "Scatter"},     {ncclFuncSendRecv, "SendRecv"},     {ncclFuncSend, "Send"},
       {ncclFuncPutSignal, "PutSignal"}, {ncclFuncSignal, "Signal"},         {ncclFuncWaitSignal, "WaitSignal"},
-      {ncclFuncAlltoAllPivot, "Invalid"}, {ncclNumFuncs, "Invalid"}};
+      {static_cast<ncclFunc_t>(11), "Invalid"}, {ncclNumFuncs, "Invalid"}};
   for (const auto& [fn, name] : names) EXPECT_STREQ(name, ncclFuncToString(fn)) << fn;
 }
 
@@ -750,69 +750,7 @@ TEST_F(CollectivesMicrotest, TypeSize_CoversEveryType) {
   EXPECT_EQ(-1, ncclTypeSize(ncclNumTypes));
 }
 
-TEST_F(CollectivesMicrotest, AlltoAllPivotEnable_ReadsItsEnvWithDefaultOff) {
-  EXPECT_EQ(0, rcclParamAlltoAllPivotEnable());
-  EXPECT_EQ(std::vector<std::string>{"RCCL_ALL_TO_ALL_PIVOT_ENABLE"}, params_);
-}
-
 // Dispatch helpers
-
-TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
-  fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false));
-  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-  EXPECT_TRUE(fake.thresholdFuncs.empty());
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) {
-  SetArch("gfx1250");
-  fake.ddaEnabled = true;
-  fake.ddaThreshold = 4096;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, false));
-  ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
-  EXPECT_EQ(kCount * 2, fake.ddaEnabledCalls[0].totalBytes);
-  EXPECT_EQ(4096u, fake.ddaEnabledCalls[0].threshold);
-  EXPECT_FALSE(fake.ddaEnabledCalls[0].query);
-  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_MessageOverTheThresholdIsRejected) {
-  fake.ddaThreshold = 64;
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false));
-  ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
-  EXPECT_EQ(kCount * 8, fake.ddaEnabledCalls[0].totalBytes);
-  EXPECT_EQ(64u, fake.ddaEnabledCalls[0].threshold);
-  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithoutDdaEnabledReturnsFalse) {
-  SetArch("gfx1250");
-  EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
-  EXPECT_EQ(1u, fake.ddaEnabledCalls.size());
-}
-
-TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) {
-  fake.ddaEnabled = true;
-  EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false));
-  EXPECT_EQ(1u, fake.thresholdFuncs.size());
-}
-
-TEST_F(CollectivesMicrotest, AlltoAllDda_YieldsToCe) {
-  fake.ddaEnabled = true;
-  EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(comm_.get(), 1024, true));
-  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
-}
-
-TEST_F(CollectivesMicrotest, AlltoAllDda_AsksDdaWithTheAlltoAllThreshold) {
-  fake.ddaThreshold = 2048;
-  EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(comm_.get(), 1024, false));
-  fake.ddaEnabled = true;
-  EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(comm_.get(), 1024, false));
-  ASSERT_EQ(2u, fake.ddaEnabledCalls.size());
-  EXPECT_EQ(1024u, fake.ddaEnabledCalls[1].totalBytes);
-  EXPECT_EQ(2048u, fake.ddaEnabledCalls[1].threshold);
-  EXPECT_EQ(ncclFuncAlltoAll, fake.thresholdFuncs.at(1));
-}
 
 TEST_F(CollectivesMicrotest, CommIsSuspended_NeedsAMemoryManager) {
   EXPECT_FALSE(ncclCommIsSuspended(nullptr));
@@ -858,7 +796,7 @@ TEST_F(CollectivesMicrotest, EnqueueSetupNeedsSwitch_OnlyForAlgosThatRewriteTheI
 #endif
   for (int algo = 0; algo < RCCL_ALGO_COUNT; algo++) {
     const bool rewrites =
-        algo == RCCL_DIRECT_ALLGATHER || algo == RCCL_A2A_PIVOT || (kGdaRewrites && algo == RCCL_A2A_GDA);
+        algo == RCCL_DIRECT_ALLGATHER || (kGdaRewrites && algo == RCCL_A2A_GDA);
     EXPECT_EQ(rewrites, rcclEnqueueSetupNeedsSwitch(algo)) << algo;
   }
 }
@@ -1775,25 +1713,6 @@ TEST_F(CollectivesMicrotest, AlltoAll_RecordOrSelectFailureStops) {
   fake.selectResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, AlltoAll());
   EXPECT_TRUE(fake.enqueued.empty());
-}
-
-TEST_F(CollectivesMicrotest, AlltoAll_PivotEnqueuesItsOwnInfoEvenInCheckMode) {
-  Decide(RCCL_A2A_PIVOT);
-  comm_->checkMode = ncclCheckModeDebugLocal;
-  fake.enqueueResults = {ncclInProgress};
-  EXPECT_EQ(ncclInProgress, AlltoAll());
-  ASSERT_EQ(1u, fake.enqueued.size());
-  const ncclInfo& info = Info();
-  EXPECT_EQ(ncclFuncAlltoAllPivot, info.coll);
-  EXPECT_STREQ("AlltoAllPivot", info.opName);
-  EXPECT_EQ(send_.data(), info.sendbuff);
-  EXPECT_EQ(recv_.data(), info.recvbuff);
-  EXPECT_EQ(kCount, info.count);
-  EXPECT_EQ(comm_.get(), info.comm);
-  EXPECT_EQ(stream_, info.stream);
-  EXPECT_EQ(ALLTOALL_PIVOT_CHUNKSTEPS, info.chunkSteps);
-  EXPECT_EQ(ALLTOALL_PIVOT_SLICESTEPS, info.sliceSteps);
-  EXPECT_FALSE(info.decisionValid);
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsLaunchAsAddons) {

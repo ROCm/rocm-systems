@@ -1,0 +1,1088 @@
+/*
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+#include "rccl_common.h"
+#include "bootstrap.h"
+#include "comm.h"
+#include "graph/topo.h"
+#include "enqueue.h"
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+#include "debug.h"
+#include "net.h"
+#include "amdsmi_wrap.h"
+#include "include/graph.h"
+#include "info.h"
+#include "group.h"
+#include "dev_runtime.h"
+#include "strongstream.h"
+#include "tuning.h"
+#include "rccl_scheduler/rccl_scheduler.h"
+
+// Use this param to experiment pipelining new data types besides bfloat16
+// Make sure you generate the device code with the new data type (i.e. in generate.py)
+RCCL_PARAM(PipelineAllDTypes, "PIPELINE_ALL_DATA_TYPES", 0);
+
+// Use this to assess impact of pipelining on performance.
+// Otherwise, it is automatically set for certain archs, datatypes and reduction collectives
+RCCL_PARAM(disableReduceCopyPipelining, "DISABLE_REDUCE_COPY_PIPELINING", 0);
+RCCL_PARAM(ThreadsPerBlock, "THREADS_PER_BLOCK", -1);
+RCCL_PARAM(UnrollFactor, "UNROLL_FACTOR", -1);
+#ifdef ENABLE_WARP_SPEED
+RCCL_PARAM(WarpSpeedCuCount, "WARP_SPEED_CU_COUNT", 0);
+RCCL_PARAM(WarpSpeedAutoMode, "WARP_SPEED_AUTO", 1);
+RCCL_PARAM(WarpSpeedForceEnable, "WARP_SPEED_FORCE_ENABLE", 0);
+RCCL_PARAM(WarpSpeedAGThreshold, "WARP_SPEED_AG_THRESHOLD", 134217728);   // 128 MB for AllGather
+RCCL_PARAM(WarpSpeedRSThreshold, "WARP_SPEED_RS_THRESHOLD", 2147483648);  // 2 GB for ReduceScatter
+RCCL_PARAM(WarpSpeedARThreshold, "WARP_SPEED_AR_THRESHOLD", 67108864);  // 64 MB for AllReduce
+#endif
+
+static inline bool rcclCollSupportsRing(ncclFunc_t func) {
+  return (func == ncclFuncAllReduce || func == ncclFuncAllGather || func == ncclFuncReduceScatter ||
+          func == ncclFuncBroadcast || func == ncclFuncReduce);
+}
+
+int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
+  int returnVal = NCCL_PROTO_SIMPLE;
+  int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
+                               /*ncclFuncReduce*/ 8192,
+                               /*ncclFuncAllGather*/ 98304,
+                               /*ncclFuncReduceScatter*/ 98304,
+                               /*ncclFuncAllReduce*/ 16384,
+                               /*ncclFuncSendRecv*/ 0,
+                               /*ncclFuncSend*/ 0,
+                               /*ncclFuncRecv*/ 0};
+  if (collectiveFunc < sizeof(SingleNodeLLCutoffs) / sizeof(int)) {
+    returnVal = (sizePerRank <= SingleNodeLLCutoffs[collectiveFunc]) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  }
+  return returnVal;
+}
+
+int32_t rcclGetProtoForGfx110x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
+  int returnVal = NCCL_PROTO_SIMPLE;
+  int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
+                               /*ncclFuncReduce*/ 1024,
+                               /*ncclFuncAllGather*/ 24756,
+                               /*ncclFuncReduceScatter*/ 24756,
+                               /*ncclFuncAllReduce*/ 65536,
+                               /*ncclFuncSendRecv*/ 0,
+                               /*ncclFuncSend*/ 0,
+                               /*ncclFuncRecv*/ 0};
+  if (collectiveFunc < sizeof(SingleNodeLLCutoffs) / sizeof(int)) {
+    returnVal = (sizePerRank <= SingleNodeLLCutoffs[collectiveFunc]) ? NCCL_PROTO_LL : NCCL_PROTO_SIMPLE;
+  }
+  return returnVal;
+}
+
+
+// The user restricted the protocol set via NCCL_PROTO. Cached like rcclNcclAlgoEnvIsSet().
+static bool rcclNcclProtoEnvIsSet() {
+  static int cached = -1;
+  if (cached == -1) cached = getenv("NCCL_PROTO") != nullptr ? 1 : 0;
+  return cached == 1;
+}
+
+// The arch table's Ring / Tree crossovers come from single-node (one clique) sweeps,
+// so they apply only when nNodes == 1; the rank-scaled ones also need
+// rankScaledMinRanks ranks. Null when they do not apply.
+static const rcclArchThresholds* rcclRingTreeTable(const struct ncclComm* comm, bool rankScaled) {
+  if (comm->nNodes != 1) return nullptr;
+  const rcclArchThresholds* t = extAlgoArchTable(comm);
+  if (t == nullptr) return nullptr;
+  if (rankScaled && (t->rankScaledMinRanks <= 0 || comm->nRanks < t->rankScaledMinRanks)) return nullptr;
+  return t;
+}
+
+// Null when this comm keeps the tuning model's per-rank broadcast ranges.
+// Semantics of the ceilings live on rcclArchThresholds.
+static const rcclArchThresholds* rcclBroadcastTotalByteTable(const struct ncclComm* comm) {
+  const rcclArchThresholds* t = extAlgoArchTable(comm);
+  if (t == nullptr || t->bcRingLL128MaxBytes == 0) return nullptr;
+  return t;
+}
+
+// Arch-table replacements for the tuning model's LL / LL128 ranges (rank-scaled entries).
+static void rcclArchProtoRanges(const struct ncclComm* comm, const struct ncclTaskColl* info, uint64_t& llMax,
+                                uint64_t& ll128Min, uint64_t& ll128Max) {
+  const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
+  if (t == nullptr) return;
+  const uint64_t nRanks = (uint64_t)comm->nRanks;
+  if (info->func == ncclFuncAllReduce && info->algorithm == NCCL_ALGO_TREE && t->arTreeLLMaxPerRank != 0) {
+    llMax = std::max<uint64_t>(llMax, nRanks * t->arTreeLLMaxPerRank);
+    ll128Min = std::max<uint64_t>(ll128Min, nRanks * t->arTreeLLMaxPerRank);
+  } else if (info->func == ncclFuncAllGather && t->agRingLL128MaxPerRank != 0) {
+    ll128Max = std::max<uint64_t>(ll128Max, t->agRingLL128MaxPerRank);
+  } else if (info->func == ncclFuncReduceScatter && t->rsRingLL128MaxPerRank != 0) {
+    // The table's band replaces the model's outright (it is narrower at the bottom).
+    ll128Min = t->rsRingLL128MinPerRank;
+    ll128Max = (ncclTypeSize(info->datatype) == 1 && t->rsRingLL128MaxPerRank1B != 0) ? t->rsRingLL128MaxPerRank1B
+                                                                                      : t->rsRingLL128MaxPerRank;
+  }
+}
+
+void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                   float table[][NCCL_NUM_PROTOCOLS]) {
+  // With NCCL_PROTO set, rcclUpdateCollectiveProtocol leaves the protocol alone, so a
+  // switch to Tree would keep the protocol picked for Ring.
+  if (rcclNcclAlgoEnvIsSet() || rcclNcclProtoEnvIsSet()) return;
+  if (info->func != ncclFuncAllReduce || info->algorithm != NCCL_ALGO_RING) return;
+  const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
+  if (t == nullptr || t->arTreeMaxPerRank == 0 || nBytes > (uint64_t)comm->nRanks * t->arTreeMaxPerRank) return;
+  // rcclUpdateCollectiveProtocol then picks Tree LL or LL128, so both must be on offer.
+  if (table[NCCL_ALGO_TREE][NCCL_PROTO_LL] == NCCL_ALGO_PROTO_IGNORE ||
+      table[NCCL_ALGO_TREE][NCCL_PROTO_LL128] == NCCL_ALGO_PROTO_IGNORE)
+    return;
+  info->algorithm = NCCL_ALGO_TREE;
+}
+
+// The remote GDR flush flag tuning was measured on gfx950 with 8 GPUs per node only. comm->ibGdrFlushFlag is the
+// same on every rank, so every rank makes the same choice.
+static bool rcclRemoteFlushTuned(struct ncclComm* comm) {
+  return comm->ibGdrFlushFlag && comm->nRanks == comm->nNodes * 8 &&
+         IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+}
+
+void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
+  // Honor user input for protocol choice
+  const bool userProtocolInput = rcclNcclProtoEnvIsSet();
+  size_t sizePerRank = rcclGetSizePerRank(info->func, nBytes, comm->nRanks);
+
+  // Broadcast on a table with total-byte ceilings (gfx1250 DPX). NCCL_PROTO still wins.
+  if (!userProtocolInput && info->func == ncclFuncBroadcast) {
+    if (const rcclArchThresholds* t = rcclBroadcastTotalByteTable(comm)) {
+      info->protocol = NCCL_PROTO_SIMPLE;
+      if (nBytes > 0 && nBytes <= t->bcRingLLMaxBytes) {
+        info->protocol = NCCL_PROTO_LL;
+      }
+#if defined(ENABLE_LL128)
+      if (comm->topo->ll128Enabled && nBytes > t->bcRingLLMaxBytes && nBytes <= t->bcRingLL128MaxBytes) {
+        info->protocol = NCCL_PROTO_LL128;
+      }
+#endif
+      return;
+    }
+  }
+
+  if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 &&
+      (info->func == ncclFuncAllGather) && sizePerRank <= 88448) {
+    // Change LL protocol threshold
+    info->protocol = NCCL_PROTO_LL;
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") &&
+             comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 1048576) {
+#ifdef ENABLE_WARP_SPEED
+    if (sizePerRank <= 131072)
+#endif
+    {
+      // Change LL protocol threshold
+      info->protocol = NCCL_PROTO_LL;
+    }
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") &&
+             comm->nNodes == 1 && (info->func == ncclFuncReduceScatter) && sizePerRank <= 352128) {
+    // Change LL protocol threshold
+    info->protocol = NCCL_PROTO_LL;
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120" /*match gfx120x*/)) {
+    if (comm->nNodes == 1) {
+      info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
+    }
+    /**
+     * We prefer simple protocol when p2p_disabled = 1,
+     * This is due to a fix in LL protocol implementation
+     * for gfx120x with __MEMORY_SCOPE_SYSTEM in prims_ll.h
+     * causing poor performance but keeps the LL protocol functional
+     */
+    bool p2p_disabled = ncclParamP2pDisable();
+    if (p2p_disabled) {
+      info->protocol = NCCL_PROTO_SIMPLE;
+    }
+  } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110" /*match gfx110x*/)) {
+    if (comm->nNodes == 1) {
+      info->protocol = rcclGetProtoForGfx110x(info->func, sizePerRank);
+    }
+  } else if (!userProtocolInput &&
+             (comm->nNodes >= 2 || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) &&
+             (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather ||
+              info->func == ncclFuncAllReduce || info->func == ncclFuncBroadcast || info->func == ncclFuncReduce)) {
+    auto tunableIndex = rcclGetTunableIndex(info->func);
+    auto llMin = comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL][RCCL_PROTOCOL_MIN_IDX];
+    auto llMax = comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL][RCCL_PROTOCOL_MAX_IDX];
+
+    auto ll128Min = comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL128][RCCL_PROTOCOL_MIN_IDX];
+    auto ll128Max = comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL128][RCCL_PROTOCOL_MAX_IDX];
+
+    // Only override model choices if min/max cutoff points are set in the tuning models
+    if ((ll128Max != RCCL_LL_LIMITS_UNDEFINED) || (llMax != RCCL_LL_LIMITS_UNDEFINED)) {
+      rcclArchProtoRanges(comm, info, llMax, ll128Min, ll128Max);
+      // Keep it simple unless otherwise required
+      info->protocol = NCCL_PROTO_SIMPLE;
+      if (sizePerRank <= llMax && sizePerRank > llMin) {
+        info->protocol = NCCL_PROTO_LL;
+      }
+#if defined(ENABLE_LL128)
+      // When LL128 is performant, the next condition overrides the previous LL choice
+      if (comm->topo->ll128Enabled) {
+        if (info->func == ncclFuncAllReduce) {
+          if (comm->nNodes > 2) {
+            ll128Max *= 3.8; // Scale max message size for n > 2 since Tree has special behavior at 2 nodes
+          }
+          // ll128Max += (log2i(comm->nNodes) - 1) * comm->minMaxLLRange[tunableIndex][NCCL_PROTO_LL128][RCCL_PROTOCOL_FACTOR_IDX];
+          // Arch-table AllReduce LL128 ceilings (gfx1250: AICOMRCCL-2874/2875).
+          if (const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/false)) {
+            if (info->algorithm == NCCL_ALGO_TREE && t->arTreeLL128Unlimited) {
+              ll128Max = UINT64_MAX;
+            } else if (info->algorithm != NCCL_ALGO_TREE && t->arRingLL128MaxPerRank != 0) {
+              ll128Max = std::max<uint64_t>(ll128Max, (uint64_t)comm->nRanks * t->arRingLL128MaxPerRank);
+            }
+          }
+        }
+        // With RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 (the scaled collective LL128 buffer, rcclScaleCollLl128BuffSize),
+        // ReduceScatter on gfx950 with 8 GPUs per node uses Ring/LL128 up to 7 MiB per rank: it beats Ring/Simple
+        // there on 2-16 nodes (+10% at 7 MiB); Ring/Simple wins from 8 MiB. With the default buffer Ring/LL128 needs
+        // a second loop there and loses.
+        if (info->func == ncclFuncReduceScatter && comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize &&
+            rcclRemoteFlushTuned(comm))
+          ll128Max = std::max<uint64_t>(ll128Max, 7 << 20);
+        if (sizePerRank <= ll128Max && sizePerRank > ll128Min) {
+          info->protocol = NCCL_PROTO_LL128;
+        }
+      }
+#endif
+    } else if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
+               IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+      // Warn that model detection for the above listed architectures did not work as expected
+      // Add supported archs to this condition as they come
+      // Also make sure the tuning_model and model detection are updated for new archs
+      static bool failedWarn = false;
+      if (!failedWarn) {
+        WARN("LL cutoff points not detected for a supported arch %s", comm->topo->nodes[GPU].nodes[0].gpu.gcn);
+        failedWarn = true;
+      }
+    }
+  }
+}
+
+// RCCL_IB_GDR_FLUSH_FLAG_TUNE=1 turns on the gfx950 multi-node tuning below for communicators that use the remote
+// GDR flush flag with 8 GPUs per node on 2-8 or 16 nodes: a 4x collective LL128 buffer, the all_reduce switch
+// points and channel count, and reduce_scatter Ring/LL128 up to 7 MiB per rank.
+RCCL_PARAM(IbGdrFlushFlagTune, "IB_GDR_FLUSH_FLAG_TUNE", 0);
+static constexpr int kRemoteFlushLl128BuffScale = 4;
+static constexpr int kRemoteFlushArRingSimpleNchannels = 48;
+
+static bool rcclRemoteFlushTuneNodes(struct ncclComm* comm) {
+  return (comm->nNodes >= 2 && comm->nNodes <= 8) || comm->nNodes == 16;
+}
+
+// Ring all_reduce moves one LL128 chunk per channel per rank per loop, so data past chunk * nChannels * nRanks
+// needs a second loop at full ring latency and loses about a third of its bandwidth. A larger buffer lifts that
+// limit; send/recv keeps the default size (comm->p2pLl128BuffSize), since it allocates one buffer per network
+// peer and channel and would grow with the node count. Not applied when NCCL_LL128_BUFFSIZE is set.
+void rcclScaleCollLl128BuffSize(struct ncclComm* comm) {
+  if (rcclParamIbGdrFlushFlagTune() == 0 || !rcclRemoteFlushTuneNodes(comm) || !comm->topo->ll128Enabled ||
+      !rcclRemoteFlushTuned(comm))
+    return;
+  comm->buffSizes[NCCL_PROTO_LL128] = comm->p2pLl128BuffSize * kRemoteFlushLl128BuffScale;
+  INFO(NCCL_INIT, "LL128 buffer for collectives %d (x%d), for send/recv %d", comm->buffSizes[NCCL_PROTO_LL128],
+       kRemoteFlushLl128BuffScale, comm->p2pLl128BuffSize);
+}
+
+// Bytes per node that Ring/LL128 all_reduce moves in one loop.
+static size_t rcclRingLl128OneLoopPerNode(struct ncclComm* comm, int nChannels) {
+  const size_t chunk =
+    (size_t)(comm->buffSizes[NCCL_PROTO_LL128] / NCCL_STEPS) / comm->ll128LineElems * comm->ll128DataElems;
+  return chunk * nChannels * (comm->nRanks / comm->nNodes);
+}
+
+extern int64_t ncclParamMinNchannels();
+extern int64_t ncclParamMaxNchannels();
+
+// gfx950 multi-node choices with the remote GDR flush flag, 8 GPUs per node, all choices measured.
+//
+// reduce_scatter (2-8 nodes): from 6 MB per rank, Simple beats LL128 (by 15-30% at 8 MB per rank), so LL128
+// stops there instead of at the 8 MB per rank of tuning_model_6; 7 MiB with the scaled LL128 buffer, also on
+// 16 nodes, where Ring/Simple wins at 8 MiB per rank.
+//
+// all_reduce, 2-8 nodes: Ring/LL128 from 16 MB per node (12 with RCCL_IB_GDR_FLUSH_FLAG_TUNE) to 32 MB per node,
+// Tree/Simple to 64 MB per node, then Ring/Simple, where the cost model goes from Ring/LL128 straight to
+// Ring/Simple a size late. With RCCL_IB_GDR_FLUSH_FLAG_TUNE, Ring/LL128 runs until it would need a second loop
+// (24.5 MiB per node with the default buffer, 98 MiB with x4), and Ring/Simple uses 48 channels up to 128 MB per
+// node.
+// all_reduce, 16 nodes (RCCL_IB_GDR_FLUSH_FLAG_TUNE): Tree/Simple beats Tree/LL128 from 8 MB per node; above 64 MB
+// per node the cost model already picks the fastest choice.
+//
+// Returns the channel count for the choice made, or 0 to keep RCCL's own.
+int rcclUpdateRemoteFlushAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                   float (*table)[NCCL_NUM_PROTOCOLS]) {
+  static int userInput = -1;
+  if (userInput == -1) userInput = (ncclGetEnv("NCCL_ALGO") || ncclGetEnv("NCCL_PROTO")) ? 1 : 0;
+  if (userInput || comm->nNodes < 2 || !rcclRemoteFlushTuned(comm)) return 0;
+  const bool ll128Scaled = comm->buffSizes[NCCL_PROTO_LL128] > comm->p2pLl128BuffSize;
+  if (info->func == ncclFuncReduceScatter) {
+    const size_t ll128MaxPerRank = (size_t)(ll128Scaled ? 7 : 6) << 20;
+    if ((comm->nNodes <= 8 || (ll128Scaled && comm->nNodes == 16)) && info->protocol == NCCL_PROTO_LL128 &&
+        info->algorithm < NCCL_NUM_ALGORITHMS &&
+        rcclGetSizePerRank(info->func, nBytes, comm->nRanks) > ll128MaxPerRank &&
+        table[info->algorithm][NCCL_PROTO_SIMPLE] >= 0.0)
+      info->protocol = NCCL_PROTO_SIMPLE;
+    return 0;
+  }
+  if (info->func != ncclFuncAllReduce) return 0;
+  const bool arTune = rcclParamIbGdrFlushFlagTune() != 0;
+  if (comm->nNodes > 8 && !(arTune && comm->nNodes == 16)) return 0;
+  if (info->algorithm != NCCL_ALGO_RING && info->algorithm != NCCL_ALGO_TREE) return 0;
+  const size_t perNode = nBytes / comm->nNodes;
+  int algorithm, protocol;
+  int nChannels = 0;
+  if (comm->nNodes == 16) {
+    if (perNode < (8 << 20) || perNode > (64 << 20)) return 0;
+    algorithm = NCCL_ALGO_TREE;
+    protocol = NCCL_PROTO_SIMPLE;
+  } else if (perNode >= (64 << 20)) {
+    algorithm = NCCL_ALGO_RING;
+    protocol = NCCL_PROTO_SIMPLE;
+    // A user channel count (NCCL_MIN/MAX_NCHANNELS) wins.
+    if (arTune && perNode < (128 << 20) && ncclParamMaxNchannels() <= 0 && ncclParamMinNchannels() <= 0)
+      nChannels = kRemoteFlushArRingSimpleNchannels;
+  } else if (perNode < (arTune ? (12 << 20) : (16 << 20))) {
+    return 0;
+  } else if (arTune ? perNode <= rcclRingLl128OneLoopPerNode(comm, comm->nChannels)
+                                     : perNode < (32 << 20)) {
+    algorithm = NCCL_ALGO_RING;
+    protocol = NCCL_PROTO_LL128;
+  } else {
+    algorithm = NCCL_ALGO_TREE;
+    protocol = NCCL_PROTO_SIMPLE;
+  }
+  if (table[algorithm][protocol] < 0.0) return 0; // unavailable, including NCCL_ALGO_PROTO_IGNORE
+  info->algorithm = algorithm;
+  info->protocol = protocol;
+  return nChannels > 0 ? nChannels : 0;
+}
+
+ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoString[], int nEntries, int& result) {
+  if (envStr) {
+    for (int i = 0; i < nEntries; ++i) {
+      if (strcasecmp(envStr, algoProtoString[i]) == 0) {
+        result = i;
+        return ncclSuccess;
+      }
+    }
+    static bool failedProtoWarn = false;
+    if (!failedProtoWarn) {
+      WARN("Invalid algo or protocol string passed %s", envStr);
+      failedProtoWarn = true;
+      return ncclInvalidUsage;
+    }
+  }
+  return ncclInvalidUsage;
+}
+
+extern int64_t ncclParamMultiSegmentRegister();
+extern int64_t rcclParamForceCe();
+RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
+
+void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc) {
+  if (info->func != ncclFuncReduceScatter || info->algorithm != NCCL_ALGO_RING || info->protocol != NCCL_PROTO_SIMPLE)
+    return;
+  // A user channel count (NCCL_MIN/MAX_NCHANNELS) wins.
+  if (ncclParamMaxNchannels() > 0 || ncclParamMinNchannels() > 0) return;
+  const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true);
+  if (t == nullptr || t->rsRingSimpleCappedChannels <= 0) return;
+  const size_t perRank = nBytes / (size_t)comm->nRanks;
+  if (perRank > t->rsRingLL128MaxPerRank && perRank <= t->rsRingSimpleCappedMaxPerRank)
+    nc = std::min(nc, t->rsRingSimpleCappedChannels);
+}
+
+ncclResult_t rcclOverrideChannels(struct ncclComm* comm, ncclFunc_t coll, size_t nBytes, int& nc) {
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) {
+    INFO(NCCL_TUNING, "RCCL channel thresholds not applied for gfx1250 (see rcclUpdateCollectiveChannels)");
+    return ncclSuccess;
+  }
+  const bool isGfx_110x_120x = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx110") ||
+                               IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120");
+  // Make an exception for gfx110x and gfx120x
+  if ((!isGfx_110x_120x && (comm->nNodes < 2)) || !rcclParamChannelTuningEnable()) {
+    INFO(NCCL_TUNING, "RCCL Channel Tuning not applied");
+    return ncclSuccess;
+  }
+
+  if ((comm->nRanks == comm->nNodes) && !IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1151")) {
+    INFO(NCCL_TUNING, "RCCL tuning model channel thresholds not applied for single GPU per node case");
+    return ncclSuccess;
+  }
+
+  auto tunableIndex = rcclGetTunableIndex(coll);
+  if (tunableIndex == RCCL_UNSUPPORTED_TUNABLE) {
+    INFO(NCCL_TUNING, "tunableIndex:%i not supported", tunableIndex);
+    return ncclSuccess;
+  }
+
+  int minCTAs = comm->config.minCTAs;
+  int maxCTAs = comm->config.maxCTAs;
+  int scalingFactor = 1;
+#ifdef ENABLE_WARP_SPEED
+  if (comm->topo->warpSpeedEnabled) {
+    scalingFactor = comm->warpSpeedChannelMultiplier; // each CU can handle 4 warps
+  }
+#endif
+  int minNChannels = ncclParamMinNchannels();
+  int maxNChannels = std::max(comm->nChannels / scalingFactor, static_cast<int>(ncclParamMaxNchannels()));
+  size_t bytesPerRank = divUp(nBytes, comm->nRanks);
+  const int myRank = comm->rank;
+
+  for (int channelCountIndex = 0; channelCountIndex < RCCL_CHANNELS_TUNABLE_ENTRIES; ++channelCountIndex) {
+    size_t minByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][0];
+    size_t maxByteThreshold = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][1];
+    if (myRank == 0) {
+      INFO(NCCL_TUNING,
+           "nBytes:%lu bytesPerRank:%lu minByteThreshold:%lu maxByteThreshold:%lu  NCCL_MIN_NCHANNELS:%i or "
+           "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+           nBytes, bytesPerRank, minByteThreshold, maxByteThreshold, minNChannels, maxNChannels, minCTAs, maxCTAs);
+    }
+    if (minByteThreshold == CHAN_THRESHOLDS_UNDEFINED || maxByteThreshold == CHAN_THRESHOLDS_UNDEFINED) {
+      INFO(NCCL_TUNING, "RCCL tuning model does not define threshold for coll:%i and nbytes:%lu", coll, nBytes);
+      break; // Skip undefined thresholds
+    }
+
+    if (bytesPerRank > minByteThreshold && bytesPerRank <= maxByteThreshold) {
+      int channelCount = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][2];
+
+      // honor user's min/max channels defined through NCCL_MIN_NCHANNELS and NCCL_MAX_NCHANNELS
+      if (channelCount >= minNChannels && channelCount <= maxNChannels && channelCount >= minCTAs &&
+          channelCount <= maxCTAs) {
+        nc = comm->minMaxChannelThresholds[tunableIndex][channelCountIndex][2];
+        if (myRank == 0) {
+          INFO(NCCL_TUNING,
+               "RCCL tuning model overrides nchannels to %i, channels may be decreased further due to "
+               "MinTrafficPerchannel thresholds",
+               channelCount);
+        }
+      } else {
+        if (myRank == 0) {
+          INFO(NCCL_TUNING,
+               "RCCL tuning model cannot override nchannels to %i due to conflicting NCCL_MIN_NCHANNELS:%i or "
+               "NCCL_MAX_NCHANNELS:%i minCTAs:%i maxCTAs:%i",
+               channelCount, minNChannels, maxNChannels, minCTAs, maxCTAs);
+        }
+      }
+
+      break;
+    }
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL_NUM_PROTOCOLS],
+                                  struct ncclTaskColl* info) {
+  static const char* protoOverrideEnv = ncclGetEnv("RCCL_OVERRIDE_PROTO");
+  static bool validInput = true;
+  if (!validInput) return ncclInvalidUsage;
+
+  if (protoOverrideEnv) {
+    static int protoVal = NCCL_PROTO_UNDEF;
+    if (protoVal == NCCL_PROTO_UNDEF) {
+      if (rcclGetAlgoProtoIndex(protoOverrideEnv, ncclProtoStr, NCCL_NUM_PROTOCOLS, protoVal) != ncclSuccess) {
+        validInput = false;
+        return ncclInvalidUsage;
+      }
+    }
+    if (protoVal > NCCL_PROTO_UNDEF) {
+      if (table[info->algorithm][protoVal] == NCCL_ALGO_PROTO_IGNORE) {
+        WARN("Failed to force unsupported protocol %s for function %s with datatype %s", protoOverrideEnv,
+             ncclFuncToString(info->func), ncclDatatypeToString(info->datatype));
+        return ncclInternalError;
+      } else {
+        info->protocol = protoVal;
+      }
+    }
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t rcclOverrideAlgorithm(const char* ncclAlgoStr[], float table[][NCCL_NUM_PROTOCOLS],
+                                   struct ncclTaskColl* info) {
+  static const char* algoOverrideEnv = ncclGetEnv("RCCL_OVERRIDE_ALGO");
+  static bool validInput = true;
+  if (!validInput) return ncclInvalidUsage;
+
+  if (algoOverrideEnv) {
+    static int algoVal = NCCL_ALGO_UNDEF;
+    if (algoVal == NCCL_ALGO_UNDEF) {
+      if (rcclGetAlgoProtoIndex(algoOverrideEnv, ncclAlgoStr, NCCL_NUM_ALGORITHMS, algoVal) != ncclSuccess) {
+        validInput = false;
+        return ncclInvalidUsage;
+      }
+    }
+    if (algoVal > NCCL_ALGO_UNDEF) {
+      if (table[algoVal][info->protocol] == NCCL_ALGO_PROTO_IGNORE) {
+        WARN("Failed to force unsupported algorithm %s for function %s with datatype %s", algoOverrideEnv,
+             ncclFuncToString(info->func), ncclDatatypeToString(info->datatype));
+        return ncclInternalError;
+      } else {
+        info->algorithm = algoVal;
+      }
+    }
+  }
+  return ncclSuccess;
+}
+
+void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
+                               int& threadThreshold) {
+  // Honor user input for thread thresholds
+  static int userChannelControlInput = -2;
+  if (userChannelControlInput == -2) {
+    const char* inputStr = getenv("NCCL_THREAD_THRESHOLDS");
+    if (!inputStr) {
+      inputStr = getenv("NCCL_MAX_NCHANNELS");
+    }
+    if (!inputStr) {
+      inputStr = getenv("NCCL_MIN_NCHANNELS");
+    }
+    userChannelControlInput = !inputStr ? 0 : 1;
+  }
+
+  if (!userChannelControlInput && comm->nNodes >= 2 &&
+      (info->func == ncclFuncReduceScatter || info->func == ncclFuncAllGather)) {
+    auto tunableIndex = rcclGetTunableIndex(info->func);
+    auto tunedThreshold = comm->minMaxLLRange[tunableIndex][info->protocol][RCCL_PROTOCOL_THREAD_THRESHOLD_IDX];
+    if (tunedThreshold != RCCL_LL_LIMITS_UNDEFINED) {
+      threadThreshold = tunedThreshold * comm->nRanks;
+    }
+  }
+}
+
+void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info) {
+  info->pipeline = 0; // Default to no pipelining
+  if (rcclParamdisableReduceCopyPipelining() || IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+    return;
+  }
+  const bool dtypeOK = (info->datatype == ncclBfloat16) || rcclParamPipelineAllDTypes();
+
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") && dtypeOK) {
+    switch (info->func) {
+    // For multi-node case, we check if the number of bytes (`nBytes`) satisfies
+    // the Bf16 Limit Equation for bf16 all_reduce on MI300:
+    // 512MB × 2^(log2[nNodes] - 1), nNodes > 1
+    // The above equation is derived from the tuning results of the bf16 all_reduce on MI300.
+    case ncclFuncAllReduce:
+      if (comm->nNodes == 1 ||
+          ((comm->nNodes > 1) && nBytes <= (1ULL << 29 /*512MB*/) * (1ULL << (log2i(comm->nNodes) - 1)))) {
+        info->pipeline = 1;
+      }
+      break;
+
+    case ncclFuncReduceScatter:
+    case ncclFuncReduce:
+      info->pipeline = 1;
+      break;
+
+    default:
+      break;
+    }
+  }
+}
+
+
+void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable) {
+  if (comm->pxnDisable != RCCL_VALUE_UNSET) {
+    rcclPxnDisable = comm->pxnDisable;
+    return;
+  }
+  const char* inputStr = getenv("NCCL_PXN_DISABLE");
+  const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  const bool archGfx1250 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+  comm->enableCustColl = (archGfx942 || archGfx950) && (inputStr && !atoi(inputStr));
+
+  // gfx1250: keep PXN off unless NCCL_PXN_DISABLE explicitly asks for it.
+  if (archGfx1250 && !inputStr) {
+    INFO(NCCL_INIT, "RCCL PXN disabled by default on gfx1250");
+    rcclPxnDisable = comm->pxnDisable = 1;
+    return;
+  }
+
+  if ((!archGfx942 && !archGfx950) || inputStr) {
+    rcclPxnDisable = comm->pxnDisable = RCCL_VALUE_INVALID;
+    return;
+  }
+  const int ranksThreshold = (archGfx942) ? 64 : 32;
+  int pxnDisable = (comm->nRanks >= ranksThreshold) ? 0 : 1;
+  INFO(NCCL_INIT, "RCCL PXN set as %s (nRanks=%d threshold=%d)", !pxnDisable ? "enabled" : "disabled", comm->nRanks,
+       ranksThreshold);
+  comm->enableCustColl = !pxnDisable;
+  rcclPxnDisable = comm->pxnDisable = pxnDisable;
+}
+
+void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
+  if (comm->p2pNetChunkSize != RCCL_VALUE_UNSET) {
+    rcclP2pNetChunkSize = comm->p2pNetChunkSize;
+    return;
+  }
+  const char* inputStr = getenv("NCCL_P2P_NET_CHUNKSIZE");
+  const bool archGfx942 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942");
+  const bool archGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  if ((!archGfx942 && !archGfx950) || inputStr) {
+    rcclP2pNetChunkSize = comm->p2pNetChunkSize = RCCL_VALUE_INVALID;
+    return;
+  }
+
+  int p2pNetChunkSize = RCCL_VALUE_UNSET;
+  if (archGfx942) p2pNetChunkSize = (comm->nRanks >= 64) ? (1 << 19) : (1 << 17);
+  else if (archGfx950)
+    p2pNetChunkSize = (comm->nRanks >= 32) ? (1 << 19) : (comm->nRanks >= 16 ? (1 << 18) : (1 << 17));
+  else
+    WARN("RCCL P2P attempt to set P2P net chunk size for unsupported arch: %s",
+         comm->topo->nodes[GPU].nodes[0].gpu.gcn);
+  INFO(NCCL_INIT, "RCCL P2P net chunk size default set to: %d (nRanks=%d)", p2pNetChunkSize, comm->nRanks);
+  comm->p2pNetChunkSize = p2pNetChunkSize;
+  rcclP2pNetChunkSize = p2pNetChunkSize;
+}
+
+// Usable means generated AND compiled for this arch; the Generated flag alone lets gfx1250-only unrolls trap.
+enum ncclUnrollAvailability {
+  ncclUnrollUsable,
+  ncclUnrollNotGenerated,
+  ncclUnrollWrongArch,
+};
+
+// Check arch first: an unroll pinned to another arch is usually also ungenerated, and the arch is the real cause.
+static ncclUnrollAvailability unrollAvailability(int unroll, char const* archName) {
+  char const* requiredArch = ncclDevFuncUnrollArch[unroll];
+  if (requiredArch != nullptr && !IsArchMatch(archName, requiredArch)) return ncclUnrollWrongArch;
+  if (!ncclDevFuncUnrollGenerated[unroll]) return ncclUnrollNotGenerated;
+  return ncclUnrollUsable;
+}
+
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  if (regRecord->rcclNet.nSegments != 0) {
+    *numSegments = regRecord->rcclNet.nSegments;
+    return ncclSuccess;
+  }
+  // endAddr is page-rounded but hipMalloc reports its unrounded size; stop inside the last page.
+  const size_t walkSize = regRecord->endAddr - regRecord->begAddr - comm->regCache.pageSize + 1;
+  CUdeviceptr base = 0;
+  size_t baseSize = 0;
+  NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, walkSize, &base, &baseSize, numSegments));
+  regRecord->rcclNet.nSegments = *numSegments;
+  return ncclSuccess;
+}
+
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  if (regRecord == NULL) return ncclSuccess;
+  ncclResult_t ret = rcclNetRegSegmentCount(comm, regRecord, numSegments);
+  if (ret != ncclSuccess || (*numSegments > 1 && !ncclParamMultiSegmentRegister())) {
+    (void)ncclCommGraphDeregister(comm, regRecord);
+  }
+  return ret;
+}
+
+void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments) {
+  // Reached only when every peer registered; a later-peer failure leaves allPeers unset.
+  if (!regRecord->rcclNet.allPeers) {
+    INFO(NCCL_REG, "rank %d - NET register regSize %ld numSegments %d", comm->rank,
+         (long)(regRecord->endAddr - regRecord->begAddr), numSegments);
+  }
+  regRecord->rcclNet.allPeers = true;
+}
+#ifdef ENABLE_WARP_SPEED
+void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
+  static int userChannelControlInput = RCCL_VALUE_UNSET;
+  int warpsPerBlock = threadsPerBlock / comm->WarpSize;
+  // only adjust channels for RING algorithm
+  if (algo != NCCL_ALGO_RING) {
+    return;
+  }
+  if (userChannelControlInput == RCCL_VALUE_UNSET) {
+    const char* inputStr = getenv("NCCL_THREAD_THRESHOLDS");
+    if (!inputStr) {
+      inputStr = getenv("NCCL_MAX_NCHANNELS");
+    }
+    if (!inputStr) {
+      inputStr = getenv("NCCL_MIN_NCHANNELS");
+    }
+    userChannelControlInput = !inputStr ? 0 : 1;
+  }
+  if (comm->topo->warpSpeedEnabled) {
+    if (!userChannelControlInput) {
+      if (rcclParamWarpSpeedCuCount() != 0) {
+        rcclWarpSpeedChannels = rcclParamWarpSpeedCuCount() * warpsPerBlock;
+        INFO(NCCL_INIT, "RCCL Warp CU count set to user defined %ld resulting in %d channels",
+             (long)rcclParamWarpSpeedCuCount(), rcclWarpSpeedChannels);
+        return;
+      }
+    }
+    // reuse the existing channel tuning logic if possible
+    rcclWarpSpeedChannels = std::min(MAXCHANNELS, rcclWarpSpeedChannels * warpsPerBlock);
+    INFO(NCCL_INIT, "RCCL Warp Speed Channels set to %d. Warps per block is set to %d", rcclWarpSpeedChannels,
+         warpsPerBlock);
+  }
+}
+
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks) {
+  if (!comm->topo->warpSpeedEnabled || plan->isSymColl) {
+    return false;
+  }
+
+  // WarpSpeed is not supported currently for the following cases:
+  // 1. if any work batch in the plan contains P2P work
+  // 2. if the plan contains AllGatherV-fused work; that kernel
+  //    does not implement WarpSpeed's warp-level channel distribution
+  // 3. or any collective task is not using RING algorithm
+  bool hasP2p = !ncclIntruQueueEmpty(&plan->p2pTaskQueue);
+  bool hasBcast = !ncclIntruQueueEmpty(&plan->bcastTaskQueue);
+  while (collHead != nullptr && nCollTasks != 0) {
+    if (collHead->algorithm != NCCL_ALGO_RING || !collHead->useWarpSpeed) return false;
+    collHead = collHead->next;
+    if (nCollTasks > 0) nCollTasks--;
+  }
+  return !hasP2p && !hasBcast && nCollTasks <= 0;
+}
+
+bool rcclIsAboveWarpSpeedThreshold(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
+  // single node, full subscription thresholds for AllGather and ReduceScatter
+  if (info->func == ncclFuncAllReduce && nBytes >= rcclParamWarpSpeedARThreshold()) {
+    return true;
+  } else if (info->func == ncclFuncAllGather && nBytes >= rcclParamWarpSpeedAGThreshold()) {
+    return true;
+  } else if (info->func == ncclFuncReduceScatter && nBytes >= rcclParamWarpSpeedRSThreshold()) {
+    return true;
+  }
+  INFO(NCCL_TUNING, "RCCL WarpSpeed not enabled for %s at %zu bytes as it below the warpSpeed threshold",
+       ncclFuncToString(info->func), nBytes);
+  return false;
+}
+
+bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes) {
+  return IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && (nNodes == 1) &&
+         (rcclParamWarpSpeedAutoMode() != 0) && comm->cuCount > 128; // Only use in SPX mode, 256 CU on gfx950
+}
+
+bool rcclWarpSpeedChannelCountSupported(struct ncclComm* comm) {
+  return comm->nChannels <= (MAXCHANNELS) / 2;
+}
+
+ncclResult_t validChannelsForWarpSpeed(struct ncclComm* comm, struct ncclTaskColl* info) {
+  if (info->useWarpSpeed && !rcclWarpSpeedChannelCountSupported(comm)) {
+    WARN("WarpSpeed does not support more than %d channels. Current number of channels is %d. To avoid hang, run with "
+         "RCCL_WARP_SPEED_AUTO=0",
+         MAXCHANNELS / 2, comm->nChannels);
+    return ncclInvalidArgument;
+  }
+  return ncclSuccess;
+}
+
+// Switch to a preferred unroll only if usable here; keeping the validated one beats trapping on an empty table.
+static void rcclPreferUnrollFactor(struct ncclComm* comm, int unroll) {
+  if (unrollAvailability(unroll, comm->archName) != ncclUnrollUsable) {
+    INFO(NCCL_TUNING, "Keeping RCCL unroll factor %d: preferred %d is not usable on arch %s",
+         (1 << comm->unroll), (1 << unroll), comm->archName);
+    return;
+  }
+  comm->unroll = unroll;
+}
+
+ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes) {
+  info->useWarpSpeed = false;
+  static bool unrollFactorSet = getenv("RCCL_UNROLL_FACTOR") != nullptr;
+  if (!comm->topo->warpSpeedEnabled) return ncclSuccess;
+  commSetUnrollFactor(comm); // TODO: reset unroll factor per task rather than per comm
+  if (!rcclCollSupportsRing(info->func)) return ncclSuccess;
+  if (rcclParamWarpSpeedForceEnable() > 0) { // Manual performance mode
+    if (info->algorithm != NCCL_ALGO_RING) {
+      INFO(NCCL_TUNING,
+           "Overriding %s algorithm with RING for nccl%s at %zu bytes as WarpSpeed is requested and only supports RING",
+           ncclAlgoToString(info->algorithm), ncclFuncToString(info->func), nBytes);
+      info->algorithm = NCCL_ALGO_RING; // Force Ring when WarpSpeed is enabled in manual mode as it only supports Ring
+    }
+    // TODO: Remove unroll update when all collectives are optimized
+    if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
+    info->useWarpSpeed = true;
+  } else if (rcclCanUseWarpSpeedAuto(comm, comm->nNodes)) { // Auto performance mode
+    // No early return based on the algorithm at the start of the function
+    // to allow unroll factor to be reverted to default.
+    // This can be changed once per-task unroll factor setting is implemented.
+    if (info->algorithm != NCCL_ALGO_RING) {
+      return ncclSuccess; // If Ring is not selected, assume it is suboptimal and return
+    }
+    if (info->func == ncclFuncAllReduce || info->func == ncclFuncAllGather || info->func == ncclFuncReduceScatter) {
+      // allReduce now benefits from unroll factor of 2 in all modes due to changing its slicing strategy
+      // TODO: Remove unroll update when all collectives are optimized
+      if (!unrollFactorSet) rcclPreferUnrollFactor(comm, NCCL_UNROLL_2);
+    }
+    if (rcclIsAboveWarpSpeedThreshold(comm, info, nBytes)) {
+      // Skip WarpSpeed when the comm exceeds its channel limit (e.g. RCCL_ENABLE_INTRANET=1 drives
+      // nChannels to MAXCHANNELS) instead of failing. Force-enable still errors below.
+      if (!rcclWarpSpeedChannelCountSupported(comm)) {
+        if (comm->rank == 0)
+          INFO(NCCL_TUNING, "RCCL WarpSpeed auto-disabled: %d channels exceeds max %d supported", comm->nChannels,
+               MAXCHANNELS / 2);
+      } else {
+        info->nWarps = 4;
+        info->useWarpSpeed = true;
+      }
+    }
+  }
+  NCCLCHECK(validChannelsForWarpSpeed(comm, info));
+  return ncclSuccess;
+}
+
+int rcclGetMaxWarpsPerBlock(struct ncclComm* comm) {
+  int warpsPerBlock;
+  if (comm->nNodes == 1) {
+    warpsPerBlock = RCCL_SINGLE_NODE_MAX_NTHREADS /
+                    comm->WarpSize; // For single node, we use half the number of threads for perf reasons.
+  } else {
+    warpsPerBlock = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ?
+                      RCCL_GFX950_MAX_NTHREADS / comm->WarpSize :
+                      RCCL_DEFAULT_MAX_NTHREADS / comm->WarpSize;
+  }
+  return warpsPerBlock;
+}
+
+// Compute the bandwidth channel count (nc) when WarpSpeed is enabled, scaling the
+// base channel count by the per-block warp multiplier.
+int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMultiplier, int maxChannels,
+                                  int adjustedMaxNchannels, bool userUpdatedMaxChannels) {
+  const bool singleNode = comm->nNodes == 1;
+  const bool isGfx950 = IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950");
+  int maxNchannels;
+  // If user didn't override, use requested channels; otherwise keep capped max.
+  if (!userUpdatedMaxChannels) {
+    maxNchannels = nc * comm->nChannels * channelMultiplier;
+    nc = singleNode ? maxNchannels : std::min(maxNchannels, maxChannels);
+  } else {
+    nc = maxNchannels = std::min(adjustedMaxNchannels * channelMultiplier, MAXCHANNELS);
+  }
+
+  if (!userUpdatedMaxChannels && isGfx950 && singleNode && comm->nRanks == 8) {
+    // For gfx950 single-node, use half the channels since they are doubled on a single node
+    // Remove when all collectives have been optimized
+    nc /= 2;
+  }
+  INFO(NCCL_TUNING, "WarpSpeed enabled: warpSpeedChannelMultiplier %d, maxNchannels %d, nc %d", channelMultiplier,
+       maxNchannels, nc);
+  return nc;
+}
+
+// Adjust the per-collective channel count (nc) for WarpSpeed during algo/channel
+// tuning. No-op when WarpSpeed is disabled.
+int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc) {
+  if (comm->topo->warpSpeedEnabled) {
+    nc /= comm->warpSpeedChannelMultiplier;
+    // Temporary check as we reduce CU usage for all collectives
+    // TODO: Remove this condition after optimizing all collectives
+    if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 &&
+        info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter &&
+        ncclParamMaxNchannels() < 0) {
+      nc *= 2;
+    }
+  }
+  return nc;
+}
+#endif
+
+void rcclGetMaxNthreads(struct ncclComm* comm, int maxNthreads[]) {
+  if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
+    maxNthreads[NCCL_PROTO_SIMPLE] = maxNthreads[NCCL_PROTO_LL128] = RCCL_GFX950_MAX_NTHREADS;
+  } else {
+    maxNthreads[NCCL_PROTO_SIMPLE] = maxNthreads[NCCL_PROTO_LL128] = RCCL_DEFAULT_MAX_NTHREADS;
+  }
+  maxNthreads[NCCL_PROTO_LL] = RCCL_LL_MAX_NTHREADS;
+}
+
+void rcclOptThreadBlockSize(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes, int& nThreads) {
+  static int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
+  if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
+  if (rcclParamThreadsPerBlock() != -1) {
+    nThreads = rcclParamThreadsPerBlock();
+    if (nThreads % comm->WarpSize != 0) {
+      nThreads = ((nThreads / comm->WarpSize) + 1) * comm->WarpSize;
+      INFO(NCCL_INIT, "RCCL Threads per block adjusted to %d to be multiple of warp size %d", nThreads, comm->WarpSize);
+    }
+    if (nThreads > maxNthreads[NCCL_PROTO_SIMPLE]) {
+      nThreads = maxNthreads[NCCL_PROTO_SIMPLE];
+      INFO(NCCL_INIT, "RCCL Threads per block reduced to %d to match max threads", nThreads);
+    } else if (nThreads < 3 * comm->WarpSize) {
+      nThreads = 3 * comm->WarpSize; // min requirement for tree
+      INFO(NCCL_INIT, "RCCL Threads per block increased to %d to be at least one warp", nThreads);
+    }
+    return;
+  }
+  // gfx1250 DPX: cap the block at 192. A lower NCCL_NTHREADS / NCCL_LL128_NTHREADS,
+  // already in nThreads, still wins. PAT is excluded: its maxThreads entry is
+  // unset on HIP, and the kernel's compute thread is NCCL_MAX_NTHREADS-1, so a
+  // short block leaves the workers spinning. SPX stays on the 256 path below.
+  // RCCL_THREADS_PER_BLOCK is handled above. Channel selection still uses maxThreads.
+  if (info->algorithm != NCCL_ALGO_PAT && comm->archName && IsArchMatch(comm->archName, "gfx1250") &&
+      comm->archThresholds != nullptr &&
+      comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_DPX)) {
+    nThreads = std::min(nThreads, RCCL_GFX1250_DEFAULT_NTHREADS);
+    return;
+  }
+  if (info->algorithm == NCCL_ALGO_TREE) nThreads = maxNthreads[NCCL_PROTO_SIMPLE]; // Tree now uses all threads always.
+  if (info->algorithm == NCCL_ALGO_PAT) nThreads = maxNthreads[NCCL_PROTO_SIMPLE];
+  if (comm->nNodes == 1)
+    nThreads = RCCL_SINGLE_NODE_MAX_NTHREADS; // For single node, we use half the number of threads for perf reasons.
+  // The following should be already set correctly by getNthreads
+  // but need to override the changes for TREE and PAT in the previous lines
+  else if (info->protocol == NCCL_PROTO_LL) nThreads = maxNthreads[NCCL_PROTO_LL];
+  // ReduceScatter small count optimization
+  if (info->func == ncclFuncReduceScatter && divUp(nBytes, comm->nRanks) <= 524288)
+    nThreads = maxNthreads[NCCL_PROTO_LL];
+}
+
+void rcclSetDefaultBuffSizes(struct ncclComm* comm, int defaultBuffSizes[]) {
+  static int maxNthreads[NCCL_NUM_PROTOCOLS] = {0};
+  if (maxNthreads[NCCL_PROTO_SIMPLE] == 0) rcclGetMaxNthreads(comm, maxNthreads);
+  defaultBuffSizes[NCCL_PROTO_LL] =
+    NCCL_LL_LINES_PER_THREAD * maxNthreads[NCCL_PROTO_LL] * NCCL_STEPS * sizeof(union ncclLLFifoLine);
+  defaultBuffSizes[NCCL_PROTO_LL128] =
+    rcclLL128ElemsPerThreadFromArch(comm->archName) * maxNthreads[NCCL_PROTO_LL128] * NCCL_STEPS * sizeof(uint64_t);
+  defaultBuffSizes[NCCL_PROTO_SIMPLE] = (1 << 22); /* 4MiB */
+}
+
+ncclResult_t rcclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count, size_t& maxCount) {
+  RCCL_STATIC_EXPOSE_CHECK();
+  maxCount = ncclFuncMaxSendRecvCount(func, nRanks, count);
+  return ncclSuccess;
+}
+
+ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
+  if (rcclParamUnrollFactor() != -1) {
+    comm->unroll = rcclParamUnrollFactor(); //-1 to map to 0 based indexing
+    if (comm->unroll < NCCL_UNROLL_1 || comm->unroll >= NCCL_NUM_UNROLLS) {
+      WARN("Invalid RCCL_UNROLL_FACTOR %d specified. Valid values are 0 to %d corresponding to unroll factors of 1, 2, "
+           "4, 8, 16, and 32 respectively.",
+           comm->unroll, NCCL_NUM_UNROLLS - 1);
+      return ncclInvalidArgument;
+    }
+    switch (unrollAvailability(comm->unroll, comm->archName)) {
+    case ncclUnrollNotGenerated:
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) was not generated by this build for arch %s; its device function "
+           "table is empty and dispatching to it would crash. "
+           "Rebuild with install.sh --all_unrolls (-DBUILD_ALL_UNROLLS=ON), or select one this build generated.",
+           comm->unroll, (1 << comm->unroll), comm->archName);
+      return ncclInvalidArgument;
+    case ncclUnrollWrongArch:
+      WARN("RCCL_UNROLL_FACTOR %d (unroll %d) is compiled for %s only, so its device function table is empty on "
+           "arch %s and dispatching to it would crash. "
+           "Select a different unroll factor.",
+           comm->unroll, (1 << comm->unroll), ncclDevFuncUnrollArch[comm->unroll], comm->archName);
+      return ncclInvalidArgument;
+    case ncclUnrollUsable:
+      break;
+    }
+    INFO(NCCL_INIT, "RCCL Unroll Factor (user set): %d", (1 << comm->unroll));
+    return ncclSuccess;
+  }
+  if (IsArchMatch(comm->archName, "gfx950")) {
+    if (comm->nNodes == 1) comm->unroll = NCCL_UNROLL_1;
+    else comm->unroll = NCCL_UNROLL_2;
+  } else if (IsArchMatch(comm->archName, "gfx908") || ((IsArchMatch(comm->archName, "gfx942") && comm->cuCount > 80)))
+    comm->unroll = NCCL_UNROLL_2;
+  else if (IsArchMatch(comm->archName, "gfx1250")) comm->unroll = NCCL_UNROLL_32;
+  else comm->unroll = NCCL_UNROLL_4;
+
+  // Fall back to the highest usable unroll if the default was not built or is pinned to another arch.
+  if (unrollAvailability(comm->unroll, comm->archName) != ncclUnrollUsable) {
+    int fallback = -1;
+    for (int u = NCCL_NUM_UNROLLS - 1; u >= NCCL_UNROLL_1; u--) {
+      if (unrollAvailability(u, comm->archName) == ncclUnrollUsable) {
+        fallback = u;
+        break;
+      }
+    }
+    if (fallback < 0) {
+      WARN("No unroll-factor device function tables are usable on arch %s.", comm->archName);
+      return ncclInvalidUsage;
+    }
+    WARN("Default RCCL unroll factor %d is not usable on arch %s; falling back to %d. Set RCCL_UNROLL_FACTOR to "
+         "override.",
+         (1 << comm->unroll), comm->archName, (1 << fallback));
+    comm->unroll = fallback;
+  }
+
+  INFO(NCCL_INIT, "RCCL Unroll Factor (pre-set): %d", (1 << comm->unroll));
+  return ncclSuccess;
+}
+
+RCCL_PARAM(P2pChannelShiftSize, "P2P_SHIFT_SIZE", -1);
+ncclResult_t rcclCommSetP2pShiftSize(struct ncclComm* comm) {
+  int nP2pChannels = comm->p2pnChannels;
+  int nChannelsLog2 = countOneBits(nP2pChannels - 1);
+  int shiftSize = rcclParamP2pChannelShiftSize();
+
+  // Use bit-reversal for default/invalid shiftSize (device uses shiftSize==-1 for that path).
+  if (shiftSize >= nChannelsLog2) {
+    comm->p2pChannelShiftSize = -1;
+  } else {
+    comm->p2pChannelShiftSize = shiftSize;
+  }
+  return ncclSuccess;
+}
+
+int getFirmwareVersion() {
+  uint64_t fw_version = 0;
+  ncclResult_t res = amd_smi_getFirmwareVersion(0, &fw_version);
+  if (res != ncclSuccess) {
+    return -1;
+  }
+  return fw_version;
+}
+
+bool validHsaScratchEnvSetting(const char* hsaScratchEnv, int hipRuntimeVersion, int firmwareVersion,
+                               char const* archName) {
+  bool hsaScratchEnvSet = (hsaScratchEnv && strcmp(hsaScratchEnv, "1") == 0);
+  if (hsaScratchEnvSet) {
+    return true;
+  }
+  if (IsArchMatch(archName, "gfx950")) {
+    return (hipRuntimeVersion >= 60443484 && firmwareVersion >= 24);
+  }
+  if (IsArchMatch(archName, "gfx942")) {
+    return (hipRuntimeVersion >= 60443484 && firmwareVersion >= 177);
+  }
+  return true;
+}
+
+// Should match get_arch_guard() in generate.py
+bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, const char* archName) {
+  bool supported = true;
+
+  if (info->protocol == NCCL_PROTO_LL128) {
+#if defined(ENABLE_LL128)
+    if (info->acc)
+      supported =
+        (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx1250"));
+    else
+      supported = (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") ||
+                   IsArchMatch(archName, "gfx90a") || IsArchMatch(archName, "gfx1250"));
+#else
+    supported = false;
+#endif
+  } else if (info->acc) {
+    supported =
+      (IsArchMatch(archName, "gfx942") || IsArchMatch(archName, "gfx950") || IsArchMatch(archName, "gfx1250"));
+  }
+
+  return supported;
+}

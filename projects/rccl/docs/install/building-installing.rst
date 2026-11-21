@@ -127,7 +127,7 @@ The RCCL build and installation helper script options are as follows:
                                   reducing build time during development. Use '|' to separate multiple functions.
                                   Example: ONLY_FUNCS="AllReduce|SendRecv" ./install.sh --debug -t
                                   Available: AllReduce, Broadcast, Reduce, AllGather, ReduceScatter,
-                                             AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda
+                                             SendRecv, AlltoAllGda, AlltoAllvGda
                                   Advanced: Specify algo, protocol, redop, and type per collective.
                                     ONLY_FUNCS="AllReduce RING SIMPLE Sum f32|SendRecv"
        ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)

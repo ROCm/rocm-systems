@@ -55,12 +55,11 @@ GENERATE_PY = RCCL_ROOT / "src" / "device" / "generate.py"
 # ---------------------------------------------------------------------------
 EXPECTED = {
     "OFF": {
-        "total": 4084,
+        "total": 4080,
         "per_coll": {
             "AllGather": 32,
             "AllGatherV": 12,
             "AllReduce": 2560,
-            "AlltoAllPivot": 4,
             "Broadcast": 16,
             "Reduce": 484,
             "ReduceScatter": 968,
@@ -69,13 +68,12 @@ EXPECTED = {
         },
     },
     "ON": {
-        "total": 4092,
+        "total": 4088,
         "per_coll": {
             "AllGather": 32,
             "AllGatherV": 12,
             "AllReduce": 2560,
             "AlltoAllGda": 4,
-            "AlltoAllPivot": 4,
             "AlltoAllvGda": 4,
             "Broadcast": 16,
             "Reduce": 484,
@@ -320,7 +318,7 @@ def test_unroll_tables_have_equal_kernel_counts(generated, rocshmem):
 def test_unroll_tables_are_index_aligned(generated, rocshmem):
     # The counts above cannot see a reorder that preserves them, and the ordering assertion
     # in test_generate_device_table.py runs under an ONLY_FUNCS slice that excludes the four
-    # collectives this guards: AlltoAllPivot, AlltoAllGda, AlltoAllvGda and AllGatherV.
+    # collectives this guards: AlltoAllGda, AlltoAllvGda and AllGatherV.
     tables = _unroll_tables(generated[rocshmem]["device_table"])
     assert tables, "no unroll tables generated"
     base_unroll, base = sorted(tables.items())[0]

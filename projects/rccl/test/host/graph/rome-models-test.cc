@@ -793,12 +793,11 @@ TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
 TEST_F(GraphRomeModelsMicrotest, ParseOptions_SetsTheKnownKeys) {
   Use(XgmiSystem(1));
 
-  parseOptions(system_.get(), "netGdrLevel=PHB,pivotA2AEnabled=1,pivotA2ANumBiRings=3,tuning=4,ll128Enabled=1");
+  parseOptions(system_.get(), "netGdrLevel=PHB,romeAllReduceTuning=1,tuning=4,ll128Enabled=1");
   parseOptions(system_.get(), "baseBw=12.5, treeDefined=1,unknown=7");
 
   EXPECT_EQ(PATH_PHB, system_->netGdrLevel);
-  EXPECT_TRUE(system_->pivotA2AEnabled);
-  EXPECT_EQ(3, system_->pivotA2ANumBiRings);
+  EXPECT_TRUE(system_->romeAllReduceTuning);
   EXPECT_EQ(4, system_->tuning);
   EXPECT_TRUE(system_->ll128Enabled);
   EXPECT_FLOAT_EQ(12.5, system_->baseBw);

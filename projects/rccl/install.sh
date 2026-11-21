@@ -136,7 +136,7 @@ function display_help()
     echo "                               reducing build time during development. Use '|' to separate multiple functions."
     echo "                               Example: ONLY_FUNCS=\"AllReduce|SendRecv\" ./install.sh --debug -t"
     echo "                               Available: AllReduce, Broadcast, Reduce, AllGather, ReduceScatter,"
-    echo "                                          AlltoAllPivot, SendRecv, AlltoAllGda, AlltoAllvGda"
+    echo "                                          SendRecv, AlltoAllGda, AlltoAllvGda"
     echo "                               Advanced: Specify algo, protocol, redop, and type per collective."
     echo "                                 ONLY_FUNCS=\"AllReduce RING SIMPLE Sum f32|SendRecv\""
     echo "    ROCSHMEM_INSTALL_DIR       Path to a pre-built rocSHMEM installation (skips building from source)"

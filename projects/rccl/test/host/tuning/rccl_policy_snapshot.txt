@@ -1,0 +1,103 @@
+policy gfx1250
+AR eval capturing
+AR eval ce-ar-graph-ok
+AR skip-rules-if algo-env
+AR preferred-backends
+AR rule gin.sdma not=in-group
+AR rule ce.2shot if=ce-ar-graph-ok,ce-ar-2shot-ok not=in-group,symk-requested
+AR rule dda.fabric.ll128 if=reroute-ce-reg
+AR rule dda.fabric.vmm window=dda-ar-vmm-first not=symk-veto,reroute-ce-reg
+AR rule dda.fabric.ll window=dda-ll not=symk-veto,reroute-ce-reg
+AR rule dda.fabric.ll128 window=dda-ll128 not=symk-veto,reroute-ce-reg
+AR rule dda.fabric.vmm window=dda-vmm not=symk-veto,reroute-ce-reg
+AR rule ce.registered window=ce-reg not=sysmem yield-to=symk-eligible
+AR rule ce.staged window=ce-reg if=ce-ar-graph-ok,ce-ar-2shot-ok not=in-group,sysmem,symk-requested yield-to=symk-eligible
+AR rule symk.kernel window=symk if=symk-requested
+AR fallback general.ring
+AG eval capturing
+AG skip-rules-if algo-env
+AG rule gin.sdma
+AG rule dda.fabric.ll window=dda-ll not=symk-veto
+AG rule dda.fabric.ll128 window=dda-ll128 not=symk-veto
+AG rule dda.fabric.vmm window=dda-vmm not=symk-veto
+AG rule general.hier not=in-group,symk-veto
+AG rule ce.scratch window=ce-nonreg not=capturing,sysmem any-size-when=cta-zero
+AG rule ce.registered window=ce-reg-ag not=capturing,sysmem yield-to=symk-eligible any-size-when=cta-zero
+AG rule ce.hier if=cta-zero not=capturing,sysmem
+AG rule symk.kernel if=symk-eligible
+AG fallback general.direct
+AG fallback general.ring
+RS skip-rules-if algo-env
+RS eval symk-eligible
+RS eval ce-ar-graph-ok
+RS eval ce-rs-ok
+RS rule ce.2shot if=ce-rs-ok not=symk-eligible
+RS rule ce.staging_init if=ce-rs-ok not=symk-eligible
+RS rule dda.fabric.ll window=dda-ll not=symk-veto
+RS rule dda.fabric.ll128 window=dda-ll128 not=symk-veto
+RS rule dda.fabric.vmm window=dda-vmm not=symk-veto
+RS rule general.hier not=in-group,symk-veto
+RS rule general.direct not=in-group,symk-veto
+RS rule ce.registered if=ce-rs-ok not=sysmem
+RS rule symk.kernel if=symk-eligible
+RS fallback general.ring
+A2A rule gin.gda
+A2A rule gin.sdma
+A2A rule dda.fabric.ll window=dda-ll not=must-enqueue,in-place,symk-veto
+A2A rule dda.fabric.ll128 window=dda-ll128 not=must-enqueue,in-place,symk-veto
+A2A rule dda.fabric.vmm window=dda-vmm not=in-place,symk-veto
+A2A rule ce.registered window=ce-reg not=capturing,sysmem any-size-when=cta-zero
+A2A rule ce.hier if=cta-zero not=capturing,sysmem
+A2A rule ce.scratch window=ce-nonreg not=capturing,sysmem any-size-when=cta-zero
+A2A fallback general.direct
+BC skip-rules-if algo-env
+BC rule dda.fabric.ll window=dda-ll
+BC rule dda.fabric.ll128 window=dda-ll128
+BC fallback general.native
+
+policy default
+AR eval capturing
+AR eval ce-ar-graph-ok
+AR skip-rules-if algo-env
+AR preferred-backends
+AR rule gin.sdma not=in-group
+AR rule ce.2shot if=ce-ar-graph-ok,ce-ar-2shot-ok not=in-group,symk-requested
+AR rule dda.ipc window=dda-vmm not=symk-veto
+AR rule ce.registered window=ce-reg not=sysmem yield-to=symk-eligible
+AR rule ce.staged window=ce-reg if=ce-ar-graph-ok,ce-ar-2shot-ok not=in-group,sysmem,symk-requested yield-to=symk-eligible
+AR rule symk.kernel window=symk if=symk-requested
+AR fallback general.ring
+AG eval capturing
+AG skip-rules-if algo-env
+AG rule gin.sdma
+AG rule dda.ipc window=dda-vmm not=symk-veto
+AG rule general.hier not=in-group,symk-veto
+AG rule ce.scratch window=ce-nonreg not=capturing,sysmem any-size-when=cta-zero
+AG rule ce.registered window=ce-reg-ag not=capturing,sysmem yield-to=symk-eligible any-size-when=cta-zero
+AG rule ce.hier if=cta-zero not=capturing,sysmem
+AG rule symk.kernel if=symk-eligible
+AG fallback general.direct
+AG fallback general.ring
+RS skip-rules-if algo-env
+RS eval symk-eligible
+RS eval ce-ar-graph-ok
+RS eval ce-rs-ok
+RS rule ce.2shot if=ce-rs-ok not=symk-eligible
+RS rule ce.staging_init if=ce-rs-ok not=symk-eligible
+RS rule dda.ipc window=dda-vmm not=symk-veto
+RS rule general.hier not=in-group,symk-veto
+RS rule general.direct not=in-group,symk-veto
+RS rule ce.registered if=ce-rs-ok not=sysmem
+RS rule symk.kernel if=symk-eligible
+RS fallback general.ring
+A2A rule gin.gda
+A2A rule gin.sdma
+A2A rule dda.ipc window=dda-vmm not=symk-veto
+A2A rule ce.registered window=ce-reg not=capturing,sysmem any-size-when=cta-zero
+A2A rule ce.hier if=cta-zero not=capturing,sysmem
+A2A rule ce.scratch window=ce-nonreg not=capturing,sysmem any-size-when=cta-zero
+A2A fallback general.direct
+BC skip-rules-if algo-env
+BC rule dda.fabric.ll window=dda-ll
+BC rule dda.fabric.ll128 window=dda-ll128
+BC fallback general.native

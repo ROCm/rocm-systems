@@ -1996,7 +1996,7 @@
         },
         {
           "name": "RcclAlltoAllDecision",
-          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, GIN selection)",
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {

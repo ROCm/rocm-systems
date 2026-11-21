@@ -14,7 +14,7 @@ set(_MICRO_TUNING_DEFS
   CE_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/ce_model.cc"
   COST_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/cost_model.cc"
   ALGORITHM_REGISTRY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/config/algorithm_registry.cc"
-  WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
+  WRAP_CC_PATH="${_RCCL_SELECTION_UNITY_CC}"
   SYM_MODEL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model.cc"
   # gin_tmp.cc, not gin.cc: src/CMakeLists.txt lists plugin/gin.cc first, so hipify renames this one.
   SYM_MODEL_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/tuning/sym_model/gin_tmp.cc"
@@ -52,7 +52,7 @@ rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningCostModel cost-model-test.
     fakes/nccl_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/tuning/tuning_general.cc)
 
-# tuning_general.cc sizes blocks through the real rcclOptThreadBlockSize, so this binary links rccl_wrap.cc through
+# tuning_general.cc sizes blocks through the real rcclOptThreadBlockSize, so this binary links rccl_tuning.cc and the scheduler through
 # tuning/rccl_wrap_wrapper.cc with the fakes wrap-test.cc links it against. Production always builds the LL128 arm.
 set_source_files_properties(tuning/rccl_wrap_wrapper.cc PROPERTIES COMPILE_DEFINITIONS ENABLE_LL128)
 rccl_add_tuning_micro_binary(rccl-UnitTestsMicroTuningGeneral tuning-general-test.cc

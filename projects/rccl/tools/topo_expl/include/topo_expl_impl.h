@@ -26,7 +26,6 @@ struct allGatherInfo {
   struct ncclTopoRanks topoRanks;
   int nc;
   int romeTopoModelIdx;
-  bool pivotA2AEnabled;
   bool ll128Enabled;
   bool mscclEnabled;
 };

@@ -2623,15 +2623,7 @@ TEST(Rcclwrap, RcclUseCeAllReduce_BiasBuffer)
     );
 }
 
-// ---------------------------------------------------------------------------
-// rcclAllReduceShouldTakeDdaPath: the AllReduce DDA entry gate.
-//
-// Returns true when DDA should handle the call: symk not eligible and DDA is
-// enabled for this arch and message size. CE vs DDA arbitration at dispatch is
-// handled by rcclCandSearch (preferred-backend mask), not by this function.
-//
-// These tests drive the real decision (no GPU): RCCL_DDA_ENABLE defaults to 1
-// and ncclGroupDepth to 0, so rcclDdaEnabled() runs its real arch/threshold logic.
+// Zero-initialized comm with just the fields the DDA decision tests read.
 namespace
 {
 // Fill a zero-initialized comm with just the fields the decision reads. Filled by
@@ -2644,161 +2636,7 @@ void InitDdaDecisionComm(ncclComm& comm, const char* arch, int nRanks, int nNode
     comm.symmetricSupport = symmetricSupport ? 1 : 0;
 }
 
-// count for a target byte size and datatype.
-size_t CountForBytes(size_t bytes, ncclDataType_t dt)
-{
-    return bytes / ncclTypeSize(dt);
-}
 } // namespace
-
-// AllReduce DDA decision cases. Named Rcclwrap so fixtures-debug CI selects
-// them (Rcclwrap.* is the listed prefix for this file).
-//
-// gfx950 with symmetricSupport off: CE cannot run, so an 8 MiB call (at/above the
-// 4 MiB CE minimum) must still take DDA rather than fall to the generic kernel.
-TEST(Rcclwrap, Gfx950_SymOff_LargeMsg_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(8ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*query=*/false));
-}
-
-// gfx950, small message with CE unavailable: squarely in DDA's range, takes DDA.
-TEST(Rcclwrap, Gfx950_SymOff_SmallMsg_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*query=*/false));
-}
-
-// gfx942 above its 8 MiB DDA cap: rcclDdaEnabled returns false, so no DDA.
-TEST(Rcclwrap, Gfx942_SymOff_AboveCap_NoDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(9ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*query=*/false));
-}
-
-
-// gfx942 within its 8 MiB DDA cap: DDA takes the call.
-TEST(Rcclwrap, Gfx942_InRange_TakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx942", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(6ull * 1024 * 1024, ncclFloat32);
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*query=*/false));
-}
-
-// gfx1250 has DDA enabled at 16 MiB (within the entry threshold); DDA is chosen
-// over CE. CE/DDA arbitration at dispatch is handled by rcclCandSearch, not here.
-TEST(Rcclwrap, Gfx1250_CeEligible_StillTakesDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32); // CE-eligible (4-256 MiB window) and within the DDA entry cap, divisible by 8
-    EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                               /*symEligible=*/false, /*query=*/false));
-}
-
-// gfx1250 still requires !symEligible: mixed-registration hangs are handled
-// by agreeing across ranks in the symmetric path, not by taking DDA when
-// one rank's windows look eligible. 256 KiB matches CHECK_COUNT in
-// SymmetricAbortCheckModeMPITests.
-TEST(Rcclwrap, Gfx1250_SymEligible_RejectsDda)
-{
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(256ull * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(&comm, count, ncclFloat32,
-                                                /*symEligible=*/true, /*query=*/false));
-}
-
-// An arch DDA never runs on: rcclDdaEnabled returns false, so no DDA on any size.
-TEST(Rcclwrap, UnsupportedArch_NoDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx90a", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*query=*/false));
-}
-
-// ---------------------------------------------------------------------------
-// rcclAlltoAllShouldTakeDdaPath: AlltoAll has no symmetric kernel, so DDA used
-// to early-return on gfx1250 even when NCCL_CTA_POLICY_ZERO would take CE.
-// When ceAlltoAllAllowed is true, DDA must yield. Default (CE not allowed)
-// AlltoAll DDA on gfx1250 is unchanged. The window/CTA/graph probe itself is
-// CeAlltoAllEligibilityTest; these cases only lock the helper's boolean.
-TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeNotAllowed_TakesDda)
-{
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
-    // CeMPI_AlltoAll.FourRanks: 4 ranks * 65536 float32 * 4 B = 1 MiB (< 4 MiB cap).
-    size_t totalBytes = 4ull * 65536 * sizeof(float);
-    EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
-}
-
-TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_CeAllowed_YieldsToCe)
-{
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
-    size_t totalBytes = 4ull * 65536 * sizeof(float);
-    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
-}
-
-TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_TwoRankLlSize_CeAllowed_YieldsToCe)
-{
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx1250", 2, 1, /*symmetricSupport=*/true);
-    // CeMPI_AlltoAll.TwoRanks: 2 * 4096 * 4 B = 32 KiB, DDA LL lane.
-    size_t totalBytes = 2ull * 4096 * sizeof(float);
-    EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
-    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/true));
-}
-
-TEST(Rcclwrap, AlltoAllDdaDecision_Gfx1250_AboveThreshold_NoDda)
-{
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx1250", 4, 1, /*symmetricSupport=*/true);
-    size_t totalBytes = rcclDdaEntryThreshold(&comm, ncclFuncAlltoAll) + 1;
-    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
-}
-
-TEST(Rcclwrap, AlltoAllDdaDecision_Gfx950_TooFewRanks_NoDda)
-{
-    ncclComm comm{};
-    InitDdaDecisionComm(comm, "gfx950", 4, 1, /*symmetricSupport=*/true);
-    size_t totalBytes = 1024ull * 1024;
-    EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(&comm, totalBytes, /*ceAlltoAllAllowed=*/false));
-}
-
-// gfx942/gfx950 DDA requires the full 8-GPU node; fewer ranks disables it.
-TEST(Rcclwrap, Gfx950_TooFewRanks_NoDda)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 4, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/false, /*query=*/false));
-}
-
-// Symmetric-kernel eligible buffers win outright: the DDA guard yields (returns false)
-// regardless of arch/size.
-TEST(Rcclwrap, SymEligible_YieldsToSymmetricKernel)
-{
-    auto comm = std::make_unique<ncclComm>();
-    InitDdaDecisionComm(*comm, "gfx950", 8, 1, /*symmetricSupport=*/false);
-    size_t   count = CountForBytes(2ull * 1024 * 1024, ncclFloat32);
-    EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
-                                                /*symEligible=*/true, /*query=*/false));
-}
 
 // ---------------------------------------------------------------------------
 // rcclCollectiveMustUseEnqueuePath: DDA/CE/GIN early-returns skip ncclEnqueueCheck.
@@ -3345,9 +3183,7 @@ void InitA2ADecisionComm(ncclComm& comm, ncclTopoSystem& topo, const char* arch,
 {
     InitDdaDecisionComm(comm, arch, nRanks, /*nNodes=*/1, /*symmetricSupport=*/false);
     comm.archThresholds        = rcclGetArchThresholds(arch);
-    // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
-    // predicate (before any arch or DDA logic). Zero-initialised: pivotA2AEnabled=false,
-    // so the pivot branch is skipped and falls through to the DDA logic under test.
+    // Zero-initialised topology for the selection paths that read comm->topo.
     comm.topo                  = &topo;
     // Sentinel pointers satisfy the non-null checks in the fabric eligibility
     // predicates (the values are never dereferenced by query=true calls).
@@ -3547,10 +3383,8 @@ TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
     auto topo = std::make_unique<ncclTopoSystem>();
-    // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
-    // predicate, so a topo is required. InitA2ADecisionComm attaches a zero-
-    // initialised ncclTopoSystem (pivotA2AEnabled=false) and the DDA sentinels;
-    // gfx90a exits rcclDdaEnabled early, so the sentinels are never dereferenced.
+    // InitA2ADecisionComm attaches a zero-initialised ncclTopoSystem and the DDA
+    // sentinels; gfx90a exits rcclDdaEnabled early, so they are never dereferenced.
     InitA2ADecisionComm(*comm, *topo, "gfx90a", 8);
 
     rcclCollDecision dec{};

@@ -111,9 +111,8 @@
 
 using namespace rccl;
 
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
-                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
-                                                   "SendRecv"}; // Increased numFunc by 1 for AlltollvGda
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 3] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
+                                                   "AlltoAllGda", "AlltoAllvGda", "SendRecv"};
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = {"Tree",     "Ring", "CollNetDirect", "CollNetChain", "NVLS",
                                                 "NVLSTree", "PAT"};
 const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = {"LL", "LL128", "Simple"};
@@ -777,7 +776,6 @@ ncclResult_t ncclUncapturedStreamPoolDestroy(struct ncclUncapturedStreamPool* po
 }
 
 RCCL_PARAM(P2pNetDisable, "P2P_NET_DISABLE", 1);
-RCCL_PARAM(PivotAlltoallEnable, "PIVOT_ALLTOALL_ENABLE", 1);
 RCCL_PARAM(LL128ForceEnable, "LL128_FORCE_ENABLE", 0);
 NCCL_PARAM(AggChannelSize, "AGG_CHANNEL_SIZE", -2);
 NCCL_PARAM(DisableGraphHelper, "GRAPH_HELPER_DISABLE", 0);
@@ -1338,30 +1336,39 @@ static const char* mnnvlDegradedBwStr(unsigned int healthMask) {
 #endif
 
 // RCCL_TUNING_PARTITION_MODE: the gfx1250 tuning table this rank asks for. "auto" (or unset)
-// follows the compute-partition mode the GPU reports; "SPX" / "DPX" force one. It only picks
-// tuning thresholds. Any mode other than DPX (CPX, or none reported) asks for SPX. An invalid
-// value is reported once and treated as "auto".
+// follows the compute-partition mode the GPU reports; "SPX" / "DPX" / "CPX" force one. It only
+// picks tuning thresholds. CPX asks for its own key, which reads the SPX table until CPX is
+// tuned; any other mode (or none reported) asks for SPX. An invalid value is reported once and
+// treated as "auto".
 static rcclTuningPartition rcclTuningPartitionRequest(const char* computePartition) {
   const char* mode = ncclGetEnv("RCCL_TUNING_PARTITION_MODE");
   if (mode != nullptr && mode[0] != '\0' && strcasecmp(mode, "auto") != 0) {
     if (strcasecmp(mode, "SPX") == 0) return RCCL_TUNING_PARTITION_SPX;
     if (strcasecmp(mode, "DPX") == 0) return RCCL_TUNING_PARTITION_DPX;
+    if (strcasecmp(mode, "CPX") == 0) return RCCL_TUNING_PARTITION_CPX;
     static std::once_flag invalidModeOnce;
     std::call_once(invalidModeOnce, [mode] {
-      ATTN("Invalid value %s for RCCL_TUNING_PARTITION_MODE (expected auto, SPX or DPX), using auto", mode);
+      ATTN("Invalid value %s for RCCL_TUNING_PARTITION_MODE (expected auto, SPX, DPX or CPX), using auto", mode);
     });
   }
-  return computePartition != nullptr && strcasecmp(computePartition, "DPX") == 0 ? RCCL_TUNING_PARTITION_DPX
-                                                                                  : RCCL_TUNING_PARTITION_SPX;
+  if (computePartition != nullptr && strcasecmp(computePartition, "DPX") == 0) return RCCL_TUNING_PARTITION_DPX;
+  if (computePartition != nullptr && strcasecmp(computePartition, "CPX") == 0) return RCCL_TUNING_PARTITION_CPX;
+  return RCCL_TUNING_PARTITION_SPX;
 }
 
-// Ranks pick algorithms on their own, so every rank of a comm must read the same table: DPX only
-// when all of them ask for it, SPX otherwise. *mixed reports ranks that disagree.
+// Ranks pick algorithms on their own, so every rank of a comm must read the same table: DPX (or
+// CPX) only when all of them ask for it, SPX otherwise. *mixed reports ranks that disagree about
+// DPX, the only key with a table of its own; CPX mixed with SPX reads the SPX table either way.
 static rcclTuningPartition rcclTuningPartitionForComm(const struct ncclPeerInfo* peers, int nRanks, bool* mixed) {
-  int nDpx = 0;
-  for (int i = 0; i < nRanks; i++) nDpx += peers[i].tuningPartition == RCCL_TUNING_PARTITION_DPX;
+  int nDpx = 0, nCpx = 0;
+  for (int i = 0; i < nRanks; i++) {
+    nDpx += peers[i].tuningPartition == RCCL_TUNING_PARTITION_DPX;
+    nCpx += peers[i].tuningPartition == RCCL_TUNING_PARTITION_CPX;
+  }
   *mixed = nDpx > 0 && nDpx < nRanks;
-  return nDpx == nRanks ? RCCL_TUNING_PARTITION_DPX : RCCL_TUNING_PARTITION_SPX;
+  if (nDpx == nRanks) return RCCL_TUNING_PARTITION_DPX;
+  if (nCpx == nRanks) return RCCL_TUNING_PARTITION_CPX;
+  return RCCL_TUNING_PARTITION_SPX;
 }
 
 // Re-picks comm->archThresholds once every rank's request is known (after AllGather1).
@@ -1374,7 +1381,10 @@ static void rcclSetTuningPartition(struct ncclComm* comm) {
     ATTN("gfx1250 tuning table: ranks ask for different tables (RCCL_TUNING_PARTITION_MODE or GPU partition mode), "
          "using SPX on every rank");
   }
-  INFO(NCCL_INIT | NCCL_TUNING, "gfx1250 tuning table: %s", partition == RCCL_TUNING_PARTITION_DPX ? "DPX" : "SPX");
+  INFO(NCCL_INIT | NCCL_TUNING, "gfx1250 tuning table: %s",
+       partition == RCCL_TUNING_PARTITION_DPX   ? "DPX"
+       : partition == RCCL_TUNING_PARTITION_CPX ? "CPX (SPX table)"
+                                                : "SPX");
 }
 
 // [RCCL] What this rank shares with its parent goes into its AllGather1 info, so ranks of an ncclCommGrow that
@@ -1634,7 +1644,7 @@ NCCL_PARAM(LlBuffSize, "LL_BUFFSIZE", -2);
 NCCL_PARAM(Ll128BuffSize, "LL128_BUFFSIZE", -2);
 
 // RCCL: for multi-node gfx942/gfx950 the P2P_NET_CHUNKSIZE default is replaced by rcclSetP2pNetChunkSize()
-// in src/rccl_wrap.cc unless the user sets NCCL_P2P_NET_CHUNKSIZE.
+// in src/rccl_tuning.cc unless the user sets NCCL_P2P_NET_CHUNKSIZE.
 #define DEFAULT_P2P_NET_CHUNKSIZE (1 << 17) /* 128 kB */
 #define DEFAULT_P2P_PCI_CHUNKSIZE (1 << 17) /* 128 kB */
 #define DEFAULT_P2P_NVL_CHUNKSIZE (1 << 19) /* 512 kB */
@@ -1961,7 +1971,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int romeTopoModelIdx;
     int treeCompact;
     bool blocking;
-    bool pivotA2AEnabled;
     bool ll128Enabled;
     char hostname[128];
     int p2pnChannelsPerPeer;
@@ -2201,9 +2210,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   comm->topo->nRanks = comm->nRanks;
   // init netGdrLevel
   comm->topo->netGdrLevel = -2;
-  // init Pivot A2A related fields
-  comm->topo->pivotA2AEnabled = false;
-  comm->topo->pivotA2ANumBiRings = 0;
+  comm->topo->romeAllReduceTuning = false;
   // LL128
   comm->topo->ll128Enabled = false;
   // Topology hint if tree has been defined by model or User
@@ -2526,7 +2533,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allGather3Data[rank].nc = MAXCHANNELS;
   }
 
-  allGather3Data[rank].pivotA2AEnabled = comm->topo->pivotA2AEnabled && rcclParamPivotAlltoallEnable();
   // Default-enable LL128 on gfx1250 so NCCL_PROTO=LL128 is honored without
   // also requiring RCCL_LL128_FORCE_ENABLE=1.
   comm->topo->ll128Enabled = comm->topo->ll128Enabled || rcclParamLL128ForceEnable() ||
@@ -2793,7 +2799,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     allTopoRanks[i] = &allGather3Data[i].topoRanks;
     nc = std::min(allGather3Data[i].nc, nc);
     // Make sure we align all ranks so that the tuning is consistent across ranks
-    comm->topo->pivotA2AEnabled = comm->topo->pivotA2AEnabled && allGather3Data[i].pivotA2AEnabled;
     comm->topo->ll128Enabled = comm->topo->ll128Enabled && allGather3Data[i].ll128Enabled;
     for (int a = 0; a < NCCL_NUM_ALGORITHMS; a++) {
       graphs[a]->nChannels = std::min(allGather3Data[i].graphInfo[a].nChannels, graphs[a]->nChannels);

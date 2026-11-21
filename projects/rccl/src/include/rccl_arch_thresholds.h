@@ -128,7 +128,7 @@ struct rcclArchThresholds {
   // rank. 0 = that default at every rank count.
   size_t ddaArLL128OneShotRankBytes;
 
-  // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_wrap.cc). 0 turns that re-route off.
+  // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_scheduler/). 0 turns that re-route off.
   size_t ddaArRegCaptureMinBytes;      // graph capture: DDA instead of Ring up to max(this, nRanks x the next)
   size_t ddaArRegCapturePerRankBytes;  // per-rank part of the capture bound
   size_t ddaArRegEagerMinShardBytes;   // eager: DDA LL128 instead of CE-registered from this per-rank shard
@@ -209,10 +209,12 @@ struct rcclArchThresholds {
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks
-// the table only; other archs have one table for every mode.
+// the table only; other archs have one table for every mode. CPX has its own key so it can
+// get its own rows later, but has no table yet: rcclGetArchThresholds serves it the SPX one.
 enum rcclTuningPartition {
   RCCL_TUNING_PARTITION_SPX = 0,
   RCCL_TUNING_PARTITION_DPX = 1,
+  RCCL_TUNING_PARTITION_CPX = 2,
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,

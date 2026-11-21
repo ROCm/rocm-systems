@@ -53,7 +53,6 @@
 
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion);
 ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
-ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
 ASSERT_HOOK_MATCHES_PROD(g_ensureHierarchicalComms, rcclEnsureHierarchicalComms);
 ASSERT_HOOK_MATCHES_PROD(g_reserveHierarchicalTempBuffer, rcclReserveHierarchicalTempBuffer);
 
@@ -228,19 +227,6 @@ bool isSymmetricKernelRequestedWin(struct ncclComm* comm, ncclFunc_t coll, int s
                                    size_t nElts, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin) {
   return g_isSymmetricKernelRequested(comm, coll, symkOp, datatype, nElts, sendWin, recvWin,
                                       /*agreeAcrossRanks=*/false);
-}
-
-// rcclAllReduceShouldTakeDdaPath: real body lives in collectives.cc (not
-// linked here), same abort-floor-turned-seam treatment as the rest. Default
-// false: DDA not taken, letting CE-registered/symmetric/plain-kernel run.
-static bool DefaultAllReduceShouldTakeDdaPath(const struct ncclComm*, size_t, ncclDataType_t, bool, bool) {
-  return false;
-}
-std::function<bool(const struct ncclComm*, size_t, ncclDataType_t, bool, bool)> g_allReduceShouldTakeDdaPath =
-    DefaultAllReduceShouldTakeDdaPath;
-bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t dt, bool symEligible,
-                                    bool query) {
-  return g_allReduceShouldTakeDdaPath(comm, count, dt, symEligible, query);
 }
 
 // getAlgoInfo / rcclKernelPackedChannels: rccl_wrap.cc `extern`-declares both

@@ -100,7 +100,7 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
            -Wl,--gc-sections -fgpu-rdc \
            -Iinclude -Itest -Ihipify_rccl/include -Ihipify_rccl/include/plugin \
 		   -Ihipify_rccl/include/nccl_device \
-           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I$(ROCM_PATH)/include/ \
+           -Ihipify_rccl/src/device/include -Ihipify_rccl/graph -I$(ROCM_PATH)/include/ -Ihipify_rccl \
            -DTOPO_EXPL -DENABLE_TRACE -DENABLE_LL128 -DNVTX_NO_IMPL -DRCCL_EXPOSE_STATIC \
            -DUSE_AMDSMI \
            $(NCCL_OS_DEFINE) $(FEATURE_DEFINES) \
@@ -108,7 +108,7 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
 
-# rccl_wrap.cc's rcclRingTreeTable() calls rcclGetArchThresholds(), and
+# rccl_tuning.cc's rcclRingTreeTable() calls rcclGetArchThresholds(), and
 # enqueue.cc keeps that function live. The definition is in
 # rccl_arch_thresholds.cc; without it the gfx90a topo_expl link fails.
 RCCL_FILES = hipify_rccl/graph/topo.cc \
@@ -124,7 +124,17 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rccl_graph_gen.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
-			hipify_rccl/rccl_wrap.cc \
+			hipify_rccl/rccl_tuning.cc \
+			hipify_rccl/rccl_scheduler/rccl_scheduler.cc \
+			hipify_rccl/rccl_scheduler/sched_conditions.cc \
+			hipify_rccl/rccl_scheduler/sched_describe.cc \
+			hipify_rccl/rccl_scheduler/arch/default_rules.cc \
+			hipify_rccl/rccl_scheduler/arch/gfx1250_rules.cc \
+			hipify_rccl/rccl_scheduler/backends/ce_backends.cc \
+			hipify_rccl/rccl_scheduler/backends/dda_backends.cc \
+			hipify_rccl/rccl_scheduler/backends/general_backends.cc \
+			hipify_rccl/rccl_scheduler/backends/gin_backends.cc \
+			hipify_rccl/rccl_scheduler/backends/symmetric_backends.cc \
 			hipify_rccl/rccl_arch_thresholds.cc \
 			hipify_rccl/collectives.cc \
 			hipify_rccl/register.cc \
@@ -166,7 +176,8 @@ hipify:
 	cp -a ../../src/enqueue/enqueue.cc hipify_rccl/
 	cp -a ../../src/register/register.cc hipify_rccl/
 	cp -a ../../src/collectives.cc hipify_rccl/
-	cp -a ../../src/rccl_wrap.cc hipify_rccl/
+	cp -a ../../src/rccl_tuning.cc hipify_rccl/
+	cp -R ../../src/rccl_scheduler hipify_rccl/
 	cp -a ../../src/rccl_arch_thresholds.cc hipify_rccl/
 	cp -a ../../src/misc/archinfo.cc hipify_rccl/graph/
 	# Hipify all header and source files (CUDA -> HIP).
@@ -189,6 +200,7 @@ hipify:
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/graph/*
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/include/network/unpack/*
 	$(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) hipify_rccl/*.cc
+	find hipify_rccl/rccl_scheduler -name '*.cc' -exec $(HIPIFY_PL_EXE) $(HIPIFY_PL_FLAGS) {} +
 	# PATCH 3: Generate *_tmp.h files - these are build-time generated headers in rccl
 	cp hipify_rccl/include/nccl_device/core.h hipify_rccl/include/nccl_device/core_tmp.h
 	cp hipify_rccl/include/nccl_device/comm.h hipify_rccl/include/nccl_device/comm_tmp.h

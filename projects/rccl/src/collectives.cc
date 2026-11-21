@@ -222,29 +222,7 @@ static inline ncclResult_t ncclAlltoAllConfigImpl(const void* sendbuff, void* re
   return ncclEnqueueCheck(&info);
 }
 
-// rcclDdaEnabled() is now in rccl_wrap.cc (declared in rccl_common.h)
-
-// Decides whether ncclAllReduce_impl takes the DDA path for this call. Kept as a small named helper
-// (rather than an inline expression) so the dispatch decision is reachable from host unit tests.
-// DDA and CE 2-shot are now both candidates in rcclCandSearch; the preferred-backend mask and probe
-// order arbitrate between them. This helper gates DDA entry on symk eligibility and rcclDdaEnabled
-// only -- CE yield logic is no longer needed here.
-bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclDataType_t datatype, bool symEligible,
-                                    bool query) {
-  const size_t msgBytes = count * ncclTypeSize(datatype);
-  const bool result = !symEligible &&
-                      rcclDdaEnabled(comm, msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
-  if (!result && !query) {
-    if (symEligible)
-      INFO(NCCL_TUNING, "AR DDA disqualified: symk eligible");
-    else if (!rcclParamDdaEnable())
-      INFO(NCCL_TUNING, "AR DDA disqualified: RCCL_DDA_ENABLE=0");
-    else
-      INFO(NCCL_TUNING, "AR DDA disqualified: msgBytes=%zu > entryThreshold=%zu",
-           msgBytes, rcclDdaEntryThreshold(comm, ncclFuncAllReduce));
-  }
-  return result;
-}
+// rcclDdaEnabled() is in rccl_scheduler/backends/dda_backends.cc (declared in rccl_common.h)
 
 // Addon backends (DDA / CE 2-shot / GIN-SDMA) return from the collective impl
 // without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks, the
@@ -271,14 +249,13 @@ bool rcclCollectiveMustUseEnqueuePath(ncclComm* comm) {
   return false;
 }
 
-// Direct AllGather sets useDirect, and AlltoAll pivot/GDA enqueue a different
+// Direct AllGather sets useDirect, and AlltoAll GDA enqueues a different
 // ncclInfo, before calling ncclEnqueueCheck. Diverting those here drops the
 // algorithm. Every other selected path either already enqueues that same info
 // or skips enqueue entirely (DDA, hier, GIN, CE 2-shot).
 static bool rcclEnqueueSetupNeedsSwitch(int algo) {
   switch (algo) {
   case RCCL_DIRECT_ALLGATHER:
-  case RCCL_A2A_PIVOT:
 #ifdef ENABLE_ROCSHMEM
   case RCCL_A2A_GDA:
 #endif
@@ -288,11 +265,9 @@ static bool rcclEnqueueSetupNeedsSwitch(int algo) {
   }
 }
 
-bool rcclAlltoAllShouldTakeDdaPath(const ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed) {
-  // AlltoAll has no symmetric kernel, so DDA must yield here or registered-window
-  // CE never dispatches. Full contract is on the declaration in rccl_common.h.
-  return !ceAlltoAllAllowed && rcclDdaEnabled(comm, totalBytes, rcclDdaEntryThreshold(comm, ncclFuncAlltoAll));
-}
+// Runs a collective's scheduler decision (defined after the collectives).
+static ncclResult_t rcclLaunch(struct ncclInfo& info, const struct rcclCollDecision& decision);
+static ncclResult_t rcclLaunch(struct ncclInfo& info) { return rcclLaunch(info, info.decision); }
 
 // Check if symmetric kernels is requested for this collective.
 // Win variant: caller has already looked up both windows (avoids redundant ncclDevrFindWindow calls).
@@ -422,14 +397,9 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
   struct ncclInfo info = {ncclFuncAllGather, "AllGather", sendbuff, recvbuff, sendcount,
                           datatype,          ncclSum,     0,        comm,     stream, /* Args */
                           chunkSteps,        sliceSteps,  nullptr};
-  int nRanks, rank;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  NCCLCHECK(ncclCommUserRank(comm, &rank));
-  size_t msgSize = sendcount * ncclTypeSize(datatype) * nRanks;
-
   NCCLCHECK(Recorder::instance().record(rrAllGather, info));
 
-  // Select the implementation once, in one place (rccl_wrap.cc). The returned
+  // Select the implementation once, in one place (rccl_scheduler/). The returned
   // decision drives dispatch here (DDA / Direct / Hier return early) and is
   // carried into taskAppend() via info so the CE-vs-kernel choice and
   // graph-capture state are never recomputed. The same function backs
@@ -440,79 +410,8 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
                                 /*graphCapturingHint=*/false, &decision));
   info.decision = decision;
   info.decisionValid = true;
-
-  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
-    return ncclEnqueueCheck(&info);
-  }
-
-  // Name the addon only after the check-mode divert. Logging first would claim
-  // DDA / hier / GIN for a call that ncclEnqueueCheck is about to run instead.
-  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
-    const char* an = nullptr;
-    rcclGetAlgoName(decision.algo, &an);
-    INFO(NCCL_COLL, "AllGather impl selected: algo %s", an ? an : "?");
-  }
-
-  switch (decision.algo) {
-  case RCCL_DDA_FABRIC_LL:
-    INFO(NCCL_COLL,
-         "AllGather: taking DDA fabric LL path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
-         comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllGatherDdaFabricLL(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-    });
-  case RCCL_DDA_FABRIC_LL128:
-    INFO(NCCL_COLL,
-         "AllGather: taking DDA fabric LL128 path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d totalBytes=%zu",
-         comm->nRanks, comm->nNodes, sendcount, (int)datatype, msgSize);
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllGatherDdaFabricLL128(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-    });
-  case RCCL_DDA_FABRIC_VMM:
-    INFO(NCCL_COLL, "AllGather: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d sendcount=%zu datatype=%d bytes=%zu",
-         comm->nRanks, comm->nNodes, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllGatherDdaFabric(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-    });
-  case RCCL_DDA_IPC:
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllGatherDdaIpc(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-    });
-  case RCCL_HIERARCHICAL_ALLGATHER:
-    return rcclAddonLaunch(info, [&] {
-      return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-    });
-#if defined(ENABLE_ROCSHMEM_GIN)
-  case RCCL_AG_GIN_SDMA:
-    INFO(NCCL_COLL, "AllGather: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
-         comm->nRanks, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype),
-         sendbuff == (const char*)recvbuff + comm->rank * sendcount * ncclTypeSize(datatype) ? 1 : 0);
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllGatherGinSdma(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-    });
-#endif
-  case RCCL_DIRECT_ALLGATHER:
-    INFO(NCCL_TUNING,
-         "RCCL DIRECT ALLGATHER count = %zu, msgSize = %zu, comm = %p, stream = %p, rank = %d, sendbuff = %p, recvbuff "
-         "= %p",
-         sendcount, msgSize, comm, stream, rank, sendbuff, recvbuff);
-    if (sendcount == 0) return ncclSuccess;
-    // Mark the info so taskAppend posts this as A2A-style per-peer Send/Recv
-    // P2P tasks (no peer rotation, no in-place self skip).
-    info.useDirect = true;
-    return ncclEnqueueCheck(&info);
-  case RCCL_CE_REGISTERED:
-  case RCCL_CE_SCRATCH:
-    // CE dispatch happens in taskAppend(); just enqueue.
-    return ncclEnqueueCheck(&info);
-  default:
-    // RCCL_SYMMETRIC / native kernel algorithms go through the standard enqueue
-    // path; taskAppend() honors info->decision.
-    return ncclEnqueueCheck(&info);
-  }
+  return rcclLaunch(info);
 }
-
-RCCL_PARAM(AlltoAllPivotEnable, "ALL_TO_ALL_PIVOT_ENABLE", 0);
 
 NCCL_API(ncclResult_t, ncclAlltoAll, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
          ncclComm* comm, cudaStream_t stream);
@@ -533,67 +432,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
   };
   info.decision = decision;
   info.decisionValid = true;
-  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
-    return ncclEnqueueCheck(&info);
-  }
-
-  // Name the addon only after the check-mode divert. DDA launchers also log
-  // grid/block at launch.
-  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
-    const char* an = nullptr;
-    rcclGetAlgoName(decision.algo, &an);
-    INFO(NCCL_COLL, "AlltoAll impl selected: algo %s", an ? an : "?");
-  }
-
-  switch (decision.algo) {
-    case RCCL_A2A_PIVOT: {
-      struct ncclInfo pivotInfo = {ncclFuncAlltoAllPivot, "AlltoAllPivot",
-                              sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
-                              ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
-      return ncclEnqueueCheck(&pivotInfo);
-    }
-#ifdef ENABLE_ROCSHMEM
-    case RCCL_A2A_GDA: {
-      struct ncclInfo gdaInfo = {ncclFuncAlltoAllGda, "AlltoAllGda",
-                              sendbuff, recvbuff, count, datatype, ncclSum, 0, comm, stream,
-                              ALLTOALL_PIVOT_CHUNKSTEPS, ALLTOALL_PIVOT_SLICESTEPS, nullptr};
-      return ncclEnqueueCheck(&gdaInfo);
-    }
-#endif
-#if defined(ENABLE_ROCSHMEM_GIN)
-    case RCCL_A2A_GIN_SDMA:
-      INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
-           comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
-      return rcclAddonLaunch(info, [&] {
-        return ncclAllToAllGinSdma(sendbuff, recvbuff, count, datatype, comm, stream);
-      });
-#endif
-    case RCCL_DDA_FABRIC_LL:
-      return rcclAddonLaunch(info, [&] {
-        return ncclAllToAllDdaFabricLL(sendbuff, recvbuff, count, datatype, comm, stream);
-      });
-    case RCCL_DDA_FABRIC_LL128:
-      return rcclAddonLaunch(info, [&] {
-        return ncclAllToAllDdaFabricLL128(sendbuff, recvbuff, count, datatype, comm, stream);
-      });
-    case RCCL_DDA_FABRIC_VMM:
-      return rcclAddonLaunch(info, [&] {
-        return ncclAllToAllDdaFabric(sendbuff, recvbuff, count, datatype, comm, stream);
-      });
-    case RCCL_DDA_IPC:
-      return rcclAddonLaunch(info, [&] {
-        return ncclAllToAllDdaIpc(sendbuff, recvbuff, count, datatype, comm, stream);
-      });
-    case RCCL_CE_REGISTERED:
-    case RCCL_CE_SCRATCH:
-    case RCCL_DIRECT_ALLTOALL:
-    default:
-      break;
-  }
-
-  // CE and Direct (per-peer Send/Recv) share this enqueue; taskAppend honors
-  // info.decision instead of re-selecting.
-  return ncclEnqueueCheck(&info);
+  return rcclLaunch(info);
 }
 
 NCCL_API(ncclResult_t, ncclAlltoAllConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -678,8 +517,8 @@ ncclResult_t ncclAlltoAllv_impl(const void* sendbuff, const size_t sendcounts[],
                             0,
                             comm,
                             stream,
-                            ALLTOALL_PIVOT_CHUNKSTEPS,
-                            ALLTOALL_PIVOT_SLICESTEPS,
+                            ALLTOALL_GDA_CHUNKSTEPS,
+                            ALLTOALL_GDA_SLICESTEPS,
                             nullptr};
 #ifdef ENABLE_ROCSHMEM
     info.sizes = sizes.data();
@@ -804,7 +643,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
 
   NCCLCHECK(Recorder::instance().record(rrAllReduce, info));
 
-  // Select the implementation once, in one place (rccl_wrap.cc). The returned
+  // Select the implementation once, in one place (rccl_scheduler/). The returned
   // decision drives dispatch here (GIN / CE 2-shot / DDA return early) and is carried
   // into taskAppend() via info so the CE-vs-kernel choice and graph-capture state
   // are never recomputed. rcclSelectAllReduce() also performs the CE graph-latch
@@ -816,77 +655,7 @@ ncclResult_t ncclAllReduce_impl(const void* sendbuff, void* recvbuff, size_t cou
                                 /*graphCapturingHint=*/false, &decision));
   info.decision = decision;
   info.decisionValid = true;
-
-  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
-    return ncclEnqueueCheck(&info);
-  }
-
-  // Name the addon only after the check-mode divert.
-  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
-    const char* an = nullptr;
-    rcclGetAlgoName(decision.algo, &an);
-    INFO(NCCL_COLL, "AllReduce impl selected: algo %s", an ? an : "?");
-  }
-
-  switch (decision.algo) {
-#if defined(ENABLE_ROCSHMEM_GIN)
-  case RCCL_GIN_SDMA:
-    INFO(NCCL_COLL, "AllReduce: taking GIN SDMA path: nRanks=%d count=%zu bytes=%zu", comm->nRanks, count,
-         count * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllReduceGinSdma(sendbuff, recvbuff, count, datatype, op, comm, stream);
-    });
-#endif
-  case RCCL_CE_2SHOT: {
-    if (count == 0) return ncclSuccess;
-    INFO(NCCL_COLL, "CE 2-shot AllReduce: count=%zu datatype=%d op=%d rank=%d/%d", count, (int)datatype, (int)op,
-         comm->rank, comm->nRanks);
-    // This path bypasses ncclLaunchCeColl, so start the CeColl event here instead.
-    struct ncclCeCollArgs ceArgs = {};
-    ceArgs.func = ncclFuncAllReduce;
-    ceArgs.datatype = datatype;
-    ceArgs.redOp = op;
-    ceArgs.nElts = count;
-    ceArgs.eltSize = ncclTypeSize(datatype);
-    ceArgs.sendBuff = (uint8_t*)sendbuff;
-    ceArgs.recvBuff = (uint8_t*)recvbuff;
-    // No CollApi parent: this path returns before ncclEnqueueCheck, so the
-    // thread-local handle still names a previous collective.
-    NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
-    ncclResult_t ceRet = rcclAddonLaunch(info, [&] {
-      return ncclCeAllReduce(comm, sendbuff, recvbuff, count, datatype, op, stream, nullptr, &ceArgs);
-    });
-    ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
-    return ceRet;
-  }
-  case RCCL_DDA_FABRIC_LL:
-    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllReduceDdaFabricLL(sendbuff, recvbuff, count, datatype, op, comm, stream, info.decision.ddaCap);
-    });
-  case RCCL_DDA_FABRIC_LL128:
-    INFO(NCCL_COLL, "AllReduce: taking DDA fabric LL128 path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllReduceDdaFabricLL128(sendbuff, recvbuff, count, datatype, op, comm, stream,
-                                         info.decision.ddaCap);
-    });
-  case RCCL_DDA_FABRIC_VMM:
-    INFO(NCCL_COLL, "AllReduce: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d count=%zu datatype=%d bytes=%zu",
-         comm->nRanks, comm->nNodes, count, (int)datatype, count * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllReduceDdaFabric(sendbuff, recvbuff, count, datatype, op, comm, stream, info.decision.ddaCap);
-    });
-  case RCCL_DDA_IPC:
-    return rcclAddonLaunch(info, [&] {
-      return ncclAllReduceDdaIpc(sendbuff, recvbuff, count, datatype, op, comm, stream);
-    });
-  default:
-    // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native kernel algorithms all go
-    // through the standard enqueue path; taskAppend() honors info->decision.
-    return ncclEnqueueCheck(&info);
-  }
+  return rcclLaunch(info);
 }
 
 ncclResult_t ncclAllReduceWithBias_impl(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -963,33 +732,9 @@ ncclResult_t ncclBroadcast_impl(const void* sendbuff, void* recvbuff, size_t cou
   }
   struct rcclCollDecision decision;
   NCCLCHECK(rcclSelectBroadcast(comm, count, datatype, root, /*query=*/false, &decision));
-  // Non-DDA decisions enqueue unchanged (info.decision stays unset).
-  if (decision.algo < NCCL_NUM_ALGORITHMS) {
-    return ncclEnqueueCheck(&info);
-  }
-
-  if (comm->rank == 0) {
-    const char* an = nullptr;
-    rcclGetAlgoName(decision.algo, &an);
-    INFO(NCCL_COLL, "Broadcast impl selected: algo %s", an ? an : "?");
-  }
-
-  switch (decision.algo) {
-  case RCCL_DDA_FABRIC_LL:
-    INFO(NCCL_COLL, "Broadcast: taking DDA LL path: nRanks=%d root=%d count=%zu datatype=%d bytes=%zu", comm->nRanks,
-         root, count, (int)datatype, count * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclBroadcastDdaFabricLL(sendbuff, recvbuff, count, datatype, root, comm, stream);
-    });
-  case RCCL_DDA_FABRIC_LL128:
-    INFO(NCCL_COLL, "Broadcast: taking DDA LL128 path: nRanks=%d root=%d count=%zu datatype=%d bytes=%zu",
-         comm->nRanks, root, count, (int)datatype, count * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclBroadcastDdaFabricLL128(sendbuff, recvbuff, count, datatype, root, comm, stream);
-    });
-  default:
-    return ncclEnqueueCheck(&info);
-  }
+  // Native decisions enqueue without a decision attached; taskAppend selects as before.
+  if (decision.algo < NCCL_NUM_ALGORITHMS) return ncclEnqueueCheck(&info);
+  return rcclLaunch(info, decision);
 }
 
 NCCL_API(ncclResult_t, ncclBroadcastConfig, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
@@ -1241,16 +986,12 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
                           sliceSteps,
                           nullptr};
 
-  int nRanks;
-  NCCLCHECK(ncclCommCount(comm, &nRanks));
-  size_t msgSize = recvcount * ncclTypeSize(datatype) * nRanks;
-
   NCCLCHECK(Recorder::instance().record(rrReduceScatter, info));
 
   // Reset value forcing direct reduce scatter algorithm
   comm->enableDirectReduceScatter = 0;
 
-  // Select once in rccl_wrap.cc; the same function backs rcclGetCollImplInfo.
+  // Select once in rccl_scheduler/; the same function backs rcclGetCollImplInfo.
   // Carry the decision into taskAppend() so RCCL_SYMMETRIC vs ring is not
   // re-derived (NCCL_ALGO=Ring must not still extract the symmetric kernel).
   // Tick the shared CE graph latch before selection so CE ReduceScatter sees capture.
@@ -1266,76 +1007,175 @@ ncclResult_t ncclReduceScatter_impl(const void* sendbuff, void* recvbuff, size_t
   decision.ceCapturing = ceCapturing;
   info.decision = decision;
   info.decisionValid = true;
+  return rcclLaunch(info);
+}
 
-  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(decision.algo)) {
-    return ncclEnqueueCheck(&info);
+// Backend launches. Addon backends (DDA, CE 2-shot, GIN, hierarchical) run here
+// and return without ncclEnqueueCheck; everything else enqueues and taskAppend()
+// honors info.decision.
+
+static const char* rcclDdaTierName(int algo) {
+  switch (algo) {
+  case RCCL_DDA_FABRIC_LL: return "DDA fabric LL";
+  case RCCL_DDA_FABRIC_LL128: return "DDA fabric LL128";
+  case RCCL_DDA_FABRIC_VMM: return "DDA fabric (VMM)";
+  default: return "DDA IPC";
   }
+}
 
-  // Name the addon only after the check-mode divert.
-  if (comm->rank == 0 && decision.algo >= NCCL_NUM_ALGORITHMS) {
+static ncclResult_t rcclLaunchDda(const struct ncclInfo& info, int algo, const rcclDdaLaunchCap& cap) {
+  const void* s = info.sendbuff;
+  void* r = info.recvbuff;
+  const size_t n = info.count;
+  const ncclDataType_t t = info.datatype;
+  const ncclRedOp_t op = info.op;
+  ncclComm* comm = info.comm;
+  cudaStream_t st = info.stream;
+  INFO(NCCL_COLL, "%s: taking %s path: nRanks=%d nNodes=%d count=%zu datatype=%d", info.opName, rcclDdaTierName(algo),
+       comm->nRanks, comm->nNodes, n, (int)t);
+  return rcclAddonLaunch(info, [&] {
+    switch (info.coll) {
+    case ncclFuncAllReduce:
+      switch (algo) {
+      case RCCL_DDA_FABRIC_LL: return ncclAllReduceDdaFabricLL(s, r, n, t, op, comm, st, cap);
+      case RCCL_DDA_FABRIC_LL128: return ncclAllReduceDdaFabricLL128(s, r, n, t, op, comm, st, cap);
+      case RCCL_DDA_FABRIC_VMM: return ncclAllReduceDdaFabric(s, r, n, t, op, comm, st, cap);
+      default: return ncclAllReduceDdaIpc(s, r, n, t, op, comm, st);
+      }
+    case ncclFuncAllGather:
+      switch (algo) {
+      case RCCL_DDA_FABRIC_LL: return ncclAllGatherDdaFabricLL(s, r, n, t, comm, st);
+      case RCCL_DDA_FABRIC_LL128: return ncclAllGatherDdaFabricLL128(s, r, n, t, comm, st);
+      case RCCL_DDA_FABRIC_VMM: return ncclAllGatherDdaFabric(s, r, n, t, comm, st);
+      default: return ncclAllGatherDdaIpc(s, r, n, t, comm, st);
+      }
+    case ncclFuncReduceScatter:
+      switch (algo) {
+      case RCCL_DDA_FABRIC_LL: return ncclReduceScatterDdaFabricLL(s, r, n, t, op, comm, st);
+      case RCCL_DDA_FABRIC_LL128: return ncclReduceScatterDdaFabricLL128(s, r, n, t, op, comm, st);
+      case RCCL_DDA_FABRIC_VMM: return ncclReduceScatterDdaFabric(s, r, n, t, op, comm, st);
+      default: return ncclReduceScatterDdaIpc(s, r, n, t, op, comm, st);
+      }
+    case ncclFuncAlltoAll:
+      switch (algo) {
+      case RCCL_DDA_FABRIC_LL: return ncclAllToAllDdaFabricLL(s, r, n, t, comm, st);
+      case RCCL_DDA_FABRIC_LL128: return ncclAllToAllDdaFabricLL128(s, r, n, t, comm, st);
+      case RCCL_DDA_FABRIC_VMM: return ncclAllToAllDdaFabric(s, r, n, t, comm, st);
+      default: return ncclAllToAllDdaIpc(s, r, n, t, comm, st);
+      }
+    case ncclFuncBroadcast:
+      if (algo == RCCL_DDA_FABRIC_LL) return ncclBroadcastDdaFabricLL(s, r, n, t, info.root, comm, st);
+      return ncclBroadcastDdaFabricLL128(s, r, n, t, info.root, comm, st);
+    default: return ncclInvalidUsage;
+    }
+  });
+}
+
+// AllReduce and ReduceScatter on the eager CE 2-shot path. It bypasses
+// ncclLaunchCeColl, so the CeColl profiler event starts here. There is no
+// CollApi parent: the thread-local handle still names a previous collective.
+static ncclResult_t rcclLaunchCe2Shot(const struct ncclInfo& info) {
+  if (info.count == 0) return ncclSuccess;
+  ncclComm* comm = info.comm;
+  INFO(NCCL_COLL, "%s: taking CE 2-shot path: count=%zu datatype=%d op=%d rank=%d/%d", info.opName, info.count,
+       (int)info.datatype, (int)info.op, comm->rank, comm->nRanks);
+  struct ncclCeCollArgs ceArgs = {};
+  ceArgs.func = info.coll;
+  ceArgs.datatype = info.datatype;
+  ceArgs.redOp = info.op;
+  ceArgs.nElts = info.count;
+  ceArgs.eltSize = ncclTypeSize(info.datatype);
+  ceArgs.sendBuff = (uint8_t*)info.sendbuff;
+  ceArgs.recvBuff = (uint8_t*)info.recvbuff;
+  NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, info.stream));
+  ncclResult_t ret = rcclAddonLaunch(info, [&] {
+    if (info.coll == ncclFuncAllReduce)
+      return ncclCeAllReduce(comm, info.sendbuff, info.recvbuff, info.count, info.datatype, info.op, info.stream,
+                             nullptr, &ceArgs);
+    return ncclCeReduceScatter(comm, info.sendbuff, info.recvbuff, info.count, info.datatype, info.op, info.stream,
+                               nullptr, &ceArgs);
+  });
+  ncclProfilerStopCeCollEvent(comm, &ceArgs, info.stream);
+  return ret;
+}
+
+#if defined(ENABLE_ROCSHMEM_GIN)
+static ncclResult_t rcclLaunchGinSdma(const struct ncclInfo& info) {
+  ncclComm* comm = info.comm;
+  INFO(NCCL_COLL, "%s: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d", info.opName, comm->nRanks, info.count,
+       (int)info.datatype);
+  return rcclAddonLaunch(info, [&] {
+    switch (info.coll) {
+    case ncclFuncAllReduce:
+      return ncclAllReduceGinSdma(info.sendbuff, info.recvbuff, info.count, info.datatype, info.op, comm, info.stream);
+    case ncclFuncAllGather:
+      return ncclAllGatherGinSdma(info.sendbuff, info.recvbuff, info.count, info.datatype, comm, info.stream);
+    default:
+      return ncclAllToAllGinSdma(info.sendbuff, info.recvbuff, info.count, info.datatype, comm, info.stream);
+    }
+  });
+}
+#endif
+
+static ncclResult_t rcclLaunch(struct ncclInfo& info, const struct rcclCollDecision& decision) {
+  ncclComm* comm = info.comm;
+  const int algo = decision.algo;
+  // Check mode, suspended and revoked comms need ncclEnqueueCheck's guards.
+  if (rcclCollectiveMustUseEnqueuePath(comm) && !rcclEnqueueSetupNeedsSwitch(algo)) return ncclEnqueueCheck(&info);
+
+  if (comm->rank == 0 && algo >= NCCL_NUM_ALGORITHMS) {
     const char* an = nullptr;
-    rcclGetAlgoName(decision.algo, &an);
-    INFO(NCCL_COLL, "ReduceScatter impl selected: algo %s", an ? an : "?");
+    rcclGetAlgoName(algo, &an);
+    INFO(NCCL_COLL, "%s impl selected: algo %s", info.opName, an ? an : "?");
   }
 
-  switch (decision.algo) {
-  case RCCL_CE_2SHOT: {
-    if (recvcount == 0) return ncclSuccess;
-    INFO(NCCL_COLL, "CE ReduceScatter: recvcount=%zu datatype=%d op=%d rank=%d/%d", recvcount, (int)datatype, (int)op,
-         comm->rank, comm->nRanks);
-    // This path bypasses ncclLaunchCeColl, so start the CeColl event here instead.
-    struct ncclCeCollArgs ceArgs = {};
-    ceArgs.func = ncclFuncReduceScatter;
-    ceArgs.datatype = datatype;
-    ceArgs.redOp = op;
-    ceArgs.nElts = recvcount;
-    ceArgs.eltSize = ncclTypeSize(datatype);
-    ceArgs.sendBuff = (uint8_t*)sendbuff;
-    ceArgs.recvBuff = (uint8_t*)recvbuff;
-    // No CollApi parent: this path returns before ncclEnqueueCheck, so the
-    // thread-local handle still names a previous collective.
-    NCCLCHECK(ncclProfilerStartCeCollEvent(comm, &ceArgs, stream));
-    ncclResult_t ceRet = rcclAddonLaunch(comm, stream, [&] {
-      return ncclCeReduceScatter(comm, sendbuff, recvbuff, recvcount, datatype, op, stream, nullptr, &ceArgs);
-    });
-    ncclProfilerStopCeCollEvent(comm, &ceArgs, stream);
-    return ceRet;
-  }
-  case RCCL_DDA_FABRIC_LL:
-    INFO(NCCL_COLL, "ReduceScatter: taking DDA fabric LL path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
-         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclReduceScatterDdaFabricLL(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
-    });
-  case RCCL_DDA_FABRIC_LL128:
-    INFO(NCCL_COLL,
-         "ReduceScatter: taking DDA fabric LL128 path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
-         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclReduceScatterDdaFabricLL128(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
-    });
+  switch (algo) {
   case RCCL_DDA_FABRIC_VMM:
-    INFO(NCCL_COLL,
-         "ReduceScatter: taking DDA fabric (VMM) path: nRanks=%d nNodes=%d recvcount=%zu datatype=%d bytes=%zu",
-         comm->nRanks, comm->nNodes, recvcount, (int)datatype, recvcount * ncclTypeSize(datatype));
-    return rcclAddonLaunch(info, [&] {
-      return ncclReduceScatterDdaFabric(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
-    });
   case RCCL_DDA_IPC:
+    if (info.coll == ncclFuncBroadcast) return ncclEnqueueCheck(&info);
+    return rcclLaunchDda(info, algo, decision.ddaCap);
+  case RCCL_DDA_FABRIC_LL:
+  case RCCL_DDA_FABRIC_LL128:
+    return rcclLaunchDda(info, algo, decision.ddaCap);
+  case RCCL_CE_2SHOT:
+    return rcclLaunchCe2Shot(info);
+#if defined(ENABLE_ROCSHMEM_GIN)
+  case RCCL_GIN_SDMA:
+  case RCCL_AG_GIN_SDMA:
+  case RCCL_A2A_GIN_SDMA:
+    return rcclLaunchGinSdma(info);
+#endif
+  case RCCL_HIERARCHICAL_ALLGATHER:
     return rcclAddonLaunch(info, [&] {
-      return ncclReduceScatterDdaIpc(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+      return ncclHierarchicalAllGather_Impl(info.sendbuff, info.recvbuff, info.count, info.datatype, comm,
+                                            info.stream);
     });
   case RCCL_HIERARCHICAL_REDUCESCATTER:
     return rcclAddonLaunch(info, [&] {
-      return ncclHierarchicalReduceScatter_Impl(sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
+      return ncclHierarchicalReduceScatter_Impl(info.sendbuff, info.recvbuff, info.count, info.datatype, info.op,
+                                                comm, info.stream);
     });
+  case RCCL_DIRECT_ALLGATHER:
+    INFO(NCCL_TUNING, "RCCL DIRECT ALLGATHER count=%zu comm=%p stream=%p rank=%d sendbuff=%p recvbuff=%p",
+         info.count, comm, info.stream, comm->rank, info.sendbuff, info.recvbuff);
+    if (info.count == 0) return ncclSuccess;
+    // taskAppend posts it as per-peer Send/Recv (no peer rotation, no in-place self skip).
+    info.useDirect = true;
+    return ncclEnqueueCheck(&info);
   case RCCL_DIRECT_REDUCESCATTER:
-    INFO(NCCL_TUNING,
-         "RCCL DIRECT REDUCE-SCATTER recvcount=%zu msgSize=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p "
-         "sendbuff=%p recvbuff=%p",
-         recvcount, msgSize, comm->rank, nRanks, comm->nNodes, comm, stream, sendbuff, recvbuff);
-    return rcclDirectReduceScatter(sendbuff, recvbuff, recvcount, datatype, op, comm, stream, chunkSteps, sliceSteps);
-  default: // RCCL_SYMMETRIC / RCCL_CE_REGISTERED / native: enqueue; taskAppend honors info->decision.
+    INFO(NCCL_TUNING, "RCCL DIRECT REDUCE-SCATTER recvcount=%zu rank=%d nRanks=%d nNodes=%d comm=%p stream=%p",
+         info.count, comm->rank, comm->nRanks, comm->nNodes, comm, info.stream);
+    return rcclDirectReduceScatter(info.sendbuff, info.recvbuff, info.count, info.datatype, info.op, comm,
+                                   info.stream, info.chunkSteps, info.sliceSteps);
+#ifdef ENABLE_ROCSHMEM
+  case RCCL_A2A_GDA: {
+    struct ncclInfo gdaInfo = {ncclFuncAlltoAllGda, "AlltoAllGda", info.sendbuff, info.recvbuff, info.count,
+                               info.datatype, ncclSum, 0, comm, info.stream, ALLTOALL_GDA_CHUNKSTEPS,
+                               ALLTOALL_GDA_SLICESTEPS, nullptr};
+    return ncclEnqueueCheck(&gdaInfo);
+  }
+#endif
+  default:
     return ncclEnqueueCheck(&info);
   }
 }

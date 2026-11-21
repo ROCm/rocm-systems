@@ -88,8 +88,7 @@ typedef enum {
   RCCL_DDA_FABRIC_VMM,  // DDA fabric, VMM/Simple path
   RCCL_DDA_IPC,         // DDA IPC (single-node, fixed nRanks)
   RCCL_GIN_SDMA,        // GIN-SDMA AllReduce (scaleup LSA/GIN)
-  RCCL_A2A_PIVOT,       // AlltoAll pivot algorithm (large, aligned messages)
-  RCCL_A2A_GDA,         // AlltoAll via GDA/RocSHMEM
+  RCCL_A2A_GDA = RCCL_GIN_SDMA + 2, // AlltoAll via GDA/RocSHMEM (skips the retired pivot value)
   RCCL_A2A_GIN_SDMA,    // AlltoAll via GIN LSA/SDMA
   // Appended rather than grouped with the other Direct entries so existing
   // values stay stable.
@@ -227,7 +226,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
                                      struct rcclCollDecision* decision, bool graphCapturingHint = false);
-// Single source of truth for AlltoAll selection: Pivot -> GDA -> DDA (LL/LL128/VMM/IPC) ->
+// Single source of truth for AlltoAll selection: GDA -> GIN -> DDA (LL/LL128/VMM/IPC) ->
 // CE registered -> HierCE -> CE scratch -> Direct (per-peer Send/Recv).
 // Live enqueue carries the decision so taskAppend honors CE vs Direct instead of
 // re-deriving it. query=false probes `stream` for capture; query=true uses
@@ -285,7 +284,7 @@ size_t rcclCeArNonRegCap(const struct ncclComm* comm);
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
 // Pure query: is CE AllReduce currently allowed on this comm?
 bool rcclCeArGraphSafe(struct ncclComm* comm);
-// CE AllReduce knobs (defined in rccl_wrap.cc). Both default to -1 (unset), which
+// CE AllReduce knobs (defined in rccl_scheduler/rccl_scheduler.cc). Both default to -1 (unset), which
 // resolves to the per-arch default; use the resolvers below rather than the raw
 // params so an unset env var does not read as "disabled".
 RCCL_PARAM_DECLARE(CeAllReduce);
@@ -313,20 +312,9 @@ RCCL_PARAM_DECLARE(CeArMinMsgBytes);     // -1 = use arch table; AR CE non-reg l
 RCCL_PARAM_DECLARE(CeCollMinBytes);      // -1 = use arch table; non-AR CE non-reg lower bound
 RCCL_PARAM_DECLARE(SymKMinBytes);        // -1 = use arch table; overrides symMinR2 for all collectives
 // True when NCCL_ALGO is set by the user. Used to skip CE/DDA/Symmetric in
-// both the selector (rccl_wrap.cc) and taskAppend (enqueue.cc).
+// both the scheduler (rccl_scheduler/) and taskAppend (enqueue.cc).
 bool rcclNcclAlgoEnvIsSet();
 // Registered CE AllReduce AUTO size cap. Env RCCL_CE_AR_REG_MAX_MSG_BYTES wins
-// Decides whether ncclAllReduce_impl takes the DDA path for this call. Mirrors the guard in
-// collectives.cc exactly: DDA requires !symEligible on every arch (gfx1250 fabric included).
-// Non-gfx1250 also requires CE AllReduce not to service the call (`ceAllReduceAllowed`);
-// gfx1250 may still take fabric DDA when CE is eligible. DDA must also be enabled for this
-// arch/size. Host-side and GPU-free so the dispatch decision can be unit tested.
-bool rcclAllReduceShouldTakeDdaPath(const struct ncclComm* comm, size_t count, ncclDataType_t datatype,
-                                    bool symEligible, bool query);
-// Decides whether ncclAlltoAll_impl takes the DDA early-return. AlltoAll has no
-// symmetric kernel, so unlike AllGather it cannot gate DDA on !symEligible.
-// `ceAlltoAllAllowed` is single-node CE (ncclCeAvailable); hier CE does not yield DDA.
-bool rcclAlltoAllShouldTakeDdaPath(const struct ncclComm* comm, size_t totalBytes, bool ceAlltoAllAllowed);
 // True when DDA / CE 2-shot / GIN-SDMA early-returns must yield to ncclEnqueueCheck
 // so NCCL_CHECK_MODE pointer checks and the suspend guard still run.
 bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
@@ -356,8 +344,6 @@ RCCL_PARAM_DECLARE(HierarchicalAllGather);
 RCCL_PARAM_DECLARE(HierarchicalReduceScatter);
 // Hierarchical sub-communicators deferred to the first eligible AllGather
 RCCL_PARAM_DECLARE(HierarchicalLazyInit);
-// Pivot AlltoAll enabled (defined in collectives.cc)
-RCCL_PARAM_DECLARE(AlltoAllPivotEnable);
 #define HIERARCHICAL_TEMP_BUFFER_SIZE (128 * 1024 * 1024) // 128MB
 
 // DDA threshold

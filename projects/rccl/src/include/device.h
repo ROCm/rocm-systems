@@ -46,7 +46,7 @@ typedef __hip_bfloat16 hip_bfloat16;
 #define sqtt_marker_exit(name) do {} while(0)
 #endif
 
-extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4];
+extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 3];
 
 extern const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS];
 
@@ -491,7 +491,7 @@ struct alignas(16) ncclDevWorkColl {
   uint32_t nWarps:8;
   uint32_t redOpArgIsPtr:1, regUsed:1, netRegUsed:1, oneNode:1, direct:2, isOneRPN:1, rcclUseOneSlice:1;
   uint32_t root:30, connIndex:2;
-  uint16_t pivotA2ANumBiRings:15, profilerEnabled:1;
+  uint16_t :15, profilerEnabled:1;
   void* recvbuff;
   void* sendbuff;
   void* acc;
@@ -1015,7 +1015,7 @@ inline int ncclDevFuncId(int coll, int devRedOp, int type, int algo, int proto, 
     // (0 = legacy LL, 1 = LL128). reg=0 preserves the historical coll-only key.
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |
           ((uint64_t)(reg & RCCL_FUNC_ID_MASK) << RCCL_REG_SHIFT);
-  } else if (coll == ncclFuncAlltoAllPivot || coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
+  } else if (coll == ncclFuncAlltoAllGda || coll == ncclFuncAlltoAllvGda) {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT);
   } else {
     key = ((uint64_t)(coll & RCCL_FUNC_ID_MASK) << RCCL_COLL_SHIFT) |

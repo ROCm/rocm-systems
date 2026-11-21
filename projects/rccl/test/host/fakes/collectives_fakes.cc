@@ -101,11 +101,6 @@ const char* ncclDatatypeToString(ncclDataType_t type) {
 // Red-op text is not consumed by this target; retain the existing placeholder.
 const char* ncclDevRedOpToString(ncclDevRedOp_t) { return "redop"; }
 
-// rcclSelectAlltoAll reads this to decide the pivot path, so it is referenced
-// from outside collectives.cc and the redirected RCCL_PARAM does not cover it.
-// Same env name and default (off) as collectives.cc:452.
-int64_t rcclParamAlltoAllPivotEnable() { return g_loadParam("RCCL_ALL_TO_ALL_PIVOT_ENABLE", 0); }
-
 std::function<bool(struct ncclComm*)> g_collectiveMustUseEnqueuePath = [](struct ncclComm*) { return false; };
 bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm) {
   return g_collectiveMustUseEnqueuePath(comm);

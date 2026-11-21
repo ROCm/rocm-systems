@@ -18,7 +18,9 @@ const rcclArchThresholds* g_archThresholdsTable[2] = {nullptr, nullptr};
 const rcclArchThresholds* rcclGetArchThresholds(const char* /*gcn*/, rcclTuningPartition partition) {
   ++g_archThresholdsCalls;
   g_lastArchThresholdsPartition = partition;
-  return g_archThresholdsTable[partition];
+  // Like the real table lookup, CPX has no table of its own yet and reads the SPX slot.
+  return g_archThresholdsTable[partition == RCCL_TUNING_PARTITION_DPX ? RCCL_TUNING_PARTITION_DPX
+                                                                      : RCCL_TUNING_PARTITION_SPX];
 }
 
 void ResetRcclArchThresholdsFakes() {

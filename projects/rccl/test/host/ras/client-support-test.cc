@@ -262,10 +262,9 @@ ncclResult_t rasDiagnosticsResume(struct rasClient* /*client*/) {
 // src/init.cc extern (only the name table; init.cc itself isn't linked here).
 // Verbatim copy of src/init.cc's own definition.
 // ---------------------------------------------------------------------------
-const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
-                                                   "AlltoAllPivot", "AlltoAllGda", "AlltoAllvGda",
-                                                   "SendRecv"};
-static_assert(NCCL_NUM_FUNCTIONS + 4 == 9, "Update the ncclFuncStr fixture when functions change");
+const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 3] = {"Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce",
+                                                   "AlltoAllGda", "AlltoAllvGda", "SendRecv"};
+static_assert(NCCL_NUM_FUNCTIONS + 3 == 8, "Update the ncclFuncStr fixture when functions change");
 
 // ---------------------------------------------------------------------------
 // misc/socket.cc externs (only rasClientInitSocket needs these).

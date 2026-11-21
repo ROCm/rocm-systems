@@ -2095,7 +2095,9 @@ TEST_F(InitMicrotest, FillInfo_TuningPartitionRequest) {
   };
   const Case cases[] = {{nullptr, "SPX", RCCL_TUNING_PARTITION_SPX},
                         {nullptr, "DPX", RCCL_TUNING_PARTITION_DPX},
-                        {nullptr, "CPX", RCCL_TUNING_PARTITION_SPX},
+                        {nullptr, "CPX", RCCL_TUNING_PARTITION_CPX},
+                        {"CPX", "SPX", RCCL_TUNING_PARTITION_CPX},
+                        {"cpx", "DPX", RCCL_TUNING_PARTITION_CPX},
                         {nullptr, "", RCCL_TUNING_PARTITION_SPX},
                         {"SPX", "DPX", RCCL_TUNING_PARTITION_SPX},
                         {"DPX", "SPX", RCCL_TUNING_PARTITION_DPX},
@@ -2189,6 +2191,21 @@ TEST_F(InitMicrotest, TuningPartitionForComm_DpxOnlyWhenEveryRankAsks) {
   EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kDpx, kSpx, kDpx}, &mixed));
   EXPECT_TRUE(mixed);
   EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kSpx, kDpx}, &mixed));
+  EXPECT_TRUE(mixed);
+}
+
+// CPX has its own key, used only when every rank asks for it. It reads the SPX table, so CPX
+// mixed with SPX is not reported as mixed; mixed with DPX it is, as SPX would be.
+TEST_F(InitMicrotest, TuningPartitionForComm_CpxOnlyWhenEveryRankAsks) {
+  constexpr int kSpx = RCCL_TUNING_PARTITION_SPX;
+  constexpr int kDpx = RCCL_TUNING_PARTITION_DPX;
+  constexpr int kCpx = RCCL_TUNING_PARTITION_CPX;
+  bool mixed = true;
+  EXPECT_EQ(RCCL_TUNING_PARTITION_CPX, TuningPartitionFor({kCpx, kCpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kCpx, kSpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kCpx, kDpx}, &mixed));
   EXPECT_TRUE(mixed);
 }
 
@@ -3965,8 +3982,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoDetected_StampsTopoDefaults) {
   g_tuningIndexValue = 7;
   // installTopo() value-initialises the system, so the four "reset to false/0" fields below would pass
   // whether or not :1584-1589 ran. Poison them first, exactly as the graphs[] test poisons its slots.
-  topo->pivotA2AEnabled = true;
-  topo->pivotA2ANumBiRings = 7;
+  topo->romeAllReduceTuning = true;
   topo->ll128Enabled = true;
   topo->treeDefined = true;
   InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
@@ -3975,8 +3991,7 @@ TEST_F(InitMicrotest, InitTransportsRank_TopoDetected_StampsTopoDefaults) {
   EXPECT_EQ(4, topo->nRanks);
   EXPECT_EQ(7, topo->tuning);
   EXPECT_EQ(-2, topo->netGdrLevel);
-  EXPECT_FALSE(topo->pivotA2AEnabled);
-  EXPECT_EQ(0, topo->pivotA2ANumBiRings);
+  EXPECT_FALSE(topo->romeAllReduceTuning);
   EXPECT_FALSE(topo->ll128Enabled);
   EXPECT_FALSE(topo->treeDefined);
 }
@@ -10837,7 +10852,6 @@ struct Tr_AllGatherInfo {
   int romeTopoModelIdx;
   int treeCompact;
   bool blocking;
-  bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];
   int p2pnChannelsPerPeer;

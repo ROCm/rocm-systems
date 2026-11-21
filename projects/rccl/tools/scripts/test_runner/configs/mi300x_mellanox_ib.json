@@ -1101,7 +1101,7 @@
         },
         {
           "name": "RcclAlltoAllDecision",
-          "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
+          "description": "AlltoAll dispatch decision unit tests (DDA, CE, GIN selection)",
           "test_filter": "RcclAlltoAllDecision.*"
         },
         {
@@ -4954,15 +4954,6 @@
       "extends": "perf_bf16_base",
       "tests": [
         {
-          "name": "Coll_PivotAlltoall",
-          "description": "RCCL_ALL_TO_ALL_PIVOT_ENABLE + RCCL_PIVOT_ALLTOALL_ENABLE off",
-          "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/alltoall_perf",
-          "env_variables": {
-            "RCCL_ALL_TO_ALL_PIVOT_ENABLE": "1",
-            "RCCL_PIVOT_ALLTOALL_ENABLE": "0"
-          }
-        },
-        {
           "name": "Coll_LL128_Force",
           "description": "RCCL_LL128_FORCE_ENABLE forces LL128 proto",
           "binary": "${RCCL_TESTS_DIR:-$PWD/rccl-tests}/build/all_gather_perf",
@@ -6378,7 +6369,7 @@
     },
     {
       "name": "rccl-tests - Collective Variants",
-      "description": "rccl-tests perf sweep across alltoall/allgather/reducescatter/broadcast (RCCL_ALL_TO_ALL_PIVOT_ENABLE, RCCL_PIVOT_ALLTOALL_ENABLE, RCCL_LL128_FORCE_ENABLE, RCCL_P2P_NET_DISABLE, RCCL_OUTPUT_TREES)",
+      "description": "rccl-tests perf sweep across alltoall/allgather/reducescatter/broadcast (RCCL_LL128_FORCE_ENABLE, RCCL_P2P_NET_DISABLE, RCCL_OUTPUT_TREES)",
       "config": "collective_variants",
       "enabled": true
     },
