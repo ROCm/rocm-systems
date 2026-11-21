@@ -14,6 +14,27 @@
 extern "C" {
 #endif
 
+// gfx1251 packed U64 arithmetic: A/B and D each hold two U64 values per lane,
+// in four VGPRs. ADD/SUB support RJ_ARITH_PK_NEG_LO_A/B, NEG_HI_A/B and CLAMP.
+// Negation precedes arithmetic; CLAMP saturates the mathematical result to U64,
+// otherwise results wrap modulo 2^64. All semantics share these integer results.
+// Inactive lanes are preserved; arbitrary operand VGPR storage may overlap.
+// Guest FP controls are rejected except the globally accepted, ignored FP16_OVFL.
+int rj_arith_v_pk_add_nc_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b);
+int rj_arith_v_pk_sub_nc_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *a,
+                                 const uint32_t *const *b);
+
+// gfx1251: D = (A << B) + C, independently for two U64 elements per lane.
+// A/C/D each use four VGPRs; B uses two VGPRs holding independent U32 counts.
+// Active counts must be in [0,4], the inherited supported execution domain.
+// Instruction flags must be zero; semantics, overlap, EXEC and FP flags as above.
+int rj_arith_v_pk_lshl_add_u64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+
 // Select each output byte using the corresponding byte of C. Selectors 0..7
 // select bytes of the concatenation A:B (B supplies the low four bytes).
 // Selectors 8..11 replicate the sign bit of its four 16-bit halves; 12 selects

@@ -6893,7 +6893,9 @@ def test_cdna5_variant_execution_callback_inventory(
         assert executable_class in backend_source
         assert executable_class in execution_source
     assert 'PkU64Pair read_pk_u64_pair' in execution_source
-    assert 'PkU32Pair read_pk_u32_pair' in execution_source
+    assert 'PkU32Pair read_pk_u32_pair' not in execution_source
+    assert 'rj_arith_v_pk_lshl_add_u64_w32, 0,' in execution_source
+    assert 'rj_arith_packed_u64_exec.h' in execution_source
     assert 'void write_pk_u64_pair' in execution_source
     u64_read_helper = execution_source.split('PkU64Pair read_pk_u64_pair', 1)[1].split(
         '\n}', 1
@@ -6907,13 +6909,6 @@ def test_cdna5_variant_execution_callback_inventory(
     assert 'operand.vgpr_msb_role()' in execution_source
     assert 'read_vgpr64(base + 2, lane)' in execution_source
     assert 'write_vgpr64(base + 2, lane, value.hi)' in execution_source
-    u32_read_helper = execution_source.split('PkU32Pair read_pk_u32_pair', 1)[1].split(
-        '\n}', 1
-    )[0]
-    assert 'const auto reg = operand.to_register_ref();' in u32_read_helper
-    assert 'if (!reg || reg->cls != RegClass::VGPR)' in u32_read_helper
-    assert 'read_lane(operand, lane)' in u32_read_helper
-    assert 'read_lane_pair32(operand, lane)' in u32_read_helper
     assert 'is_general_register' not in u64_read_helper
     assert 'exec_wmma_f64_16x16x4_f64' in execution_source
     execute_body = execution_source.split(

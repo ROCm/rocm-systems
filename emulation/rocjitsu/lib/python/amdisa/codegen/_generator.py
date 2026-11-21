@@ -7004,11 +7004,6 @@ class CodeGenerator:
               uint64_t hi;
             };
 
-            struct PkU32Pair {
-              uint32_t lo;
-              uint32_t hi;
-            };
-
             uint32_t packed_vgpr_physical_base(const Operand &operand,
                                                const amdgpu::Wavefront &wf) {
               const auto offset = Isa::resolved_vgpr_offset(
@@ -7026,19 +7021,6 @@ class CodeGenerator:
 
               const uint32_t base = packed_vgpr_physical_base(operand, wf);
               return {lo, amdgpu::RegisterAccess(wf).read_vgpr64(base + 2, lane)};
-            }
-
-            PkU32Pair read_pk_u32_pair(const Operand &operand, const amdgpu::Wavefront &wf,
-                                       uint32_t lane) {
-              // Packed 32-bit scalar inputs replicate one word, including special
-              // scalar registers. Only VGPR inputs supply two independent words.
-              const auto reg = operand.to_register_ref();
-              if (!reg || reg->cls != RegClass::VGPR) {
-                const uint32_t value = amdgpu::RegisterAccess(wf).read_lane(operand, lane);
-                return {value, value};
-              }
-              const auto pair = amdgpu::RegisterAccess(wf).read_lane_pair32(operand, lane);
-              return {pair.lo, pair.hi};
             }
 
             void write_pk_u64_pair(const Operand &operand, amdgpu::Wavefront &wf, uint32_t lane,
@@ -18459,6 +18441,18 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/rj_arith_wide_conversion_exec.h',
+                            False,
+                        )
+                    )
+
+                if any(
+                    i.name
+                    in ('V_PK_ADD_NC_U64', 'V_PK_SUB_NC_U64', 'V_PK_LSHL_ADD_U64')
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        (
+                            'rocjitsu/isa/arch/amdgpu/shared/rj_arith_packed_u64_exec.h',
                             False,
                         )
                     )

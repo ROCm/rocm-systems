@@ -683,6 +683,7 @@ add_executable(
     scalar_f16_constant_test.cpp
     vector16_inline_constant_test.cpp
     scalar_scc_test.cpp
+    older_wide_scalar_integer_test.cpp
     vskip_test.cpp
     cbranch_fork_join_test.cpp
     isa_diagnostics_test.cpp

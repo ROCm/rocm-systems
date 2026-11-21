@@ -87,6 +87,7 @@ add_library(
     integer/byte_shift.cpp
     integer/integer16.cpp
     integer/integer16_ternary.cpp
+    integer/packed_u64.cpp
     integer/integer_add.cpp
     integer/integer_mad.cpp
     integer/integer_minmax.cpp
