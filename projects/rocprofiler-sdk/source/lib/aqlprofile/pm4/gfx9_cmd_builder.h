@@ -162,15 +162,18 @@ public:
 
         // The address to poll should be DWord (4 byte) aligned
         // Update upper 32 bit address if addr is not a register
-        if(mem_space)
-        {
-            assert(!(wait_addr & 0x3) && "WaitRegMem address must be 4 byte aligned");
-        }
-        uint32_t dword3 = PACKET3_WAIT_REG_MEM__MEM_POLL_ADDR_LO((Low32(wait_addr) >> 2));
+        uint32_t dword3 = 0;
         uint32_t dword4 = 0;
         if(mem_space)
         {
+            assert(!(wait_addr & 0x3) && "WaitRegMem address must be 4 byte aligned");
+            dword3 = PACKET3_WAIT_REG_MEM__MEM_POLL_ADDR_LO((Low32(wait_addr) >> 2));
             dword4 = PACKET3_WAIT_REG_MEM__MEM_POLL_ADDR_HI(High32(wait_addr));
+        }
+        else
+        {
+            assert(!(wait_addr >> 18) && "WaitRegMem register address must fit in 18 bits");
+            dword3 = PACKET3_WAIT_REG_MEM__REG_POLL_ADDR(wait_addr);
         }
 
         // build the pm4mec_wait_reg_mem command which has 7 Dwords

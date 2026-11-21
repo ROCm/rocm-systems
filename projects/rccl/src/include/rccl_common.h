@@ -97,6 +97,7 @@ typedef enum {
   // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
   // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
   RCCL_SYMMETRIC_TDM,
+  RCCL_AG_GIN_SDMA,     // AllGather via GIN LSA/SDMA
   RCCL_HOST_HIER_ALLREDUCE, // AllReduce as intra-host RS, inter-host AR, intra-host AG on split comms
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
@@ -413,6 +414,8 @@ int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
 // Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// DDA LL128 Broadcast thread count from the arch table, or 0 when it sets none.
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
 // DDA LL128 ReduceScatter batched kernel block size from the arch table, or 0 when it sets none.
 int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
 // Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.

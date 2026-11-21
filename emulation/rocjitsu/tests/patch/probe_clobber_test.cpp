@@ -11,6 +11,7 @@
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
@@ -51,7 +52,7 @@ constexpr uint32_t kSMovFlatScrLo_0 = 0xbee60080; // s_mov_b32 flat_scratch_lo, 
 constexpr uint32_t kVCmpEqU32 = 0x7D940000;  // v_cmp_eq_u32 vcc, s0, v0
 constexpr uint32_t kVCmpxEqU32 = 0x7DB40000; // v_cmpx_eq_u32 s0, v0
 
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA2;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna2;
 
 ProbeCallable make_callable(std::vector<uint32_t> body) {
   ProbeCallable callable;
@@ -106,7 +107,7 @@ TEST(ProbeClobber, DerivesOrdinaryClobberFromBody) {
 TEST(ProbeClobber, DerivesClobberFromATwelveByteInstruction) {
   ProbeCallable callable = make_callable(
       {kGfx12GlobalLoadW0, kGfx12GlobalLoadW1, kGfx12GlobalLoadW2, kGfx12SSetpcS30S31});
-  callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  callable.arch = rocjitsu::IsaFamily::Rdna4;
   std::string err;
   const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
@@ -118,7 +119,7 @@ TEST(ProbeClobber, DerivesClobberFromATwelveByteInstruction) {
 // The compare's encoding names s[2:3], but a Wave32 probe writes only s2.
 TEST(ProbeClobber, Rdna4CompareClobbersTheSgprAboveOnlyAtWave64) {
   ProbeCallable callable = make_callable({kGfx12VCmpS2W0, kGfx12VCmpS2W1, kGfx12SSetpcS30S31});
-  callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  callable.arch = rocjitsu::IsaFamily::Rdna4;
   for (const uint8_t wave_size : {uint8_t{32}, uint8_t{64}}) {
     SCOPED_TRACE(static_cast<int>(wave_size));
     std::string err;
@@ -133,7 +134,7 @@ TEST(ProbeClobber, Rdna4CompareClobbersTheSgprAboveOnlyAtWave64) {
 // of build_probe_callable, so it must bound its own reads to the body.
 TEST(ProbeClobber, RejectsAnInstructionRunningPastTheBody) {
   ProbeCallable callable = make_callable({kGfx12GlobalLoadW0});
-  callable.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  callable.arch = rocjitsu::IsaFamily::Rdna4;
   std::string err;
   EXPECT_FALSE(build_probe_clobber_summary(callable, /*wave_size=*/64, &err).has_value());
   EXPECT_NE(err.find("word 0"), std::string::npos) << err;
