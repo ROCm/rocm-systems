@@ -140,10 +140,18 @@
 #define HIPFILE_WARN_NO_GLOBAL_CTOR_ON
 #endif
 
-/* Suppress Clang's unsafe buffer usage warnings where the operation can't be
- * avoided, such as in glibc's CPU_ZERO, CPU_SET, and CPU_ISSET macros, which
- * memset and index the cpu_set_t bit array through a raw pointer and are the
- * standard interface to CPU affinity masks.
+/* Suppress Clang's unsafe buffer usage warnings (pointer arithmetic,
+ * indexing through a raw pointer, the C library's memory and string
+ * functions, and building a view from a pointer and a separate length)
+ * where the operation can't be avoided
+ *
+ * Memory that arrives through a C interface only comes as a pointer and
+ * a length, so something has to turn it into a view. The helpers in
+ * hipfile-span.h do that, so the library should use them rather than these.
+ * glibc's CPU_ZERO, CPU_SET, and CPU_ISSET macros also memset and index the
+ * cpu_set_t bit array through a raw pointer, and are the standard interface
+ * to CPU affinity masks. This also turns off the -Wunsafe-buffer-usage-in-*
+ * warnings, which are in its group.
  */
 #if defined(__clang__) && __clang_major__ >= 16
 #define HIPFILE_WARN_UNSAFE_BUFFER_USAGE_OFF HIPFILE_WARN_OFF("unsafe-buffer-usage")
