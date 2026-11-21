@@ -20,6 +20,7 @@
 #include <utils/debug.hpp>
 #include <random>
 #include <sstream>
+#include <streambuf>
 
 
 // #define DEBUG_DETAIL // For detailed debug log
@@ -84,6 +85,51 @@ typedef struct {
 } ElfSectionsDesc;
 
 namespace {
+// Read-only, seekable view. The caller's bytes must outlive the stream buffer.
+class MemoryStreamBuf final : public std::streambuf {
+ public:
+  MemoryStreamBuf(const char* data, size_t size) {
+    // setg requires mutable pointers, but no put area or writing override exists.
+    char* begin = const_cast<char*>(data);
+    setg(begin, begin, begin + size);
+  }
+
+ protected:
+  pos_type seekoff(off_type off, std::ios_base::seekdir dir,
+                   std::ios_base::openmode which) override {
+    if ((which & std::ios_base::in) == 0) {
+      return pos_type(off_type(-1));
+    }
+
+    const off_type size = egptr() - eback();
+    off_type base;
+    switch (dir) {
+      case std::ios_base::beg:
+        base = 0;
+        break;
+      case std::ios_base::cur:
+        base = gptr() - eback();
+        break;
+      case std::ios_base::end:
+        base = size;
+        break;
+      default:
+        return pos_type(off_type(-1));
+    }
+
+    if (off < -base || off > size - base) {
+      return pos_type(off_type(-1));
+    }
+    const off_type next = base + off;
+    setg(eback(), eback() + next, egptr());
+    return pos_type(next);
+  }
+
+  pos_type seekpos(pos_type pos, std::ios_base::openmode which) override {
+    return seekoff(off_type(pos), std::ios_base::beg, which);
+  }
+};
+
 // Objects that are visible only within this module
 constexpr ElfSectionsDesc ElfSecDesc[] = {
     {Elf::LLVMIR, ".llvmir", 1, SHT_PROGBITS, 0, "ASIC-independent LLVM IR"},
@@ -187,7 +233,10 @@ bool Elf::Init() {
         return false;
       }
       {
-        std::istringstream is{std::string(_rawElfBytes, _rawElfSize)};
+        // ELFIO eagerly owns the loaded section/segment data; the input stream
+        // need only live through load(), without an intermediate full-ELF copy.
+        MemoryStreamBuf buffer(_rawElfBytes, _rawElfSize);
+        std::istream is(&buffer);
         if (!_elfio.load(is)) {
           LogElfError("failed in _elfio.load(%p, %lu)", _rawElfBytes, _rawElfSize);
           return false;

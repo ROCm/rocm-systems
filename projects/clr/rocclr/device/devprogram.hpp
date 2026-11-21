@@ -130,6 +130,11 @@ class Program {
   amd_comgr_metadata_node_t metadata_ = {};                             //!< COMgr metadata
   uint32_t codeObjectVer_;                                              //!< version of code object
   std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_;  //!< Map of kernel metadata
+  // Identity of the immutable binary used for metadata/symbol reuse, not an
+  // owning pointer. setBinary invalidates reuse when the address or size changes.
+  const void* codeObjectImage_ = nullptr;
+  size_t codeObjectSize_ = 0;
+  std::map<amd_comgr_symbol_type_t, std::vector<std::string>> codeObjectSymbols_;
   //! Sanitizer lock - lock when launching init/fini kernels
   static std::recursive_mutex initFiniLock_;
 
@@ -228,6 +233,12 @@ class Program {
   bool isTrapHandler() const { return trapHandler_; }
 
   amd_comgr_metadata_node_t metadata() const { return metadata_; }
+
+  //! Reuse metadata and owned symbol names from an unbundled executable.
+  //! data is borrowed only for this call; its contents must match binary/size.
+  //! The caller separately keeps the program's binary bytes alive. Reuse is
+  //! rejected if program creation transformed the input into a different binary.
+  bool initializeCodeObject(amd_comgr_data_t data, const void* binary, size_t size);
 
   //! Get the kernel metadata
   const bool getKernelMetadata(const std::string& name, amd_comgr_metadata_node_t* meta) const {
@@ -393,6 +404,8 @@ class Program {
 
   //! Create the map for the kernel name and its metadata for fast access
   bool createKernelMetadataMap(void* binary, size_t binSize);
+  bool createKernelMetadataMap(amd_comgr_data_t data);
+  void clearCodeObjectMetadata();
 
   bool trySubstObjFile(const char* SubstCfgFile, const std::string& sourceCode,
                        const amd::option::Options* options);
