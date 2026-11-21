@@ -58,6 +58,9 @@ class RdcCacheManager {
                                             const rdc_field_value& value) = 0;
   virtual rdc_status_t rdc_job_remove(const char job_id[64]) = 0;
   virtual rdc_status_t rdc_job_remove_all() = 0;
+  // Removes stopped jobs, the one that stopped first first, until the cache
+  // keeps no more jobs than its limit. Called after a job start succeeds.
+  virtual void evict_jobs() = 0;
 
   virtual rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                       const rdc_field_value& value) = 0;
