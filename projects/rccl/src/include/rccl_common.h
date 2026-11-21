@@ -367,6 +367,9 @@ RCCL_PARAM_DECLARE(DdaLLThreshold);
 RCCL_PARAM_DECLARE(DdaLL128);
 RCCL_PARAM_DECLARE(DdaLL128Threshold);
 RCCL_PARAM_DECLARE(DdaEnable);
+// Defined in enqueue.cc. When 0, addon launches through rcclAddonLaunch skip doneEvent
+// wait/record; destroy/abort must device-sync before tearing down peer mappings.
+RCCL_PARAM_DECLARE(AddonDoneEventOrdering);
 extern int64_t ncclParamP2pDisable();
 
 // Value of RCCL_DDA_THRESHOLD / RCCL_DDA_LL_THRESHOLD / RCCL_DDA_LL128_THRESHOLD
