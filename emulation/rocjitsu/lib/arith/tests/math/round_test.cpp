@@ -3,6 +3,10 @@
 
 // Tests for rounding to integral values and rounding-related FP status.
 
+#include "common/cpu.h"
+#include "common/semantics.h"
+#include "common/wave.h"
+#include "math/older_half_unary_test.h"
 #include "math/unary_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 #include "rj_arith/detail/rj_arith_math.h"
@@ -362,4 +366,16 @@ TEST(MathFloorF32W32Gfx942, Arithmetic) {
 // Share the arithmetic contract while checking the CDNA NaN-policy difference.
 TEST(MathFloorF32W64Gfx942, Arithmetic) {
   rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_floor_f32_w64_gfx942, 3);
+}
+
+// Every older-profile unary entry point shares arithmetic, aliases, masks and qualification.
+TEST(MathOlderHalfRound, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_trunc_f16_w32_gfx908, 0);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_ceil_f16_w32_gfx908, 1);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_rndne_f16_w32_gfx908, 2);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_floor_f16_w32_gfx908, 3);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_trunc_f16_w64_gfx908, 0);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_ceil_f16_w64_gfx908, 1);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_rndne_f16_w64_gfx908, 2);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_floor_f16_w64_gfx908, 3);
 }

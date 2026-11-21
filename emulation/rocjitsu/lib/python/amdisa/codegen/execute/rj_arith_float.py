@@ -295,6 +295,10 @@ CDNA_HALF_SELECTION = BINARY_SELECTION_F16 | (
     PACKED_BINARY16_NAMES - {'V_PK_ADD_F16', 'V_PK_MUL_F16'}
 )
 
+OLDER_HALF_ROUNDING_TARGETS = {'cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'}
+HALF_ROUNDING_NAMES = {f'V_{op}_F16' for op in ('TRUNC', 'CEIL', 'FLOOR', 'RNDNE')}
+OLDER_HALF_FREXP_NAMES = {'V_FREXP_MANT_F16', 'V_FREXP_EXP_I16_F16'}
+
 UNARY_F16 = {
     'V_TRUNC_F16',
     'V_CEIL_F16',
@@ -2382,25 +2386,60 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
+    older = arch in OLDER_HALF_ROUNDING_TARGETS and mnemonic in (
+        HALF_ROUNDING_NAMES | OLDER_HALF_FREXP_NAMES | {'V_FRACT_F16'}
+    )
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
-        or mnemonic not in UNARY_F16
-    ):
+        not older and arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+    ) or mnemonic not in UNARY_F16:
         return None
-    # Only half-precision exponent extraction uses this CDNA unary path.
-    if arch.startswith('cdna') and mnemonic != 'V_FREXP_EXP_I16_F16':
+    # CDNA rounding, mantissa and FRACT use their earlier dedicated handlers.
+    if arch in ('cdna3', 'cdna4', 'cdna5') and mnemonic != 'V_FREXP_EXP_I16_F16':
         return None
+    true16_simple = arch == 'cdna5'
     if len(dst) != 1 or len(src) != 1:
         return None
     api = (
         'rj_arith_'
         + mnemonic.lower()
-        + ('_gfx12' if arch in ('rdna4', 'cdna5') else '')
+        + (
+            '_gfx908'
+            if older and mnemonic != 'V_FREXP_EXP_I16_F16'
+            else '_gfx12' if arch in ('rdna4', 'cdna5') else ''
+        )
     )
     modifiers = '0'
-    lines = inherited_half_qualification_guard(arch)
-    old_cdna = arch in ('cdna3', 'cdna4')
-    if old_cdna and not is_vop3:
+    lines = (
+        ['  if (!wf.exec()) { return; }']
+        if older
+        else inherited_half_qualification_guard(arch)
+    )
+    if true16_simple:
+        lines.insert(0, '  if (!wf.exec()) { return; }')
+    if older:
+        lines += [
+            '  const uint64_t semantics = wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK;',
+            '  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||',
+            '      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {',
+            '    wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::UnsupportedOperandValue);',
+            '    return;',
+            '  }',
+        ]
+    old_cdna = arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+    if older and not is_vop3:
+        adapter = (
+            'execute_half_exponent_sdwa'
+            if mnemonic == 'V_FREXP_EXP_I16_F16'
+            else 'execute_half_unary_sdwa'
+        )
+        lines += [
+            '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
+            f'    amdgpu::arith::{adapter}(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+            f'        wf.cu().arithmetic_flags(), {dst[0]}, {src[0]});',
+            '    return;',
+            '  }',
+        ]
+    if old_cdna and not older and not is_vop3:
         lines += [
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {',
             f'    amdgpu::arith::execute_half_exponent_sdwa(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
@@ -2408,6 +2447,17 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
             '    return;',
             '  }',
         ]
+    source, destination = src[0], dst[0]
+    if true16_simple and not is_vop3:
+        # e32 index bit7 selects a half. Staged DPP operands already selected it.
+        lines += [
+            f'  auto word_source = amdgpu::e32_word_operand({source});',
+            f'  auto word_destination = amdgpu::e32_word_operand({destination});',
+            '  const uint64_t modifiers =',
+            f'      ((amdgpu::e32_packed_vgpr_operand({source}) && ({source}.encoding_value() & 0x80)) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
+            f'      ((amdgpu::e32_packed_vgpr_operand({destination}) && ({destination}.encoding_value() & 0x80)) ? RJ_ARITH_ALU_HIGH_D : 0u);',
+        ]
+        source, destination, modifiers = 'word_source', 'word_destination', 'modifiers'
     if is_vop3:
         lines += [
             '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
@@ -2416,6 +2466,9 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
             '      ((opsel & 1) ? RJ_ARITH_ALU_HIGH_A : 0u) |',
             '      ((opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u) |',
         ]
+        if older and arch in ('rdna1', 'rdna2'):
+            lines[-2:] = []
+            lines.remove('  const uint32_t opsel = amdgpu::vop3_opsel(inst_);')
         if mnemonic.startswith('V_FREXP_EXP_'):
             # Integer results ignore floating-point output modifiers.
             lines[-1] = lines[-1].removesuffix(' |') + ';'
@@ -2433,9 +2486,9 @@ def gen_float_unary16(ctx: ExecuteContext) -> str | None:
         'FRACT',
     }
     lines += [
-        f'  amdgpu::arith::execute_float_unary16(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
+        f'  amdgpu::arith::execute_float_unary16(wf, {wave_api(api, 32)}, {wave_api(api, 64) if not true16_simple or mnemonic in (HALF_ROUNDING_NAMES | OLDER_HALF_FREXP_NAMES) else "nullptr"},',
         f'      wf.cu().arithmetic_flags(), {modifiers},',
-        f'      {dst[0]}, {src[0]}, {str(arch in ("cdna2", "rdna3", "cdna3", "cdna4")).lower()}, /*guest_rounding=*/{str(guest_rounding).lower()}, /*zero_extend_low=*/{str(old_cdna).lower()});',
+        f'      {destination}, {source}, {str(older or arch in ("rdna3", "cdna3", "cdna4")).lower()}, /*guest_rounding=*/{str(guest_rounding).lower()}, /*zero_extend_low=*/{str(old_cdna).lower()});',
     ]
     return '\n'.join(lines)
 
