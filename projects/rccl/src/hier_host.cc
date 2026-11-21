@@ -52,11 +52,12 @@ bool allRanksReady(struct ncclComm* comm, ncclResult_t* res) {
   return false;
 }
 
-ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes, cudaStream_t stream) {
+ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes) {
+  if (h->scratchUsed == nullptr) CUDACHECK(cudaEventCreateWithFlags(&h->scratchUsed, cudaEventDisableTiming));
   if (h->scratchBytes >= bytes) return ncclSuccess;
   if (h->scratch != nullptr) {
-    // Earlier collectives on this stream may still read the old buffer.
-    CUDACHECK(cudaStreamSynchronize(stream));
+    // Earlier collectives, on any stream, may still read the old buffer.
+    CUDACHECK(cudaEventSynchronize(h->scratchUsed));
     NCCLCHECK(ncclCudaFree(h->scratch, comm->memManager));
     h->scratch = nullptr;
     h->scratchBytes = 0;
@@ -210,6 +211,7 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   // The children's collectives read the scratch buffer.
   if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
 exit:
+  if (h->scratchUsed != nullptr) CUDACHECKIGNORE(cudaEventDestroy(h->scratchUsed));
   free(h);
   return res;
 }
@@ -256,7 +258,7 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   const bool doInter = h->inter != nullptr;
   // The inter-host AllReduce runs out of place: in place it is several times slower.
   const size_t stride = (chunkBytes + 255) & ~size_t{255};
-  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes, stream));
+  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes));
   char* rsOut = static_cast<char*>(h->scratch);
   char* agIn = doInter ? rsOut + stride : rsOut;
 
@@ -266,6 +268,7 @@ ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t 
   NCCLCHECKGOTO(ncclReduceScatter(sendbuff, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
   if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
   NCCLCHECKGOTO(ncclAllGather(agIn, recvbuff, chunk, datatype, h->intra, stream), res, exit);
+  CUDACHECKGOTO(cudaEventRecord(h->scratchUsed, stream), res, exit);
 exit:
   rccl::Recorder::instance().skip(false);
   return res;

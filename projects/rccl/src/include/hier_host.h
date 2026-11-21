@@ -41,6 +41,9 @@ struct rcclHostHier {
   // concurrently on two streams is unsafe.
   void* scratch;
   size_t scratchBytes;
+  // Recorded after each host-hierarchical collective, on whichever stream it ran. Consecutive collectives on the comm
+  // are ordered on the device, so the latest record follows every earlier use of scratch.
+  cudaEvent_t scratchUsed;
 };
 
 // Returns true and fills layout when every host holds the same number of ranks,
