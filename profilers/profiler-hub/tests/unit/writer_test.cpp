@@ -551,7 +551,7 @@ TEST_F(writer_test, insert_memory_copy_data_is_readable_after_flush)
     writer_types::memory_copy_data_t memory_copy_data;
     memory_copy_data.name = "hipMemcpy";
     // Timeline display_name for memory copies comes from region_name_id, not name_id
-    // (see initialize_memory_copy_timeline_event_statements in read_statements.hpp).
+    // (see initialize_memory_copy_timeline_event_statements in schema_v3/read_statements.hpp).
     memory_copy_data.region_name     = "hipMemcpy";
     memory_copy_data.start_timestamp = 1000;
     memory_copy_data.end_timestamp   = 2000;

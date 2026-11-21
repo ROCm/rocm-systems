@@ -5,7 +5,7 @@
 
 #include "profiler-hub/cpp/reader_types.hpp"
 
-#include "data_storage/read_statements.hpp"
+#include "data_storage/schema_v3/read_statements.hpp"
 
 #include <cstddef>
 #include <cstdint>

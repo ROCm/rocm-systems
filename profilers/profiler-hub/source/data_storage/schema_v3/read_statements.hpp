@@ -3,10 +3,11 @@
 
 #pragma once
 
-#include "backends/sqlite_backend.hpp"
+#include "data_storage/backends/sqlite_backend.hpp"
 
 #include "debug.hpp"
 
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -489,33 +490,90 @@ struct read_statements
     read_statements& operator=(read_statements&&)      = delete;
     virtual ~read_statements()                         = default;
 
-    // Best-effort: speeds up track_filtered/track_and_time_filtered queries
-    // (see initialize_timeline_event_variants) by letting SQLite index-seek
-    // the (nid,pid,tid) branch instead of a full table scan. Databases
-    // written before this existed won't have the index yet; create it
-    // lazily on open. A failure (e.g. read-only file) is only logged --
-    // queries still work without it, just slower.
+    // Best-effort: creates the indexes the track, histogram, and event-detail
+    // queries rely on. They match the set the legacy RocprofDatabase builds in
+    // CreateIndexes(), so SQLite seeks by (nid, pid, tid), (nid, agent, queue),
+    // (nid, pid, stream), and event_id instead of scanning a whole table once
+    // per event. Without the sample table's event_id index every thread track
+    // scans rocpd_sample for each region row. Databases written before this
+    // existed won't have the indexes yet; create them lazily on open. A failure
+    // (e.g. read-only file) is only logged -- queries still work without them,
+    // just slower.
     void create_track_topology_indexes()
     {
-        for(const auto* table : { "rocpd_region",
-                                  "rocpd_kernel_dispatch",
-                                  "rocpd_memory_allocate",
-                                  "rocpd_memory_copy" })
+        struct index_t
         {
+            const char* table;
+            const char* name;
+            const char* columns;
+        };
+
+        // Tables that carry a track topology and an owning event row.
+        constexpr std::array<index_t, 14> k_event_indexes{ {
+            { "rocpd_region", "niptid", "nid, pid, tid" },
+            { "rocpd_kernel_dispatch", "niptid", "nid, pid, tid" },
+            { "rocpd_memory_allocate", "niptid", "nid, pid, tid" },
+            { "rocpd_memory_copy", "niptid", "nid, pid, tid" },
+            { "rocpd_kernel_dispatch", "agent_queue", "nid, agent_id, queue_id" },
+            { "rocpd_memory_allocate", "agent_queue", "nid, agent_id, queue_id" },
+            { "rocpd_memory_copy", "agent_queue", "nid, dst_agent_id, queue_id" },
+            { "rocpd_kernel_dispatch", "stream", "nid, pid, stream_id" },
+            { "rocpd_memory_allocate", "stream", "nid, pid, stream_id" },
+            { "rocpd_memory_copy", "stream", "nid, pid, stream_id" },
+            { "rocpd_region", "event_id", "event_id" },
+            { "rocpd_kernel_dispatch", "event_id", "event_id" },
+            { "rocpd_memory_allocate", "event_id", "event_id" },
+            { "rocpd_memory_copy", "event_id", "event_id" },
+        } };
+        // Present only in newer files. Same shape as the kernel table.
+        constexpr std::array<index_t, 3> k_hip_event_indexes{ {
+            { "rocpd_hip_event", "agent_queue", "nid, agent_id, queue_id" },
+            { "rocpd_hip_event", "stream", "nid, pid, stream_id" },
+            { "rocpd_hip_event", "event_id", "event_id" },
+        } };
+        // Joined by event_id. Only a physical per-GUID table can be indexed. The
+        // unsuffixed name is a view of every GUID in the file.
+        constexpr std::array<index_t, 3> k_child_indexes{ {
+            { "rocpd_sample", "event_id", "event_id" },
+            { "rocpd_arg", "event_id", "event_id" },
+            { "rocpd_event", "stack_id", "stack_id" },
+        } };
+
+        const auto create = [this](const index_t& index) {
+            const std::string table = fmt::format("{}_{}", index.table, m_uuid);
+            if(!table_present(table)) return;
             try
             {
                 m_backend->execute(
-                    fmt::format("CREATE INDEX IF NOT EXISTS idx_{0}_{1}_niptid ON "
-                                "{0}_{1}(nid, pid, tid)",
-                                table,
-                                m_uuid));
+                    fmt::format("CREATE INDEX IF NOT EXISTS idx_{0}_{1}_{2} ON "
+                                "{0}_{1}({3})",
+                                index.table,
+                                m_uuid,
+                                index.name,
+                                index.columns));
             } catch(const std::runtime_error& err)
             {
-                LOG_ERROR("Failed to create the track topology index on {}_{}: {}",
+                LOG_ERROR("Failed to create the {} index on {}: {}",
+                          index.name,
                           table,
-                          m_uuid,
                           err.what());
             }
+        };
+
+        for(const index_t& index : k_event_indexes)
+        {
+            create(index);
+        }
+        if(m_hip_event_table)
+        {
+            for(const index_t& index : k_hip_event_indexes)
+            {
+                create(index);
+            }
+        }
+        for(const index_t& index : k_child_indexes)
+        {
+            create(index);
         }
     }
 

@@ -147,9 +147,9 @@ profiler-hub/
 
 | File | Role | Purpose |
 |---|---|---|
-| `read_statements.hpp` | Reader | Schema-3 SELECT result structs and prepared read statements. |
 | `schema_version.hpp` | Shared | Reads rocpd metadata version tags into a schema version. |
 | `schema/rocpd_schema.in` | Build | CMake template that turns one schema SQL fragment into a constexpr string. |
+| `schema_v3/read_statements.hpp` | Reader | Schema-3 SELECT result structs, prepared read statements, and the indexes the reads rely on. |
 | `schema_v3/insert_statements.hpp` | Writer | Prepared INSERT statements for every schema-3 table. |
 | `backends/database_backend.hpp` | Shared | SQLite engine templated on a C API policy: open, execute, bind, flush. |
 | `backends/sqlite_api_policy.hpp` | Shared | Production policy that calls the sqlite3 C API. |

@@ -6,7 +6,7 @@
 #include "reader_impl.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
-#include "data_storage/read_statements.hpp"
+#include "data_storage/schema_v3/read_statements.hpp"
 #include "reader_catalog.hpp"
 
 #include <memory>
