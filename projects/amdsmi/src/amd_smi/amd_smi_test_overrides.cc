@@ -12,6 +12,7 @@ namespace {
 std::string g_sysfs_drm_root = "/sys/class/drm";
 std::string g_app_tmp_dir = "/tmp";
 std::string g_kfd_nodes_path_root = "/sys/class/kfd/kfd/topology/nodes";
+std::string g_sysfs_pci_devices_root = "/sys/bus/pci/devices";
 }  // namespace
 
 // The setters are declared only in the tests (test_fixture_utils.h), not in the header above.
@@ -24,6 +25,12 @@ AMDSMI_TEST_HOOK void SetSysfsDrmRoot(const std::string& root) { g_sysfs_drm_roo
 const std::string& KfdNodesPathRoot() { return g_kfd_nodes_path_root; }
 
 AMDSMI_TEST_HOOK void SetKfdNodesPathRoot(const std::string& root) { g_kfd_nodes_path_root = root; }
+
+const std::string& SysfsPciDevicesRoot() { return g_sysfs_pci_devices_root; }
+
+AMDSMI_TEST_HOOK void SetSysfsPciDevicesRoot(const std::string& root) {
+  g_sysfs_pci_devices_root = root;
+}
 
 const std::string& AppTmpDir() { return g_app_tmp_dir; }
 

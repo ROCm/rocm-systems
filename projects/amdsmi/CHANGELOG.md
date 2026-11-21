@@ -143,6 +143,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 
+- **Fixed the compute partition of a secondary partition showing as `N/A`**.  
+  - A secondary partition, for example the only partition a container is given, now reports the compute partition, memory partition and partition count of its GPU in `amdsmi_get_gpu_accelerator_partition_profile()`, `amd-smi partition --current` and `amd-smi static --partition`. An SR-IOV VF still reports only what its own device shows.
+
 - **Fixed `amd-smi ras --cper` crashing with `TypeError` when no GPU devices are available**.  
   - When the `amdgpu` driver is not loaded, the command now exits with a clear driver-not-loaded message and exit code 206 instead of an unhandled exception.
 

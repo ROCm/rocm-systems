@@ -314,6 +314,19 @@ class Device {
   bool m_is_dynamic_gpu_metrics_supported = false;
 };
 
+// While one is alive, a secondary compute partition reads only its own files on this thread, so a
+// set on it fails as it did before it read the partition attributes of its GPU.
+class ScopedOwnPartitionFiles {
+ public:
+  ScopedOwnPartitionFiles();
+  ~ScopedOwnPartitionFiles();
+  ScopedOwnPartitionFiles(const ScopedOwnPartitionFiles&) = delete;
+  ScopedOwnPartitionFiles& operator=(const ScopedOwnPartitionFiles&) = delete;
+
+ private:
+  bool previous_;
+};
+
 }  // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_

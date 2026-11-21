@@ -4136,6 +4136,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_partition(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_set_gpu_compute_partition(
     amdsmi_processor_handle processor_handle, amdsmi_compute_partition_type_t compute_partition) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedOwnPartitionFiles own_files;
   auto ret_resp = rsmi_wrapper(rsmi_dev_compute_partition_set, processor_handle, 0,
                                static_cast<rsmi_compute_partition_type_t>(compute_partition));
   return ret_resp;
@@ -4271,6 +4272,7 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
 amdsmi_status_t amdsmi_set_gpu_memory_partition_mode(
     amdsmi_processor_handle processor_handle, amdsmi_memory_partition_type_t memory_partition) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedOwnPartitionFiles own_files;
   if (memory_partition != AMDSMI_MEMORY_PARTITION_UNKNOWN &&
       memory_partition != AMDSMI_MEMORY_PARTITION_NPS1 &&
       memory_partition != AMDSMI_MEMORY_PARTITION_NPS2 &&
@@ -4864,8 +4866,14 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
       // Note: # of XCDs is max # of partitions CPX supports
       uint16_t tmp_xcd_count = 0;
       amdsmi_status_t xcd_status = amdsmi_get_gpu_xcd_counter(processor_handle, &tmp_xcd_count);
+      uint32_t count = 0;
       if (xcd_status == AMDSMI_STATUS_SUCCESS) {
         profile->num_partitions = tmp_xcd_count;
+      } else if (rsmi_wrapper(rsmi_dev_compute_partition_count_get, processor_handle, 0, &count) ==
+                     AMDSMI_STATUS_SUCCESS &&
+                 count > 1) {
+        // A secondary partition has no gpu_metrics; the count comes from its GPU.
+        profile->num_partitions = count;
       }
     }
   }
@@ -4947,6 +4955,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
 amdsmi_status_t amdsmi_set_gpu_accelerator_partition_profile(
     amdsmi_processor_handle processor_handle, uint32_t profile_index) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedOwnPartitionFiles own_files;
   std::ostringstream ss;
   amdsmi_accelerator_partition_profile_config_t config;
   amdsmi_status_t status =
@@ -5463,6 +5472,7 @@ amdsmi_status_t amdsmi_get_gpu_process_isolation(amdsmi_processor_handle process
 amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle processor_handle,
                                                  uint32_t pisolate) {
   AMDSMI_CHECK_INIT();
+  const amd::smi::ScopedOwnPartitionFiles own_files;
 
   return rsmi_wrapper(rsmi_dev_process_isolation_set, processor_handle, 0, pisolate);
 }

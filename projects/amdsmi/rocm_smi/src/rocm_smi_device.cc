@@ -13,15 +13,19 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -566,6 +570,7 @@ static const std::map<const char*, dev_depends_t> kDevFuncDependsMap = {
     {"rsmi_dev_xgmi_plpd_get", {{kDevXgmiPlpdFName}, {}}},
     {"rsmi_dev_process_isolation_set", {{kDevProcessIsolationFName}, {}}},
     {"rsmi_dev_process_isolation_get", {{kDevProcessIsolationFName}, {}}},
+    {"rsmi_dev_compute_partition_count_get", {{kDevProcessIsolationFName}, {}}},
     {"rsmi_dev_gpu_shader_clean", {{kDevShaderCleanFName}, {}}},
     {"rsmi_perf_determinism_mode_set", {{kDevPerfLevelFName, kDevPowerODVoltageFName}, {}}},
     {"rsmi_dev_overdrive_level_set", {{kDevOverDriveLevelFName}, {}}},
@@ -804,6 +809,36 @@ static const std::map<DevInfoTypes, std::string> kDevFallbackFile = {
     {kDevErrCntXGMIWAFL, "ras/aca_xgmi_wafl"},
 };
 
+// Attributes that amdgpu creates once per GPU, on its PCI device. The render node of a secondary
+// compute partition belongs to an amdgpu_xcp platform device, which has none of them.
+static const std::set<DevInfoTypes> kDevPartitionParentFiles = {
+    kDevComputePartition, kDevAvailableComputePartition, kDevSupportedXcpConfigs,
+    kDevMemoryPartition,  kDevAvailableMemoryPartition,  kDevProcessIsolation,
+};
+
+static thread_local bool t_own_partition_files = false;
+
+ScopedOwnPartitionFiles::ScopedOwnPartitionFiles() : previous_(t_own_partition_files) {
+  t_own_partition_files = true;
+}
+
+ScopedOwnPartitionFiles::~ScopedOwnPartitionFiles() { t_own_partition_files = previous_; }
+
+// The PCI device directory of a secondary compute partition, or "" for any other device. KFD
+// reports a partition at the address of its GPU, with the partition index in the function bits.
+static std::string partition_parent_dir(const std::string& path, uint64_t bdfid) {
+  std::error_code ec;
+  const auto device = std::filesystem::canonical(path + "/device", ec);
+  if (ec || device.filename().string().rfind("amdgpu_xcp", 0) != 0) {
+    return "";
+  }
+  std::string bdf;
+  if (getBDFWithDomain(bdfid & ~uint64_t{0x7}, bdf) != RSMI_STATUS_SUCCESS) {
+    return "";
+  }
+  return test_hooks::SysfsPciDevicesRoot() + "/" + bdf;
+}
+
 template <typename T>
 int Device::openSysfsFileStream(DevInfoTypes type, T* fs, const char* str) {
   auto sysfs_path = path_;
@@ -852,6 +887,14 @@ int Device::openSysfsFileStream(DevInfoTypes type, T* fs, const char* str) {
            << std::to_string(ret);
         LOG_ERROR(ss);
         return ret;
+      }
+    } else if (std::is_same_v<T, std::ifstream> && !t_own_partition_files &&
+               kDevPartitionParentFiles.count(type) != 0) {
+      const std::string parent = partition_parent_dir(path_, bdfid_);
+      if (!parent.empty()) {
+        sysfs_path = parent + "/" + kDevAttribNameMap.at(type);
+        DBG_FILE_ERROR(sysfs_path, str);
+        ret = isRegularFile(sysfs_path, &reg_file);
       }
     }
   }
