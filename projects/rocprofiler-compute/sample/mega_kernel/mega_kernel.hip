@@ -2607,104 +2607,111 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
                                           TestResults* results, int lane_id, int tid) {
     bool passed = true;
 
-#if __has_builtin(__builtin_amdgcn_global_load_async_to_lds_b32)
-    // MI350 (gfx950) / gfx1250: Full async LDS load/store support
-    // global_load_async_to_lds_b8/b32/b64/b128: Load from global to LDS asynchronously
-    // global_store_async_from_lds_b8/b32/b64/b128: Store from LDS to global asynchronously
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_load_async_to_lds_b128)) {
+        if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_store_async_from_lds_b128)) {
+            // MI350 (gfx950) / gfx1250: Full async LDS load/store support
+            // global_load_async_to_lds_b8/b32/b64/b128: Load from global to LDS asynchronously
+            // global_store_async_from_lds_b8/b32/b64/b128: Store from LDS to global asynchronously
 
-    // Initialize global source with test pattern
-    if (tid < 64) {
-        // First, copy test data to global memory
-        global_src[tid] = (float)(tid * 10 + 1);
-    }
+            // Initialize global source with test pattern
+            if (tid < 64) {
+                // First, copy test data to global memory
+                global_src[tid] = (float)(tid * 10 + 1);
+            }
 
-    // Initialize async barrier counter per block for gfx1250
-    if (threadIdx.x == 0) {
-        async_barrier_counter = 0;
-    }
-    __syncthreads();
+            // Initialize async barrier counter per block for gfx1250
+            if (threadIdx.x == 0) {
+                async_barrier_counter = 0;
+            }
+            __syncthreads();
 
-    // Perform async load from global to LDS
-    // Only first thread in each block issues the async load for this test
-    if (threadIdx.x == 0) {
-        // Cast pointers to appropriate address spaces
-        // address_space(1) = global, address_space(3) = local/LDS
-        typedef int __attribute__((ext_vector_type(4))) vint4;
+            // Perform async load from global to LDS
+            // Only first thread in each block issues the async load for this test
+            if (threadIdx.x == 0) {
+                // Cast pointers to appropriate address spaces
+                // address_space(1) = global, address_space(3) = local/LDS
+                typedef int __attribute__((ext_vector_type(4))) vint4;
 
-        // Load 16 bytes (4 ints) asynchronously from global to LDS
-        __builtin_amdgcn_global_load_async_to_lds_b128(
-            ((__attribute__((address_space(1))) vint4*)global_src),
-            ((__attribute__((address_space(3))) vint4*)async_lds_buffer),
-            0 /* offset */, 0 /* cache policy */);
-    }
-
-#if defined(__gfx1250__)
-    // GFX1250: Use DS atomic async barrier for synchronization
-    // This signals that this thread has reached the barrier point
-    // The barrier counter is atomically incremented
-    if (__has_builtin(__builtin_amdgcn_ds_atomic_async_barrier_arrive_b64)) {
-        __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64(
-            ((__attribute__((address_space(3))) long*)&async_barrier_counter));
-    }
-
-    // Wait for async operations to complete
-    // On gfx1250, use s_wait_asynccnt for async LDS operations
-    __builtin_amdgcn_s_wait_asynccnt(0);  // Wait for async copy operations
-#else
-    // Other architectures: Use unified s_waitcnt
-    WAITCNT_ALL();  // Wait for all memory operations
-#endif
-    __syncthreads();
-
-    // Verify the data was loaded correctly to LDS
-    if (tid < 4) {
-        int expected = (int)(tid * 10 + 1);
-        // Note: We loaded floats but stored as ints, reinterpret
-        float* lds_as_float = (float*)async_lds_buffer;
-        passed = passed && approx_equal_f32(lds_as_float[tid], (float)expected, 0.1f);
-    }
-    __syncthreads();
-
-    // Now test async store from LDS to global
-    if (tid == 0) {
-        // Modify LDS data
-        async_lds_buffer[0] = 12345;
-        async_lds_buffer[1] = 67890;
-        async_lds_buffer[2] = 11111;
-        async_lds_buffer[3] = 22222;
-    }
-    __syncthreads();
-
-    if (tid == 0) {
-        typedef int __attribute__((ext_vector_type(4))) vint4;
-
-        // Store 16 bytes from LDS to global asynchronously
-        __builtin_amdgcn_global_store_async_from_lds_b128(
-            ((__attribute__((address_space(1))) vint4*)(global_dst)),
-            ((__attribute__((address_space(3))) vint4*)async_lds_buffer),
-            0 /* offset */, 0 /* cache policy */);
-    }
+                // Load 16 bytes (4 ints) asynchronously from global to LDS
+                __builtin_amdgcn_global_load_async_to_lds_b128(
+                    ((__attribute__((address_space(1))) vint4*)global_src),
+                    ((__attribute__((address_space(3))) vint4*)async_lds_buffer),
+                    0 /* offset */, 0 /* cache policy */);
+            }
 
 #if defined(__gfx1250__)
-    // GFX1250: Use DS atomic async barrier for store synchronization
-    if (__has_builtin(__builtin_amdgcn_ds_atomic_async_barrier_arrive_b64)) {
-        __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64(
-            ((__attribute__((address_space(3))) long*)&async_barrier_counter));
-    }
+            // GFX1250: Use DS atomic async barrier for synchronization
+            // This signals that this thread has reached the barrier point
+            // The barrier counter is atomically incremented
+            if (__has_builtin(__builtin_amdgcn_ds_atomic_async_barrier_arrive_b64)) {
+                __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64(
+                    ((__attribute__((address_space(3))) long*)&async_barrier_counter));
+            }
 
-    // Wait for async store operations to complete
-    __builtin_amdgcn_s_wait_asynccnt(0);  // Wait for async copy operations
+            // Wait for async operations to complete
+            // On gfx1250, use s_wait_asynccnt for async LDS operations
+            __builtin_amdgcn_s_wait_asynccnt(0);  // Wait for async copy operations
 #else
-    // Other architectures: Use unified s_waitcnt
-    WAITCNT_ALL();
+            // Other architectures: Use unified s_waitcnt
+            WAITCNT_ALL();  // Wait for all memory operations
 #endif
-    __syncthreads();
+            __syncthreads();
 
-    // Verify the store (on subsequent kernel or by reading back)
-    // For now, just check that no crash occurred
-    passed = passed && true;
+            // Verify the data was loaded correctly to LDS
+            if (tid < 4) {
+                int expected = (int)(tid * 10 + 1);
+                // Note: We loaded floats but stored as ints, reinterpret
+                float* lds_as_float = (float*)async_lds_buffer;
+                passed = passed && approx_equal_f32(lds_as_float[tid], (float)expected, 0.1f);
+            }
+            __syncthreads();
 
+            // Now test async store from LDS to global
+            if (tid == 0) {
+                // Modify LDS data
+                async_lds_buffer[0] = 12345;
+                async_lds_buffer[1] = 67890;
+                async_lds_buffer[2] = 11111;
+                async_lds_buffer[3] = 22222;
+            }
+            __syncthreads();
+
+            if (tid == 0) {
+                typedef int __attribute__((ext_vector_type(4))) vint4;
+
+                // Store 16 bytes from LDS to global asynchronously
+                __builtin_amdgcn_global_store_async_from_lds_b128(
+                    ((__attribute__((address_space(1))) vint4*)(global_dst)),
+                    ((__attribute__((address_space(3))) vint4*)async_lds_buffer),
+                    0 /* offset */, 0 /* cache policy */);
+            }
+
+#if defined(__gfx1250__)
+            // GFX1250: Use DS atomic async barrier for store synchronization
+            if (__has_builtin(__builtin_amdgcn_ds_atomic_async_barrier_arrive_b64)) {
+                __builtin_amdgcn_ds_atomic_async_barrier_arrive_b64(
+                    ((__attribute__((address_space(3))) long*)&async_barrier_counter));
+            }
+
+            // Wait for async store operations to complete
+            __builtin_amdgcn_s_wait_asynccnt(0);  // Wait for async copy operations
 #else
+            // Other architectures: Use unified s_waitcnt
+            WAITCNT_ALL();
+#endif
+            __syncthreads();
+
+            // Verify the store (on subsequent kernel or by reading back)
+            // For now, just check that no crash occurred
+            passed = passed && true;
+
+            if (lane_id == 0) {
+                atomicAdd(&results->async_lds_load_passed, passed ? 1 : 0);
+                atomicAdd(&results->async_lds_store_passed, passed ? 1 : 0);
+            }
+            return;
+        }
+    }
     // Async LDS builtins not available - mark as bypassed
     (void)global_src;
     (void)global_dst;
@@ -2714,13 +2721,6 @@ __device__ void test_async_lds_operations([[maybe_unused]] float* global_src, fl
     if (lane_id == 0) {
         atomicMin(&results->async_lds_load_passed, -1);
         atomicMin(&results->async_lds_store_passed, -1);
-    }
-    return;
-#endif
-
-    if (lane_id == 0) {
-        atomicAdd(&results->async_lds_load_passed, passed ? 1 : 0);
-        atomicAdd(&results->async_lds_store_passed, passed ? 1 : 0);
     }
 }
 

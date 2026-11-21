@@ -41,13 +41,13 @@ template <typename T> __global__ void Inc(T* Ad) {
 __global__ void AtomicFAddKernelKernel(float* data, size_t n) {
   size_t i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i < n) {
-#if __has_builtin(__builtin_amdgcn_global_atomic_fadd_f32)
-    __builtin_amdgcn_global_atomic_fadd_f32(data, 1.0f);
-#else
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_global_atomic_fadd_f32)) {
+      __builtin_amdgcn_global_atomic_fadd_f32(data, 1.0f);
+      return;
+    }
     if (i == 0) {
       *data = -1.0;
     }
-#endif
   }
 }
 #endif
