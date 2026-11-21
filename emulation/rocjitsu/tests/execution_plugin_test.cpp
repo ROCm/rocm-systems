@@ -916,7 +916,7 @@ TEST(ThroughputPluginTest, ReportsExactWaveInstructionCountsAsJsonl) {
   const auto &summary = records[1];
   EXPECT_EQ(summary.record, "summary");
   EXPECT_EQ(summary.dispatches, 1u);
-  EXPECT_GT(summary.dispatch_seconds_sum, 0.0);
+  EXPECT_EQ(summary.dispatch_seconds_sum, dispatch.wall_seconds);
   EXPECT_GT(summary.wall_seconds, 0.0);
   EXPECT_GT(summary.mips, 0.0);
   EXPECT_EQ(summary.wave_instructions, dispatch.wave_instructions);

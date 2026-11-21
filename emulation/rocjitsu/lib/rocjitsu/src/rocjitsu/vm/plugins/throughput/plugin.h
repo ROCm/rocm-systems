@@ -5,6 +5,7 @@
 
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/instruction_family.h"
+#include "util/statistics.h"
 
 #include <array>
 #include <chrono>
@@ -94,7 +95,7 @@ private:
   UntimedInstructions aggregate_untimed_instructions_{};
   Clock::time_point first_begin_{};
   Clock::time_point last_end_{};
-  double dispatch_seconds_sum_ = 0.0;
+  stats::Summary dispatch_durations_;
   uint64_t completed_dispatches_ = 0;
   bool have_active_window_ = false;
   bool summary_emitted_ = false;
