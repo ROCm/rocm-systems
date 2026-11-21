@@ -24,6 +24,7 @@ set(TEST_SRC
   cg_any_all.cc
   split_barrier.cc
   invoke_one.cc
+  concurrent_grid_sync.cc
 )
 
 set(AMD_TEST_SRC 
