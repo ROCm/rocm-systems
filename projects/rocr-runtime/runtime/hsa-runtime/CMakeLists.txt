@@ -68,6 +68,20 @@ include ( utils )
 include ( hsa_common )
 include ( GNUInstallDirs )
 
+## ROCm install root, used to locate the ROCm LLVM toolchain.
+if(NOT DEFINED ROCM_PATH)
+  if(DEFINED ENV{ROCM_PATH})
+    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE STRING "ROCm installation directory.")
+  elseif(CMAKE_PREFIX_PATH)
+    list(GET CMAKE_PREFIX_PATH 0 _first_prefix_path)
+    set(ROCM_PATH "${_first_prefix_path}" CACHE STRING "ROCm installation directory.")
+    unset(_first_prefix_path)
+  else()
+    set(ROCM_PATH "${CMAKE_INSTALL_PREFIX}" CACHE STRING "ROCm installation directory.")
+  endif()
+endif()
+message(STATUS "ROCM_PATH: ${ROCM_PATH}")
+
 ## Adjust target name for static builds
 ## Original name will be an interface target that adds --whole-archive linker options around the target.
 if( NOT ${BUILD_SHARED_LIBS} )
