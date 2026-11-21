@@ -325,14 +325,14 @@ separate_arguments(HIP_DEVICE_BUILD_FLAGS_NO_ARCH NATIVE_COMMAND
   "${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_HIP_BUILD_TYPE_UPPER}}")
 list(FILTER HIP_DEVICE_BUILD_FLAGS_NO_ARCH EXCLUDE REGEX "--offload-arch=")
 
-# SPIR-V does not support ASan, so the ASan-related flags have to be removed.
-set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
-if(NOT ENABLE_SANITIZER STREQUAL "OFF")
-  hip_tests_sanitizer_drop_device_flags(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN)
+# Preserve device ASan instrumentation, but omit host-only sanitizer flags from SPIR-V.
+set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH})
+if(ENABLE_SANITIZER STREQUAL "HOST_ASAN")
+  hip_tests_sanitizer_drop_device_flags(HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV)
 endif()
 
 if(ENABLE_SPIRV)
-  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN})
+  set(HIP_DEVICE_BUILD_FLAGS_NO_ARCH ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV})
 endif()
 
 # get hip-tests commit short hash

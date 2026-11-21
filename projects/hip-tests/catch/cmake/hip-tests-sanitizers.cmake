@@ -98,7 +98,7 @@ function(hip_tests_sanitizer_resolve_offload_archs offload_arch_str_var)
 
   set(_no_xnack ${_archs})
   list(FILTER _no_xnack EXCLUDE REGEX ":xnack\\+")
-  # ASan on SPIR-V is already handled by hip_tests_sanitizer_drop_device_flags below.
+  # SPIR-V target features are resolved when the runtime compiles for the GPU.
   list(FILTER _no_xnack EXCLUDE REGEX "^--offload-arch=amdgcnspirv$")
   if(_no_xnack)
     list(TRANSFORM _no_xnack REPLACE "^--offload-arch=" "")
