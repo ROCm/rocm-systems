@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-sdk-formatting.yml'
       - 'projects/rocprofiler-sdk/**'
       - 'shared/sha256/**'
       - '!**/*.md'
@@ -26,6 +27,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  pre-commit:
+    # The PR policy requires this check name. Report the combined result of the
+    # SDK's existing formatters, including its pinned clang-format version.
+    name: pre-commit
+    if: always()
+    needs: [cmake, source, python, missing-new-line, config_yaml]
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Check formatting results
+      env:
+        RESULTS: ${{ toJSON(needs) }}
+      run: |
+        python3 - <<'PY'
+        import json
+        import os
+
+        results = json.loads(os.environ["RESULTS"])
+        failed = [name for name, job in results.items() if job["result"] != "success"]
+        if failed:
+            raise SystemExit("Formatting checks did not pass: " + ", ".join(failed))
+        PY
+
   cmake:
     runs-on: ubuntu-22.04
     env:
