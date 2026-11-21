@@ -1,0 +1,1 @@
+* Enabled `RCCL_USE_AMD_SMI_LIB=1` by default. The `amdsmi_init` concurrency issue that required the opt-in has been resolved in ROCm 7.0. If `libamd_smi.so` cannot be loaded at runtime (e.g., library not installed), RCCL falls back to the internal sysfs-based fabric discovery path automatically. Set `RCCL_USE_AMD_SMI_LIB=0` to force the sysfs path.

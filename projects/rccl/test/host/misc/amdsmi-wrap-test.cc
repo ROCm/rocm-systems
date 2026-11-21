@@ -428,6 +428,7 @@ protected:
     amdSmiInitCalled = false;
     amdSmiInitResult = ncclSuccess;
     amdSmiLibInitialized = false;
+    amdSmiDiagInitialized = false;
     amdSmiLibMajor.store(kAmdSmiLibVersionUnknown);
     fabricInitialized = false;
     threadFabricInitialized = false;
@@ -437,6 +438,7 @@ protected:
   }
 
   static void UseLib() { g_params["RCCL_USE_AMD_SMI_LIB"] = 1; }
+  static void UseSysfs() { g_params["RCCL_USE_AMD_SMI_LIB"] = 0; }
   static void UseWsl2() {
     g_access = [](const char* path, int) { return std::strcmp(path, "/dev/dxg") == 0 ? 0 : -1; };
   }
@@ -444,6 +446,7 @@ protected:
   // Runs the one-time init so is_wsl2 and the backend are settled, then clears the log.
   static void InitFor(bool lib) {
     if (lib) UseLib();
+    else UseSysfs();
     ASSERT_EQ(amd_smi_init(), ncclSuccess);
     g_logged.clear();
   }
@@ -483,14 +486,26 @@ TEST_F(AmdsmiWrapMicrotest, Init_Wsl2SkipsEveryBackend) {
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "WSL2 environment detected"));
 }
 
+TEST_F(AmdsmiWrapMicrotest, Init_DefaultBackendIsLib) {
+  UseLib();
+  EXPECT_EQ(amd_smi_init(), ncclSuccess);
+  EXPECT_EQ(is_wsl2, 0);
+  EXPECT_EQ(g_smi.initCalls, 1);
+  EXPECT_EQ(g_arsmi.initCalls, 0);
+  EXPECT_TRUE(amdSmiLibInitialized);
+}
+
 TEST_F(AmdsmiWrapMicrotest, Init_DefaultBackendIsArsmi) {
+  UseSysfs();
   EXPECT_EQ(amd_smi_init(), ncclSuccess);
   EXPECT_EQ(is_wsl2, 0);
   EXPECT_EQ(g_arsmi.initCalls, 1);
   EXPECT_EQ(g_smi.initCalls, 0);
+  EXPECT_FALSE(amdSmiLibInitialized);
 }
 
 TEST_F(AmdsmiWrapMicrotest, Init_ArsmiFailureIsInternalError) {
+  UseSysfs();
   g_arsmi.initResult = 5;
   EXPECT_EQ(amd_smi_init(), ncclInternalError);
   EXPECT_TRUE(Logged(NCCL_LOG_ERROR, "ARSMI failure: 5"));
@@ -528,6 +543,7 @@ TEST_F(AmdsmiWrapMicrotest, Init_VersionFailureAfterInitStillCountsAsInitialized
 
 // The result is cached, failures included, until shutdown resets it.
 TEST_F(AmdsmiWrapMicrotest, Init_CachesItsResultUntilShutdown) {
+  UseSysfs();
   g_arsmi.initResult = 1;
   EXPECT_EQ(amd_smi_init(), ncclInternalError);
   g_arsmi.initResult = 0;
@@ -557,6 +573,7 @@ TEST_F(AmdsmiWrapMicrotest, Shutdown_ShutsTheLibraryDownOnceAndForgetsItsMajor) 
 
 // The ARSMI backend has nothing to shut down.
 TEST_F(AmdsmiWrapMicrotest, Shutdown_ArsmiBackendNeverCallsTheLibrary) {
+  UseSysfs();
   ASSERT_EQ(amd_smi_init(), ncclSuccess);
   EXPECT_EQ(amd_smi_shutdown(), ncclSuccess);
   EXPECT_EQ(g_smi.shutdownCalls, 0);
@@ -572,7 +589,7 @@ TEST_F(AmdsmiWrapMicrotest, Shutdown_LibraryFailureIsReturned) {
 // dlopen runs once per process (function-local static handle), so these two run in forked children.
 // The child bodies are plain functions: their lambdas' commas would split EXPECT_EXIT's arguments.
 namespace {
-int DlopenFailureChild() {
+int DlopenFailureFallsBackToArsmiChild() {
   ClearSmiTable();
   g_params["RCCL_USE_AMD_SMI_LIB"] = 1;
   static std::string opened;
@@ -581,11 +598,28 @@ int DlopenFailureChild() {
     return nullptr;
   };
   ncclResult_t r = amd_smi_init();
-  bool warned = false;
+  bool warnedFallback = false;
+  bool infoArsmi = false;
   for (const auto& m : g_logged) {
-    warned |= m.level == NCCL_LOG_WARN && m.text.find("Failed to open") != std::string::npos;
+    warnedFallback |= m.level == NCCL_LOG_WARN && m.text.find("falling back to sysfs") != std::string::npos;
+    infoArsmi |= m.level == NCCL_LOG_INFO && m.text.find("alternative rsmi") != std::string::npos;
   }
-  return r == ncclInternalError && opened.rfind("libamd_smi.so", 0) == 0 && warned ? 0 : 1;
+  // Should succeed via ARSMI fallback, not fail
+  return r == ncclSuccess && opened.rfind("libamd_smi.so", 0) == 0 && warnedFallback && infoArsmi ? 0 : 1;
+}
+
+int DlopenAndArsmiBothFailChild() {
+  ClearSmiTable();
+  g_params["RCCL_USE_AMD_SMI_LIB"] = 1;
+  g_dlopen = [](const char*, int) -> void* { return nullptr; };
+  g_arsmi.initResult = 5;  // ARSMI fallback also fails
+  ncclResult_t r = amd_smi_init();
+  bool loggedArsmiError = false;
+  for (const auto& m : g_logged) {
+    loggedArsmiError |= m.level == NCCL_LOG_ERROR && m.text.find("ARSMI failure") != std::string::npos;
+  }
+  // Should fail when both dlopen and ARSMI fail
+  return r == ncclInternalError && loggedArsmiError ? 0 : 1;
 }
 
 int DlopenResolvesChild() {
@@ -606,8 +640,14 @@ int DlopenResolvesChild() {
 }
 }  // namespace
 
-TEST_F(AmdsmiWrapMicrotest, Init_DlopenFailureIsInternalError) {
-  EXPECT_EXIT(std::exit(DlopenFailureChild()), ::testing::ExitedWithCode(0), "");
+// When dlopen fails, init falls back to ARSMI instead of returning an error.
+TEST_F(AmdsmiWrapMicrotest, Init_DlopenFailureFallsBackToArsmi) {
+  EXPECT_EXIT(std::exit(DlopenFailureFallsBackToArsmiChild()), ::testing::ExitedWithCode(0), "");
+}
+
+// When dlopen fails AND ARSMI fallback also fails, init returns an error.
+TEST_F(AmdsmiWrapMicrotest, Init_DlopenAndArsmiBothFailIsInternalError) {
+  EXPECT_EXIT(std::exit(DlopenAndArsmiBothFailChild()), ::testing::ExitedWithCode(0), "");
 }
 
 TEST_F(AmdsmiWrapMicrotest, Init_DlopenResolvesEveryEntryPointByName) {
@@ -617,12 +657,13 @@ TEST_F(AmdsmiWrapMicrotest, Init_DlopenResolvesEveryEntryPointByName) {
 // getProcessorHandle (via amd_smi_getFirmwareVersion, its only plain caller)
 
 TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_IsAmdSmiLibOnly) {
+  UseSysfs();
   amdsmi_processor_handle h = nullptr;
   EXPECT_EQ(getProcessorHandle(0, &h), ncclSystemError);
 }
 
 TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_MatchesTheHipIdAndSkipsNonGpus) {
-  UseLib();
+  InitFor(/*lib=*/true);
   TwoGpusBehindACpu();
   amdsmi_processor_handle h = nullptr;
   ASSERT_EQ(getProcessorHandle(1, &h), ncclSuccess);
@@ -631,7 +672,7 @@ TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_MatchesTheHipIdAndSkipsNonGpus) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_SearchesEverySocket) {
-  UseLib();
+  InitFor(/*lib=*/true);
   FakeProc a, b;
   a.hipId = 0;
   b.hipId = 1;
@@ -642,7 +683,7 @@ TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_SearchesEverySocket) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_LibraryFailuresAreInternalError) {
-  UseLib();
+  InitFor(/*lib=*/true);
   TwoGpusBehindACpu();
   amdsmi_processor_handle h = nullptr;
   // Each failure returns at once: nothing past the failing call runs.
@@ -683,14 +724,14 @@ TEST_F(AmdsmiWrapMicrotest, NumDevice_Wsl2AsksHip) {
   EXPECT_EQ(n, 3u);
 }
 
-// Counts every processor handle in every socket, CPUs included; a fix flips this pin.
-TEST_F(AmdsmiWrapMicrotest, NumDevice_KnownBug_LibCountsCpuProcessors) {
+// Counts only GPU processor handles, skipping CPUs and other processor types.
+TEST_F(AmdsmiWrapMicrotest, NumDevice_LibCountsOnlyGpuProcessors) {
   InitFor(/*lib=*/true);
   g_smi.sockets = {{FakeProc{}, FakeProc{}}, {FakeProc{}}};
-  g_smi.sockets[1][0].gpu = false;
+  g_smi.sockets[1][0].gpu = false;  // CPU processor, should be skipped
   uint32_t n = 0;
   EXPECT_EQ(amd_smi_getNumDevice(&n), ncclSuccess);
-  EXPECT_EQ(n, 3u);
+  EXPECT_EQ(n, 2u);  // Only the 2 GPUs, not the CPU
 }
 
 TEST_F(AmdsmiWrapMicrotest, NumDevice_LibFailureIsInternalError) {
@@ -996,21 +1037,21 @@ TEST_F(AmdsmiWrapMicrotest, LinkInfo_LibXgmiCountIsTheBandwidthRatio) {
   EXPECT_EQ(count, 1);
 }
 
-// An unknown index is logged, then queried as a null handle and reported as success; a fix flips this pin.
-TEST_F(AmdsmiWrapMicrotest, LinkInfo_KnownBug_LibUnknownIndexStillSucceeds) {
+// An unknown device index returns ncclInternalError and logs an error.
+TEST_F(AmdsmiWrapMicrotest, LinkInfo_LibUnknownIndexReturnsError) {
   InitFor(/*lib=*/true);
   TwoGpusBehindACpu();
   amdsmi_link_type_t type;
   int hops = 0, count = 0;
-  EXPECT_EQ(amd_smi_getLinkInfo(0, 9, &type, &hops, &count), ncclSuccess);
+  EXPECT_EQ(amd_smi_getLinkInfo(0, 9, &type, &hops, &count), ncclInternalError);
   EXPECT_TRUE(Logged(NCCL_LOG_ERROR, "could not find processor handle for dstIndex: 9"));
   EXPECT_FALSE(Logged(NCCL_LOG_ERROR, "srcIndex"));
-  EXPECT_EQ(g_smi.lastLinkDst, nullptr);
 }
 
 // amd_smi_getFirmwareVersion
 
 TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_InitFailureIsReturned) {
+  UseSysfs();
   g_arsmi.initResult = 1;
   uint64_t fw = 7;
   EXPECT_EQ(amd_smi_getFirmwareVersion(0, &fw), ncclInternalError);
@@ -1026,6 +1067,7 @@ TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_Wsl2IsZero) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_ArsmiReportsItsVersion) {
+  UseSysfs();
   g_arsmi.fwVersion = 0x55;
   uint64_t fw = 0;
   EXPECT_EQ(amd_smi_getFirmwareVersion(0, &fw), ncclSuccess);
@@ -1066,6 +1108,21 @@ TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_LibFailures) {
   EXPECT_TRUE(Logged(NCCL_LOG_ERROR, "amdsmi_get_fw_info symbol not loaded"));
 }
 
+// Verifies that amd_smi_getFirmwareVersion initializes the backend before checking
+// amdSmiLibInitialized, so calling it before explicit amd_smi_init() still works.
+TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_SelfInitializesBeforeBackendCheck) {
+  // Don't call InitFor() - start with no init, like init.cc's early firmware query
+  UseLib();
+  TwoGpusBehindACpu();
+  g_smi.sockets[0][1].fwVersion = 0x42;
+
+  // The function should call amd_smi_init() internally before checking amdSmiLibInitialized
+  uint64_t fw = 0;
+  EXPECT_EQ(amd_smi_getFirmwareVersion(0, &fw), ncclSuccess);
+  EXPECT_EQ(fw, 0x42u);
+  EXPECT_EQ(g_smi.initCalls, 1);  // Confirms init was called internally
+}
+
 // amd_smi_ensureFabricInitialized and the fabric accessors
 
 namespace {
@@ -1086,6 +1143,7 @@ ARSMI_fabricInfo ArsmiFabric(int supported, uint32_t accelId, uint32_t bw) {
 }  // namespace
 
 TEST_F(AmdsmiWrapMicrotest, Fabric_InitFailureIsCachedForTheThread) {
+  UseSysfs();
   g_arsmi.initResult = 1;
   EXPECT_EQ(amd_smi_ensureFabricInitialized(), ncclInternalError);
   g_arsmi.initResult = 0;
@@ -1100,21 +1158,25 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_Wsl2HasNoFabric) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, Fabric_NoDevicesIsSuccessWithAnEmptyCache) {
+  UseSysfs();
   EXPECT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
   EXPECT_EQ(amdsmiFabricDeviceCount, 0);
 }
 
 TEST_F(AmdsmiWrapMicrotest, Fabric_TooManyDevicesIsInternalError) {
+  UseSysfs();
   g_arsmi.numDevices = amdsmiFabricMaxDevices + 1;
   EXPECT_EQ(amd_smi_ensureFabricInitialized(), ncclInternalError);
   EXPECT_TRUE(Logged(NCCL_LOG_WARN, "exceeds internal maximum"));
   Reset();  // the boundary itself fits
+  UseSysfs();
   g_arsmi.numDevices = amdsmiFabricMaxDevices;
   EXPECT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
   EXPECT_EQ(amdsmiFabricDeviceCount, amdsmiFabricMaxDevices);
 }
 
 TEST_F(AmdsmiWrapMicrotest, Fabric_SysfsPathCopiesEachDevicesFields) {
+  UseSysfs();
   g_arsmi.numDevices = 2;
   g_arsmi.fabric[0] = ArsmiFabric(1, 11, 400000);  // device 1 has no ualink dir
   ASSERT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
@@ -1137,6 +1199,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_SysfsPathCopiesEachDevicesFields) {
 
 // Discovery runs once; later calls, on any thread, read the cache.
 TEST_F(AmdsmiWrapMicrotest, Fabric_DiscoveryRunsOnce) {
+  UseSysfs();
   g_arsmi.numDevices = 1;
   g_arsmi.fabric[0] = ArsmiFabric(1, 11, 100);
   ASSERT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
@@ -1249,6 +1312,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_LibProbeFallsBackToSysfs) {
     UseLib();
     FakeProc a;
     g_smi.sockets = {{a}};
+    g_arsmi.numDevices = 1;
     g_arsmi.fabric[0] = ArsmiFabric(1, 33, 100);
     c.arrange();
     ASSERT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
@@ -1263,10 +1327,42 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_LibWithoutAProbeHandleFallsBackToSysfs) {
   FakeProc a;
   a.hipId = 4;  // no GPU answers to hip id 0
   g_smi.sockets = {{a}};
+  g_arsmi.numDevices = 1;
   g_arsmi.fabric[0] = ArsmiFabric(1, 44, 100);
   ASSERT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
   EXPECT_TRUE(Logged(NCCL_LOG_WARN, "no processor handle to probe"));
   EXPECT_EQ(amdsmiFabricDevices[0].acceleratorId, 44u);
+}
+
+// When AMD SMI lib initializes but ABI probe fails, fabric init falls back to sysfs.
+// This test verifies that the device count and indices remain consistent: numDevs from
+// amd_smi_getNumDevice (which uses AMD SMI when lib is initialized) matches the count
+// ARSMI would report, and each device index 0..N-1 is populated correctly from ARSMI.
+// This addresses the ARGUS concern about "useSysfs mixed state" at line 600.
+TEST_F(AmdsmiWrapMicrotest, Fabric_LibProbeFailsMultiDeviceIndicesConsistent) {
+  UseLib();
+  // 4 GPUs across 2 sockets - AMD SMI will count them by hip_id
+  FakeProc g0, g1, g2, g3;
+  g0.hipId = 0; g1.hipId = 1; g2.hipId = 2; g3.hipId = 3;
+  g_smi.sockets = {{g0, g1}, {g2, g3}};
+  // Force probe failure so we fall back to sysfs
+  g_smi.fabricProbeStatus = AMDSMI_STATUS_NOT_SUPPORTED;
+  // ARSMI reports same 4 devices with distinct accelerator IDs
+  g_arsmi.numDevices = 4;
+  g_arsmi.fabric[0] = ArsmiFabric(1, 100, 400000);
+  g_arsmi.fabric[1] = ArsmiFabric(1, 101, 400000);
+  g_arsmi.fabric[2] = ArsmiFabric(1, 102, 400000);
+  g_arsmi.fabric[3] = ArsmiFabric(1, 103, 400000);
+
+  ASSERT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "falling back to sysfs"));
+
+  // Verify all 4 devices populated from ARSMI with correct indices
+  EXPECT_EQ(amdsmiFabricDeviceCount, 4);
+  EXPECT_EQ(amdsmiFabricDevices[0].acceleratorId, 100u);
+  EXPECT_EQ(amdsmiFabricDevices[1].acceleratorId, 101u);
+  EXPECT_EQ(amdsmiFabricDevices[2].acceleratorId, 102u);
+  EXPECT_EQ(amdsmiFabricDevices[3].acceleratorId, 103u);
 }
 
 // Without the fabric entry point the probe is skipped and each device is marked unsupported.
@@ -1282,6 +1378,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_LibWithoutTheFabricSymbolMarksDevicesUnsuppor
 }
 
 TEST_F(AmdsmiWrapMicrotest, FabricAccessors_ReadTheCacheWithBoundsChecks) {
+  UseSysfs();
   g_arsmi.numDevices = 2;
   g_arsmi.fabric[0] = ArsmiFabric(1, 11, 400000);
   g_arsmi.fabric[1] = ArsmiFabric(0, 12, 300000);  // present but not usable
@@ -1314,6 +1411,7 @@ TEST_F(AmdsmiWrapMicrotest, FabricAccessors_ReadTheCacheWithBoundsChecks) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, FabricAccessors_PropagateAnInitFailure) {
+  UseSysfs();
   g_arsmi.initResult = 1;
   bool supported = true;
   EXPECT_EQ(amd_smi_isFabricSupported(0, &supported), ncclInternalError);
@@ -1326,6 +1424,7 @@ TEST_F(AmdsmiWrapMicrotest, FabricAccessors_PropagateAnInitFailure) {
 // Fabric telemetry
 
 TEST_F(AmdsmiWrapMicrotest, Telemetry_IsAmdSmiLibOnly) {
+  UseSysfs();
   amdsmi_fabric_telemetry_t* t = nullptr;
   auto* dummy = reinterpret_cast<amdsmi_fabric_telemetry_t*>(0x2000);
   EXPECT_EQ(amd_smi_allocFabricTelemetry(0, 1, &t), ncclSystemError);
@@ -1343,7 +1442,7 @@ TEST_F(AmdsmiWrapMicrotest, Telemetry_NullBufferIsRejected) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, Telemetry_CallsTheLibraryWithTheDevicesHandle) {
-  UseLib();
+  InitFor(/*lib=*/true);
   TwoGpusBehindACpu();
   amdsmi_fabric_telemetry_t* t = nullptr;
   ASSERT_EQ(amd_smi_allocFabricTelemetry(1, 0x6, &t), ncclSuccess);
@@ -1359,7 +1458,7 @@ TEST_F(AmdsmiWrapMicrotest, Telemetry_CallsTheLibraryWithTheDevicesHandle) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, Telemetry_FailuresAreReturned) {
-  UseLib();
+  InitFor(/*lib=*/true);
   TwoGpusBehindACpu();
   amdsmi_fabric_telemetry_t* t = nullptr;
   auto* dummy = reinterpret_cast<amdsmi_fabric_telemetry_t*>(0x2000);
@@ -1375,12 +1474,14 @@ TEST_F(AmdsmiWrapMicrotest, Telemetry_FailuresAreReturned) {
 // amd_smi_fabricTelemIdToString
 
 TEST_F(AmdsmiWrapMicrotest, TelemIdToString_WithoutTheSymbolAsksArsmi) {
+  UseSysfs();
   pfn_amdsmi_fabric_telem_id_to_string = nullptr;
   EXPECT_STREQ(amd_smi_fabricTelemIdToString(5), "ARSMI_NAME");
 }
 
 // amd_smi 27+ and an unknown version use the out-parameter form.
 TEST_F(AmdsmiWrapMicrotest, TelemIdToString_OutParamForm) {
+  UseLib();
   for (uint32_t major : {kAmdSmiLibVersionUnknown, 27u, 30u}) {
     SCOPED_TRACE(major);
     amdSmiLibMajor.store(major);
@@ -1397,6 +1498,7 @@ TEST_F(AmdsmiWrapMicrotest, TelemIdToString_OutParamForm) {
 
 // Before 27 the symbol returns the name, so it is called through that signature instead.
 TEST_F(AmdsmiWrapMicrotest, TelemIdToString_LegacyFormBeforeMajor27) {
+  UseLib();
   amdSmiLibMajor.store(26);
   pfn_amdsmi_fabric_telem_id_to_string =
     reinterpret_cast<decltype(pfn_amdsmi_fabric_telem_id_to_string)>(FakeLegacyTelemIdToString);
