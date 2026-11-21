@@ -221,9 +221,8 @@ MILESTONE_PATTERNS = [
     ("bc_unopt_link", re.compile(r"^bitcode/[^/]+/librocshmem_device_.*_unopt\.bc$")),
     ("bc_opt", re.compile(r"^librocshmem_device_[^/]+\.bc$")),
     ("kernel_compile",
-     re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_(?!.*_unopt)(?!.*_linked)[^/]+\.bc$")),
+     re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_(?!.*_unopt)[^/]+\.bc$")),
     ("kernel_unopt_link", re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_.*_unopt\.bc$")),
-    ("kernel_opt", re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_.*_linked\.bc$")),
     ("kernel_codegen", re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_[^/]+\.o$")),
     ("hsaco_lld", re.compile(r"^tests/functional_tests/device_bitcode_tester_kernel_[^/]+\.hsaco$")),
     ("host_archive", re.compile(r"^librocshmem\.a$")),
@@ -649,7 +648,7 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
     wall_total = (wall_end - wall_start) / 1000.0
 
     milestone_cmd_names = ("bc_unopt_link", "bc_opt", "kernel_compile", "kernel_unopt_link",
-                            "kernel_opt", "kernel_codegen", "hsaco_lld")
+                            "kernel_codegen", "hsaco_lld")
     wanted_outputs = {milestones[n][2] for n in milestone_cmd_names if n in milestones}
     real_cmds = {out: simplify_command(cmd) for out, cmd in
                  extract_ninja_commands(build_ninja_path, wanted_outputs).items()} \
@@ -817,12 +816,14 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             lines += ["  cmake_configure -> host_sources;\n", "  host_sources -> host_archive;\n"]
 
         gate_color = "red" if not compact else "red"
-        lines.append(_node("project_dep_hack",
-                            f"add_dependencies(${{PROJECT_NAME}}, device_bitcode_tester_hsacos)\n{gated_note}",
-                            "#fff3bf", style="filled,dashed", color=gate_color, penwidth=2, shape="note"))
+        has_gate = bool(gate_info and gate_info["gated_targets"])
+        if has_gate:
+            lines.append(_node("project_dep_hack",
+                                f"add_dependencies(${{PROJECT_NAME}}, device_bitcode_tester_hsacos)\n{gated_note}",
+                                "#fff3bf", style="filled,dashed", color=gate_color, penwidth=2, shape="note"))
 
         # HSACO chain
-        hsaco_names = ["kernel_compile", "kernel_unopt_link", "kernel_opt", "kernel_codegen", "hsaco_lld"]
+        hsaco_names = ["kernel_compile", "kernel_unopt_link", "kernel_codegen", "hsaco_lld"]
         if all(n in milestones for n in hsaco_names):
             chain_s, _, _ = milestones["kernel_compile"]
             _, chain_e, _ = milestones["hsaco_lld"]
@@ -835,8 +836,7 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             steps = [
                 ("kernel_compile", "clang++ kernel compile", "#b2f2bb", 1, "#f08c00"),
                 ("kernel_unopt_link", "llvm-link kernel+library", "#ffd8a8", 1, "#f08c00"),
-                ("kernel_opt", "opt -O3 merged bc -- SERIAL", "#ffd8a8", 2, "red"),
-                ("kernel_codegen", "clang -x ir codegen -- SERIAL", "#ffd8a8", 3, "red"),
+                ("kernel_codegen", "clang -x ir codegen -- SERIAL", "#ffd8a8", 2, "red"),
                 ("hsaco_lld", "ld.lld -> .hsaco", "#ffd8a8", 1, "#f08c00"),
             ]
             for name, label, fill, pw, ccolor in steps:
@@ -854,9 +854,9 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             lines += [
                 "  kernel_hip -> kernel_compile;\n", "  kernel_compile -> kernel_unopt_link;\n",
                 "  bc_opt -> kernel_unopt_link [color=red];\n" if "bc_opt" in milestones else "",
-                "  kernel_unopt_link -> kernel_opt;\n", "  kernel_opt -> kernel_codegen;\n",
+                "  kernel_unopt_link -> kernel_codegen;\n",
                 "  kernel_codegen -> hsaco_lld;\n", "  hsaco_lld -> hsaco_target;\n",
-                "  hsaco_target -> project_dep_hack [color=red, penwidth=2];\n",
+                "  hsaco_target -> project_dep_hack [color=red, penwidth=2];\n" if has_gate else "",
             ]
 
         # examples (when present)
@@ -902,10 +902,11 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
                 lines.append('  host_archive -> not_built [style=dashed, color="#adb5bd"];\n')
 
         # functional tests
+        functest_gated = bool(gate_info and "rocshmem_functional_tests" in gate_info["gated_targets"])
         if ft_group or "functest_link" in milestones:
             lines.append(f"  subgraph cluster_functest {{\n"
                           f'    label="rocshmem_functional_tests'
-                          f'{" -- gated by device_bitcode_tester_hsacos" if not gates_library else ""}";\n'
+                          f'{" -- gated by device_bitcode_tester_hsacos" if functest_gated else ""}";\n'
                           f'    style="filled,dashed"; fillcolor="#fff5f5"; color=red; fontsize={fs};\n')
             if ft_group:
                 s0, e0, n, cpu = ft_group
@@ -928,7 +929,7 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
                                       width=0.65, fontsize=9, penwidth=2))
             lines.append("  }\n")
             lines.append("  project_dep_hack -> functest_sources [color=red, penwidth=2];\n"
-                          if ft_group else "")
+                          if ft_group and functest_gated else "")
             lines.append("  functest_sources -> functest_link;\n" if ft_group else "")
             lines.append('  hsaco_target -> functest_link [style=dashed, label="  HSACO used at runtime"];\n'
                           if "functest_link" in milestones and all(n in milestones for n in hsaco_names) else "")
