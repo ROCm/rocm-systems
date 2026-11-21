@@ -89,6 +89,29 @@ set(tstSources
 # Build rules
 add_executable(${TEST} ${tstSources} ${unitSources} ${functSources})
 
+if(ENABLE_ESMI_LIB)
+    # The ESMI mock is confined to amdsmitst's static-library link. libamd_smi
+    # and its normal hardware dispatch have no test function pointers.
+    foreach(
+        entry
+        init
+        exit
+        number_of_cpus_get
+        number_of_sockets_get
+        threads_per_core_get
+        core_energy_get
+        current_freq_limit_core_get
+        core_boostlimit_get
+        core_boostlimit_set
+        read_ccd_power
+        floorlimit_set_get
+        socket_freq_range_get
+        msr_floorlimit_set
+    )
+        target_link_options(${TEST} PRIVATE "LINKER:--wrap=esmi_${entry}")
+    endforeach()
+endif()
+
 # Header include paths, scoped to the test target (consistent with the
 # target_* calls below). ${CMAKE_CURRENT_SOURCE_DIR} (= tests/amd_smi_test/) lets
 # test_base.h, test_common.h, and test_utils.h be included as "test_base.h" from
