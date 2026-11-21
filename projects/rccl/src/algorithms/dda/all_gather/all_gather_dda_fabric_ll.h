@@ -81,27 +81,31 @@ __launch_bounds__(512)
   if (pkEnd > nPk) pkEnd = nPk;
 
   if (peer == selfRank) {
-    // self column: local copy sendbuff -> recvbuff[self].
-    const uint4* s4 = reinterpret_cast<const uint4*>(sendbuff);
-    uint4* d4 = reinterpret_cast<uint4*>(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes);
-    const size_t nVec = perRankBytes >> 4; // number of 16B chunks
-    // split the copy across this peer's blocks too.
-    const size_t vecPerChunk = (nVec + (size_t)nChunks - 1) / (size_t)nChunks;
-    const size_t vBegin = (size_t)chunk * vecPerChunk;
-    size_t vEnd = vBegin + vecPerChunk;
-    if (vEnd > nVec) vEnd = nVec;
-    for (size_t i = vBegin + tid; i < vEnd; i += nthreads) {
-      const uint4* p = &s4[i];
-      uint4 v;
-      v.x = __builtin_nontemporal_load(&p->x);
-      v.y = __builtin_nontemporal_load(&p->y);
-      v.z = __builtin_nontemporal_load(&p->z);
-      v.w = __builtin_nontemporal_load(&p->w);
-      uint4* q = &d4[i];
-      __builtin_nontemporal_store(v.x, &q->x);
-      __builtin_nontemporal_store(v.y, &q->y);
-      __builtin_nontemporal_store(v.z, &q->z);
-      __builtin_nontemporal_store(v.w, &q->w);
+    // Local copy from sendbuff to this rank's output slot.
+    // In-place calls already have the input there, so skip the copy.
+    char* localRecv = reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perRankBytes;
+    if (reinterpret_cast<const char*>(sendbuff) != localRecv) {
+      const uint4* s4 = reinterpret_cast<const uint4*>(sendbuff);
+      uint4* d4 = reinterpret_cast<uint4*>(localRecv);
+      const size_t nVec = perRankBytes >> 4; // number of 16B chunks
+      // split the copy across this peer's blocks too.
+      const size_t vecPerChunk = (nVec + (size_t)nChunks - 1) / (size_t)nChunks;
+      const size_t vBegin = (size_t)chunk * vecPerChunk;
+      size_t vEnd = vBegin + vecPerChunk;
+      if (vEnd > nVec) vEnd = nVec;
+      for (size_t i = vBegin + tid; i < vEnd; i += nthreads) {
+        const uint4* p = &s4[i];
+        uint4 v;
+        v.x = __builtin_nontemporal_load(&p->x);
+        v.y = __builtin_nontemporal_load(&p->y);
+        v.z = __builtin_nontemporal_load(&p->z);
+        v.w = __builtin_nontemporal_load(&p->w);
+        uint4* q = &d4[i];
+        __builtin_nontemporal_store(v.x, &q->x);
+        __builtin_nontemporal_store(v.y, &q->y);
+        __builtin_nontemporal_store(v.z, &q->z);
+        __builtin_nontemporal_store(v.w, &q->w);
+      }
     }
   } else {
     // scatter: write my payload into peer's slot (== selfRank).
