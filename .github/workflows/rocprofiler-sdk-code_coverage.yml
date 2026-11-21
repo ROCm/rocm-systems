@@ -118,7 +118,7 @@ jobs:
 
     runs-on: ${{ needs.ci_config.outputs.gfx94x_runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.gpu-target }}-test-pr-13323-v2
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -224,6 +224,15 @@ jobs:
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
+    # ROCr writes a GPU core dump when a GPU memory fault kills a test. By default it
+    # is written to the working directory of that test and then lost with the job.
+    - name: Configure GPU core dumps
+      shell: bash
+      run: |
+        mkdir -p "${GITHUB_WORKSPACE}/gpu-coredumps"
+        echo "HSA_COREDUMP_PATTERN=${GITHUB_WORKSPACE}/gpu-coredumps/gpucore.%e.%p.gpu" >> "${GITHUB_ENV}"
+        echo "HSA_COREDUMP_SHOW_PROGRESS=1" >> "${GITHUB_ENV}"
+
     - name: Build ROCProfiler SDK Dependencies
       uses: ./.github/actions/rocprofiler-sdk-util
       with:
@@ -241,35 +250,12 @@ jobs:
         ccache-key: ccache-${{ matrix.system.os }}-${{ needs.ci_config.outputs.gfx94x_runner }}-${{ matrix.system.gpu }}
         ccache-variant: ccache
 
-    - name: Configure, Build, and Test (Total Code Coverage)
-      timeout-minutes: 45
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run:
-        source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
-        python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov
-          --build-jobs 16
-          --site ${{ needs.ci_config.outputs.gfx94x_runner }}
-          --gpu-targets ${{ env.GPU_TARGETS }}
-          --coverage all
-          --run-attempt ${{ github.run_attempt }}
-          --
-          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
-          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
-          -DPython3_EXECUTABLE=$(which python3)
-          ${{ env.GLOBAL_CMAKE_OPTIONS }}
-          --
-          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
-
     - name: Configure, Build, and Test (Tests Code Coverage)
-      timeout-minutes: 45
+      timeout-minutes: 60
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
         source ${GITHUB_WORKSPACE}/${{ env.PYTHON_VENV_PATH }}/bin/activate &&
-        find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-codecov-tests
           --build-jobs 16
@@ -328,14 +314,14 @@ jobs:
         echo "PWD: ${PWD}"
         ls -la
 
-        for i in "all" "tests" "samples"; do
+        for i in "tests" "samples"; do
             wkhtmltoimage --enable-local-file-access --quality 70 .codecov/${i}.html .codecov/${i}.png
         done
         ls -la .codecov
         which -a git
         git --version
 
-        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.GITHUB_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.GITHUB_TOKEN }} --files .codecov/{tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
 
         echo -e "\n${PWD}:"
         ls -la .
@@ -353,9 +339,6 @@ jobs:
 
         ## Samples Only
         $(get-base-md-contents samples)
-
-        ## Tests + Samples
-        $(get-base-md-contents all)
 
         <!-- code-coverage-comment-identifier -->
         EOF
@@ -455,3 +438,40 @@ jobs:
             exit 1
         fi
         popd
+
+    - name: Archive GPU core dumps
+      if: ${{ failure() }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: gpu-coredumps-${{ matrix.system.gpu }}-${{ matrix.system.os }}-attempt-${{ github.run_attempt }}
+        path: gpu-coredumps/
+        if-no-files-found: ignore
+        retention-days: 7
+
+    # ROCr writes no core dump for a GPU hang. The amdgpu and KFD drivers record a hang or
+    # reset, and the cause of a GPU fault, in the kernel log, not in the test output. The
+    # container is privileged, so the kernel log may be readable.
+    - name: Print GPU kernel log
+      if: ${{ failure() }}
+      timeout-minutes: 2
+      shell: bash
+      run: |
+        if ! command -v dmesg > /dev/null; then
+          echo "dmesg is not available in the container"
+          exit 0
+        fi
+        if ! kernel_log=$(dmesg -T 2>&1); then
+          echo "dmesg could not read the kernel log:"
+          echo "${kernel_log}"
+          exit 0
+        fi
+        if [ -z "${kernel_log}" ]; then
+          echo "the kernel log is empty"
+          exit 0
+        fi
+        gpu_lines=$(printf '%s\n' "${kernel_log}" | grep -i -E "amdgpu|kfd|gpu reset|ring .*timeout|vm fault|page fault" | tail -n 300 || true)
+        if [ -n "${gpu_lines}" ]; then
+          echo "${gpu_lines}"
+        else
+          echo "no GPU lines in the kernel log ($(printf '%s\n' "${kernel_log}" | wc -l) lines in total)"
+        fi

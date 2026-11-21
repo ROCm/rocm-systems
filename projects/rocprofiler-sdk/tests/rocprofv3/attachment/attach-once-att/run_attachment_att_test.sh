@@ -41,6 +41,26 @@ wait_for_attach_ready() {
     return 1
 }
 
+# ctest prints the output of a test when it ends, so the log has no timing of its own.
+# Print the time, the host load and the state, CPU time and thread count of the
+# application at the main steps, to show a stall when the test fails. The application
+# is read from /proc because the CI image may not have ps.
+log_progress() {
+    local now loadavg clk_tck stat fields app
+    now=$(date +%H:%M:%S.%N) || true
+    loadavg=$(cut -d' ' -f1-3 /proc/loadavg) || true
+    clk_tck=$(getconf CLK_TCK 2>/dev/null) || clk_tck=100
+    [ "${clk_tck}" -gt 0 ] 2>/dev/null || clk_tck=100
+    app="gone"
+    # In /proc/<pid>/stat, after "pid (command) " the fields are numbered from 1:
+    # state is 1, utime 12 and stime 13 (in clock ticks), thread count 18.
+    if stat=$(cat "/proc/${APP_PID:-0}/stat" 2>/dev/null); then
+        read -r -a fields <<< "${stat##*) }"
+        app="state ${fields[0]}, cpu $(((fields[11] + fields[12]) * 1000 / clk_tck)) ms, threads ${fields[17]}"
+    fi
+    echo "Diagnostic ${now:0:12} $1: loadavg ${loadavg}, app ${app}"
+}
+
 # Arguments
 TEST_APP=$1
 ROCPROFV3=$2
@@ -78,9 +98,11 @@ fi
 echo "Launching test application: ${TEST_APP}"
 HSA_CU_MASK=0:0-1 LD_PRELOAD=${ROCPROF_PRELOAD} ${TEST_APP} 1 1 &
 APP_PID=$!
+log_progress "application launched"
 
 # Wait for the application to be ready for attachment
 wait_for_attach_ready $APP_PID
+log_progress "attach ready"
 
 # Check if the application is still running
 if ! kill -0 $APP_PID 2>/dev/null; then
@@ -113,6 +135,7 @@ fi
 # into ui_output_agent_* directories.
 ATTACH_DURATION_MSEC=2000
 echo "Attaching profiler with ATT to PID $APP_PID for ${ATTACH_DURATION_MSEC} milliseconds..."
+log_progress "starting rocprofv3"
 
 LD_PRELOAD=${ROCPROF_PRELOAD} ${ROCPROFV3} \
     --attach $APP_PID \
@@ -134,6 +157,7 @@ echo "rocprofv3 PID: $ROCPROF_PID"
 # Wait for the attach process to complete
 wait $ROCPROF_PID
 ROCPROF_EXIT_CODE=$?
+log_progress "rocprofv3 finished with exit code ${ROCPROF_EXIT_CODE}"
 
 if [ $ROCPROF_EXIT_CODE -ne 0 ]; then
     echo "rocprofv3 attach test failed with exit code $ROCPROF_EXIT_CODE"
@@ -155,6 +179,7 @@ if [ $APP_EXIT_CODE -ne 0 ]; then
 fi
 
 echo "Test application completed successfully"
+log_progress "application exited"
 
 echo "Checking for generated output files..."
 ls -laR ${OUTPUT_DIR}/${OUTPUT_SUBDIR}/

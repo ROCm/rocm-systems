@@ -116,12 +116,17 @@ if __name__ == "__main__":
 
         run([git_cmd, "--version"])
 
+        # The image branch is an orphan history, so the repository is not cloned.
+        run([git_cmd, "init", tmpdir], check=True)
         run(
             [
                 git_cmd,
-                "clone",
-                repo_url_secure,
+                "-C",
                 tmpdir,
+                "remote",
+                "add",
+                "origin",
+                repo_url_secure,
             ],
             sensitive=True,
             check=True,
