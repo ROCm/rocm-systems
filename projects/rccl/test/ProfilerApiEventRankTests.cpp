@@ -6,6 +6,7 @@
 
 // ProfilerApiEventRank: group/collective/P2P API and kernel-launch event descriptors must carry
 // the rank of the communicator they were issued on, not rank 0 (NVIDIA/nccl#2300).
+// ProfilerNetPluginEvents: with a v6+ plugin, NetPlugin no longer switches on ProxyOp/ProxyStep events.
 
 #include <gtest/gtest.h>
 #include <rccl/rccl.h>
@@ -26,8 +27,14 @@ constexpr uint64_t kApiEvents =
 // the one that context was created for.
 std::atomic<uint64_t> seenOnNonZeroRank{0}, wrongRank{0};
 
+// The mask init() hands RCCL, the word RCCL gave it, and the proxy events started so far.
+std::atomic<int> initMask{static_cast<int>(kApiEvents)};
+std::atomic<int*> maskPtr{nullptr};
+std::atomic<uint64_t> proxyEvents{0};
+
 ncclResult_t rankStartEvent(void* context, void** eHandle, ncclProfilerEventDescr_v7_t* eDescr) {
   const int rank = *static_cast<int*>(context);
+  if (eDescr->type & (ncclProfileProxyOp | ncclProfileProxyStep)) proxyEvents++;
   const uint64_t type = eDescr->type & kApiEvents;
   *eHandle = context;
   if (rank != 0) seenOnNonZeroRank |= type;
@@ -44,7 +51,8 @@ extern "C" __attribute__((visibility("default"))) ncclProfiler_v7_t ncclProfiler
     "RankCheck",
     [](void** context, uint64_t, int* eActivationMask, const char*, int, int, int rank, ncclDebugLogger_t) {
       *context = new int(rank);
-      *eActivationMask = static_cast<int>(kApiEvents);
+      *eActivationMask = initMask.load();
+      maskPtr = eActivationMask;
       return ncclSuccess;
     },
     rankStartEvent, [](void*) { return ncclSuccess; },
@@ -93,6 +101,49 @@ TEST(ProfilerApiEventRank, ApiEventsCarryCommRank) {
     ASSERT_EQ(seenOnNonZeroRank.load(), kApiEvents) << "API event types seen from rank 1 (bitmask)";
     EXPECT_EQ(wrongRank.load(), 0u) << "API event types reported with the wrong rank (bitmask)";
   }, {{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}});
+}
+
+// NetPlugin alone must not start ProxyOp/ProxyStep events; asking for ProxyOp afterwards proves the
+// collective did run through the net proxy, so the first check is not vacuous.
+TEST(ProfilerNetPluginEvents, NetPluginMaskStartsNoProxyEvents) {
+  RUN_ISOLATED_TEST_WITH_ENV("ProfilerNetPluginEvents.NetPluginMaskStartsNoProxyEvents", []() {
+    if (int n = 0; hipGetDeviceCount(&n) != hipSuccess || n < 2) GTEST_SKIP() << "requires at least 2 GPUs";
+    constexpr int kRanks = 2;
+    constexpr size_t kCount = 1 << 20;
+    initMask = ncclProfileNetPlugin;
+    ncclComm_t comms[kRanks];
+    hipStream_t streams[kRanks];
+    float* bufs[kRanks];
+    ASSERT_EQ(ncclCommInitAll(comms, kRanks, nullptr), ncclSuccess);
+    ASSERT_NE(maskPtr.load(), nullptr) << "RCCL did not load the in-binary profiler";
+    for (int r = 0; r < kRanks; ++r) {
+      ASSERT_EQ(hipSetDevice(r), hipSuccess);
+      ASSERT_EQ(hipStreamCreate(&streams[r]), hipSuccess);
+      ASSERT_EQ(hipMalloc(&bufs[r], kCount * sizeof(float)), hipSuccess);
+      ASSERT_EQ(hipMemset(bufs[r], 0, kCount * sizeof(float)), hipSuccess);
+    }
+    auto allReduce = [&]() {
+      ASSERT_EQ(ncclGroupStart(), ncclSuccess);
+      for (int r = 0; r < kRanks; ++r) {
+        ASSERT_EQ(ncclAllReduce(bufs[r], bufs[r], kCount, ncclFloat, ncclSum, comms[r], streams[r]), ncclSuccess);
+      }
+      ASSERT_EQ(ncclGroupEnd(), ncclSuccess);
+      for (int r = 0; r < kRanks; ++r) ASSERT_EQ(hipStreamSynchronize(streams[r]), hipSuccess);
+    };
+    allReduce();
+    const uint64_t netOnly = proxyEvents.load();
+    // RCCL reads the mask through this pointer on every operation.
+    __atomic_store_n(maskPtr.load(), ncclProfileNetPlugin | ncclProfileProxyOp, __ATOMIC_RELAXED);
+    allReduce();
+    const uint64_t withProxyOp = proxyEvents.load() - netOnly;
+    for (int r = 0; r < kRanks; ++r) {
+      ASSERT_EQ(ncclCommDestroy(comms[r]), ncclSuccess);
+      ASSERT_EQ(hipStreamDestroy(streams[r]), hipSuccess);
+      ASSERT_EQ(hipFree(bufs[r]), hipSuccess);
+    }
+    ASSERT_GT(withProxyOp, 0u) << "no ProxyOp events: the allreduce did not use the net transport";
+    EXPECT_EQ(netOnly, 0u) << "ProxyOp/ProxyStep events started for a NetPlugin-only mask";
+  }, {{"NCCL_PROFILER_PLUGIN", "STATIC_PLUGIN"}, {"NCCL_P2P_DISABLE", "1"}, {"NCCL_SHM_DISABLE", "1"}});
 }
 
 } // namespace RcclUnitTesting
