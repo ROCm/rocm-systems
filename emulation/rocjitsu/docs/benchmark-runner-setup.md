@@ -124,6 +124,94 @@ Record when measurement settings change. The dashboard doesn't separate results
 by installed host policy, so comparisons across the change can appear as
 code-performance changes.
 
+## Persistent setup storage
+
+The benchmark container requires two pre-provisioned, dedicated host directories:
+
+| Host directory | Container mount | Purpose |
+| --- | --- | --- |
+| `/srv/rocjitsu-ci/sources` | `/__w/rocm-systems/rocm-systems/ci-sources` | Separate pinned measurement, corpus, TensileLite, full Tensile, llama and nanobind checkouts |
+| `/srv/rocjitsu-ci/cache` | `/opt/rocjitsu-cache` | uv packages (`uv/`) and compiler objects (`ccache/`) |
+
+These are bind mounts, not restored Actions cache archives. They must exist before
+Docker starts the job; the workflow does not provision the host. The cache root
+must be owned by the container's configured UID 0; both mounts must be writable
+by that UID, without symbolic-link ancestors. Limit
+writers to the trusted benchmark runner/jobs. Same-repository opt-in PR workflows
+share this storage; it is not an isolation boundary for untrusted code. Operators
+own disk capacity, quotas and pruning, outside active jobs. Run only one benchmark
+job at a time on a shared source root.
+
+Checkouts retain immutable revisions, `clean: true` and disabled credential
+persistence. TensileLite includes `projects/hipblaslt/tensilelite`, `cmake`,
+`shared/origami`, `shared/stinkytofu` and `shared/mxdatagenerator` for the
+source-built ROCISA wheel and native adapter; full
+Tensile includes `shared/tensile`. Other measurement dependencies retain full
+checkouts, including recursive nanobind submodules. Workflow tooling remains an
+independent sparse scripts checkout at the workflow revision, not the measurement
+revision. Preparation still verifies source revisions and cleanliness.
+
+The pinned setup-uv action installs uv 0.12.21; Python remains 3.12 from the pinned
+setup-python action. Preparation uses the action's absolute uv executable output,
+not PATH. `uv venv --python 3.12` creates a fresh attempt-owned environment without
+seeding pip. Registry installs, package lists and dependency checks use `uv pip`
+with that environment's explicit Python. Registry installs retain explicit indexes
+and benchmark constraints, with bytecode compilation and copied cache materialization.
+`uv build --wheel --no-index --no-build-isolation` builds ROCISA from its pinned
+source using preinstalled build requirements, an external build directory and
+16 build workers. Exact-wheel installation uses an attempt-local requirements
+receipt with the wheel's SHA-256, `--require-hashes --no-index --no-deps`, and no
+bytecode compilation. Import checks still verify venv/noneditable URL origin,
+actual extension and mapped-library hashes, and exclude `/opt/rocm` mappings;
+they do not require an archive hash in uv's `direct_url.json`. Compact inventories
+read installed metadata with stdlib `importlib.metadata`; command logs retain
+verbose registry resolution information. No pip bootstrap, cache or configuration
+is used by benchmark preparation.
+
+Only package setup data and compiler-cache entries persist alongside sources.
+Complete builds, venvs, generated artifacts,
+Tensile helper caches, Triton caches and measurements remain attempt-local.
+Preparation rejects package-cache roots overlapping scratch or source roots and
+symbolic paths. Owned-scratch cleanup leaves both host mounts intact. Package
+cache reuse does not imply ROCISA wheel reuse or change workload cache policy.
+
+## Provider preparation phases
+
+The workflow retains **Install benchmark dependencies** and **Build rocjitsu**,
+then runs one **Prepare benchmark providers** step. Its owned-venv Python commands
+run serially: `rocisa`, `tensilelite-build`, `tensilelite-generate`, `tensile-build`,
+`tensile-generate`, `llama-build`, `gluon-verify`. The five inventory-consuming
+commands starting at `tensilelite-generate` require the selected `--manifest`.
+Granular command logs, timings and phase receipts remain in owned scratch. A
+failed command stops the grouped step and blocks suite admission. See the
+[preparation contract](../website/dashboard/docs/architecture-and-publication.md#isolated-preparation-before-measurement)
+for validation and environment-export boundaries. This split adds no wheel or
+artifact reuse and does not change measurement or JIT policy.
+
+## Compiler caching
+
+The workflow installs ccache inside the job container. Preparation shares
+`/opt/rocjitsu-cache/ccache` across C/C++ builds; no additional runner directory
+or mount needs provisioning. Fresh CMake builds initialize both C and C++ compiler
+launchers from the helper's environment, including the scikit-build ROCISA wheel,
+rocjitsu, the TensileLite adapter/host tests and the full-Tensile adapter.
+The pinned corpus llama builder explicitly disables caching and clears launchers;
+it remains excluded. HIP kernel generation/assembly and Gluon verification are
+not compiler-cache reuse paths.
+
+The helper removes inherited ccache/launcher overrides and writes an attempt-owned
+configuration with compiler-content checking and a `5G` shared size limit. A common
+source/scratch base directory normalizes changing attempt paths; `/` is not used.
+No sloppiness options or ignored headers are enabled. Per-phase ccache statistics
+logs, configuration and diagnostic summaries distinguish real hits from compiler
+fallbacks. Existing source, package, import/loader, host-test and artifact checks
+remain active.
+
+Only compilation results are reused. Configuration, linking, wheel packaging and
+validation still run against fresh attempt outputs. The helper does not export
+ccache settings or compiler launchers to the measured suite. No completed-artifact,
+Tensile helper/JIT, Triton cache or benchmark-result reuse is enabled here.
+
 ## Run benchmarks
 
 Run the wrapper inside the Actions runner service context. Set `INSTALL_DIR`
