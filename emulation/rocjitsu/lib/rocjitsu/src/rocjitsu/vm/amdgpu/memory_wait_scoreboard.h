@@ -6,6 +6,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <array>
@@ -202,15 +203,15 @@ public:
   /// Cancel the latest instruction's dependency and counter positions before
   /// debugger replay, preserving older producers and coalesced source records.
   bool cancel_last_issue(uint64_t pc, std::span<const WaitCounterType> counters,
-                         rj_code_arch_t arch, bool xcnt);
+                         rocjitsu::IsaFamily arch, bool xcnt);
   using IssueSnapshot = std::array<uint64_t, static_cast<size_t>(WaitCounterKind::Count)>;
   /// Capture positions before tracking one instruction. No further instruction
   /// may issue before cancelling that instruction with this snapshot.
   IssueSnapshot issue_snapshot() const { return issued_; }
   bool cancel_last_issue(uint64_t pc, const IssueSnapshot &before);
-  void before(const Instruction &inst, rj_code_arch_t arch);
+  void before(const Instruction &inst, rocjitsu::IsaFamily arch);
   /// Return whether address preparation can change which lanes supply VDATA.
-  static bool needs_prepared_payload_lanes(const Instruction &inst, rj_code_arch_t arch);
+  static bool needs_prepared_payload_lanes(const Instruction &inst, rocjitsu::IsaFamily arch);
   void check_instruction(const Instruction &inst, Wavefront &wf);
   /// Check the GFX11/12 image store's payload after addressing has selected the requested lanes.
   void check_image_store_payload(const Instruction &inst, const Wavefront &wf);
@@ -236,14 +237,15 @@ public:
   /// Count every operation, including stores without a register destination.
   uint64_t issue(WaitCounterKind counter, bool unordered = false, uint32_t ordering_kind = 0,
                  uint32_t units = 1, bool backpressure_ordered = true);
-  uint64_t issue(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch,
+  uint64_t issue(const waitcheck_detail::ClassifiedEvent &event, rocjitsu::IsaFamily arch,
                  uint32_t units = 1);
   /// Use the same decoded counter units for admission and issue accounting.
   static uint32_t issue_units(const Instruction &inst,
-                              const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch);
+                              const waitcheck_detail::ClassifiedEvent &event,
+                              rocjitsu::IsaFamily arch);
   /// Find the incoming producer's writeback order without issuing its completion.
   WriteOrder ordered_write_order(const waitcheck_detail::ClassifiedEvent &event,
-                                 rj_code_arch_t arch) const;
+                                 rocjitsu::IsaFamily arch) const;
   /// Admission can force completion before the incoming instruction reads its operands.
   void backpressure(WaitCounterKind counter, uint32_t capacity, uint32_t incoming_units = 1);
   void add(Event event, bool ordered_native_result = false);
