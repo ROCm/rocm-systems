@@ -1065,7 +1065,7 @@ function(rocprofiler_add_unit_test)
         "FAIL_REGULAR_EXPRESSION"
         "SKIP_REGULAR_EXPRESSION"
         "RESOURCE_LOCK")
-    set(_MULTI_OPTS "SOURCES" "LABELS" "ENVIRONMENT" "DISABLE_TESTS" "DATA"
+    set(_MULTI_OPTS "SOURCES" "LABELS" "ENVIRONMENT" "DISABLE_TESTS" "DATA" "ARGS"
                     "CONFIGURE_FILES" "SPM_TESTS")
 
     cmake_parse_arguments(RAUT "${_FLAG_OPTS}" "${_SINGLE_OPTS}" "${_MULTI_OPTS}" ${ARGN})
@@ -1118,6 +1118,7 @@ function(rocprofiler_add_unit_test)
         SOURCES ${RAUT_SOURCES}
         TEST_LIST ${RAUT_TEST_LIST}
         TEST_PREFIX ${RAUT_TEST_PREFIX}
+        EXTRA_ARGS ${RAUT_ARGS}
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
     set_tests_properties(
