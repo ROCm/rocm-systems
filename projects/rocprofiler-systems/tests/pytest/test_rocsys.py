@@ -256,7 +256,11 @@ class TestRocsys(RocprofsysTest):
         )
 
     @pytest.mark.timeout(15)
-    def test_attach_leaves_a_missing_pid_to_the_tool(self) -> None:
+    def test_attach_leaves_a_missing_pid_to_the_tool(
+        self, rocprof_config: RocprofsysConfig
+    ) -> None:
+        if rocprof_config.rocprofsys_attach is None:
+            pytest.skip("rocprof-sys-attach not built")
         result = self.run_test(
             "baseline",
             target=self.target,
@@ -268,7 +272,7 @@ class TestRocsys(RocprofsysTest):
             result,
             pass_regex=[
                 r"Unknown option '1234'",
-                r"rocprof-sys-attach -p <pid> \[OPTIONS\]",
+                r"Usage: rocprof-sys-attach -p <pid>",
             ],
             fail_regex=[r"put '--' before the application"],
             use_abort_fail_regex=False,
