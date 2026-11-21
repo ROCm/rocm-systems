@@ -681,6 +681,38 @@ TEST(SmiDiagProcesses, AnInsufficientSizeGpuListUsesTheEntriesWritten) {
   EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
   EXPECT_EQ(entries(*r), (std::vector<std::pair<uint32_t, std::string>>{
                              {1, "Running process: 100"}, {2, "Running process: 100"}}));
+  EXPECT_EQ(info(*r), "Process: 100, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 1.");
+}
+
+// The GPUs past a list too long for RDC may be the group's: a process whose
+// list names none of the group's GPUs is one whose GPUs could not be read.
+// Here the process runs on 129 GPUs, and GPU 0 is the one past the list.
+TEST(SmiDiagProcesses, ACutShortGpuListWithoutTheGroupsGpusIsSkipped) {
+  reset_fake(1);
+  std::vector<uint32_t> gpus;
+  for (uint32_t gpu = 1; gpu <= RDC_MAX_NUM_DEVICES; ++gpu) gpus.push_back(gpu);
+  gpus.push_back(0);
+  add_process(100, gpus);
+  g_gpu_lists[100].status = AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_SKIP);
+  EXPECT_EQ(info(*r), "Could not read the GPUs of 1 process.");
+  EXPECT_EQ(r->per_gpu_result_count, 0u);
+}
+
+// ... and a process on the group's GPUs still fails the check.
+TEST(SmiDiagProcesses, ACutShortGpuListWithoutTheGroupsGpusKeepsAFail) {
+  reset_fake(2);
+  add_process(100, {1});
+  g_gpu_lists[100].status = AMDSMI_STATUS_INSUFFICIENT_SIZE;
+  add_process(101, {0});
+  auto r = processes({0});
+  EXPECT_EQ(r->status, RDC_DIAG_RESULT_FAIL);
+  EXPECT_EQ(entries(*r),
+            (std::vector<std::pair<uint32_t, std::string>>{{0, "Running process: 101"}}));
+  EXPECT_EQ(info(*r),
+            "Could not read the GPUs of 1 process. "
+            "Process: 101, vram_usage: 4096, sdma_usage: 0, cu_occupancy: 1.");
 }
 
 TEST(SmiDiagProcesses, NoProcessIsAPass) {

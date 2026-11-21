@@ -210,7 +210,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
     if (err == AMDSMI_STATUS_NOT_FOUND) {
       continue;  // on no GPU, as when it exited after the process list was read
     }
-    if (err == AMDSMI_STATUS_INSUFFICIENT_SIZE) {
+    const bool partial = err == AMDSMI_STATUS_INSUFFICIENT_SIZE;
+    if (partial) {
       on_many_gpus++;
     } else if (err != AMDSMI_STATUS_SUCCESS) {
       last_error = err;
@@ -226,6 +227,11 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
         running[position].add(pid);
       }
       on_group[i] = true;
+    }
+    if (partial && !on_group[i]) {
+      // The GPUs past the list may be the group's.
+      last_error = err;
+      unreadable++;
     }
   }
 
