@@ -2496,6 +2496,46 @@ TEST_F(TopoGetSystemMicrotest, GetSystem_FailuresAreReturned) {
   EXPECT_EQ(nullptr, system_);
 }
 
+// NCCL v2.32.6-1 (GitHub #2160, PR #2386): the fused XML was the rank's own NCCL_TOPO_XML_MAX_NODES buffer,
+// but subtrees whose attributes differ per rank do not dedup, so their union can outgrow it and init failed
+// with "too many XML nodes". Each local rank here contributes a 4510-node subtree tagged with its rank:
+// two of them fit their own gather slots but not one 8192-node buffer.
+TEST_F(TopoGetSystemMicrotest, GetSystem_FusesPerRankXmlsLargerThanOneBuffer) {
+  TopoFile(XgmiSystem(2, 1, true));
+  Ranks({getHostHash(), getHostHash()}, 0);
+  int grown = 0;
+  ScopedHook allGather(g_bootstrapIntraNodeAllGather,
+                       [&grown](void*, int*, int rank, int nranks, void* data, int size) {
+    // Copy this rank's XML to every slot before growing any, so each slot holds only its own subtree.
+    for (int r = 0; r < nranks; r++) {
+      if (r != rank) memcpy((char*)data + (size_t)r * size, (char*)data + (size_t)rank * size, size);
+    }
+    for (int r = 0; r < nranks; r++) {
+      ncclXml* x = (ncclXml*)((char*)data + (size_t)r * size);
+      NCCLCHECK(ncclTopoConvertXml(x, (uintptr_t)x->nodes, 0));
+      ncclXmlNode *top, *pad, *group, *leaf;
+      NCCLCHECK(xmlFindTag(x, "system", &top));
+      NCCLCHECK(xmlAddNode(x, top, "pad", &pad));
+      NCCLCHECK(xmlSetAttrInt(pad, "owner", r));
+      for (int g = 0; g < 9; g++) {
+        NCCLCHECK(xmlAddNode(x, pad, "pad", &group));
+        for (int l = 0; l < 500; l++) NCCLCHECK(xmlAddNode(x, group, "pad", &leaf));
+      }
+      NCCLCHECK(ncclTopoConvertXml(x, (uintptr_t)x->nodes, 1));
+      grown++;
+    }
+    return ncclSuccess;
+  });
+
+  ncclResult_t res = GetSystem();
+  ASSERT_EQ(2, grown);  // Both gathered XMLs fit their slots; only the fusion can run out of room.
+  ASSERT_EQ(ncclSuccess, res);
+
+  ASSERT_NE(nullptr, system_);
+  EXPECT_EQ(1, system_->nodes[GPU].count);
+  EXPECT_FALSE(Logged("too many XML nodes"));
+}
+
 // --- topo_expl models: each loads with the CPU class a live host with its CPUID would get.
 
 struct TopoModelCpu {
