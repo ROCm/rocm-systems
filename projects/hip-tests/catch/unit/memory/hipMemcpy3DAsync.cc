@@ -72,6 +72,39 @@ HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_Array) {
 #endif
 }
 
+// As with hipMemcpyAsync, a pageable source may be reused as soon as the call returns.
+HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Positive_PageableSourceReuse) {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr size_t width = 32;
+  constexpr size_t height = 32;
+  constexpr size_t depth = 8;
+  const StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+  ArrayAllocGuard<int> dst(make_hipExtent(width, height, depth));
+  std::vector<int> src(width * height * depth, 42);
+
+  hipMemcpy3DParms params = {};
+  params.srcPtr = make_hipPitchedPtr(src.data(), width * sizeof(int), width, height);
+  params.dstArray = dst.ptr();
+  params.extent = dst.extent();
+  params.kind = hipMemcpyHostToDevice;
+  // Queued work keeps the copy from running before the source is overwritten.
+  LaunchDelayKernel(std::chrono::milliseconds(50), stream);
+  HIP_CHECK(hipMemcpy3DAsync(&params, stream));
+  std::fill(src.begin(), src.end(), -1);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<int> result(width * height * depth);
+  params = {};
+  params.srcArray = dst.ptr();
+  params.dstPtr = make_hipPitchedPtr(result.data(), width * sizeof(int), width, height);
+  params.extent = dst.extent();
+  params.kind = hipMemcpyDeviceToHost;
+  HIP_CHECK(hipMemcpy3D(&params));
+  ArrayFindIfNot(result.data(), 42, width * height * depth);
+}
+
 HIP_TEST_CASE(Unit_hipMemcpy3DAsync_Negative_Parameters) {
   constexpr bool async = true;
   constexpr hipExtent extent{128 * sizeof(int), 128, 8};

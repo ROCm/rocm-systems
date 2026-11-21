@@ -49,6 +49,28 @@ HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Basic) {
   }
 }
 
+// As with hipMemcpyAsync, a pageable source may be reused as soon as the call returns.
+HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_PageableSourceReuse) {
+  constexpr size_t width = 256;
+  constexpr size_t height = 64;
+  const StreamGuard stream_guard(Streams::created);
+  const hipStream_t stream = stream_guard.stream();
+  LinearAllocGuard2D<int> dst(width, height);
+  std::vector<int> src(width * height, 42);
+
+  // Queued work keeps the copy from running before the source is overwritten.
+  LaunchDelayKernel(std::chrono::milliseconds(50), stream);
+  HIP_CHECK(hipMemcpy2DAsync(dst.ptr(), dst.pitch(), src.data(), width * sizeof(int),
+                             width * sizeof(int), height, hipMemcpyHostToDevice, stream));
+  std::fill(src.begin(), src.end(), -1);
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<int> result(width * height);
+  HIP_CHECK(hipMemcpy2D(result.data(), width * sizeof(int), dst.ptr(), dst.pitch(),
+                        width * sizeof(int), height, hipMemcpyDeviceToHost));
+  ArrayFindIfNot(result.data(), 42, width * height);
+}
+
 HIP_TEST_CASE(Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior) {
   using namespace std::placeholders;
 
