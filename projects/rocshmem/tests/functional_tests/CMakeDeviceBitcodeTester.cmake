@@ -76,7 +76,7 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
     VERBATIM
   )
 
-  set(_UNOPT_BC ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}_unopt.bc)
+  set(_TESTER_UNOPT_LINKED_BC ${CMAKE_CURRENT_BINARY_DIR}/device_bitcode_tester_kernel_${GPU_ARCH}_unopt.bc)
 
   # rocshmem_device_bitcode is listed explicitly (in addition to the file
   # itself) because the Unix Makefiles generator only resolves custom-command
@@ -87,29 +87,29 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
   # on the target instead gives a global build-order edge that works
   # regardless of generator.
   add_custom_command(
-    OUTPUT ${_UNOPT_BC}
+    OUTPUT ${_TESTER_UNOPT_LINKED_BC}
     COMMAND ${LLVM_LINK}
       ${KERNEL_BC}
       ${BITCODE_OUTPUT_${GPU_ARCH}}
-      -o ${_UNOPT_BC}
+      -o ${_TESTER_UNOPT_LINKED_BC}
     DEPENDS ${KERNEL_BC} ${BITCODE_OUTPUT_${GPU_ARCH}} rocshmem_device_bitcode
     COMMENT "device_bitcode_tester: linking kernel against rocshmem device bitcode for ${GPU_ARCH}"
     VERBATIM
   )
 
   # Optimize the merged BC at -O3 so the final HSACO has efficient code.
-  add_custom_command(
-    OUTPUT ${LINKED_BC}
-    COMMAND ${LLVM_OPT}
-      -O3
-      -mtriple=amdgcn-amd-amdhsa
-      -mcpu=${GPU_ARCH}
-      ${_UNOPT_BC}
-      -o ${LINKED_BC}
-    DEPENDS ${_UNOPT_BC}
-    COMMENT "device_bitcode_tester: optimizing merged BC for ${GPU_ARCH}"
-    VERBATIM
-  )
+  # add_custom_command(
+  #   OUTPUT ${LINKED_BC}
+  #   COMMAND ${LLVM_OPT}
+  #     -O3
+  #     -mtriple=amdgcn-amd-amdhsa
+  #     -mcpu=${GPU_ARCH}
+  #     ${_TESTER_UNOPT_LINKED_BC}
+  #     -o ${LINKED_BC}
+  #   DEPENDS ${_TESTER_UNOPT_LINKED_BC}
+  #   COMMENT "device_bitcode_tester: optimizing merged BC for ${GPU_ARCH}"
+  #   VERBATIM
+  # )
 
   add_custom_command(
     OUTPUT ${OBJ_FILE}
@@ -118,10 +118,10 @@ foreach(GPU_ARCH ${BITCODE_GPU_ARCHS})
       -mcpu=${GPU_ARCH}
       -mllvm -amdgpu-internalize-symbols=false
       -x ir
-      -c ${LINKED_BC}
+      -c ${_TESTER_UNOPT_LINKED_BC}
       -o ${OBJ_FILE}
 
-    DEPENDS ${LINKED_BC}
+    DEPENDS ${_TESTER_UNOPT_LINKED_BC}
     COMMENT "device_bitcode_tester: compiling to object for ${GPU_ARCH}"
     VERBATIM
   )
@@ -144,7 +144,5 @@ endforeach()
 add_custom_target(device_bitcode_tester_hsacos ALL
   DEPENDS ${ALL_TESTER_HSACOS}
 )
-
-add_dependencies(${PROJECT_NAME} device_bitcode_tester_hsacos)
 
 message(STATUS "Device bitcode test (in rocshmem_functional_tests) enabled for: ${BITCODE_GPU_ARCHS}")
