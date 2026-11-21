@@ -39,7 +39,6 @@ from amdisa.codegen.execute.matrix import gen_mfma as emit_mfma
 from amdisa.codegen.execute.vector_cmp import (
     gen_vector_add_co,
     gen_vector_cmp,
-    gen_vector_cmp_class,
     gen_vector_cmpx,
 )
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
@@ -2065,26 +2064,6 @@ def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
     assert policy['V_MAD_I64_I32'] == 'i64'
 
 
-def test_vector_cmp_class_writes_explicit_sdst_mask():
-    body = gen_vector_cmp_class(
-        ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
-    )
-
-    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc' not in body
-
-    callback_body = gen_vector_cmp_class(
-        ['sdst'],
-        ['src0', 'src1'],
-        'f32',
-        is_cmpx=False,
-        is_vop3=True,
-        result_writer='commit_result',
-    )
-    assert 'commit_result(vcc);' in callback_body
-    assert 'write_wave_mask_scalar' not in callback_body
-
-
 def test_vector_cmpx_can_delegate_exec_commit():
     body = gen_vector_cmpx(
         ['src0', 'src1'],
@@ -2096,59 +2075,6 @@ def test_vector_cmpx_can_delegate_exec_commit():
 
     assert 'commit_result(result);' in body
     assert 'wf.set_exec(result);' not in body
-
-    class_body = gen_vector_cmp_class(
-        ['sdst'],
-        ['src0', 'src1'],
-        'f32',
-        is_cmpx=True,
-        is_vop3=True,
-        result_writer='commit_result',
-    )
-    assert 'commit_result(result);' in class_body
-    assert 'wf.set_exec(result);' not in class_body
-
-
-@pytest.mark.parametrize('dtype', ['f16', 'f32', 'f64'])
-def test_cdna_vop3_cmpx_class_commits_explicit_sgpr_and_exec(dtype):
-    body = gen_vector_cmp_class(
-        ['vdst'],
-        ['src0', 'src1'],
-        dtype,
-        is_cmpx=True,
-        cmpx_writes_vcc=True,
-        is_vop3=True,
-        result_writer='commit_result',
-    )
-    assert 'amdgpu::write_wave_mask_scalar(vdst, wf, result);' in body
-    assert 'commit_result(result);' in body
-    assert 'wf.set_vcc_mask' not in body
-
-
-def test_vector_cmp_class_omits_redundant_mask_clears():
-    body = gen_vector_cmp_class(
-        ['sdst'], ['src0', 'src1'], 'f32', is_cmpx=False, is_vop3=True
-    )
-
-    assert 'uint64_t vcc = 0;' in body
-    assert 'vcc &= ~(1ULL << lane)' not in body
-
-
-def test_vop3_f16_cmp_class_uses_selected_mask_half():
-    for is_cmpx in (False, True):
-        body = gen_vector_cmp_class(
-            ['sdst'], ['src0', 'src1'], 'f16', is_cmpx=is_cmpx, is_vop3=True
-        )
-
-        assert 'uint32_t opsel = amdgpu::vop3_opsel(inst_);' in body
-        assert (
-            'uint16_t s0_raw = static_cast<uint16_t>('
-            '::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0));'
-        ) in body
-        assert (
-            'uint32_t mask = ::rocjitsu::amdgpu::read_vop3_true16_src(src1, wf, lane, opsel, 1);'
-        ) in body
-        assert 'uint32_t mask = src1.read_lane(wf, lane);' not in body
 
 
 def test_true16_vop3_integer_ops_do_not_use_whole_dword_simd_probe():
