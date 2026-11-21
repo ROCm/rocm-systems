@@ -291,5 +291,4 @@ struct hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w,
                                                  enum hipChannelFormatKind f);
 
 #endif /* __cplusplus */
-
 #endif /* !HIP_INCLUDE_HIP_AMD_DETAIL_CHANNEL_DESCRIPTOR_H */
