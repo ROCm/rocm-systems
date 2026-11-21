@@ -286,18 +286,51 @@ TEST_F(NetIbCastRegMicrotest, RegMr_RegistrationFails_FreesTheHandleAndReturnsTh
   EXPECT_EQ(Cache().population, 0);
 }
 
-// Deregistering moves the last slot into the hole, so the cache is no longer sorted and the
-// lookup's early exit misses a cached range. Pins AICOMRCCL-3092; a fix flips this pin.
-TEST_F(NetIbCastRegMicrotest, DeregMr_KnownBug_CacheLosesItsOrderAndRegistersTwice) {
-  void *low = nullptr, *mid = nullptr, *high = nullptr, *again = nullptr;
-  ASSERT_EQ(IbCastRegMr(send_.get(), buf_, 8, NCCL_PTR_HOST, &low), ncclSuccess);
-  ASSERT_EQ(IbCastRegMr(send_.get(), buf_ + 2 * pageSize_, 8, NCCL_PTR_HOST, &mid), ncclSuccess);
-  ASSERT_EQ(IbCastRegMr(send_.get(), buf_ + 4 * pageSize_, 8, NCCL_PTR_HOST, &high), ncclSuccess);
-  ASSERT_EQ(IbCastDeregMr(send_.get(), low), ncclSuccess);
-  ASSERT_EQ(IbCastRegMr(send_.get(), buf_ + 2 * pageSize_, 8, NCCL_PTR_HOST, &again), ncclSuccess);
-  EXPECT_EQ(calls_.size(), 4u);
-  EXPECT_NE(MrOf(again), MrOf(mid));
-  for (void* h : {mid, high, again}) EXPECT_EQ(IbCastDeregMr(send_.get(), h), ncclSuccess);
+TEST_F(NetIbCastRegMicrotest, DeregMr_RemovalPreservesOrderAndCacheHits) {
+  ASSERT_NE(buf_, nullptr);
+  std::vector<ibv_mr*> released;
+  ScopedHook dereg(g_ibvDeregMr, [&](ibv_mr* mr) {
+    released.push_back(mr);
+    return ncclSuccess;
+  });
+  for (int removed : {0, 1, 3}) {
+    SCOPED_TRACE(removed);
+    void* handles[4] = {};
+    ibv_mr* registered[4] = {};
+    const size_t registrations = calls_.size();
+    const int deregistrations = dereg.calls;
+    for (int index = 0; index < 4; ++index) {
+      ASSERT_EQ(IbCastRegMr(send_.get(), buf_ + 2 * index * pageSize_, 8, NCCL_PTR_HOST, &handles[index]),
+                ncclSuccess);
+      registered[index] = MrOf(handles[index]);
+    }
+    ASSERT_EQ(IbCastDeregMr(send_.get(), handles[removed]), ncclSuccess);
+    ASSERT_EQ(released.size(), static_cast<size_t>(deregistrations + 1));
+    EXPECT_EQ(released.back(), registered[removed]);
+    ASSERT_EQ(Cache().population, 3);
+    for (int slot = 1; slot < Cache().population; ++slot) {
+      EXPECT_LT(Cache().slots[slot - 1].addr, Cache().slots[slot].addr);
+    }
+    for (int index = 0; index < 4; ++index) {
+      if (index == removed) continue;
+      void* again = nullptr;
+      ASSERT_EQ(IbCastRegMr(send_.get(), buf_ + 2 * index * pageSize_, 8, NCCL_PTR_HOST, &again), ncclSuccess);
+      EXPECT_EQ(MrOf(again), MrOf(handles[index]));
+      EXPECT_EQ(calls_.size(), registrations + 4);
+      ASSERT_EQ(IbCastDeregMr(send_.get(), again), ncclSuccess);
+      EXPECT_EQ(dereg.calls, deregistrations + 1);
+    }
+    for (int slot = 0; slot < Cache().population; ++slot) EXPECT_EQ(Cache().slots[slot].refs, 1);
+    for (int index = 0; index < 4; ++index) {
+      if (index == removed) continue;
+      ASSERT_EQ(IbCastDeregMr(send_.get(), handles[index]), ncclSuccess);
+      EXPECT_EQ(released.back(), registered[index]);
+    }
+    EXPECT_EQ(dereg.calls, deregistrations + 4);
+    EXPECT_EQ(Cache().population, 0);
+    EXPECT_EQ(Cache().slots, nullptr);
+    EXPECT_EQ(Cache().capacity, 0);
+  }
 }
 
 // A failure on a later device returns without releasing the MRs the earlier devices took.
