@@ -15,7 +15,16 @@
 # library, so the tests exercise the same objects as the shipping library.
 # Only the amd-dbgapi headers are used; libamd-dbgapi is not linked.
 
-cmake_minimum_required(VERSION 3.21)
+# This directory is added by the top-level CMakeLists.txt when ENABLE_TESTS is
+# ON.  The rocm-debug-agent-core target is created there.
+if(NOT TARGET rocm-debug-agent-core)
+    message(
+        FATAL_ERROR
+        "The rocr-debug-agent unit tests cannot be configured on their own. "
+        "Configure from the top-level rocr-debug-agent CMakeLists.txt "
+        "with -DENABLE_TESTS=ON."
+    )
+endif()
 
 # GoogleTest resolution strategy with layered fallback.
 # Step 1: Try CMake config package (TheRock CI, pre-installed systems).
@@ -28,21 +37,16 @@ endif()
 
 # If GoogleTest not found, fail the build.
 if(NOT GTest_FOUND)
-    message(FATAL_ERROR "GoogleTest not found. Unit tests are enabled but GoogleTest is not available. "
-                        "Install GoogleTest or disable unit tests with -DENABLE_UNIT_TESTS=OFF")
+    message(
+        FATAL_ERROR
+        "GoogleTest not found. Tests are enabled but GoogleTest is not "
+        "available. Install GoogleTest or disable the tests with "
+        "-DENABLE_TESTS=OFF."
+    )
 endif()
 
 # Find Threads (required by GTest and for pthreads).
 find_package(Threads REQUIRED)
-
-# The rocm-debug-agent-core target is created by the top-level CMakeLists.txt.
-if(NOT TARGET rocm-debug-agent-core)
-    message(
-        FATAL_ERROR
-        "The rocm-debug-agent-core target is missing. "
-        "Configure from the top-level rocr-debug-agent CMakeLists.txt."
-    )
-endif()
 
 # Headers under test.
 set(AGENT_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../src)

@@ -16,8 +16,7 @@ There are two tiers:
 - **Integration tests** are GPU-bound: each test builds and runs a real HIP
   kernel with the debug agent attached, then inspects its output.
 - **Unit tests** are CPU-only GTest tests under `test/unit/`, built into the
-  `rocm-debug-agent-unit-tests` binary when `ENABLE_UNIT_TESTS=ON`.  They
-  need no GPU.
+  `rocm-debug-agent-unit-tests` binary.  They need no GPU to run.
 
 Tests live under `test/`.  The `rocm-debug-agent-test` binary contains the
 HIP kernel scenarios; `test/run-test.py` drives it, sweeping
@@ -50,6 +49,16 @@ New scenarios automatically run under all `HIP_ENABLE_DEFERRED_LOADING`
 settings.  See the existing tests and `run-test.py`'s comment header for
 the conventions to follow.
 
+## Building the tests
+
+Both tiers are built from the top-level `CMakeLists.txt`.  `test/` and
+`test/unit/` cannot be configured on their own.
+
+`ENABLE_TESTS` (default `ON`) builds the integration tests, the unit tests and
+the CI wrapper together.  It needs a HIP compiler and GoogleTest.  If GoogleTest
+is not installed, configure fails; install it or pass `-DENABLE_TESTS=OFF` to
+build only the library.
+
 ## Running the suite
 
 **Local build tree:**
@@ -76,7 +85,7 @@ Which tests run, and which binaries the wrapper requires, depend on the flags:
 | `--gpu-tests --cpu-tests`  | both                | integration and unit                       |
 
 The wrapper fails before running anything if a required binary is missing.
-The unit test binary is only built with `ENABLE_UNIT_TESTS=ON`.
+The wrapper and both test binaries are installed with `ENABLE_TESTS=ON`.
 
 The wrapper prepends the ROCm tree's `bin` and `lib` directories to `PATH` and
 `LD_LIBRARY_PATH`, drops `ROCM_PATH` from the environment unless
