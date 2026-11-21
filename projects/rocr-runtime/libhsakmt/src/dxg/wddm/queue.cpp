@@ -258,7 +258,7 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
           if (++stall_windows >= kMaxStallWindows) {
             if (queue->thread_stop_.exchange(true)) return;
             pr_err("GPU hang timeout: rptr=%" PRIu64 " wptr=%" PRIu64 " fence=%" PRIu64
-                   " made no progress for %dms with a healthy fence — aborting queue\n",
+                   " made no progress for %dms with a healthy fence - aborting queue\n",
                    current_rptr, current_wptr, current_fence,
                    kStallTimeoutMs * kMaxStallWindows);
             // Not a memory fault: no fence was ever poisoned, so report a hang rather
@@ -268,7 +268,7 @@ void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
           }
           last_progress = std::chrono::steady_clock::now();
           pr_debug("queue blocked on dependency for %dms, fence healthy (0x%" PRIx64
-                   ") — window %d/%d, continuing to monitor\n",
+                   ") - window %d/%d, continuing to monitor\n",
                    kStallTimeoutMs, current_fence, stall_windows, kMaxStallWindows);
         }
       }
