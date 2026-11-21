@@ -8,8 +8,9 @@
 // and the one-source copy (tryTdmCopy in common_kernel.h).
 //
 // Each kernel drives reduceCopy from one block the way genericOp does: the pointer
-// lists live in shared memory and EnableTdmReduce is set. Every case runs twice, with
-// the runtime switch on and off, and both outputs must match a host reference exactly,
+// lists live in shared memory and, for the reduce kernels, EnableTdmReduce is set (the
+// one-source copy kernel leaves it at its default and is gated by the TDM SIMPLE switch
+// instead). Every case runs twice, with the runtime switch on and off, and both outputs must match a host reference exactly,
 // so the TDM tiles and the vector passes that finish each slice are checked together.
 // Inputs are small multiples of 1/4, so float sums are exact in any order.
 
@@ -385,6 +386,9 @@ protected:
       DeviceBuffer<T*> dDstPtrs(NDsts);
       dDstPtrs.copyFrom(dstPtrs);
       DeviceBuffer<int> dGate(1);
+      // Only the first thread of the team writes the gate. Zero it so a launch where no warp runs the team (warp0 past
+      // the last warp) fails the gate assertion instead of reading back garbage.
+      dGate.zero();
 
       kTdmSimpleCopy<T, NDsts><<<1, kBlockThreads>>>(dSrc.ptr + srcOff, dDstPtrs.ptr, static_cast<ssize_t>(nElts),
                                                      tdmSimple, warp0, dGate.ptr);
@@ -418,12 +422,13 @@ TEST_F(TdmSimpleCopyTest, Aligned) {
 
 // Source and destination off their lines by different amounts, including one off and one on.
 TEST_F(TdmSimpleCopyTest, MisalignedOffsets) {
-  for (size_t srcOff : {0, 1, 2, 3, 64, 255})
+  for (size_t srcOff : {0, 1, 2, 3, 64, 255}) {
     for (size_t dstOff : {0, 1, 3, 128, 200}) {
       if (srcOff == 0 && dstOff == 0) continue;
       run<uint8_t, 1>(kCopyBytes, srcOff, {dstOff}, 0,
                       "src+" + std::to_string(srcOff) + " dst+" + std::to_string(dstOff));
     }
+  }
 }
 
 // The fp16 rccl-tests shape at offset 1: both legs 2 bytes off.
@@ -447,9 +452,11 @@ TEST_F(TdmSimpleCopyTest, TeamNotAtWarpZero) {
 TEST_F(TdmSimpleCopyTest, SizeSweep) {
   for (size_t n : {size_t(1), size_t(3), size_t(127), size_t(255), size_t(256), size_t(257), size_t(511),
                    size_t(8191), size_t(8193), size_t(16383), size_t(16385), size_t(65537), size_t(131071),
-                   size_t(131073), size_t(3 * 131072 + 100)})
-    for (size_t off : {0, 1})
+                   size_t(131073), size_t(3 * 131072 + 100)}) {
+    for (size_t off : {0, 1}) {
       run<uint8_t, 1>(n, off, {3 * off}, 0, std::to_string(n) + " bytes off " + std::to_string(off));
+    }
+  }
 }
 
 } // namespace RcclUnitTesting
