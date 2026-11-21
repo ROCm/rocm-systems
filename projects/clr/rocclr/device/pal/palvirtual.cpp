@@ -226,6 +226,8 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
       }
       queue->info_ = info;
       queue->aql_mgmt_ = &info->aql_packet_mgmt_;
+      // The queue isn't shared, but Queue methods always lock lock_, so it must be valid
+      queue->lock_ = &info->queue_lock_;
       // Exclusive compute path
       addrQ = reinterpret_cast<address>(&queue[1]);
       qCreateInfo.aqlPacketList = info->DebuggerData();
@@ -267,9 +269,7 @@ VirtualGPU::Queue* VirtualGPU::Queue::Create(VirtualGPU& gpu, Pal::QueueType que
 }
 
 VirtualGPU::Queue::~Queue() {
-  amd::DestroyWithTrailing(reinterpret_cast<Device::QueueRecycleInfo*>(info_));
-
-  if (nullptr != iQueue_) {
+  if ((nullptr != iQueue_) && (nullptr != lock_)) {
     // Make sure the queues are idle
     // It's unclear why PAL could still have a busy queue
     std::scoped_lock l(*lock_);
@@ -297,8 +297,8 @@ VirtualGPU::Queue::~Queue() {
   }
 
   if (nullptr != iQueue_) {
-    // Find if this queue was used in recycling
-    if (lock_ != nullptr) {
+    // Find if this queue was used in recycling. Exclusive (real-time) queues own a private info_.
+    if (info_ == nullptr) {
       // Release the queue if the counter is 0
       if (--gpu_.dev().QueuePool().find(iQueue_)->second->counter_ == 0) {
         iQueue_->Destroy();
@@ -317,6 +317,9 @@ VirtualGPU::Queue::~Queue() {
       iQueue_->Destroy();
     }
   }
+
+  // Release the private info last: lock_ and the PAL queue's AQL packet list point into it
+  amd::DestroyWithTrailing(reinterpret_cast<Device::QueueRecycleInfo*>(info_));
 }
 
 Pal::Result VirtualGPU::Queue::UpdateAppPowerProfile() {
