@@ -174,9 +174,10 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
 
     for _ in range(3):
         print(f"Decoding images in {dir_path}")
+        # PIPE and universal_newlines instead of capture_output and text, which need Python 3.7
         result = subprocess.run(
             base_cmd,
-            capture_output=True, text=True, env=env
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env
         )
         if result.returncode != 0:
             print(result.stderr)
@@ -274,14 +275,13 @@ def run_benchmark(images_path, batch_size, num_threads, num_images, device_id, b
             ips, mps, proc_time, wall_time, total = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path, num_iterations)
             results.append([category, decode_type, resolution.replace('_', 'x'), total, proc_time, ips, mps, wall_time])
 
-    else:  # flat or single — benchmark the whole folder (or file's parent folder) as one unit
+    else:  # flat or single — benchmark the whole folder, or the single file, as one unit
+        label = os.path.splitext(os.path.basename(images_path))[0] if mode == 'single' \
+                else os.path.basename(images_path.rstrip('/'))
         if direct:
-            # Use images_path directly: resolve to containing folder if it's a single file
-            dir_path = os.path.dirname(images_path) if mode == 'single' else images_path.rstrip('/')
-            label = os.path.basename(dir_path)
+            # Use images_path directly: jpegdecodeperf takes a single file as well as a folder
+            dir_path = images_path if mode == 'single' else images_path.rstrip('/')
         else:
-            label = os.path.splitext(os.path.basename(images_path))[0] if mode == 'single' \
-                    else os.path.basename(images_path.rstrip('/'))
             dir_path = os.path.join(dst_base, label)
         ips, mps, proc_time, wall_time, total = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path, num_iterations)
         results.append([label, decode_type, 'mixed', total, proc_time, ips, mps, wall_time])
@@ -354,13 +354,17 @@ def main():
                         choices=['native', 'yuv_planar', 'y', 'rgb', 'rgb_planar'],
                         help='rocJPEG output format for decoding: native, yuv_planar, y, rgb, rgb_planar (default: native)')
     parser.add_argument('-crop', '--crop', type=str, default=None,
-                        help='Crop rectangle for output in comma-separated format: left,top,right,bottom (optional)')
+                        help='Crop rectangle for output in comma-separated format: left,top,right,bottom. Images '
+                             'that it does not fit in are decoded in full (optional)')
     parser.add_argument('-o', '--output_path', type=str, default=None,
-                        help='Path to an output file or directory to write decoded images (optional)')
+                        help='Existing directory to write the decoded images to (optional)')
     args = parser.parse_args()
     if not os.path.exists(args.images_path):
         # Checked before copying images or building jpegdecodeperf
         parser.error(f'-i/--images_path {args.images_path} does not exist')
+    if args.output_path and not os.path.isdir(args.output_path):
+        # jpegdecodeperf saves each image in this directory, and saves nothing, without an error, if it is missing
+        parser.error(f'-o/--output_path {args.output_path} is not an existing directory')
     if args.num_iterations < 1:
         # Checked here because run_one passes -n only when it is above 1, so a smaller value would silently run
         # one iteration

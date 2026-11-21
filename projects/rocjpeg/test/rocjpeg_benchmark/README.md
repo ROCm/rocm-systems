@@ -16,7 +16,7 @@ A Python harness that builds the `jpegdecodeperf` sample application, optionally
 ## Quick start
 
 ```bash
-python rocjpeg_benchmark.py --rocm_path <path_to_rocm_installation> -i <path_to_jpeg_images>
+python3 rocjpeg_benchmark.py --rocm_path <path_to_rocm_installation> -i <path_to_jpeg_images>
 ```
 
 rocJPEG installs this script and README in `<path_to_rocm_installation>/share/rocjpeg/test/rocjpeg_benchmark/`.
@@ -48,8 +48,8 @@ rocJPEG installs this script and README in `<path_to_rocm_installation>/share/ro
 | Argument | Short | Default | Description |
 |---|---|---|---|
 | `--output_format FMT` | `-fmt` | `native` | Output pixel format for decoding. One of:<br>`native` — keep the format the JPEG was encoded in (default)<br>`yuv_planar` — planar YUV (Y, U, V planes)<br>`y` — luminance (Y plane) only<br>`rgb` — packed RGB<br>`rgb_planar` — planar RGB (R, G, B planes) |
-| `--crop L,T,R,B` | `-crop` | *(none)* | Crop rectangle applied to each decoded image, specified as four comma-separated integers: `left,top,right,bottom`. Example: `-crop 0,0,1280,720`. |
-| `--output_path PATH` | `-o` | *(none)* | Destination for decoded image output. Can be a file path (when decoding a single image) or a directory path. When omitted, `jpegdecodeperf` does not write output files. |
+| `--crop L,T,R,B` | `-crop` | *(none)* | Crop rectangle applied to each decoded image, specified as four comma-separated integers: `left,top,right,bottom`. Example: `-crop 0,0,1280,720`. Images that the rectangle does not fit in are decoded in full. |
+| `--output_path PATH` | `-o` | *(none)* | Existing directory in which `jpegdecodeperf` saves each decoded image, as `<name>_<width>x<height>_<format>.<ext>`. The script stops with an error if the directory does not exist. When omitted, `jpegdecodeperf` does not write output files. |
 
 ---
 
@@ -104,7 +104,7 @@ Each directory is benchmarked three times and the best result (highest IPS) is r
 ### Minimal — run directly on existing images
 
 ```bash
-python rocjpeg_benchmark.py \
+python3 rocjpeg_benchmark.py \
     --rocm_path <path_to_rocm_installation> \
     -i <path_to_jpeg_images>
 ```
@@ -112,7 +112,7 @@ python rocjpeg_benchmark.py \
 ### Full benchmark with 100 image copies, 4 threads, batch size 64
 
 ```bash
-python rocjpeg_benchmark.py \
+python3 rocjpeg_benchmark.py \
     --rocm_path <path_to_rocm_installation> \
     -i <path_to_jpeg_images> \
     -n 100 \
@@ -124,7 +124,7 @@ python rocjpeg_benchmark.py \
 ### Decode each image 50 times without copying images
 
 ```bash
-python rocjpeg_benchmark.py \
+python3 rocjpeg_benchmark.py \
     --rocm_path <path_to_rocm_installation> \
     -i <path_to_jpeg_images> \
     -iter 50
@@ -133,7 +133,7 @@ python rocjpeg_benchmark.py \
 ### Decode to RGB format with a crop region
 
 ```bash
-python rocjpeg_benchmark.py \
+python3 rocjpeg_benchmark.py \
     --rocm_path <path_to_rocm_installation> \
     -i <path_to_jpeg_images> \
     -fmt rgb \
@@ -143,7 +143,7 @@ python rocjpeg_benchmark.py \
 ### Save decoded output images to a directory
 
 ```bash
-python rocjpeg_benchmark.py \
+python3 rocjpeg_benchmark.py \
     --rocm_path <path_to_rocm_installation> \
     -i <path_to_jpeg_images> \
     -fmt yuv_planar \
@@ -153,7 +153,7 @@ python rocjpeg_benchmark.py \
 ### Use a specific GPU and decode only the Y (luminance) channel
 
 ```bash
-python rocjpeg_benchmark.py \
+python3 rocjpeg_benchmark.py \
     --rocm_path <path_to_rocm_installation> \
     -i <path_to_jpeg_file> \
     -d 1 \
@@ -172,7 +172,7 @@ For achieving optimal JPEG decoding performance:
 
 ```bash
 # Example: 32 batch size with 4 threads
-python rocjpeg_benchmark.py \
+python3 rocjpeg_benchmark.py \
     --rocm_path <path_to_rocm_installation> \
     -i <path_to_jpeg_images> \
     -b 32 \

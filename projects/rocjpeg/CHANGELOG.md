@@ -15,6 +15,7 @@ Documentation for rocJPEG is available at
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
 * Fixed `rocjpeg_benchmark.py` results. Wall times of a minute or more were saved in minutes or hours instead of seconds, an option that `jpegDecodePerf` rejected produced a row of zeros instead of an error, and Number of Images counted the `.jpg` files directly in the folder instead of the images `jpegDecodePerf` decoded.
+* Fixed `rocjpeg_benchmark.py` benchmarking every image in the folder of a single image given with `-i` and the default `-n 1`, failing on Python 3.6, and saving no images, without an error, when `-o` was not an existing directory.
 
 ### Changed
 
