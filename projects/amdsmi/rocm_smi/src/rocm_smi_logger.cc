@@ -334,7 +334,7 @@ void ROCmLogging::Logger::debug(const char* text) noexcept {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  if (!m_loggingIsOn) {
+  if (!isDebugEnabled()) {
     return;
   }
 
@@ -342,11 +342,11 @@ void ROCmLogging::Logger::debug(const char* text) noexcept {
   data.append("[DEBUG]: ");
   data.append(text);
 
-  if ((m_LogType == FILE_LOG) && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
+  if (m_LogType == FILE_LOG) {
     logIntoFile(data);
-  } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
+  } else if (m_LogType == CONSOLE) {
     logOnConsole(data);
-  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE) && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
+  } else if (m_LogType == BOTH_FILE_AND_CONSOLE) {
     logOnConsole(data);
     logIntoFile(data);
   }

@@ -138,6 +138,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - ``--brcm_nic``, ``--brcm_switch``, ``--switch``, ``--nic_switch``, ``topology --nic_topo``, the ``BRCM_NIC`` CMake option and the Python and ``rsmi_*`` Broadcom NIC and switch functions are gone. Broadcom NICs appear through ``--nic`` like every other NIC.
   - The Python enum members ``AmdSmiDeviceType.BRCM_NIC_DEVICE``, ``AmdSmiDeviceType.BRCM_SWITCH_DEVICE``, ``AmdSmiProcessorType.AMD_BRCM_NIC`` and ``AmdSmiProcessorType.AMD_BRCM_SWITCH`` are removed, so code that still names them raises ``AttributeError``.
 
+### Optimized
+
+- GPU and partition metrics queries no longer format a text dump of the table when debug logging is disabled.
+
 ### Resolved Issues
 
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
