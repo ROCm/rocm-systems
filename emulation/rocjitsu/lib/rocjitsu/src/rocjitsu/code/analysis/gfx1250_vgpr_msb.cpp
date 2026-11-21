@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -21,9 +22,9 @@
 
 namespace rocjitsu {
 
-bool may_change_vgpr_msb(const Instruction &instruction, rj_code_arch_t arch,
+bool may_change_vgpr_msb(const Instruction &instruction, rocjitsu::IsaFamily arch,
                          bool setreg_vgpr_msb_fixup) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5)
+  if (arch != rocjitsu::IsaFamily::Cdna5)
     return false;
   if (instruction.mnemonic() == "s_set_vgpr_msb")
     return true;
@@ -152,7 +153,7 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
   const amdgpu::VgprMsbBanks incoming_armed_banks = state.armed_banks;
   state.hazard = AdjacentSetVgprMsbHazard::Clear;
   state.armed_banks.fill(std::nullopt);
-  if (!may_change_vgpr_msb(inst, ROCJITSU_CODE_ARCH_CDNA5, setreg_vgpr_msb_fixup))
+  if (!may_change_vgpr_msb(inst, rocjitsu::IsaFamily::Cdna5, setreg_vgpr_msb_fixup))
     return;
   if (inst.opcode() == cdna5::kSSetVgprMsbSopp &&
       inst.amdgpu_operation() == amdgpu::Operation::S_SET_VGPR_MSB) {

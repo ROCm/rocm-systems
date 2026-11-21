@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "async_vm_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
@@ -26,7 +27,7 @@ public:
     queue.address_space = vm.register_translated(1, memory, memory);
     queue.process_id = 1;
     queue.packet_format = QueuePacketFormat::Pm4;
-    context.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    context.arch = rocjitsu::IsaFamily::Rdna4;
     context.flush_caches = [] { return VmAccessOutcome::Complete; };
     context.retry = [&] { queue.command_retry_pending = true; };
     context.wake = [] {};
