@@ -335,6 +335,10 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             Ok(cleanup) => cleanup,
             Err(status) => return status,
         };
+        let prefetch = match crate::memory::prefetch::prepare(runtime, address, size, location) {
+            Ok(prefetch) => prefetch,
+            Err(status) => return status,
+        };
         let mut pending = match PendingAsyncRetention::new(
             &mut runtime.signal_state,
             &mut runtime.memory_state,
@@ -348,14 +352,6 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
                 return status;
             }
         }
-        let prefetch = match pending
-            .memory
-            .pending_prefetches
-            .prepare(address, size, agent)
-        {
-            Ok(prefetch) => prefetch,
-            Err(status) => return status,
-        };
         let operation = prefetch.operation();
         let worker_handles = pending.handles.clone();
         let dependency_len = dependency_slice.len();
