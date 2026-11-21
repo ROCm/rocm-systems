@@ -8,6 +8,19 @@
 
 #include <hip_test_common.hh>
 
+#include <string>
+
+// Cluster range checks assume the gfx1250 family layout.
+// gcnArchName can carry target features after ':' (e.g. gfx950:sramecc+:xnack-).
+inline bool IsOccupancyClusterRangeArch(const char* gcnArchName) {
+  if (gcnArchName == nullptr) {
+    return false;
+  }
+  const std::string arch(gcnArchName);
+  const std::string name = arch.substr(0, arch.find(':'));
+  return name == "gfx1250" || name == "gfx1250-strict" || name == "gfx1251";
+}
+
 template <typename F> void MaxPotentialBlockSize(F func, int maxThreadsPerBlock) {
   int gridSize = 0;
   int blockSize = 0;
