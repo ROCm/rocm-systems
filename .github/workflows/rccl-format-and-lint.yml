@@ -53,12 +53,11 @@ jobs:
 
       - run: pip install pre-commit
 
-      - name: Run pre-commit on changed files
+      - name: Run pre-commit
         run: |
-          pre-commit run \
-            --config projects/rccl/.pre-commit-config.yaml \
-            --from-ref ${{ github.event.pull_request.base.sha }} \
-            --to-ref ${{ github.event.pull_request.head.sha }}
+          projects/rccl/maint/ci-pre-commit.sh \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }}
 
   clang-tidy:
     name: clang-tidy
@@ -74,7 +73,6 @@ jobs:
       image: rocm/dev-ubuntu-26.04:10.1.0-full
     env:
       ROCM_PATH: /opt/rocm
-      GPU_TARGETS: gfx942
     steps:
       - name: Install git
         run: |
@@ -84,12 +82,16 @@ jobs:
       - name: Checkout rccl
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # No fetch-depth: this analyses the tree, not a diff, so no merge
-          # base and no history are needed.
+          # Only the files changed in the PR are analysed, and working out
+          # which those are needs the base commit.
+          fetch-depth: 0
           sparse-checkout: projects/rccl
 
       - name: Run clang-tidy
-        run: projects/rccl/maint/ci-clang-tidy.sh
+        run: |
+          projects/rccl/maint/ci-clang-tidy.sh \
+            ${{ github.event.pull_request.base.sha }} \
+            ${{ github.event.pull_request.head.sha }}
 
       - name: Upload findings
         if: always()
