@@ -91,16 +91,14 @@ void note_unreplayable(const char* api, const char* reason);
 
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the
 // writer is not open, flush() has written the trailer, or capture has stopped
-// for lack of space or at the size limit. A `capped` buffer over
-// HIP_HRR_CAPTURE_MAX_BLOB_MB is not written either: {} is returned and the
-// capture marked incomplete. Fat binaries are not capped: replay loads them to
-// run their kernels and resolve their device globals.
+// for lack of space or at the size limit. A buffer over HIP_HRR_CAPTURE_MAX_BLOB_MB
+// is not written either: {} is returned and the capture marked incomplete.
 // Thread-safe. Skips the write when the same bytes are already in this archive.
-Hash128 write_blob(const void* data, size_t len, bool capped = true);
+Hash128 write_blob(const void* data, size_t len);
 
 // write_blob() for a caller that has hashed `data` with hash_bytes(). The
 // caller must not change `data` in between, or the blob differs from its name.
-Hash128 write_blob_hashed(const void* data, size_t len, Hash128 h, bool capped = true);
+Hash128 write_blob_hashed(const void* data, size_t len, Hash128 h);
 
 // The hash write_blob() names `data` by, without writing anything.
 Hash128 hash_bytes(const void* data, size_t len);

@@ -955,7 +955,7 @@ DIRECT_PLAYBACK_APIS: Set[str] = {
 # Maps API name -> list of (field_type, field_name, comment) to append
 EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     "__hipRegisterFatBinary": [
-        ("uint64_t", "blob_hash_lo", "128-bit content lo of fat binary"),
+        ("uint64_t", "blob_hash_lo", "128-bit content lo of fat binary, or of its code object if blob_size is 0"),
         ("uint64_t", "blob_hash_hi", "128-bit content hi"),
         ("uint64_t", "blob_size",    "fat binary byte count"),
     ],

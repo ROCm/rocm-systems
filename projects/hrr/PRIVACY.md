@@ -109,11 +109,10 @@ not make.
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | — kept |
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | — kept |
 | Kernel argument bytes | `events.bin` | — kept |
-| Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | — kept |
+| Code objects the process loaded (the application's own GPU binary code); of a fat binary, the code object HIP loads, which its `__hipRegisterFatBinary` record names with a blob size of 0. A record with a blob size names a whole bundle in `blobs/`, with targets HIP never loads | `code_objects/` | of a fat binary, only the code object HIP loads |
 | Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded. A SPIR-V or LLVM bitcode input keeps its compiler identification and, built with `-g`, its source and build directories; capture does not scrub them | `blobs/` | — kept |
-| Whole fat binary bundles, including targets HIP never loads | `blobs/` | — kept |
-| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | zeroed in code objects and uncompressed fat binaries; kept in compressed (`CCOB`) fat binaries |
-| Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/`, `blobs/` | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
+| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/` | zeroed in every code object stored, including the one HIP takes from a compressed (`CCOB`) fat binary. A compressed bundle that a record with a blob size names in `blobs/` keeps them |
+| Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/` | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | — kept, written only by an opt-in producer |
 | Marker that capture is running: the boot id and the process start time in clock ticks since boot. A normal exit removes it; a process that crashes or is killed leaves it | `active` | — kept, region producers read it |
 
