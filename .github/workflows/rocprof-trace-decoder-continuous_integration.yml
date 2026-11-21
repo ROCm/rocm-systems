@@ -183,6 +183,7 @@ jobs:
             projects/rocr-runtime
             projects/clr
             projects/hip
+            runtimes/api-headers
             projects/hrr
           submodules: false
           set-safe-directory: true

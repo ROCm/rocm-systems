@@ -145,6 +145,7 @@ jobs:
           projects/rocr-runtime
           projects/clr
           projects/hip
+          runtimes/api-headers
           projects/hrr
           projects/hipfile
           projects/rocdecode
