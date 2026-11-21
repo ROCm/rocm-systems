@@ -419,3 +419,27 @@ def test_a_gpu_identified_late_takes_its_own_index(tools, tmp_path, unidentified
     finally:
         code = d.stop()
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+def test_a_field_of_an_unidentified_gpu_is_read_once_per_interval(tools, tmp_path):
+    # rdcd reads no value from a GPU that AMD SMI cannot identify. Each read logs one line at
+    # debug level; GPU 0 reads fine, so all such lines are GPU 1's.
+    d = Rdcd(tools, tmp_path, RDC_LOG="DEBUG", RDC_FAKE_FAIL="amdsmi_get_processor_type@1")
+    d.arm()
+    d.start()
+    try:
+        fields = DMON_FIELDS[:2]
+        before = len(d.out_log.read_text(errors="replace"))
+        started = time.monotonic()
+        d.ok("dmon", "-e", ",".join(map(str, fields)), "-i", "0,1", "-c", "5", "-d", "1000")
+        elapsed = time.monotonic() - started
+        log = d.out_log.read_text(errors="replace")[before:]
+        reads = log.count("Failed to get processor handle for device ")
+        # One read per field per second: thousands when every 1 ms update asks again, none
+        # after the first when no update asks again.
+        assert len(fields) * 3 <= reads <= len(fields) * (elapsed + 2), (
+            f"{reads} reads in {elapsed:.1f} s"
+        )
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
