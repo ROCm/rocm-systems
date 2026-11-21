@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "util/result.h"
 #include "util/simd_control.h"
 
 #include <cstdint>
@@ -29,7 +30,7 @@ struct ArithmeticPolicy {
 };
 
 /// @brief Parse an arithmetic semantics name, rejecting unknown or reserved modes.
-ArithmeticPolicy parse_arithmetic_policy(std::string_view semantics);
+util::FailureOr<ArithmeticPolicy> parse_arithmetic_policy(std::string_view semantics);
 
 /// @brief Return the configuration spelling of an arithmetic semantics mode.
 const char *arithmetic_semantics_name(ArithmeticSemantics semantics);
