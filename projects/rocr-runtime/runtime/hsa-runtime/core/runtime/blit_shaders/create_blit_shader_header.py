@@ -12,6 +12,12 @@ def GetSize(fileobject):
     size = fileobject.tell()
     return size
 
+def ToIdentifier(name):
+    # Every character that is not valid in a C identifier becomes an
+    # underscore, so a generic target such as gfx9-generic cannot leak a
+    # hyphen into a symbol name.
+    return ''.join(c if c.isalnum() or c == '_' else '_' for c in name)
+
 def DumpFile(header, input_name):
   try:
     with open(input_name, "rb") as binary_file:
@@ -22,7 +28,7 @@ def DumpFile(header, input_name):
         # Reset file pointer
         binary_file.seek(0)
         parts = input_name.split('.')
-        file_name = parts[0]
+        file_name = ToIdentifier(parts[0])
         content = f"unsigned char {file_name}""[] = {\n  "
 
         header.write(content)
