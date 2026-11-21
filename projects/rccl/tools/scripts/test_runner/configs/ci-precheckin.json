@@ -128,6 +128,8 @@
         {"name": "GraphCaptureStreamOrdering.EagerAroundCapture", "description": "GraphCaptureStreamOrdering uncaptured one- and two-stream launches before, between and after graph launches", "test_filter": "GraphCaptureStreamOrdering.EagerAroundCapture", "timeout": 240},
         {"name": "GraphCaptureStreamOrdering.ConcurrentCapturesSameComm", "description": "GraphCaptureStreamOrdering two graphs captured at once from the same communicators", "test_filter": "GraphCaptureStreamOrdering.ConcurrentCapturesSameComm", "timeout": 240},
         {"name": "GraphCaptureStreamOrdering.RecaptureAcrossStreams", "description": "GraphCaptureStreamOrdering recapture on the same and on a different stream", "test_filter": "GraphCaptureStreamOrdering.RecaptureAcrossStreams", "timeout": 240},
+        {"name": "TransportEncryption.PskGatesBootstrapSockets", "description": "ncclSetEncryption refuses bad configs, and a stored PSK never lets the bootstrap come up in plaintext", "test_filter": "TransportEncryption.PskGatesBootstrapSockets", "timeout": 120},
+        {"name": "TransportEncryption.PlaintextBootstrapByDefault", "description": "One-rank init bootstraps in plaintext when ncclSetEncryption is never called", "test_filter": "TransportEncryption.PlaintextBootstrapByDefault", "timeout": 120},
         {"name": "Recorder.ParseBinary", "description": "Recorder parse binary tests", "test_filter": "Recorder.ParseBinary", "timeout": 60},
         {"name": "Recorder.ParseJson", "description": "Recorder parse JSON tests", "test_filter": "Recorder.ParseJson", "timeout": 60},
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithread verification tests", "test_filter": "Recorder.VerifyMultithread", "timeout": 60},
