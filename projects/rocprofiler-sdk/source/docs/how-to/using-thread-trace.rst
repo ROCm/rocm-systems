@@ -4,8 +4,6 @@
 
 .. _using-thread-trace:
 
-====================
-Using thread trace
 ********************************
 Using thread trace
 ********************************
