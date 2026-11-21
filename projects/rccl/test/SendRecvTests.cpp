@@ -557,6 +557,68 @@ namespace RcclUnitTesting
     unsetenv("NCCL_P2P_LL128_ENABLE");
   }
 
+  // NCCL 2.32.6 extended LL selection: a payload above nChannels(SIMPLE plan) * NCCL_P2P_LL_THRESHOLD
+  // still selects legacy LL when it is within nChannelsMax * threshold and fits one LL data step
+  // across the LL channel plan. Intranode with a 4 KiB threshold, 8 KiB gets a single SIMPLE channel
+  // (the SIMPLE step is >= 128 KiB, so minPartSize >= 16 KiB), which fails the per-channel cutoff,
+  // but fits one LL step (>= 8 KiB of payload) with at least 2 channels per peer. Without the
+  // extension it would be SIMPLE.
+  TEST(SendRecv, LegacyLLExtendsPastPerChannelThreshold)
+  {
+    setenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS", "0", 1); // no LL128 on gfx942/gfx950
+    setenv("NCCL_P2P_LL128_ENABLE", "0", 1);         // no LL128 on gfx1250
+    setenv("NCCL_P2P_LL_THRESHOLD", "4096", 1);      // per-channel cutoff below the 8 KiB transfer
+    std::string const debugGlob = "/tmp/rccl_ll_extend_" + std::to_string(getpid()) + ".*";
+    RemoveGlobbedFiles(debugGlob);
+    setenv("NCCL_DEBUG", "INFO", 1);
+    setenv("NCCL_DEBUG_SUBSYS", "COLL", 1);
+    setenv("NCCL_DEBUG_FILE", ("/tmp/rccl_ll_extend_" + std::to_string(getpid()) + ".%p").c_str(), 1);
+    bool skipped = false;
+    {
+      TestBed testBed;
+      if (testBed.ev.maxGpus < 2) {
+        skipped = true;
+        testBed.Finalize();
+      } else {
+        const std::vector<int>& gpuPriorityOrder = testBed.ev.GetGpuPriorityOrder();
+        testBed.InitComms(TestBed::GetDeviceIdsList(1, 2, 1, gpuPriorityOrder), {1},
+                          testBed.GetNumStreamsPerGroup(1, 1), 1);
+        if (!::testing::Test::HasFatalFailure()) {
+          OptionalColArgs options;
+          int const n = 8192;
+          bool isCorrect = true;
+          options.root = 1;
+          testBed.SetCollectiveArgs(ncclCollSend, ncclInt8, n, n, options, 0, 0, 0);
+          testBed.AllocateMem(false, false, 0, 0, 0);
+          testBed.PrepareData(0, 0, 0);
+          options.root = 0;
+          testBed.SetCollectiveArgs(ncclCollRecv, ncclInt8, n, n, options, 0, 0, 1);
+          testBed.AllocateMem(false, false, 0, 0, 1);
+          testBed.PrepareData(0, 0, 1);
+          testBed.ExecuteCollectives({0, 1}, 0);
+          testBed.ValidateResults(isCorrect, 0, 0, 1);
+          testBed.DeallocateMem(0, 0, 1);
+          testBed.DeallocateMem(0, 0, 0);
+          EXPECT_TRUE(isCorrect);
+          testBed.DestroyComms();
+        }
+        testBed.Finalize();
+      }
+    }
+    bool const sawLLSend = DebugLogsContainNeedle(debugGlob, "protocol=LL dir=send bytes=8192 ");
+    bool const sawLLRecv = DebugLogsContainNeedle(debugGlob, "protocol=LL dir=recv bytes=8192 ");
+    RemoveGlobbedFiles(debugGlob);
+    unsetenv("NCCL_DEBUG_FILE");
+    unsetenv("NCCL_DEBUG_SUBSYS");
+    unsetenv("NCCL_DEBUG");
+    unsetenv("NCCL_P2P_LL_THRESHOLD");
+    unsetenv("NCCL_P2P_LL128_ENABLE");
+    unsetenv("NCCL_ALLOC_P2P_NET_LL_BUFFERS");
+    if (skipped) GTEST_SKIP() << "Skipping... extended LL selection needs 2 GPUs.";
+    EXPECT_TRUE(sawLLSend) << "8 KiB send above the 4 KiB per-channel threshold should extend to legacy LL";
+    EXPECT_TRUE(sawLLRecv) << "8 KiB recv above the 4 KiB per-channel threshold should extend to legacy LL";
+  }
+
   // NCCL_ALLOC_P2P_NET_LL_BUFFERS=0: exercises the branch of the net.cc staging-buffer allocation
   // that does not add the dedicated LL128 buffer for shared p2p NET connections. The legacy LL
   // send/recv kernel is used; the key invariant is that LL128 is NEVER selected when the flag is off.

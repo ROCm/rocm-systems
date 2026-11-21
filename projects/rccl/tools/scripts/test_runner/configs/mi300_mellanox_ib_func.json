@@ -1888,6 +1888,11 @@
           "test_filter": "SendRecv.UserBufferRegister"
         },
         {
+          "name": "SendRecv.LegacyLLExtendsPastPerChannelThreshold",
+          "description": "Legacy LL extends past the per-channel P2P_LL_THRESHOLD when the payload fits one LL step (NCCL 2.32.6)",
+          "test_filter": "SendRecv.LegacyLLExtendsPastPerChannelThreshold"
+        },
+        {
           "name": "GroupCall.Identical",
           "description": "GroupCall identical",
           "test_filter": "GroupCall.Identical"
