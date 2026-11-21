@@ -69,7 +69,7 @@ gfx10::Token TokenGenerator::next()
         bits_toread = info.length;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
+        globaltime = advanceTime(lookupbits, info, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {
@@ -118,7 +118,7 @@ gfx10::Token TokenGenerator::next()
         bits_toread = info.length;
 
         int64_t real = 0;
-        globaltime = lookupbits.getTime(info, current, globaltime, packetlost, real);
+        globaltime = advanceTime(lookupbits, info, real);
 
         if (type == RdnaType::TIMESTAMP || type == RdnaType::TIME)
         {

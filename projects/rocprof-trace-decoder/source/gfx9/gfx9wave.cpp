@@ -363,8 +363,10 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
     auto generate_event = [&](int64_t time, rocprofiler_thread_trace_decoder_event_type_t type)
     { stitch.sendEvent(type, time, 0, 0, 0, false, false); };
 
+    stitch.markerSetRegisters(csregister);
     while (generator.valid())
     {
+        if (stitch.records().status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         Token token = generator.next();
 
         switch (token.type)
@@ -375,6 +377,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                     case MISC_TYPE_PACKET_LOST:
                     {
                         generate_event(token.time, ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS);
+                        stitch.markerPacketLoss();
                         info.bPacketLost = true;
                         break;
                     }
@@ -443,6 +446,8 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                     );
                 else
                     it.first->second = wave_addr;
+                // Counts above 64 are context save/restore, not new waves.
+                if (wstart.count <= 64) stitch.markerWaveStart(wstart.cu, wstart.simd, wstart.wave, wave_addr);
                 break;
             }
             case TOKEN_WAVE_END:
@@ -510,6 +515,10 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                          (uint64_t) wend.tg_id}
                     );
                 }
+
+                if (startpc.code_object_id == 0 && startpc.address != 0)
+                    startpc = csregister.get_wave_start_delayed(startpc.address);
+                stitch.markerWaveEnd(wend.cu, wend.simd, wend.wave, startpc);
 
                 if (double_buffer && occupancy.size() >= MAX_ACCUM_RECORDS) send_occupancy();
                 break;
@@ -636,6 +645,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                     (uint8_t) token.fields.userdata.wave,
                     0,
                 });
+                stitch.processShaderdata(shaderdata.back());
 
                 if (shaderdata.size() >= MAX_ACCUM_RECORDS) stitch.sendShaderdata(shaderdata);
                 break;
@@ -647,9 +657,12 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
         for (auto& slot : waveslot)
             for (auto& wave : slot) wave.lookbackpcs(csregister);
 
+    stitch.markerResolveAll(csregister);
+
     if (!occupancy.empty()) send_occupancy();
     if (csregister.realtime.size()) stitch.sendRealtime(csregister.realtime);
     if (shaderdata.size()) stitch.sendShaderdata(shaderdata);
+    stitch.finishMarkers();
 
     info.realtime_frequency = csregister.realtime_frequency;
     info.counter_frequency = csregister.counter_frequency;
