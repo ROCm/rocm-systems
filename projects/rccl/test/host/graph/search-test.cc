@@ -972,6 +972,27 @@ TEST_F(SearchMicrotest, GetSpeedArray_PicksTheTableForTheComputeCapability) {
   }
 }
 
+// NCCL 2.32.6 (ab72c99e) lowered the second SM100 inter-node speed from 90.2 to 90.1. RDNA3/RDNA4 GPUs
+// (gfx1100, gfx1200, gfx1201) report 110/120/121 and search with this table.
+TEST_F(SearchMicrotest, GetSpeedArray_Sm100InterStepsDownTo90Point1) {
+  for (int cc : {100, 110, 120, 121}) {
+    int n = 0;
+    float* speeds = nullptr;
+
+    ncclTopoGetSpeedArray(1, cc, &n, &speeds);
+
+    ASSERT_EQ((int)NSPEEDSINTER_SM100, n) << cc;
+    EXPECT_FLOAT_EQ(96.0f, speeds[0]) << cc;
+    EXPECT_FLOAT_EQ(90.1f, speeds[1]) << cc;
+    EXPECT_FLOAT_EQ(86.0f, speeds[2]) << cc;
+    // A 90.15 GB/s NIC path now starts the search at 90.1 instead of skipping to 86.
+    int start = 0;
+    while (speeds[start] > 90.15f && start < n - 1) start++;
+    EXPECT_FLOAT_EQ(90.1f, speeds[start]) << cc;
+    for (int i = 0; i < n; i++) EXPECT_NE(90.2f, speeds[i]) << cc << " index " << i;
+  }
+}
+
 TEST_F(SearchMicrotest, DupChannels_DoublesWideGraphsOnly) {
   GraphPtr graph = NewGraph(0, NCCL_TOPO_PATTERN_RING, 1, 8);
   graph->nChannels = 3;
