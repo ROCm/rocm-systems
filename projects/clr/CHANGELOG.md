@@ -24,6 +24,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipArrayGetPlane` returns a single format plane of a multiplanar HIP array. Added for
         source compatibility: HIP does not implement multiplanar arrays, so no array has planes
         and it validates its arguments and returns `hipErrorNotSupported`.
+      * `hipArrayGetMemoryRequirements` returns the size and alignment of the memory backing a HIP array.
     - Execution affinity: support for API parity with corresponding CUDA API.
       * `hipDeviceGetExecAffinitySupport` reports whether a device supports a given execution-affinity
         type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
