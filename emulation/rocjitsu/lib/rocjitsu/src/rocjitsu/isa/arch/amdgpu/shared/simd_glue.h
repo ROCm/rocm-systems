@@ -2881,45 +2881,6 @@ template <typename T, typename Inst, typename TernOp>
   return false;
 }
 
-/// VOP3 ternary operations with true16 SRC0/SRC1 and a full-width SRC2/result,
-/// such as V_MAD_[IU]32_[IU]16.
-template <typename T, typename Inst, typename TernOp>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_ternary_vop3_true16_src01_simd(Inst &inst, Wavefront &wf,
-                                                                     TernOp tern_op) {
-  static_assert(std::is_same_v<T, uint32_t>);
-  if (inst.inst_.clamp != 0u || simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) ||
-      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
-      !inst.vdst.simd_capable())
-    return false;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint32_t opsel = vop3_opsel(inst.inst_);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  auto src2 = regs.read_operand(inst.src2, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto a = select_vop3_true16_src(src0.template load_native<T>(base), opsel, 0);
-    const auto b = select_vop3_true16_src(src1.template load_native<T>(base), opsel, 1);
-    const auto c = src2.template load_native<T>(base);
-    const auto r = tern_op(a, b, c);
-    if (dst.template store_native<T>(base, r, chunk).failed())
-      return true;
-  }
-  return true;
-}
-
-template <typename T, typename Inst, typename TernOp>
-[[nodiscard]] bool try_execute_ternary_vop3_true16_src01_simd(Inst &, Wavefront &, TernOp) {
-  return false;
-}
-
 /// VOP3 ternary operations whose three sources and destination are true16,
 /// such as min3/max3/med3 i16/u16 on RDNA true16 encodings. The glue applies
 /// no modifier; F16 min/max functors apply every VOP3 modifier to the raw bits.
@@ -4071,95 +4032,6 @@ template <PackedFloatOp Op, bool Bf16, typename Inst>
   return false;
 }
 
-/// VOP3P packed-16 binary integer SIMD fast path. Apply op_sel/op_sel_hi
-/// to each source before the per-half functor. Integer CLAMP retains scalar
-/// execution for exact saturation. The functor receives and returns packed
-/// u32 lanes, including any operation-specific masking before repacking.
-template <typename Inst, typename Op>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_pk_binary_int_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  if (inst.inst_.clamp)
-    return false;
-  using T = uint32_t;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  const uint32_t negations = packed_integer_negations(wf.cu().arch(), inst.inst_);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto a =
-        select_packed_halves(src0.template load_native<T>(base), packed_opsel(inst.inst_),
-                             packed_opsel_hi(inst.inst_), 0, negations);
-    const auto b =
-        select_packed_halves(src1.template load_native<T>(base), packed_opsel(inst.inst_),
-                             packed_opsel_hi(inst.inst_), 1, negations);
-    const auto r = op(a, b);
-    if (dst.template store_native<T>(base, r, chunk).failed())
-      return true;
-  }
-  return true;
-}
-
-template <typename Inst, typename Op>
-[[nodiscard]] bool try_execute_vop3p_pk_binary_int_simd(Inst &, Wavefront &, Op) {
-  return false;
-}
-
-/// VOP3P packed-16 integer MAD selects each source half and applies the
-/// architecture's NEG/NEG_HI sign-bit policy before multiplication and addition.
-/// CLAMP uses scalar execution for per-half saturation.
-template <typename Inst, typename Op>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vop3p_pk_ternary_int_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  if (inst.inst_.clamp)
-    return false;
-  using T = uint32_t;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto src1 = regs.read_operand(inst.src1, exec);
-  auto src2 = regs.read_operand(inst.src2, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  const uint32_t negations = packed_integer_negations(wf.cu().arch(), inst.inst_);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto a =
-        select_packed_halves(src0.template load_native<T>(base), packed_opsel(inst.inst_),
-                             packed_opsel_hi(inst.inst_), 0, negations);
-    const auto b =
-        select_packed_halves(src1.template load_native<T>(base), packed_opsel(inst.inst_),
-                             packed_opsel_hi(inst.inst_), 1, negations);
-    const auto c = select_packed_halves(
-        src2.template load_native<T>(base), packed_opsel(inst.inst_),
-        packed_opsel_hi(inst.inst_) | (packed_opsel_hi_2(inst.inst_) << 2), 2, negations);
-    const auto r = op(a, b, c);
-    if (dst.template store_native<T>(base, r, chunk).failed())
-      return true;
-  }
-  return true;
-}
-
-template <typename Inst, typename Op>
-[[nodiscard]] bool try_execute_vop3p_pk_ternary_int_simd(Inst &, Wavefront &, Op) {
-  return false;
-}
-
 /// VOP3P packed-f32 binary fast path (v_pk_add_f32 / v_pk_mul_f32). In a VGPR
 /// pair {N, N+1} register N is the LO f32 of every lane, N+1 the HI f32, so each
 /// half is a native-width native<float> read of one register (read_pkf32_halves)
@@ -4895,14 +4767,8 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
   }
 
 /// VOP3 ternary counterpart for true16 SRC0/SRC1 plus full-width SRC2/result.
-#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(T, ...)                                        \
-  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_src01_simd<T>(inst, wf, __VA_ARGS__))    \
-  return
 
 /// VOP3 ternary counterpart for true16 SRC0/SRC1/SRC2 plus selected-half dst.
-#define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16(T, ...)                                              \
-  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_true16_simd<T>(inst, wf, __VA_ARGS__))          \
-  return
 
 /// VOP3 ternary counterparts on raw floating-point encodings (min/max), with
 /// the same functor contract as ROCJITSU_TRY_SIMD_VOP3_BINARY_RAW_FP.
@@ -5081,14 +4947,8 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
 /// (each holding {low16, high16} packed) and returns the same shape with
 /// the per-half op applied. The glue applies half selectors and retains
 /// scalar execution for integer CLAMP.
-#define ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_INT(...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_binary_int_simd(inst, wf, __VA_ARGS__))             \
-  return
 
 /// VOP3P packed-16 integer ternary probe (3-source pk_mad family).
-#define ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_INT(...)                                                \
-  if (::rocjitsu::amdgpu::try_execute_vop3p_pk_ternary_int_simd(inst, wf, __VA_ARGS__))            \
-  return
 
 /// VOP3P packed-f32 binary probe (v_pk_add_f32 / v_pk_mul_f32). Functor takes
 /// (a, b) as native<float> (neg-applied) and returns native<float>.

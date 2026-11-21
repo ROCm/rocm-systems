@@ -520,6 +520,7 @@ add_executable(
     checkpoint_restore_errors_test.cpp
     cdna_integer_arith_test.cpp
     older_scalar_integer_test.cpp
+    older_packed_integer_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
     rj_arith_bridge_test.cpp
