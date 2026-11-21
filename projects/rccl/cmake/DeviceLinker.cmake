@@ -766,6 +766,8 @@ foreach(_coll all_reduce reduce_scatter all_gather alltoall)
       ${_dda_dir}/${_coll}/dda_${_coll}_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)
   endforeach()
 endforeach()
+dl_add_fat_object(dda_all_reduce_fabric_hier
+  ${_dda_dir}/all_reduce/dda_all_reduce_fabric_hier.cu.cpp SUPPRESS_WARNINGS)
 foreach(_proto _ll _ll128)
   dl_add_fat_object(dda_broadcast_fabric${_proto}
     ${_dda_dir}/broadcast/dda_broadcast_fabric${_proto}.cu.cpp SUPPRESS_WARNINGS)

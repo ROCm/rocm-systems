@@ -1,0 +1,1 @@
+* `RCCL_HOST_HIER_ALLREDUCE`: the default (`-1`) now also uses host-hierarchical AllReduce for FP32 `ncclSum` on gfx1250 hosts with four ranks each (SPX): 2 to 32 MiB on four hosts and 2 to 256 MiB on eight hosts. `RCCL_HOST_HIER_ALLREDUCE_FUSED` now picks the fused kernel automatically only with eight ranks per host.

@@ -33,17 +33,20 @@ struct rcclHostLayout {
   int localRank; // Position among this host's ranks, in rank order
 };
 
+// Scratch at least doubles each time it grows, so this covers any size.
+constexpr int kHostHierMaxRetired = 64;
+
 struct rcclHostHier {
   struct rcclHostLayout layout;
   ncclComm_t intra; // Ranks of this host, ordered by local rank
   ncclComm_t inter; // The same local rank on every host, ordered by host. Null with one host
+  int* hostRanks; // Comm rank of local rank l on host h at h * ranksPerHost + l
   // Shared by every host-hierarchical collective on the comm, so running them
   // concurrently on two streams is unsafe.
   void* scratch;
   size_t scratchBytes;
-  // Recorded after each host-hierarchical collective, on whichever stream it ran. Consecutive collectives on the comm
-  // are ordered on the device, so the latest record follows every earlier use of scratch.
-  cudaEvent_t scratchUsed;
+  void* retired[kHostHierMaxRetired]; // Outgrown scratch buffers, freed at teardown
+  int nRetired;
 };
 
 // Returns true and fills layout when every host holds the same number of ranks,
@@ -62,9 +65,26 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm);
 // Destroys the child comms, or aborts them when comm is being aborted. Called from commFree.
 ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 
-// Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in
-// gfx1250 MNNVL fp32 sum measurements with 8 ranks per host. False for unmeasured host counts.
-bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes);
+// Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in gfx1250
+// MNNVL fp32 sum measurements with 8 ranks per host on 2, 4 and 8 hosts and with 4 ranks
+// per host on 4 and 8 hosts. The rcclHostHierAllReduceAutoType combinations gain at the
+// same sizes. False for unmeasured layouts. Auto mode also needs the SPX tuning table
+// for 4 ranks per host, and on two hosts the fused kernel between 2 and 8 and between 16
+// and 128 MiB for the types the kernel takes.
+bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes);
+
+// Sizes, in bytes, at which the fused DDA kernel beat the three collectives in gfx1250 fp32, fp16 and bf16 sum
+// measurements on one and two hosts with 8 ranks per host. With 4 ranks per host it was slower at every size.
+bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes);
+
+// Datatype and op combinations that auto mode uses at the fp32-sum sizes of rcclHostHierAllReduceAutoWindow, from
+// gfx1250 measurements. With 8 ranks per host (DPX), sum on fp32, fp16, bf16 and fp8, which gained at every size of
+// the window on two, four and eight hosts: prod, max, min, avg and integer sums were slower at 64-128 MiB on two and
+// four hosts. With 4 ranks per host (SPX), every split op except fp8 avg,
+// prod, max and min and int8 / uint8 max and min: fp8 avg was slower at 32 MiB, fp8, int8 and uint8 max and min at
+// 256 MiB on eight hosts, and fp8 prod is unmeasured. The caller still applies opSplitsAcrossStages, which drops
+// integer avg and PreMulSum.
+bool rcclHostHierAllReduceAutoType(int ranksPerHost, ncclDataType_t datatype, ncclRedOp_t op);
 
 // Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical
 // AllReduce. registeredBuffers: the send or receive buffer is in a registered
@@ -74,7 +94,9 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
                                    bool registeredBuffers);
 
 // ReduceScatter within the host, AllReduce across hosts, then AllGather within
-// the host. Needs rcclHostHierEnsure to have succeeded.
+// the host: in one fused DDA kernel where RCCL_HOST_HIER_ALLREDUCE_FUSED selects
+// it, otherwise as three collectives on the child comms. Needs
+// rcclHostHierEnsure to have succeeded.
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                    ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream);
 

@@ -6,6 +6,7 @@
 
 #include "hier_host.h"
 
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/fabric/fabric_init.h"
 #include "alloc.h"
 #include "bootstrap.h"
@@ -13,6 +14,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "param.h"
+#include "rccl_arch_thresholds.h"
 #include "recorder.h"
 
 #include <algorithm>
@@ -21,6 +23,9 @@
 #include <vector>
 
 RCCL_PARAM(HostHierAllReduce, "HOST_HIER_ALLREDUCE", -1);
+// -1 runs host-hierarchical AllReduce in the fused DDA kernel inside rcclHostHierAllReduceFusedWindow, 1 wherever the
+// kernel applies, 0 never.
+RCCL_PARAM(HostHierAllReduceFused, "HOST_HIER_ALLREDUCE_FUSED", -1);
 
 namespace {
 
@@ -52,20 +57,18 @@ bool allRanksReady(struct ncclComm* comm, ncclResult_t* res) {
   return false;
 }
 
+// Never frees a buffer while the comm lives: freeing one that peer GPUs of the same process have just accessed
+// through the child comms intermittently fails in HIP, so a buffer that is outgrown is kept until teardown. Growing
+// at least twofold keeps the kept buffers under the size of the current one.
 ncclResult_t reserveScratch(struct ncclComm* comm, struct rcclHostHier* h, size_t bytes) {
-  if (h->scratchUsed == nullptr) CUDACHECK(cudaEventCreateWithFlags(&h->scratchUsed, cudaEventDisableTiming));
   if (h->scratchBytes >= bytes) return ncclSuccess;
-  if (h->scratch != nullptr) {
-    // Earlier collectives, on any stream, may still read the old buffer.
-    CUDACHECK(cudaEventSynchronize(h->scratchUsed));
-    NCCLCHECK(ncclCudaFree(h->scratch, comm->memManager));
-    h->scratch = nullptr;
-    h->scratchBytes = 0;
-  }
+  if (h->nRetired == kHostHierMaxRetired) return ncclInternalError;
+  const size_t grown = std::max(bytes, 2 * h->scratchBytes);
   char* buf = nullptr;
-  NCCLCHECK(ncclCudaMalloc(&buf, bytes, comm->memManager));
+  NCCLCHECK(ncclCudaMalloc(&buf, grown, comm->memManager));
+  if (h->scratch != nullptr) h->retired[h->nRetired++] = h->scratch;
   h->scratch = buf;
-  h->scratchBytes = bytes;
+  h->scratchBytes = grown;
   return ncclSuccess;
 }
 
@@ -84,6 +87,33 @@ bool opSplitsAcrossStages(ncclRedOp_t op, ncclDataType_t datatype) {
   default:
     return false;
   }
+}
+
+bool fusedKernelRuns(struct ncclComm* comm, const struct rcclHostLayout& layout, size_t count, ncclDataType_t datatype,
+                     ncclRedOp_t op) {
+  const int64_t fused = rcclParamHostHierAllReduceFused();
+  if (fused == 0) return false;
+  if (fused == -1 &&
+      !rcclHostHierAllReduceFusedWindow(layout.nHosts, layout.ranksPerHost, count * ncclTypeSize(datatype))) {
+    return false;
+  }
+  return ncclAllReduceDdaFabricHierEligible(comm, count, datatype, op, layout.nHosts, layout.ranksPerHost);
+}
+
+// The three collectives gained over the default path on two hosts with 8 ranks only at 1-2, 8-16 and 128-512 MiB in
+// fp32 sum; the auto window between those sizes needs the fused kernel. fp8, which the kernel does not take, gained
+// across the window on the three collectives.
+bool needsFusedKernel(const struct rcclHostLayout& layout, ncclDataType_t datatype, size_t bytes) {
+  constexpr size_t MiB = size_t{1} << 20;
+  if (layout.nHosts != 2 || layout.ranksPerHost != 8) return false;
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) return false;
+  return (bytes > 2 * MiB && bytes < 8 * MiB) || (bytes > 16 * MiB && bytes < 128 * MiB);
+}
+
+// Every rank of a comm reads the same table (rcclSetTuningPartition), so this matches on all of them.
+bool spxTuningTable(const struct ncclComm* comm) {
+  return comm->archName != nullptr && comm->archThresholds != nullptr &&
+         comm->archThresholds == rcclGetArchThresholds(comm->archName, RCCL_TUNING_PARTITION_SPX);
 }
 
 } // namespace
@@ -120,6 +150,26 @@ bool rcclHostLayoutGet(const struct ncclComm* comm, struct rcclHostLayout* layou
   return true;
 }
 
+namespace {
+
+// Same host numbering as rcclHostLayoutGet.
+void fillHostRanks(const struct ncclComm* comm, const struct rcclHostLayout& layout, int* hostRanks) {
+  std::vector<uint64_t> hosts;
+  std::vector<int> counts;
+  for (int r = 0; r < comm->nRanks; r++) {
+    const uint64_t hash = comm->peerInfo[r].hostHash;
+    size_t idx = 0;
+    while (idx < hosts.size() && hosts[idx] != hash) idx++;
+    if (idx == hosts.size()) {
+      hosts.push_back(hash);
+      counts.push_back(0);
+    }
+    hostRanks[idx * layout.ranksPerHost + counts[idx]++] = r;
+  }
+}
+
+} // namespace
+
 const struct rcclHostLayout* rcclHostHierGetLayout(struct ncclComm* comm) {
   if (comm == nullptr) return nullptr;
   switch (comm->hostHierState) {
@@ -141,6 +191,12 @@ const struct rcclHostLayout* rcclHostHierGetLayout(struct ncclComm* comm) {
     comm->hostHierState = rcclHostHierOff;
     return nullptr;
   }
+  if (ncclCalloc(&h->hostRanks, comm->nRanks) != ncclSuccess) {
+    free(h);
+    comm->hostHierState = rcclHostHierOff;
+    return nullptr;
+  }
+  fillHostRanks(comm, layout, h->hostRanks);
   h->layout = layout;
   comm->hostHier = h;
   comm->hostHierState = rcclHostHierLayout;
@@ -208,24 +264,64 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm) {
   ncclResult_t res = ncclSuccess;
   NCCLCHECKGOTO(releaseChild(h->inter, aborting), res, exit);
   NCCLCHECKGOTO(releaseChild(h->intra, aborting), res, exit);
-  // The children's collectives read the scratch buffer.
+  // The children's collectives read the scratch buffers.
+  for (int i = 0; i < h->nRetired; i++) NCCLCHECKGOTO(ncclCudaFree(h->retired[i], comm->memManager), res, exit);
   if (h->scratch != nullptr) NCCLCHECKGOTO(ncclCudaFree(h->scratch, comm->memManager), res, exit);
 exit:
-  if (h->scratchUsed != nullptr) CUDACHECKIGNORE(cudaEventDestroy(h->scratchUsed));
+  free(h->hostRanks);
   free(h);
   return res;
 }
 
-bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
+bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
-  switch (nHosts) {
-  case 2:
-    return (bytes > 1 * MiB && bytes <= 2 * MiB) || (bytes >= 8 * MiB && bytes <= 16 * MiB) ||
-           (bytes >= 128 * MiB && bytes <= 512 * MiB);
-  case 4:
-    return bytes >= 2 * MiB && bytes <= 1024 * MiB;
-  case 8:
-    return bytes >= 2 * MiB && bytes <= 2048 * MiB;
+  if (ranksPerHost == 8) {
+    switch (nHosts) {
+    case 2:
+      return bytes >= 2 * MiB && bytes <= 128 * MiB;
+    case 4:
+      return bytes >= 2 * MiB && bytes <= 1024 * MiB;
+    case 8:
+      return bytes >= 2 * MiB && bytes <= 2048 * MiB;
+    default:
+      return false;
+    }
+  }
+  if (ranksPerHost == 4) {
+    switch (nHosts) {
+    case 4:
+      return bytes >= 2 * MiB && bytes <= 32 * MiB;
+    case 8:
+      return bytes >= 2 * MiB && bytes <= 256 * MiB;
+    default:
+      return false;
+    }
+  }
+  return false;
+}
+
+bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes) {
+  constexpr size_t MiB = size_t{1} << 20;
+  return ranksPerHost == 8 && nHosts <= 2 && bytes >= 4 * MiB && bytes <= 128 * MiB;
+}
+
+bool rcclHostHierAllReduceAutoType(int ranksPerHost, ncclDataType_t datatype, ncclRedOp_t op) {
+  const bool fp8 = datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2;
+  const bool byteInt = datatype == ncclInt8 || datatype == ncclUint8;
+  if (ranksPerHost == 8) {
+    return op == ncclSum && (datatype == ncclFloat32 || datatype == ncclFloat16 || datatype == ncclBfloat16 || fp8);
+  }
+  if (ranksPerHost != 4) return false;
+  switch (op) {
+  case ncclSum:
+    return true;
+  case ncclProd:
+    return !fp8;
+  case ncclMax:
+  case ncclMin:
+    return !fp8 && !byteInt;
+  case ncclAvg:
+    return !fp8;
   default:
     return false;
   }
@@ -240,36 +336,73 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   // Registered windows are left to the symmetric and CE paths: the child comms do not see the registrations.
   // The windows were measured on one MNNVL clique; a job spanning several stays on the default path.
   const bool oneClique = ncclDdaUseFabricPath(comm) && comm->clique.size == comm->nRanks;
-  if (!forced && (registeredBuffers || !(oneClique && datatype == ncclFloat32 && op == ncclSum))) {
+  if (!forced && (registeredBuffers || !(oneClique && (rcclHostHierAllReduceAutoType(8, datatype, op) ||
+                                                       rcclHostHierAllReduceAutoType(4, datatype, op))))) {
     return false;
   }
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
   if (layout == nullptr || count % layout->ranksPerHost != 0) return false;
   if (forced) return true;
-  return layout->ranksPerHost == 8 && rcclHostHierAllReduceAutoWindow(layout->nHosts, count * ncclTypeSize(datatype));
+  if (!rcclHostHierAllReduceAutoType(layout->ranksPerHost, datatype, op)) return false;
+  const size_t bytes = count * ncclTypeSize(datatype);
+  if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes)) return false;
+  // The 4-ranks-per-host windows were measured in SPX; a DPX comm with half of each host's ranks keeps the default path.
+  if (layout->ranksPerHost == 4 && !spxTuningTable(comm)) return false;
+  return !needsFusedKernel(*layout, datatype, bytes) || fusedKernelRuns(comm, *layout, count, datatype, op);
 }
 
 ncclResult_t rcclHostHierAllReduce(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                    ncclRedOp_t op, struct ncclComm* comm, cudaStream_t stream) {
   if (comm->hostHierState != rcclHostHierReady) return ncclInternalError;
   struct rcclHostHier* h = comm->hostHier;
-  const size_t chunk = count / h->layout.ranksPerHost;
+  const struct rcclHostLayout& layout = h->layout;
+  const bool fused = fusedKernelRuns(comm, layout, count, datatype, op);
+  const size_t bytes = count * ncclTypeSize(datatype);
+  const size_t chunk = count / layout.ranksPerHost;
   const size_t chunkBytes = chunk * ncclTypeSize(datatype);
   const bool doInter = h->inter != nullptr;
   // The inter-host AllReduce runs out of place: in place it is several times slower.
   const size_t stride = (chunkBytes + 255) & ~size_t{255};
-  NCCLCHECK(reserveScratch(comm, h, doInter ? stride + chunkBytes : chunkBytes));
-  char* rsOut = static_cast<char*>(h->scratch);
-  char* agIn = doInter ? rsOut + stride : rsOut;
+  const size_t stageBytes = fused ? 0 : doInter ? stride + chunkBytes : chunkBytes;
+  // The fused kernel and some algorithms of the child collectives are chosen from each rank's own buffer alignment, so
+  // a rank whose buffers are not 16-byte aligned copies them through scratch instead of taking a path its peers do
+  // not take.
+  const bool aligned = ((reinterpret_cast<uintptr_t>(sendbuff) | reinterpret_cast<uintptr_t>(recvbuff)) & 15) == 0;
+  const size_t copyBytes = aligned ? 0 : (bytes + 255) & ~size_t{255};
+  NCCLCHECK(reserveScratch(comm, h, copyBytes + stageBytes));
+  char* const copy = static_cast<char*>(h->scratch);
+  const void* in = aligned ? sendbuff : copy;
+  void* out = aligned ? recvbuff : copy;
+  if (!aligned) CUDACHECK(cudaMemcpyAsync(copy, sendbuff, bytes, cudaMemcpyDeviceToDevice, stream));
 
-  // The parent AllReduce is already recorded.
-  rccl::Recorder::instance().skip(true);
-  ncclResult_t res = ncclSuccess;
-  NCCLCHECKGOTO(ncclReduceScatter(sendbuff, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
-  if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
-  NCCLCHECKGOTO(ncclAllGather(agIn, recvbuff, chunk, datatype, h->intra, stream), res, exit);
-  CUDACHECKGOTO(cudaEventRecord(h->scratchUsed, stream), res, exit);
-exit:
-  rccl::Recorder::instance().skip(false);
-  return res;
+  if (fused) {
+    std::vector<int> inter(layout.nHosts);
+    for (int host = 0; host < layout.nHosts; host++) {
+      inter[host] = h->hostRanks[host * layout.ranksPerHost + layout.localRank];
+    }
+    // With a copy-out after the kernel, the kernel must not record the stop event that orders the next call, which
+    // writes the same scratch: hand it back so rcclAddonLaunchEnd records it after the copy.
+    hipEvent_t stopEvent = aligned ? nullptr : rcclTakeAddonStopEvent(comm);
+    const ncclResult_t res =
+      ncclAllReduceDdaFabricHier(in, out, count, datatype, comm, stream, layout.nHosts, layout.ranksPerHost,
+                                 layout.hostIndex, layout.localRank,
+                                 h->hostRanks + layout.hostIndex * layout.ranksPerHost, inter.data());
+    if (!aligned) comm->addonStopEvent = stopEvent;
+    NCCLCHECK(res);
+  } else {
+    // The child comms keep their own stop events, so this comm's is recorded after the copy-out below.
+    char* rsOut = copy + copyBytes;
+    char* agIn = doInter ? rsOut + stride : rsOut;
+    // The parent AllReduce is already recorded.
+    rccl::Recorder::instance().skip(true);
+    ncclResult_t res = ncclSuccess;
+    NCCLCHECKGOTO(ncclReduceScatter(in, rsOut, chunk, datatype, op, h->intra, stream), res, exit);
+    if (doInter) NCCLCHECKGOTO(ncclAllReduce(rsOut, agIn, chunk, datatype, op, h->inter, stream), res, exit);
+    NCCLCHECKGOTO(ncclAllGather(agIn, out, chunk, datatype, h->intra, stream), res, exit);
+  exit:
+    rccl::Recorder::instance().skip(false);
+    if (res != ncclSuccess) return res;
+  }
+  if (!aligned) CUDACHECK(cudaMemcpyAsync(recvbuff, copy, bytes, cudaMemcpyDeviceToDevice, stream));
+  return ncclSuccess;
 }

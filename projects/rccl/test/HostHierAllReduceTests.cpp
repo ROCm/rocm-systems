@@ -9,9 +9,11 @@
 #include "comm.h"
 #include "hier_host.h"
 #include "nccl.h"
+#include "rccl_arch_thresholds.h"
 
 #include "gtest/gtest.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -46,6 +48,10 @@ struct HostHierMockComm
         comm.rank     = rank;
         setHosts(hostOf);
         comm.hostHierState = rcclHostHierUnprobed;
+        // The table of the partition mode that puts this many ranks on each host.
+        const bool spx = std::count(hostOf.begin(), hostOf.end(), hostOf.empty() ? 0 : hostOf[0]) == 4;
+        comm.archThresholds
+            = rcclGetArchThresholds(archBuf, spx ? RCCL_TUNING_PARTITION_SPX : RCCL_TUNING_PARTITION_DPX);
     }
 
     HostHierMockComm(const HostHierMockComm&)            = delete;
@@ -154,6 +160,17 @@ TEST(HostHierLayout, CachedOnFirstProbe)
     EXPECT_EQ(layout, rcclHostHierGetLayout(mock.get()));
 }
 
+// The fused kernel takes its intra-host and inter-host peers from hostRanks.
+TEST(HostHierLayout, HostRanksOfInterleavedHosts)
+{
+    HostHierMockComm mock({0, 1, 0, 1, 0, 1, 0, 1}, /*rank=*/5);
+    ASSERT_NE(nullptr, rcclHostHierGetLayout(mock.get()));
+    ASSERT_NE(nullptr, mock.comm.hostHier);
+    const int* hostRanks = mock.comm.hostHier->hostRanks;
+    ASSERT_NE(nullptr, hostRanks);
+    EXPECT_EQ(std::vector<int>({0, 2, 4, 6, 1, 3, 5, 7}), std::vector<int>(hostRanks, hostRanks + 8));
+}
+
 TEST(HostHierLayout, NoLayoutIsCachedToo)
 {
     HostHierMockComm mock({0, 0, 0, 1, 1, 1, 1, 1}, 0);
@@ -195,30 +212,81 @@ TEST(HostHierAllReduce, NeedsChildComms)
 
 TEST(HostHierAllReduce, AutoWindowEdges)
 {
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, kMiB + 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 2 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 2 * kMiB + 1));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 4 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 16 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 64 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 128 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 512 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 1024 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB - 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 64 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 128 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 128 * kMiB + 1));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 512 * kMiB));
 
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 2 * kMiB - 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 2 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 1024 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 1024 * kMiB + 1));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 8, kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 8, 2 * kMiB - 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 8, 2 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 8, 1024 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 8, 1024 * kMiB + 1));
 
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 2 * kMiB - 1));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 2 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 2048 * kMiB));
-    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 2048 * kMiB + 1));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 8, kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 8, 2 * kMiB - 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 8, 2 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 8, 2048 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 8, 2048 * kMiB + 1));
+
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 4, 2 * kMiB - 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 4, 2 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(4, 4, 32 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, 4, 32 * kMiB + 1));
+
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 4, 2 * kMiB - 1));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 4, 2 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(8, 4, 256 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(8, 4, 256 * kMiB + 1));
 
     for(int nHosts : {0, 1, 3, 5, 6, 7, 16})
-        EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(nHosts, 16 * kMiB)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(nHosts, 8, 16 * kMiB)) << nHosts << " hosts";
+    for(int nHosts : {1, 2, 3, 16})
+        EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(nHosts, 4, 16 * kMiB)) << nHosts << " hosts, 4 ranks each";
+    for(int ranksPerHost : {2, 16})
+        EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(4, ranksPerHost, 16 * kMiB)) << ranksPerHost << " ranks per host";
+}
+
+TEST(HostHierAllReduce, FusedWindowEdges)
+{
+    for(int nHosts : {1, 2})
+    {
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 4 * kMiB - 1)) << nHosts << " hosts";
+        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 4 * kMiB)) << nHosts << " hosts";
+        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 128 * kMiB)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 128 * kMiB + 1)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 4, 16 * kMiB)) << nHosts << " hosts, 4 ranks each";
+    }
+    for(int nHosts : {4, 8})
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 16 * kMiB)) << nHosts << " hosts";
+}
+
+TEST(HostHierAllReduce, AutoTypes)
+{
+    const ncclDataType_t all[] = {ncclInt8,     ncclUint8,   ncclInt32,   ncclUint32,
+                                  ncclInt64,    ncclUint64,  ncclFloat16, ncclFloat32,
+                                  ncclFloat64,  ncclBfloat16, ncclFloat8e4m3, ncclFloat8e5m2};
+    for(ncclDataType_t t : all)
+    {
+        const bool fp8      = t == ncclFloat8e4m3 || t == ncclFloat8e5m2;
+        const bool byteInt  = t == ncclInt8 || t == ncclUint8;
+        const bool dpxFloat = fp8 || t == ncclFloat32 || t == ncclFloat16 || t == ncclBfloat16;
+        EXPECT_TRUE(rcclHostHierAllReduceAutoType(4, t, ncclSum)) << t;
+        EXPECT_EQ(!fp8, rcclHostHierAllReduceAutoType(4, t, ncclProd)) << t;
+        EXPECT_EQ(!fp8 && !byteInt, rcclHostHierAllReduceAutoType(4, t, ncclMax)) << t;
+        EXPECT_EQ(!fp8 && !byteInt, rcclHostHierAllReduceAutoType(4, t, ncclMin)) << t;
+        EXPECT_EQ(!fp8, rcclHostHierAllReduceAutoType(4, t, ncclAvg)) << t;
+
+        EXPECT_EQ(dpxFloat, rcclHostHierAllReduceAutoType(8, t, ncclSum)) << t;
+        for(ncclRedOp_t op : {ncclProd, ncclMax, ncclMin, ncclAvg})
+            EXPECT_FALSE(rcclHostHierAllReduceAutoType(8, t, op)) << t << " op " << op;
+
+        for(int ranksPerHost : {2, 16})
+            EXPECT_FALSE(rcclHostHierAllReduceAutoType(ranksPerHost, t, ncclSum)) << t << " " << ranksPerHost;
+    }
 }
 
 // RCCL_HOST_HIER_ALLREDUCE is cached on first read, so each mode runs in its own process.
@@ -235,16 +303,36 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 return rcclHostHierAllReduceEligible(mock.get(), count, type, op, registered);
             };
             EXPECT_TRUE(eligible(blockHosts(2, 8), floats(2 * kMiB)));
-            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(kMiB))) << "below the window";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(4 * kMiB))) << "2-host gap";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB) - 8)) << "below the window";
+            EXPECT_TRUE(eligible(blockHosts(2, 8), floats(128 * kMiB)));
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(256 * kMiB))) << "two hosts, above the window";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), floats(1024 * kMiB))) << "above the window";
             EXPECT_FALSE(eligible(blockHosts(4, 8), floats(kMiB))) << "four hosts, below the window";
             EXPECT_TRUE(eligible(blockHosts(4, 8), floats(2 * kMiB)));
             EXPECT_TRUE(eligible(blockHosts(4, 8), floats(1024 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(4, 8), floats(2048 * kMiB)));
             EXPECT_TRUE(eligible(blockHosts(8, 8), floats(2048 * kMiB)));
             EXPECT_FALSE(eligible(blockHosts(1, 8), floats(16 * kMiB))) << "single host";
-            EXPECT_FALSE(eligible(blockHosts(2, 4), floats(16 * kMiB))) << "four ranks per host";
-            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16";
+            EXPECT_FALSE(eligible(blockHosts(2, 4), floats(16 * kMiB))) << "two hosts of four ranks";
+            EXPECT_TRUE(eligible(blockHosts(4, 4), floats(2 * kMiB))) << "four hosts of four ranks";
+            EXPECT_FALSE(eligible(blockHosts(4, 4), floats(64 * kMiB))) << "four hosts of four ranks, above";
+            EXPECT_TRUE(eligible(blockHosts(8, 4), floats(256 * kMiB))) << "eight hosts of four ranks";
+            EXPECT_FALSE(eligible(blockHosts(8, 4), floats(kMiB))) << "eight hosts of four ranks, below";
+            EXPECT_TRUE(eligible(blockHosts(4, 4), 8 * kMiB, ncclBfloat16)) << "bf16, four hosts of four ranks";
+            EXPECT_TRUE(eligible(blockHosts(8, 4), 16 * kMiB, ncclInt32, ncclMax)) << "int32 max, SPX";
+            EXPECT_TRUE(eligible(blockHosts(4, 4), 2 * kMiB, ncclFloat64, ncclAvg)) << "fp64 avg, SPX";
+            EXPECT_FALSE(eligible(blockHosts(4, 4), 64 * kMiB, ncclInt32, ncclMax)) << "int32 max, SPX, above";
+            EXPECT_FALSE(eligible(blockHosts(8, 4), 16 * kMiB, ncclFloat8e4m3, ncclAvg)) << "fp8 avg, SPX";
+            EXPECT_FALSE(eligible(blockHosts(8, 4), 16 * kMiB, ncclUint8, ncclMin)) << "uint8 min, SPX";
+            EXPECT_FALSE(eligible(blockHosts(8, 4), 4 * kMiB, ncclInt32, ncclAvg)) << "int32 avg, SPX";
+            EXPECT_FALSE(eligible(blockHosts(4, 8), floats(16 * kMiB), ncclFloat32, ncclMax)) << "fp32 max, DPX";
+            EXPECT_TRUE(eligible(blockHosts(2, 8), kMiB, ncclBfloat16)) << "bf16, 2 MiB";
+            EXPECT_TRUE(eligible(blockHosts(2, 8), 64 * kMiB, ncclFloat16)) << "fp16, 128 MiB";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB - 8, ncclBfloat16)) << "bf16 below the window";
+            EXPECT_TRUE(eligible(blockHosts(4, 8), 8 * kMiB, ncclBfloat16)) << "bf16 on four hosts";
+            EXPECT_TRUE(eligible(blockHosts(8, 8), 8 * kMiB, ncclFloat8e4m3)) << "fp8 sum on eight hosts";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), 8 * kMiB, ncclInt32)) << "int32 sum, DPX";
+            EXPECT_FALSE(eligible(blockHosts(2, 8), kMiB, ncclFloat64)) << "fp64";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclMax)) << "max";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx950")) << "gfx950";
             EXPECT_FALSE(eligible(blockHosts(2, 8), floats(2 * kMiB), ncclFloat32, ncclSum, "gfx1250", false))
@@ -257,6 +345,23 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
                     << "two MNNVL cliques";
             }
+            for(int nHosts : {4, 8})
+            {
+                HostHierMockComm mock(blockHosts(nHosts, 4), 0);
+                mock.comm.archThresholds = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
+                    << nHosts << " hosts of four ranks with the DPX table";
+            }
+            // The mock comm has no DDA fabric, so the fused kernel never runs on it.
+            for(size_t bytes : {4 * kMiB, 8 * kMiB - 64, 32 * kMiB, 128 * kMiB - 64})
+            {
+                EXPECT_FALSE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, no fused kernel";
+                EXPECT_FALSE(eligible(blockHosts(2, 8), bytes / 2, ncclBfloat16)) << bytes << " B bf16, no fused kernel";
+                EXPECT_TRUE(eligible(blockHosts(2, 8), bytes, ncclFloat8e4m3)) << bytes << " B fp8 on two hosts";
+                EXPECT_TRUE(eligible(blockHosts(4, 8), floats(bytes))) << bytes << " B on four hosts";
+            }
+            for(size_t bytes : {2 * kMiB, 8 * kMiB, 16 * kMiB, 128 * kMiB})
+                EXPECT_TRUE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts";
         })
         .withTimeout(std::chrono::seconds(30))
         .withNumGpus(0);

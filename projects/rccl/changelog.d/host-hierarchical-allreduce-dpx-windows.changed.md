@@ -1,0 +1,1 @@
+* `RCCL_HOST_HIER_ALLREDUCE`: the default (`-1`) window on two hosts with eight ranks per host (DPX) now stops at 128 MiB (was 2 to 512 MiB). On gfx1250, host-hierarchical AllReduce was 3% slower than the default path at 256 MiB on two hosts, and 512 MiB was within noise.
