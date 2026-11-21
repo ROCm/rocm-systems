@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import argparse
 from datetime import datetime
+from decimal import Decimal
 import csv
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -187,12 +188,16 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
         # with its help text and exit status 0. Every run that gets past its options prints this line.
         started = re.search(r'^Decoding started with .*$', result.stdout, re.MULTILINE)
         if not started:
-            raise RuntimeError(
-                f"jpegdecodeperf printed its help text instead of decoding {dir_path}, so it rejected one of "
-                f"the options in: {' '.join(base_cmd)}"
-            )
+            message = (f"jpegdecodeperf printed its help text instead of decoding {dir_path}, so it rejected one of "
+                       f"the options in: {' '.join(base_cmd)}")
+            if num_iterations > 1 or num_threads > 32:
+                # Builds before rocJPEG 1.7.0 reject -n, and builds before 1.14.0 reject more than 32 threads
+                message += (f". If those options are valid, {exe} may predate rocJPEG 1.14.0, which added -n and "
+                            f"up to 64 threads: delete {os.path.dirname(exe)} to rebuild it from {rocm_path}, "
+                            f"which must have rocJPEG 1.14.0 or later.")
+            raise RuntimeError(message)
         # Builds that honor -n report the iteration count in that line, e.g. "Decoding started with 1 threads,
-        # 4 iteration(s) over the image set". jpegdecodeperf from rocJPEG before 1.14.0 accepts -n but decodes
+        # 4 iteration(s) over the image set". jpegdecodeperf from rocJPEG 1.7.0 to 1.13 accepts -n but decodes
         # each image only once, and its line has no count.
         if num_iterations > 1 and not re.search(rf'\b{num_iterations} iteration\(s\)', started.group(0)):
             raise RuntimeError(
@@ -211,9 +216,10 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
             if 'Average processing time per image' in line:
                 proc_time = float(line.split(':')[-1].strip())
             if 'Total wall time' in line:
-                # Printed in sec, min, or hours, depending on the length of the run
+                # Printed in sec, min, or hours, depending on the length of the run. Decimal keeps the converted
+                # value as short as the printed one: 59.9999 min is 3599.994, not 3599.9939999999997.
                 scale = 3600 if '(hours)' in line else 60 if '(min)' in line else 1
-                wall_time = float(line.split(':')[-1].strip()) * scale
+                wall_time = float(Decimal(line.split(':')[-1].strip()) * scale)
             if 'Total decoded images' in line:
                 # Every decode counts: each image once per iteration, without the images the app skipped
                 images = int(line.split(':')[-1].strip())
@@ -356,7 +362,8 @@ def main():
         # Checked before copying images or building jpegdecodeperf
         parser.error(f'-i/--images_path {args.images_path} does not exist')
     if args.num_iterations < 1:
-        # Checked here because jpegdecodeperf answers an invalid -n with its help text and exit status 0
+        # Checked here because run_one passes -n only when it is above 1, so a smaller value would silently run
+        # one iteration
         parser.error('-iter/--num_iterations must be at least 1')
 
     if args.num_images == 1:
