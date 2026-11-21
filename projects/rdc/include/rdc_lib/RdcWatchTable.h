@@ -34,6 +34,9 @@ namespace rdc {
 class RdcWatchTable {
  public:
   virtual rdc_status_t rdc_field_update_all() = 0;
+  // Milliseconds until rdc_field_update_all() next has work to do, when a watched field
+  // falls due or the cache's clean-up does; 0 if something is due now.
+  virtual uint64_t ms_until_next_update() = 0;
   virtual rdc_status_t rdc_field_listen_notif(uint32_t timeout_ms) = 0;
 
   virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id, const char job_id[64],

@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 
 #include <list>
+#include <mutex>  // NOLINT(build/c++11)
 
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcModuleMgr.h"
@@ -54,9 +55,11 @@ class RdcModuleMgrImpl : public RdcModuleMgr {
   template <typename T>
   rdc_status_t insert_modules(std::shared_ptr<T> ptr);
 
-  //  Function module
+  //  Function modules, made on first use (rdcd's clients can ask from several threads)
   RdcTelemetryPtr rdc_telemetry_module_;
   RdcDiagnosticPtr rdc_diagnostic_module_;
+  std::once_flag telemetry_module_once_;
+  std::once_flag diagnostic_module_once_;
 
   //  Domain module
   RdcMetricFetcherPtr fetcher_;

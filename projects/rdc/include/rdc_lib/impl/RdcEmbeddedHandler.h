@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCEMBEDDEDHANDLER_H_
 
 #include <future>  // NOLINT(build/c++11)
+#include <mutex>   // NOLINT(build/c++11)
 
 #include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/RdcConfigSettings.h"
@@ -163,6 +164,7 @@ class RdcEmbeddedHandler final : public RdcHandler {
   RdcPolicyPtr policy_;
   RdcTopologyLinkPtr topologylink_;
   RdcConfigSettingsPtr config_handler_;
+  std::mutex updater_mutex_;  // rdc_field_update_all() calls replace updater_ one at a time
   std::future<void> updater_;
 };
 
