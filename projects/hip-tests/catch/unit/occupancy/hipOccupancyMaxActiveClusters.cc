@@ -35,7 +35,7 @@ static __global__ void reverse(int* d, int n) {
   d[t] = shBuf[tr];
 };
 
-TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
+HIP_TEST_CASE(Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation) {
   hipLaunchConfig_t config = {};
   hipLaunchAttribute attribute[1];
   int clustersNoLDS = -1, clustersLDS = -1;
@@ -103,7 +103,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Positive_RangeValidation") {
   REQUIRE(clustersLDS == (maxBlocks * ratio * totalSE) / 4);
 }
 
-TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster") {
+HIP_TEST_CASE(Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster) {
   hipLaunchConfig_t config = {};
   hipLaunchAttribute attribute[1];
   hipError_t hip_error;
@@ -126,7 +126,7 @@ TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Negative_Zero_Cluster") {
   REQUIRE(hip_error == hipErrorInvalidClusterSize);
 }
 
-TEST_CASE("Unit_hipOccupancyMaxActiveClusters_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipOccupancyMaxActiveClusters_Negative_Parameters) {
   hipLaunchConfig_t config = {};
   hipLaunchAttribute attribute[1];
   hipError_t hip_error;
