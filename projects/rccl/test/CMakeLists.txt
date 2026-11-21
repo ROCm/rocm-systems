@@ -307,6 +307,7 @@ if(BUILD_TESTS)
     ScatterTests.cpp
     TeamTopologyTests.cpp
     P2pChannelScalingTests.cpp
+    P2pMaxCtasTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
     HipProbeTests.cpp

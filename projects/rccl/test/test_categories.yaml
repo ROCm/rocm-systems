@@ -124,6 +124,7 @@ test_categories:
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
       - "HipProbe.*"
+      - "P2pMaxCtas.*"
     exclude_windows:
       - "*"
     labels:

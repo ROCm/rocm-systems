@@ -1888,6 +1888,11 @@
           "test_filter": "SendRecv.UserBufferRegister"
         },
         {
+          "name": "P2pMaxCtas",
+          "description": "maxCTAs bounds P2P kernel grids (comm cap not a power of two, per-call Scatter/Gather cap)",
+          "test_filter": "P2pMaxCtas.*"
+        },
+        {
           "name": "GroupCall.Identical",
           "description": "GroupCall identical",
           "test_filter": "GroupCall.Identical"
