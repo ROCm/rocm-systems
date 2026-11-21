@@ -573,42 +573,29 @@ struct ncclLsaPointerGetter {
   }
 };
 
-// [RCCL] World-rank peer pointers for the single-LSA-team kernels (ReduceScatter LD, AllReduce RSxLD),
-// read from the window once. ncclSymPtr::peerPtr(world, r) resolves every peer through the window's
-// lsaPeerDelta4G table since 2.32.6: a chain of dependent global loads per peer and iteration, which
-// the compiler cannot hoist past the loops' stores. These kernels run only when the world is one LSA
-// team, whose ranks are consecutive, so a world rank is an LSA rank shifted by (lsaRank - rank).
-// [RCCL] ReloadPerCall re-reads base/stride per call instead of caching them: in the TDM deep loop,
-// holding them live costs the registers the compiler otherwise uses to overlap the LDS reads.
-template <typename T, bool ReloadPerCall = false>
+// [RCCL] World-rank peer pointers for the single-LSA-team kernels (ReduceScatter LD, AllReduce RSxLD): a world rank
+// maps to an LSA rank, so the pointer comes from lsaFlatBase/stride4G instead of the lsaPeerDelta4G table.
+// [RCCL] Fields are read per call: caching them costs registers and a wave of occupancy. StoreTarget uses scalar loads
+// so the lookup does not drain earlier peer stores on gfx9; load sources stay vector, not hoisted into SGPRs.
+template <typename T, bool StoreTarget = false>
 struct ncclSymkWorldPointerGetter {
-  ncclWindow_t window;
-  size_t offset;
-  void* base;
-  uint32_t stride4G;
-  int lsaShift;
-  __device__ ncclSymkWorldPointerGetter(ncclSymPtr<T> ptr, ncclDevComm const& comm) {
-    window = ptr.window;
-    offset = ptr.offset;
-    lsaShift = comm.lsaRank - comm.rank;
-    if NCCL_IF_CONSTEXPR (!ReloadPerCall) {
-      base = (char*)nccl::utility::loadConst(&ptr.window->lsaFlatBase) + ptr.offset;
-      stride4G = nccl::utility::loadConst(&ptr.window->stride4G);
-    }
-  }
+  ncclSymPtr<T> ptr;
+  int rank;
+  __device__ ncclSymkWorldPointerGetter(ncclSymPtr<T> ptr_, ncclDevComm const& comm) : ptr(ptr_), rank(comm.rank) {}
   __device__ T* operator()(int worldPeer) const {
-    if NCCL_IF_CONSTEXPR (ReloadPerCall) {
-      char* b = (char*)nccl::utility::loadConst(&window->lsaFlatBase) + offset;
-      return (T*)nccl::utility::add4G(b, (worldPeer + lsaShift) * nccl::utility::loadConst(&window->stride4G));
+#if defined(__HIP_PLATFORM_AMD__)
+    if NCCL_IF_CONSTEXPR (StoreTarget) {
+      using ConstWindow = ncclWindow_vidmem const __attribute__((address_space(4)));
+      ConstWindow* w = (ConstWindow*)ptr.window;
+      int lsaPeer = w->lsaRank + (worldPeer - rank);
+      return (T*)(nccl::utility::add4G(w->lsaFlatBase, lsaPeer * w->stride4G) + ptr.offset);
     }
-    return (T*)nccl::utility::add4G(base, (worldPeer + lsaShift) * stride4G);
+#endif
+    int lsaPeer = nccl::utility::loadConst(&ptr.window->lsaRank) + (worldPeer - rank);
+    return (T*)ncclGetLsaPointer(ptr.window, ptr.offset, lsaPeer);
   }
   __device__ void advance(intptr_t nElts) {
-    if NCCL_IF_CONSTEXPR (ReloadPerCall) {
-      offset += nElts * sizeof(T);
-    } else {
-      base = (T*)base + nElts;
-    }
+    ptr += nElts;
   }
 };
 #endif // NCCL_DEVICE_SYMMETRIC_SYMK_H_

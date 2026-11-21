@@ -44,7 +44,7 @@ static __device__ __forceinline__ void allreduceDeep(ncclSymkArgsHandler const& 
 #endif
                                             lane);
   ncclSymkWorldPointerGetter<Pack> inpPeer(inpPacks, handler.comm);
-  ncclSymkWorldPointerGetter<Pack> outPeer(outPacks, handler.comm);
+  ncclSymkWorldPointerGetter<Pack, /*StoreTarget=*/true> outPeer(outPacks, handler.comm);
 
   Pack acc0[UnrollPacks];
 
@@ -250,7 +250,7 @@ static __device__ __forceinline__ void allreduceEnds(ncclSymkArgsHandler const& 
   ncclSymPtr<BytePack<sizeof(T)>> inpPacks = (ncclSymPtr<BytePack<sizeof(T)>>)input;
   ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
   ncclSymkWorldPointerGetter<BytePack<sizeof(T)>> inpPeer(inpPacks, handler.comm);
-  ncclSymkWorldPointerGetter<BytePack<sizeof(T)>> outPeer(outPacks, handler.comm);
+  ncclSymkWorldPointerGetter<BytePack<sizeof(T)>, /*StoreTarget=*/true> outPeer(outPacks, handler.comm);
 
   NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
