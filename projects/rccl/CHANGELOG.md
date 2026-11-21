@@ -5,6 +5,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ## RCCL 2.32.3 for ROCm 10.3.0 (Unreleased)
 
 ### Added
+* Experimental native Windows CMake build with HIP/Win32 initialization and a single-GPU AllReduce smoke test. Multi-GPU and network operation remain unvalidated.
+* `RCCL_ENABLE_SIGNALHANDLER`: the experimental Windows build warns when this option is requested because the Linux signal/backtrace handler is unavailable on Windows; its default remains disabled (`0`).
 * Documentation for the unified cost model (`docs/how-to/rccl-cost-model.rst`), covering the candidate ID space, the `NCCL_DEBUG_SUBSYS=TUNING` log records, which selections it drives today, and the tuner plugin boundary.
 * gfx1250 DDA fabric (VMM) `ncclAlltoAll` push kernels, selected by `RCCL_DDA_A2A_PUSH` (default `1`; `0` restores the previous pull kernel): each rank writes its chunks straight into its peers' DDA scratch buffers and syncs all ranks before finishing, so a following LL or LL128 collective cannot reuse the scratch early. `RCCL_DDA_A2A_TDM` (default `1`) moves the data through the tensor data mover; `0`, like in-place calls, uses vector loads and stores. The gfx1250 DPX table enables the AlltoAll VMM tier up to 256 MiB; the SPX table leaves it off, so on SPX these kernels run only when `RCCL_DDA_THRESHOLD` covers the message.
 * `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `16`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion. The channels share one non-blocking stream per proxy thread to avoid SDMA completion stalls.

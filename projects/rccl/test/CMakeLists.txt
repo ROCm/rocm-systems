@@ -358,6 +358,11 @@ if(BUILD_TESTS)
       ../src/misc/proxy_trace/proxy_trace.cc
       ../src/misc/ibvsymbols.cc  # buildIbvSymbols() is hidden in librccl; compile it in for IbvSymbolsEnvTests
     )
+    if(BUILD_SHARED_LIBS)
+      # The recorder copy needs these private OS helpers, also hidden in librccl.
+      # Static builds resolve them from the library's existing OS object instead.
+      list(APPEND TEST_SOURCE_FILES common/OsIdentity.cpp)
+    endif()
   endif()
 
   set(RCCL_TEST_EXECUTABLES rccl-UnitTests)

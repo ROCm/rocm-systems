@@ -689,6 +689,11 @@ set(SRC_FILES
 # Prepend src/ to all source files for proper paths from root
 list(TRANSFORM SRC_FILES PREPEND "src/")
 
+if(RCCL_WINDOWS_COLLECT_SOURCES)
+  set(SRC_FILES "${SRC_FILES};${DEVCOMM_SOURCES}" PARENT_SCOPE)
+  return()
+endif()
+
 # Conditional source files based on build options
 #==================================================================================================
 if(ENABLE_ROCSHMEM_GIN)

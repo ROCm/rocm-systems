@@ -8,9 +8,11 @@
 #ifndef NCCL_ROCMWRAP_H_
 #define NCCL_ROCMWRAP_H_
 
+#if defined(NCCL_OS_LINUX)
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>  // hsa_amd_portable_export_dmabuf (DMA-BUF export)
 #include <unistd.h>
+#endif
 #include "checks.h"
 
 #ifndef CU_STREAM_WRITE_VALUE_DEFAULT
@@ -101,6 +103,7 @@ ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CU
 // undefined symbol), and pfn_hsa_amd_portable_export_dmabuf below stays the
 // runtime feature gate. This declaration must precede every use of the symbol
 // so all references (including the HSACHECK* macro call sites) are emitted weak.
+#if defined(NCCL_OS_LINUX)
 extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf, uint64_t* offset)
   __attribute__((weak));
 
@@ -110,6 +113,10 @@ extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t s
 // gate: pfn_hsa_amd_portable_export_dmabuf stays NULL when the platform does not
 // support DMA-BUF.
 typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size_t size, int* dmabuf, uint64_t* offset);
+#else
+// DMA-BUF is a Linux facility. Keep the optional exporter null on Windows.
+typedef int (*PFN_hsa_amd_portable_export_dmabuf)(const void*, size_t, int*, uint64_t*);
+#endif
 
 #ifdef __HIP_PLATFORM_AMD__
 #define CUPFN(symbol) symbol
@@ -208,6 +215,7 @@ DECLARE_ROCM_PFN_EXTERN(hsa_amd_portable_export_dmabuf); // DMA-BUF feature gate
 // pfn_hsa_amd_portable_export_dmabuf being non-NULL.
 static inline bool ncclHsaRegMrDmaBuf(ncclResult_t (*regMrDmaBuf)(void*, void*, size_t, int, uint64_t, int, void**),
                                       void* comm, void* buffer, size_t size, int type, void** mhandle) {
+#if defined(NCCL_OS_LINUX)
   int fd = -1;
   uint64_t offset = 0;
   hsa_status_t status = pfn_hsa_amd_portable_export_dmabuf(buffer, size, &fd, &offset);
@@ -224,6 +232,9 @@ static inline bool ncclHsaRegMrDmaBuf(ncclResult_t (*regMrDmaBuf)(void*, void*, 
     return false;
   }
   return true;
+#else
+  return false;
+#endif
 }
 
 extern int ncclCuMemEnable();

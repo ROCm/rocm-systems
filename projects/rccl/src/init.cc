@@ -35,16 +35,21 @@
 #include "profiler.h"
 #include "mnnvl.h"
 #include <fcntl.h>
+#if defined(NCCL_OS_LINUX)
 #include <unistd.h>
+#endif
 #include <hip/hip_runtime.h>
 #include <string.h>
 #include <errno.h>
 #include <assert.h>
+#if defined(NCCL_OS_LINUX)
 #include <dlfcn.h>
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
+#if defined(NCCL_OS_LINUX)
 #include <sys/resource.h>
-#include <unistd.h>
+#endif
 #include "graph/topo.h"
 #include "graph/rome_topo_consensus.h"
 #include "graph/xml.h"
@@ -342,7 +347,7 @@ ncclResult_t checkHostUncacheMemSetting(struct ncclComm* comm) {
   return ncclSuccess;
 #else
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950")) {
-    ERROR("Build flag HIP_HOST_UNCACHED_MEMORY must be set to avoid memory corruption on mi350x");
+    NCCL_ERROR("Build flag HIP_HOST_UNCACHED_MEMORY must be set to avoid memory corruption on mi350x");
     return ncclSystemError;
   }
   return ncclSuccess;
@@ -369,6 +374,7 @@ static ncclResult_t ncclInit() {
   // early so the handler runs BEFORE HIP runtime static destructors.
   rcclRegisterShutdownHandler();
 
+#if defined(NCCL_OS_LINUX)
   char strValue[2048];
   NCCLCHECK(ncclOsTopoGetStrFromSys("/proc/sys/kernel", "numa_balancing", strValue, sizeof(strValue)));
   if (strcmp(strValue, "1") == 0)
@@ -419,6 +425,7 @@ static ncclResult_t ncclInit() {
            "instablity or hang!");
 #endif
   }
+#endif
   std::call_once(initOnceFlag, initOnceFunc);
   return initResult;
 }
@@ -1277,12 +1284,20 @@ fail:
 #endif
 static void showVersion() {
   // Retrieve Hostname info
-  char hostBuf[HOST_NAME_MAX + 1] = {};
+  char hostBuf[256] = {};
   std::string hostInfo = (gethostname(hostBuf, sizeof(hostBuf) - 1) == 0) ? hostBuf : "Unknown";
 
   // Retrieve librccl path
+#if defined(NCCL_OS_WINDOWS)
+  HMODULE module = nullptr;
+  char modulePath[MAX_PATH] = {};
+  bool foundModule = GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+      GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, reinterpret_cast<LPCSTR>(ncclCommInitRank), &module);
+  std::string libPathInfo = foundModule && GetModuleFileNameA(module, modulePath, MAX_PATH) ? modulePath : "Unknown";
+#else
   Dl_info pathInfo;
   std::string libPathInfo = dladdr((void*)ncclCommInitRank, &pathInfo) ? pathInfo.dli_fname : "Unknown";
+#endif
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   // Query the active HIP/ROCm runtime to report alongside the compile-time
@@ -1390,6 +1405,7 @@ static void rcclFillSharedParentInfo(struct ncclPeerInfo* info, struct ncclComm*
 // for a comm only when every rank can use it. A net context shared with the parent keeps the parent's
 // decision; the net proxy applies this comm's decision to each of its receives.
 static void rcclSetIbGdrFlushFlag(struct ncclComm* comm, struct ncclComm* parent) {
+#if defined(NCCL_OS_LINUX)
   int nCapable = 0;
   for (int i = 0; i < comm->nRanks; i++) nCapable += comm->peerInfo[i].ibGdrFlushFlag;
   comm->ibGdrFlushFlag = nCapable == comm->nRanks;
@@ -1401,6 +1417,9 @@ static void rcclSetIbGdrFlushFlag(struct ncclComm* comm, struct ncclComm* parent
          comm->nRanks);
   }
   INFO(NCCL_INIT | NCCL_NET, "RCCL_IB_GDR_FLUSH_FLAG %s for this comm", comm->ibGdrFlushFlag ? "enabled" : "disabled");
+#else
+  comm->ibGdrFlushFlag = 0;
+#endif
 }
 
 static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, uint64_t commHash) {
@@ -1428,8 +1447,12 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   CUDACHECK(cudaGetDeviceProperties(&prop, comm->cudaDev));
   info->totalGlobalMem = ROUNDUP(prop.totalGlobalMem, (1ULL << 32));
   // The proxy writes the GDR flush flags through the CPU mapping of fine-grained VRAM (gfx942/gfx950).
+#if defined(NCCL_OS_LINUX)
   info->ibGdrFlushFlag = comm->ncclNet == &ncclNetIb && ncclIbGdrFlushFlagLocalSupport() &&
                          (IsArchMatch(prop.gcnArchName, "gfx942") || IsArchMatch(prop.gcnArchName, "gfx950"));
+#else
+  info->ibGdrFlushFlag = 0;
+#endif
   NCCLCHECK(ncclCudaDriverVersion(&info->cudaDriverVersion));
   const char* mlopartStr = strstr(prop.name, "MLOPart");
   info->mloPart = mlopartStr ? atoi(mlopartStr + strlen("MLOPart")) : NCCL_TOPO_UNDEF;
@@ -1560,7 +1583,7 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
       }
     }
   }
-#else
+#elif defined(NCCL_OS_LINUX)
   char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
   NCCLCHECK(int64ToBusId(info->busId, busId));
   uint32_t deviceIndex = -1;
@@ -5600,7 +5623,7 @@ const char* ncclGetErrorString_impl(ncclResult_t code) {
  * comm is currently unused and can be set to NULL
  */
 NCCL_API(const char*, ncclGetLastError, const ncclComm_t comm);
-const char* ncclGetLastError_impl(ncclComm_t comm) {
+const char* ncclGetLastError_impl(const ncclComm_t comm) {
   Recorder::instance().record("GetLastEror");
   return ncclLastError;
 }

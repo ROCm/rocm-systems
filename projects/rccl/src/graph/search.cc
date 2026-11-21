@@ -14,7 +14,6 @@
 #include "xml.h"
 #include <limits.h>
 #include <math.h>
-#include <sys/time.h>
 #include "rome_models.h"
 
 NCCL_PARAM(CrossNic, "CROSS_NIC", 2);

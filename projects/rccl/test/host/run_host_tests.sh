@@ -23,7 +23,7 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
-#   guards          device-table unittest, the kernel-count and accl-reporter
+#   guards          Windows HIP-staging and device-table unittests, kernel-count and accl-reporter
 #                   pytest suites, the tools/scripts/test_runner unittests
 #                   (which include the rccl-device-compile driver cases),
 #                   src/include/test_poison_hip_atomics.py,
@@ -319,8 +319,14 @@ do_test_runner_guards() {
 # leaves the later guards running and reported,
 # instead of aborting the phase at the first one. Same idiom as do_host_tests
 # above.
+do_windows_staging_guards() {
+  echo "==> HIP source-staging guards (CPU-only Python unittest)"
+  python3 "$RCCL_ROOT/cmake/scripts/test_stage_windows.py" -v
+}
+
 do_guards() {
   local rc=0
+  do_windows_staging_guards || rc=1
   do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1

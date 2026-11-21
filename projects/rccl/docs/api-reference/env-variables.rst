@@ -17,6 +17,12 @@ Configuration and setup
 The configuration and setup environment variables for RCCL are collected
 in the following table.
 
+``RCCL_ENABLE_SIGNALHANDLER`` defaults to ``0`` (disabled). On Linux, setting
+it to ``1`` installs RCCL's optional signal and backtrace handler. The
+experimental native Windows build does not install this Linux-specific
+handler and emits a warning when it is requested; use Windows debugging
+tools to diagnose crashes on that platform.
+
 .. list-table::
     :header-rows: 1
     :widths: 40,60

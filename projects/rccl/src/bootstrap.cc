@@ -10,8 +10,10 @@
 #include "utils.h"
 #include "bootstrap.h"
 #include "net.h"
+#if defined(NCCL_OS_LINUX)
 #include <unistd.h>
 #include <sched.h>
+#endif
 #include <sys/types.h>
 #include "proxy.h"
 #include "signals.h" // [RCCL]
@@ -352,7 +354,7 @@ static ncclResult_t netMultiOp(ncclNet_t* net, struct ncclNetOp* ops, int numOps
       } else if (ops[i].req != prevReq) madeProgress = true;
       if (!ops[i].done && ops[i].req == NULL) allIssued = false;
     }
-    if (allIssued && !madeProgress) sched_yield();
+    if (allIssued && !madeProgress) std::this_thread::yield();
   }
   return ncclSuccess;
 }
@@ -444,7 +446,7 @@ static ncclResult_t bootstrapAccept(struct ncclSocket* sock, struct ncclSocket* 
     }
     NCCLCHECK(ncclSocketAccept(sock, listenSock, /*retry=*/false));
     if (sock->state == ncclSocketStateReady) return ncclSuccess;
-    usleep(1000);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
 }
 
@@ -861,7 +863,7 @@ static ncclResult_t netRingConnectFinish(void* ctx, ncclNet_t* net, struct boots
     NCCLCHECK(checkAbort(abortFlag, &abortCounter));
     NCCLCHECK(netRingConnectProgress(ctx, net, listen, peerHandle, sendComm, sendDevHandle, recvComm, recvDevHandle,
                                      &done));
-    if (!done) sched_yield();
+    if (!done) std::this_thread::yield();
   } while (!done);
   return ncclSuccess;
 }
@@ -898,7 +900,7 @@ static ncclResult_t socketRingConnectFinish(struct ncclSocket* sendSocket, struc
     NCCLCHECK(checkAbort(abortFlag, &abortCounter));
     if (!sendReady) NCCLCHECK(ncclSocketReady(sendSocket, &sendReady));
     if (!recvReady) NCCLCHECK(ncclSocketReady(recvSocket, &recvReady));
-    if (!sendReady || !recvReady) sched_yield();
+    if (!sendReady || !recvReady) std::this_thread::yield();
   } while (!sendReady || !recvReady);
   return ncclSuccess;
 }
@@ -1034,7 +1036,7 @@ static ncclResult_t bootstrapBidirRingSetupFinish(struct ncclComm* comm, struct 
                                    &STATE_RING(state, net.revRecvDevHandle)));
       if (STATE_RING(state, net.revRecvComm) != prevPtr) madeProgress = true;
     }
-    if (!madeProgress) sched_yield();
+    if (!madeProgress) std::this_thread::yield();
   }
   INFO(NCCL_BOOTSTRAP, "Bootstrap bidirectional ring (net) connected: nranks %d", state->nranks);
   return ncclSuccess;
