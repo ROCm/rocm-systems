@@ -21,8 +21,10 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/common/container/stable_vector.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -31,18 +33,55 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include <memory>
+#include <mutex>
+#include <vector>
+
 namespace rocprofiler
 {
 namespace context
 {
 namespace
 {
-auto*&
-get_correlation_id_map()
+struct correlation_id_storage
 {
-    using data_type  = common::container::stable_vector<std::unique_ptr<correlation_id>>;
-    static auto*& _v = common::static_object<common::Synchronized<data_type>>::construct();
+    static constexpr size_t block_size = (1UL << 6);  // 64
+    std::mutex              mutex      = {};
+    bool                    closed     = false;
+    common::container::stable_vector<std::unique_ptr<correlation_id>, block_size> ids = {};
+};
+
+struct correlation_id_registry
+{
+    bool                                                 closed  = false;
+    std::vector<std::unique_ptr<correlation_id_storage>> threads = {};
+};
+
+auto*&
+get_correlation_id_registry()
+{
+    static auto*& _v =
+        common::static_object<common::Synchronized<correlation_id_registry>>::construct();
     return _v;
+}
+
+correlation_id_storage*
+get_correlation_id_storage()
+{
+    // The registry, not TLS, owns IDs: asynchronous completions can outlive their creator.
+    static thread_local correlation_id_storage* storage = nullptr;
+    if(storage) return storage;
+
+    auto* registry = get_correlation_id_registry();
+    if(!registry) return nullptr;
+    auto next = std::make_unique<correlation_id_storage>();
+    storage   = registry->wlock([&next](auto& data) -> correlation_id_storage* {
+        if(data.closed || registration::get_fini_status() != 0) return nullptr;
+        auto* result = next.get();
+        data.threads.emplace_back(std::move(next));
+        return result;
+    });
+    return storage;
 }
 
 auto&
@@ -128,18 +167,6 @@ correlation_id::sub_ref_count()
     return _ret;
 }
 
-uint32_t
-correlation_id::add_kern_count()
-{
-    return m_kern_count.fetch_add(1);
-}
-
-uint32_t
-correlation_id::sub_kern_count()
-{
-    return m_kern_count.fetch_sub(1);
-}
-
 correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
@@ -155,16 +182,17 @@ correlation_tracing_service::construct(uint32_t _init_ref_count)
 
     ROCP_FATAL_IF(_init_ref_count == 0) << "must have reference count > 0";
 
-    auto  _internal_id = get_unique_internal_id();
-    auto* corr_id_map  = get_correlation_id_map();
-    if(!corr_id_map) return nullptr;
-    auto& ret = corr_id_map->wlock([](auto& data) -> auto& { return data.emplace_back(); });
+    auto* storage = get_correlation_id_storage();
+    if(!storage) return nullptr;
+    auto lock = std::unique_lock<std::mutex>{storage->mutex};
+    if(storage->closed || registration::get_fini_status() != 0) return nullptr;
 
-    ret = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
-
+    auto id = std::make_unique<correlation_id>(
+        _init_ref_count, common::get_tid(), get_unique_internal_id());
     if(auto* prev_api_corr_id = get_latest_correlation_id())
-        ret->ancestor = prev_api_corr_id->internal;
+        id->ancestor = prev_api_corr_id->internal;
 
+    auto& ret = storage->ids.emplace_back(std::move(id));
     get_latest_correlation_id_impl().emplace_back(ret.get());
 
     return ret.get();
@@ -235,11 +263,30 @@ dump_correlation_stack(const char* s)
 void
 correlation_id_finalize()
 {
-    if(!get_correlation_id_map()) return;
+    auto* registry = get_correlation_id_registry();
+    if(!registry) return;
 
-    get_correlation_id_map()->rlock([](const auto& data) {
-        uint64_t ndangling = 0;
-        for(const auto& itr : data)
+    auto storages = registry->wlock([](auto& data) {
+        auto result = std::vector<correlation_id_storage*>{};
+        result.reserve(data.threads.size());
+        for(const auto& storage : data.threads)
+            result.emplace_back(storage.get());
+        data.closed = true;
+        return result;
+    });
+
+    // Seal each single-writer container and wait for any active insertion to finish.
+    // Retirement can invoke buffer consumers, so release all allocation locks first.
+    for(auto* storage : storages)
+    {
+        auto lock       = std::unique_lock<std::mutex>{storage->mutex};
+        storage->closed = true;
+    }
+
+    uint64_t ndangling = 0;
+    for(const auto* storage : storages)
+    {
+        for(const auto& itr : storage->ids)
         {
             if(itr && itr->get_ref_count() > 0)
             {
@@ -258,28 +305,27 @@ correlation_id_finalize()
                 {}
             }
         }
+    }
 
-        if(ndangling > 0)
+    if(ndangling > 0)
+    {
+        auto retirement_ctxs = get_active_contexts([](const context* ctx) {
+            return (ctx->buffered_tracer &&
+                    (ctx->buffered_tracer->domains(
+                        ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
+        });
+
+        if(!retirement_ctxs.empty())
         {
-            auto retirement_ctxs = get_active_contexts([](const context* ctx) {
-                return (ctx->buffered_tracer &&
-                        (ctx->buffered_tracer->domains(
-                            ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
-            });
-
-            if(!retirement_ctxs.empty())
-            {
-                ROCP_CI_LOG_IF(INFO, ndangling > 0)
-                    << fmt::format("retired dangling correlation IDs: {}", ndangling);
-            }
-            else
-            {
-                ROCP_INFO << fmt::format(
-                    "retired dangling correlation IDs: {} (no retirement consumer active)",
-                    ndangling);
-            }
+            ROCP_CI_LOG_IF(INFO, ndangling > 0)
+                << fmt::format("retired dangling correlation IDs: {}", ndangling);
         }
-    });
+        else
+        {
+            ROCP_INFO << fmt::format(
+                "retired dangling correlation IDs: {} (no retirement consumer active)", ndangling);
+        }
+    }
 }
 }  // namespace context
 }  // namespace rocprofiler

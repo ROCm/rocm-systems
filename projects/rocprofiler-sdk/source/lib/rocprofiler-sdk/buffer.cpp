@@ -48,6 +48,18 @@ namespace
 {
 using reserve_size_t = common::container::reserve_size;
 
+struct flush_lease
+{
+    std::atomic<std::atomic_flag*> flag{nullptr};
+
+    void release()
+    {
+        if(auto* value = flag.exchange(nullptr)) value->clear(std::memory_order_release);
+    }
+
+    ~flush_lease() { release(); }
+};
+
 auto&
 get_buffers_mutex()
 {
@@ -167,31 +179,38 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
     if(wait) task_group->wait();
 
-    auto idx = buff->buffer_idx++;
-    idx %= buff->buffers.size();
+    auto flush_lock = std::unique_lock<std::mutex>{buff->flush_mutex, std::defer_lock};
+    if(wait)
+        flush_lock.lock();
+    else if(!flush_lock.try_lock())
+        return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    // Keep ownership across task copies, including a submission that throws after
+    // enqueueing. An unsubmitted task also reopens its slot when its lease dies.
+    auto lease      = std::make_shared<flush_lease>();
+    auto generation = buff->buffer_idx.load(std::memory_order_acquire);
+    auto idx        = generation % buff->buffers.size();
+    while(buff->syncer.at(idx).test_and_set(std::memory_order_acquire))
+    {
+        if(!wait) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+        flush_lock.unlock();
+        std::this_thread::yield();
+        flush_lock.lock();
+        generation = buff->buffer_idx.load(std::memory_order_acquire);
+        idx        = generation % buff->buffers.size();
+    }
+    lease->flag.store(&buff->syncer.at(idx));
+    // Discard buffers have only slot zero allocated.
+    if(buff->policy == ROCPROFILER_BUFFER_POLICY_LOSSLESS)
+        buff->buffer_idx.store(generation + 1, std::memory_order_release);
 
     ROCP_INFO << fmt::format("executing buffer flush [id={}, index={}]...", buffer_id.handle, idx);
 
-    // buffer is currently being flushed or destroyed
-    if(buff->syncer.at(idx).test_and_set())
-    {
-        ROCP_INFO << fmt::format(
-            "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
-        if(!wait) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
-        while(buff->syncer.at(idx).test_and_set())
-        {
-            ROCP_TRACE << fmt::format(
-                "waiting for buffer flush to complete [id={}, index={}]...", buffer_id.handle, idx);
-            std::this_thread::yield();
-            std::this_thread::sleep_for(buff->sync_wait_usec);
-        }
-    }
-
-    auto _task = [buffer_id, idx, offset]() {
+    auto _task = [buffer_id, idx, offset, lease]() {
         ROCP_ERROR_IF(registration::get_fini_status() > 0)
             << "executing buffer (" << buffer_id.handle << ") flush task finalization!";
 
         auto& buff_v          = CHECK_NOTNULL(get_buffers())->at(buffer_id.handle - offset);
+        auto  reopen          = common::scope_destructor{[&lease]() { lease->release(); }};
         auto& buff_internal_v = buff_v->get_internal_buffer(idx);
 
         if(!buff_internal_v.is_empty())
@@ -263,10 +282,10 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
         ROCP_INFO << fmt::format(
             "completed buffer flush [id={}, index={}]...", buffer_id.handle, idx);
-        buff_v->syncer.at(idx).clear();
     };
 
     task_group->exec(std::move(_task));
+    flush_lock.unlock();
     if(wait)
     {
         task_group->join();
@@ -298,6 +317,14 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
     }
 
+    // do not allow the watermark to exceed the buffer size
+    if(watermark > size)
+    {
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "watermark ({}) cannot exceed buffer size ({})", watermark, size);
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
     auto opt_buff_id = rocprofiler::buffer::allocate_buffer();
     if(!opt_buff_id) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
     buffer_id->handle = opt_buff_id->handle;
@@ -307,8 +334,15 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
 
     // allocate the buffers. if it is lossless, we allocate a second buffer to store data while
     // other buffer is being flushed
-    buff->buffers.front().allocate(size);
-    if(action == ROCPROFILER_BUFFER_POLICY_LOSSLESS) buff->buffers.back().allocate(size);
+    if(action == ROCPROFILER_BUFFER_POLICY_LOSSLESS)
+    {
+        for(auto& itr : buff->buffers)
+            itr.allocate(size);
+    }
+    else  // if discard, do not allocate all the buffers
+    {
+        buff->buffers.front().allocate(size);
+    }
 
     buff->watermark     = watermark;
     buff->policy        = action;
@@ -345,18 +379,24 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
 
     if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
-    // buffer is currently being flushed or destroyed
+    auto flush_lock = std::unique_lock<std::mutex>{buff->flush_mutex, std::try_to_lock};
+    if(!flush_lock.owns_lock()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    size_t closed = 0;
     for(auto& itr : buff->syncer)
     {
-        if(itr.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+        if(itr.test_and_set(std::memory_order_acquire))
+        {
+            for(size_t i = 0; i < closed; ++i)
+                buff->syncer.at(i).clear(std::memory_order_release);
+            return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+        }
+        ++closed;
     }
 
     for(auto& itr : buff->buffers)
         itr.reset();
 
-    for(auto& itr : buff->syncer)
-        itr.clear();
-
+    flush_lock.unlock();
     buff.reset();
 
     return ROCPROFILER_STATUS_SUCCESS;
