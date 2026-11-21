@@ -1837,6 +1837,14 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   std::vector<core::unique_signal_ptr> body_signal_ptrs;
   std::vector<core::Signal*> body_signals_raw;
 
+  // On a failed submit, already-queued commands may still use the internal signals: leak them.
+  bool published = false;
+  MAKE_NAMED_SCOPE_GUARD(leakOnPartialSubmit, [&]() {
+    if (!published) return;
+    (void)prologue_signal.release();
+    for (auto& bp : body_signal_ptrs) (void)bp.release();
+  });
+
   hsa_status_t stat;
 
   if (fused) {
@@ -1866,6 +1874,13 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       }
     }
 
+    // Bodies wait on prologue_signal: submit the prologue first so no queue waits on a later one.
+    if (need_prologue) {
+      stat = coordinator->SubmitPrologue(dep_signals, out_signal, *prologue_signal, fused);
+      if (stat != HSA_STATUS_SUCCESS) return stat;
+      published = true;
+    }
+
     // Submit non-coordinator engine bodies first (they start working while
     // the coordinator's epilogue poll waits for them).
     for (const auto& grp : engine_groups) {
@@ -1880,9 +1895,10 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           op, dst_list, src_list, size_list, idxs,
           ind_src, ind_dst, body_deps, out_signal, nullptr, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      published = true;
     }
 
-    // Coordinator: prologue + coord bodies + epilogue in one doorbell.
+    // Coordinator: coord bodies + epilogue in one doorbell.
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
              "SDMA FanOut(%s) Coordinator: engine %02u, coord_entries=%zu, "
              "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p",
@@ -1892,7 +1908,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
              prologue_signal ? prologue_signal.get() : nullptr);
     stat = coordinator->SubmitFusedCoordinator(
         dep_signals, out_signal,
-        prologue_signal.get(),
+        nullptr,
         op, coord_dsts, coord_srcs, coord_sizes_a, coord_sizes_b,
         ind_src, ind_dst, body_deps);
     if (stat != HSA_STATUS_SUCCESS) return stat;
@@ -1924,6 +1940,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
       stat = coordinator->SubmitPrologue(dep_signals, out_signal,
                                          *prologue_signal, fused);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      published = true;
     }
 
     // Bodies: one SubmitBodies call per engine group
@@ -1941,6 +1958,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           op, dst_list, src_list, size_list, idxs,
           ind_src, ind_dst, body_deps, out_signal, body_sig, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
+      published = true;
       ++grp_idx;
     }
 
@@ -1953,6 +1971,8 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
     stat = coordinator->SubmitEpilogue(out_signal, body_signals_raw);
     if (stat != HSA_STATUS_SUCCESS) return stat;
   }
+
+  leakOnPartialSubmit.Dismiss();
 
   // --- Async cleanup: destroy prologue_signal and body_signals when done ---
   {
