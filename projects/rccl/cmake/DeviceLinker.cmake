@@ -340,13 +340,22 @@ target_include_directories(rccl_device_defs SYSTEM INTERFACE
 
 # The same, as flags for the compiles below that bypass the RCCLDEV language.
 get_target_property(_iface_defs rccl_device_defs INTERFACE_COMPILE_DEFINITIONS)
+if(NOT _iface_defs)
+  set(_iface_defs "")
+endif()
 list(TRANSFORM _iface_defs PREPEND "-D")
 set(_link_def_flags -DRCCL_DEVICE_LINKER ${_iface_defs})
 list(REMOVE_DUPLICATES _link_def_flags)
 
 get_target_property(_dev_includes rccl_device_defs INTERFACE_INCLUDE_DIRECTORIES)
+if(NOT _dev_includes)
+  set(_dev_includes "")
+endif()
 list(TRANSFORM _dev_includes PREPEND "-I" OUTPUT_VARIABLE _link_inc_flags)
 get_target_property(_dev_sys_includes rccl_device_defs INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
+if(NOT _dev_sys_includes)
+  set(_dev_sys_includes "")
+endif()
 foreach(_inc ${_dev_sys_includes})
   if(NOT _inc IN_LIST CMAKE_CXX_IMPLICIT_INCLUDE_DIRECTORIES)
     list(APPEND _link_inc_flags "-isystem${_inc}")
