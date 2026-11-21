@@ -94,9 +94,14 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
   }
 
   JobWatchTableEntry jentry{group_id, fields_in_watch};
+  // The generation of the job this start adds: 0 when another start added it first.
+  uint64_t generation = 0;
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
-    job_watch_table_.insert({job_id, jentry});
+    jentry.generation = ++job_generation_;
+    if (job_watch_table_.insert({job_id, jentry}).second) {
+      generation = jentry.generation;
+    }
   } while (0);
 
   rdc_field_group_info_t finfo;
@@ -124,12 +129,15 @@ rdc_status_t RdcWatchTableImpl::rdc_job_start_stats(rdc_gpu_group_t group_id, co
     proc_events.emplace_back(gpu, RDC_EVNT_NOTIF_PROCESS_END);
   }
   result = notifications_->add_event_listeners(proc_events);
-  // Recorded whatever the result: the listeners stay added, and the job's stop removes them.
+  // Recorded whatever the result, by the start that added the job in the table: the listeners
+  // stay added, and the job's stop removes them.
   std::vector<RdcFieldKey> to_remove;
   do {  //< lock guard for thread safe
     std::lock_guard<std::mutex> guard(watch_mutex_);
-    if (job_watch_table_.find(job_id) == job_watch_table_.end()) {
-      // A stop erased the job meanwhile and does not know these listeners: remove them now.
+    auto job = job_watch_table_.find(job_id);
+    if (job == job_watch_table_.end() || job->second.generation != generation) {
+      // A stop erased the job meanwhile, and a new start of the same ID may have added it again,
+      // or another start added it first: none of them knows these listeners, so they go now.
       to_remove = proc_events;
     } else {
       std::vector<RdcFieldKey>& record = job_listeners_[job_id];

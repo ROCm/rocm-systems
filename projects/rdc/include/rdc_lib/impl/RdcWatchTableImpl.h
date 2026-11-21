@@ -53,6 +53,7 @@ struct FieldSettings {
 struct JobWatchTableEntry {
   uint32_t group_id;
   std::vector<RdcFieldKey> fields;  //< store fields for faster query
+  uint64_t generation = 0;          //< which start added the job (see job_generation_)
 };
 
 struct HealthWatchTableEntry {
@@ -171,6 +172,12 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< (RdcNotification::add_event_listeners()): its unwatch, or the job's stop, removes them.
   std::map<RdcFieldGroupKey, std::vector<RdcFieldKey>> watch_listeners_;
   std::map<std::string, std::vector<RdcFieldKey>> job_listeners_;
+
+  //!< Numbers the job starts that reach the insert into job_watch_table_; the start whose
+  //!< insert succeeds stores its number in the job's entry. A stop and a new start of the
+  //!< same job ID can come between a start's add of its job and its record of its listeners:
+  //!< only the start whose number the job in the table has records them.
+  uint64_t job_generation_ = 0;
 
   //!< The settings for each field can be deduced from watch_table. But every
   //!< rdc_field_update_all() call needs to deduce them. To improve the

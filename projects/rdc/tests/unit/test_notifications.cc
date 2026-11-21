@@ -952,10 +952,11 @@ class EmptyCache : public amd::rdc::RdcCacheManager {
   }
 };
 
-TEST(JobListeners, AStartThatRecordsWhileAStopRunsLeavesNoListeners) {
+TEST(JobListeners, TwoStartsAndAStopOfOneJobLeaveNoListeners) {
   // Two starts of job j, on GPU 0 and on GPU 1 (nothing keeps two starts of one job apart), and
-  // a stop of j, ordered with gates: the start on GPU 1 records its listeners after the stop
-  // released those of the start on GPU 0, before the stop erased the job.
+  // a stop of j, ordered with gates: the start on GPU 1, which found no job j but did not add
+  // it, gets to its listeners after the stop released those of the start on GPU 0, before the
+  // stop erased the job.
   auto groups = std::make_shared<HoldingGroups>();
   auto notifications = std::make_shared<HoldingNotification>();
   // Job starts and stops use no metric fetcher.
@@ -997,13 +998,14 @@ TEST(JobListeners, AStartThatRecordsWhileAStopRunsLeavesNoListeners) {
   ASSERT_TRUE(groups->gate.arrived());
   // The start on GPU 0 runs, and records its listeners.
   ASSERT_EQ(watch_table.rdc_job_start_stats(gpu0, "j", 1000000, gauges), RDC_ST_OK);
-  // The start on GPU 1 adds its listeners, and waits before it records them.
+  // The start on GPU 1 gets to its listeners, and waits before it adds them.
   groups->gate.open();
   ASSERT_TRUE(notifications->add_gate.arrived());
-  // The stop releases GPU 0's listeners, and waits before its unwatch.
+  // The stop takes the record of GPU 0's listeners, and waits before it removes them.
   stopper = std::thread([&] { stop = watch_table.rdc_job_stop_stats("j", gauges); });
   ASSERT_TRUE(notifications->remove_gate.arrived());
-  // The start on GPU 1 records its listeners: job j is still in the table.
+  // The start on GPU 1 adds its listeners, and removes them again: the start on GPU 0 added the
+  // job j that is in the table.
   notifications->add_gate.open();
   starter.join();
   notifications->remove_gate.open();
@@ -1013,7 +1015,59 @@ TEST(JobListeners, AStartThatRecordsWhileAStopRunsLeavesNoListeners) {
   EXPECT_EQ(stop, RDC_ST_OK);
   for (rdc_field_t field : {RDC_EVNT_NOTIF_PROCESS_START, RDC_EVNT_NOTIF_PROCESS_END}) {
     EXPECT_EQ(notifications->listeners(0, field), 0u) << field;
-    EXPECT_EQ(notifications->listeners(1, field), 0u) << field << ": the stop left them";
+    EXPECT_EQ(notifications->listeners(1, field), 0u) << field << ": the start on GPU 1 kept them";
+  }
+}
+
+TEST(JobListeners, AStartWhoseJobWasStoppedAndStartedAgainKeepsNoListeners) {
+  // A start of job j on GPU 0 waits before it adds its listeners. Meanwhile j is stopped, and
+  // started again on GPU 1. The start on GPU 0 then finds a job j that it did not add: it removes
+  // its own listeners and leaves those of the start on GPU 1.
+  auto groups = std::make_shared<HoldingGroups>();
+  auto notifications = std::make_shared<HoldingNotification>();
+  // Job starts and stops use no metric fetcher.
+  amd::rdc::RdcWatchTableImpl watch_table{groups, std::make_shared<EmptyCache>(), nullptr,
+                                          std::make_shared<TelemetryOnly>(), notifications};
+  rdc_gpu_group_t gpu0 = 0;
+  rdc_gpu_group_t gpu1 = 0;
+  ASSERT_EQ(groups->rdc_group_gpu_create("gpu0", &gpu0), RDC_ST_OK);
+  ASSERT_EQ(groups->rdc_group_gpu_add(gpu0, 0), RDC_ST_OK);
+  ASSERT_EQ(groups->rdc_group_gpu_create("gpu1", &gpu1), RDC_ST_OK);
+  ASSERT_EQ(groups->rdc_group_gpu_add(gpu1, 1), RDC_ST_OK);
+  groups->held_group = gpu1 + 1;  // no group of the test
+  notifications->held_add_gpu = 0;
+  notifications->held_remove_gpu = 2;  // no GPU of the test
+  const rdc_gpu_gauges_t gauges;
+  rdc_status_t first_start = RDC_ST_UNKNOWN_ERROR;
+  std::thread starter;
+  // On any failure below, let the thread go and wait for it.
+  struct Finally {
+    std::function<void()> run;
+    ~Finally() { run(); }
+  } finally{[&] {
+    notifications->add_gate.open();
+    if (starter.joinable()) {
+      starter.join();
+    }
+  }};
+
+  starter = std::thread(
+      [&] { first_start = watch_table.rdc_job_start_stats(gpu0, "j", 1000000, gauges); });
+  ASSERT_TRUE(notifications->add_gate.arrived());
+  ASSERT_EQ(watch_table.rdc_job_stop_stats("j", gauges), RDC_ST_OK);
+  ASSERT_EQ(watch_table.rdc_job_start_stats(gpu1, "j", 1000000, gauges), RDC_ST_OK);
+  notifications->add_gate.open();
+  starter.join();
+
+  EXPECT_EQ(first_start, RDC_ST_OK);
+  for (rdc_field_t field : {RDC_EVNT_NOTIF_PROCESS_START, RDC_EVNT_NOTIF_PROCESS_END}) {
+    EXPECT_EQ(notifications->listeners(0, field), 0u) << field << ": the first start kept them";
+    EXPECT_EQ(notifications->listeners(1, field), 1u) << field << ": the second start lost them";
+  }
+  // The stop of the second start removes its listeners.
+  ASSERT_EQ(watch_table.rdc_job_stop_stats("j", gauges), RDC_ST_OK);
+  for (rdc_field_t field : {RDC_EVNT_NOTIF_PROCESS_START, RDC_EVNT_NOTIF_PROCESS_END}) {
+    EXPECT_EQ(notifications->listeners(1, field), 0u) << field;
   }
 }
 
