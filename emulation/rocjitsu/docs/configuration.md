@@ -353,6 +353,11 @@ engine; SE_ID must fit in three bits. DP_RATE reads 1 on gfx11 and gfx12 and
 is unsupported on gfx11.5, which has no measured value. Reads touching an
 unrepresentable field warn and write zero.
 
+RDNA3/RDNA4 `HW_ID2` reports ME_ID 1, since every wave comes from a compute
+queue, and STATE_ID 0. RocJITsu has no hardware queue slots, workgroup slots
+or per-wave hardware VMID, so QUEUE_ID, PIPE_ID, WG_ID and VM_ID are
+unsupported and the default 32-bit `HW_ID2` read warns and writes zero.
+
 Omitted geometry fields inherit defaults selected by `gfx_target_version`.
 For a smaller topology, set both `num_cu_per_sh` and
 `num_shader_arrays_per_engine` to match its CU groups; for example, two arrays
