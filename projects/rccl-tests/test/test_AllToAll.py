@@ -50,12 +50,16 @@
 #   RCCL_TESTS_A2A_CTAS      device CTA count (-V) (default: 16)
 #   RCCL_TESTS_A2A_TIMEOUT_S per-run hang timeout in seconds (default: 900)
 #   RCCL_TESTS_A2A_CONN_RETRIES  connectivity-gate retries (default: 5)
+#   RCCL_TESTS_A2A_EXPECT_LSA_LANE  set to 1 where the LSA lane must arm (every
+#                            rank in one LSA team, e.g. one MI450 node or an
+#                            MNNVL clique); otherwise lsa-on accepts either lane
 #
 # Verified on 8x MI355X (ROCm 7.13, NCCL_GIN_TYPE=7, force1ch): 256 MiB/peer and
 # 2 GiB/peer int32 and the 2 GiB-total guard all pass with #wrong=0, no hang
 # (busbw ~424-428 GB/s).
 
 import os
+import re
 import shlex
 
 import pytest
@@ -92,6 +96,8 @@ TIMEOUT_S = env_int("RCCL_TESTS_A2A_TIMEOUT_S", 900)
 CONN_RETRIES = env_int("RCCL_TESTS_A2A_CONN_RETRIES", 5)
 MPI_OPTS = shlex.split(os.environ.get("RCCL_TESTS_MPI_OPTS", ""))
 XENV = shlex.split(os.environ.get("RCCL_TESTS_A2A_XENV", ""))
+EXPECT_LSA_LANE = os.environ.get("RCCL_TESTS_A2A_EXPECT_LSA_LANE", "") not in ("", "0")
+A2A_LANE_RE = re.compile(r"^#\[a2a-lane\]\s+(\S+)", re.M)
 
 pytestmark = pytest.mark.skipif(
     not _enabled,
@@ -100,8 +106,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _launch_a2a(request, total_bytes, dtype):
-    """Launch alltoall_perf -D 3 once at a fixed total (per-rank) size."""
+def _launch_a2a(request, total_bytes, dtype, extra_env=(), nprocs=None, perf_extra=None):
+    """Launch alltoall_perf -D 3 once at a fixed total (per-rank) size.
+
+    `nprocs` overrides the MPI process count and `perf_extra` is appended after
+    -D (a later -g/-t wins), so NP ranks can run as NP/2 processes of two.
+    """
     size = str(int(total_bytes))
     gin_env = gin_env_xflags(
         [
@@ -110,13 +120,14 @@ def _launch_a2a(request, total_bytes, dtype):
             "NCCL_GIN_ANVIL_SDMA_THRESHOLD=0",
             "NCCL_GIN_ANVIL_SDMA_THRESHOLD_ALLTOALL=0",
         ]
+        + list(extra_env)
         + XENV
     )
 
     args = (
-        mpi_launch_prefix(request, LAUNCHER, NP, MPI_OPTS)
+        mpi_launch_prefix(request, LAUNCHER, nprocs or NP, MPI_OPTS)
         + gin_env
-        + gin_perf_argv(executable, size, dtype, CTAS)
+        + gin_perf_argv(executable, size, dtype, CTAS, extra=perf_extra)
     )
     cmd = " ".join(shlex.quote(a) for a in args)
     hang_msg = gin_hang_msg(
@@ -129,12 +140,12 @@ def _launch_a2a(request, total_bytes, dtype):
     return launch_mpi_shell(cmd, TIMEOUT_S, hang_msg)
 
 
-def _run_a2a(request, total_bytes, dtype):
+def _run_a2a(request, total_bytes, dtype, extra_env=(), nprocs=None, perf_extra=None):
     """Run one all-to-all with connectivity-gate retry on gfx950 VMM aborts."""
     if NP < 2:
         pytest.skip("need >= 2 ranks/GPUs for AllToAll")
     return run_with_conn_gate_retry(
-        lambda: _launch_a2a(request, total_bytes, dtype), CONN_RETRIES
+        lambda: _launch_a2a(request, total_bytes, dtype, extra_env, nprocs, perf_extra), CONN_RETRIES
     )
 
 
@@ -153,3 +164,60 @@ def test_AllToAllGinSdmaLargeSegmented(request, per_peer_mib, dtype):
 def test_AllToAllGinSdma2GiBTotalHangGuard(request):
     rc, _ = _run_a2a(request, 2 * GiB, "int32")
     assert rc == 0, "AllToAll 2 GiB-total data check failed (nonzero exit)"
+
+
+# The LSA lane arms only where one LSA team covers every rank (one node, or an
+# MI450 MNNVL clique; pass NCCL_MNNVL_ENABLE=1 through RCCL_TESTS_A2A_XENV
+# there). Elsewhere the opt-in leaves -D 3 on gin.put. 64 KiB per peer keeps the
+# total under the nRanks^2 MiB default threshold at any rank count.
+_LSA_LANE_ENV = ("RCCL_TESTS_A2A_LSA_LANE=1",)
+
+
+@pytest.mark.parametrize("lane", [False, True], ids=["lsa-off", "lsa-on"])
+@pytest.mark.parametrize("dtype", ["float", "int32"])
+def test_AllToAllLsaLane(request, lane, dtype):
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + (_LSA_LANE_ENV if lane else ())
+    rc, out = _run_a2a(request, 64 * 1024 * NP, dtype, env)
+    assert rc == 0, "AllToAll data check failed (nonzero exit), lane={}, dtype={}".format(lane, dtype)
+    lanes = set(A2A_LANE_RE.findall(out or ""))
+    if not lane:
+        expected = {"gin-put"}
+    elif EXPECT_LSA_LANE:
+        expected = {"lsa"}
+    else:
+        expected = None
+    if expected is None:
+        assert lanes and lanes <= {"lsa", "gin-put"}, "no #[a2a-lane] line in the output: {}".format(lanes)
+    else:
+        assert lanes == expected, "AllToAll took lane(s) {}, expected {} (lane={}, dtype={})".format(
+            sorted(lanes), sorted(expected), lane, dtype
+        )
+
+
+# Two ranks per process: -g 2 reads each GPU's devComm slot, and -t 2 without
+# -p 1 runs the worker thread on host thread 0's lane flags. Every rank must
+# still take the lane. Only the lane sizes run here: -D 3 gin.put with more than
+# one rank per process faults on the MI450 ROCm 10.3 images, lane or not.
+@pytest.mark.parametrize("layout", [["-g", "2"], ["-t", "2"]], ids=["g2", "t2"])
+def test_AllToAllLsaLaneTwoRanksPerProcess(request, layout):
+    if not EXPECT_LSA_LANE:
+        pytest.skip("needs RCCL_TESTS_A2A_EXPECT_LSA_LANE=1")
+    if NP % 2:
+        pytest.skip("needs an even number of ranks/GPUs")
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1",) + _LSA_LANE_ENV
+    rc, out = _run_a2a(request, 64 * 1024 * NP, "float", env, nprocs=NP // 2, perf_extra=layout)
+    assert rc == 0, "AllToAll data check failed (nonzero exit), layout={}".format(layout)
+    lanes = set(A2A_LANE_RE.findall(out or ""))
+    assert lanes == {"lsa"}, "AllToAll took lane(s) {}, expected ['lsa'] (layout={})".format(
+        sorted(lanes), layout
+    )
+
+
+# RCCL_TESTS_A2A_LSA_THRESHOLD overrides the default total-size threshold; 0
+# keeps every size on gin.put even with the lane opted in.
+def test_AllToAllLsaLaneThresholdZero(request):
+    env = ("RCCL_TESTS_A2A_LANE_LOG=1", "RCCL_TESTS_A2A_LSA_THRESHOLD=0") + _LSA_LANE_ENV
+    rc, out = _run_a2a(request, 64 * 1024 * NP, "float", env)
+    assert rc == 0, "AllToAll data check failed (nonzero exit)"
+    lanes = set(A2A_LANE_RE.findall(out or ""))
+    assert lanes == {"gin-put"}, "AllToAll took lane(s) {}, expected ['gin-put']".format(sorted(lanes))

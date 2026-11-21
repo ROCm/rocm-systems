@@ -251,6 +251,20 @@ Note that the reported bandwidth is per group, hence to get the total bandwidth 
 mpirun -np 8 -x RCCL_TESTS_A2A_HIER_GROUP_SIZE=4 ./build/alltoall_perf -b 1M -e 1G -f 2 -g 1 -R 2 -D 5 -V 16 -c 1
 ```
 
+### LSA lane for device-API alltoall
+
+`alltoall_perf -D 3` sends every peer with `gin.put`. When one LSA team covers every rank (a single node, or an MNNVL clique), it can instead send sizes up to a threshold with a load/store kernel that writes straight into each peer's receive window and signals with LL flags (`ncclLLA2ASession`). Sizes above the threshold stay on `gin.put`. It needs a CMake build with `-DENABLE_DEVICE_API=ON` against RCCL 2.29 or newer.
+
+- `RCCL_TESTS_A2A_LSA_LANE=1` opts in. Default: off.
+- `RCCL_TESTS_A2A_LSA_THRESHOLD=<bytes>` overrides the total-size threshold (ranks × bytes per peer). Default: nRanks² MiB, with no cap at 16 ranks. `0` keeps every size on `gin.put`.
+- `RCCL_TESTS_A2A_LANE_LOG=1` prints `#[a2a-lane] lsa` or `#[a2a-lane] gin-put` once for each lane a run takes.
+
+Every rank must opt in, be in a full LSA team, and set the same threshold; otherwise every rank stays on `gin.put`, because the two lanes do not wait on each other.
+
+```shell
+mpirun -np 4 -x NCCL_GIN_TYPE=7 -x RCCL_TESTS_A2A_LSA_LANE=1 ./build/alltoall_perf -b 64K -e 64M -f 2 -g 1 -R 2 -D 3 -c 1
+```
+
 ## Unit tests
 
 Unit tests for rccl-tests are implemented with pytest (python3 is also required). Several notes for the unit tests:

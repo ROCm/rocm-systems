@@ -51,6 +51,18 @@ add_test(NAME rccl-tests-AllToAllHierHostUnit
          COMMAND rccl-tests-AllToAllHierHostUnit)
 set_tests_properties(rccl-tests-AllToAllHierHostUnit PROPERTIES LABELS "unit")
 
+add_executable(rccl-tests-AllToAllLsaLaneHostUnit alltoall_lsa_lane_host_test.cpp)
+target_include_directories(rccl-tests-AllToAllLsaLaneHostUnit PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_compile_definitions(rccl-tests-AllToAllLsaLaneHostUnit PRIVATE ALLTOALL_LSA_LANE_HOST_ONLY)
+target_link_libraries(rccl-tests-AllToAllLsaLaneHostUnit PRIVATE
+  ${_RCCL_TESTS_GTEST_LIB} ${_RCCL_TESTS_GTEST_MAIN})
+set_target_properties(rccl-tests-AllToAllLsaLaneHostUnit PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+add_test(NAME rccl-tests-AllToAllLsaLaneHostUnit
+         COMMAND rccl-tests-AllToAllLsaLaneHostUnit)
+set_tests_properties(rccl-tests-AllToAllLsaLaneHostUnit PROPERTIES LABELS "unit")
+
 add_executable(rccl-tests-CollectorHostUnit collector_host_test.cpp)
 target_include_directories(rccl-tests-CollectorHostUnit PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../src)
