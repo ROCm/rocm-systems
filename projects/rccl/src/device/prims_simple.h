@@ -61,6 +61,9 @@ class Primitives<T, RedOp, Fan, Direct,
   uint64_t barrier_next_pat = 0;
   int repeat;
   bool skip_fence = false;
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+  bool stepStoreFree = false;  // stepStartBarrier() may order LDS only: no connFifo on any send or receive peer
+#endif
 
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -78,6 +81,35 @@ class Primitives<T, RedOp, Fan, Direct,
   inline __device__ void subBarrier() {
     if (nworkers == WARP_SIZE) __syncwarp();
     else barrier();
+  }
+
+  // Orders LDS only: the last step drained at its end barrier, and the post threads' tail or head only has to reach
+  // the peer. Slot loads issue after the wait thread's system-scope acquire. connFifo comms keep subBarrier().
+  inline __device__ void stepStartBarrier() {
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    if (stepStoreFree && nworkers != WARP_SIZE) {
+      ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
+      return;
+    }
+#endif
+    subBarrier();
+  }
+
+  // Each wave drains its own loads and stores, then an LDS-only barrier. Returns true where that replaced the cheap
+  // post-send fence, so postPeer() skips its second barrier.
+  inline __device__ bool stepEndBarrier() {
+#if RCCL_SIMPLE_FUSED_STEP_END
+    if (skip_fence) {
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");  // s_wait_loadcnt 0 and s_wait_storecnt 0
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);  // Keeps the fence above from merging into the barrier's "local" one.
+      if (nworkers != WARP_SIZE) {
+        ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
+      }
+      return true;
+    }
+#endif
+    barrier();
+    return false;
   }
 
   // Multi-RPN (hierarchical) PAT runs NCCL_PAT_MULTI_RPN_NWORKERS workers.
@@ -231,8 +263,10 @@ class Primitives<T, RedOp, Fan, Direct,
   }
 
   template <int Recv, int Send>
-  inline __device__ void postPeer(bool dataStored) {
-    if (skip_fence) {
+  inline __device__ void postPeer(bool dataStored, bool drained = false) {
+    if (drained) {
+      // stepEndBarrier() already ran the cheap post-send fence.
+    } else if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
       // To be revisited for correctness and performance on gfx1250
@@ -301,7 +335,7 @@ class Primitives<T, RedOp, Fan, Direct,
           ncclShmem.groups[group].acc = (Dst && userAcc != nullptr) ? userAcc + dstIx + offset : nullptr;
         }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(srcIx, dstIx, offset, sliceSize);
-        subBarrier();
+        stepStartBarrier();
         /* if user abort the kernel, we don't need to actually perform copy/reduce; just set size
          * to 0 to avoid unnecessary workload. */
         int workSize = ncclShmem.aborted ? 0 : sliceSize;
@@ -355,8 +389,8 @@ class Primitives<T, RedOp, Fan, Direct,
           // skip data flush.
           workSize = 0;
         }
-        barrier(); // This barrier has a counterpart in following loop
-        postPeer<Recv, Send>(0 < workSize);
+        bool drained = stepEndBarrier(); // This barrier has a counterpart in following loop
+        postPeer<Recv, Send>(0 < workSize, drained);
         offset += sliceSize;
         slice += 1;
         // Yes, for some template arguments this code will be unreachable.  That's fine.
@@ -375,9 +409,9 @@ class Primitives<T, RedOp, Fan, Direct,
         // since we've exited the loop above.
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, sliceSize);
       }
-      barrier(); // Has couterpart in preceding worker-only loop.
+      bool drained = stepEndBarrier(); // Has couterpart in preceding worker-only loop.
       int workSize = ncclShmem.aborted ? 0 : sliceSize;
-      postPeer<Recv, Send>(0 < workSize);
+      postPeer<Recv, Send>(0 < workSize, drained);
       offset += sliceSize;
       slice += 1;
     }
@@ -812,6 +846,11 @@ public:
     // coverity[overrun-call] => Coverity think prims.index can be greater than 1
     if (flags & (RoleWaitSend | RolePostSend))
       loadSendConn(channel->peers[peer], connIndexSend, collWork ? collWork->direct : 0, sendIpcReg, sendNetReg);
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    // Every thread scans the same peers, so the whole block takes the same barrier.
+    stepStoreFree = !anySendConnFifo(channel, sendPeers, nsend, connIndexSend) &&
+                    !anyRecvConnFifo(channel, recvPeers, nrecv, connIndexRecv);
+#endif
 
     // if (barrierAny(flags & NetDeviceUnpack)) {
     //   flags |= AnyNetDeviceUnpack;

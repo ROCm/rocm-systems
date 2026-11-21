@@ -265,7 +265,7 @@ test_categories:
       - "NCCL_P2P_DISABLE=1"
       - "NCCL_SHM_DISABLE=1"
   quick_env_p2p_ll_step_barrier:
-    description: "Ring LL and LL128 AllReduce, ReduceScatter and AllGather over P2P with per-rank, per-iteration input, checked element by element. On gfx1250 this runs the store-free step barrier. DDA, CE, direct and symmetric kernels win ahead of Ring and their switches are cached for the process lifetime, so they are set before launch. The test skips where a case does not select Ring with the requested protocol or a ring hop is not on P2P."
+    description: "Ring LL, LL128 and Simple AllReduce, ReduceScatter and AllGather over P2P with per-rank, per-iteration input, checked element by element. On gfx1250 this runs the store-free step barriers. DDA, CE, direct and symmetric kernels win ahead of Ring and their switches are cached for the process lifetime, so they are set before launch. The test skips where a case does not select Ring with the requested protocol or a ring hop is not on P2P."
     test_patterns:
       - "LlStepBarrierMPITest.*"
     exclude_windows: *mpi_exclude_windows
