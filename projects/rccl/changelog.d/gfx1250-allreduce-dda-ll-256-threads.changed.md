@@ -1,0 +1,1 @@
+* On gfx1250 SPX comms of up to 16 ranks, the `ncclAllReduce` DDA LL one-shot runs 256-thread blocks (previously 512), with 10-30% lower latency at 4 KiB-1 MiB on 4, 8 and 16 ranks. The spread two-shot keeps 512 threads and is chosen against the 256-thread one-shot block, so 16-rank messages of 4-128 KiB now run the one-shot instead. DPX and larger SPX comms keep 512 threads.

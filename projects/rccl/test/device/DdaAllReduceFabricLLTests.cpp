@@ -36,7 +36,7 @@ constexpr size_t kCount = 3072;  // floats: 1536 packets, 3 blocks of 512
 constexpr size_t kOneShotBytes = kCount * sizeof(float);
 constexpr size_t kBufBytes = 2 * kOneShotBytes;  // a spread shard of more than one LDS pass on one block
 constexpr unsigned kOneShotThreads = 512;
-static_assert(dda::common::kDdaLLSpreadThreads == kOneShotThreads, "the spread runs on the one-shot's blocks");
+static_assert(dda::common::kDdaLLSpreadThreads == kOneShotThreads, "both kernels run here on the spread's blocks");
 constexpr size_t kBankBytes = (size_t)kMaxRanks * 64 * 1024;
 constexpr uint32_t kFlag = 2;  // epoch cells start at 1, so the kernels use flag 2 and bank 0
 constexpr unsigned kEpochCells = 16;

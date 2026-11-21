@@ -1,0 +1,1 @@
+* On gfx1250 SPX, `ncclAllReduce` on 32 ranks (8 nodes of 4 GPUs) runs the DDA LL spread up to 2 MiB (previously DDA LL128 above 1 MiB), and Ring LL128 above 64 MiB (previously DDA LL128 up to 256 MiB), with 11-13% lower latency at 2 MiB, 128 MiB and 256 MiB. Other rank counts and DPX are unchanged.

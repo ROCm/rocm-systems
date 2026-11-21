@@ -245,6 +245,18 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaArRegCapturePerRankBytes = 2ULL*1024*1024,
   .ddaArRegEagerMinShardBytes = 512ULL*1024,
   .ddaArRegEagerMaxShardBytes = 1ULL*1024*1024,
+  // 4, 8 and 16 ranks (1-4 SPX nodes): 256-thread DDA LL one-shot blocks beat 512 by 1.1-1.4x at 4K-1M. Every count
+  // up to 16 takes them, so the others are extrapolated; on 13-15 ranks that also moves about 4K-170K from the spread
+  // to the one-shot, as 4K-128K does on 16. On 32 ranks the 512-thread spread runs those sizes either way.
+  .ddaNarrowThreads = 256,
+  .ddaNarrowMaxRanks = 16,
+  // 32 ranks (8 SPX nodes), against the peer-parallel DDA LL128 AllReduce: the LL spread is 1.1x faster at 2M, and
+  // Ring LL128 1.1x at 128M and 1.15x at 256M; DDA LL128 keeps 4M-64M.
+  .ddaLargeCommMinRanks = 32,
+  .ddaLargeCommMaxRanks = 32,
+  .ddaLargeCommLLMaxPerRank = {0, 0, 0, 0, 64ULL*1024, 0, 0, 0, 0},             // [4] AR 2M
+  .ddaLargeCommLL128MaxPerRank = {0, 0, 0, 0, 2ULL*1024*1024, 0, 0, 0, 0},      // [4] AR 64M
+  .ddaLargeCommArLLOneShotMax = 2ULL*1024*1024,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
@@ -273,6 +285,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .rsRingLL128MaxPerRank1B = 32ULL*1024*1024,     // fp8: LL128 holds to 32M per rank
   .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024,// 128 channels beat 192 by 1.1-1.3x in (8M, 32M]
   .rsRingSimpleCappedChannels = 128,
+  // 8-32 ranks (2-8 SPX nodes): Ring LL128 beats Simple 1.08-1.16x to 256M/512M/1G (rccl-tests -R 0,
+  // median of 2-5). Above the DDA LL128 caps that is 512M on 16 ranks and 1G on 32, 1.1x each.
+  .rsSmallCommMaxRanks = 32,
+  .rsSmallCommRingLL128MaxPerRank = 32ULL*1024*1024,
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
