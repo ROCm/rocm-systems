@@ -559,6 +559,30 @@ void IPCTest::ChildProcessImpl() {
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in attaching to IPC signal handle\n");
   PROCESS_LOG("Child: Attached to IPC signal shared by parent process\n");
 
+  // Attaching the same handle more than once in one process must return a
+  // reference to the existing signal instead of importing the shared memory
+  // again. Exercise repeated attaches while the original handle is alive.
+  hsa_signal_t duplicate_signal;
+  err = hsa_amd_ipc_signal_attach(const_cast<hsa_amd_ipc_signal_t*>(&shared_->signal_handle),
+                                  &duplicate_signal);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 211);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in reattaching to IPC signal handle\n");
+  FORK_ASSERT_EQ(ipc_signal.handle, duplicate_signal.handle,
+                 "Child: Reattaching an IPC signal returned a different handle\n");
+  err = hsa_signal_destroy(duplicate_signal);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 212);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in destroying duplicate IPC signal\n");
+
+  err = hsa_amd_ipc_signal_attach(const_cast<hsa_amd_ipc_signal_t*>(&shared_->signal_handle),
+                                  &duplicate_signal);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 213);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in reattaching to IPC signal handle\n");
+  FORK_ASSERT_EQ(ipc_signal.handle, duplicate_signal.handle,
+                 "Child: Reattaching an IPC signal returned a different handle\n");
+  err = hsa_signal_destroy(duplicate_signal);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 214);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in destroying duplicate IPC signal\n");
+
   // Validate Gpu buffer is filled per expectation i.e. if so update
   // per previously agreed upon value (first_val_ and second_val_)
   CheckAndFillBuffer(reinterpret_cast<uint32_t*>(ipc_ptr), first_val_, second_val_);
@@ -609,6 +633,19 @@ void IPCTest::ChildProcessImpl() {
 
   PROCESS_LOG("Child: Confirmed DWord's of IPC buffer has: %d\n", third_val_);
   PROCESS_LOG("Child: Updated DWord's of IPC buffer to: %d\n", fourth_val_);
+
+  // Releasing the final local reference must remove the cache entry, allowing
+  // a later attach of the still-live exported signal to create a fresh import.
+  err = hsa_signal_destroy(ipc_signal);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 215);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in destroying final IPC signal reference\n");
+  err = hsa_amd_ipc_signal_attach(const_cast<hsa_amd_ipc_signal_t*>(&shared_->signal_handle),
+                                  &ipc_signal);
+  USR_TRIGGERED_FAILURE(err, HSA_STATUS_ERROR, 216);
+  FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Child: Failure in reattaching after final IPC signal destroy\n");
+  hsa_signal_value_t reattached_value = hsa_signal_load_relaxed(ipc_signal);
+  FORK_ASSERT_EQ(3, reattached_value,
+                 "Child: Reattached IPC signal has an unexpected value\n");
 
   // Signal parent process to wake up and continue
   hsa_signal_store_release(ipc_signal, 4);
