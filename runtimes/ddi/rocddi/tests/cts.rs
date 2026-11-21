@@ -360,7 +360,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     }
 
     destination_bytes[..64].fill(0xa5);
-    let before = gpu.clock_counters()?.gpu;
+    let before = gpu.clock_counters()?;
     let mut timed = GpuCopySequence::begin(gpu, &cancel).map_err(|failure| failure.error)?;
     timed.enable_timing().map_err(|failure| failure.error)?;
     // SAFETY: Both mapped allocations stay live until the timed copy retires.
@@ -388,8 +388,14 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
     }
     let ticks = timed.finish_timing().map_err(|failure| failure.error)?;
     drop(timed);
-    let after = gpu.clock_counters()?.gpu;
-    assert!(before <= ticks.start && ticks.start <= ticks.end && ticks.end <= after);
+    let after = gpu.clock_counters()?;
+    assert!(
+        before.gpu <= ticks.start && ticks.start <= ticks.end && ticks.end <= after.gpu,
+        "SDMA timestamps are outside the surrounding clock samples: \
+         before={before:?}, start={}, end={}, after={after:?}",
+        ticks.start,
+        ticks.end
+    );
     assert_eq!(&destination_bytes[..64], &source_bytes[..64]);
 
     destination_bytes.fill(0xa5);
