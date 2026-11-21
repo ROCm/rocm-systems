@@ -693,6 +693,7 @@ struct Info : public amd::EmbeddedObject {
   //! CPU supports MOVDIR64B (atomic 64-byte write with WC buffer close).
   bool movdir64b_;
 
+  bool xnackEnabled_;                //!< Runtime has enabled XNACK for memory fault retry
   uint32_t hmmSupported_;            //!< ROCr supports HMM interfaces
   uint32_t hmmCpuMemoryAccessible_;  //!< CPU memory is accessible by GPU without pinning/register
   uint32_t hmmDirectHostAccess_;     //!< HMM memory is accessible from the host without migration

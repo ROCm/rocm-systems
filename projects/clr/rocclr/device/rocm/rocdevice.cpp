@@ -1850,6 +1850,11 @@ bool Device::populateOCLDeviceConstants() {
     LogError("HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT query failed.");
   }
 
+  if (HSA_STATUS_SUCCESS !=
+      Hsa::system_get_info(HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, &info_.xnackEnabled_)) {
+    LogError("HSA_AMD_SYSTEM_INFO_XNACK_ENABLED query failed. Discard will be disabled.");
+  }
+
   // HMM specific capability for CPU direct access to device memory
   if (HSA_STATUS_SUCCESS !=
       Hsa::agent_get_info(bkendDevice_,
