@@ -10,12 +10,13 @@
 /// needs; neither is the home for a VALU op emitted on its own.
 ///
 /// Same two-layer shape as instruction_builder.h: each build_* takes an
-/// rj_code_arch_t and delegates to that generation's generated builder, so an
+/// rocjitsu::IsaFamily and delegates to that generation's generated builder, so an
 /// opcode or field layout that moves between generations is picked up from the
 /// generated tables rather than hard-coded here.
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include <array>
 #include <cstdint>
 
@@ -65,53 +66,53 @@ inline constexpr uint16_t kVectorSrcLiteral = cdna1::OPR_SRC_SRC_LITERAL;
 ///   MODE.VGPR_MSB selects, not a fixed physical VGPR. That constrains callers
 ///   that must name a specific register, not this encoder
 inline util::FailureOr<std::array<uint32_t, 2>>
-build_v_mov_b32_imm(uint16_t vdst, uint32_t imm, rj_code_arch_t arch,
+build_v_mov_b32_imm(uint16_t vdst, uint32_t imm, rocjitsu::IsaFamily arch,
                     const util::DiagnosticEmitter *error = nullptr) {
   const uint8_t dst = static_cast<uint8_t>(vdst);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return std::array<uint32_t, 2>{
         cdna1::build_vop1(cdna1::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return std::array<uint32_t, 2>{
         cdna2::build_vop1(cdna2::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return std::array<uint32_t, 2>{
         cdna3::build_vop1(cdna3::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return std::array<uint32_t, 2>{
         cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return std::array<uint32_t, 2>{
         cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return std::array<uint32_t, 2>{
         rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return std::array<uint32_t, 2>{
         rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return std::array<uint32_t, 2>{
         rdna3::build_vop1(rdna3::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return std::array<uint32_t, 2>{
         rdna3_5::build_vop1(rdna3_5::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst})
             .front(),
         imm};
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return std::array<uint32_t, 2>{
         rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = kVectorSrcLiteral, .vdst = dst}).front(),
         imm};
   default:
-    // RV32I/RV64I and ROCJITSU_CODE_ARCH_INVALID reach here: not AMDGPU, so
+    // RV32I/RV64I and rocjitsu::IsaFamily::Invalid reach here: not AMDGPU, so
     // there is no VOP1 encoding to pick.
     return error != nullptr
                ? (error->emit() << "unsupported target architecture for v_mov_b32 with a literal")
@@ -139,7 +140,7 @@ build_v_mov_b32_imm(uint16_t vdst, uint32_t imm, rj_code_arch_t arch,
 ///   MODE.VGPR_MSB selects, not a fixed physical VGPR. That constrains callers
 ///   that must name a specific register, not this encoder
 inline util::FailureOr<uint32_t>
-build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rj_code_arch_t arch,
+build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rocjitsu::IsaFamily arch,
                     const util::DiagnosticEmitter *error = nullptr) {
   if (src0 == kVectorSrcLiteral) {
     return error != nullptr
@@ -148,35 +149,35 @@ build_v_mov_b32_src(uint16_t vdst, uint16_t src0, rj_code_arch_t arch,
   }
   // Selector 254 selects a trailing 64-bit literal on CDNA5. Neither literal
   // form fits this single-word result.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && src0 == cdna5::OPR_SRC_SRC_LITERAL64) {
+  if (arch == rocjitsu::IsaFamily::Cdna5 && src0 == cdna5::OPR_SRC_SRC_LITERAL64) {
     return error != nullptr
                ? (error->emit() << "v_mov_b32 from a 64-bit literal needs trailing literal words")
                : util::Result::failure();
   }
   const uint8_t dst = static_cast<uint8_t>(vdst);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_vop1(cdna1::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_vop1(cdna2::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop1(cdna3::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_vop1(rdna2::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_vop1(rdna3::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_vop1(rdna3_5::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop1(rdna4::kVMovB32Vop1, {.src0 = src0, .vdst = dst}).front();
   default:
-    // RV32I/RV64I and ROCJITSU_CODE_ARCH_INVALID reach here: not AMDGPU, so
+    // RV32I/RV64I and rocjitsu::IsaFamily::Invalid reach here: not AMDGPU, so
     // there is no VOP1 encoding to pick.
     return error != nullptr
                ? (error->emit() << "unsupported target architecture for v_mov_b32 from a register")

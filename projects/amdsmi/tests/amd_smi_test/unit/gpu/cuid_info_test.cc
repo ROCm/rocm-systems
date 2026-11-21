@@ -497,7 +497,7 @@ TEST(GpuUnit, CuidPartitionNodeNamesThePartition) {
   const FabricatedPartition partition(handle, "DPX", "2");
   ASSERT_TRUE(partition.valid());
   amdsmi_cuid_info_t info = {};
-  EXPECT_NE(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(amdsmi_get_gpu_cuid_info(handle, &info), AMDSMI_STATUS_NOT_SUPPORTED);
   ExpectNoCuidReported(info);
 }
 

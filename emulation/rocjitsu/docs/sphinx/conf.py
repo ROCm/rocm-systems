@@ -5,7 +5,7 @@
 
 # -- Project information ---------------------------------------------------
 
-project = "rocJITsu"
+project = "rocjitsu"
 author = "Advanced Micro Devices, Inc."
 # pylint: disable=redefined-builtin
 copyright = "Copyright (c) Advanced Micro Devices, Inc. All rights reserved."
@@ -18,7 +18,7 @@ copyright = "Copyright (c) Advanced Micro Devices, Inc. All rights reserved."
 
 html_theme = "rocm_docs_theme"
 html_theme_options = {"flavor": "rocm"}
-html_title = "rocJITsu documentation"
+html_title = "rocjitsu documentation"
 suppress_warnings = ["etoc.toctree"]
 external_toc_path = "./sphinx/_toc.yml"
 external_projects_current_project = "rocjitsu"
@@ -36,8 +36,8 @@ exclude_patterns = ["README.md"]
 # breathe against that committed output rather than rocm_docs.doxygen, which
 # unconditionally re-runs Doxygen at build time and overwrites the committed
 # XML with symbol-less output on the RTD builder.
-breathe_projects = {"rocJITsu API reference": "doxygen/xml"}
-breathe_default_project = "rocJITsu API reference"
+breathe_projects = {"rocjitsu API reference": "doxygen/xml"}
+breathe_default_project = "rocjitsu API reference"
 
 # -- Sphinx setup ----------------------------------------------------------
 

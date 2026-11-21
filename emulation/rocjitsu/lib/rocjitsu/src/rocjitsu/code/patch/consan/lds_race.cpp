@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/lds_race.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -147,15 +148,15 @@ Result qualify_lds_race_block(const BasicBlock &block, InputError &error) {
   return Result::success();
 }
 
-Result classify_lds_race_instruction(const Instruction &instruction, rj_code_arch_t arch,
+Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                      uint32_t allocated_vgprs,
                                      std::vector<NativeLdsAccess> &accesses, InputError &error) {
   const std::string_view name = instruction.mnemonic();
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
   const uint64_t offset = instruction.src_loc();
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
-                                           operation == amdgpu::Operation::S_BARRIER_WAIT))
+  if (arch == rocjitsu::IsaFamily::Cdna5 && (operation == amdgpu::Operation::S_BARRIER_SIGNAL ||
+                                             operation == amdgpu::Operation::S_BARRIER_WAIT))
     return Result::success(); // The complete original group/CFG is qualified below.
   if ((instruction.flags() & BARRIER) != 0 ||
       instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic ||
@@ -174,7 +175,7 @@ Result classify_lds_race_instruction(const Instruction &instruction, rj_code_arc
   if (width != 0) {
     // CDNA3/4 place GDS at bit 16; RDNA and CDNA5 use bit 17.
     const uint32_t gds_bit =
-        (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4) ? 16 : 17;
+        (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) ? 16 : 17;
     if (instruction.size() != 8 || (instruction.raw_encoding()[0] & (1u << gds_bit)) != 0)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess, "non-native LDS form",
                                 offset);
@@ -220,9 +221,9 @@ Result qualify_lds_race_barrier(InputProgram &program, std::span<BasicBlock *con
       const uint32_t signal =
           cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN})[0];
       const uint32_t wait =
-          build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSBarrierWaitSopp, 0xffff).value();
+          build_sopp_encoding(rocjitsu::IsaFamily::Cdna5, cdna5::kSBarrierWaitSopp, 0xffff).value();
       const uint32_t drain =
-          build_sopp_encoding(ROCJITSU_CODE_ARCH_CDNA5, cdna5::kSWaitDscntSopp, 0).value();
+          build_sopp_encoding(rocjitsu::IsaFamily::Cdna5, cdna5::kSWaitDscntSopp, 0).value();
       size_t wait_index = index + 1;
       bool intervening_memory_or_barrier = false;
       while (wait_index < instructions.size() &&
