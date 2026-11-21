@@ -12,7 +12,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
+from common.common import (
+    cli_search_order,
+    fake_amdsmi_init,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(str(Path(__file__).parent)))
 _CLI_FILES = {
@@ -34,13 +41,7 @@ class TestNicChoicesDegraded(unittest.TestCase):
             cls,
             {
                 "_version": fake_module("_version", __version__="0.0.0+test"),
-                "amdsmi_init": fake_module(
-                    "amdsmi_init",
-                    AMDSMI_INIT_FLAG=0,
-                    AMDSMI_INITIALIZED=True,
-                    amdsmi_interface=amdsmi_interface,
-                    amdsmi_exception=amdsmi_exception,
-                ),
+                "amdsmi_init": fake_amdsmi_init(amdsmi_interface, amdsmi_exception, init_flag=0),
                 "amdsmi_helpers": None,
             },
         )

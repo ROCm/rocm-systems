@@ -31,4 +31,6 @@ sys.path.insert(0, _here)
 
 import common.common as common  # noqa: E402  (sys.path bootstrapped above)
 
-common.run_test_dir("unit", "AMD SMI Unit Tests", _here)
+# Unit tests need no hardware, so a skipped test is a check that never ran: fail on it.
+# (unit/__init__.py forbids the CLI's driver probe, whichever runner loads the package.)
+common.run_test_dir("unit", "AMD SMI Unit Tests", _here, fail_on_skip=True)

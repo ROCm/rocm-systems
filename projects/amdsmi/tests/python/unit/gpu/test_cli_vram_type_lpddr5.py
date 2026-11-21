@@ -30,7 +30,7 @@ from common.common import (
 )
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
-# checkout wins. None -> setUpClass skips.
+# checkout wins. None -> setUpClass fails.
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
 
@@ -184,7 +184,7 @@ class TestCliVramTypeLpddr5(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         cls.holder = {"info": copy.deepcopy(_BASE_VRAM_INFO)}

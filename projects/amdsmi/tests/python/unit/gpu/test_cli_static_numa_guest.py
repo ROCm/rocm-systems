@@ -142,7 +142,7 @@ class TestStaticNumaGuestParser(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not PARSER_PATH or not os.path.isfile(PARSER_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI amdsmi_parser.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         interface = fake_module("amdsmi.amdsmi_interface")
@@ -187,7 +187,7 @@ class TestStaticNumaGuestOutput(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         exception = fake_module(

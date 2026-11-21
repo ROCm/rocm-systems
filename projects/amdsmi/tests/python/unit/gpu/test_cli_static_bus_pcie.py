@@ -182,7 +182,7 @@ class TestCliStaticBusPcieNA(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _fake_modules(
@@ -234,7 +234,7 @@ class TestCliStaticBusPcieValid(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _fake_modules(

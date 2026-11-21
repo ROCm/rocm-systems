@@ -22,7 +22,7 @@ _CLI_DIR = find_cli_dir(*cli_search_order(str(Path(__file__).resolve().parent)))
 _MODULE_PATH = Path(_CLI_DIR) / "subcommands" / "list_devices.py" if _CLI_DIR else None
 
 if _MODULE_PATH is None or not _MODULE_PATH.is_file():
-    raise unittest.SkipTest(f"amd-smi CLI list_devices.py not found (looked in {_CLI_DIR})")
+    raise FileNotFoundError(f"amd-smi CLI list_devices.py not found (looked in {_CLI_DIR})")
 
 
 def _load_list_devices() -> types.ModuleType:

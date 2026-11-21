@@ -80,7 +80,13 @@ import types
 import unittest
 from unittest import mock
 
-from common.common import cli_search_order, fake_module, find_cli_dir, stub_modules
+from common.common import (
+    cli_search_order,
+    fake_amdsmi_init,
+    fake_module,
+    find_cli_dir,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
@@ -215,7 +221,7 @@ class TestCliSetNodePowerLimit(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH:
-            raise unittest.SkipTest("amd-smi CLI set_value.py not found (source or installed)")
+            raise FileNotFoundError("amd-smi CLI set_value.py not found (source or installed)")
         # set_value.py does `from amdsmi_helpers import AMDSMIHelpers`; stub that
         # module directly so the real amdsmi_helpers -> amdsmi_init import chain
         # (and its AmdSmiInitFlags/amdsmi_init C-library surface) never loads.
@@ -345,14 +351,17 @@ def _install_fake_amdsmi_for_helpers():
 
 
 class TestValidateAndSetNodePowerLimit(unittest.TestCase):
-    _EXTRA_STUBBED_NAMES = ("amdsmi_init", "amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")
+    _EXTRA_STUBBED_NAMES = ("amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")
 
     @classmethod
     def setUpClass(cls):
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
+            raise FileNotFoundError("amd-smi CLI source not found")
         modules = _install_fake_amdsmi_for_helpers()
         modules.update({name: None for name in cls._EXTRA_STUBBED_NAMES})
+        modules["amdsmi_init"] = fake_amdsmi_init(
+            modules["amdsmi.amdsmi_interface"], modules["amdsmi.amdsmi_exception"]
+        )
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
 
@@ -462,9 +471,12 @@ class TestGetMaxNodePowerLimit(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
+            raise FileNotFoundError("amd-smi CLI source not found")
         modules = _install_fake_amdsmi_for_helpers()
         modules.update({name: None for name in cls._EXTRA_STUBBED_NAMES})
+        modules["amdsmi_init"] = fake_amdsmi_init(
+            modules["amdsmi.amdsmi_interface"], modules["amdsmi.amdsmi_exception"]
+        )
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
 
@@ -623,7 +635,7 @@ class TestNodePowerLimitGuestRegistration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not PARSER_PATH or not os.path.isfile(PARSER_PATH):
-            raise unittest.SkipTest("amd-smi CLI amdsmi_parser.py not found (source or installed)")
+            raise FileNotFoundError("amd-smi CLI amdsmi_parser.py not found (source or installed)")
         modules = _build_fake_modules_for_parser()
         modules["amdsmi_cli_exceptions"] = None
         stub_modules(cls, modules)

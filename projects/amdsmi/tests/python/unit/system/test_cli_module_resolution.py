@@ -35,7 +35,7 @@ def _make_rocm_root(root):
 class TestCliModuleResolution(unittest.TestCase):
     def setUp(self):
         if not _CLI_DIR:
-            self.skipTest("amd-smi CLI directory not found")
+            self.fail("amd-smi CLI directory not found")
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp_dir = tmp.name

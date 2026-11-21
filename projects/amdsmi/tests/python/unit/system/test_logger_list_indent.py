@@ -28,7 +28,7 @@ _DEEP_NESTING = 3
 
 def _load_renderer() -> Any:
     if not _CLI_DIR:
-        raise unittest.SkipTest("amdsmi_cli not found")
+        raise FileNotFoundError("amdsmi_cli not found")
     tree = ast.parse(_LOGGER_PATH.read_text(encoding="utf-8"))
     logger_class = next(
         node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "AMDSMILogger"

@@ -164,7 +164,7 @@ class _CliFixture(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not PARSER_PATH or not os.path.isfile(PARSER_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI amdsmi_parser.py not found in {_CLI_DIR}")
+            raise FileNotFoundError(f"amd-smi CLI amdsmi_parser.py not found in {_CLI_DIR}")
         stub_modules(cls, _fake_modules())
         cls.parser_mod = load_cli_module(
             "amdsmi_parser_device_selection_test", PARSER_PATH, sys_path_dir=_CLI_DIR

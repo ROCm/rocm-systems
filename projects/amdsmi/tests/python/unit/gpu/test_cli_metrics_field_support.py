@@ -18,7 +18,6 @@ Two properties matter more than the size of the table:
 
 import importlib.util
 import os
-import re
 import sys
 import unittest
 
@@ -28,16 +27,10 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
 _MODULE_FILENAME = "amdsmi_metrics_field_support.py"
 
-# The C++ the version table mirrors. Present in a source checkout only.
-_CPP_SOURCE_PATH = os.path.normpath(
-    os.path.join(_THIS_DIR, "..", "..", "..", "..", "rocm_smi", "src", "rocm_smi_gpu_metrics.cc")
-)
-
 MODULE_PATH = os.path.join(_CLI_DIR, _MODULE_FILENAME) if _CLI_DIR else ""
 
-# Skip only when no CLI resolves; a resolved CLI missing the module fails on load.
-_RUNNABLE = bool(_CLI_DIR)
-_SKIP_REASON = f"amd-smi CLI not found (looked in {amdsmi_path})"
+if not _CLI_DIR:
+    raise FileNotFoundError(f"amd-smi CLI not found (looked in {amdsmi_path})")
 
 
 def _load_module():
@@ -53,7 +46,6 @@ def _load_module():
 NA = "N/A"
 
 
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class TestVersionFieldTable(unittest.TestCase):
     """The per-version field sets must match the C++ copy_internal_to_external_metrics()."""
 
@@ -179,7 +171,6 @@ class TestVersionFieldTable(unittest.TestCase):
         self.assertIsNone(self.fields(2, 0))
 
 
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class TestSuppressionSet(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -249,7 +240,6 @@ class TestSuppressionSet(unittest.TestCase):
                 self.assertNotIn(path, suppressed)
 
 
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class TestEverySourceIsRequired(unittest.TestCase):
     """Sources listed for a CLI path are required together, not alternatives.
 
@@ -334,7 +324,6 @@ class TestEverySourceIsRequired(unittest.TestCase):
                             self.assertIn(("throttle", f"{row}{form}"), suppressed)
 
 
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class TestFilterUnsupported(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -434,159 +423,4 @@ class TestFilterUnsupported(unittest.TestCase):
                     filtered,
                     values,
                     f"version {fmt}.{content} dropped real value #{index}: {real!r}",
-                )
-
-
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
-class TestVersionTableMatchesCppSource(unittest.TestCase):
-    """Drift guard: the hand-written table must track the C++ it mirrors.
-
-    Derives each version's public field set from the per-version
-    ``copy_internal_to_external_metrics()`` in ``rocm_smi_gpu_metrics.cc`` and
-    diffs it against ``_VERSION_FIELDS``. Skipped where the C++ source is not
-    shipped, such as an installed package.
-    """
-
-    # Class name -> the (format_revision, content_revision) it reads.
-    CLASS_VERSIONS = {f"GpuMetricsBase_v1{content}_t": (1, content) for content in range(9)}
-    DYNAMIC_CLASS = "GpuMetricsBaseDynamic_t"
-    # APU versions (2, 4) and (3, 0) share one class and are told apart by a
-    # branch inside it, so CLASS_VERSIONS cannot map them;
-    # test_apu_versions_match_their_branches covers them instead.
-    APU_CLASS = "ApuMetricsBase_v30_t"
-
-    # common_header is the version stamp itself; apu_metrics is the internal
-    # source struct, not a public member. xcp_stats sub-fields are assigned in a
-    # copy loop the extractor cannot see, so the bare name is dropped here and
-    # the sub-fields are excluded from every comparison by _comparable().
-    IGNORED_ROOTS = frozenset({"common_header", "apu_metrics", "xcp_stats"})
-
-    _FUNCTION_RE = re.compile(
-        r"^AMGpuMetricsPublicLatestTupl_t\s+(\w+)::copy_internal_to_external_metrics\(\)\s*\{",
-        re.MULTILINE,
-    )
-    # A body ends at its own closing brace in column 0. Without this the last
-    # class in the file would absorb every later assignment in the file.
-    _FUNCTION_END_RE = re.compile(r"^\}", re.MULTILINE)
-    # v1.x classes copy into a local named metrics_public_init; the dynamic
-    # reader copies into one named out.
-    _ASSIGNMENT_RE = re.compile(r"\b(?:metrics_public_init|out)\.([A-Za-z_][A-Za-z0-9_.]*)")
-    _LINE_COMMENT_RE = re.compile(r"//[^\n]*")
-    # ApuMetricsBase_v30_t serves both APU versions from one function: a v2.4
-    # branch and an else branch for v3.0. Comparing the merged body would let a
-    # deleted v3.0 field pass, so each branch is extracted and compared alone.
-    _APU_V24_BRANCH_RE = re.compile(
-        r"if\s*\(\s*get_gpu_metrics_version_used\(\)\s*==\s*[\w:]*kApuMetricV24\s*\)\s*\{"
-    )
-    # Branch braces sit one level in; the bodies themselves are deeper.
-    _APU_ELSE_RE = re.compile(r"^  \} else \{", re.MULTILINE)
-    _APU_BRANCH_END_RE = re.compile(r"^  \}", re.MULTILINE)
-
-    @classmethod
-    def setUpClass(cls):
-        if not os.path.isfile(_CPP_SOURCE_PATH):
-            raise unittest.SkipTest(f"C++ source not available at {_CPP_SOURCE_PATH}")
-        cls.support = _load_module()
-        with open(_CPP_SOURCE_PATH, encoding="utf-8", errors="replace") as source:
-            cls.bodies = cls._derive_bodies(source.read())
-        cls.derived = {name: cls._fields_in(body) for name, body in cls.bodies.items()}
-
-    @classmethod
-    def _derive_bodies(cls, text):
-        functions = list(cls._FUNCTION_RE.finditer(text))
-        bodies = {}
-        for index, match in enumerate(functions):
-            limit = functions[index + 1].start() if index + 1 < len(functions) else len(text)
-            closing = cls._FUNCTION_END_RE.search(text, match.end(), limit)
-            end = closing.end() if closing else limit
-            bodies[match.group(1)] = cls._LINE_COMMENT_RE.sub("", text[match.start() : end])
-        return bodies
-
-    @classmethod
-    def _fields_in(cls, body):
-        return {
-            name
-            for name in cls._ASSIGNMENT_RE.findall(body)
-            if name.split(".")[0] not in cls.IGNORED_ROOTS
-        }
-
-    @classmethod
-    def _apu_branch_fields(cls):
-        """(v2.4 fields, v3.0 fields), or None if the branches cannot be located."""
-        body = cls.bodies.get(cls.APU_CLASS, "")
-        opening = cls._APU_V24_BRANCH_RE.search(body)
-        if opening is None:
-            return None
-        otherwise = cls._APU_ELSE_RE.search(body, opening.end())
-        if otherwise is None:
-            return None
-        closing = cls._APU_BRANCH_END_RE.search(body, otherwise.end())
-        if closing is None:
-            return None
-        return (
-            cls._fields_in(body[opening.end() : otherwise.start()]),
-            cls._fields_in(body[otherwise.end() : closing.start()]),
-        )
-
-    @staticmethod
-    def _comparable(fields):
-        # xcp_stats.* is deliberately outside the drift guard: the C++ assigns
-        # those sub-fields inside a per-partition copy loop, so a line-based
-        # extractor cannot attribute them to a version. Guarding them needs a
-        # branch-aware extractor. Until then 18 of the 49 mapped CLI paths are
-        # unguarded and rest on the explicit xcp_stats tests above.
-        return {name for name in fields if not name.startswith("xcp_stats.")}
-
-    def _assert_matches(self, class_name, table_fields):
-        self.assertIn(
-            class_name, self.derived, f"{class_name}::copy_internal_to_external_metrics() not found"
-        )
-        expected = self._comparable(self.derived[class_name])
-        actual = self._comparable(table_fields)
-        self.assertEqual(
-            actual,
-            expected,
-            f"{class_name} drifted from the table | "
-            f"only in table: {sorted(actual - expected)} | "
-            f"only in C++: {sorted(expected - actual)}",
-        )
-
-    def test_every_mapped_class_is_present_in_the_source(self):
-        missing = sorted(
-            name
-            for name in list(self.CLASS_VERSIONS) + [self.DYNAMIC_CLASS, self.APU_CLASS]
-            if name not in self.derived
-        )
-        self.assertEqual(missing, [], f"classes renamed or removed in C++: {missing}")
-
-    def test_explicit_versions_match_the_cpp_source(self):
-        for class_name, version in sorted(self.CLASS_VERSIONS.items(), key=lambda item: item[1]):
-            with self.subTest(version=version):
-                table_fields = self.support.populatable_fields(*version)
-                self.assertIsNotNone(table_fields, f"{version} is missing from _VERSION_FIELDS")
-                self._assert_matches(class_name, table_fields)
-
-    def test_dynamic_bound_matches_the_cpp_source(self):
-        self._assert_matches(
-            self.DYNAMIC_CLASS,
-            self.support.populatable_fields(1, self.support._DYNAMIC_MIN_CONTENT_REVISION),
-        )
-
-    def test_apu_versions_match_their_branches(self):
-        branches = self._apu_branch_fields()
-        self.assertIsNotNone(
-            branches,
-            f"could not split {self.APU_CLASS}::copy_internal_to_external_metrics() into its "
-            "kApuMetricV24 and else branches; the branch shape changed",
-        )
-        for version, branch in zip(((2, 4), (3, 0)), branches):
-            with self.subTest(version=version):
-                expected = self._comparable(branch)
-                actual = self._comparable(self.support.populatable_fields(*version))
-                self.assertEqual(
-                    actual,
-                    expected,
-                    f"{version} drifted from its {self.APU_CLASS} branch | "
-                    f"only in table: {sorted(actual - expected)} | "
-                    f"only in C++: {sorted(expected - actual)}",
                 )

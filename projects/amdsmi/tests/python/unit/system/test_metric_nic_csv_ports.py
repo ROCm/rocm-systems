@@ -64,7 +64,7 @@ def _load_modules() -> types.SimpleNamespace:
 def _csv_row(args: types.SimpleNamespace, interface_setup: Dict[str, object]) -> Dict[str, str]:
     """Run ``metric_nic`` with the real logger in CSV mode and return the one printed row."""
     if not _CLI_DIR:
-        raise unittest.SkipTest("amd-smi CLI directory not found")
+        raise FileNotFoundError("amd-smi CLI directory not found")
     loaded = _load_modules()
     for name, value in interface_setup.items():
         setattr(loaded.interface, name, value)
