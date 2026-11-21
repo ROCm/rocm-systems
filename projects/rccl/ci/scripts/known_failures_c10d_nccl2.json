@@ -1,0 +1,18 @@
+{
+  "_comment": "Known failures for the PyTorch c10d_nccl2 suite (SUITES in test_pytorch_c10d.py). Keys are \"Class.test\" as reported in the JUnit XML. Same rules as known_failures.json: an entry is excluded from the verdict so a new failure stays visible, it is not a statement that the test is expected to fail forever, and each entry should name a ticket or cause. Remove an entry once its cause is resolved; the harness logs entries that now pass. Baselined 2026-11-15 from the PR #15864 runs: develop at the v2.32.6 sync fork point (RCCL 2.32.3) and the v2.32.6 sync branch, torch 2.16 nightlies 20261113 and 20261115, MI300X (TheRock CI runners) and MI350X (Ruby).",
+  "tests": {
+    "ProcessGroupNCCL2Test.test_coalescing_window_future_result": "coalescing_window_timeout",
+    "ProcessGroupNCCL2Test.test_watchdog_does_not_release_python_backed_tensor": "teardown_hang_after_class_failure",
+    "ProcessGroupNCCL2TimingTest.test_result_callback_issues_collective": "future_not_completed",
+    "ProcessGroupNCCL2WatchdogNoTearDownTest.test_timeout_publishes_results": "future_not_completed",
+    "ProcessGroupNCCL2WatchdogNoTearDownTest.test_timeout_without_process_abort": "teardown_hang_after_class_failure",
+    "ProcessGroupNCCL2DumpOnTimeoutTest.test_flight_recorder_dumped_on_timeout": "flight_recorder_dump_on_timeout",
+    "ProcessGroupNCCL2DumpTimeoutBoundTest.test_flight_recorder_dump_is_bounded": "flight_recorder_dump_on_timeout"
+  },
+  "categories": {
+    "coalescing_window_timeout": "Hits the 600 s pytest-timeout in every run (16/16: 8 develop, 8 sync; MI300X and MI350X). Cause not yet determined (AICOMRCCL-3665). PyTorch then skips the rest of ProcessGroupNCCL2Test ('Previous test failed'); the harness reports those as NOT RUN.",
+    "future_not_completed": "Worker raises 'TimeoutError: future not completed' in every run (16/16, both GPUs, RCCL 2.32.3 and 2.32.6). Cause not yet determined (AICOMRCCL-3665).",
+    "teardown_hang_after_class_failure": "The test body is skipped because an earlier test in its class failed, then the class teardown errors with 'ranks [...] did not exit within 300s' (16/16). It says nothing about the test itself. test_timeout_without_process_abort is the ROCM-32381 reproducer (ncclCommAbort hang on the DDA-IPC path, fix #11245 on develop); these runs cannot validate that fix because the body never runs. Remove when the class's first failure is fixed. Tracked in AICOMRCCL-3665.",
+    "flight_recorder_dump_on_timeout": "Flight-recorder dump on watchdog timeout: test_flight_recorder_dumped_on_timeout fails with 'DistBackendError: Watchdog caught collective operation timeout'; test_flight_recorder_dump_is_bounded with 'no trace written', then a teardown hang (16/16, both GPUs). Cause not yet determined; c10d_nccl's flight-recorder known failures (trace_*, missing_dump_pipe) may share it. Tracked in AICOMRCCL-3665."
+  }
+}

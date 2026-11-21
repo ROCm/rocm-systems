@@ -1,0 +1,5 @@
+{
+  "_comment": "Known failures for the PyTorch fsdp_dtensor suite (SUITES in test_pytorch_c10d.py). Keys are \"Class.test\" as reported in the JUnit XML. Same rules as known_failures.json: an entry is excluded from the verdict so a new failure stays visible, it is not a statement that the test is expected to fail forever, and each entry should name a ticket or cause. Remove an entry once its cause is resolved; the harness logs entries that now pass. Baselined 2026-11-15 from the PR #15864 runs: develop at the v2.32.6 sync fork point (RCCL 2.32.3) and the v2.32.6 sync branch, torch 2.16 nightlies 20261113 and 20261115, MI300X (TheRock CI runners) and MI350X (Ruby).",
+  "tests": {},
+  "categories": {}
+}
