@@ -39,8 +39,12 @@
 #include <array>
 #include <atomic>
 #include <bitset>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <mutex>
+#include <optional>
 #include <regex>
 #include <stdexcept>
 #include <string>
@@ -161,6 +165,10 @@ constexpr auto shared_library_prefix =
     std::string_view{ ROCPROFILER_REGISTER_SHARED_LIBRARY_PREFIX };
 constexpr auto shared_library_suffix =
     std::string_view{ ROCPROFILER_REGISTER_SHARED_LIBRARY_SUFFIX };
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((used)) const char transient_extra_counters_marker[] =
+    "ROCPROFILER_REGISTER_TRANSIENT_EXTRA_COUNTERS_V1";
+#endif
 
 std::string
 get_unversioned_library_name(std::string_view base_name)
@@ -891,32 +899,127 @@ rocp_invoke_registrations(bool invoke_all)
 }
 
 void
-load_environment_buffer(const char* environment_buffer)
+log_attachment_environment(std::string_view name, std::string_view value)
 {
-    // environment_buffer is a null-character delimited list of name value pairs.
-    // Each name and value is delimited separately.
-    // The first 4 bytes contain a uint32_t count of pairs.
-
-    if(!environment_buffer)
+    if(name == "ROCPROF_EXTRA_COUNTERS_CONTENTS")
     {
-        LOG(WARNING) << "Attachment was invoked with no environment variables provided "
-                        "for what to trace.";
-        return;
+        LOG(INFO) << "Attachment adding environment variable: " << name << " ("
+                  << value.size() << " bytes, redacted)";
     }
-
-    const uint32_t pair_count = *reinterpret_cast<const uint32_t*>(environment_buffer);
-    const char*    position   = environment_buffer + sizeof(uint32_t);
-    for(uint32_t pair_idx = 0; pair_idx < pair_count; ++pair_idx)
+    else
     {
-        const char* name = position;
-        position += strlen(name) + 1;
-        const char* value = position;
-        position += strlen(value) + 1;
-
         LOG(INFO) << "Attachment adding environment variable: " << name << "=" << value;
-        setenv(name, value, 1);
     }
 }
+
+bool
+is_transient_extra_counter_environment(std::string_view name)
+{
+    return name == "ROCPROF_EXTRA_COUNTERS_FILE" ||
+           name == "ROCPROF_EXTRA_COUNTERS_CONTENTS";
+}
+
+class scoped_extra_counter_environment
+{
+public:
+    scoped_extra_counter_environment() = default;
+    ~scoped_extra_counter_environment() { restore(); }
+
+    scoped_extra_counter_environment(const scoped_extra_counter_environment&) = delete;
+    scoped_extra_counter_environment(scoped_extra_counter_environment&&)      = delete;
+    scoped_extra_counter_environment& operator=(const scoped_extra_counter_environment&) = delete;
+    scoped_extra_counter_environment& operator=(scoped_extra_counter_environment&&) = delete;
+
+    bool set(std::string_view name, std::string_view value, bool log_value = false)
+    {
+        const auto restore_after_attach = is_transient_extra_counter_environment(name);
+        if(restore_after_attach)
+        {
+            auto previous = std::optional<std::string>{};
+            if(const auto* current = std::getenv(name.data())) previous = current;
+            m_previous.emplace_back(saved_value{ std::string{ name }, std::move(previous) });
+        }
+
+        errno = 0;
+        if(::setenv(name.data(), value.data(), 1) != 0)
+        {
+            const auto error_number = errno;
+            LOG(ERROR) << "Attachment failed to set environment variable " << name << ": "
+                       << ((error_number != 0) ? std::strerror(error_number)
+                                               : "unknown error");
+            if(restore_after_attach) m_previous.pop_back();
+            return false;
+        }
+
+        if(log_value) log_attachment_environment(name, value);
+        return true;
+    }
+
+    bool apply_buffer(const char* environment_buffer)
+    {
+        // environment_buffer is a null-character delimited list of name value pairs.
+        // Each name and value is delimited separately.
+        // The first 4 bytes contain a uint32_t count of pairs.
+
+        if(!environment_buffer)
+        {
+            LOG(WARNING)
+                << "Attachment was invoked with no environment variables provided "
+                   "for what to trace.";
+            return true;
+        }
+
+        const uint32_t pair_count =
+            *reinterpret_cast<const uint32_t*>(environment_buffer);
+        const char* position = environment_buffer + sizeof(uint32_t);
+        for(uint32_t pair_idx = 0; pair_idx < pair_count; ++pair_idx)
+        {
+            const char* name = position;
+            position += strlen(name) + 1;
+            const char* value = position;
+            position += strlen(value) + 1;
+
+            if(!set(name, value, true)) return false;
+        }
+        return true;
+    }
+
+    bool restore()
+    {
+        if(m_restored) return true;
+        m_restored = true;
+
+        auto success = true;
+        for(auto itr = m_previous.rbegin(); itr != m_previous.rend(); ++itr)
+        {
+            errno             = 0;
+            const auto status = (itr->value)
+                                    ? ::setenv(itr->name.c_str(), itr->value->c_str(), 1)
+                                    : ::unsetenv(itr->name.c_str());
+            if(status != 0)
+            {
+                const auto error_number = errno;
+                LOG(ERROR) << "Attachment failed to restore environment variable "
+                           << itr->name << ": "
+                           << ((error_number != 0) ? std::strerror(error_number)
+                                                   : "unknown error");
+                success = false;
+            }
+        }
+        m_previous.clear();
+        return success;
+    }
+
+private:
+    struct saved_value
+    {
+        std::string                name  = {};
+        std::optional<std::string> value = std::nullopt;
+    };
+
+    bool                     m_restored = false;
+    std::vector<saved_value> m_previous = {};
+};
 
 bool
 is_attachment_library_registered()
@@ -1263,9 +1366,14 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
         return ROCP_REG_ATTACHMENT_NOT_AVAILABLE;
     }
 
+    if(tool_lib_path == nullptr)
+    {
+        LOG(ERROR) << "rocprofiler_register_attach requires a non-null tool library path";
+        return ROCP_REG_INVALID_ARGUMENT;
+    }
+
     static auto prev_tool_lib_path = std::string{};
 
-    // tool_lib_path is declared with non-null attribute
     if(!prev_tool_lib_path.empty() && prev_tool_lib_path != tool_lib_path)
     {
         LOG(WARNING) << "rocprofiler_register_attach invoked with a different "
@@ -1279,24 +1387,20 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
     LOG(INFO) << "rocprofiler_register_attach started with tool_lib_path: "
               << tool_lib_path;
 
-    // Set default tool library path if not provided
-    setenv("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1", 1);
+    // Extra-counter FILE/CONTENTS are synchronous transport values and must not remain in the
+    // target environment. Other forwarded ROCP* values intentionally retain their established
+    // post-attach lifetime.
+    auto       attach_environment = scoped_extra_counter_environment{};
+    const auto finish = [&attach_environment](rocprofiler_register_error_code_t status) {
+        return attach_environment.restore() ? status : ROCP_REG_ROCPROFILER_ERROR;
+    };
 
-    LOG_IF(FATAL, tool_lib_path == nullptr)
-        << "ROCP_TOOL_LIBRARIES is set, but tool_lib_path is NULL. "
-           "This is not supported. Please provide a valid tool library path.";
+    if(!attach_environment.apply_buffer(environment_buffer) ||
+       !attach_environment.set("ROCPROFILER_REGISTER_TOOL_ATTACHED", "1") ||
+       !attach_environment.set("ROCP_TOOL_LIBRARIES", tool_lib_path))
+        return finish(ROCP_REG_ROCPROFILER_ERROR);
 
-    // TODO: should save old environment variables if they get overwritten and restore
-    // them on detach
-    // load_environment_buffer(environment_buffer);
-
-    // Use provided path. Must come after load_environment_buffer to ensure override
-    setenv("ROCP_TOOL_LIBRARIES", tool_lib_path, 1);
     LOG(INFO) << "Using provided tool library: " << tool_lib_path;
-
-    // TODO: should save old environment variables if they get overwritten and restore
-    // them on detach
-    load_environment_buffer(environment_buffer);
 
     // No previous tool library was attached
     if(prev_tool_lib_path.empty())
@@ -1305,19 +1409,19 @@ rocprofiler_register_attach(const char* environment_buffer, const char* tool_lib
         if(status != ROCP_REG_SUCCESS)
         {
             LOG(ERROR) << "error during invoke_all_registrations: " << status;
-            return status;
+            return finish(status);
         }
         prev_tool_lib_path = tool_lib_path;
     }
 
-    if(existing_scanned_data.attach_fn == nullptr) return ROCP_REG_NO_TOOLS;
+    if(existing_scanned_data.attach_fn == nullptr) return finish(ROCP_REG_NO_TOOLS);
 
     LOG(INFO) << "rocprofiler-sdk attach starting...";
     auto _ret = existing_scanned_data.attach_fn();
 
     LOG(INFO) << "rocprofiler-sdk attach completed.";
 
-    return (_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR;
+    return finish((_ret == 0) ? ROCP_REG_SUCCESS : ROCP_REG_ROCPROFILER_ERROR);
 }
 
 //

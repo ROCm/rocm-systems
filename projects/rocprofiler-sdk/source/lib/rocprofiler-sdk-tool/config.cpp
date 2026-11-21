@@ -40,14 +40,18 @@
 #include <linux/limits.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -333,6 +337,51 @@ config::config()
 
         benchmark_mode = valid_options.at(benchmark_mode_env);
     }
+}
+
+void
+config::load_extra_counters()
+{
+    if(extra_counters_file.empty()) return;
+
+    if(!extra_counters_contents.empty())
+    {
+        ROCP_WARNING
+            << "Both ROCPROF_EXTRA_COUNTERS_FILE and "
+               "ROCPROF_EXTRA_COUNTERS_CONTENTS are set; loading extra counters from file '"
+            << extra_counters_file << "'";
+    }
+
+    auto            ec          = std::error_code{};
+    const auto      file_status = common::filesystem::status(extra_counters_file, ec);
+    const auto&     file_path   = extra_counters_file;
+    constexpr auto* description = "extra counter definition file";
+
+    ROCP_FATAL_IF(ec) << "Failed to access " << description << " '" << file_path
+                      << "': " << ec.message();
+    ROCP_FATAL_IF(!common::filesystem::is_regular_file(file_status))
+        << "Extra counter definition file '" << file_path << "' is not a regular file";
+
+    errno      = 0;
+    auto input = std::ifstream{file_path, std::ios::binary};
+    if(!input.is_open())
+    {
+        const auto error_number = errno;
+        ROCP_FATAL << "Failed to open " << description << " '" << file_path
+                   << "': " << ((error_number != 0) ? std::strerror(error_number) : "I/O error");
+    }
+
+    errno = 0;
+    auto contents =
+        std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    if(input.bad())
+    {
+        const auto error_number = errno;
+        ROCP_FATAL << "Failed to read " << description << " '" << file_path
+                   << "': " << ((error_number != 0) ? std::strerror(error_number) : "I/O error");
+    }
+
+    extra_counters_contents = std::move(contents);
 }
 
 std::string
