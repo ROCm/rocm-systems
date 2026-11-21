@@ -1028,14 +1028,12 @@ err_out0:
   return false;
 }
 
-void WDDMDevice::DestroyQueue(WDDMQueue *queue) {
-
-  queue->Fini();
-
+bool WDDMDevice::DestroyQueue(WDDMQueue *queue) {
+  const bool queue_destroyed = queue->Fini() == HSA_STATUS_SUCCESS;
   auto cmdbuf_mem = GpuMemory::Convert(queue->cmdbuf);
   delete cmdbuf_mem;
-
-  DestroyContext(queue->context);
+  const bool context_destroyed = DestroyContext(queue->context);
+  return queue_destroyed && context_destroyed;
 }
 
 bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,

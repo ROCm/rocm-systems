@@ -17,3 +17,9 @@ target_include_directories(cmdbuf_frame_ring_test
 target_compile_features(cmdbuf_frame_ring_test PRIVATE cxx_std_17)
 
 add_test(NAME cmdbuf_frame_ring COMMAND cmdbuf_frame_ring_test)
+
+add_executable(rocdxg_scratch_retirement_test scratch_retirement_test.cpp)
+target_include_directories(rocdxg_scratch_retirement_test
+                           PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+target_compile_features(rocdxg_scratch_retirement_test PRIVATE cxx_std_17)
+add_test(NAME rocdxg_scratch_retirement COMMAND rocdxg_scratch_retirement_test)
