@@ -36,8 +36,9 @@ namespace amd::smi {
  *  - vpod_size: virtual pod size
  *  - vpod_active_accels: list of active accelerator ids
  *  - local_accels: list of local accelerator ids
- *  - addr_mode: source aliasing or source identification
- *  - accel_state: this accelerator state: unconfigured, configured, ready, active, error
+ *  - addr_mode: source-aliasing or source-identification
+ *  - accel_state: this accelerator state: unconfigured, ppod_configured, vpod_configured
+ *    (configured on older kernels), ready, active, error
  */
 
 constexpr auto kIFOE_DRIVER_BASE_PATH = std::string_view("/sys/bus/pci/drivers/ifoe/");
@@ -54,6 +55,7 @@ constexpr auto kUALOE_VPOD_ACTIVE_ACCELS = std::string_view("vpod_active_accels"
 constexpr auto kUALOE_LOCAL_ACCELS = std::string_view("local_accels");
 constexpr auto kUALOE_ADDR_MODE = std::string_view("addr_mode");
 constexpr auto kUALOE_ACCEL_STATE = std::string_view("accel_state");
+constexpr auto kFABRIC_INFO_VERSION_1 = std::uint32_t(1);
 constexpr auto kUALOE_BDF_OFFSET = std::uint16_t(0x01);  // TODO: Example offset - TBD
 
 enum class UALoeLinkInfo_t : std::uint16_t {
