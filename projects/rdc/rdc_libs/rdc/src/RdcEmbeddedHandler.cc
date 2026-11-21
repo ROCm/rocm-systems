@@ -461,13 +461,17 @@ rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
 
 // Control API
 rdc_status_t RdcEmbeddedHandler::rdc_field_update_all(uint32_t wait_for_update) {
+  // One update at a time: each call first waits for the previous background update to finish
+  // (std::async starts its task before the assignment to updater_ would wait for the old one).
+  std::lock_guard<std::mutex> lock(updater_mutex_);
+  if (updater_.valid()) {
+    updater_.wait();
+  }
   if (wait_for_update == 1) {
     return watch_table_->rdc_field_update_all();
   }
 
-  //  Async update the field and return immediately. Callers replace updater_ one at
-  //  a time; replacing it waits for the previous background update to finish.
-  std::lock_guard<std::mutex> lock(updater_mutex_);
+  //  Async update the field and return immediately.
   updater_ = std::async(std::launch::async, [this]() { watch_table_->rdc_field_update_all(); });
 
   return RDC_ST_OK;

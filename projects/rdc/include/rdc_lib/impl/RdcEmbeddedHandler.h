@@ -164,7 +164,7 @@ class RdcEmbeddedHandler final : public RdcHandler {
   RdcPolicyPtr policy_;
   RdcTopologyLinkPtr topologylink_;
   RdcConfigSettingsPtr config_handler_;
-  std::mutex updater_mutex_;  // rdc_field_update_all() calls replace updater_ one at a time
+  std::mutex updater_mutex_;  // rdc_field_update_all() runs one update at a time
   std::future<void> updater_;
 };
 

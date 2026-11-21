@@ -223,8 +223,9 @@ handle = start(MANUAL)
 watch(handle, b"bg", fields, 1000)  # due at every update
 failed = []
 def ask():
-    for _ in range(calls):
-        st = lib.rdc_field_update_all(handle, 0)  # 0: in the background
+    for i in range(calls):
+        # 0: in the background; now and then 1, which waits for the update
+        st = lib.rdc_field_update_all(handle, 1 if i % 50 == 49 else 0)
         if st != 0:
             failed.append(st)
 workers = [threading.Thread(target=ask) for _ in range(threads)]

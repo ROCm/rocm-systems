@@ -1178,9 +1178,9 @@ rdc_status_t rdc_job_remove_all(rdc_handle_t p_rdc_handle);
  *  @brief Request RDC to update all fields to be watched.
  *
  *  @details In RDC_OPERATION_MODE_MANUAL, the user must call this method
- *  periodically. With wait_for_update 0 the update runs in the background; a
- *  call waits for the previous background update, from any thread, to finish
- *  before it starts another.
+ *  periodically. With wait_for_update 0 the update runs in the background.
+ *  Each call first waits for the previous background update, from any thread,
+ *  to finish.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
