@@ -136,6 +136,7 @@ fn gfx1201_kernel_queue_refresh_contract() -> Result<(), Box<dyn Error>> {
     }
     assert_eq!(queue.status().retired_submission, submission);
     queue.destroy()?;
+    drop(queue);
     command.free()?;
     drop(command);
     drop(device);
@@ -1426,6 +1427,7 @@ fn gfx1201_aql_barrier(
         return Err(Box::new(error));
     }
     signal.free()?;
+    drop(signal);
     drop(queue);
     drop(device);
     session.destroy()?;
