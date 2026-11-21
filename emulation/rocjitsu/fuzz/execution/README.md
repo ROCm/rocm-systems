@@ -9,9 +9,9 @@ zero-valued GWS INIT, so arbitrary streams begin from defined GWS state.
 An input has three parts:
 
 - Byte zero selects `gfx908`, `gfx90a`, `gfx942`, `gfx950`, `gfx1010`,
-  `gfx1030`, `gfx1100`, `gfx1151`, `gfx1200`, `gfx1201`, `gfx1250`, or
-  `gfx1251`. Their stable selector values are 0 through 11. Other values do no
-  work.
+  `gfx1030`, `gfx1100`, `gfx1150`, `gfx1200`, `gfx1201`, `gfx1250`, or
+  `gfx1251`. Their selector values are 0 through 11. Each selects a concrete
+  registry binding. Other values do no work.
 - Byte one selects asynchronous execution, concurrent issuers, and full EXEC.
   Bit `0x10` enables runtime memory-wait diagnostics, including XCNT on CDNA5.
   Bit `0x20` selects the cache-backed memory path for the same bounded mapping.

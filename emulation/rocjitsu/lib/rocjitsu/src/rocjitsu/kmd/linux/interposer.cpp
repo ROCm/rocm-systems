@@ -2741,14 +2741,21 @@ public:
               ib.ip_instance || ib.ring >= (ib.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u) ||
               !ib.ib_bytes || (ib.ib_bytes & 3) ||
               (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
-                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC)))
+                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC |
+                            AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID)))
+            return -EINVAL;
+          if ((ib.flags & AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID) &&
+              !driver->supports_pm4_gds_wave_id_reset(file->render_minor))
             return -EINVAL;
           if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
             return -EINVAL;
           submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
           engine = ib.ip_type;
           ring = ib.ring;
-          submission.buffers.push_back({.address = ib.va_start, .dwords = ib.ib_bytes / 4});
+          submission.buffers.push_back(
+              {.address = ib.va_start,
+               .dwords = ib.ib_bytes / 4,
+               .reset_gds_wave_id = bool(ib.flags & AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID)});
           break;
         }
         case AMDGPU_CHUNK_ID_FENCE: {
@@ -5893,6 +5900,15 @@ FcntlArgKind fcntl_arg_kind(int cmd) {
   case F_GETLK:
 #if defined(F_GETLK64) && (!defined(F_GETLK) || F_GETLK64 != F_GETLK)
   case F_GETLK64:
+#endif
+#ifdef F_OFD_SETLK
+  case F_OFD_SETLK:
+#endif
+#ifdef F_OFD_SETLKW
+  case F_OFD_SETLKW:
+#endif
+#ifdef F_OFD_GETLK
+  case F_OFD_GETLK:
 #endif
 #ifdef F_GETOWNER_UIDS
   case F_GETOWNER_UIDS:

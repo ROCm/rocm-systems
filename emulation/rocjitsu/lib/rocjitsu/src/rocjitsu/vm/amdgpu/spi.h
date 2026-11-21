@@ -13,6 +13,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -75,18 +76,18 @@ public:
   }
 
   /// CS SGPR ABI: count [5:0], ordered append term [17:6], first wave [31].
-  static uint32_t workgroup_info(rj_code_arch_t arch, uint32_t wave_count, uint32_t wave,
+  static uint32_t workgroup_info(rocjitsu::IsaFamily arch, uint32_t wave_count, uint32_t wave,
                                  uint32_t term) {
     uint32_t info = wave_count;
-    if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    if (arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4)
       info |= term << 6;
     if (!isa_properties(arch).uses_ttmp_workgroup_ids) {
       info |= wave == 0 ? 1u << 31 : 0;
       // CDNA3/4 list a 34-bit concatenation. Their [24:20] position follows
       // RDNA2/3's layout and has no gfx942/gfx950 hardware qualification.
-      if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-          arch == ROCJITSU_CODE_ARCH_RDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-          arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+      if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4 ||
+          arch == rocjitsu::IsaFamily::Rdna2 || arch == rocjitsu::IsaFamily::Rdna3 ||
+          arch == rocjitsu::IsaFamily::Rdna3_5)
         info |= wave << 20;
     }
     return info;
@@ -101,6 +102,31 @@ public:
   void clear_vmid_apertures() {
     for (auto *cu : cus_)
       cu->clear_vmid_apertures();
+  }
+
+  /// Allocate GFX10 ordered IDs only after a workgroup's placement can commit.
+  static void init_ordered_append(ComputeUnitCore &cu, const DispatchEntry &entry,
+                                  std::span<Wavefront *> waves) {
+    using OrderedAppend = DispatchEntry::OrderedAppend;
+    if (entry.ordered_append == OrderedAppend::Disabled)
+      return;
+    const bool per_wave = entry.ordered_append == OrderedAppend::PerWave;
+    // COMPUTE_DISPATCH_INITIATOR assigns a term per wave or per group on this ring.
+    // RDNA1/2's CS SGPR table delivers it in TG_INFO[17:6]. The shader packs that
+    // term into M0 with its counter base before issuing DS_ORDERED_COUNT.
+    const uint32_t base = cu.gws_device().reserve_ordered_ids(
+        entry.process_id, entry.queue_id, per_wave ? entry.wfs_per_workgroup : 1,
+        entry.ordered_id_count);
+    if (!entry.enable_wg_info)
+      return;
+    const uint32_t sgpr =
+        entry.num_user_sgprs + entry.enable_wg_id_x + entry.enable_wg_id_y + entry.enable_wg_id_z;
+    for (auto *wf : waves) {
+      const uint32_t wave = wf->wave_in_group();
+      const uint32_t term = (base + (per_wave ? wave : 0)) % entry.ordered_id_count;
+      cu.write_sgpr(wf->sgpr_alloc().base + sgpr,
+                    workgroup_info(cu.arch(), entry.wfs_per_workgroup, wave, term));
+    }
   }
 
   /// @brief Enqueue a workgroup from an ACE pipe.
@@ -162,6 +188,7 @@ public:
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);
         wg_wfs.push_back(wf);
       }
+      init_ordered_append(*cu, *wg.entry, wg_wfs);
       if (on_wg_dispatch)
         on_wg_dispatch(wg.global_wg_id, *wg.entry, std::span<Wavefront *>(wg_wfs));
       q.pop_front();

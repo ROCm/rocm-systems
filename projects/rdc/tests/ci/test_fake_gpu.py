@@ -64,12 +64,13 @@ UNREACHED_APIS = {
     "amdsmi_set_gpu_clk_limit": "rdci config has no --host option",
     "amdsmi_set_gpu_perf_level": "rdci config has no --host option",
     "amdsmi_reset_gpu": "policy reset action needs a breached threshold",
-    "amdsmi_stop_gpu_event_notification": "rdci offers no notification event field",
 }
 
-# A failing amdsmi_init() makes rdcd hang, then crash on SIGTERM; the rdcd
-# start/stop fix adds that case. amdsmi_shut_down() has no failure to inject.
-LIFECYCLE_APIS = {"amdsmi_init", "amdsmi_shut_down"}
+# test_fake_gpu_session.py fails amdsmi_init(). amdsmi_shut_down() has no failure
+# to inject. rdcd calls amdsmi_stop_gpu_event_notification() only when it stops,
+# for the GPU events of a job (rdci offers no event field to unwatch), and only
+# logs a failure there.
+LIFECYCLE_APIS = {"amdsmi_init", "amdsmi_shut_down", "amdsmi_stop_gpu_event_notification"}
 
 
 def _missing(what):

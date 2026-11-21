@@ -1,12 +1,12 @@
 ---
 myst:
     html_meta:
-        "description": "Execution plugin system in rocJITsu, covering the ExecutionPlugin interface, multi-plugin dispatch, sink configuration, and built-in plugins for race detection and kernel logging."
-        "keywords": "rocJITsu, ROCm, execution plugins, race detection, kernel logging, sink system, RJ_RACE, RJ_LOG, RJ_SINKS, RJ_SINK_DIR"
+        "description": "Execution plugin system in rocjitsu, covering the ExecutionPlugin interface, multi-plugin dispatch, sink configuration, and built-in plugins for race detection and kernel logging."
+        "keywords": "rocjitsu, ROCm, execution plugins, race detection, kernel logging, sink system, RJ_RACE, RJ_LOG, RJ_SINKS, RJ_SINK_DIR"
 ---
 # Execution plugin system
 
-rocJITsu provides a pluggable execution plugin system that lets analysis
+rocjitsu provides a pluggable execution plugin system that lets analysis
 tools observe simulation events without modifying the core hardware
 model. Each plugin receives callbacks at well-defined points during
 wavefront execution, and all output flows through a configurable sink
@@ -41,9 +41,17 @@ destination register is consumed.
 
 ### Barrier
 
-Called when a wavefront executes an `s_barrier` instruction. Plugins
-that track inter-wave synchronization within a workgroup use this to
-update epoch or ordering state.
+Called as waves synchronize through a barrier. Three steps are reported
+separately. A completed round *notifies* waves: `onAmdgpuBarrierResolved`
+lists them. The round *arms* the wait of each notified wave whose
+completion bit it set: `onAmdgpuBarrierRoundCompleted` lists those. A wave
+*passes* its wait: `onAmdgpuBarrierWaitPassed` names the round that
+released it. On gfx1250, where `s_barrier_signal` and `s_barrier_wait` are
+separate instructions, a wave is ordered after a round only from the
+moment it passes its wait, so plugins that track inter-wave
+synchronization update each wave's ordering state there. A target with a
+single `s_barrier` instruction reports all three steps when the barrier
+resolves.
 
 ### Waitcnt
 
@@ -87,7 +95,7 @@ that multiple sinks can be active at the same time. For example,
 | `RJ_SINK_DIR` | *(none)* | Directory for file sinks. Required when `file` appears in `RJ_SINKS`. |
 
 
-For a full reference of all rocJITsu environment variables, see
+For a full reference of all rocjitsu environment variables, see
 [Environment variable reference](../reference/environment-variables.md).
 
 ## Built-in plugins

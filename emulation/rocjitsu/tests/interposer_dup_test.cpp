@@ -297,6 +297,49 @@ TEST(InterposerDupTest, TrackedMunmapFailureUsesLibcErrno) {
   EXPECT_EQ(close(kfd), 0);
 }
 
+TEST(InterposerDupTest, ClientMunmapClearsOnlyReplacedSvmPolicy) {
+  const int kfd = open_kfd();
+  ASSERT_GE(kfd, 0);
+  uint32_t gpu_id = 0;
+  ASSERT_TRUE(read_gpu_id(gpu_id));
+  const long page_size = sysconf(_SC_PAGESIZE);
+  ASSERT_GT(page_size, 0);
+  const auto page = static_cast<size_t>(page_size);
+  auto *base = static_cast<std::byte *>(
+      mmap(nullptr, 2 * page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(base, MAP_FAILED);
+
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  const unsigned long request =
+      (AMDKFD_IOC_SVM & ~(_IOC_SIZEMASK << _IOC_SIZESHIFT)) | (buffer.size() << _IOC_SIZESHIFT);
+  svm->start_addr = reinterpret_cast<uintptr_t>(base);
+  svm->size = 2 * page;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 1;
+  svm->attrs[0] = {KFD_IOCTL_SVM_ATTR_NO_ACCESS, gpu_id};
+  ASSERT_EQ(ioctl(kfd, request, svm), 0);
+  const auto expect_access = [&](std::byte *address, uint32_t expected) {
+    svm->start_addr = reinterpret_cast<uintptr_t>(address);
+    svm->size = page;
+    svm->op = KFD_IOCTL_SVM_OP_GET_ATTR;
+    svm->attrs[0] = {KFD_IOCTL_SVM_ATTR_ACCESS, gpu_id};
+    ASSERT_EQ(ioctl(kfd, request, svm), 0);
+    EXPECT_EQ(svm->attrs[0].type, expected);
+  };
+  expect_access(base, KFD_IOCTL_SVM_ATTR_NO_ACCESS);
+  ASSERT_EQ(munmap(base, 1), 0);
+  ASSERT_EQ(mmap(base, page, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0),
+            base);
+  expect_access(base, KFD_IOCTL_SVM_ATTR_ACCESS);
+  expect_access(base + page, KFD_IOCTL_SVM_ATTR_NO_ACCESS);
+  EXPECT_EQ(munmap(base, 2 * page), 0);
+  EXPECT_EQ(close(kfd), 0);
+}
+
 TEST(InterposerDupTest, LiveSvmDenialEndsOnHostVmaReplacement) {
   using GpuAccess = int (*)(uint32_t, uint64_t, size_t);
   auto gpu_access =
@@ -888,6 +931,59 @@ TEST(InterposerDupTest, FcntlDupfdKeepsKfdRouting) {
   // Original still routes.
   EXPECT_TRUE(kfd_version_ok(kfd));
   EXPECT_EQ(close(kfd), 0);
+}
+
+// The memory keeper takes its lease with OFD locks, which go through the
+// interposed fcntl with a pointer argument. Take a write lock on a temporary
+// file, check that F_OFD_GETLK reports the conflict from a second open of the
+// same file, then release the lock. This catches a dropped vararg pointer
+// without starting the keeper.
+TEST(InterposerDupTest, FcntlOfdLocksReachTheRealFileTable) {
+  rocjitsu::test::ScopedTempFile lock_file;
+  ASSERT_TRUE(lock_file.initialize("rocjitsu_ofd_lock"));
+
+  int first = open(lock_file.path().c_str(), O_RDWR | O_CLOEXEC);
+  ASSERT_GE(first, 0);
+  int second = open(lock_file.path().c_str(), O_RDWR | O_CLOEXEC);
+  ASSERT_GE(second, 0);
+
+  struct flock lease {};
+  lease.l_type = F_WRLCK;
+  lease.l_whence = SEEK_SET;
+  lease.l_start = 0;
+  lease.l_len = 0;
+  ASSERT_EQ(fcntl(first, F_OFD_SETLK, &lease), 0) << std::strerror(errno);
+
+  // The lock is open-file-description scoped: a second open of the same path
+  // must observe the conflict. F_OFD_GETLK reports the conflicting lock with
+  // l_pid set to -1, since an OFD lock is not tied to a process id.
+  struct flock conflict {};
+  conflict.l_type = F_WRLCK;
+  conflict.l_whence = SEEK_SET;
+  conflict.l_start = 0;
+  conflict.l_len = 0;
+  ASSERT_EQ(fcntl(second, F_OFD_GETLK, &conflict), 0) << std::strerror(errno);
+  EXPECT_EQ(conflict.l_type, F_WRLCK);
+  EXPECT_EQ(conflict.l_pid, -1);
+
+  // Unlock through the waiting variant; nothing conflicts, so it returns at
+  // once and a third probe no longer reports the lock.
+  struct flock release {};
+  release.l_type = F_UNLCK;
+  release.l_whence = SEEK_SET;
+  release.l_start = 0;
+  release.l_len = 0;
+  ASSERT_EQ(fcntl(first, F_OFD_SETLKW, &release), 0) << std::strerror(errno);
+  struct flock clear {};
+  clear.l_type = F_WRLCK;
+  clear.l_whence = SEEK_SET;
+  clear.l_start = 0;
+  clear.l_len = 0;
+  ASSERT_EQ(fcntl(second, F_OFD_GETLK, &clear), 0) << std::strerror(errno);
+  EXPECT_EQ(clear.l_type, F_UNLCK);
+
+  EXPECT_EQ(close(second), 0);
+  EXPECT_EQ(close(first), 0);
 }
 
 // dup2 that OVERWRITES the primary KFD fd number must invalidate the old primary
