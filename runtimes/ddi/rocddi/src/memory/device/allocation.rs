@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 //! Device-accessible allocation ownership and registration.
+//!
+//! New allocations, registrations, and access changes participate in session
+//! admission. Retirement leaves checks and explicit resource release available.
 
 use super::{
     AllocationInfo, DeviceAccess, HostMappingPolicy, HostRegistration, MemoryKind,
@@ -100,6 +103,10 @@ pub(crate) struct DriverAllocation<D: AllocationOperations> {
 }
 
 impl<D: AllocationOperations> DriverAllocation<D> {
+    pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        self.driver.admission().enter()
+    }
+
     pub(crate) fn new(driver: Shared<D>, inner: Owned<D::Allocation>) -> Self {
         let info = inner.cached_info();
         Self {
@@ -172,6 +179,7 @@ where
     D: AllocationOperations,
     F: for<'a> Fn(&'a Device) -> Option<(&'a Shared<D>, &'a D::DeviceState)>,
 {
+    let _operation = allocation.admit()?;
     let mut states = crate::memory::storage::try_vec_with_capacity(devices.len())?;
     for device in devices {
         let (driver, state) = state_of(device).ok_or(Error::Operation {
@@ -236,6 +244,17 @@ impl Allocation {
         self.inner.info()
     }
 
+    /// Borrows retained memory for a fatal diagnostic, including after a VM fault.
+    /// Unmapped private VRAM has no CPU alias and must be recorded as unavailable.
+    ///
+    /// # Errors
+    /// Rejects released, uncertain, MMIO, or unsupported backing.
+    pub fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.inner.diagnostic_memory()
+    }
+
     /// Offset of this allocation's logical base into an identified backing.
     /// For a page-cover registration, add the returned caller-pointer offset.
     /// Absence means that the provider has no external backing-offset metadata.
@@ -261,6 +280,7 @@ impl Allocation {
         &mut self,
         identity: LocalBackingIdentity,
     ) -> Result<(), Error> {
+        let _operation = self.inner.admit()?;
         self.check()?;
         if identity.namespace == 0 || identity.object == 0 {
             return Err(Error::Operation {
@@ -698,8 +718,47 @@ impl Device {
 }
 
 #[cfg(test)]
-mod rollback_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn retiring_allocation_rejects_publication_and_preserves_release() -> Result<(), Error> {
+        use crate::driver::test_driver::TestDriver;
+        use crate::session::{DriverContextLifetime, RetirementOutcome, Session};
+        use crate::topology::EndpointKind;
+
+        let id = [0x67; 16];
+        let driver = TestDriver::new(id, EndpointKind::Npu, DriverContextLifetime::Session)
+            .with_owned_allocation();
+        let mut session = Session::from_drivers(
+            vec![driver::DriverInstance::Test(Shared::new(driver)?)],
+            DriverContextLifetime::Session,
+        )?;
+        let device = session.activate(&session.open_endpoint(id)?)?;
+        let mut allocation = device.allocate(MemoryKind::System, 4096, 4096, DeviceAccess::READ)?;
+        session.begin_retirement()?;
+        assert!(
+            device
+                .allocate(MemoryKind::System, 4096, 4096, DeviceAccess::READ)
+                .is_err()
+        );
+        assert!(matches!(
+            allocation.bind_local_backing_identity(LocalBackingIdentity {
+                namespace: 1,
+                object: 1,
+            }),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        assert!(allocation.local_backing_identity().is_none());
+        allocation.check()?;
+        assert_ne!(allocation.device_address(&device)?, 0);
+        assert!(matches!(session.try_close(), RetirementOutcome::Busy));
+        allocation.free()?;
+        drop(allocation);
+        drop(device);
+        assert!(matches!(session.try_close(), RetirementOutcome::Closed));
+        Ok(())
+    }
 
     #[test]
     fn rollback_capture_keeps_first_error_and_charges_only_owned_payload() {

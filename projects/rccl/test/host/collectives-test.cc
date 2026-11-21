@@ -203,6 +203,7 @@ struct Fakes {
   hipError_t lastError = hipSuccess;
   ncclResult_t groupStartResult = ncclSuccess;
   ncclResult_t groupEndResult = ncclSuccess;
+  ncclResult_t groupErrorAtEnd = ncclSuccess;
   std::vector<P2p> p2ps;
   int p2pFailAt = 0;
   std::map<int, std::vector<size_t>> peerMeta;  // copied into an ncclRecv buffer from that peer
@@ -276,6 +277,9 @@ ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, n
 
 #if defined(ENABLE_ROCSHMEM_GIN)
 // The GIN-SDMA launchers (src/algorithms/gin/sdma/*.cu) have no fakes file yet.
+ncclResult_t ncclAllGatherGinSdma(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c, hipStream_t st) {
+  return RecordAddon("ncclAllGatherGinSdma", s, r, n, t, ncclNumOps, c, st);
+}
 ncclResult_t ncclAllToAllGinSdma(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c, hipStream_t st) {
   return RecordAddon("ncclAllToAllGinSdma", s, r, n, t, ncclNumOps, c, st);
 }
@@ -535,10 +539,14 @@ struct SharedHooks {
   // group.cc and init.cc
   ScopedHook<ncclResult_t()> groupStart{g_ncclGroupStart, [] {
     fake.trace.push_back("groupStart");
+    if (fake.groupStartResult == ncclSuccess) ++ncclGroupDepth;
     return fake.groupStartResult;
   }};
   ScopedHook<ncclResult_t()> groupEnd{g_ncclGroupEnd, [] {
     fake.trace.push_back("groupEnd");
+    fake.groupErrorAtEnd = ncclGroupError;
+    if (ncclGroupDepth > 0) --ncclGroupDepth;
+    if (ncclGroupDepth == 0) ncclGroupError = ncclSuccess;
     return fake.groupEndResult;
   }};
   ScopedHook<ncclResult_t(const ncclComm_t, int*)> commCount{g_commCount, [](const ncclComm_t comm, int* count) {
@@ -590,6 +598,9 @@ class CollectivesMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     fake = Fakes{};
+    ncclGroupDepth = 0;
+    ncclGroupError = ncclSuccess;
+    rccl::Recorder::instance().skip(false);
     g_recorderSkips.clear();
 
     comm_ = MakeComm(kRank, kNRanks);
@@ -599,6 +610,10 @@ class CollectivesMicrotest : public ::testing::Test {
   }
 
   void TearDown() override {
+    ncclGroupDepth = 0;
+    ncclGroupError = ncclSuccess;
+    rccl::Recorder::instance().skip(false);
+    g_recorderSkips.clear();
     for (void* p : fake.memAllocs) std::free(p);
     fake.memAllocs.clear();
     ResetHipFakes();       // g_hipMemcpyAsyncArgs
@@ -1894,7 +1909,8 @@ TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
   EXPECT_EQ(sizeof(float), fake.profArgs.eltSize);
   EXPECT_EQ(reinterpret_cast<uint8_t*>(send_.data()), fake.profArgs.sendBuff);
   EXPECT_EQ(reinterpret_cast<uint8_t*>(recv_.data()), fake.profArgs.recvBuff);
-  EXPECT_EQ(nullptr, fake.profArgs.collApiEventHandle);
+  // 2.32.6: the handle is an ncclProfilerEventRef holding one slot per profiler plugin; all must be empty.
+  for (void* h : fake.profArgs.collApiEventHandle.h) EXPECT_EQ(nullptr, h);
   ASSERT_EQ(1u, fake.ceArs.size());
   EXPECT_EQ(send_.data(), fake.ceArs[0].sendbuff);
   EXPECT_EQ(recv_.data(), fake.ceArs[0].recvbuff);
@@ -2044,6 +2060,8 @@ class CollectivesAlltoAllvMicrotest : public CollectivesMicrotest {
  protected:
   void SetUp() override {
     CollectivesMicrotest::SetUp();
+    comm_->config.blocking = 1;
+    comm_->allRanksBlocking = true;
     fake.windows[send_.data()] = &sendWin_;
     fake.windows[recv_.data()] = &recvWin_;
     fake.regType = ncclSymSendRegRecvReg;
@@ -2158,29 +2176,111 @@ TEST_F(CollectivesAlltoAllvMicrotest, SetupFailuresStopBeforeAnyTraffic) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
-// A failed post returns without ncclGroupEnd or skip(false), so the caller's group stays open.
-// Pins AICOMRCCL-2980; a fix flips this pin.
-TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_KnownBug_FailureLeavesTheGroupOpen) {
+TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_GroupStartFailureRestoresRecorderState) {
   fake.groupStartResult = ncclInvalidUsage;
-  EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
-  EXPECT_TRUE(fake.p2ps.empty());
-  fake.groupStartResult = ncclSuccess;
-  for (int failAt : {3, 4}) {
-    SCOPED_TRACE(failAt);
-    fake.p2ps.clear();
+  for (bool skipped : {false, true}) {
+    ncclGroupDepth = 2;
+    rccl::Recorder::instance().skip(skipped);
     g_recorderSkips.clear();
-    fake.trace.clear();
-    fake.p2pFailAt = failAt;
-    EXPECT_EQ(ncclInternalError, AlltoAllv());
-    EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
-    EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
-    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
+    EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
+    EXPECT_EQ(ncclGroupDepth, 2);
+    EXPECT_EQ(rccl::Recorder::instance().isSkipped(), skipped);
+    EXPECT_EQ((std::vector<bool>{true, skipped}), g_recorderSkips);
   }
-  fake.p2pFailAt = 0;
-  g_recorderSkips.clear();
+  EXPECT_TRUE(fake.p2ps.empty());
+  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
+}
+
+TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_FailureClosesOnlyItsOwnGroup) {
   fake.groupEndResult = ncclRemoteError;
-  EXPECT_EQ(ncclRemoteError, AlltoAllv());
-  EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
+  for (int depth : {0, 2}) {
+    for (bool skipped : {false, true}) {
+      for (int failAt = 1; failAt <= 2 * kNRanks; ++failAt) {
+        SCOPED_TRACE(depth);
+        SCOPED_TRACE(skipped);
+        SCOPED_TRACE(failAt);
+        ncclGroupDepth = depth;
+        ncclGroupError = ncclSuccess;
+        fake.groupErrorAtEnd = ncclSuccess;
+        rccl::Recorder::instance().skip(skipped);
+        fake.p2ps.clear();
+        g_recorderSkips.clear();
+        fake.trace.clear();
+        fake.p2pFailAt = failAt;
+        EXPECT_EQ(ncclInternalError, AlltoAllv());
+        EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
+        EXPECT_EQ(ncclGroupDepth, depth);
+        EXPECT_EQ(fake.groupErrorAtEnd, ncclInternalError);
+        EXPECT_EQ(rccl::Recorder::instance().isSkipped(), skipped);
+        EXPECT_EQ((std::vector<bool>{true, skipped}), g_recorderSkips);
+        EXPECT_EQ(1, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
+      }
+    }
+  }
+}
+
+TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_PropagatesGroupEndStatusAndRestoresRecorder) {
+  for (bool skipped : {false, true}) {
+    for (ncclResult_t result : {ncclSuccess, ncclInProgress, ncclRemoteError}) {
+      SCOPED_TRACE(result);
+      fake.p2ps.clear();
+      rccl::Recorder::instance().skip(skipped);
+      g_recorderSkips.clear();
+      fake.groupEndResult = result;
+      EXPECT_EQ(result, AlltoAllv());
+      EXPECT_EQ(2u * kNRanks, fake.p2ps.size());
+      EXPECT_EQ(ncclGroupDepth, 0);
+      EXPECT_EQ(rccl::Recorder::instance().isSkipped(), skipped);
+      EXPECT_EQ((std::vector<bool>{true, skipped}), g_recorderSkips);
+    }
+  }
+}
+
+TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_NestedCallsPreserveTheOuterGroup) {
+  ncclGroupDepth = 2;
+  rccl::Recorder::instance().skip(true);
+  for (int call = 0; call < 2; ++call) {
+    SCOPED_TRACE(call);
+    fake.p2ps.clear();
+    fake.trace.clear();
+    EXPECT_EQ(ncclSuccess, AlltoAllv());
+    EXPECT_EQ(ncclGroupDepth, 2);
+    EXPECT_EQ(ncclGroupError, ncclSuccess);
+    EXPECT_TRUE(rccl::Recorder::instance().isSkipped());
+    EXPECT_EQ(2u * kNRanks, fake.p2ps.size());
+    EXPECT_EQ(1, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
+  }
+}
+
+TEST_F(CollectivesAlltoAllvMicrotest, NonblockingPeer_UsesPayloadP2pRegardlessOfLocalBlockingMode) {
+  comm_->allRanksBlocking = false;
+  for (bool hierarchical : {false, true}) {
+    fake.ceElig = !hierarchical;
+    fake.hierElig = hierarchical;
+    for (int blocking : {0, 1}) {
+      comm_->config.blocking = blocking;
+      SCOPED_TRACE(testing::Message() << "blocking=" << blocking);
+      for (ncclResult_t result : {ncclSuccess, ncclInProgress}) {
+        SCOPED_TRACE(hierarchical);
+        SCOPED_TRACE(result);
+        fake.p2ps.clear();
+        fake.groupEndResult = result;
+        EXPECT_EQ(result, AlltoAllv());
+        EXPECT_TRUE(fake.memAllocSizes.empty());
+        EXPECT_TRUE(g_hipMemcpyAsyncArgs.empty());
+        EXPECT_TRUE(fake.enqueued.empty());
+        EXPECT_EQ(ncclGroupDepth, 0);
+        ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
+        for (int peer = 0; peer < kNRanks; ++peer) {
+          EXPECT_EQ(fake.p2ps[2 * peer].buff, send_.data() + sdispls_[peer]);
+          EXPECT_EQ(fake.p2ps[2 * peer].count, sendcounts_[peer]);
+          EXPECT_EQ(fake.p2ps[2 * peer].datatype, ncclFloat32);
+          EXPECT_EQ(fake.p2ps[2 * peer + 1].buff, recv_.data() + rdispls_[peer]);
+          EXPECT_EQ(fake.p2ps[2 * peer + 1].count, recvcounts_[peer]);
+        }
+      }
+    }
+  }
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangesTheSizeMatrixThenEnqueuesIt) {
@@ -2290,19 +2390,37 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_DeviceSwitchFailuresStopTheCall) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
-// A failed size-exchange post returns without ncclGroupEnd, so the caller's group stays open.
-// Pins AICOMRCCL-2980; a fix flips this pin.
-TEST_F(CollectivesAlltoAllvMicrotest, Ce_KnownBug_FailedExchangePostLeavesTheGroupOpen) {
+TEST_F(CollectivesAlltoAllvMicrotest, Ce_FailedExchangePostClosesTheGroup) {
   fake.ceElig = true;
-  for (int failAt : {1, 2}) {
+  fake.groupEndResult = ncclRemoteError;
+  for (int failAt = 1; failAt <= 2 * kNRanks; ++failAt) {
     SCOPED_TRACE(failAt);
+    ncclGroupDepth = 0;
+    ncclGroupError = ncclSuccess;
     fake.p2ps.clear();
     fake.trace.clear();
+    g_hipMemcpyAsyncArgs.clear();
     fake.p2pFailAt = failAt;
     EXPECT_EQ(ncclInternalError, AlltoAllv());
     EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
-    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
+    EXPECT_EQ(1, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
+    EXPECT_EQ(ncclGroupDepth, 0);
+    EXPECT_EQ(fake.groupErrorAtEnd, ncclInternalError);
+    ASSERT_EQ(g_hipMemcpyAsyncArgs.size(), 1u);
+    EXPECT_EQ(g_hipMemcpyAsyncArgs[0].kind, hipMemcpyHostToDevice);
+    EXPECT_TRUE(fake.enqueued.empty());
   }
+}
+
+TEST_F(CollectivesAlltoAllvMicrotest, Ce_InProgressStopsBeforeReadingMetadata) {
+  fake.ceElig = true;
+  fake.groupEndResult = ncclInProgress;
+  EXPECT_EQ(ncclInProgress, AlltoAllv());
+  ASSERT_EQ(g_hipMemcpyAsyncArgs.size(), 1u);
+  EXPECT_EQ(g_hipMemcpyAsyncArgs[0].kind, hipMemcpyHostToDevice);
+  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "sync"));
+  EXPECT_TRUE(fake.enqueued.empty());
+  EXPECT_EQ(ncclGroupDepth, 0);
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangeFailuresReturnTheFirstError) {

@@ -42,6 +42,19 @@ ncclResult_t ncclGpuCftSupport(struct ncclComm*, int* gpuCftSupport, bool* gpuCf
   return ncclSuccess;
 }
 
+// src/cft_dev_runtime.cc (NCCL 2.32.6): fillInfo records the CUDA clique ids. Without CUDA >= 13.4 the
+// production body reports UINT32_MAX for both, which is the only HIP behaviour.
+ncclResult_t ncclGpuGetCliqueIds(int /*dev*/, uint32_t* unicastId, uint32_t* multicastId) {
+  *unicastId = UINT32_MAX;
+  *multicastId = UINT32_MAX;
+  return ncclSuccess;
+}
+
+// src/misc/rocmwrap.cc: fillInfo (NCCL 2.32.6) ANDs cuMemSupport with this. Not compiled into MicroInit;
+// tests set g_cuMemHostEnable to exercise the cuMemHostSupport bit.
+int g_cuMemHostEnable = 0;
+int ncclCuMemHostEnable() { return g_cuMemHostEnable; }
+
 // src/ras/progress_monitor.cc (NCCL 2.32). NCCL_PROGRESS_COUNTERS defaults to 0, so the suites here never
 // start a monitor; Destroy runs on every comm teardown and must succeed.
 ncclResult_t ncclProgressCounterMonitorInit(struct ncclComm*) { return ncclSuccess; }
@@ -119,5 +132,6 @@ void ResetInitFakes() {
   ResetTransportStubs();
   ResetTransportNetIbFakes();
   ResetTuningFakes();
+  g_cuMemHostEnable = 0;
   g_ncclNetInitResult = ncclSuccess;
 }

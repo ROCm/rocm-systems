@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Shared by sym-kernels-test.cc and sym-model-test.cc, which link into the same binary.
+// Shared by sym-kernels-test.cc and tuning/sym-model-test.cc.
 
 #ifndef RCCL_TEST_HOST_SYM_TDM_TEST_HELPERS_H_
 #define RCCL_TEST_HOST_SYM_TDM_TEST_HELPERS_H_

@@ -31,19 +31,13 @@ bool LegacyAddressSpace::local_ingress_mapped(
     return false;
   // Cached coverage identifies mapped GPU pages. Only the driver owns stable
   // write permissions. Application pages need a fresh check on each ingress.
-  struct Coverage {
-    uint64_t memory = 0, generation = 0, begin = 0, end = 0;
-    uint32_t vmid = 0;
-    std::shared_ptr<LegacyPageTableCacheState> policies;
-    bool driver_owned = false;
-    uintptr_t host_begin = 0;
-  };
-  static thread_local std::array<Coverage, 8> runs;
+  auto &cache = thread_pte_caches();
+  auto &runs = cache.coverage_runs;
   const bool writing =
       std::ranges::any_of(spans, [](const auto &s) { return s.access != VmAccessKind::Read; });
   // A contiguous application mapping still needs a fresh kernel permission
   // query for each ingress. Only reuse its numeric GPU-to-host offset.
-  const auto admitted = [&](const Coverage &run) {
+  const auto admitted = [&](const PteCacheSet::Coverage &run) {
     if (!writing || run.driver_owned)
       return true;
     if (!run.host_begin)
@@ -89,8 +83,7 @@ bool LegacyAddressSpace::local_ingress_mapped(
       driver_owned &= extent.owner != LegacyHostExtentOwner::Application;
     }
     if (page != first) {
-      static thread_local unsigned next = 0;
-      auto &run = runs[next++ % runs.size()];
+      auto &run = runs[cache.next_coverage++ % runs.size()];
       run = {instance_id_, policies->generation(), first << PAGE_SHIFT, page << PAGE_SHIFT, vmid,
              policies,     driver_owned,           host_begin};
       if (end <= run.end && admitted(run))

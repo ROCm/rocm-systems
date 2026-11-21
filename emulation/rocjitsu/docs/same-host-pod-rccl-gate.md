@@ -8,7 +8,7 @@ useful regressions but do not pass this gate.
 ## Topology and driver contract
 
 Run four independent nodes on one physical host. In VFIO mode, each node is
-its own QEMU guest and rocJITsu VMM. Each node has at least two modeled GPUs
+its own QEMU guest and rocjitsu VMM. Each node has at least two modeled GPUs
 and runs one RCCL process per GPU, for at least eight ranks in one
 communicator. In emulated KFD mode, run the equivalent four isolated node
 projections, at least two GPUs and one process per GPU on each node. Give each
@@ -43,7 +43,7 @@ hardware models reached through the stock register, packet, and discovery
 interfaces.
 
 The QEMU/VFIO run must also use stock QEMU and libvfio-user peer transport
-interfaces. A rocJITsu-specific extension to `VFIO_USER_DMA_MAP` does not
+interfaces. A rocjitsu-specific extension to `VFIO_USER_DMA_MAP` does not
 satisfy this gate. Peer BAR access must retain its local fabric effects and
 fail-closed lifetime checks through a standard transport path. A NET-only
 fallback does not satisfy this requirement.
@@ -71,13 +71,10 @@ python3 scripts/run-rccl-pod-emulated.py \
   --output /tmp/rocjitsu-pod-emulated --timeout 600
 ```
 
-The [2026-10-19 result](same-host-pod-rccl-result-20261019.md) preserves
-historical commands and input hashes, not a current-build recipe.
-
 ### Capture source and runtime provenance
 
 Immediately before building the binaries for a fresh run, save the source
-revision, tracked changes, and untracked rocJITsu source files. Run these
+revision, tracked changes, and untracked rocjitsu source files. Run these
 commands from `emulation/rocjitsu`, then repeat the capture after the build;
 set `pod_capture_dir=/tmp/rocjitsu-pod-evidence/source-after-build` for the
 second capture so it does not overwrite the first. If the source state changed,
@@ -99,7 +96,7 @@ tar -C ../.. --null \
 ```
 
 Archive any other untracked source named by `source-status.txt` if it affects
-the build; the tar command above covers only rocJITsu's untracked files.
+the build; the tar command above covers only rocjitsu's untracked files.
 
 The controllers hash their executable, manifest, and logs in `result.json`;
 the emulated controller also hashes itself and its node helper. Hash the VFIO
@@ -175,7 +172,7 @@ are dropped. Bound each rank, guest, VMM, and the complete run; require clean
 rank and guest teardown, zero launcher status, and no remaining VFIO sockets.
 Record the exact manifest, guest network layout, commands and environment,
 driver source/package and module hashes, firmware and user-space versions,
-QEMU and rocJITsu binary hashes, seed, message sizes, iteration count,
+QEMU and rocjitsu binary hashes, seed, message sizes, iteration count,
 per-rank case results, channel evidence, route totals, and complete logs.
 
 The two-host cluster run and cacheable peer-coherence qualification are later
@@ -185,29 +182,44 @@ peer-map success, a NET-only RCCL run, or an earlier single-guest result.
 
 ## Qualification status
 
-The 2026-10-19 [local result](same-host-pod-rccl-result-20261019.md) records
-passing per-rank checks, local fabric effects, NET channels, and clean teardown
-in both modes for its saved binary. Its embedded revision identifies a reported
-checkout, but no build-time working-tree status or patch was saved. The result
-therefore does not qualify the current rebased source. Its
-`numerical_mismatches: 0` field is inferred from case success and the absence
-of nonzero mismatch diagnostics, not measured for every case and iteration.
-The saved logs identify the selected local GPU index, but do not record a
-runtime GPU identity or a mismatch count for every case and iteration.
-
 The gate remains open for the current tree. Run both modes again, capture the
 exact source revision and any working-tree patch, hash the executed binaries
 and loaded runtime libraries, and archive the commands, rank logs, and traces.
 
-The 2026-10-15 [qualification record](same-host-pod-rccl-result-20261015.md)
-documents an earlier pass in both modes. Its QEMU/VFIO guests used a
-zero-local-patch AMDGPU/AMDKFD module and standard VFIO-user peer DMA maps,
-with only general QEMU PCIe and libvfio-user BAR bug fixes. All eight ranks
-passed the numerical, local P2P/IPC, cross-node NET, directed fabric-effect,
-bounded-completion, and teardown checks in both modes.
+### Historical runs
 
-The earlier [2026-10-14 record](same-host-pod-rccl-result-20261014.md) and
-[zero-patch driver ablation](unpatched-amdgpu-pod-ablation-20261015.md) are
-historical controls. Their VFIO runs used a removed nonstandard peer
-transport. This gate does not qualify native xGMI, default ROCr IPC mode,
-cacheable peer coherence, or the later two-host run.
+- [2026-10-19 rerun][rerun] passed the per-rank checks in both modes.
+  Both controllers enabled `--fabric-effect-trace` and recorded local
+  P2P/IPC, cross-node NET, and clean teardown. The saved binary reported a
+  revision, but the build-time working-tree changes were unrecorded, leaving
+  the source and VFIO aperture path unverified. The controller inferred
+  `numerical_mismatches: 0` from passing cases and the absence of nonzero
+  diagnostics. The logs record local GPU indices. Runtime GPU identities
+  and mismatch counts for every case and iteration remain unverified.
+- [2026-10-15 standard-transport run][standard-transport] passed in both modes.
+  The VFIO guests used a zero-local-patch AMDGPU/AMDKFD module and standard
+  VFIO-user peer DMA maps with general QEMU PCIe and libvfio-user BAR fixes.
+  All eight ranks passed the numerical checks, exercised local P2P/IPC and
+  cross-node NET channels, recorded directed fabric effects, and shut down
+  within the time bound. The checkout had uncommitted changes.
+- [2026-10-14 pod run][original-pod] passed the original gate in both modes.
+  Its emulated KFD result stands for that run. The VFIO result and the
+  [2026-10-15 zero-patch driver ablation][driver-ablation] used a removed
+  nonstandard peer transport. The ablation exercised ordinary peer reads
+  and writes and ran the four-guest workload with a zero-local-patch driver.
+  The original driver error paths require separate coverage.
+- [2026-10-14 two-GPU driver control][driver-control] exercised ordinary
+  peer reads and writes with a locally patched guest driver. Root and switch
+  PCIe AtomicOp support was required for KFD initialization. The observed peer
+  mappings were UC, and the guest test left cacheable peer coherence open.
+
+Native xGMI, default ROCr IPC mode, cacheable peer coherence, and a two-host
+run remain outside this qualification. The original reports preserve the
+historical commands and hashes. Their raw logs and result JSON were recorded
+in local scratch directories.
+
+[rerun]: https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/same-host-pod-rccl-result-20261019.md
+[standard-transport]: https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/same-host-pod-rccl-result-20261015.md
+[original-pod]: https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/same-host-pod-rccl-result-20261014.md
+[driver-ablation]: https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/unpatched-amdgpu-pod-ablation-20261015.md
+[driver-control]: https://github.com/ROCm/rocm-systems/blob/90ddc8aae52bd58adaff8bab6498a140bcb77747/emulation/rocjitsu/docs/stock-driver-hardware-path-20261014.md

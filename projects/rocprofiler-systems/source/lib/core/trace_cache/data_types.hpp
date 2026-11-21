@@ -40,7 +40,8 @@ enum class format_kind
 {
     rocpd,
     perfetto,
-    unified_memory
+    unified_memory,
+    wall_clock
 };
 
 struct format_t
@@ -66,6 +67,7 @@ struct enabled_formats_t
     [[nodiscard]] bool              is_rocpd_enabled() const;
     [[nodiscard]] bool              is_perfetto_enabled() const;
     [[nodiscard]] bool              is_unified_memory_enabled() const;
+    [[nodiscard]] bool              is_wall_clock_enabled() const;
     [[nodiscard]] std::string       names() const;
 };
 

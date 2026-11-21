@@ -22,12 +22,13 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCPOLICYIMPL_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCPOLICYIMPL_H_
 
-#include <atomic>
+#include <condition_variable>  // NOLINT
 #include <future>
 #include <map>
 #include <memory>
 #include <mutex>  // NOLINT
 #include <string>
+#include <thread>  // NOLINT
 #include <utility>
 #include <vector>
 
@@ -61,16 +62,16 @@ class RdcPolicyImpl : public RdcPolicy {
  private:
   RdcGroupSettingsPtr group_settings_;
   RdcMetricFetcherPtr metric_fetcher_;
-  std::mutex policy_mutex_;
+  std::mutex policy_mutex_;  // guards settings_, callbacks_ and stop_
+  std::condition_variable stop_cv_;
+  bool stop_;
   std::thread thread_;
-  bool start_;
 
   std::map<rdc_gpu_group_t, std::vector<rdc_policy_t> > settings_;
   std::map<rdc_gpu_group_t, rdc_policy_register_callback> callbacks_;
 
   void rdc_policy_check_condition();
   void rdc_policy_gpu_reset(uint32_t gpu_index);
-  rdc_policy_register_callback rdc_policy_get_callback(rdc_gpu_group_t group_id);
 };
 
 }  // namespace rdc

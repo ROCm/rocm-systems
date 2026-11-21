@@ -203,9 +203,9 @@ class CeCollDoneEventMicrotest : public CeCollMicrotest {
     comm_->planner.capturingGraph.graphId = ULLONG_MAX;  // not capturing
     comm_->doneEvent = doneEvent_;
     comm_->nRanks = 1;
-    comm_->devrState.lsaSize = 1;
-    comm_->devrState.lsaSelf = 0;
-    comm_->devrState.lsaRankList = lsaRankList_;
+    comm_->devrState.lsaTeamSize = 1;
+    comm_->devrState.lsaTeamSelf = 0;
+    comm_->devrState.lsaTeamRankList = lsaRankList_;
     syncWin_.userPtr = syncFlags_;
     comm_->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(&syncFlags_[0]);
     comm_->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(&syncFlags_[1]);
@@ -584,6 +584,7 @@ struct RankRun {
   size_t copyStreamCopies = 0;
   size_t copyCalls = 0;
   int syncCalls = 0;
+  std::vector<uintptr_t> destinations;
   // Barriers already issued when the copy to each destination slot was enqueued; 0 for a slot with nothing to send.
   std::vector<uint32_t> slotEpochs;
 };
@@ -629,7 +630,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     g_hipEventRecord = [](hipEvent_t, hipStream_t) { return hipSuccess; };
     g_hipStreamWaitEvent = [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; };
     g_devrGetLsaRankPtr = [](ncclComm* comm, ncclDevrWindow*, size_t offset, int lsaRank, void** outPtr) {
-      if (lsaRank < 0 || lsaRank >= comm->devrState.lsaSize) {
+      if (lsaRank < 0 || lsaRank >= comm->devrState.lsaTeamSize) {
         return ncclInvalidArgument;
       }
       *outPtr = reinterpret_cast<void*>(kPeerWindowBase + lsaRank * kPeerWindowStride + offset);
@@ -661,6 +662,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     ++current_.copies;
     current_.bytes += bytes;
     const uintptr_t addr = reinterpret_cast<uintptr_t>(dst);
+    current_.destinations.push_back(addr);
     const int nRanks = activeComm_->nRanks;
     const int dstRank =
         addr >= kPeerWindowBase ? static_cast<int>((addr - kPeerWindowBase) / kPeerWindowStride) : activeComm_->rank;
@@ -671,6 +673,9 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   std::vector<RankRun> Run(const SizeMatrix& send, uint32_t freq, ncclResult_t expected = ncclSuccess) {
     const int nRanks = static_cast<int>(send.size());
     std::vector<size_t> gathered = GatherSizes(send);
+    if (corruptGathered_) {
+      corruptGathered_(gathered);
+    }
     std::vector<int> lsaRankList(nRanks);
     for (int r = 0; r < nRanks; ++r) {
       lsaRankList[r] = r;
@@ -688,9 +693,9 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
       auto comm = std::make_unique<ncclComm>();
       comm->rank = rank;
       comm->nRanks = nRanks;
-      comm->devrState.lsaSize = nRanks;
-      comm->devrState.lsaSelf = rank;
-      comm->devrState.lsaRankList = lsaRankList.data();
+      comm->devrState.lsaTeamSize = nRanks;
+      comm->devrState.lsaTeamSelf = rank;
+      comm->devrState.lsaTeamRankList = lsaRankList.data();
       comm->symkState.hasLsaMultimem = false;
       comm->planner.capturingGraph.graphId = path == LaunchPath::kGraphCapture ? kCaptureGraphId : ULLONG_MAX;
       comm->ceColl.intraBatchSyncFreq = freq;
@@ -799,6 +804,7 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   ncclComm* activeComm_ = nullptr;
   size_t failCopyCall_ = 0;  // 1-based copy API call on each rank that fails; 0 never fails
   int failSyncCall_ = 0;     // 1-based hipStreamBatchMemOp call on each rank that fails; 0 never fails
+  std::function<void(std::vector<size_t>&)> corruptGathered_;  // edits the gathered matrix before any rank runs
 };
 
 TEST_P(CeAlltoAllvSyncMicrotest, Sparse16Ranks_EqualTotalsAt512MiB_EveryRankIssuesSameBarrierCount) {
@@ -935,6 +941,45 @@ TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundCopyFails_ReturnsTheErrorBeforeTheRou
   const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ, ncclUnhandledCudaError);
 
   EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 1));
+}
+
+TEST_P(CeAlltoAllvSyncMicrotest, GatheredRecvSizeDisagreesWithPeerSendSize_EveryRankRejectsBeforeAnyBarrierOrCopy) {
+  const int kNRanks = 4;
+  const int kSrc = 2;
+  const int kDst = 3;
+  const SizeMatrix send = EqualTotalsMatrix(std::vector<int>(kNRanks, kNRanks), kNRanks * kMiB);
+  ASSERT_NE(send[kSrc][kDst], 0u);
+  corruptGathered_ = [&](std::vector<size_t>& gathered) {
+    ncclAlltoAllvRecvSizes(gathered.data(), kDst, kNRanks)[kSrc] = send[kSrc][kDst] + 1;
+  };
+
+  const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ, ncclInvalidUsage);
+
+  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 0));
+  for (int rank = 0; rank < kNRanks; ++rank) {
+    EXPECT_EQ(runs[rank].syncCalls, 0) << "rank " << rank;
+    EXPECT_EQ(runs[rank].copyCalls, 0u) << "rank " << rank;
+    EXPECT_EQ(runs[rank].copies, 0u) << "rank " << rank;
+  }
+}
+
+TEST_P(CeAlltoAllvSyncMicrotest, SenderWritesAtTheReceiversGatheredDisplacement) {
+  const int kNRanks = 4;
+  const int kSrc = 2;
+  const int kDst = 3;
+  const SizeMatrix send = EqualTotalsMatrix(std::vector<int>(kNRanks, kNRanks), kNRanks * kMiB);
+  size_t recvDisplacement = 0;
+  corruptGathered_ = [&](std::vector<size_t>& gathered) {
+    recvDisplacement = ++ncclAlltoAllvRecvDispls(gathered.data(), kDst, kNRanks)[kSrc];
+  };
+
+  const std::vector<RankRun> runs = Run(send, CE_COLL_INTRA_BATCH_SYNC_FREQ);
+
+  EXPECT_EQ(Barriers(runs), std::vector<uint32_t>(kNRanks, 2));
+  ExpectRowsCopied(send, runs, kNRanks);
+  ExpectLaunchPathTaken(runs);
+  const uintptr_t expectedDestination = kPeerWindowBase + kDst * kPeerWindowStride + recvDisplacement;
+  EXPECT_EQ(std::count(runs[kSrc].destinations.begin(), runs[kSrc].destinations.end(), expectedDestination), 1);
 }
 
 TEST_P(CeAlltoAllvSyncMicrotest, FirstRoundBarrierFails_ReturnsTheErrorWithoutLaunchingTheNextRound) {

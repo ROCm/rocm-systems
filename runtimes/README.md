@@ -20,13 +20,11 @@ part of the repository's default build or installation yet.
   implementation-neutral AMD GPU device-interface layer.
 - [`ddi/libamdf`](ddi/libamdf/README.md) implements the AMDF C table ABI and
   builds a static library. Its shared ABI is an alias of the shared image.
-- [`loader/rocelf`](loader/rocelf/README.md) provides a standalone Rust library for
-  checked ELF64 parsing and AMDGPU load-image construction. It depends on
-  neither rocddi nor the HSA frontend.
-- [`image/rocaddr3`](image/rocaddr3/README.md) wraps AddrLib3 to compute GFX12
-  surface layouts and map image rows without owning device memory.
+- [`image/rocaddr3`](image/rocaddr3/README.md) wraps AddrLib2 and AddrLib3 for
+  GFX9–GFX12 surface layouts and GFX12 row mapping without owning device memory.
 - [`loader/rocloader`](loader/rocloader/README.md) interprets AMD HSA code
-  objects, creates rocddi-backed GPU images, and owns executable state.
+  objects, contains checked ELF byte operations, creates rocddi-backed loaded
+  images, and owns executable state.
 - [`ddi/libhsa`](ddi/libhsa/README.md) implements the HSA C ABI and builds a
   shared ABI in the same image. It consumes rocddi and rocloader directly,
   not through AMDF.
@@ -36,6 +34,8 @@ shared-image linker package, lockfile, toolchain, Rust profiles,
 and common CMake integration. Grouping directories do not introduce additional
 Cargo workspaces or CMake projects.
 Rocddi remains an internal `rlib`; it has no standalone native ABI.
+The [architecture guide](docs/architecture.md) describes ownership, dependency
+direction, and the distinction between surface images and executable storage.
 
 ## Shared image
 
@@ -127,6 +127,9 @@ be prepared before configuration; missing inputs fail rather than fetch.
   the CMake cache and generated commands so builds and regeneration do not
   depend on the caller's working directory.
 - `ROCM_RUNTIMES_CARGO_JOBS`: optional positive parallel-job limit.
+- `ROCM_RUNTIMES_ADDRLIB_SOURCE_DIR`: optional explicit AddrLib source tree.
+  Empty selects the pinned runtime copy. Source sharing needs no changes to
+  the selected tree or the ROCr build; see the [source selection contract](image/rocaddr3/README.md#source-selection).
 
 Native C libraries should be discovered by CMake and explicitly supplied to
 Rust consumers when needed. No native package-discovery abstraction is added

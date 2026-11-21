@@ -17,6 +17,7 @@
 
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -65,10 +66,11 @@ struct ProbeArgumentMove {
   constexpr bool operator==(const ProbeArgumentMove &) const = default;
 };
 
-/// @brief Framework-owned scalar snapshot of a VGPR's lane zero at kernel entry.
-struct EntryVgprCapture {
-  uint16_t vgpr = 0;
+/// @brief Framework-owned snapshot of an SGPR, TTMP or VGPR's lane zero at guest entry.
+struct EntryRegisterCapture {
+  uint16_t source_index = 0;
   uint16_t sgpr = 0;
+  RegClass source_class = RegClass::VGPR;
 };
 
 /// @brief Preserve an ordinary guest register in an additional allocated register.
@@ -83,7 +85,7 @@ struct RegisterSave {
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
 /// after validation and layout, then hands it to TrampolineBuilder.
 struct TrampolinePlan {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   uint64_t anchor_offset = 0;
   uint32_t original_size = 0; // 4 or 8 for the inline-nop smoke build.
@@ -150,7 +152,7 @@ struct TrampolinePlan {
   /// site, so the envelope's own temp selection avoids it either way. Unset when
   /// the kernel has no prologue, which makes a LogBufferPtr* argument fail closed.
   std::optional<uint16_t> entry_storage_base;
-  std::vector<EntryVgprCapture> entry_vgpr_captures;
+  std::vector<EntryRegisterCapture> entry_register_captures;
   std::vector<RegisterSave> register_saves;
 
   /// Run the probe body under EXEC = -1 instead of the anchor mask. The envelope
@@ -227,7 +229,7 @@ public:
   ///
   /// Returns std::nullopt and writes a human-readable explanation to
   /// @p error_out (if non-null) on:
-  ///   - arch left at ROCJITSU_CODE_ARCH_INVALID (caller forgot to set it)
+  ///   - arch left at rocjitsu::IsaFamily::Invalid (caller forgot to set it)
   ///   - original_size zero or not dword aligned
   ///   - original_size other than 4 or 8 when splicing or relocating the original
   ///   - original_words size mismatch with original_size
@@ -257,7 +259,7 @@ public:
   ///   - When plan.preserve_scc is set, SCC gets one dead SGPR temp across the call
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
-  ///   - `plan.entry_storage_base` and `plan.entry_vgpr_captures`, when set, are
+  ///   - `plan.entry_storage_base` and `plan.entry_register_captures`, when set, are
   ///     excluded from every dead-register choice below. The prologue defines
   ///     this persistent storage in the cave, outside the guest's liveness.
   ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* input

@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string>
 
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -27,7 +28,6 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_utils.h"
 
-static const char* kPathDRMRoot = "/sys/class/drm";
 static const char* kPathHWMonRoot = "/sys/class/hwmon";
 static const char* kPathPowerRoot = "/sys/kernel/debug/dri";
 static const char* kPathDeviceMon = "/device/hwmon";
@@ -285,6 +285,11 @@ void RocmSMI::Initialize(uint64_t flags) {
   // internal data structures.
   ret = DiscoverAmdgpuDevices();
   if (ret != 0) {
+    if (ret == 2) {
+      // DiscoverAmdgpuDevices returns 2 when GetLargestNodeNumber failed with ENOENT
+      throw amd::smi::rsmi_exception(RSMI_STATUS_DRIVER_NOT_LOADED,
+                                     "DiscoverAmdgpuDevices() did not detect a supported device.");
+    }
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR, "DiscoverAmdgpuDevices() failed.");
   }
 
@@ -385,6 +390,10 @@ void RocmSMI::Initialize(uint64_t flags) {
 }
 
 void RocmSMI::Cleanup() {
+  euid_ = 0;
+  kfd_node_map_.clear();
+  io_link_map_.clear();
+  dev_ind_to_node_ind_map_.clear();
   devices_.clear();
   monitors_.clear();
 
@@ -631,7 +640,7 @@ void RocmSMI::AddToDeviceList(const std::string& dev_name, uint64_t bdfid) {
   ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
-  auto dev_path = std::string(kPathDRMRoot);
+  auto dev_path = test_hooks::SysfsDrmRoot();
   dev_path += "/";
   dev_path += dev_name;
 
@@ -695,7 +704,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
      << std::setw(1) << +(device.bdfid & static_cast<uint64_t>(0x7)) << "]\n";
   // std::cout << ss.str() << std::endl;
   LOG_TRACE(ss);
-  auto dev_path = std::string(kPathDRMRoot);
+  auto dev_path = test_hooks::SysfsDrmRoot();
 
   if (device.dev_name.empty()) {
     ss << __PRETTY_FUNCTION__ << " | dev_name is empty";
@@ -707,7 +716,7 @@ rsmi_status_t RocmSMI::AddToDeviceList2(RocmSMI::rsmi_device_enumeration_t devic
     uint32_t card_num = GetCard(dev_path);
     device.dev_name = "card" + std::to_string(card_num);
     device.drm_render_path = dev_path;
-    device.drm_card_path = std::string(kPathDRMRoot) + "/card" + std::to_string(card_num);
+    device.drm_card_path = test_hooks::SysfsDrmRoot() + "/card" + std::to_string(card_num);
     device.card_index = card_num;
   }
 
@@ -795,19 +804,23 @@ static const uint32_t kAmdGpuId = 0x1002;
   return isAmdGpu;
 }
 
-uint32_t GetLargestNodeNumber(const std::string& path = "/sys/class/kfd/kfd/topology/nodes/") {
+uint32_t GetLargestNodeNumber(const std::string& path = KFDNodesPathRoot()) {
   std::ostringstream ss;
   uint32_t largest_node_number = 0;
 
   // Open the directory
   DIR* dir = opendir(path.c_str());
   if (!dir) {
+    int error = errno;
     // Return UINT32_MAX on error
-    ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path << " | errno = " << errno
-       << " | error = " << strerror(errno);
+    ss << __PRETTY_FUNCTION__ << " | Failed to open directory: " << path << " | errno = " << error
+       << " | error = " << strerror(error);
     // std::cout << ss.str() << std::endl;
     LOG_ERROR(ss);
-    return UINT32_MAX;
+    if (error == ENOENT)
+      return UINT32_MAX - 1;
+    else
+      return UINT32_MAX;
   }
 
   struct dirent* entry;
@@ -850,6 +863,12 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
      << " kfd nodes";
   // std::cout << ss.str() << std::endl;
   LOG_DEBUG(ss);
+  if (max_nodes == UINT32_MAX - 1) {
+    ss << __PRETTY_FUNCTION__ << " | Failed to get kfd directory";
+    // std::cout << ss.str() << std::endl;
+    LOG_ERROR(ss);
+    return 2;
+  }
   if (max_nodes == UINT32_MAX) {
     ss << __PRETTY_FUNCTION__ << " | Failed to get largest node number";
     // std::cout << ss.str() << std::endl;

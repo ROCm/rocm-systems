@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -13,7 +14,7 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-std::unique_ptr<Xcd> Xcd::create(std::string name, const Config &config, rj_code_arch_t arch,
+std::unique_ptr<Xcd> Xcd::create(std::string name, const Config &config, rocjitsu::IsaFamily arch,
                                  GpuMemory *memory, simdojo::ExecMode exec_mode,
                                  std::shared_ptr<DeviceCacheCoherence> coherence,
                                  util::DiagnosticEmitter emit_error) {
@@ -23,7 +24,7 @@ std::unique_ptr<Xcd> Xcd::create(std::string name, const Config &config, rj_code
   return xcd;
 }
 
-util::Result Xcd::configure(const Config &config, rj_code_arch_t arch, GpuMemory *memory,
+util::Result Xcd::configure(const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
                             simdojo::ExecMode exec_mode,
                             std::shared_ptr<DeviceCacheCoherence> coherence,
                             util::DiagnosticEmitter emit_error) {

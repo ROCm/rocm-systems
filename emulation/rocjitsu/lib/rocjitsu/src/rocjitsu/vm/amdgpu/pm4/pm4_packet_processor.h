@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/diagnostic.h"
 
 #include <array>
@@ -24,7 +25,7 @@ enum class VmAccessOutcome : uint8_t;
 struct Pm4ExecutionContext {
   /// @brief Target architecture for architecture-specific packet behavior.
   /// @details INVALID represents a CP without a compute unit.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
   /// @brief XCD index used by PRED_EXEC in CDNA vendor command buffers.
   uint32_t xcc_id = 0;
   /// @brief Flush GPU caches before packet memory effects and stream completion.
@@ -50,6 +51,8 @@ struct Pm4ExecutionContext {
   /// The processor sets queue.publication_faulted before calling this callback
   /// on terminal cursor-publication failures; CP preserves that failure state.
   std::function<void()> fault_queue;
+  /// Apply AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID before entering the supplied IB.
+  std::function<void()> reset_gds_wave_id;
 };
 
 /// @brief Process a bounded turn of a native ring or DRM indirect-buffer stream.

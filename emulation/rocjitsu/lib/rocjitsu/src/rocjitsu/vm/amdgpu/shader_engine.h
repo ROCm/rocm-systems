@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_
 #define ROCJITSU_VM_AMDGPU_SHADER_ENGINE_H_
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 
@@ -47,7 +48,7 @@ public:
   /// @param emit_error Destination for failure diagnostics.
   /// @returns Null if CU configuration or execution mode is rejected; emits the reason.
   static std::unique_ptr<ShaderEngine>
-  create(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
+  create(std::string name, const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
          L2Cache *l2, simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
          util::DiagnosticEmitter emit_error = {});
 
@@ -93,8 +94,9 @@ public:
   }
 
 private:
-  util::Result configure(const Config &config, rj_code_arch_t arch, GpuMemory *memory, L2Cache *l2,
-                         simdojo::ExecMode exec_mode, util::DiagnosticEmitter emit_error);
+  util::Result configure(const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
+                         L2Cache *l2, simdojo::ExecMode exec_mode,
+                         util::DiagnosticEmitter emit_error);
 
   std::vector<ComputeUnitCore *> cus_;
   std::unique_ptr<ShaderProcessorInput> spi_;

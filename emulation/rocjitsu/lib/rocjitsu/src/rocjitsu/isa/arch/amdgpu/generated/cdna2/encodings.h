@@ -877,6 +877,7 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  void append_dst_operand(std::string &out, uint8_t index) const override;
   void append_src_operand(std::string &out, uint8_t index) const override {
     const auto *operand = static_cast<const IsaOperand<Isa> *>(src_operands_[index]);
     if (operand->opr_type_ == OperandType::OPR_VGPR) {
@@ -889,7 +890,7 @@ public:
   }
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
-    return !mnemonic_.starts_with("image_atomic_") &&
+    return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&
            Instruction::should_print_dst_operand(operand_index);
   }
   void build_modifiers(std::string &out) const override {
@@ -899,6 +900,22 @@ public:
       out += " dmask:0x";
       out += "0123456789abcdef"[inst->dmask];
     }
+    if (inst->unorm)
+      out += " unorm";
+    if (inst->glc)
+      out += " glc";
+    if (inst->slc)
+      out += " slc";
+    if (inst->scc)
+      out += " scc";
+    if (inst->a16)
+      out += " a16";
+    if (inst->lwe)
+      out += " lwe";
+    if (inst->da)
+      out += " da";
+    if (inst->d16)
+      out += " d16";
   }
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;

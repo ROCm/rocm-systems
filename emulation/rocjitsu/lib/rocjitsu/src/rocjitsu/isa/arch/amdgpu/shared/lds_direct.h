@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -45,11 +46,11 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
     return;
   const uint32_t type = (wf.m0() >> 16) & 7, address = wf.m0() & 0xffff;
   if (!valid_lds_direct_operand(wf.m0()) ||
-      (dst >= wf.num_vgprs() && wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3_5)) {
+      (dst >= wf.num_vgprs() && wf.cu().arch() != rocjitsu::IsaFamily::Rdna3_5)) {
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  auto d = std::make_unique<VectorMemState>(LOCAL_MEM);
+  std::unique_ptr<VectorMemState> d = inst.acquire_data<VectorMemState>(LOCAL_MEM);
   d->wf_size = wf.wf_size();
   d->dst_reg_base = wf.vgpr_alloc().base + dst;
   d->elem_size = type == 2 ? 4 : (type & 1 ? 2 : 1);
@@ -60,6 +61,38 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
   d->lane_mask = d->exec_mask;
   d->per_lane_addr.fill(wf.lds_base() + address);
   inst.set_data(std::move(d));
+}
+
+/// Each primitive stores P0, P10, and P20 as three consecutive XYZW vectors.
+inline void execute_lds_parameter_load(Instruction &inst, Wavefront &wf, uint32_t dst,
+                                       uint32_t attribute, uint32_t component) {
+  if (!wf.exec())
+    return;
+  if ((wf.m0() & 0x8000007f) || attribute > 32) {
+    wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  const unsigned quads = wf.wf_size() / 4;
+  const uint32_t starts = ((wf.m0() >> 15) | 1u) & ((1u << quads) - 1);
+  const uint32_t primitives = std::popcount(starts);
+  const uint64_t parameter_base = wf.lds_base() + (wf.m0() & 0xffffu);
+  auto data = std::make_unique<VectorMemState>(LOCAL_MEM);
+  data->wf_size = wf.wf_size();
+  data->dst_reg_base = wf.vgpr_alloc().base + dst;
+  data->elem_size = 4;
+  data->num_elems = 1;
+  data->wait_counter_type = WaitCounterType::EXPCNT;
+  // Lane 3 receives zero at writeback without reading a fourth coefficient.
+  data->exec_mask = whole_active_quads(wf.exec());
+  data->lane_mask = data->exec_mask & 0x7777777777777777ULL;
+  for (unsigned quad = 0; quad < quads; ++quad) {
+    const uint32_t primitive = std::popcount(starts & ((2u << quad) - 1u)) - 1;
+    const uint32_t primitive_offset = (attribute * primitives + primitive) * 12;
+    for (unsigned coefficient = 0; coefficient < 3; ++coefficient)
+      data->per_lane_addr[4 * quad + coefficient] =
+          parameter_base + 4 * (primitive_offset + coefficient * 4 + component);
+  }
+  inst.set_data(std::move(data));
 }
 
 } // namespace rocjitsu::amdgpu
