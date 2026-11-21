@@ -65,10 +65,11 @@ jobs:
         with:
           sparse-checkout: .github/actions/rocprofiler-sdk-util/resolve-ci-config
           set-safe-directory: true
+          persist-credentials: false
 
       - name: Resolve runner labels
         id: runner
-        uses: ./.github/actions/rocprofiler-sdk-util/resolve-ci-config
+        uses: $/.github/actions/rocprofiler-sdk-util/resolve-ci-config
 
   core-deb:
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
@@ -108,10 +109,11 @@ jobs:
       run: |
         ln -s -f /usr/bin/git /usr/local/bin/git
 
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
+        persist-credentials: false
 
     - name: Install requirements
       timeout-minutes: 10
@@ -137,12 +139,14 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
+      env:
+        GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
       run:
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure --verbose -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${{ needs.ci_config.outputs.gfx94x_runner }}"
-          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${GFX94X_RUNNER}"
+          -DCTEST_BUILD_NAME=PR_${GITHUB_REF_NAME}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
@@ -179,10 +183,11 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
+        persist-credentials: false
 
     - name: Install requirements
       timeout-minutes: 10
@@ -210,13 +215,15 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
+      env:
+        GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
       run:
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${PATH}
         LD_LIBRARY_PATH=$(pwd)/build:${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         ctest --output-on-failure --verbose -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16"
-          -DCTEST_SITE=${{ needs.ci_config.outputs.gfx94x_runner }}
-          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
+          -DCTEST_SITE=${GFX94X_RUNNER}
+          -DCTEST_BUILD_NAME=PR_${GITHUB_REF_NAME}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""

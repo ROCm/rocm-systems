@@ -12,7 +12,8 @@ name: aqlprofile Deprecation Warning
 # a checkout of the PR head.
 # Refs:
 #   https://docs.github.com/en/actions/reference/security/securely-using-pull_request_target
-on:
+# Labels and comments through the API only; PR head code is never checked out.
+on: # zizmor: ignore[dangerous-triggers]
   pull_request_target:
     types: [opened, synchronize, reopened]
     paths:
