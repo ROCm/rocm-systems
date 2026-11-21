@@ -3,6 +3,7 @@
 
 from types import SimpleNamespace
 from amdisa.codegen.execute import ExecuteContext
+from amdisa.__main__ import _PROFILES
 
 
 from rj_arith_headers import public_headers
@@ -26,7 +27,7 @@ def context(arch, name, dst, src, *, is_vop3=False, result_writer=None):
     return ExecuteContext(
         inst=SimpleNamespace(name=name),
         sem=None,
-        profile=None,
+        profile=_PROFILES[arch.replace('_', '.')](),
         arch_name=arch,
         dst_ops=dst,
         src_ops=src,
@@ -73,8 +74,8 @@ def test_integer_compare_signatures_and_result_commit(name):
         assert 'RJ_ARITH_ALU_HIGH' not in implicit
     assert (
         gen_integer_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
-        is None
-    )
+        is not None
+    ) == (bits == 32)
 
 
 @pytest.mark.parametrize(
@@ -229,7 +230,9 @@ def test_every_vopc_handler_routes_through_rj_arith(arch):
     assert 'ROCJITSU_TRY_SIMD' not in source
 
 
-@pytest.mark.parametrize('arch', ('cdna3', 'cdna4', 'cdna5'))
+@pytest.mark.parametrize(
+    'arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5')
+)
 @pytest.mark.parametrize('cmpx', (False, True))
 @pytest.mark.parametrize('explicit_destination', (False, True))
 def test_cdna_integer_compare_architectural_destinations(
@@ -240,7 +243,7 @@ def test_cdna_integer_compare_architectural_destinations(
     body = gen_integer_compare(context(arch, name, dst, ['a', 'b']))
     assert 'execute_compare<32>' in body
     assert ('wf.set_exec(result)' in body) == cmpx
-    writes_scalar = not cmpx or arch in ('cdna3', 'cdna4')
+    writes_scalar = not cmpx or _PROFILES[arch.replace('_', '.')]().cmpx_writes_vcc
     assert ('write_wave_mask_scalar(dst' in body) == (
         writes_scalar and explicit_destination
     )
@@ -251,6 +254,9 @@ def test_cdna_integer_compare_architectural_destinations(
         context(arch, name, dst, ['a', 'b'], result_writer='commit_result')
     )
     assert 'commit_result' in custom
+    assert ('write_wave_mask_scalar(dst' in custom) == (
+        cmpx and writes_scalar and explicit_destination
+    )
     assert 'wf.set_exec' not in custom
 
 
