@@ -70,14 +70,16 @@ inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvByt
 // Fusion size cutoff. A negative threshold, including an explicit
 // RCCL_P2P_BATCH_THRESHOLD=-1, means "arch default": the parameter default is
 // -1, and the wrapper passes that value through with no separate "was set" bit.
-// Arch default is 64 KiB on gfx950 at 16+ nodes and no cutoff elsewhere, so an
-// explicit enable stays fused. A non-negative threshold is the cutoff on every
-// architecture. The channel map still follows the batching flag, so rounds that
-// miss the cutoff share a channel and run one after another.
+// Arch default is 64 KiB on gfx950 at 16+ nodes, 1 MiB on gfx942, and no cutoff
+// elsewhere, so an explicit enable stays fused. On gfx942, fusing multi-MiB
+// per-peer rounds loses AllToAll busbw. A non-negative threshold is the cutoff on
+// every architecture. The channel map still follows the batching flag, so rounds
+// that miss the cutoff share a channel and run one after another.
 inline ssize_t rcclP2pBatchCutoff(const char* gcn, int nNodes, ssize_t sendBytes, ssize_t recvBytes,
                                   ssize_t threshold) {
   if (threshold < 0) {
     if (IsArchMatch(gcn, "gfx950") && nNodes >= 16) return 1 << 16; // 64k per-rank message size
+    if (IsArchMatch(gcn, "gfx942")) return 1 << 20;                 // 1M per-rank message size
     return std::max(sendBytes, recvBytes);
   } else {
     return threshold;

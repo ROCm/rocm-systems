@@ -405,7 +405,8 @@ collected in the following table.
         | fuse. This does not turn batching on; that is
         | ``RCCL_P2P_BATCH_ENABLE``.
         | A negative value selects the architecture default: 64 KiB on gfx950
-        | (MI350) with 16 or more nodes, and no size limit elsewhere. An
+        | (MI350) with 16 or more nodes, 1 MiB on gfx942 (MI300), and no size
+        | limit elsewhere. An
         | explicit ``-1`` is the same as leaving the variable unset. A
         | non-negative value, including ``65536``, is the cutoff on every
         | architecture. ``0`` fuses no positive-size message.
