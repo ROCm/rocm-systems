@@ -5396,12 +5396,13 @@ auto Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics, DevInfoT
   auto header_output = [&]() {
     const auto gpu_metrics_header = dev_get_metrics_header();
     const auto timestamp_time = timestamp_to_time_point(m_gpu_metrics_updated_timestamp);
+    char timestamp_buffer[26]{};
     tmp_outstream_metrics << "\n" << kDoubleLine << "\n";
     tmp_outstream_metrics << "*** GPU Metrics Header: ***";
     tmp_outstream_metrics << "\n";
     tmp_outstream_metrics << "Timestamp: "
                           << " [" << m_gpu_metrics_updated_timestamp << "] "
-                          << std::ctime(&timestamp_time);
+                          << ctime_r(&timestamp_time, timestamp_buffer);
     tmp_outstream_metrics << "Version: " << print_unsigned_int(gpu_metrics_header.m_format_revision)
                           << "." << print_unsigned_int(gpu_metrics_header.m_content_revision)
                           << " [Flag: "
