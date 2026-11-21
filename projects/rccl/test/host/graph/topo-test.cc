@@ -310,6 +310,28 @@ TEST_F(TopoMicrotest, GetSystemFromXml_CpuNicGinRmaAndDisabledNets) {
   EXPECT_NE(system->nodes[NET].nodes[0].net.pciId, system->nodes[NET].nodes[1].net.pciId);
 }
 
+// NCCL 2.32.6 keeps the NUMA id in bits 55:48 of a NIC's local id (it used to sit at bit 56, which
+// NCCL_TOPO_ID masked off), and indexes the busid-less <nic>s under a <cpu> so they stay distinct.
+// Spelled out in literals: the macros themselves are what changed.
+TEST_F(TopoMicrotest, GetSystemFromXml_NicIdsKeepTheirNumaNode) {
+  std::string cpuNics = "<nic>" + Net("a", 0) + "</nic><nic>" + Net("b", 1) + "</nic>";
+  SystemPtr system = BuildSystem(System(Cpu(0, cpuNics) + Cpu(1, "<nic>" + Net("c", 2) + "</nic>") +
+                                        Cpu(2, NicPci(NicBus(0), Net("d", 3)))));
+
+  ASSERT_NE(nullptr, system);
+  ASSERT_EQ(4, system->nodes[NIC].count);
+  ASSERT_EQ(4, system->nodes[NET].count);
+  std::vector<int64_t> ids;
+  for (int n = 0; n < system->nodes[NIC].count; n++) {
+    int64_t id = system->nodes[NIC].nodes[n].id;
+    EXPECT_EQ(0, NCCL_TOPO_ID_SYSTEM_ID(id));
+    ids.push_back(id & 0x00ffffffffffffffLL);
+  }
+  std::sort(ids.begin(), ids.end());
+  const int64_t numa1 = int64_t(1) << 48, numa2 = int64_t(2) << 48;
+  EXPECT_EQ((std::vector<int64_t>{0, 1, numa1, numa2 + BusId(NicBus(0))}), ids);
+}
+
 TEST_F(TopoMicrotest, GetSystemFromXml_GinAndRmaUnderAPciNicReadItsIds) {
   std::string nets = "<gin name=\"g\" dev=\"0\" speed=\"400000\" rail=\"1\" plane=\"2\"/>"
                      "<rma name=\"r\" dev=\"1\" speed=\"400000\" guid=\"0x55\" rail=\"1\" plane=\"2\"/>";
