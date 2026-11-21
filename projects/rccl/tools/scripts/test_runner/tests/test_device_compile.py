@@ -345,6 +345,93 @@ class PatchDispatcherNoDeadStripTest(unittest.TestCase):
         ])
 
 
+class NamedBarrierCountTest(unittest.TestCase):
+    def test_extract_records_largest_named_barrier_count(self):
+        """The count can appear anywhere in the .set expressions, so neither
+        the first integer nor the last .set is enough."""
+        lines = [
+            "\t.type\t_Z13ncclDevFunc_fooPv, @function\n",
+            "\t.set .L_Z13ncclDevFunc_fooPv.num_named_barrier, max(0, .L_Z3barv.num_named_barrier)\n",
+            "\t.set .L_Z3barv.num_named_barrier, max(.L_sym_12.num_named_barrier, 9)\n",
+            "\t.set .L_Z3bazv.num_named_barrier, 0\n",
+            "\t.set amdgpu.max_num_named_barrier, 4\n",
+        ]
+
+        _, resources = driver.extract_device_function(lines)
+
+        self.assertEqual(resources["num_named_barrier"], 9)
+
+    def test_extract_ignores_integers_inside_symbol_names(self):
+        lines = [
+            "\t.type\t_Z13ncclDevFunc_fooPv, @function\n",
+            "\t.set .L_Z13ncclDevFunc_fooPv.num_named_barrier, max(.L_sym_12.num_named_barrier, 3)\n",
+        ]
+
+        _, resources = driver.extract_device_function(lines)
+
+        self.assertEqual(resources["num_named_barrier"], 3)
+
+    def test_aggregate_takes_max_named_barrier_count(self):
+        """Whichever order the shards come in."""
+        for counts in ([0, 9], [9, 0]):
+            with self.subTest(counts=counts):
+                agg = driver.aggregate_resources(
+                    [{"num_named_barrier": c} for c in counts], "gfx1250")
+
+                self.assertEqual(agg["num_named_barrier"], 9)
+
+    def test_patch_dispatcher_keeps_named_barriers_reserved(self):
+        """Zeroing the dispatcher's count left gfx1250 kernels with no named
+        barriers allocated, while their devfuncs signal and wait on them."""
+        lines = [
+            "\t.set .L_Z4kernv.num_named_barrier, max(9, amdgpu.max_num_named_barrier)\n",
+            "\t.set amdgpu.max_num_named_barrier, 0\n",
+        ]
+
+        result = driver.patch_dispatcher(lines, {"num_named_barrier": 5})
+
+        self.assertEqual(result, [
+            "\t.set .L_Z4kernv.num_named_barrier, 9\n",
+            "\t.set amdgpu.max_num_named_barrier, 9\n",
+        ])
+
+    def test_patch_dispatcher_takes_the_aggregate_when_it_is_larger(self):
+        """A devfunc shard can need more barriers than the dispatcher's own
+        assembly names."""
+        lines = [
+            "\t.set .L_Z4kernv.num_named_barrier, max(9, amdgpu.max_num_named_barrier)\n",
+            "\t.set amdgpu.max_num_named_barrier, 0\n",
+        ]
+
+        result = driver.patch_dispatcher(lines, {"num_named_barrier": 12})
+
+        self.assertEqual(result, [
+            "\t.set .L_Z4kernv.num_named_barrier, 12\n",
+            "\t.set amdgpu.max_num_named_barrier, 12\n",
+        ])
+
+    def test_patch_dispatcher_without_named_barriers_writes_zero(self):
+        lines = ["\t.set .L_Z4kernv.num_named_barrier, max(0, amdgpu.max_num_named_barrier)\n"]
+
+        result = driver.patch_dispatcher(lines, {})
+
+        self.assertEqual(result, ["\t.set .L_Z4kernv.num_named_barrier, 0\n"])
+
+    def test_extract_drops_only_the_named_barriers_globl(self):
+        """The shards' copies collide with the dispatcher's at device link
+        time; any other symbol with that prefix has to survive."""
+        lines = [
+            "\t.type\t_Z13ncclDevFunc_fooPv, @function\n",
+            "\t.globl\trcclNamedBarriers\n",
+            "\t.globl\trcclNamedBarriersExtra\n",
+        ]
+
+        extracted, _ = driver.extract_device_function(lines)
+
+        self.assertNotIn("\t.globl\trcclNamedBarriers\n", extracted)
+        self.assertIn("\t.globl\trcclNamedBarriersExtra\n", extracted)
+
+
 class ExtractDeviceFunctionNoDeadStripTest(unittest.TestCase):
     def test_extract_device_function_drops_local_no_dead_strip(self):
         lines = [

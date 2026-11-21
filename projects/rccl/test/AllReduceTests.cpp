@@ -7,6 +7,7 @@
 #include "CallCollectiveForked.hpp"
 #include "SingleProcMemRegTestUtils.hpp"
 #include "StandaloneUtils.hpp"
+#include "ScopedEnvVar.hpp"
 
 namespace RcclUnitTesting
 {
@@ -482,6 +483,23 @@ namespace RcclUnitTesting
       RunBiasTest(ncclFloat16,
                   ncclMax,
                   {GFX1250_CAPPED_CHUNK_TAIL_COUNT},
+                  BIAS_INCREMENTAL_PATTERN,
+                  INPUT_RANK_BASED_PATTERN,
+                  true);
+  }
+
+  // Bias forces Tree+Simple through runTreeSplit, which halves the block. At 160 threads (5 waves
+  // on gfx1250) an unrounded split at 80 leaves wave 2 in both groups, so it joins and signals both
+  // groups' named barriers and each releases early.
+  TEST(AllReduce, BiasGfx1250TreeSimpleOddWaveSplit)
+  {
+      using namespace BiasTestConstants;
+      ScopedEnvVar algo("NCCL_ALGO", "Tree");
+      ScopedEnvVar proto("NCCL_PROTO", "Simple");
+      ScopedEnvVar threads("RCCL_THREADS_PER_BLOCK", "160");
+      RunBiasTest(ncclFloat32,
+                  ncclSum,
+                  {384, 2048, GFX1250_CAPPED_CHUNK_TAIL_COUNT},
                   BIAS_INCREMENTAL_PATTERN,
                   INPUT_RANK_BASED_PATTERN,
                   true);

@@ -78,6 +78,7 @@ set(SRC_FILES
   device/reduce_kernel.h
   device/reduce_scatter.h
   device/sendrecv.h
+  device/sub_barrier.h
   device/symmetric/all_gather.cuh
   device/symmetric/all_gather_gin.cuh
   device/symmetric/all_reduce.cuh
