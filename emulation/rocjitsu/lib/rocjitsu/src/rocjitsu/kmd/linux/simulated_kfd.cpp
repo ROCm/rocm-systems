@@ -256,12 +256,15 @@ amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags, bool shared) {
 }
 
 SimulatedKfd::GemVaTransaction::GemVaTransaction(std::shared_ptr<KfdProcess> process)
-    : process_(std::move(process)), transaction_(process_->begin_page_table_transaction()) {}
+    : process_(std::move(process)), alloc_lock_(process_->alloc_mutex_),
+      transaction_(process_->begin_page_table_transaction()) {}
 
 int SimulatedKfd::GemVaTransaction::preflight_map(uint64_t gpu_va, size_t size,
                                                   uint64_t drm_file_id) {
   if (process_->event_state_.is_closing())
     return -ENODEV;
+  if (size == 0 || size > UINT64_MAX - gpu_va)
+    return -EINVAL;
   const auto owner = KfdProcess::VaOwner{KfdProcess::VaOwnerKind::Gem, drm_file_id};
   const auto resident = process_->has_foreign_resident_overlap(transaction_, gpu_va, size, owner);
   if (resident != KfdProcess::PageTableMutationResult::Applied ||
@@ -285,11 +288,11 @@ int SimulatedKfd::GemVaTransaction::map(uint64_t gpu_va, void *host_ptr, size_t 
     return preflight;
   // GEM_VA uses the interposer's private read-write dmabuf mapping, whose
   // lifetime is tied to the GEM entry. It is not the application's CPU alias.
-  const auto result = process_->map_pages(transaction_, gpu_va, host_ptr, size,
-                                          SimulatedKfd::pte_mtype_for_flags(alloc_flags),
-                                          sealed_ram ? KfdProcess::HostExtentOwner::DriverSealedRam
-                                                     : KfdProcess::HostExtentOwner::Driver,
-                                          {KfdProcess::VaOwnerKind::Gem, drm_file_id});
+  const auto result = process_->map_gem_pages(
+      transaction_, gpu_va, host_ptr, size, SimulatedKfd::pte_mtype_for_flags(alloc_flags),
+      sealed_ram ? KfdProcess::HostExtentOwner::DriverSealedRam
+                 : KfdProcess::HostExtentOwner::Driver,
+      drm_file_id);
   return result == KfdProcess::PageTableMutationResult::Applied ? 0 : -EINVAL;
 }
 
