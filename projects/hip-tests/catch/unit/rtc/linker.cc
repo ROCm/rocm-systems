@@ -11,6 +11,7 @@
 #include <memory>
 #include <iostream>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 #pragma clang diagnostic ignored "-Wuninitialized"
@@ -149,6 +150,55 @@ HIP_TEST_CASE(Unit_RTC_LinkerAPI) {
   for (size_t i = 0; i < n; ++i) {
     REQUIRE(fabs(a * hX[i] + hY[i] - hOut[i]) <= fabs(hOut[i]) * 1e-6);
   }
+}
+
+static constexpr auto scale_src{
+    R"(
+extern "C"
+__global__
+void scale(float a, float* x, size_t n)
+{
+    size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid < n) {
+           x[tid] *= a;
+    }
+}
+)"};
+
+// Program and link input names that are not valid file names, such as paths
+// with a Windows drive letter (ROCm/TheRock#9848). Each pair goes into one link
+// state; some pairs give comgr the same name or no name for both inputs.
+HIP_TEST_CASE(Unit_RTC_LinkerAPI_NamesNotFileNames) {
+  using NamePair = std::pair<const char*, const char*>;
+  const NamePair names = GENERATE(
+      NamePair("C:\\src\\saxpy.bc", "C:\\src\\scale.bc"), NamePair("C:\\a\\k.bc", "D:\\b\\k.bc"),
+      NamePair("C:\\src\\", "C:\\src\\.."), NamePair("saxpy<float>.bc", "a|b.bc"),
+      NamePair("k?.bc", "k*.bc"), NamePair("src/", ".."));
+  INFO("link input names: " << names.first << ", " << names.second);
+
+  const char* options[]{"-fgpu-rdc"};
+  std::vector<char> saxpy = createBitcodeFromSource(src, "C:\\src\\saxpy.cu", 1, options);
+  std::vector<char> scale = createBitcodeFromSource(scale_src, "scale<float>.cu", 1, options);
+
+  hiprtcLinkState linkstate;
+  HIPRTC_CHECK(hiprtcLinkCreate(0, nullptr, nullptr, &linkstate));
+  HIPRTC_CHECK(hiprtcLinkAddData(linkstate, HIPRTC_JIT_INPUT_LLVM_BITCODE, saxpy.data(),
+                                 saxpy.size(), names.first, 0, nullptr, nullptr));
+  HIPRTC_CHECK(hiprtcLinkAddData(linkstate, HIPRTC_JIT_INPUT_LLVM_BITCODE, scale.data(),
+                                 scale.size(), names.second, 0, nullptr, nullptr));
+
+  void* finaldata;
+  size_t finalsize = 0;
+  HIPRTC_CHECK(hiprtcLinkComplete(linkstate, &finaldata, &finalsize));
+  REQUIRE(finalsize > 0);
+
+  hipModule_t module;
+  hipFunction_t kernel;
+  HIP_CHECK(hipModuleLoadData(&module, finaldata));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "saxpy"));
+  HIP_CHECK(hipModuleGetFunction(&kernel, module, "scale"));
+  HIP_CHECK(hipModuleUnload(module));
+  HIPRTC_CHECK(hiprtcLinkDestroy(linkstate));
 }
 
 HIP_TEST_CASE(Unit_RTC_LinkAddFile_Negative) {

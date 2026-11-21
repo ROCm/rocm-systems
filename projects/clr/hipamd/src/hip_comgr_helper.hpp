@@ -114,6 +114,10 @@ std::string handleMangledName(std::string loweredName);
 bool fillMangledNames(const std::vector<char>& executable,
                       std::map<std::string, std::string>& mangledNames, bool isBitcode);
 void GenerateUniqueFileName(std::string& name);
+// The name to give comgr for a data object the caller named name: name itself
+// when comgr can use it as a file name, else a name derived from it, or made
+// from fallback (a GenerateUniqueFileName template) when nothing is left.
+std::string comgrDataName(const std::string& name, const std::string& fallback);
 
 bool CheckIfBundled(std::string_view llvm_bitcode);
 
@@ -215,7 +219,11 @@ class LinkProgram : public RTCProgram {
   // Private Data Members
   hip::comgr_helper::ComgrDataSetUniqueHandle link_input_;
   std::vector<std::string> link_options_;
+  // Names of the data objects in link_input_, kept unique.
+  std::unordered_set<std::string> link_input_names_;
   static std::unordered_set<LinkProgram*> linker_set_;
+
+  std::string UniqueLinkInputName(const std::string& name);
 
   bool AddLinkerDataImpl(std::string_view link_data, hipJitInputType input_type,
                          const std::string& link_file_name);
