@@ -65,7 +65,7 @@ static void resetSyncState() {
   g_thread1_capturing = false;
   g_thread2_can_start = false;
   g_thread2_done = false;
-  g_thread2_result = hipSuccess;
+  g_thread2_result.store(hipSuccess);
   g_capture_stream = nullptr;
   g_normal_event = nullptr;
   g_captured_event = nullptr;
@@ -173,7 +173,7 @@ static void thread2_default_mode_event_query_normal() {
   while (!g_thread2_can_start) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  g_thread2_result = hipEventQuery(g_normal_event);
+  g_thread2_result.store(hipEventQuery(g_normal_event));
   g_thread2_done = true;
 }
 
@@ -182,7 +182,7 @@ static void thread2_default_mode_event_query_captured() {
   while (!g_thread2_can_start) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  g_thread2_result = hipEventQuery(g_captured_event);
+  g_thread2_result.store(hipEventQuery(g_captured_event));
   g_thread2_done = true;
 }
 
@@ -197,7 +197,7 @@ static void thread2_relaxed_mode_event_query_normal() {
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
   oldMode = newMode;
 
-  g_thread2_result = hipEventQuery(g_normal_event);
+  g_thread2_result.store(hipEventQuery(g_normal_event));
 
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
   g_thread2_done = true;
@@ -214,7 +214,7 @@ static void thread2_threadlocal_mode_event_query_normal() {
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
   oldMode = newMode;
 
-  g_thread2_result = hipEventQuery(g_normal_event);
+  g_thread2_result.store(hipEventQuery(g_normal_event));
 
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
   g_thread2_done = true;
@@ -229,7 +229,7 @@ static void thread2_default_mode_event_sync_normal() {
   while (!g_thread2_can_start) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  g_thread2_result = hipEventSynchronize(g_normal_event);
+  g_thread2_result.store(hipEventSynchronize(g_normal_event));
   g_thread2_done = true;
 }
 
@@ -238,7 +238,7 @@ static void thread2_default_mode_event_sync_captured() {
   while (!g_thread2_can_start) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  g_thread2_result = hipEventSynchronize(g_captured_event);
+  g_thread2_result.store(hipEventSynchronize(g_captured_event));
   g_thread2_done = true;
 }
 
@@ -253,7 +253,7 @@ static void thread2_relaxed_mode_event_sync_normal() {
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
   oldMode = newMode;
 
-  g_thread2_result = hipEventSynchronize(g_normal_event);
+  g_thread2_result.store(hipEventSynchronize(g_normal_event));
 
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
   g_thread2_done = true;
@@ -270,7 +270,7 @@ static void thread2_threadlocal_mode_event_sync_normal() {
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&newMode));
   oldMode = newMode;
 
-  g_thread2_result = hipEventSynchronize(g_normal_event);
+  g_thread2_result.store(hipEventSynchronize(g_normal_event));
 
   HIP_CHECK(hipThreadExchangeStreamCaptureMode(&oldMode));
   g_thread2_done = true;

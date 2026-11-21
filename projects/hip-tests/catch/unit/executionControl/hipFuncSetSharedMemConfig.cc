@@ -71,29 +71,6 @@ HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Parameters) {
 }
 
 /**
- * Test Description
- * ------------------------
- *  - Sets shared memory config that is not supported.
- *    - Expected output: return `hipErrorNotSupported`
- * Test source
- * ------------------------
- *  - unit/executionControl/hipFuncSetSharedMemConfig.cc
- * Test requirements
- * ------------------------
- *  - Platform specific (AMD)
- *  - HIP_VERSION >= 5.2
- */
-HIP_TEST_CASE(Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported) {
-#if HT_NVIDIA
-  HIP_SKIP_TEST(HipTest::SkipReason::kApiUnsupportedOnNvidia);
-#endif
-
-  HIP_CHECK_ERROR(
-      hipFuncSetSharedMemConfig(reinterpret_cast<void*>(kernel), hipSharedMemBankSizeDefault),
-      hipErrorNotSupported);
-}
-
-/**
  * End doxygen group ExecutionTest.
  * @}
  */

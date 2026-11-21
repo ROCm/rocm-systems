@@ -8,6 +8,7 @@ set(TEST_SRC
     hipFuncSetCacheConfig.cc
     hipLaunchKernel.cc
     hipLaunchCooperativeKernel.cc
+    hipFuncSetSharedMemConfig.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
@@ -20,7 +21,6 @@ if(HIP_PLATFORM MATCHES "amd")
     )
 else()
   set(TEST_SRC ${TEST_SRC}
-        hipFuncSetSharedMemConfig.cc
         hipFuncSetAttribute.cc
     )
 endif()
