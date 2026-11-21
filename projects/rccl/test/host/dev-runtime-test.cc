@@ -626,6 +626,33 @@ TEST_F(DevrInitOnceTest, LsaDomain_LocalRanksUsesCopyOfLocalRankToRank) {
   EXPECT_EQ(devr->lsaDomainSize, 2);
 }
 
+// Interleaved nodes (rank r on node r % 2): the gcd LSA team shrinks to one rank, but the LSA domain still covers
+// every node-local peer, so the flat VA maps both local ranks and the team list is this rank's slot in the domain.
+TEST_F(DevrInitOnceTest, LsaDomain_InterleavedNodesDomainIsLocalRanksNotLsaTeam) {
+  comm->symmetricSupport = 1;
+  comm->nRanks = 4;
+  comm->rank = 2;
+  comm->localRanks = 2;
+  comm->localRank = 1;
+  rankToNode.assign({0, 1, 0, 1});
+  comm->rankToNode = rankToNode.data();
+  localRankToRank.assign({0, 2});
+  comm->localRankToRank = localRankToRank.data();
+  peers.assign(comm->nRanks, ncclPeerInfo{});
+  for (auto& p : peers) p.totalGlobalMem = 1u << 20;
+  comm->peerInfo = peers.data();
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  ncclDevrState* devr = &comm->devrState;
+  EXPECT_EQ(devr->lsaTeamSize, 1);
+  EXPECT_EQ(devr->lsaTeamSelf, 0);
+  ASSERT_EQ(devr->lsaDomainSize, 2);
+  EXPECT_EQ(devr->lsaDomainSelf, 1);
+  ASSERT_NE(devr->lsaDomainRankList, nullptr);
+  EXPECT_EQ(std::vector<int>(devr->lsaDomainRankList, devr->lsaDomainRankList + 2), (std::vector<int>{0, 2}));
+  EXPECT_EQ(devr->lsaTeamRankList, devr->lsaDomainRankList + 1);
+}
+
 // The cross-clique domain list's ncclCalloc fails: the error propagates and init is not marked done.
 TEST_F(DevrInitOnceTest, LsaDomain_CrossCliqueCallocFailurePropagates) {
   comm->symmetricSupport = 1;
