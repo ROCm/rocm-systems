@@ -3454,6 +3454,99 @@ TEST_F(InterposerPm4Test, UnsupportedGdsResetLeavesQueueUsable) {
   EXPECT_EQ(wait_output(monotonic_deadline_after(std::chrono::seconds(2))), 0);
 }
 
+TEST_F(InterposerPm4Test, AccumulatedSyncobjChunksRespectArrayBudget) {
+  constexpr uint32_t kChunkDwords = 1u << 20;
+  constexpr size_t kArrayBytes = 16 * 1024 * 1024;
+  constexpr size_t kMaxEntries = kArrayBytes / sizeof(drm_amdgpu_cs_chunk_syncobj);
+  std::vector<uint32_t> words(kChunkDwords, 0);
+  for (uint32_t id :
+       {AMDGPU_CHUNK_ID_SYNCOBJ_IN, AMDGPU_CHUNK_ID_SYNCOBJ_OUT,
+        AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT, AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL}) {
+    SCOPED_TRACE(id);
+    const bool timeline = id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ||
+                          id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_SIGNAL;
+    const uint32_t entry_dwords = timeline ? sizeof(drm_amdgpu_cs_chunk_syncobj) / 4 : 1;
+    const size_t full_chunks = kMaxEntries / (kChunkDwords / entry_dwords);
+    drm_amdgpu_cs_chunk chunk{};
+    chunk.chunk_id = id;
+    chunk.length_dw = kChunkDwords;
+    chunk.chunk_data = reinterpret_cast<uint64_t>(words.data());
+    drm_amdgpu_cs_chunk extra = chunk;
+    extra.length_dw = entry_dwords;
+    const auto submit_chunks = [&](size_t count, bool extra_entry) {
+      std::vector<uint64_t> pointers(count, reinterpret_cast<uint64_t>(&chunk));
+      if (extra_entry)
+        pointers.push_back(reinterpret_cast<uint64_t>(&extra));
+      drm_amdgpu_cs cs{};
+      cs.in.ctx_id = context_;
+      cs.in.num_chunks = pointers.size();
+      cs.in.chunks = reinterpret_cast<uint64_t>(pointers.data());
+      EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+      return errno;
+    };
+    // Without an IB, admitted arrays reach the ordinary submission validation.
+    EXPECT_EQ(submit_chunks(1, false), EINVAL);
+    EXPECT_EQ(submit_chunks(full_chunks, false), EINVAL);
+    EXPECT_EQ(submit_chunks(full_chunks, true), ENOMEM);
+    // Repeated chunks deliberately share a valid 4 MiB caller buffer.
+    EXPECT_EQ(submit_chunks(full_chunks + 1, false), ENOMEM);
+  }
+}
+
+TEST_F(InterposerPm4Test, SyncobjDependencyStorageRespectsArrayBudget) {
+  constexpr uint32_t kChunkDwords = 1u << 20;
+  std::vector<uint32_t> words(kChunkDwords, 0);
+  drm_amdgpu_cs_chunk input{};
+  input.chunk_id = AMDGPU_CHUNK_ID_SYNCOBJ_IN;
+  input.length_dw = kChunkDwords;
+  input.chunk_data = reinterpret_cast<uint64_t>(words.data());
+  drm_amdgpu_cs_chunk_ib ib{};
+  ib.va_start = kAddress;
+  ib.ib_bytes = 4;
+  ib.ip_type = AMDGPU_HW_IP_COMPUTE;
+  drm_amdgpu_cs_chunk ib_chunk{};
+  ib_chunk.chunk_id = AMDGPU_CHUNK_ID_IB;
+  ib_chunk.length_dw = sizeof(ib) / 4;
+  ib_chunk.chunk_data = reinterpret_cast<uint64_t>(&ib);
+  uint64_t pointers[] = {reinterpret_cast<uint64_t>(&input), reinterpret_cast<uint64_t>(&ib_chunk)};
+  drm_amdgpu_cs cs{};
+  cs.in.ctx_id = context_;
+  cs.in.num_chunks = 2;
+  cs.in.chunks = reinterpret_cast<uint64_t>(pointers);
+  // The 16 MiB parsed array fits, but its larger dependency records do not.
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+  EXPECT_EQ(errno, ENOMEM);
+
+  // A small admitted dependency reaches handle lookup instead.
+  input.length_dw = 1;
+  EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+  EXPECT_EQ(errno, ENOENT);
+}
+
+TEST_F(InterposerPm4Test, BoHandleCountLimitFailsBeforeCopying) {
+  // Linux's AMDGPU_BO_LIST_MAX_ENTRIES is 128K, independently of the
+  // interposer's caller-array allocation budget.
+  constexpr uint32_t kMaxEntries = 128 * 1024;
+  for (uint32_t count : {kMaxEntries, kMaxEntries + 1, UINT32_MAX, uint32_t{1}}) {
+    SCOPED_TRACE(count);
+    drm_amdgpu_bo_list_in list{};
+    list.bo_number = count;
+    list.bo_info_size = sizeof(drm_amdgpu_bo_list_entry);
+    list.bo_info_ptr = 1;
+    drm_amdgpu_cs_chunk chunk{};
+    chunk.chunk_id = AMDGPU_CHUNK_ID_BO_HANDLES;
+    chunk.length_dw = sizeof(list) / 4;
+    chunk.chunk_data = reinterpret_cast<uint64_t>(&list);
+    uint64_t pointer = reinterpret_cast<uint64_t>(&chunk);
+    drm_amdgpu_cs cs{};
+    cs.in.ctx_id = context_;
+    cs.in.num_chunks = 1;
+    cs.in.chunks = reinterpret_cast<uint64_t>(&pointer);
+    EXPECT_EQ(ioctl(drm_, DRM_IOCTL_AMDGPU_CS, &cs), -1);
+    EXPECT_EQ(errno, count > kMaxEntries ? EINVAL : EFAULT);
+  }
+}
+
 TEST_F(InterposerPm4Test, KfdResidentVaRejectsGemMapAndReplace) {
   constexpr size_t kBytes = 4096;
   uint32_t gpu_id = 0;
@@ -6064,62 +6157,55 @@ TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
-  // These runtimes reserve large shadow mappings and may abort on allocation
-  // failure instead of letting the C++ allocation throw.
-  if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init"))
-    GTEST_SKIP() << "address-space limits are incompatible with ASan and TSan";
-
-  constexpr char kChildEnv[] = "RJ_TEST_SYNCOBJ_MEMORY_LIMIT";
-  if (!getenv(kChildEnv)) {
-    // Re-exec before limiting memory so the interposer owns a fresh backend.
-    std::string child_env = std::string(kChildEnv) + "=1";
-    std::vector<char *> environment;
-    for (char **entry = environ; *entry; ++entry)
-      environment.push_back(*entry);
-    environment.push_back(child_env.data());
-    environment.push_back(nullptr);
-    char executable[] = "/proc/self/exe";
-    char filter[] = "--gtest_filter=InterposerSyncobjTest.OversizedBinaryWaitReturnsEnomem";
-    char *arguments[] = {executable, filter, nullptr};
-    pid_t child = -1;
-    ASSERT_EQ(posix_spawn(&child, executable, nullptr, nullptr, arguments, environment.data()), 0);
-    int status = 0;
-    ASSERT_EQ(waitpid(child, &status, 0), child);
-    ASSERT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(WEXITSTATUS(status), 0);
-    return;
-  }
-
+TEST(InterposerSyncobjTest, CallerArrayResourceLimitsFailBeforeCopying) {
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
   ASSERT_TRUE(kfd_version_ok(kfd));
   int drm = open_drm_render();
-  ASSERT_GE(drm, 0);
+  if (drm < 0)
+    GTEST_SKIP() << "synthetic DRM render node unavailable in this configuration";
 
-  struct rlimit original {};
-  ASSERT_EQ(getrlimit(RLIMIT_AS, &original), 0);
-  size_t virtual_pages = 0;
-  {
-    std::ifstream statm("/proc/self/statm");
-    ASSERT_TRUE(statm >> virtual_pages);
+  // rocjitsu budgets 16 MiB per caller-sized DRM array. Waits also allocate
+  // shared-pointer scratch arrays, so their count limit can be lower.
+  constexpr uint32_t kArrayBytes = 16 * 1024 * 1024;
+  constexpr uint32_t kWaitLimit = kArrayBytes / sizeof(std::shared_ptr<void>);
+  constexpr uint32_t kPointLimit = kArrayBytes / sizeof(uint64_t);
+  for (uint32_t count : {kWaitLimit, kWaitLimit + 1, UINT32_MAX, uint32_t{1}}) {
+    SCOPED_TRACE(count);
+    const int expected = count > kWaitLimit ? ENOMEM : EFAULT;
+    drm_syncobj_wait binary{};
+    binary.handles = 1;
+    binary.count_handles = count;
+    EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_WAIT, &binary), -1);
+    EXPECT_EQ(errno, expected);
+
+    drm_syncobj_timeline_wait timeline{};
+    timeline.handles = 1;
+    timeline.points = 1;
+    timeline.count_handles = count;
+    EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &timeline), -1);
+    EXPECT_EQ(errno, expected);
   }
-  const long page_size = sysconf(_SC_PAGESIZE);
-  ASSERT_GT(page_size, 0);
-  // Leave room for background driver threads while rejecting the 32 GiB
-  // points allocation, regardless of the backend's existing VM reservations.
-  struct rlimit limited = original;
-  limited.rlim_cur =
-      std::min<rlim_t>(original.rlim_cur, virtual_pages * page_size + rlim_t{512} * 1024 * 1024);
-  drm_syncobj_wait wait{};
-  wait.handles = 1;
-  wait.count_handles = UINT32_MAX;
-  ASSERT_EQ(setrlimit(RLIMIT_AS, &limited), 0);
-  const int result = ioctl(drm, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
-  const int wait_errno = errno;
-  ASSERT_EQ(setrlimit(RLIMIT_AS, &original), 0);
-  EXPECT_EQ(result, -1);
-  EXPECT_EQ(wait_errno, ENOMEM);
+  for (uint32_t count : {kPointLimit, kPointLimit + 1, UINT32_MAX, uint32_t{1}}) {
+    SCOPED_TRACE(count);
+    const int expected = count > kPointLimit ? ENOMEM : EFAULT;
+    drm_syncobj_array binary{};
+    binary.handles = 1;
+    binary.count_handles = count;
+    for (unsigned long operation : {DRM_IOCTL_SYNCOBJ_SIGNAL, DRM_IOCTL_SYNCOBJ_RESET}) {
+      EXPECT_EQ(ioctl(drm, operation, &binary), -1);
+      EXPECT_EQ(errno, expected);
+    }
+
+    drm_syncobj_timeline_array timeline{};
+    timeline.handles = 1;
+    timeline.points = 1;
+    timeline.count_handles = count;
+    for (unsigned long operation : {DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL, DRM_IOCTL_SYNCOBJ_QUERY}) {
+      EXPECT_EQ(ioctl(drm, operation, &timeline), -1);
+      EXPECT_EQ(errno, expected);
+    }
+  }
   EXPECT_EQ(close(drm), 0);
   EXPECT_EQ(close(kfd), 0);
 }
@@ -6286,6 +6372,34 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   ASSERT_GE(kfd, 0);
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
+  drm_amdgpu_gem_create buffer{};
+  buffer.in.bo_size = 4096;
+  buffer.in.domains = AMDGPU_GEM_DOMAIN_GTT;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_AMDGPU_GEM_CREATE, &buffer), 0);
+  drm_prime_handle prime{};
+  prime.handle = buffer.out.handle;
+  prime.flags = DRM_CLOEXEC;
+  ASSERT_EQ(ioctl(drm, DRM_IOCTL_PRIME_HANDLE_TO_FD, &prime), 0);
+  struct stat backing {};
+  ASSERT_EQ(syscall(SYS_fstat, prime.fd, &backing), 0);
+  const auto count_backing_fds = [&] {
+    DIR *directory = opendir("/proc/self/fd");
+    if (!directory)
+      return -1;
+    int count = 0;
+    while (dirent *entry = readdir(directory)) {
+      int candidate;
+      struct stat info {};
+      if (std::sscanf(entry->d_name, "%d", &candidate) == 1 &&
+          syscall(SYS_fstat, candidate, &info) == 0 && info.st_dev == backing.st_dev &&
+          info.st_ino == backing.st_ino)
+        ++count;
+    }
+    closedir(directory);
+    return count;
+  };
+  const int retained_fds = count_backing_fds();
+  ASSERT_GE(retained_fds, 2);
   drm_syncobj_create create{};
   ASSERT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_CREATE, &create), 0);
   uint64_t point = 1;
@@ -6308,10 +6422,14 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   std::atomic<pid_t> tid{0};
   bool unwound = false, returned = false;
   std::thread waiter([&] {
-    struct Cleanup {
-      bool &unwound;
-      ~Cleanup() { unwound = true; }
-    } cleanup{unwound};
+    class Cleanup {
+    public:
+      explicit Cleanup(bool &unwound) : unwound_(unwound) {}
+      ~Cleanup() { unwound_ = true; }
+
+    private:
+      bool &unwound_;
+    } cleanup(unwound);
     tid.store(syscall(SYS_gettid), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
@@ -6344,8 +6462,12 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
-  // Closing the file also checks that unwinding released its ioctl reservation.
+  EXPECT_EQ(count_backing_fds(), retained_fds);
+  // The final DRM close must release its private GEM backing descriptor. A leaked
+  // wait reservation would retain that descriptor even though close returns zero.
   EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(count_backing_fds(), retained_fds - 1);
+  EXPECT_EQ(close(prime.fd), 0);
   EXPECT_EQ(close(kfd), 0);
 }
 

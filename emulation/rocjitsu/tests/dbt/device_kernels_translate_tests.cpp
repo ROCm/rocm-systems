@@ -8,6 +8,7 @@
 #error "device_kernels_translate_tests.cpp requires HAS_DEVICE_KERNELS"
 #endif
 
+#include "../scoped_temp.h"
 #include "../test_paths.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -879,12 +880,10 @@ TEST(BinaryTranslatorE2E, WriteTranslatedElfToFile) {
   e_flags = (e_flags & ~0xFFu) | 0x4E;
   std::memcpy(elf_1201.data() + 48, &e_flags, 4);
 
-  const char *out_path = "/tmp/vector_add_gfx1201.co";
-  FILE *f = fopen(out_path, "wb");
-  ASSERT_NE(f, nullptr);
-  fwrite(elf_1201.data(), 1, elf_1201.size(), f);
-  fclose(f);
-  printf("  Wrote translated ELF to %s (%zu bytes)\n", out_path, elf_1201.size());
+  rocjitsu::test::ScopedTempFile output;
+  ASSERT_TRUE(output.initialize("vector_add_gfx1201-"));
+  ASSERT_TRUE(output.write(
+      std::string_view(reinterpret_cast<const char *>(elf_1201.data()), elf_1201.size())));
 }
 
 TEST(BinaryTranslatorE2E, DumpTranslation) {

@@ -108,6 +108,18 @@ using rocjitsu::RemoteDriver;
 using rocjitsu::SimulatedKfd;
 using rocjitsu::Sysfs;
 
+#if defined(__SANITIZE_THREAD__)
+#define INTERPOSER_TSAN 1
+#elif defined(__has_feature)
+#if __has_feature(thread_sanitizer)
+#define INTERPOSER_TSAN 1
+#endif
+#endif
+
+#ifdef INTERPOSER_TSAN
+#include <sanitizer/linux_syscall_hooks.h>
+#endif
+
 namespace rocjitsu {
 
 /// @brief BO state every handle to one backing file shares.
@@ -157,11 +169,24 @@ static_assert(std::atomic<uint32_t>::is_always_lock_free,
 
 /// @brief Sleep while @p word still equals @p expected, until @p deadline or a signal.
 long futex_wait_until(std::atomic<uint32_t> &word, uint32_t expected, const timespec *deadline) {
+#ifdef INTERPOSER_TSAN
+  // The resolved syscall bypasses TSan's blocking-call interception.
+  __sanitizer_syscall_pre_futex(&word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline, nullptr,
+                                FUTEX_BITSET_MATCH_ANY);
+#endif
   // Wine may call pthread_exit from a signal handler during this wait. Use the
   // resolved pointer to avoid libc's noexcept declaration of syscall, which
   // would terminate forced unwinding instead of releasing the waiter's state.
-  return rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
-                                              deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
+  const long result =
+      rocjitsu::libc_passthrough().syscall(SYS_futex, &word, FUTEX_WAIT_BITSET_PRIVATE, expected,
+                                           deadline, nullptr, FUTEX_BITSET_MATCH_ANY);
+#ifdef INTERPOSER_TSAN
+  const int wait_errno = errno;
+  __sanitizer_syscall_post_futex(result, &word, FUTEX_WAIT_BITSET_PRIVATE, expected, deadline,
+                                 nullptr, FUTEX_BITSET_MATCH_ANY);
+  errno = wait_errno;
+#endif
+  return result;
 }
 
 /// @brief Wake every waiter sleeping on @p word.
@@ -1951,13 +1976,17 @@ public:
 
   int update_syncobjs(const DrmFileToken &file, uint64_t handles_address, uint64_t points_address,
                       uint32_t count, bool reset) {
+    if (!valid_user_array_count<uint64_t>(count))
+      return -ENOMEM;
     std::vector<uint32_t> handles;
-    std::vector<uint64_t> points(count, 0);
+    std::vector<uint64_t> points;
     if (int result = snapshot_user_array(handles_address, count, handles); result != 0)
       return result;
     if (points_address) {
       if (int result = snapshot_user_array(points_address, count, points); result != 0)
         return result;
+    } else {
+      points.resize(count, 0);
     }
     if (!file)
       return -EBADF;
@@ -1981,6 +2010,8 @@ public:
   int query_syncobjs(const DrmFileToken &file, const drm_syncobj_timeline_array &request) {
     if (request.flags & ~DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED)
       return -EINVAL;
+    if (!valid_user_array_count<uint64_t>(request.count_handles))
+      return -ENOMEM;
     std::vector<uint32_t> handles;
     if (int result = snapshot_user_array(request.handles, request.count_handles, handles);
         result != 0)
@@ -2207,9 +2238,20 @@ public:
     return true;
   }
 
+  // Bound each caller-sized DRM array, including scratch arrays, before any
+  // allocation. This is a rocjitsu resource budget, not a DRM UAPI count limit.
+  static constexpr size_t kMaxDrmArrayBytes = 16 * 1024 * 1024;
+
+  template <typename T> static bool valid_user_array_count(uint32_t count) {
+    // Division also checks byte-size overflow before the eventual multiplication.
+    return count <= kMaxDrmArrayBytes / sizeof(T);
+  }
+
   /// @brief Copy a caller-owned array without faulting inside the interposer.
   template <typename T>
   static int snapshot_user_array(uint64_t address, uint32_t count, std::vector<T> &snapshot) {
+    if (!valid_user_array_count<T>(count))
+      return -ENOMEM;
     try {
       snapshot.resize(count);
     } catch (const std::bad_alloc &) {
@@ -2231,7 +2273,8 @@ public:
   /// @details Waiters use a per-file generation futex. Producers update the
   /// points under fd_mutex_, increment the generation with release ordering, and
   /// wake all sleepers; waiters recheck state under the same mutex after waking.
-  int wait_syncobj_timeline(const DrmFileToken &file, drm_syncobj_timeline_wait *wait) {
+  int wait_syncobj_timeline(const DrmFileToken &file, drm_syncobj_timeline_wait *wait,
+                            bool binary = false) {
     if (!wait)
       return -EINVAL;
     const drm_syncobj_timeline_wait request = *wait;
@@ -2242,17 +2285,25 @@ public:
       return -EINVAL;
     if (request.count_handles == 0)
       return 0;
+    if (!valid_user_array_count<uint64_t>(request.count_handles) ||
+        !valid_user_array_count<std::shared_ptr<SyncobjEntry>>(request.count_handles) ||
+        !valid_user_array_count<std::shared_ptr<SyncobjFence>>(request.count_handles))
+      return -ENOMEM;
     std::vector<uint32_t> handles;
     std::vector<uint64_t> points;
     if (int rc = snapshot_user_array(request.handles, request.count_handles, handles); rc != 0)
       return rc;
-    if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0)
-      return rc;
+    if (!binary) {
+      if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0)
+        return rc;
+    }
     if (!file)
       return -EBADF;
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
     std::vector<std::shared_ptr<SyncobjFence>> fences;
     try {
+      if (binary)
+        points.resize(request.count_handles, 0);
       fences.resize(request.count_handles);
       entries.reserve(request.count_handles);
     } catch (const std::bad_alloc &) {
@@ -2770,7 +2821,10 @@ public:
             return -EINVAL;
           drm_amdgpu_bo_list_in list;
           std::memcpy(&list, words.data(), sizeof(list));
-          if (list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
+          // Match AMDGPU_BO_LIST_MAX_ENTRIES in Linux amdgpu_bo_list.c.
+          constexpr uint32_t kMaxBoListEntries = 128 * 1024;
+          if (list.bo_number > kMaxBoListEntries ||
+              list.bo_info_size != sizeof(drm_amdgpu_bo_list_entry))
             return -EINVAL;
           if (int rc = snapshot_user_array(list.bo_info_ptr, list.bo_number, buffers); rc)
             return rc;
@@ -2779,6 +2833,9 @@ public:
         case AMDGPU_CHUNK_ID_SYNCOBJ_IN:
         case AMDGPU_CHUNK_ID_SYNCOBJ_OUT: {
           auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_IN ? inputs : outputs;
+          constexpr size_t kMaxEntries = kMaxDrmArrayBytes / sizeof(target[0]);
+          if (words.size() > kMaxEntries - target.size())
+            return -ENOMEM;
           for (uint32_t handle : words)
             target.push_back({handle, 0, 0});
           break;
@@ -2788,6 +2845,9 @@ public:
           if (bytes % sizeof(drm_amdgpu_cs_chunk_syncobj))
             return -EINVAL;
           auto &target = chunk.chunk_id == AMDGPU_CHUNK_ID_SYNCOBJ_TIMELINE_WAIT ? inputs : outputs;
+          constexpr size_t kMaxEntries = kMaxDrmArrayBytes / sizeof(target[0]);
+          if (bytes / sizeof(target[0]) > kMaxEntries - target.size())
+            return -ENOMEM;
           for (size_t offset = 0; offset < bytes; offset += sizeof(drm_amdgpu_cs_chunk_syncobj)) {
             drm_amdgpu_cs_chunk_syncobj object;
             std::memcpy(&object, reinterpret_cast<uint8_t *>(words.data()) + offset,
@@ -2809,7 +2869,11 @@ public:
         std::shared_ptr<SyncobjFence> fence;
         uint64_t point;
       };
+      // Dependency records retain more state than the parsed syncobj array.
+      if (inputs.size() > kMaxDrmArrayBytes / sizeof(Dependency))
+        return -ENOMEM;
       std::vector<Dependency> dependencies;
+      dependencies.reserve(inputs.size());
       finished = std::make_shared<SyncobjFence>();
       auto retained = std::make_shared<GemSubmissionLease>();
       retained->context = this;
@@ -5147,21 +5211,13 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
                                            DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE;
       if ((wait->flags & ~kSupportedFlags) != 0)
         return kfd_ioctl_ret(-EINVAL);
-      std::vector<uint64_t> points;
-      try {
-        points.resize(wait->count_handles, 0);
-      } catch (const std::bad_alloc &) {
-        return kfd_ioctl_ret(-ENOMEM);
-      } catch (const std::length_error &) {
-        return kfd_ioctl_ret(-ENOMEM);
-      }
       drm_syncobj_timeline_wait timeline{};
       timeline.handles = wait->handles;
-      timeline.points = reinterpret_cast<uint64_t>(points.data());
       timeline.count_handles = wait->count_handles;
       timeline.timeout_nsec = wait->timeout_nsec;
       timeline.flags = wait->flags;
-      int result = InterposerContext::ctx.wait_syncobj_timeline(drm_file, &timeline);
+      int result =
+          InterposerContext::ctx.wait_syncobj_timeline(drm_file, &timeline, /*binary=*/true);
       wait->first_signaled = timeline.first_signaled;
       return kfd_ioctl_ret(result);
     }

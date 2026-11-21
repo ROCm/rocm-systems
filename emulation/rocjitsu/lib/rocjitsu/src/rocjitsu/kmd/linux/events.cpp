@@ -338,6 +338,29 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     return 0;
   }
 
+  // Construct before publishing any pointer. Cancellation reacquires mutex_,
+  // so unregistering runs under the lock before it and the waiter storage unwind.
+  class WaitRegistration {
+  public:
+    WaitRegistration(std::unordered_map<uint32_t, GpuEvent> &events,
+                     const kfd_event_data *event_data, std::vector<EventWaiter> &waiters)
+        : events_(events), event_data_(event_data), waiters_(waiters) {}
+    ~WaitRegistration() {
+      for (size_t index = 0; index < waiters_.size(); ++index) {
+        const auto event = events_.find(event_data_[index].event_id);
+        if (event != events_.end())
+          std::erase(event->second.waiters, &waiters_[index]);
+      }
+    }
+    WaitRegistration(const WaitRegistration &) = delete;
+    WaitRegistration &operator=(const WaitRegistration &) = delete;
+
+  private:
+    std::unordered_map<uint32_t, GpuEvent> &events_;
+    const kfd_event_data *event_data_;
+    std::vector<EventWaiter> &waiters_;
+  } registration(events_, ev_data, waiters);
+
   for (uint32_t i = 0; i < args->num_events; ++i) {
     auto it = events_.find(ev_data[i].event_id);
     if (it == events_.end())
@@ -356,14 +379,6 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     ev.waiters.push_back(&waiters[i]);
   }
 
-  auto unregister_waiters = [&]() {
-    for (uint32_t i = 0; i < args->num_events; ++i) {
-      auto it = events_.find(ev_data[i].event_id);
-      if (it != events_.end())
-        std::erase(it->second.waiters, &waiters[i]);
-    }
-  };
-
   auto is_ready = [&]() -> bool {
     if (closing_ || wait_cancelled_)
       return true;
@@ -381,16 +396,11 @@ int EventState::wait_events(void *arg, uint32_t process_id) {
     return wait_all ? all_satisfied : any_satisfied;
   };
 
-  bool is_poll = (args->timeout == 0);
-  if (is_poll) {
-    // Poll mode.
-  } else if (args->timeout == kWaitEventsInfiniteMs) {
+  const bool is_poll = args->timeout == 0;
+  if (args->timeout == kWaitEventsInfiniteMs)
     my_cv.wait(lock, is_ready);
-  } else {
+  else if (!is_poll)
     my_cv.wait_for(lock, std::chrono::milliseconds(args->timeout), is_ready);
-  }
-
-  unregister_waiters();
 
   if (closing_)
     return -EBADF;

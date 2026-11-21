@@ -28,7 +28,6 @@
 #include <linux/mman.h>
 #include <optional>
 #include <string_view>
-#include <utility>
 #ifndef MADV_POPULATE_WRITE
 #define MADV_POPULATE_WRITE 23
 #endif
@@ -51,6 +50,7 @@
 #include <system_error>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -833,7 +833,7 @@ int RemoteDriver::ioctl(unsigned long request, void *arg,
 int RemoteDriver::send_ioctl(unsigned long request, void *arg,
                              const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver,
                              uint32_t *export_mapping_flags) {
-  std::lock_guard<std::mutex> lock(rpc_mutex_);
+  std::lock_guard lock(rpc_mutex_);
   // The stream is misaligned past a rejected reply; every later header would be
   // parsed out of stale bytes. Fail closed instead of returning bogus results.
   // Tested under rpc_mutex_, not before it: a thread that read the flag first
@@ -1152,6 +1152,33 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
       send_fds[num_send_fds++] = target_proc_fd.get();
     }
   }
+  // Own the output slot before recvmsg publishes its descriptor. Native unwind
+  // abandons an uncertain transaction, but ordinary zero-byte send failures do not.
+  class IoctlExchange {
+  public:
+    explicit IoctlExchange(RemoteDriver &driver) : driver_(driver) {}
+    IoctlExchange(const IoctlExchange &) = delete;
+    IoctlExchange &operator=(const IoctlExchange &) = delete;
+    ~IoctlExchange() {
+      const int saved_errno = errno;
+      if (pending_)
+        (void)driver_.poison_stream();
+      if (reply_fd_ >= 0)
+        MmapReplyFdTraits::close(reply_fd_);
+      errno = saved_errno;
+    }
+
+    void complete() { pending_ = false; }
+    int *reply_fd_out() { return &reply_fd_; }
+    int reply_fd() const { return reply_fd_; }
+    int release_reply_fd() { return std::exchange(reply_fd_, -1); }
+
+  private:
+    RemoteDriver &driver_;
+    int reply_fd_ = -1;
+    bool pending_ = true;
+  } exchange(*this);
+  size_t num_fds = 1;
   // A send that fails without putting a byte on the wire is recoverable: the
   // daemon never saw a frame, so the stream is still aligned and the caller just
   // gets the transport errno. A send that stops part way through is not — the
@@ -1166,6 +1193,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     if (sent > 0 && static_cast<size_t>(sent) != buf.size())
       return poison_stream();
     if (sent <= 0) {
+      exchange.complete();
       // Preserve the transport errno — e.g. EBADF when the client handed us a
       // closed notifier fd for SCM_RIGHTS — instead of a bare -1, which the
       // interposer would surface as EPERM (-EPERM == -1).
@@ -1176,16 +1204,15 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     if (!rpc_send_exact(sock_, buf.data(), buf.size(), &sent)) {
       if (sent > 0)
         return poison_stream();
+      exchange.complete();
       return transport_errno();
     }
   }
 
   // Receive response — may include a backing descriptor via SCM_RIGHTS for ALLOC_MEMORY.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
-  int received_fds[1] = {-1};
-  size_t num_fds = 1;
-  auto bytes =
-      rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf), received_fds, &num_fds);
+  auto bytes = rpc_recv_msg(sock_, resp_header_buf, sizeof(resp_header_buf),
+                            exchange.reply_fd_out(), &num_fds);
 
   // Every reply byte we decline to read leaves the stream misaligned: the next
   // call would parse its header out of this one's remains, silently returning a
@@ -1194,8 +1221,6 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
   // in on the doomed reply is dropped here — nothing downstream runs to adopt
   // it.
   auto poison_reply = [&] {
-    if (num_fds > 0 && received_fds[0] >= 0)
-      syscall(SYS_close, received_fds[0]);
     if (request == AMDKFD_IOC_EXPORT_DMABUF)
       static_cast<kfd_ioctl_export_dmabuf_args *>(arg)->dmabuf_fd = static_cast<uint32_t>(-1);
     return poison_stream();
@@ -1217,8 +1242,7 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
 
   // kMaxPayloadBytes bounds both directions of the protocol; the daemon
   // enforces it on receive. Enforce it here too so a desynced or corrupted
-  // reply header cannot make an interposed ioctl() attempt a multi-GiB
-  // allocation and throw std::bad_alloc out of a C entry point.
+  // reply header cannot make an interposed ioctl() attempt a multi-GiB allocation.
   if (resp->payload_bytes > kMaxPayloadBytes)
     return poison_reply();
 
@@ -1228,11 +1252,13 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     // rest, which is the same misalignment as refusing it outright.
     if (!rpc_recv_exact(sock_, payload.data(), resp->payload_bytes))
       return poison_reply();
+    exchange.complete();
 
     // The daemon's numeric fd has no meaning in this process. Refuse an
     // incomplete export reply before copying that number into caller memory.
     if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0 &&
-        (resp->payload_bytes != arg_size + sizeof(uint32_t) || num_fds != 1 || received_fds[0] < 0))
+        (resp->payload_bytes != arg_size + sizeof(uint32_t) || num_fds != 1 ||
+         exchange.reply_fd() < 0))
       return poison_reply();
 
     if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0 && export_mapping_flags)
@@ -1437,8 +1463,11 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     }
   }
 
+  exchange.complete();
+
   auto register_allocation = [&](uint64_t handle, uint64_t va_addr, uint64_t size, int backing_fd) {
-    handle_backings_[handle] = backing_fd;
+    int &owned_fd = handle_backings_[handle];
+    owned_fd = exchange.release_reply_fd();
     if (va_addr != 0 && size > 0)
       alloc_ranges_.push_back({va_addr, size, backing_fd});
   };
@@ -1494,33 +1523,33 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg,
     remember_host_svm_range_locked(alloc_args->va_addr, alloc_args->size);
     if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
       remember_host_svm_range_locked(userptr_cpu_address, alloc_args->size);
-    if (num_fds > 0 && received_fds[0] >= 0) {
-      register_allocation(alloc_args->handle, alloc_args->va_addr, alloc_args->size,
-                          received_fds[0]);
+    if (num_fds > 0 && exchange.reply_fd() >= 0) {
+      const int backing_fd = exchange.reply_fd();
+      register_allocation(alloc_args->handle, alloc_args->va_addr, alloc_args->size, backing_fd);
 
       if (alloc_args->flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-        promote_userptr(alloc_args->handle, userptr_cpu_address, alloc_args->size, received_fds[0]);
+        promote_userptr(alloc_args->handle, userptr_cpu_address, alloc_args->size, backing_fd);
     }
   }
 
   if (request == AMDKFD_IOC_IPC_IMPORT_HANDLE && resp->result == 0) {
     auto *import_args = static_cast<kfd_ioctl_ipc_import_handle_args *>(arg);
-    if (num_fds > 0 && received_fds[0] >= 0) {
+    if (num_fds > 0 && exchange.reply_fd() >= 0) {
       uint64_t size = 0;
       struct stat st {};
-      if (stat_memory_backing(received_fds[0], &st) == 0)
+      if (stat_memory_backing(exchange.reply_fd(), &st) == 0)
         size = static_cast<uint64_t>(st.st_size);
       // Imported views can also be freed while their client VA remains mapped.
       remember_host_svm_range_locked(import_args->va_addr, size);
-      register_allocation(import_args->handle, import_args->va_addr, size, received_fds[0]);
+      register_allocation(import_args->handle, import_args->va_addr, size, exchange.reply_fd());
     }
   }
 
   if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
     auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-    if (num_fds != 1 || received_fds[0] < 0)
+    if (num_fds != 1 || exchange.reply_fd() < 0)
       return poison_reply();
-    export_args->dmabuf_fd = received_fds[0];
+    export_args->dmabuf_fd = exchange.release_reply_fd();
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {

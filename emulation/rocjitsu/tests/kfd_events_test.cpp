@@ -14,6 +14,7 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <pthread.h>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -151,6 +152,30 @@ INSTANTIATE_TEST_SUITE_P(SetInterruptIdle, KfdEventOrderingTest,
                          ::testing::Combine(::testing::Values(0, 1, 2, 3),
                                             ::testing::Values(uint64_t{0}, uint64_t{1}),
                                             ::testing::Bool()));
+
+TEST_F(KfdEventsTest, NativeCancellationUnregistersEveryEventBeforeReleasingTheWait) {
+  const auto first = create();
+  const auto second = create();
+  Wait wait(events, {first, second});
+  ASSERT_TRUE(registered(first));
+  ASSERT_TRUE(registered(second));
+  ASSERT_EQ(::pthread_cancel(wait.thread.native_handle()), 0);
+  wait.thread.join();
+  EXPECT_FALSE(wait.done.load());
+  EXPECT_EQ(events.waiter_count(first), 0u);
+  EXPECT_EQ(events.waiter_count(second), 0u);
+
+  for (uint32_t id : {first, second}) {
+    signal(id);
+    Wait pending(events, {id}, 0, true, true);
+    pending.complete();
+    expect_unsignaled(id);
+    Wait next(events, {id});
+    ASSERT_TRUE(registered(id));
+    signal(id);
+    next.complete();
+  }
+}
 
 TEST_F(KfdEventsTest, InterruptRequiresSignalPage) {
   const auto id = create();

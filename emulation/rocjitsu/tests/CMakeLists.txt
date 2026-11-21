@@ -2013,6 +2013,9 @@ rj_add_test(
     TIMEOUT 60
 )
 
+# Keep the socket path short and isolate it from other build trees and users.
+string(SHA256 _system_graph_runtime_id "${CMAKE_CURRENT_BINARY_DIR}")
+string(SUBSTRING "${_system_graph_runtime_id}" 0 16 _system_graph_runtime_id)
 rj_add_test(
     REQUIRES_INTERPOSER
     NAME "SystemGraphTest.DaemonStartsSelectedNode"
@@ -2026,8 +2029,7 @@ rj_add_test(
         --
         /bin/true
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    # AF_UNIX sun_path is short; the source/build checkout may be much longer.
-    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-system-graph"
+    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-sg-${_system_graph_runtime_id}"
     TIMEOUT 60
 )
 
@@ -2954,6 +2956,9 @@ rj_add_interposer_test_suite(
 )
 
 set(_rj_interposer_pm4_tests
+    AccumulatedSyncobjChunksRespectArrayBudget
+    SyncobjDependencyStorageRespectsArrayBudget
+    BoHandleCountLimitFailsBeforeCopying
     UnsupportedGdsResetLeavesQueueUsable
     SparseReplacementPreservesResidentTail
     SubmissionFenceQueryPollsAndWaitsForCompletion
@@ -3112,6 +3117,7 @@ rj_add_interposer_test_suite(
 rj_add_interposer_test_suite(InterposerGemTest ${_rj_interposer_gem_tests})
 
 set(_rj_interposer_syncobj_tests
+    CallerArrayResourceLimitsFailBeforeCopying
     VmTimelineWaitObservesSynchronousMapAndUnmap
     VmDelayUpdateSuppressesTimelinePublication
     GemVaSignalsBinarySyncobjsAtPointZero
@@ -3120,7 +3126,6 @@ set(_rj_interposer_syncobj_tests
     IndependentDrmOpensHaveSeparateNamespaces
     CreateSignaledSeedsOnlyTheInitialPoint
     WaitValidationMatchesDrm
-    OversizedBinaryWaitReturnsEnomem
     DestroyRejectsInvalidInput
     TimelineWaitBlocksUntilSignalOrDeadline
     TimelineWaitReturnsEintrForSignal
