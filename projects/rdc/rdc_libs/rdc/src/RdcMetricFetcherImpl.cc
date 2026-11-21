@@ -328,6 +328,10 @@ void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_i
   if (!value) {
     return;
   }
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
+    return;
+  }
   // amdsmi_gpu_block_t is a 64-bit flag enum; a 32-bit counter wraps to 0 and never exits.
   for (uint64_t b = AMDSMI_GPU_BLOCK_FIRST; b <= AMDSMI_GPU_BLOCK_LAST; b = b * 2) {
     err =
@@ -444,6 +448,10 @@ void RdcMetricFetcherImpl::get_ecc_deferred_total(uint32_t gpu_index, rdc_field_
 
   amdsmi_processor_handle processor_handle = nullptr;
   amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
+    return;
+  }
 
   uint64_t deferred_count = 0;
   bool counted = false;  // a block reported its counts
@@ -1950,10 +1958,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     } else {
       info_str = std::to_string(info.device_index);
     }
-    // An unavailable GPU was logged once, when it became unavailable; every field it is
-    // asked for fails the same way.
-    bool unavailable =
-        ret == AMDSMI_STATUS_NOT_FOUND && info.entity_role == RDC_DEVICE_ROLE_PHYSICAL;
+    // An unavailable GPU, or a partition instance of one, was logged once, when it became
+    // unavailable; every field it is asked for fails the same way.
+    bool unavailable = ret == AMDSMI_STATUS_NOT_FOUND;
     RDC_LOG(unavailable ? RDC_DEBUG : RDC_ERROR,
             "Failed to get processor handle for device " << info_str << " error: " << ret);
     return Smi2RdcError(ret);

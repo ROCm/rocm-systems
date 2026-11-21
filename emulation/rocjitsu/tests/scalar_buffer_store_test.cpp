@@ -3,6 +3,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -15,7 +16,7 @@
 
 namespace rocjitsu {
 namespace {
-class ScalarBufferStore : public testing::TestWithParam<rj_code_arch_t> {
+class ScalarBufferStore : public testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     l2_.set_backing_memory(&memory_);
@@ -91,7 +92,7 @@ TEST_P(ScalarBufferStore, BufferStoreSkipsDwordThatEndsPastTheBuffer) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, ScalarBufferStore,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 } // namespace
 } // namespace rocjitsu

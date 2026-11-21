@@ -94,7 +94,11 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     g_hipGetLastError = [] { return hipSuccess; };
     g_loadParam = [this](const char* env, int64_t deftVal) {
       auto it = params_.find(env);
-      return it == params_.end() ? deftVal : it->second;
+      if (it != params_.end()) {
+        return it->second;
+      }
+      auto pinned = pinned_.find(env);
+      return pinned == pinned_.end() ? deftVal : pinned->second;
     };
     comm().rank = 5;
     comm().addonStopEvent = kStopEvent;
@@ -215,6 +219,9 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
 
   DdaFabricMockComm mock_;
   std::map<std::string, int64_t> params_;
+  // Params a fixture fixes for all its tests; params_ (which tests clear) overrides them. These tests cover the
+  // one-warp-per-slice LL128 kernels; DdaAllReduceFabricLL128PeerParMicrotest covers the peer-parallel default.
+  std::map<std::string, int64_t> pinned_{{"RCCL_DDA_LL128_AR_PEER_PARALLEL", 0}};
 };
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_SharedShapeChecks) {
@@ -938,6 +945,191 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatat
   EXPECT_EQ(RunOneLL128(16 * kMiB / 2, ncclFloat16).kernel, (LL128TwoShotW<half, 8, kAsync>()));
   EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e4m3).kernel, (LL128TwoShotW<dda::common::fp8e4m3, 8, kAsync>()));
   EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e5m2).kernel, (LL128TwoShotW<dda::common::fp8e5m2, 8, kAsync>()));
+}
+
+// ---- Peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL, on by default) ----
+
+template <typename T, int N>
+const void* LL128OneShotPP() {
+  return KernelPtr(&dda::common::ddaAllReduceFlatLL128PeerPar<T, N>);
+}
+template <typename T, int N>
+const void* LL128TwoShotPP() {
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128PeerPar<T, N>);
+}
+
+// Floats in `slices` LL128 slices.
+constexpr size_t SliceFloats(size_t slices) {
+  return slices * kSliceData / 4;
+}
+
+// The peer-parallel launch shape: a group of one warp per rank (at most the block) per block, the block doubling up
+// to 512 threads only while the group-per-block grid would pass the block cap.
+struct PeerParShape {
+  unsigned threads;
+  unsigned blocks;
+};
+PeerParShape PeerParModel(int nRanks, size_t slices, int maxBlocks, rcclDdaLaunchCap cap) {
+  const unsigned maxThreads = dda::common::ddaCapThreads(512, cap.threads);
+  const unsigned group = std::min<unsigned>((unsigned)nRanks, maxThreads / 32) * 32;
+  const size_t blockCap = dda::common::ddaCapBlocks((size_t)std::max(maxBlocks, 1), cap.blocks);
+  unsigned threads = group;
+  while (threads * 2 <= maxThreads && (slices + threads / group - 1) / (threads / group) > blockCap) {
+    threads *= 2;
+  }
+  const size_t groups = threads / group;
+  const size_t blocks = std::min((slices + groups - 1) / groups, blockCap);
+  return {threads, (unsigned)std::max<size_t>(blocks, 1)};
+}
+
+// The production default: peer-parallel on.
+class DdaAllReduceFabricLL128PeerParMicrotest : public DdaAllReduceFabricLLMicrotest {
+ protected:
+  void SetUp() override {
+    DdaAllReduceFabricLLMicrotest::SetUp();
+    pinned_.clear();
+  }
+};
+
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BothShotsTakeThePeerParallelKernelOfEachDatatype) {
+  EXPECT_EQ(RunOneLL128(64).kernel, (LL128OneShotPP<float, 8>()));
+  EXPECT_EQ(RunOneLL128(64, ncclFloat16).kernel, (LL128OneShotPP<half, 8>()));
+  EXPECT_EQ(RunOneLL128(64, ncclBfloat16).kernel, (LL128OneShotPP<bf16, 8>()));
+  EXPECT_EQ(RunOneLL128(256, ncclFloat8e4m3).kernel, (LL128OneShotPP<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL128(256, ncclFloat8e5m2).kernel, (LL128OneShotPP<dda::common::fp8e5m2, 8>()));
+  OnlyTwoShot();
+  EXPECT_EQ(RunOneLL128(256).kernel, (LL128TwoShotPP<float, 8>()));
+  EXPECT_EQ(RunOneLL128(512, ncclFloat16).kernel, (LL128TwoShotPP<half, 8>()));
+  EXPECT_EQ(RunOneLL128(512, ncclBfloat16).kernel, (LL128TwoShotPP<bf16, 8>()));
+  EXPECT_EQ(RunOneLL128(2048, ncclFloat8e4m3).kernel, (LL128TwoShotPP<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL128(2048, ncclFloat8e5m2).kernel, (LL128TwoShotPP<dda::common::fp8e5m2, 8>()));
+}
+
+// RCCL_DDA_LL128_AR_PEER_PARALLEL=0 restores the one-warp-per-slice kernels and their 512-thread blocks.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_OffSwitchRestoresTheFlatKernels) {
+  params_["RCCL_DDA_LL128_AR_PEER_PARALLEL"] = 0;
+  const DdaLaunch& one = RunOneLL128(64);
+  EXPECT_EQ(one.kernel, (LL128OneShot<float, 8>()));
+  EXPECT_EQ(one.block.x, 512u);
+  OnlyTwoShot();
+  const DdaLaunch& two = RunOneLL128(256);
+  EXPECT_EQ(two.kernel, (LL128TwoShot<float, 8>()));
+  EXPECT_EQ(two.block.x, 512u);
+}
+
+// A block holds one warp group, one warp per rank up to 16 warps: 64 / 96 / 128 / 256 / 512 threads at 2 / 3 / 4 / 8 /
+// 16+ ranks, so one slice is one block.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BlockIsOneWarpGroup) {
+  const struct {
+    int nRanks;
+    unsigned threads;
+  } cases[] = {{2, 64}, {3, 96}, {4, 128}, {8, 256}, {16, 512}, {32, 512}};
+  for (const auto& c : cases) {
+    comm().nRanks = c.nRanks;
+    const DdaLaunch& one = RunOneLL128(16);
+    EXPECT_EQ(one.block.x, c.threads) << "nRanks " << c.nRanks;
+    EXPECT_EQ(one.grid.x, 1u) << "nRanks " << c.nRanks;
+    EXPECT_EQ(one.sharedMemBytes, c.threads / 32 * kSliceWire) << "a wire slice of LDS per warp, nRanks " << c.nRanks;
+    EXPECT_EQ(RunOneLL128(SliceFloats(17)).grid.x, 17u) << "a block per slice, nRanks " << c.nRanks;
+  }
+}
+
+// Blocks widen, two groups then four, only once a group per block would pass the block cap; past that they loop.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BlocksWidenOnlyPastTheBlockCap) {
+  comm().nRanks = 4;  // 128-thread groups
+  comm().ddaFabricMaxBlocks = 2;
+  const struct {
+    size_t slices;
+    unsigned threads;
+    unsigned blocks;
+  } cases[] = {{2, 128, 2}, {3, 256, 2}, {4, 256, 2}, {5, 512, 2}, {100, 512, 2}};
+  for (const auto& c : cases) {
+    const DdaLaunch& one = RunOneLL128(SliceFloats(c.slices));
+    EXPECT_EQ(one.block.x, c.threads) << "slices " << c.slices;
+    EXPECT_EQ(one.grid.x, c.blocks) << "slices " << c.slices;
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), SliceFloats(c.slices), ncclFloat32), c.blocks);
+  }
+  OnlyTwoShot();
+  const DdaLaunch& two = RunOneLL128(4 * SliceFloats(3));  // three slices a shard
+  EXPECT_EQ(two.block.x, 256u);
+  EXPECT_EQ(two.grid.x, 2u);
+}
+
+// Every LL128 sweep case: uncapped, the launch is the peer-parallel shape. Capped, DDA runs another backend's call,
+// so the launch is the one RCCL_DDA_LL128_AR_PEER_PARALLEL=0 gives under the same cap. The reporter reports its grid.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_PeerParallelOnlyUncapped) {
+  const rcclDdaLaunchCap caps[] = {{1, 64}, {3, 192}, {17, 256}, {3, 0},  {0, 192},
+                                   {17, 96}, {2, 1024}, {0, 64}, {0, 480}, {1, 32}, {0, 1}};
+  ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
+                      size_t count) {
+    if (!tier.ll128) {
+      return;
+    }
+    const DdaLaunch uncapped = RunTier(tier, count, type);
+    const PeerParShape shape = PeerParModel(nRanks, TierUnits(tier, bytes, nRanks), maxBlocks, {});
+    EXPECT_EQ(uncapped.block.x, shape.threads);
+    EXPECT_EQ(uncapped.grid.x, shape.blocks);
+    EXPECT_EQ(ReportTier(tier, count, type, {}), uncapped.grid.x * uncapped.grid.y);
+    for (const rcclDdaLaunchCap& cap : caps) {
+      SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+      params_["RCCL_DDA_LL128_AR_PEER_PARALLEL"] = 0;
+      const DdaLaunch flat = RunTier(tier, count, type, cap);
+      params_.erase("RCCL_DDA_LL128_AR_PEER_PARALLEL");
+      const DdaLaunch launch = RunTier(tier, count, type, cap);
+      EXPECT_EQ(launch.kernel, flat.kernel);
+      EXPECT_EQ(launch.block.x, flat.block.x);
+      EXPECT_EQ(launch.grid.x, flat.grid.x);
+      EXPECT_EQ(launch.sharedMemBytes, flat.sharedMemBytes);
+      EXPECT_EQ(ReportTier(tier, count, type, cap), launch.grid.x * launch.grid.y);
+    }
+  });
+}
+
+// The two-shot is peer-parallel with the cooperative writer only: from a 2 MiB shard, RCCL_DDA_LL128_ASYNC_WIRE=1 on a
+// gfx1250 wave32 comm keeps the staged one-warp-per-slice kernel on its 512-thread blocks.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_TwoShotPeerParallelOnlyWithTheCooperativeWriter) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 32;
+  const size_t big = 16 * kMiB / 4;  // 8 ranks: a 2 MiB shard, two-shot
+  const DdaLaunch& staged = RunOneLL128(big);
+  EXPECT_EQ(staged.kernel, (LL128TwoShotW<float, 8, kAsync>()));
+  EXPECT_EQ(staged.block.x, 512u);
+  EXPECT_GT(staged.sharedMemBytes, 0u);
+  EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), big, ncclFloat32), staged.grid.x);
+  const DdaLaunch& below = RunOneLL128(big - 8 * 4);  // one 16 B chunk short of a 2 MiB shard
+  EXPECT_EQ(below.kernel, (LL128TwoShotPP<float, 8>()));
+  EXPECT_EQ(below.sharedMemBytes, below.block.x / 32 * kSliceWire) << "the fold's slice per warp";
+  comm().WarpSize = 64;
+  EXPECT_EQ(RunOneLL128(big).kernel, (LL128TwoShotPP<float, 8>())) << "no staged writer on wave64";
+  EXPECT_EQ(RunOneLL128(64).kernel, (LL128OneShotPP<float, 8>())) << "the one-shot never stages";
+}
+
+// Past the rank-scaled cap the one-shot gives way, but only to a two-shot that splits the message into whole 16 B
+// shards; anything else stays on the one-shot up to RCCL_DDA_LL128_ONESHOT_THRESHOLD. A capped launch keeps that
+// unscaled cap.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, LL128OneShotEligible_PastTheRankScaledCapOnlyForTheTwoShot) {
+  comm().nRanks = 4;
+  const ncclComm* seen = nullptr;
+  g_rcclDdaLL128OneShotThreshold = [&](const ncclComm* c) {
+    seen = c;
+    return 1 * kMiB;  // 4 MiB / 4 ranks
+  };
+  EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, kMiB / 4));
+  const size_t splits = kMiB / 4 + 16;  // 4 shards of 256 KiB + 16 B
+  EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, splits));
+  EXPECT_EQ(seen, mock_.get());
+  EXPECT_TRUE(Eligible(ddaLL128ArTwoShotEligible, splits));
+  EXPECT_EQ(RunOneLL128(splits).kernel, (LL128TwoShotPP<float, 4>()));
+  const size_t ragged = kMiB / 4 + 4;  // shards of 256 KiB + 4 B
+  EXPECT_FALSE(Eligible(ddaLL128ArTwoShotEligible, ragged));
+  EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, ragged));
+  EXPECT_EQ(RunOneLL128(ragged).kernel, (LL128OneShotPP<float, 4>()));
+  EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, 4 * kMiB / 4 - 4)) << "ragged, at the unscaled cap";
+  EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 4 * kMiB / 4 + 4)) << "ragged, past the unscaled cap";
+  const rcclDdaLaunchCap cap{2, 256};
+  const DdaLaunch& capped = RunOneLL128(splits, ncclFloat32, cap);
+  EXPECT_EQ(capped.kernel, (LL128OneShot<float, 4>())) << "capped: the one-warp one-shot";
+  EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), splits, ncclFloat32, cap), capped.grid.x);
 }
 
 }  // namespace

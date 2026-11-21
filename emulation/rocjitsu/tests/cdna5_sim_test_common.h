@@ -7,6 +7,7 @@
 #include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -266,12 +267,15 @@ constexpr uint16_t vopd_src0_vgpr(uint16_t reg) { return 256 + reg; }
 enum class VopdOp : uint16_t {
   FmamkF32 = 2,
   MulF32 = 3,
+  AddF32 = 4,
   MulDx9ZeroF32 = 7,
   MovB32 = 8,
   CndmaskB32 = 9,
   FmaF32 = 19,
   FmaF64 = 32,
   AddF64 = 33,
+  MaxNumF64 = 35,
+  MinNumF64 = 36,
 };
 
 struct VopdSlot {
@@ -328,7 +332,7 @@ inline uint32_t read_global_u32(amdgpu::GpuMemory &memory, uint64_t addr) {
 
 inline std::unique_ptr<Instruction> decode_gfx1250(const std::array<uint32_t, 3> &words,
                                                    std::string_view expected_mnemonic) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   if (!decoder) {
     ADD_FAILURE() << "Decoder::create() returned nullptr for gfx1250";
     return nullptr;

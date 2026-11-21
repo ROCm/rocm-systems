@@ -4,6 +4,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -140,7 +141,7 @@ protected:
     ASSERT_FALSE(original.empty());
     const TargetProfile *profile = target_profile(target_mode.target);
     ASSERT_NE(profile, nullptr);
-    const rj_code_arch_t arch = profile->arch;
+    const rocjitsu::IsaFamily arch = profile->arch;
     const uint32_t waves_per_workgroup =
         (threads + target_mode.wave_size - 1) / target_mode.wave_size;
     const uint32_t wave_count = workgroups * waves_per_workgroup;

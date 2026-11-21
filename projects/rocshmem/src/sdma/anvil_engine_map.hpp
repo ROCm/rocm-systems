@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace sdma_anvil {
 
@@ -115,6 +116,34 @@ inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEngine
                                 uint32_t queuesPerEngine) {
   const uint32_t budget = numEnginesTotal * queuesPerEngine;
   return requested > 0 && budget > 0 && used + static_cast<uint32_t>(requested) > budget;
+}
+
+// The usable engine carrying the fewest queues, lowest id on a tie. queuesPerEngine[e] counts this
+// process's queues on engine e, sized to the node's engine total; an empty vector means the total
+// is unknown and returns engine 0.
+inline int leastLoadedUsableEngine(const std::vector<uint32_t>& queuesPerEngine) {
+  int best = 0;
+  for (size_t e = 0; e < queuesPerEngine.size(); e += 2) {
+    if (queuesPerEngine[e] < queuesPerEngine[static_cast<size_t>(best)]) best = static_cast<int>(e);
+  }
+  return best;
+}
+
+// The usable engine of an HSA preferred-copy-engine mask carrying the fewest queues, lowest id on a
+// tie. MI450 reports every engine as preferred for every GPU pair, and taking the lowest one stacks
+// every local-peer queue on engine 0 past its KFD queue limit. Falls back to preferredUsableEngine
+// when the load is unknown (empty vector) or no even engine of the mask is counted in it.
+inline int leastLoadedPreferredEngine(uint32_t preferredMask,
+                                      const std::vector<uint32_t>& queuesPerEngine) {
+  const uint32_t evenMask = preferredMask & 0x55555555u;
+  int best = -1;
+  for (size_t e = 0; e < queuesPerEngine.size() && e < 32; e += 2) {
+    if ((evenMask & (1u << e)) == 0) continue;
+    if (best < 0 || queuesPerEngine[e] < queuesPerEngine[static_cast<size_t>(best)]) {
+      best = static_cast<int>(e);
+    }
+  }
+  return best >= 0 ? best : preferredUsableEngine(preferredMask);
 }
 
 }  // namespace sdma_anvil

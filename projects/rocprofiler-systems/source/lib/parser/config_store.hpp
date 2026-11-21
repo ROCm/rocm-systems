@@ -1,0 +1,153 @@
+// Copyright (c) Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "parser/schema.hpp"
+#include "parser/value_text.hpp"
+
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <optional>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <variant>
+#include <vector>
+
+namespace rocprofsys::parser
+{
+template <typename ValueT>
+concept config_value =
+    std::is_same_v<ValueT, bool> || std::is_same_v<ValueT, std::int64_t> ||
+    std::is_same_v<ValueT, double> || std::is_same_v<ValueT, std::string> ||
+    std::is_same_v<ValueT, std::vector<std::string>>;
+
+/**
+ * Where a stored value came from.
+ *
+ * Listed from lowest precedence to highest: command_line overrides preset, which
+ * overrides environment, file, and default_value. This store records the source
+ * but does not apply precedence; a later resolver decides whether to replace a value.
+ */
+enum class config_source : std::uint8_t
+{
+    default_value = 0,
+    file,
+    environment,
+    preset,
+    command_line,
+};
+
+/// One stored parameter, already parsed.
+struct config_slot
+{
+    std::string    id;
+    config_value_t value;
+    config_source  source = config_source::default_value;
+};
+
+/**
+ * Values for the parameters of one schema.
+ *
+ * Construct a store with its schema. set() accepts only parameter ids and textual
+ * values the schema allows, parses each value once, and records which source
+ * supplied it. get() returns canonical text. get_as<T>() returns the stored value
+ * when T is that parameter's type: bool, std::int64_t, double, string, or
+ * vector<string> for an enumeration_list. An integer value is not returned as a
+ * double.
+ *
+ * Thread safety: reads may run concurrently with each other and with set() and
+ * set_value(). Callbacks run in registration order after the value is stored and the
+ * lock is released, so if several threads set the same parameter at the same time,
+ * the order in which their callbacks run is not specified. Make all writes to a
+ * parameter from one thread when callbacks must see its values in order. A callback
+ * receives the canonical text and may call set(). A callback that throws leaves the
+ * new value stored and skips later callbacks for that change. clear() drops stored
+ * values and does not run callbacks.
+ */
+class config_store
+{
+public:
+    using change_callback_t = std::function<void(std::string_view, std::string_view)>;
+
+    explicit config_store(schema config_schema);
+
+    /**
+     * Store a textual value for a known parameter.
+     * @throws std::runtime_error if the id is unknown or the value is not valid.
+     * Change callbacks run after the value is stored, and only when the parsed
+     * value changes. A callback may read the store.
+     */
+    void set(std::string_view param_id, std::string_view value, config_source source);
+
+    /**
+     * Store a value that is already parsed, such as one decoded from JSON. The value
+     * must hold the parameter's type, as for get_as<T>(): a std::int64_t is refused
+     * for a number parameter, where set() would accept the text "2".
+     * @throws std::runtime_error if the id is unknown or accepts_value() refuses it.
+     * Change callbacks follow the same rules as set().
+     */
+    void set_value(std::string_view param_id, config_value_t value, config_source source);
+
+    [[nodiscard]] std::optional<std::string>   get(std::string_view param_id) const;
+    [[nodiscard]] bool                         contains(std::string_view param_id) const;
+    [[nodiscard]] std::optional<config_source> source_of(std::string_view param_id) const;
+
+    template <config_value ValueT>
+    [[nodiscard]] std::optional<ValueT> get_as(std::string_view param_id) const;
+
+    /// Stored parameter ids in that category, in schema order.
+    [[nodiscard]] std::vector<std::string> ids_in_category(
+        std::string_view category_id) const;
+
+    [[nodiscard]] value_map_t values() const;
+
+    /// Stored slots, including the parsed value and its source.
+    [[nodiscard]] std::vector<config_slot> slots() const;
+
+    /// @throws std::runtime_error if the id is unknown.
+    void on_change(std::string_view param_id, change_callback_t callback);
+
+    /// Drop stored values. The schema and callbacks stay.
+    void clear();
+
+    [[nodiscard]] std::shared_ptr<const schema> config_schema() const;
+
+private:
+    config_store(const config_store&)            = delete;
+    config_store& operator=(const config_store&) = delete;
+
+    struct stored_value
+    {
+        config_value_t value;
+        config_source  source = config_source::default_value;
+    };
+
+    [[nodiscard]] std::optional<stored_value> lookup(std::string_view param_id) const;
+    void store_parsed(std::string_view param_id, config_value_t value,
+                      config_source source);
+
+    const std::shared_ptr<const schema>                                m_schema;
+    mutable std::shared_mutex                                          m_mutex;
+    std::map<std::string, stored_value, std::less<>>                   m_values;
+    std::map<std::string, std::vector<change_callback_t>, std::less<>> m_callbacks;
+};
+
+template <config_value ValueT>
+std::optional<ValueT>
+config_store::get_as(std::string_view param_id) const
+{
+    const auto stored = lookup(param_id);
+    if(!stored)
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<ValueT>(&stored->value);
+    return value == nullptr ? std::nullopt : std::optional<ValueT>{ *value };
+}
+
+}  // namespace rocprofsys::parser

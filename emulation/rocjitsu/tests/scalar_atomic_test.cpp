@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
@@ -95,7 +96,8 @@ constexpr uint16_t buffer_atomic_opcode(uint16_t opcode) { return opcode - 64; }
 static_assert(buffer_atomic_opcode(cdna3::kSAtomicSwapSmem) == cdna3::kSBufferAtomicSwapSmem);
 static_assert(buffer_atomic_opcode(cdna3::kSAtomicDecX2Smem) == cdna3::kSBufferAtomicDecX2Smem);
 
-class ScalarAtomicTest : public ::testing::TestWithParam<std::tuple<rj_code_arch_t, MemoryMode>> {
+class ScalarAtomicTest
+    : public ::testing::TestWithParam<std::tuple<rocjitsu::IsaFamily, MemoryMode>> {
 protected:
   static constexpr uint64_t kAddress = 0x1000;
   static constexpr uint32_t kRecords = 0x100;
@@ -205,8 +207,8 @@ protected:
 
 INSTANTIATE_TEST_SUITE_P(
     Cdna, ScalarAtomicTest,
-    ::testing::Combine(::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4),
+    ::testing::Combine(::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4),
                        ::testing::Values(MemoryMode::Direct, MemoryMode::CachedVm,
                                          MemoryMode::TranslatedVm)));
 
