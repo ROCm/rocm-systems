@@ -45,6 +45,7 @@ test_categories:
       - "CeColl*"
       - "CeInit*"
       - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      - "CeBatchCaptureMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"

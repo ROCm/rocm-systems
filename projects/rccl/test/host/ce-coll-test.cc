@@ -1001,4 +1001,87 @@ INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
                                            LaunchPath::kLegacyNullStream, LaunchPath::kGraphCapture),
                          LaunchPathName);
 
+// NCCL_CE_BATCH_CAPTURE_ENABLE (NCCL 2.32.6): captured CE copies take hipMemcpyBatchAsync only when opted in and the
+// driver can capture batch copies; otherwise they fall back to per-op hipMemcpyAsync.
+class CeBatchCaptureMicrotest : public CeCollDoneEventMicrotest {
+ protected:
+  uint8_t src_[3] = {}, dst_[3] = {};
+  void* srcs_[3] = {&src_[0], &src_[1], &src_[2]};
+  void* dsts_[3] = {&dst_[0], &dst_[1], &dst_[2]};
+  size_t sizes_[3] = {1, 1, 1};
+  int64_t captureEnable_ = 0;
+  int batchCalls_ = 0;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+  hipMemcpyAttributes attrs_[1] = {};
+  size_t attrIdxs_[1] = {};
+  ScopedHook<hipError_t(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t, size_t*, hipStream_t)>
+      batchHook_{g_hipMemcpyBatchAsync, [this](void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t,
+                                               size_t*, hipStream_t) {
+        ++batchCalls_;
+        return hipSuccess;
+      }};
+#endif
+  ScopedHook<int64_t(const char*, int64_t)> paramHook_{g_loadParam, [this](const char* env, int64_t deft) -> int64_t {
+    if (std::strcmp(env, "RCCL_CE_BATCH_ASYNC_ENABLE") == 0) return 1;
+    if (std::strcmp(env, "CE_BATCH_CAPTURE_ENABLE") == 0) return captureEnable_;
+    return deft;
+  }};
+
+  void SetUp() override {
+    CeCollDoneEventMicrotest::SetUp();
+#ifndef CE_BATCH_ASYNC_SUPPORTED
+    GTEST_SKIP() << "hip_runtime_api.h has no hipMemcpyBatchAsync, so ce_coll.cc builds without the batch path";
+#endif
+  }
+  void TearDown() override {
+    ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;
+    CeCollDoneEventMicrotest::TearDown();
+  }
+
+  ncclResult_t LaunchOps(bool capturing, int driverVersion) {
+    comm_->planner.capturingGraph.graphId = capturing ? kCaptureGraphId : ULLONG_MAX;
+    ncclCudaDriverVersionCache = driverVersion;
+    ncclCeBatchOpsParams params = {};
+    params.srcs = srcs_;
+    params.dsts = dsts_;
+    params.sizes = sizes_;
+    params.numOps = 3;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    params.attrs = attrs_;
+    params.attrIdxs = attrIdxs_;
+#endif
+    std::string log;
+    return Run([&]() { return ncclCeLaunchBatchOps(comm_.get(), &params, launchStream_, &args_); }, &log);
+  }
+};
+
+// A driver that can capture batch copies: RCCL's capture minimum is INT_MAX, so only a scripted version reaches it.
+constexpr int kBatchCaptureDriverVersion = INT_MAX;
+
+TEST_F(CeBatchCaptureMicrotest, NotCapturing_UsesBatchCopy) {
+  ASSERT_EQ(ncclSuccess, LaunchOps(/*capturing=*/false, kBatchCaptureDriverVersion));
+  EXPECT_EQ(1, batchCalls_);
+  EXPECT_EQ(0, copies_);
+}
+
+TEST_F(CeBatchCaptureMicrotest, Capturing_DefaultOff_FallsBackToPerOpCopies) {
+  ASSERT_EQ(ncclSuccess, LaunchOps(/*capturing=*/true, kBatchCaptureDriverVersion));
+  EXPECT_EQ(0, batchCalls_);
+  EXPECT_EQ(3, copies_);
+}
+
+TEST_F(CeBatchCaptureMicrotest, Capturing_OptedInOnCurrentHipDriver_FallsBackToPerOpCopies) {
+  captureEnable_ = 1;
+  ASSERT_EQ(ncclSuccess, LaunchOps(/*capturing=*/true, ROCM_VER_7_12_0));
+  EXPECT_EQ(0, batchCalls_);
+  EXPECT_EQ(3, copies_);
+}
+
+TEST_F(CeBatchCaptureMicrotest, Capturing_OptedInOnCapableDriver_UsesBatchCopy) {
+  captureEnable_ = 1;
+  ASSERT_EQ(ncclSuccess, LaunchOps(/*capturing=*/true, kBatchCaptureDriverVersion));
+  EXPECT_EQ(1, batchCalls_) << "NCCL_CE_BATCH_CAPTURE_ENABLE=1 must batch captured copies";
+  EXPECT_EQ(0, copies_);
+}
+
 }  // namespace
