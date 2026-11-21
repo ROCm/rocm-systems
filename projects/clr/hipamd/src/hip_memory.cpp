@@ -2245,13 +2245,16 @@ hipError_t validateMemoryObject(const void* ptr, bool isDeviceMemory, amd::Coord
     return hipErrorInvalidValue;
   }
 
+  if (rect.start_ > std::numeric_limits<size_t>::max() - offset) {
+    return hipErrorInvalidValue;
+  }
+  rect.start_ += offset;
+
   amd::Coord3D start(rect.start_, 0, 0);
   amd::Coord3D size(rect.end_, 1, 1);
   if (memory && !memory->validateRegion(start, size)) {
     return hipErrorInvalidValue;
   }
-
-  rect.start_ += offset;
 
   origin.c[0] = rect.offset(0, 0, 0);  // Get the physical offset of the logic origin
   origin.c[1] = origin.c[2] = 0;
