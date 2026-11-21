@@ -104,7 +104,12 @@ struct ncclShmemData {
 };
 
 // Device-linker host passes only need the kernel declarations below; hiding the
-// device code keeps them from defining host shadows of ncclShmem.
+// device code keeps them from defining host shadows of ncclShmem. This hides
+// everything up to the matching #endif: ncclShmem, ncclShmemPerWarp,
+// barrier_sync*, copyToShmem16, loadWorkBatchToShmem, globaltimer, RunWorkColl,
+// RunWorkBatch, profiler, the progress counters and ncclKernelMain. Clang still
+// checks device function bodies in the host pass, so a fat-object TU that uses
+// any of them must put that use under #ifdef __HIP_DEVICE_COMPILE__.
 #if !defined(RCCL_DEVICE_LINKER) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef RCCL_DEVICE_LINKER
 __shared__ ncclShmemData ncclShmem;
