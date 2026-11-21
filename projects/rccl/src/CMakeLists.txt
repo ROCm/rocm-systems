@@ -1783,10 +1783,15 @@ if(ENABLE_DEVICE_LINKER)
     if(ENABLE_COMPRESS)
       set(_dl_archive_env ${CMAKE_COMMAND} -E env OFFLOAD_BUNDLER_COMPRESS=1)
     endif()
+    # The flags CMake puts on librccl.so's link line, so the device code is
+    # optimized (and instrumented) the same way in both builds.
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _dl_build_type)
+    separate_arguments(_dl_archive_cxx_flags UNIX_COMMAND
+      "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_dl_build_type}}")
     add_custom_command(
       OUTPUT  ${_dl_archive_object}
-      COMMAND ${_dl_archive_env} ${CMAKE_CXX_COMPILER} -r ${_dl_device_link_flags}
-              ${_dl_archive_link_inputs} -o ${_dl_archive_object}
+      COMMAND ${_dl_archive_env} ${CMAKE_CXX_COMPILER} ${_dl_archive_cxx_flags} -r
+              ${_dl_device_link_flags} ${_dl_archive_link_inputs} -o ${_dl_archive_object}
       DEPENDS ${_dl_archive_inputs} device_linker_build
       COMMENT "DL relocatable device link for librccl.a"
       VERBATIM
