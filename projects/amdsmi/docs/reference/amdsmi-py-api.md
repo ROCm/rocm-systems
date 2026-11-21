@@ -624,6 +624,7 @@ Field | Content
 `hip_id` | HIP ID
 `hip_uuid` | HIP UUID
 `oam_id` | OAM ID
+`physical_acc_id` | physical accelerator ID (`"N/A"` if not supported)
 
 Exceptions that can be thrown by `amdsmi_get_gpu_enumeration_info` function:
 
@@ -723,18 +724,20 @@ Output: Dictionary with fields
 Field | Content
 ---|---
 `market_name` |  market name
-`vendor_id` |  vendor id
+`vendor_id` |  vendor id as a hex string, for example `"0x1002"`
 `vendor_name` |  vendor name
-`device_id` |  device id
-`rev_id` |  PCI config-space revision id (`"N/A"` if not supported)
+`subvendor_id` | subsystem vendor id as a hex string (`"N/A"` if not supported)
+`device_id` |  device id as a hex string, for example `"0x74a1"`
+`rev_id` |  PCI config-space revision id as a hex string (`"N/A"` if not supported)
 `chip_rev_id` | amdgpu `chip_rev`; internal chip revision (stepping) as the driver reports it, not decoded (`"N/A"` if not supported)
 `external_rev_id` | amdgpu `external_rev`; family-scoped, so interpret it alongside `device_id` (`"N/A"` if not supported)
 `asic_serial` | asic serial
 `oam_id` | oam id
 `physical_acc_id` | physical accelerator ID (UALoE-backed; `"N/A"` if not supported)
-`num_of_compute_units` | number of compute units on asic
-`target_graphics_version` | hardware graphics version
-`subsystem_id` |  subsystem id
+`num_compute_units` | number of compute units on asic
+`target_graphics_version` | hardware graphics version, for example `"gfx942"`
+`subsystem_id` |  subsystem id as a hex string (`"N/A"` if not supported)
+`flags` | on Linux, the amdgpu `ids_flags` bitmask; `AMDGPU_IDS_FLAGS_FUSION` (`0x1`) is set on APUs
 
 Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 
@@ -784,6 +787,7 @@ Field | Content
 ---|---
 `kfd_id` | KFD's unique GPU identifier
 `node_id` | KFD's internal GPU index
+`current_partition_id` | current compute partition ID (`"N/A"` if not supported)
 
 Exceptions that can be thrown by `amdsmi_get_gpu_kfd_info` function:
 
