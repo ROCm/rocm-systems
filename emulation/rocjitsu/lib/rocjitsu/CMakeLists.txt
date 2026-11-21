@@ -199,7 +199,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # note. Without it the store finds no identity for the translator and turns
     # itself off, which would look like a cache that simply never hits.
     #
-    # The version script is what keeps the exported surface to the C API. HIDDEN
+    # The version script limits exports to the private C++ interface. HIDDEN
     # above only governs this target's own sources; the object libraries linked in
     # are not built that way, so unscripted this library exports 126 symbols.
     set(_gfx1250_map ${CMAKE_CURRENT_SOURCE_DIR}/rocjitsu_gfx1250_b0_to_a0.map)

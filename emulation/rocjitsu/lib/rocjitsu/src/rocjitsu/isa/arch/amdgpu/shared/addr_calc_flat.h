@@ -14,6 +14,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -43,8 +44,8 @@ inline void add_private_scratch_lanes(VectorMemState &state, unsigned wave_size,
 inline bool check_private_lane(const Wavefront &wf, VectorMemState &d, unsigned lane,
                                uint64_t offset, bool generic) {
   const auto arch = wf.cu().arch();
-  const bool partial = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA2;
-  if ((!partial && arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA1) ||
+  const bool partial = arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Rdna2;
+  if ((!partial && arch != rocjitsu::IsaFamily::Cdna1 && arch != rocjitsu::IsaFamily::Rdna1) ||
       !d.elem_size || !d.num_elems)
     return true;
   const uint64_t size = wf.scratch_lane_size();
@@ -52,9 +53,9 @@ inline bool check_private_lane(const Wavefront &wf, VectorMemState &d, unsigned 
   if (count >= d.num_elems)
     return true;
   const uint64_t bit = uint64_t{1} << lane;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch == rocjitsu::IsaFamily::Rdna2)
     d.address_range_violation_lanes |= bit;
-  if (generic && arch == ROCJITSU_CODE_ARCH_CDNA2)
+  if (generic && arch == rocjitsu::IsaFamily::Cdna2)
     d.flat_memory_violation = true;
   if (!partial || !count)
     d.lane_mask &= ~bit;

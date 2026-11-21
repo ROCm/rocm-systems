@@ -81,6 +81,9 @@ fn linear_layout_rejects_unsupported_explicit_pitches() {
             };
             // At 32 bpp the 96-element case is the reported 384-byte pitch.
             for pitch in [1, block_elements * 3 / 2] {
+                if family == 0x98 && pitch != 1 {
+                    continue;
+                }
                 assert_eq!(
                     compute_linear(request, pitch),
                     Err(rocaddr3::Error::NoLayout),
@@ -105,31 +108,64 @@ fn linear_layout_rejects_unsupported_explicit_pitches() {
 
 #[test]
 fn gfx12_linear_pitches_respect_row_and_slice_alignment() {
-    for (resource_type, height, slices, accepted) in [
-        (ResourceType::Texture1D, 1, 1, true),
-        (ResourceType::Texture1D, 1, 2, false),
-        (ResourceType::Texture2D, 1, 1, true),
-        (ResourceType::Texture2D, 1, 2, false),
-        (ResourceType::Texture2D, 2, 2, true),
-        (ResourceType::Texture3D, 1, 1, false),
-        (ResourceType::Texture3D, 2, 2, true),
+    for (resource_type, height, slices, small_slice, large_slice) in [
+        (ResourceType::Texture1D, 1, 1, 256, 512),
+        (ResourceType::Texture1D, 1, 2, 256, 512),
+        (ResourceType::Texture2D, 1, 1, 256, 512),
+        (ResourceType::Texture2D, 1, 2, 256, 512),
+        (ResourceType::Texture2D, 2, 2, 512, 1024),
+        (ResourceType::Texture2D, 3, 1, 512, 1280),
+        (ResourceType::Texture2D, 3, 2, 768, 1536),
+        (ResourceType::Texture3D, 1, 1, 256, 512),
+        (ResourceType::Texture3D, 3, 2, 768, 1536),
     ] {
-        let request = SurfaceRequest {
-            width: 17,
-            height,
-            slices,
-            mip_levels: 1,
-            ..request(0x98, resource_type)
-        };
-        let result = compute_linear(request, 96);
-        if accepted {
-            let layout = result.unwrap();
-            assert_eq!(layout.pitch, 96);
-            assert_eq!(layout.slice_size, 384 * u64::from(height));
-        } else {
-            assert_eq!(result, Err(rocaddr3::Error::NoLayout));
+        // HIP's float-width-30 and short-width-179 allocations use 128-byte
+        // and 384-byte rows. Also retain an oversized custom-pitch case.
+        for (bits_per_pixel, width, pitch, expected_slice) in [
+            (32, 30, 32, small_slice),
+            (16, 179, 192, large_slice),
+            (32, 17, 96, large_slice),
+        ] {
+            let request = SurfaceRequest {
+                bits_per_pixel,
+                width,
+                height,
+                slices,
+                mip_levels: 1,
+                ..request(0x98, resource_type)
+            };
+            let layout = compute_linear(request, pitch).unwrap();
+            assert_eq!(layout.pitch, pitch);
+            assert_eq!(layout.mips[0].pitch, pitch);
+            assert_eq!(layout.slice_size, expected_slice);
+            assert_eq!(layout.size, expected_slice * u64::from(slices));
+
+            let mut mapper = SurfaceMapper::new(request, &layout).unwrap();
+            let mut offsets = [0; 2];
+            mapper
+                .map_row(0, width - 2, height - 1, slices - 1, &mut offsets)
+                .unwrap();
+            let element_bytes = u64::from(bits_per_pixel / 8);
+            let expected = u64::from(slices - 1) * expected_slice
+                + (u64::from(height - 1) * u64::from(pitch) + u64::from(width - 2)) * element_bytes;
+            assert_eq!(offsets, [expected, expected + element_bytes]);
+            assert!(offsets[1] + element_bytes <= layout.size);
+
+            assert_eq!(
+                compute_linear(request, pitch - 1),
+                Err(rocaddr3::Error::NoLayout)
+            );
+            assert_eq!(
+                compute_linear(
+                    SurfaceRequest {
+                        width: pitch + 1,
+                        ..request
+                    },
+                    pitch
+                ),
+                Err(rocaddr3::Error::NoLayout)
+            );
         }
-        assert!(compute_linear(request, 128).is_ok());
     }
 }
 
@@ -171,4 +207,47 @@ fn linear_mapper_preserves_row_and_slice_pitches() {
             }
         }
     }
+}
+
+fn check_gfx12_large_surface_sizes(linear: bool) {
+    // These aligned extents need no padding. The two-level chain adds a
+    // quarter-sized mip to the base image, taking a 4-GiB slice to 5 GiB.
+    for (bits_per_pixel, mip_levels, expected_slice) in [
+        (64, 1, 2_u64 << 30),
+        (128, 1, 4_u64 << 30),
+        (128, 2, 5_u64 << 30),
+    ] {
+        for slices in [1, 2] {
+            let request = SurfaceRequest {
+                bits_per_pixel,
+                width: 16384,
+                height: 16384,
+                slices,
+                mip_levels,
+                ..request(0x98, ResourceType::Texture2D)
+            };
+            let layout = if linear {
+                compute_linear(request, 0)
+            } else {
+                compute(request)
+            }
+            .unwrap_or_else(|error| panic!("{request:?}, linear {linear}: {error:?}"));
+
+            assert_eq!(layout.slice_size, expected_slice, "{request:?}");
+            assert_eq!(layout.size, expected_slice * u64::from(slices));
+            assert_eq!(layout.pitch, request.width);
+            assert_eq!(layout.height, request.height);
+            assert_eq!(layout.mips.len(), mip_levels as usize);
+        }
+    }
+}
+
+#[test]
+fn gfx12_large_linear_surface_sizes_do_not_wrap() {
+    check_gfx12_large_surface_sizes(true);
+}
+
+#[test]
+fn gfx12_large_tiled_surface_sizes_do_not_wrap() {
+    check_gfx12_large_surface_sizes(false);
 }
