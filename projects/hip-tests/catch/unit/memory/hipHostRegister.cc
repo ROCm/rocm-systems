@@ -38,7 +38,6 @@ template <typename T> __global__ void Inc(T* Ad) {
 }
 
 #if HT_AMD
-
 __global__ void AtomicFAddKernelKernel(float* data, size_t n) {
   size_t i = blockDim.x * blockIdx.x + threadIdx.x;
   if (i < n) {
