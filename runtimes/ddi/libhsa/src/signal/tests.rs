@@ -826,6 +826,7 @@ fn closing_admission_releases_unbounded_waits() {
                         compare_value: values[0],
                         timeout_hint: u64::MAX,
                         wait_state_hint: WAIT_STATE_BLOCKED,
+                        yielding_poll: false,
                         order: Ordering::Acquire,
                     },
                 ) as u32
