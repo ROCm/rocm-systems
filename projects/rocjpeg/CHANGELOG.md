@@ -8,15 +8,19 @@ Documentation for rocJPEG is available at
 ### Added
 
 * Added the `-n` option to the `jpegDecodePerf` sample to decode the input images the given number of times, so that a run lasts long enough to measure. With `-n`, `jpegDecodePerf` can run more threads than there are images.
+* Added the `-iter` (`--num_iterations`) option to `rocjpeg_benchmark.py` to decode each image the given number of times, using the `jpegDecodePerf` `-n` option.
+* `rocjpeg_benchmark.py` and its README are installed in `share/rocjpeg/test/rocjpeg_benchmark`.
 
 ### Resolved issues
 
 * Fixed the RGB, RGB planar, Y, and YUV planar outputs writing past the image when its width is not a multiple of 8 or its height is odd. With output buffers sized exactly to the image, this overwrote memory after the buffer and made the right and bottom edges of the image nondeterministic.
+* Fixed `rocjpeg_benchmark.py` results. Wall times of a minute or more were saved in minutes or hours instead of seconds, an option that `jpegDecodePerf` rejected produced a row of zeros instead of an error, and Number of Images counted the `.jpg` files directly in the folder instead of the images `jpegDecodePerf` decoded.
 
 ### Changed
 
 * The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
 * The `jpegDecodePerf` sample accepts up to 64 decoding threads (`-t`), up from 32.
+* `rocjpeg_benchmark.py` requires the `-i` (`--images_path`) option. Its default image folder did not exist.
 
 ## rocJPEG 1.13.0 for ROCm 10.2.0
 
