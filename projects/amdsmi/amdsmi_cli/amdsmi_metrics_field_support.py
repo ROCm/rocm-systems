@@ -183,8 +183,8 @@ _VERSION_FIELDS: Dict[VersionKey, FieldSet] = {
         vr_thm_residency_acc vram_max_bandwidth xcp_stats.gfx_below_host_limit_ppt_acc
         xcp_stats.gfx_below_host_limit_thm_acc xcp_stats.gfx_below_host_limit_total_acc
         xcp_stats.gfx_busy_acc xcp_stats.gfx_busy_inst xcp_stats.gfx_low_utilization_acc
-        xcp_stats.jpeg_busy xcp_stats.temperature_xcd xcp_stats.vcn_busy xgmi_link_speed
-        xgmi_link_status xgmi_link_width xgmi_read_data_acc xgmi_write_data_acc
+        xcp_stats.jpeg_busy xcp_stats.vcn_busy xgmi_link_speed xgmi_link_status xgmi_link_width
+        xgmi_read_data_acc xgmi_write_data_acc
         """
     ),
     # APU v2.x and v3.0 share ApuMetricsBase_v30_t but fill different public members.

@@ -130,9 +130,6 @@ struct amdgpu_xcp_metrics_v1_2 {
   uint64_t gfx_below_host_limit_thm_acc[kRSMI_MAX_NUM_XCC];
   uint64_t gfx_low_utilization_acc[kRSMI_MAX_NUM_XCC];
   uint64_t gfx_below_host_limit_total_acc[kRSMI_MAX_NUM_XCC];
-
-  /* v1.9 additions */
-  uint16_t temperature_xcd[kRSMI_MAX_NUM_XCC];
 };
 
 struct AMDGpuMetricsBase_t {
@@ -767,9 +764,6 @@ struct AMDGpuMetrics_v18_Partition_v1_0_t {
   uint64_t m_gfx_below_host_limit_thm_acc[kRSMI_MAX_NUM_XCC];
   uint64_t m_gfx_low_utilization_acc[kRSMI_MAX_NUM_XCC];
   uint64_t m_gfx_below_host_limit_total_acc[kRSMI_MAX_NUM_XCC];
-
-  /* v1.9 additions */
-  uint16_t m_temperature_xcd[kRSMI_MAX_NUM_XCC];
 };
 
 struct AMDGpuMetrics_v18_t {
