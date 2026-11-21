@@ -748,6 +748,65 @@ static void testWindowRegisterSingleRankNonSymTeardown() {
     NCCLCHECK(ncclCommDestroy(comm));
 }
 
+/**
+ * @brief ncclCommRegister must reject a NULL handle pointer (NCCL v2.32.6-1, PR #2433)
+ *
+ * Without the PtrCheck, ncclCommRegister writes through the NULL pointer (and its
+ * recorder reads *handle), so the call crashes instead of returning ncclInvalidArgument.
+ */
+static void testCommRegisterNullHandlePtr() {
+    SKIP_IF_NO_GPU();
+
+    HIPCALL(hipSetDevice(0));
+
+    ncclComm_t comm;
+    ASSERT_EQ(initSingleRankComm(&comm), ncclSuccess);
+
+    const size_t bufferSize = 64 * 1024;
+    void* deviceBuffer = nullptr;
+    HIPCALL(hipMalloc(&deviceBuffer, bufferSize));
+
+    EXPECT_EQ(ncclCommRegister(comm, deviceBuffer, bufferSize, nullptr), ncclInvalidArgument);
+
+    HIPCALL(hipFree(deviceBuffer));
+    NCCLCHECK(ncclCommDestroy(comm));
+}
+
+/**
+ * @brief ncclCommRegister of a CPU-backed buffer must return a NULL handle (NCCL v2.32.6-1, PR #2433)
+ *
+ * Registration skips buffers with sysmem segments; the handle must still be written
+ * (NULL) so that ncclCommDeregister accepts it, rather than left as the caller's garbage.
+ */
+static void testCommRegisterHostBufferNullHandle() {
+    SKIP_IF_NO_GPU();
+
+    HIPCALL(hipSetDevice(0));
+
+    ncclComm_t comm;
+    ASSERT_EQ(initSingleRankComm(&comm), ncclSuccess);
+
+    const size_t bufferSize = 64 * 1024;
+    void* hostBuffer = nullptr;
+    HIPCALL(hipHostMalloc(&hostBuffer, bufferSize, hipHostMallocDefault));
+
+    void* const kStale = reinterpret_cast<void*>(0xdeadbeef);
+    void* regHandle = kStale;
+    ncclResult_t res = ncclCommRegister(comm, hostBuffer, bufferSize, &regHandle);
+    if (res != ncclSuccess || (regHandle != nullptr && regHandle != kStale)) {
+        if (res == ncclSuccess) NCCLCHECK(ncclCommDeregister(comm, regHandle));
+        HIPCALL(hipHostFree(hostBuffer));
+        NCCLCHECK(ncclCommDestroy(comm));
+        GTEST_SKIP() << "Host buffer was not skipped as CPU-backed (result " << ncclGetErrorString(res)
+                     << "); the sysmem-skip path is not reached here.";
+    }
+    EXPECT_EQ(regHandle, nullptr) << "Skipped registration left the caller's handle unwritten";
+    if (regHandle == nullptr) EXPECT_EQ(ncclCommDeregister(comm, regHandle), ncclSuccess);
+
+    HIPCALL(hipHostFree(hostBuffer));
+    NCCLCHECK(ncclCommDestroy(comm));
+}
+
 //==============================================================================
 // Test configuration helpers
 //==============================================================================
@@ -831,6 +890,19 @@ TEST(Register, P2pIpcSegmentReuse)
     };
     RUN_ISOLATED_TESTS(config("P2pIpcSegmentReuse_MultiSegment", 2),
                        config("P2pIpcSegmentReuse_SingleSegment", 1));
+}
+
+/**
+ * @brief ncclCommRegister always writes a valid handle or rejects a NULL handle pointer
+ *        (NCCL v2.32.6-1, PR #2433)
+ */
+TEST(Register, CommRegisterHandleOutput)
+{
+    RUN_ISOLATED_TESTS(
+        makeDisabledConfig("CommRegisterNullHandlePtr_Disabled", testCommRegisterNullHandlePtr),
+        makeEnabledConfig("CommRegisterNullHandlePtr_Enabled", testCommRegisterNullHandlePtr),
+        makeEnabledConfig("CommRegisterHostBufferNullHandle", testCommRegisterHostBufferNullHandle)
+            .setVariable("NCCL_CUMEM_ENABLE", "1"));
 }
 
 } // namespace RcclUnitTesting
