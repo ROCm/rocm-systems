@@ -71,7 +71,9 @@ rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllGatherFabricLl all_gather/dda
 
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllGatherFabricLl128 all_gather/dda-all-gather-fabric-ll128-test.cc
   KERNELS
-  SOURCES ${_MICRO_DDA_COLL_SOURCES})
+  SOURCES
+    ${_MICRO_DDA_COLL_SOURCES}
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc)
 
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAllGatherIpc all_gather/dda-all-gather-ipc-test.cc
   KERNELS

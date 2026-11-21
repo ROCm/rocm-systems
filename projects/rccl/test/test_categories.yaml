@@ -119,6 +119,7 @@ test_categories:
       - "DdaReduceScatterFabricLL.*"
       - "DdaReduceScatterFabricSpreadLL.*"
       - "DdaAllReduceFabricLL.*"
+      - "DdaAllGatherFabricLL128.*"
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
