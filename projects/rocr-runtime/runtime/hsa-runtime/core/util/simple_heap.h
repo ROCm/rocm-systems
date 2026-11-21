@@ -130,7 +130,14 @@ template <typename Allocator> class SimpleHeap {
   SimpleHeap& operator=(const SimpleHeap& rhs) = delete;
   SimpleHeap& operator=(SimpleHeap&& rhs) = delete;
 
-  void* alloc(size_t bytes) {
+  // recycled is set when the returned memory may contain stale data from a
+  // previously freed fragment or a cached block. A new block comes from the
+  // block allocator and is left as that allocator provided it.
+  void* alloc(size_t bytes, bool* recycled = nullptr) {
+    auto set_recycled = [&](bool value) {
+      if (recycled != nullptr) *recycled = value;
+    };
+
     // Find best fit.
     auto free_fragment = free_list_.lower_bound(bytes);
     uintptr_t base;
@@ -160,16 +167,21 @@ template <typename Allocator> class SimpleHeap {
         free_fragment = free_list_.insert(std::make_pair(size - bytes, base + bytes));
         frag_map[base + bytes] = makeFragment(free_fragment, size - bytes);
       }
+      set_recycled(true);
       return reinterpret_cast<void*>(base);
     }
 
-    // No usable fragment, check block cache
-    if (bytes < default_block_size() && !block_cache_.empty()) {
+    // No usable fragment, check block cache. A request of up to the default
+    // block size, including exactly that size, fits a cached block.
+    bool from_cache = false;
+    if (bytes <= default_block_size() && !block_cache_.empty() &&
+        block_cache_.back().length_ >= bytes) {
       const auto& block = block_cache_.back();
       base = block.base_ptr_;
       size = block.length_;
       block_cache_.pop_back();
       cache_size_ -= size;
+      from_cache = true;
     } else {  // Alloc new block - new block may be larger than default.
       void* ptr = block_allocator_.alloc(bytes, size);
       base = reinterpret_cast<uintptr_t>(ptr);
@@ -194,6 +206,7 @@ template <typename Allocator> class SimpleHeap {
       }
     }
 
+    set_recycled(from_cache);
     return reinterpret_cast<void*>(base);
   }
 

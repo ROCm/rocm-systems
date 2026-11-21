@@ -348,18 +348,25 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     bool useSubAlloc = subAllocEnabled;
     useSubAlloc &=
         ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
+    // A system request larger than a fragment block is never recycled: it gets
+    // a block of its own, rounded up to a block multiple, that is discarded on
+    // free. Give it a dedicated BO of the requested size instead. Local memory
+    // keeps its block-multiple sizing.
+    useSubAlloc &= !(m_region.IsSystem() && size > m_region.fragment_block_size());
 
     if (useSubAlloc) {
-      mem = m_region.fragment_alloc(size);
+      // recycled is true when mem may hold data from a previously freed
+      // fragment or a cached block. A new block is a dedicated BO of
+      // kernel-zeroed pages; clearing it only faults those pages in.
+      bool recycled = false;
+      mem = m_region.fragment_alloc(size, &recycled);
 
-      // Suballocated fragments may hold stale data from previously freed
-      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
-      // kernel pages. Zero system-memory fragments so callers that rely on a
-      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
-      // buffer used as an atomic accumulator) behave as they do with a
-      // dedicated BO. Local (device) memory is not host-writable here and is
-      // left untouched (matching pre-existing VRAM suballocation behavior).
-      if (m_region.IsSystem()) {
+      // Zero recycled system fragments so callers that rely on a freshly
+      // allocated buffer being zero-initialized (e.g. an hipHostMalloc buffer
+      // used as an atomic accumulator) behave as they do with a dedicated BO.
+      // Local (device) memory is not host-writable here and is left untouched
+      // (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem() && recycled) {
         memset(mem, 0, size);
       }
 
