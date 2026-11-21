@@ -161,10 +161,7 @@ class KFDBaseComponentTest : public testing::Test {
     void SVMSetXNACKMode(int xnack_override = -1) {
         if (!SVMAPISupported())
             return;
-        if (!m_is_xnack_supported) {
-            LOG() << "Skipping test: XNACK not supported on this ASIC" << std::endl;
-            return;
-        }
+
         m_xnack = -1;
         HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtGetXNACKMode, m_hsakmt_current_ctx, &m_xnack);
         if (ret != HSAKMT_STATUS_SUCCESS) {
@@ -182,6 +179,15 @@ class KFDBaseComponentTest : public testing::Test {
                 xnack_on = xnack_override;
         else
                 return;
+
+        /* If XNACK is not supported by hardware, only allow disabling
+         * XNACK (xnack_on == 0). Enabling XNACK (xnack_on != 0) on
+         * unsupported hardware is not allowed.
+         */
+        if (!m_is_xnack_supported && xnack_on) {
+            LOG() << "XNACK not supported on this ASIC" << std::endl;
+            return;
+        }
 
         // No need to set XNACK if it's already the current value
         if (xnack_on == m_xnack)
