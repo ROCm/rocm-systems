@@ -592,7 +592,7 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
                        size_t nElts);
 bool ncclSymkAlltoAllLLForced(struct ncclComm* comm);
 ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                                size_t nElts, bool symAligned16B = true);
+                                size_t nElts, bool symAligned16B = true, bool ginWindowsUnregistered = false);
 // Whether the hierarchical LSA AllGather kernel can run on this arch and partition mode.
 bool ncclSymkAgHierAvailable(struct ncclComm* comm);
 // Packages the hierarchical LSA AllGather kernel spans on this comm, or 0 where it can't run.

@@ -244,13 +244,20 @@ public:
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
 
-  /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
-  void flushBarrierPendingEvents();
+  /// Retire the LDS events of this wave whose LDS access completed in barrier
+  /// epochs up to `epoch`. Events are kept in that order, so these are a
+  /// prefix.
+  void retireReleasedThrough(uint32_t epoch);
 
   /// Check a synchronous VALU source against older writers and remember the
   /// completed read until a barrier publishes it to peer waves.
   void recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address, uint32_t bytes,
                             uint32_t lane);
+
+  /// Forget which LDS DWORDs this wave has read as operands, so that its next
+  /// read of each is recorded again. Called when the wave signals a barrier:
+  /// reads recorded before the signal are released by it, later ones are not.
+  void forgetLdsOperandReads() { directLdsReadWidths.clear(); }
 
   /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
   void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
@@ -283,6 +290,13 @@ public:
 
   const std::vector<EventId> &getBarrierPendingEvents() const { return barrierPendingEvents; }
 
+  /// Whether retained LDS history could overlap [start, end). The bounds may
+  /// include retired prefixes, but never exclude a retained access.
+  bool barrierPendingMayOverlap(int start, int end) const {
+    return !barrierPendingEvents.empty() && start < barrierPendingBounds.end &&
+           barrierPendingBounds.start < end;
+  }
+
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
 
@@ -290,6 +304,9 @@ public:
 
 private:
   void retireEventRegisters(EventId);
+  /// Keep an event whose LDS access has completed until a barrier orders it
+  /// for the other waves, recording the barrier epoch it completed in.
+  void queueForBarrier(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
 
   template <typename Pred>
@@ -323,6 +340,9 @@ private:
 
   std::vector<EventId> waveMemoryEvents;
   std::vector<EventId> barrierPendingEvents;
+  /// Conservative bounds avoid scanning another group's history when its
+  /// LDS tile is disjoint. Reset when starting a new, previously empty history.
+  Interval barrierPendingBounds{0, 0};
   // GFX10 direct reads cover the first 1, 2, or 4 bytes of an aligned DWORD.
   std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
 

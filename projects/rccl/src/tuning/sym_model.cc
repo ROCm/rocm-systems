@@ -137,7 +137,7 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
   ncclSymkKernelMask valid_kmask = inputs->symkMaskCache != 0
     ? inputs->symkMaskCache
     : ncclSymkMask(inputs->comm, inputs->func, inputs->devRedOp, inputs->datatype,
-                   inputs->countMax, inputs->symAligned16B);
+                   inputs->countMax, inputs->symAligned16B, inputs->ginWindowsUnregistered);
   ncclSymkKernelMask window_optional_kmask = ncclSymkLLKernelMask() | ncclGenkKernelMask();
   // Kernels that don't support grouping -- these are symmetric LL kernels.
   ncclSymkKernelMask ungrouped_kmask = ncclSymkLLKernelMask() & ~ncclGenkKernelMask();
