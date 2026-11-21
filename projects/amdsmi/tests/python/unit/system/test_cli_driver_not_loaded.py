@@ -31,6 +31,7 @@ from common.common import (
     fake_module,
     find_cli_dir,
     generated_version_stub,
+    stub_modules,
     stub_modules_at_import,
 )
 
@@ -345,10 +346,9 @@ class TestNotesStream(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        restore = stub_modules_at_import(
-            {"amdsmi_commands": fake_module("amdsmi_commands", AMDSMICommands=object)}
+        stub_modules(
+            cls, {"amdsmi_commands": fake_module("amdsmi_commands", AMDSMICommands=object)}
         )
-        cls.addClassCleanup(restore)
         spec = importlib.util.spec_from_file_location(
             "amdsmi_cli_main", Path(_CLI_DIR) / "amdsmi_cli.py"
         )

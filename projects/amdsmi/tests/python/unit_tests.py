@@ -17,7 +17,7 @@ Options:
     -v / --verbose    Verbose output (show per-test names)
     -q / --quiet      Quiet output
     -b / --buffer     Buffer stdout/stderr during tests
-    -k "pattern"      Only run tests matching the substring
+    -k "pattern"      Only run tests whose id contains the pattern (*, ? and [...] are wildcards)
     --list / -l       List all available tests without running them
 """
 

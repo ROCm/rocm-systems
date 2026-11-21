@@ -62,8 +62,9 @@ def _load_detail(ifindex_of: Callable[[Any, int], int] = _ifindex_of) -> Any:
         "amdsmi_get_nic_port_ifindex": ifindex_of,
         "AmdSmiLibraryException": _FakeLibraryException,
     }
-    exec(compile(ast.Module(_load_unavailable_helpers(), []), str(_UTILS_PATH), "exec"), namespace)
-    exec(compile(ast.Module(nodes, []), str(_INTERFACE_PATH), "exec"), namespace)
+    helpers = ast.Module(body=_load_unavailable_helpers(), type_ignores=[])
+    exec(compile(helpers, str(_UTILS_PATH), "exec"), namespace)
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(_INTERFACE_PATH), "exec"), namespace)
     return namespace[_FUNCTION_NAME]
 
 

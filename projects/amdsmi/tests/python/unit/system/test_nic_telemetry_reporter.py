@@ -76,7 +76,7 @@ def _load_definitions(names: List[str], namespace: Dict[str, Any]) -> Dict[str, 
     missing = set(names) - {_definition_name(node) for node in wanted}
     if missing:
         raise AssertionError(f"not found in amdsmi_interface.py: {sorted(missing)}")
-    exec(compile(ast.Module(wanted, []), str(_INTERFACE_PATH), "exec"), namespace)
+    exec(compile(ast.Module(body=wanted, type_ignores=[]), str(_INTERFACE_PATH), "exec"), namespace)
     return namespace
 
 

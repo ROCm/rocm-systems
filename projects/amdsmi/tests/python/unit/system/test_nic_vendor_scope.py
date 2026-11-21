@@ -59,7 +59,7 @@ def _load_function(wrapper: types.SimpleNamespace) -> Any:
         "AmdSmiParameterException": _FakeParameterException,
         "_check_res": _fake_check_res,
     }
-    exec(compile(ast.Module(nodes, []), str(_INTERFACE_PATH), "exec"), namespace)
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(_INTERFACE_PATH), "exec"), namespace)
     return namespace[_FUNCTION_NAME]
 
 

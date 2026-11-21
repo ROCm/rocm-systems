@@ -9,8 +9,6 @@ control-flow branch is exercised without a built libamd_smi.so or NIC hardware;
 the NIC-less branch never fires on a GPU/NIC-equipped CI host.
 """
 
-from __future__ import annotations
-
 import importlib.util
 import os
 import sys

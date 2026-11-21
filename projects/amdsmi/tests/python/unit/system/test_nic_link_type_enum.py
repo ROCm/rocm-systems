@@ -10,7 +10,7 @@ the source instead.
 
 import ast
 import unittest
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from common.common import amdsmi_interface_path
 
@@ -40,15 +40,21 @@ def _enum_members() -> List[str]:
     return list(_enum_assignments())
 
 
+def _int_literal(node: ast.expr) -> Optional[int]:
+    """Value of an integer literal, else None; its node is ``ast.Num`` before Python 3.8."""
+    value = node.value if isinstance(node, ast.Constant) else getattr(node, "n", None)
+    return value if type(value) is int else None  # not bool, which only 3.8+ would let through
+
+
 def _wrapper_values() -> Dict[str, int]:
     """The integer constants of the generated wrapper, which is built from ``amdsmi.h``."""
     tree = ast.parse(_WRAPPER_PATH.read_text(encoding="utf-8"))
     return {
-        target.id: node.value.value
+        target.id: _int_literal(node.value)
         for node in tree.body
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+        if isinstance(node, ast.Assign) and _int_literal(node.value) is not None
         for target in node.targets
-        if isinstance(target, ast.Name) and isinstance(node.value.value, int)
+        if isinstance(target, ast.Name)
     }
 
 

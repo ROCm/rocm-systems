@@ -203,6 +203,7 @@ tests/
                             ./amdsmitst --gtest_filter="-$GTEST_EXCLUDE"
                             ./integration_test.py -v
                             ./unit_tests.py -v
+                            /usr/bin/python3.6 ./unit_tests.py -v   (RHEL8, AlmaLinux8, SLES)
                         └─► run_amdsmi_build.py summarize
    abi-compliance-check.yml ──► abi_check.py (major, then minor)
    amdsmi-abi-gate.yml ──► abi_gate.py gate (base commit's copy)

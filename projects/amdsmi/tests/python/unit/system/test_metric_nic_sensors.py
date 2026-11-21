@@ -9,8 +9,6 @@ These load subcommands/metric.py standalone with a stubbed ``amdsmi`` package so
 is exercised without a built libamd_smi.so or NIC hardware.
 """
 
-from __future__ import annotations
-
 import os
 import sys
 import types

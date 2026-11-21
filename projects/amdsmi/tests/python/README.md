@@ -61,7 +61,10 @@ graph TD
 
 ## Prerequisites
 
-- **Python 3.8+**
+- **Python 3.6.8+** for the unit suite. CI also runs `unit_tests.py` on Python 3.6, the
+  `python3` of RHEL 8 and SLES 15, so `unit/` and `common/` must not use newer features
+  (check with `sudo python3.6 ./unit_tests.py -v`). CI runs the functional and CLI suites on
+  Python 3.8 and newer only.
 - The **`amdsmi` Python package installed** — every runner imports it at start-up
   (resolved via `AMDSMI_PATH` → `ROCM_HOME` → `ROCM_PATH` → `/opt/rocm`). See the
   [AMD SMI installation guide](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
@@ -127,8 +130,8 @@ Every runner accepts the same flags (parsed in `common/common.py`):
 | `-v`, `-vv` | `--verbose` | Verbose: each test body prints its own per-call output; the runner's own dot line is suppressed to avoid duplication. **Recommended.** |
 | `-q` | `--quiet` | Quiet: suppress the title/legend/per-test prints; dots only. |
 | `-b` | `--buffer` | Buffer each test's stdout/stderr; show it only if that test fails. |
-| `-k PAT` | `--keyword PAT` | Run only tests whose id contains `PAT` (substring; `-kPAT` joined form also works). |
-| `-x PAT` | `--exclude PAT` | Skip tests whose id contains `PAT` (the inverse of `-k`). |
+| `-k PAT` | `--keyword PAT` | Run only tests whose id contains `PAT`; `*`, `?` and `[...]` in `PAT` are wildcards. `-kPAT` and `--keyword=PAT` also work. |
+| `-x PAT` | `--exclude PAT` | Skip tests whose id contains `PAT` (plain text, no wildcards). `-xPAT` and `--exclude=PAT` also work. |
 | `-l` | `--list` | List all discovered test ids to **stdout** and exit (nothing runs). |
 | `-h` | `--help` | Show unittest help plus AMD SMI env-var/path guidance and examples. |
 
@@ -276,7 +279,10 @@ sequenceDiagram
     alt -h / --help
         C-->>U: help + path guidance, exit 0
     end
-    C->>L: discover(test_*.py) with -k filter
+    C->>L: discover(test_*.py)
+    opt -k pattern
+        C->>C: keep matching test ids
+    end
     opt -x pattern
         C->>C: drop excluded test ids
     end

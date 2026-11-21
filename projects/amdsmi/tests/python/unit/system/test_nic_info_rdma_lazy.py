@@ -82,7 +82,7 @@ def _load_namespace() -> Dict[str, Any]:
         "Dict": Dict,
         "Callable": Callable,
     }
-    exec(compile(ast.Module(wanted, []), str(_INTERFACE_PATH), "exec"), namespace)
+    exec(compile(ast.Module(body=wanted, type_ignores=[]), str(_INTERFACE_PATH), "exec"), namespace)
     return namespace
 
 

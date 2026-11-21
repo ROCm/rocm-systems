@@ -7,8 +7,6 @@ The port block names the RDMA device and netdev so an index maps to ``rdma stati
 DEV/PORT``. ``metric.py`` is loaded in isolation with a stubbed ``amdsmi``.
 """
 
-from __future__ import annotations
-
 import os
 import sys
 import types

@@ -4,8 +4,6 @@
 
 """amdsmi_get_gpu_cpu_links() Python wrapper unit tests (hardware-free)."""
 
-from __future__ import annotations
-
 import unittest
 from unittest import mock
 
