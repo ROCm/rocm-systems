@@ -16,14 +16,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <span>
 #include <string>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -104,7 +102,9 @@ struct RaceWavefrontState : WavefrontState {
   /// a copy of its encoding, so reports can disassemble it after the code is
   /// rewritten or unmapped.
   RingBuffer<InstructionSnapshot, kTraceHistorySize> trace;
-  WaveRaceState *race_state = nullptr;
+  // Aliases this wave's state while owning the whole workgroup detector. Peers
+  // keep an ended wave's history alive until the last wave releases it.
+  std::shared_ptr<WaveRaceState> race_state;
   struct LdsOperandRead {
     uint32_t address;
     uint32_t bytes;
@@ -165,9 +165,6 @@ public:
                                    uint32_t physical_vgpr_count, uint32_t physical_sgpr_count,
                                    std::span<amdgpu::Wavefront *> wavefronts) override;
 
-  /// Release the workgroup's detector. Reported races are still counted.
-  void onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) override;
-
   void onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) override;
 
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
@@ -216,19 +213,8 @@ public:
 
   std::string getSummary() const;
 
-  /// Number of workgroups whose detector state is still held.
-  size_t retainedWorkgroupCount() const;
-
 private:
   size_t trace_context_ = kDefaultTraceContext;
-
-  struct WorkgroupKey {
-    uint32_t dispatch_id;
-    uint32_t workgroup_id;
-    bool operator<(const WorkgroupKey &o) const {
-      return std::tie(dispatch_id, workgroup_id) < std::tie(o.dispatch_id, o.workgroup_id);
-    }
-  };
 
   struct KernelNames {
     std::string name;
@@ -247,9 +233,6 @@ private:
     return wf.has_plugin_state(slot_index()) ? get_state(wf)->race_state : nullptr;
   }
   void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
-
-  mutable std::mutex dispatch_mutex_;
-  std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
 
   mutable std::mutex report_mutex_;
   uint64_t reports_emitted_ = 0;
