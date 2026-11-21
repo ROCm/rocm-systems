@@ -442,9 +442,6 @@ HIP_TEST_CASE(Unit_hipMalloc3DArray_Negative_NumericLimit) {
 // texture gather arrays are only allowed to be 2D
 HIP_TEMPLATE_TEST_CASE(Unit_hipMalloc3DArray_Negative_Non2DTextureGather, char, uchar2, short4,
                    float2, float4) {
-#if HT_AMD
-  HIP_SKIP_TEST(HipTest::SkipReason::kTextureGatherUnsupportedAmd);
-#endif
   hipArray_t array;
   const auto desc = hipCreateChannelDesc<TestType>();
 
