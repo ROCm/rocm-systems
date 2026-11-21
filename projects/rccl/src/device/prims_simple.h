@@ -266,6 +266,13 @@ class Primitives<T, RedOp, Fan, Direct,
   inline __device__ void postPeer(bool dataStored, bool drained = false) {
     if (drained) {
       // stepEndBarrier() already ran the cheap post-send fence.
+#if RCCL_SIMPLE_FUSED_STEP_END
+      // Each wave released its stores at workgroup scope before the barrier. The posting threads acquire them and
+      // release at system scope, so the step post below publishes the step's data to the peer.
+      if (flags & (Recv * RolePostRecv | Send * RolePostSend)) {
+        __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "", "global");
+      }
+#endif
     } else if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
