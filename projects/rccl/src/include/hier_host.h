@@ -67,7 +67,7 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 
 // Sizes, in bytes, at which host-hierarchical AllReduce beat the default path in gfx1250
 // MNNVL fp32 sum measurements with 8 ranks per host on 2, 4 and 8 hosts and with 4 ranks
-// per host on 4 and 8 hosts. The rcclHostHierAllReduceAutoType combinations gain at the
+// per host on 8 hosts. The rcclHostHierAllReduceAutoType combinations gain at the
 // same sizes. False for unmeasured layouts. Auto mode also needs the SPX tuning table
 // for 4 ranks per host, and on two hosts the fused kernel between 2 and 8 MiB for the
 // types the kernel takes.
@@ -81,9 +81,9 @@ bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes
 // gfx1250 measurements. With 8 ranks per host (DPX), sum on fp32, fp16, bf16 and fp8, which gained at every size of
 // the window on two, four and eight hosts: prod, max, min, avg and integer sums were slower at 64-128 MiB on two and
 // four hosts. With 4 ranks per host (SPX), every split op except fp8 avg,
-// prod, max and min and int8 / uint8 max and min: fp8 avg was slower at 32 MiB, fp8, int8 and uint8 max and min at
-// 256 MiB on eight hosts, and fp8 prod is unmeasured. The caller still applies opSplitsAcrossStages, which drops
-// integer avg and PreMulSum.
+// prod, max and min and int8 / uint8 max and min: on eight hosts fp8 avg, max and min were slower at 256-512 MiB and
+// int8 and uint8 max and min at 256 MiB, and fp8 prod is unmeasured. The caller still applies opSplitsAcrossStages,
+// which drops integer avg and PreMulSum.
 bool rcclHostHierAllReduceAutoType(int ranksPerHost, ncclDataType_t datatype, ncclRedOp_t op);
 
 // Whether RCCL_HOST_HIER_ALLREDUCE and the operands allow host-hierarchical

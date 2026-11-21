@@ -287,16 +287,7 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes)
       return false;
     }
   }
-  if (ranksPerHost == 4) {
-    switch (nHosts) {
-    case 4:
-      return bytes >= 2 * MiB && bytes <= 32 * MiB;
-    case 8:
-      return bytes >= 2 * MiB && bytes <= 256 * MiB;
-    default:
-      return false;
-    }
-  }
+  if (ranksPerHost == 4) return nHosts == 8 && bytes >= 64 * MiB && bytes <= 512 * MiB;
   return false;
 }
 
@@ -346,7 +337,7 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   if (!rcclHostHierAllReduceAutoType(layout->ranksPerHost, datatype, op)) return false;
   const size_t bytes = count * ncclTypeSize(datatype);
   if (!rcclHostHierAllReduceAutoWindow(layout->nHosts, layout->ranksPerHost, bytes)) return false;
-  // The 4-ranks-per-host windows were measured in SPX; a DPX comm with half of each host's ranks keeps the default path.
+  // The 4-ranks-per-host window was measured in SPX; a DPX comm with half of each host's ranks keeps the default path.
   if (layout->ranksPerHost == 4 && !spxTuningTable(comm)) return false;
   return !needsFusedKernel(*layout, datatype, bytes) || fusedKernelRuns(comm, *layout, count, datatype, op);
 }
