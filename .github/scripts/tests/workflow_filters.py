@@ -64,3 +64,21 @@ def pull_request_trigger(workflow: Path) -> PullRequestTrigger:
         types=set(filters.get("types", [])) or DEFAULT_TYPES,
         ifs=ifs,
     )
+
+
+def job_lines(workflow: Path) -> dict[str, list[str]]:
+    """Stripped, comment-free lines of each top-level job, by job id."""
+    jobs: dict[str, list[str]] = {}
+    job, in_jobs = None, False
+    for line in workflow.read_text(encoding="utf-8").splitlines():
+        line = re.sub(r"\s+#.*$", "", line)
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            in_jobs, job = line == "jobs:", None
+        elif in_jobs and (m := re.match(r"^  ([\w-]+):$", line)):
+            job = m.group(1)
+            jobs[job] = []
+        elif job:
+            jobs[job].append(line.strip())
+    return jobs
