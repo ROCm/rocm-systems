@@ -63,6 +63,7 @@ target_sources(
     wavefront_size_gtest.cpp
     atomic_wf_queue_gtest.cpp
     envvar_gtest.cpp
+    bootstrap_accept_timeout_gtest.cpp
     backend_bc_buffer_register_gtest.cpp
     anvil_engine_map_gtest.cpp
     sdma_agreement_gtest.cpp

@@ -39,6 +39,9 @@ namespace rocshmem {
 #define MAX_IFS 16
 #define MAX_IF_NAME_SIZE 16
 #define SLEEP_INT 1000  // connection retry sleep interval in usec
+// Longest single poll() wait while accepting with a timeout. Bounds how late
+// an abortFlag_ set by another thread is noticed.
+#define ACCEPT_POLL_INTERVAL_MS 100
 #define SOCKET_NAME_MAXLEN (NI_MAXHOST + NI_MAXSERV)
 #define ROCSHMEM_SOCKET_MAGIC 0x564ab9f2fc4b9d6cULL
 
