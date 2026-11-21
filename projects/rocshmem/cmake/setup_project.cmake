@@ -83,9 +83,9 @@ set(CMAKE_CXX_FLAGS_DEBUG "-O0 -ggdb")
 # Build-bottleneck analysis: emit a clang -ftime-trace JSON profile per
 # translation unit (front-end parse/template-instantiation/codegen time
 # breakdown). Adds overhead and one JSON file per compile job; summarize with
-# scripts/analysis/ftime_trace_summary.py. Off by default.
-option(ROCSHMEM_TIME_TRACE "Emit a clang -ftime-trace profile for every compiled translation unit" OFF)
-if(ROCSHMEM_TIME_TRACE)
+# scripts/analysis/build_time_report.py. Off by default.
+option(ROCSHMEM_BUILD_TIME_TRACE "Emit a clang -ftime-trace profile for every compiled translation unit" OFF)
+if(ROCSHMEM_BUILD_TIME_TRACE)
   add_compile_options(-ftime-trace -ftime-trace-granularity=500)
 endif()
 

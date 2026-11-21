@@ -7,14 +7,18 @@ Two commit-vs-commit comparison tools for AMDGPU compiler-codegen regressions, p
 
 Both scripts build each commit under test in its own isolated `git worktree` (under `/tmp`), so your working tree — including uncommitted changes — is never touched, and drive the same pipeline: build → extract remarks → CSV → diff → a self-contained interactive HTML dashboard (plus PNG charts for quick viewing). The Python helpers (`resource_usage_to_csv.py`/`_diff.py`/`_dashboard.py`, `lto_inline_remarks_to_csv.py`/`_diff.py`/`_dashboard.py`/`_report.py`) are plain CSV/YAML parsers and chart/dashboard generators with no project-specific logic — they only need whatever CSV/YAML the shell drivers hand them.
 
-Two more scripts answer a different question — not "did codegen change" but "where does build time actually go":
+One more script answers a different question — not "did codegen change" but "where does build time actually go":
 
-- **`ninja_build_timing.py`** — parses `.ninja_log` (Ninja timestamps every edge it runs, so this is free) into a per-component time budget (`src/gda`, `tests/functional`, link steps, ...) and a list of the slowest individual compile/link edges. `scripts/build_configs/all_backends` runs this automatically after every build and appends it to `build/build_timing.log`, alongside separate configure/build/install stage timings (`time_stage` in `_common.sh`). Works with any build, no special flags needed.
-- **`ftime_trace_summary.py`** — for a finer-grained look, configure with `-DROCSHMEM_TIME_TRACE=ON` (adds `-ftime-trace` to every compile job) and rebuild, then run this to aggregate the resulting per-TU JSON profiles across the whole build: total time per compiler phase (parsing, template instantiation, codegen, ...) and the specific symbols whose instantiation costs the most time summed across every TU that instantiates them. Useful for confirming whether a combinatorial API-x-type template surface is the actual bottleneck.
+- **`build_time_report.py`** — a single entry point that parses `.ninja_log` once (Ninja timestamps every edge it runs, so this is free) and produces: a per-component time budget (`src/gda`, `tests/functional`, link steps, ...) and slowest-individual-edges table (text); a `-ftime-trace` phase/template-instantiation summary (text), if the build was configured with `-DROCSHMEM_BUILD_TIME_TRACE=ON` (adds `-ftime-trace` to every compile job) — skipped with a note otherwise; a Gantt-style `build-timeline.svg` showing real parallel overlap between build phases instead of flat per-component totals; `build-dependency-graph.dot`/`-compact.dot` rendered to `.svg` (and `.png` with `--png`) if Graphviz's `dot` is on `PATH`; and a combined `build-time-analysis.md` report. It recognizes rocSHMEM's device-bitcode/`device_bitcode_tester` HSACO build shape specifically, and detects straight from `build.ninja` which target `add_dependencies(${PROJECT_NAME}, device_bitcode_tester_hsacos)` actually gates and whether `examples`/`rocshmem_unit_tests` exist in this configuration (commonly absent without external MPI), so the graphs/report stay correct even if that wiring or environment changes. Works with any Ninja build, no special flags needed for the first (text) section.
+- **`timed_build.sh`** — wraps any `scripts/build_configs/*` script (default `all_backends`) with wall-clock stage timing and a post-build `build_time_report.py --summary-only` call, without touching that script or `_common.sh`. Appends to `build_timing.log` in the cwd, same convention `all_backends` itself used to follow before that instrumentation was moved out here to keep the build-config scripts identical to `develop`.
 
 ```bash
-python3 scripts/analysis/ninja_build_timing.py --ninja-log build/.ninja_log
-python3 scripts/analysis/ftime_trace_summary.py --build-dir build
+python3 scripts/analysis/build_time_report.py --build-dir build
+
+# or, to produce build/build_timing.log for the above to read stage timings
+# from, run the build itself through the timing wrapper instead of directly:
+mkdir build && cd build
+../scripts/analysis/timed_build.sh -DROCSHMEM_BUILD_TIME_TRACE=ON -DGPU_TARGETS=gfx950
 ```
 
 ## Prerequisites

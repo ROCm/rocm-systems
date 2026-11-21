@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="630" font-family="Helvetica,Arial,sans-serif">
+<rect x="0" y="0" width="1840" height="630" fill="white"/>
+<text x="920.0" y="28" font-size="18" font-weight="bold" text-anchor="middle">Build timeline</text>
+<text x="920.0" y="48" font-size="11" fill="#555" text-anchor="middle">wall time 676.4s over 172 edges -- build/.ninja_log</text>
+<line x1="319.2" y1="65" x2="319.2" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="319.2" y="510" font-size="10" fill="#555" text-anchor="middle">0s</text>
+<line x1="450.6" y1="65" x2="450.6" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="450.6" y="510" font-size="10" fill="#555" text-anchor="middle">60s</text>
+<line x1="581.9" y1="65" x2="581.9" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="581.9" y="510" font-size="10" fill="#555" text-anchor="middle">120s</text>
+<line x1="713.3" y1="65" x2="713.3" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="713.3" y="510" font-size="10" fill="#555" text-anchor="middle">180s</text>
+<line x1="844.6" y1="65" x2="844.6" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="844.6" y="510" font-size="10" fill="#555" text-anchor="middle">240s</text>
+<line x1="976.0" y1="65" x2="976.0" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="976.0" y="510" font-size="10" fill="#555" text-anchor="middle">300s</text>
+<line x1="1107.3" y1="65" x2="1107.3" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="1107.3" y="510" font-size="10" fill="#555" text-anchor="middle">360s</text>
+<line x1="1238.7" y1="65" x2="1238.7" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="1238.7" y="510" font-size="10" fill="#555" text-anchor="middle">420s</text>
+<line x1="1370.0" y1="65" x2="1370.0" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="1370.0" y="510" font-size="10" fill="#555" text-anchor="middle">480s</text>
+<line x1="1501.4" y1="65" x2="1501.4" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="1501.4" y="510" font-size="10" fill="#555" text-anchor="middle">540s</text>
+<line x1="1632.7" y1="65" x2="1632.7" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="1632.7" y="510" font-size="10" fill="#555" text-anchor="middle">600s</text>
+<line x1="1764.1" y1="65" x2="1764.1" y2="495" stroke="#e9ecef" stroke-width="1"/>
+<text x="1764.1" y="510" font-size="10" fill="#555" text-anchor="middle">660s</text>
+<line x1="319.2" y1="65" x2="319.2" y2="495" stroke="#868e96" stroke-width="1.5" stroke-dasharray="3,3"/>
+<text x="319.2" y="60" font-size="10" fill="#495057" text-anchor="middle" font-weight="bold">build start (t=0)</text>
+<rect x="300" y="65" width="19.2" height="430" fill="#cfe2ff" opacity="0.25"/>
+<text x="288" y="93.0" font-size="11" text-anchor="end" fill="#212529">device bitcode library</text>
+<rect x="300" y="70" width="1500" height="46" fill="#fafafa" stroke="#e9ecef"/>
+<rect x="324.9" y="76" width="8.4" height="34" rx="3" fill="#b2f2bb" stroke="#495057" stroke-width="0.6"/>
+<text x="324.9" y="67" font-size="8" fill="#495057">18 per-source .bc compiles</text>
+<rect x="333.3" y="76" width="2.0" height="34" rx="3" fill="#ffd8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="333.3" y="67" font-size="8" fill="#495057">llvm-link unopt.bc</text>
+<rect x="319.2" y="76" width="224.2" height="34" rx="3" fill="#ffd8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="323.2" y="97.0" font-size="9" fill="#1a1a1a">opt -O3 librocshmem_device.bc -- SERIAL (102.4s)</text>
+<text x="288" y="153.0" font-size="11" text-anchor="end" fill="#212529">library host/device TUs</text>
+<rect x="300" y="130" width="1500" height="46" fill="#fafafa" stroke="#e9ecef"/>
+<rect x="319.2" y="136" width="55.0" height="34" rx="3" fill="#b2f2bb" stroke="#495057" stroke-width="0.6"/>
+<text x="323.2" y="157.0" font-size="9" fill="#1a1a1a">56 TU compiles (parallel, 140.9s cpu-sum)</text>
+<text x="288" y="213.0" font-size="11" text-anchor="end" fill="#212529">librocshmem.a</text>
+<rect x="300" y="190" width="1500" height="46" fill="#fafafa" stroke="#e9ecef"/>
+<rect x="374.2" y="196" width="1.0" height="34" rx="3" fill="#e9ecef" stroke="#495057" stroke-width="0.6"/>
+<text x="374.2" y="187" font-size="8" fill="#495057">archive ready</text>
+<text x="288" y="273.0" font-size="11" text-anchor="end" fill="#212529">examples x11 (links)</text>
+<rect x="300" y="250" width="1500" height="46" fill="#fafafa" stroke="#e9ecef"/>
+<rect x="319.2" y="256" width="264.3" height="34" rx="3" fill="#ffa8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="323.2" y="277.0" font-size="9" fill="#1a1a1a">-fgpu-rdc whole-program links (1315.8s cpu total)</text>
+<text x="288" y="327.0" font-size="11" text-anchor="end" fill="#212529">other links (tools/unit-tests/</text>
+<text x="288" y="340.0" font-size="11" text-anchor="end" fill="#212529">rocprofiler-register, 3 targets)</text>
+<rect x="300" y="310" width="1500" height="46" fill="#fafafa" stroke="#e9ecef"/>
+<rect x="319.2" y="316" width="260.6" height="34" rx="3" fill="#ffa8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="323.2" y="337.0" font-size="9" fill="#1a1a1a">3 independent links</text>
+<text x="288" y="387.0" font-size="11" text-anchor="end" fill="#212529">device_bitcode_tester</text>
+<text x="288" y="400.0" font-size="11" text-anchor="end" fill="#212529">HSACO chain (SERIAL)</text>
+<rect x="300" y="370" width="1500" height="46" fill="#fafafa" stroke="#e9ecef"/>
+<rect x="543.4" y="376" width="1.0" height="34" rx="3" fill="#b2f2bb" stroke="#495057" stroke-width="0.6"/>
+<text x="543.4" y="367" font-size="8" fill="#495057">kernel.bc compile</text>
+<rect x="544.1" y="376" width="11.5" height="34" rx="3" fill="#ffd8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="544.1" y="367" font-size="8" fill="#495057">llvm-link kernel+library</text>
+<rect x="555.6" y="376" width="181.3" height="34" rx="3" fill="#ffd8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="559.6" y="397.0" font-size="9" fill="#1a1a1a">opt -O3 merged bc -- SERIAL (82.8s)</text>
+<rect x="737.0" y="376" width="503.7" height="34" rx="3" fill="#e03131" stroke="#495057" stroke-width="0.6"/>
+<text x="741.0" y="397.0" font-size="9" fill="#1a1a1a">clang -x ir codegen -- SERIAL (230.1s)</text>
+<rect x="1240.7" y="376" width="1.0" height="34" rx="3" fill="#ffd8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="1240.7" y="367" font-size="8" fill="#495057">ld.lld HSACO link</text>
+<text x="288" y="447.0" font-size="11" text-anchor="end" fill="#212529">rocshmem_functional_tests</text>
+<text x="288" y="460.0" font-size="11" text-anchor="end" fill="#212529">(gated by HSACO chain)</text>
+<rect x="300" y="430" width="1500" height="46" fill="#fafafa" stroke="#e9ecef"/>
+<rect x="1240.9" y="436" width="61.3" height="34" rx="3" fill="#b2f2bb" stroke="#495057" stroke-width="0.6"/>
+<text x="1244.9" y="457.0" font-size="9" fill="#1a1a1a">36 source compiles, parallel (86.6s cpu)</text>
+<rect x="1302.2" y="436" width="497.8" height="34" rx="3" fill="#ffa8a8" stroke="#495057" stroke-width="0.6"/>
+<text x="1306.2" y="457.0" font-size="9" fill="#1a1a1a">final -fgpu-rdc whole-program link -- SERIAL (227.4s)</text>
+<text x="288" y="528" font-size="11" text-anchor="end" fill="#e03131" font-weight="bold">critical path</text>
+<rect x="333.3" y="516" width="2.0" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="319.2" y="516" width="224.2" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="543.4" y="516" width="1.0" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="544.1" y="516" width="11.5" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="555.6" y="516" width="181.3" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="737.0" y="516" width="503.7" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="1240.7" y="516" width="1.0" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="1302.2" y="516" width="497.8" height="16" fill="#e03131" opacity="0.85"/>
+<rect x="300" y="516" width="1500" height="16" fill="none" stroke="#e9ecef"/>
+</svg>
