@@ -6353,7 +6353,7 @@ typedef enum {
 typedef struct {
   uint32_t accelerator_id;           //!< Accelerator identifier (range 0 to 1023)
   amdsmi_fabric_type_t fabric_type;  //!< UALOE or UALINK
-  uint32_t bandwidth;                //!< Station bandwidth share in Mb/s
+  uint32_t bandwidth;                //!< Estimated total bandwidth between accelerator pairs, MB/s
   uint32_t latency;  //!< Latency in nanoseconds (depends on switch presence and type)
   uint8_t ppod_id[AMDSMI_MAX_UUID_ELEMENTS];  //!< Physical PoD Identifier (16 bytes)
 
