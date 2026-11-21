@@ -82,7 +82,6 @@
 #define RCCL_SIMPLE_STORE_FREE_STEP_START 0
 #endif
 
-#if RCCL_STORE_FREE_STEP_BARRIER || RCCL_SIMPLE_FUSED_STEP_END || RCCL_SIMPLE_STORE_FREE_STEP_START
 // Block barrier whose fences order LDS only: it does not wait for the waves' global or peer stores.
 inline __device__ void ldsOrderedBarrier(int nthreads, int threadsPerBlock, uint64_t& barrier_next,
                                          uint64_t* barriers) {
@@ -91,7 +90,6 @@ inline __device__ void ldsOrderedBarrier(int nthreads, int threadsPerBlock, uint
                           __ATOMIC_RELAXED);
   __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 }
-#endif
 
 // Runs an LL or LL128 step barrier that orders LDS between the waves but does not wait for their global or peer
 // stores to complete. Returns false where the caller must run its full-fence barrier instead: other architectures,
