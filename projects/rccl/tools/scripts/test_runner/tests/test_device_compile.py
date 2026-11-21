@@ -335,21 +335,19 @@ class TargetIdTest(unittest.TestCase):
 
 
 class DeviceCompileCmdTest(unittest.TestCase):
-    def test_gline_tables_only_precedes_forwarded_g0(self):
-        cmd = driver.device_compile_cmd(
-            "clang", "gfx942", ["-O1", "-g0"], "disp.s", "common.cu.cpp"
-        )
-
-        self.assertIn("-gline-tables-only", cmd)
-        self.assertLess(cmd.index("-gline-tables-only"), cmd.index("-g0"))
-
-    def test_release_flags_keep_gline_tables_only(self):
+    def test_release_flags_add_no_debug_info(self):
         cmd = driver.device_compile_cmd(
             "clang", "gfx942", ["-O3"], "disp.s", "common.cu.cpp"
         )
 
-        self.assertIn("-gline-tables-only", cmd)
-        self.assertNotIn("-g0", cmd)
+        self.assertEqual([f for f in cmd if f.startswith("-g")], [])
+
+    def test_debug_flags_are_forwarded(self):
+        cmd = driver.device_compile_cmd(
+            "clang", "gfx942", ["-O1", "-g"], "disp.s", "common.cu.cpp"
+        )
+
+        self.assertEqual([f for f in cmd if f.startswith("-g")], ["-g"])
 
 
 class IrCodegenTest(unittest.TestCase):
@@ -413,6 +411,85 @@ class ExtractDeviceFunctionNoDeadStripTest(unittest.TestCase):
 
         self.assertNotIn("\t.no_dead_strip\t.L__profc_foo\n", extracted)
         self.assertEqual(resources["function_name"], "ncclDevFunc_fooPv")
+
+
+class ExtractDeviceFunctionDropsKernelTest(unittest.TestCase):
+    FUNC = "_Z13ncclDevFunc_av"
+    KERNEL = "_Z15ncclDevKernel_av"
+    LINES = [
+        "\t.text\n",
+        f"\t.p2align\t6 ; -- Begin function {FUNC}\n",
+        f"\t.type\t{FUNC},@function\n",
+        f"{FUNC}:\n",
+        "\ts_setpc_b64 s[30:31]\n",
+        f"\t.size\t{FUNC}, .Lfunc_end0-{FUNC}\n",
+        "                                        ; -- End function\n",
+        f"\t.set .L{FUNC}.num_vgpr, 8\n",
+        f"\t.globl\t{KERNEL}\n",
+        f"\t.protected\t{KERNEL} ; -- Begin function {KERNEL}\n",
+        "\t.p2align\t8\n",
+        f"\t.type\t{KERNEL},@function\n",
+        f"{KERNEL}: ; @{KERNEL}\n",
+        ".Lfunc_begin1:\n",
+        "\t.cfi_startproc\n",
+        f"\ts_add_u32 s4, s4, {FUNC}@rel32@lo+4\n",
+        "\ts_swappc_b64 s[30:31], s[4:5]\n",
+        "\ts_endpgm\n",
+        ".Lfunc_end1:\n",
+        f"\t.size\t{KERNEL}, .Lfunc_end1-{KERNEL}\n",
+        "\t.cfi_endproc\n",
+        "\t.section\t.rodata,\"a\",@progbits\n",
+        f"\t.amdhsa_kernel {KERNEL}\n",
+        "\t.end_amdhsa_kernel\n",
+        "\t.text\n",
+        "                                        ; -- End function\n",
+        f"\t.set .L{KERNEL}.num_vgpr, max(32, .L{FUNC}.num_vgpr)\n",
+        "\t.fill 256, 4, 3212836864\n",
+        "\t.section\t.AMDGPU.gpr_maximums,\"\",@progbits\n",
+        "\t.set amdgpu.max_num_vgpr, 229\n",
+        "\t.set amdgpu.max_num_sgpr, 100\n",
+        "\t.text\n",
+    ]
+
+    def setUp(self):
+        self.extracted, _ = driver.extract_device_function(list(self.LINES))
+
+    def test_kernel_code_is_dropped(self):
+        for dropped in ("\ts_swappc_b64 s[30:31], s[4:5]\n", "\ts_endpgm\n",
+                        "\t.cfi_startproc\n", "\t.p2align\t8\n",
+                        f"\t.type\t{self.KERNEL},@function\n"):
+            self.assertNotIn(dropped, self.extracted)
+        self.assertFalse(any(".globl\t" + self.KERNEL in l for l in self.extracted))
+        self.assertFalse(any(f".set .L{self.KERNEL}." in l for l in self.extracted))
+
+    def test_kernel_local_labels_are_kept(self):
+        """Debug info refers to them."""
+        for label in (".Lfunc_begin1:\n", ".Lfunc_end1:\n"):
+            self.assertIn(label, self.extracted)
+
+    def test_kernel_symbol_is_dropped(self):
+        self.assertNotIn(f"{self.KERNEL}: ; @{self.KERNEL}\n", self.extracted)
+
+    def test_gpr_maximums_are_dropped(self):
+        self.assertFalse(any("gpr_maximums" in l or "amdgpu.max_num_" in l
+                             for l in self.extracted))
+
+    def test_gpr_maximums_are_kept_while_read(self):
+        """Coverage instrumentation adds calls whose resources read them."""
+        reader = "\t.set .Lhelper.num_vgpr, max(45, amdgpu.max_num_vgpr)\n"
+        lines = list(self.LINES)
+        lines.insert(lines.index(f"\t.set .L{self.FUNC}.num_vgpr, 8\n"), reader)
+        extracted, _ = driver.extract_device_function(lines)
+
+        self.assertIn(reader, extracted)
+        self.assertIn("\t.set amdgpu.max_num_vgpr, 229\n", extracted)
+        self.assertIn("\t.section\t.AMDGPU.gpr_maximums,\"\",@progbits\n", extracted)
+
+    def test_device_function_is_kept_and_exported(self):
+        self.assertIn(f"\t.globl\t{self.FUNC}\n", self.extracted)
+        self.assertIn("\ts_setpc_b64 s[30:31]\n", self.extracted)
+        self.assertIn(f"\t.set .L{self.FUNC}.num_vgpr, 8\n", self.extracted)
+        self.assertIn("\t.fill 256, 4, 3212836864\n", self.extracted)
 
 
 if __name__ == "__main__":

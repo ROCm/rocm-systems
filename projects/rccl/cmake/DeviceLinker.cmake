@@ -183,6 +183,16 @@ else()
   set(DL_OPT_FLAGS -O3)
 endif()
 
+# Device-only compiles (per-kernel, dispatcher, fat objects' device halves).
+# Release has no NDEBUG, so each kernel compile unit would get its own
+# __assert_fail and printf. Device code needs no .eh_frame; with -g the CFI
+# goes to .debug_frame.
+set(DL_DEVICE_ONLY_FLAGS -fno-unwind-tables -fno-asynchronous-unwind-tables)
+if(NOT ENABLE_FULL_COVERAGE AND NOT CMAKE_BUILD_TYPE MATCHES "Debug")
+  list(APPEND DL_DEVICE_ONLY_FLAGS -DNDEBUG)
+endif()
+set(DL_DEVICE_OPT_FLAGS ${DL_OPT_FLAGS} ${DL_DEVICE_ONLY_FLAGS})
+
 # ---------------------------------------------------------------------------
 # Device-side coverage instrumentation (ENABLE_FULL_COVERAGE).
 #
@@ -449,7 +459,8 @@ function(dl_add_fat_object NAME SRC)
       file(MAKE_DIRECTORY "${DEVICE_BUILD_DIR}/${_half}")
       # Self-contained on the device, so internalize; codegen is a separate step, see ir_codegen_cmd.
       set(_half_flags --offload-device-only --offload-arch=${DL_TARGET_ID_${_half}}
-        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${FO_EXTRA_FLAGS} -emit-llvm)
+        -fno-offload-lto -mllvm -amdgpu-internalize-symbols ${DL_DEVICE_ONLY_FLAGS}
+        ${FO_EXTRA_FLAGS} -emit-llvm)
       set(_out "${_obj}.bc")
       set(_codegen COMMAND ${CMAKE_RCCLDEV_COMPILER} --ir-codegen --arch=${_half}
         --target-id=${DL_TARGET_ID_${_half}} --clang=${DL_CLANG}
@@ -600,7 +611,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
     --arch=${DL_GPU_TARGET}
     --target-id=${DL_TARGET_ID}
     --clang=${DL_CLANG}
-    ${DL_OPT_FLAGS}
+    ${DL_DEVICE_OPT_FLAGS}
     ${DL_COVERAGE_FLAGS}
     -std=c++17
     ${DL_HIP_COMPILER_FLAGS}
@@ -657,7 +668,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       ${_dl_profile_rt_arg}
       ${_link_def_flags}
       ${_link_inc_flags}
-      ${DL_OPT_FLAGS}
+      ${DL_DEVICE_OPT_FLAGS}
       ${DL_LINK_INHERITED_FLAGS}
       ${DL_COVERAGE_FLAGS}
       ${DL_MAIN_MODULE_CUID_FLAGS}
