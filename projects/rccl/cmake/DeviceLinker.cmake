@@ -78,7 +78,7 @@ set(SPECIALIZED_DIR  "${GEN_DIR}/specialized")
 #
 # Dropped here: flags selecting the compilation model (each command sets its
 # own -x hip / --offload-arch, and --offload-host-only would suppress the very
-# device code these commands exist to produce), -parallel-jobs (would
+# device code these commands exist to produce), -parallel-jobs/--offload-jobs (would
 # oversubscribe an already parallel build), --offload-compress (packaging, see
 # ENABLE_COMPRESS below) and diagnostics (generated sources are compiled
 # quietly by design, and some need -w).
@@ -93,7 +93,7 @@ set(DL_INHERITED_FLAGS "")
 get_target_property(_rccl_copts rccl COMPILE_OPTIONS)
 if(_rccl_copts)
   foreach(_opt IN LISTS _rccl_copts)
-    if(_opt MATCHES "^(-x|hip|-fgpu-rdc|--offload-host-only|--offload-compress|--offload-arch=.*|-parallel-jobs=.*|-w|-W.*)$")
+    if(_opt MATCHES "^(-x|hip|-fgpu-rdc|--offload-host-only|--offload-compress|--offload-arch=.*|-parallel-jobs=.*|--offload-jobs=.*|-w|-W.*)$")
       continue()
     endif()
     if(_opt MATCHES "^(SHELL:|--hipcc-)")
