@@ -2306,6 +2306,11 @@
           "name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled",
           "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM",
           "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"
+        },
+        {
+          "name": "IbTypedParam",
+          "description": "NCCL_IB_* connection settings are typed params: AUTO/-1 named values, out-of-range rejection, boolean spellings",
+          "test_filter": "IbTypedParam.*"
         }
       ]
     },
