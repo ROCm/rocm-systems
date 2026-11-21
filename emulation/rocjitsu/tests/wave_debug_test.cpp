@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
@@ -408,6 +409,33 @@ TEST(WaveDebugTest, Gfx11ShaderCyclesWrapsAtTwentyBitsOnAFullRegisterRead) {
       ASSERT_TRUE(fx.cu->execute_instruction(inst.value().get(), *wave).succeeded());
       EXPECT_EQ(wave->debug_read_sgpr(4), cycle & 0xfffffu);
     }
+  }
+}
+
+TEST(WaveDebugTest, Rdna4ShaderCyclesReadsBothHalvesOfTheSixtyFourBitCounter) {
+  // clock64() on gfx12 reads SHADER_CYCLES_HI, _LO, _HI and retries on a carry.
+  WaveDebugFixture fx(ROCJITSU_CODE_ARCH_RDNA4);
+  auto *wave = fx.dispatch(kKernelAddr);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  // s_getreg_b32 s4, hwreg(HW_REG_SHADER_CYCLES_LO)
+  // s_getreg_b32 s5, hwreg(HW_REG_SHADER_CYCLES_HI)
+  const auto lo_words = rdna4::build_sopk(17, {.simm16 = 0xf81d, .sdst = 4});
+  const auto hi_words = rdna4::build_sopk(17, {.simm16 = 0xf81e, .sdst = 5});
+  auto lo = decoder->decode_window(lo_words);
+  auto hi = decoder->decode_window(hi_words);
+  ASSERT_TRUE(lo.succeeded());
+  ASSERT_TRUE(hi.succeeded());
+  for (uint64_t cycle : {0x0ull, 0xfffffull, 0xffffffffull, 0x100000000ull, 0x123456789abcull}) {
+    SCOPED_TRACE(cycle);
+    fx.cu->restore_cycle_count(cycle);
+    ASSERT_TRUE(fx.cu->execute_instruction(lo.value().get(), *wave).succeeded());
+    ASSERT_TRUE(fx.cu->execute_instruction(hi.value().get(), *wave).succeeded());
+    EXPECT_EQ(wave->debug_read_sgpr(4), static_cast<uint32_t>(cycle));
+    EXPECT_EQ(wave->debug_read_sgpr(5), static_cast<uint32_t>(cycle >> 32));
+  }
+  for (uint32_t id : {29u, 30u}) {
+    const uint16_t hwreg = static_cast<uint16_t>(id | (31u << 11));
+    EXPECT_EQ(amdgpu::write_hwreg_field(*wave, hwreg, 0), amdgpu::HwregAccessResult::ReadOnly);
   }
 }
 
