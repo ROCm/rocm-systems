@@ -2215,13 +2215,11 @@ exact UNMAP, BAR reprogramming, reset, and disconnect revoke it. A stale peer
 IOVA is denied rather than reinterpreted as ordinary guest RAM. GPU peer
 effects cross the modeled local fabric. Ordinary guest RAM uses its usual
 descriptor-backed VFIO-user DMA map and never routes through the GPU fabric.</p>
-<p>The active libvfio-user source carries only a generic fix for the upper
-address register of a sub-4-GiB 64-bit BAR. A former nonstandard peer
-transport is removed from the active source and launch path. Runs that
-depended on it are historical controls, not evidence for the current
-stock-transport gate. The peer endpoint does not advertise AtomicOp
-completion; peer BAR atomics are rejected. The selected
-stock driver emits UC peer PTEs, so cacheable peer coherence is a later gate.</p>
+<p>A former nonstandard peer transport is removed from the active source and
+launch path. Runs that depended on it are historical controls, not evidence
+for the current stock-transport gate. The peer endpoint does not advertise
+AtomicOp completion; peer BAR atomics are rejected. The selected stock
+driver emits UC peer PTEs, so cacheable peer coherence is a later gate.</p>
 <h2 id="gpu-vm-hardware-path">GPU VM hardware path<a class="headerlink" href="#gpu-vm-hardware-path" title="Permanent link">&para;</a></h2>
 <p>The guest uses the selected AMDGPU and AMDKFD driver with the ordinary GFXHUB,
 MMHUB, NBIF/HDP, and KFD VM register and packet paths. BAR4 contains only the
@@ -2295,6 +2293,10 @@ cacheable coherence, or the four-guest same-host RCCL exit gate below. The
   libvfio-user and json-c dependencies are already available locally.</li>
 <li>Optional access to <code>/dev/kvm</code>. The launcher falls back to TCG.</li>
 </ul>
+<p>If you set <code>FETCHCONTENT_SOURCE_DIR_LIBVFIO-USER</code>, use the revision pinned in
+<code>cmake/rj_libvfio_user.cmake</code> or a checkout that preserves the upper address
+bits of sub-4-GiB 64-bit BARs, because this override bypasses the dependency
+pin and CMake does not update the supplied sources.</p>
 <p>Check the QEMU capabilities before building a guest:</p>
 <div class="highlight"><pre><span></span><code>qemu-system-x86_64<span class="w"> </span>-accel<span class="w"> </span><span class="nb">help</span>
 qemu-system-x86_64<span class="w"> </span>-device<span class="w"> </span><span class="nb">help</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>rg<span class="w"> </span>vfio-user-pci
@@ -2314,6 +2316,19 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build-vfio<span clas
 <p>The build also produces the profile-specific IP-discovery generator at:</p>
 <div class="highlight"><pre><span></span><code>build-vfio/tools/rj-ip-discovery/rj-ip-discovery
 </code></pre></div>
+<p>If reconfiguration reports <code>Failed to unstash changes</code>, cached dependency
+sources may contain changes from an earlier build. Leave the old dependency
+directory intact, including its <code>.git</code> directory, local edits, and stashes,
+and retry with fresh build and <code>FETCHCONTENT_BASE_DIR</code> directories:</p>
+<div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-S<span class="w"> </span>.<span class="w"> </span>-B<span class="w"> </span>tmp/build-vfio-clean<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DROCJITSU_ENABLE_VFIO<span class="o">=</span>ON<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-DFETCHCONTENT_BASE_DIR<span class="o">=</span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">/tmp/vfio-deps-clean"</span>
+cmake<span class="w"> </span>--build<span class="w"> </span>tmp/build-vfio-clean<span class="w"> </span>--target<span class="w"> </span>rocjitsu_bin<span class="w"> </span>rj_ip_discovery
+</code></pre></div>
+<p>Choose unused directory names and use the executables under the new build
+directory. The old sources remain available for recovering edits; inspect
+both <code>git status</code> and <code>git stash list</code> there before removing them.</p>
 <h2 id="prepare-compatible-guest-artifacts">Prepare compatible guest artifacts<a class="headerlink" href="#prepare-compatible-guest-artifacts" title="Permanent link">&para;</a></h2>
 <p>The kernel, AMDGPU module, firmware, ROCm user-mode stack, and rocBLAS payload
 must be mutually compatible. A current ROCm nightly is suitable when it has
