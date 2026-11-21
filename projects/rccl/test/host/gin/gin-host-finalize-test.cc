@@ -322,4 +322,56 @@ TEST_F(GinHostFinalizeTest, AlreadyDisconnectedIsNoOp) {
   EXPECT_EQ(backend()->ginComms[0], ginComm0_);
 }
 
+// NCCL 2.32.6 (rn-42e1e06944), upstream b3314a2d "Move ginState into comm": a
+// splitShare=1 child shares its parent's ncclSharedResources. While ginState
+// lived there, the child's ncclGinConnectOnce saw the parent's connected flag
+// and kept the parent's ginComms[], built for the parent's team, so GIN and
+// GIN symmetric kernels on the child put and signalled to the wrong peers.
+// The child's GIN state, wherever this tree keeps it (per comm, or in sharedRes).
+template <typename C>
+auto ginStateOf(C* comm, int) -> decltype(&comm->ginState) { return &comm->ginState; }
+template <typename C>
+struct ncclGinState* ginStateOf(C* comm, long) { return &comm->sharedRes->ginState; }
+
+TEST_F(GinHostFinalizeTest, SplitShareChild_ConnectsItsOwnGinComms) {
+  auto child = std::make_unique<ncclComm>();
+  child->sharedRes = sharedRes_.get();  // splitShare=1
+  child->rank = 0;
+  child->nRanks = 1;
+  child->contiguousRanksPerHost = 1;
+  child->symmetricSupport = true;
+  child->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  struct ncclGinState* childGs = ginStateOf(child.get(), 0);
+  if (childGs != ginState()) {
+    // What ncclGinInitFromParent hands a split child: the parent's backends, no connections.
+    childGs->supported = ginState()->supported;
+    childGs->numActiveBackends = ginState()->numActiveBackends;
+    childGs->backends[0] = *backend();
+    childGs->backends[0].ginCommCount = 0;
+    std::memset(childGs->backends[0].ginComms, 0, sizeof(childGs->backends[0].ginComms));
+  }
+  const int connectsBefore = fake_.connectCalls;
+
+  ASSERT_EQ(ncclGinConnectOnce(child.get()), ncclSuccess);
+
+  EXPECT_GT(fake_.connectCalls, connectsBefore) << "child reused the parent's GIN connections";
+  EXPECT_NE(childGs->backends[0].ginComms[0], ginComm0_);
+  EXPECT_NE(childGs->backends[0].ginComms[0], nullptr);
+  // The parent keeps its own connections.
+  EXPECT_EQ(backend()->ginComms[0], ginComm0_);
+  EXPECT_EQ(backend()->ginComms[1], ginComm1_);
+}
+
+// Control: a fresh comm with its own sharedRes connects, on any GIN state layout.
+TEST_F(GinHostFinalizeTest, NonSharedComm_ConnectsOnce) {
+  ginState()->connected = false;
+  backend()->ginComms[0] = nullptr;
+  backend()->ginComms[1] = nullptr;
+
+  ASSERT_EQ(ncclGinConnectOnce(&comm_), ncclSuccess);
+  EXPECT_GT(fake_.connectCalls, 0);
+  EXPECT_TRUE(ginState()->connected);
+  EXPECT_NE(backend()->ginComms[0], nullptr);
+}
+
 }  // namespace
