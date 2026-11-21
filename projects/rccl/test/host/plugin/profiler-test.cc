@@ -872,7 +872,16 @@ struct FakePlugin2 {
     stops().push_back(eHandle);
     return ncclSuccess;
   }
-  static ncclResult_t Record(void*, ncclProfilerEventState_t, ncclProfilerEventStateArgs_t*) { return ncclSuccess; }
+  static std::vector<RecordCall>& records() {
+    static std::vector<RecordCall> v;
+    return v;
+  }
+  static ncclResult_t Record(void* eHandle, ncclProfilerEventState_t s, ncclProfilerEventStateArgs_t* a) {
+    RecordCall r{eHandle, s, a != nullptr, {}};
+    if (a) r.args = *a;
+    records().push_back(r);
+    return ncclSuccess;
+  }
   static ncclResult_t Finalize(void* ctx) {
     finalized().push_back(ctx);
     return ncclSuccess;
@@ -881,6 +890,7 @@ struct FakePlugin2 {
     starts().clear();
     stops().clear();
     finalized().clear();
+    records().clear();
     initMask() = 0;
   }
 };
@@ -944,6 +954,43 @@ TEST_F(ProfilerMicrotest, PluginList_TwoPlugins_EachGetsItsOwnContextMaskAndHand
   EXPECT_EQ(comm_->profilerContext, nullptr);
   EXPECT_FALSE(ncclProfilerPluginLoaded());
   EXPECT_EQ(g_closedLibs, (std::vector<void*>{&lib_, &lib3, &lib_, &lib2}));
+  FakePlugin2::Reset();
+}
+
+// A net plugin one-off event (an update with no live handle) reaches every loaded plugin, each with a NULL handle.
+TEST_F(ProfilerMicrotest, NetPluginCallback_OneOffUpdate_ReachesEveryPluginWithANullHandle) {
+  FakePlugin2::Reset();
+  ncclProfiler_v8_t vtable2{"FakeProfiler2", &FakePlugin2::Init, &FakePlugin2::Start, &FakePlugin2::Stop,
+                            &FakePlugin2::Record, &FakePlugin2::Finalize};
+  FakeLib lib2{{"ncclProfiler_v8", &vtable2}};
+  g_openProfilerLib = [&](const char* name) -> void* {
+    return std::string(name ? name : "") == "a" ? static_cast<void*>(&lib_) : static_cast<void*>(&lib2);
+  };
+  g_env["NCCL_PROFILER_PLUGIN"] = "a,b";
+  fake_.initMask = ncclProfileNetPlugin;
+  FakePlugin2::initMask() = ncclProfileNetPlugin;
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
+  ASSERT_EQ(profilerPluginCount, 2);
+  fake_.Clear();
+
+  void* h = nullptr;
+  ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventUpdate, nullptr, 0, H(0xE5)));
+  ASSERT_EQ(ncclSuccess, ncclProfilerCallback(&h, ncclProfilerNetEventUpdateAndStop, nullptr, 0, H(0xE6)));
+  EXPECT_EQ(h, nullptr);
+
+  for (const auto& records : {fake_.Records(), FakePlugin2::records()}) {
+    ASSERT_EQ(records.size(), 2u);
+    for (size_t i = 0; i < 2; i++) {
+      EXPECT_EQ(records[i].handle, nullptr);
+      EXPECT_EQ(records[i].state, ncclProfilerNetPluginUpdate);
+      ASSERT_TRUE(records[i].hasArgs);
+      EXPECT_EQ(records[i].args.netPlugin.data, H(0xE5 + i));
+    }
+  }
+  EXPECT_EQ(fake_.NumStops(), 0u);
+  EXPECT_TRUE(FakePlugin2::stops().empty());
+
+  ASSERT_EQ(ncclSuccess, ncclProfilerPluginFinalize(comm_.get()));
   FakePlugin2::Reset();
 }
 
