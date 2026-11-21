@@ -2340,6 +2340,7 @@ ncclResult_t ncclProfilerStartAddonEvent(struct ncclInfo* info, bool isGraphCapt
       eDescr.coll.datatype = ncclDatatypeToString(info->datatype);
       // nChannels field is used by plugins as number of KernelCh events to wait for.
       // Must be 0 until Addon Collectives generate KernelCh events as well.
+      // See also Example profiler plugin.
       eDescr.coll.nChannels = 0;
       // Addon Collectives determine launch topology internally in an ad-hoc manner.
       // Set nWarps field to 0 until this can be determined in an algorithm-independent manner.
