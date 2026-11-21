@@ -747,8 +747,12 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
     auto wlock = std::unique_lock{m_mutex};
     if(search_cache()) return;
 
+    // Only counters the agent supports are collected. gfx1250 provides the TX_VCA
+    // counters in place of the TA counters.
     std::set<std::string> counters_to_collect = {"TA_TOTAL_WAVEFRONTS",
                                                  "TA_TA_BUSY",
+                                                 "TX_VCA_TOTAL_WAVEFRONTS",
+                                                 "TX_VCA_VCA_BUSY",
                                                  "SQC_ICACHE_REQ",
                                                  "SQC_ICACHE_HITS",
                                                  "SQC_ICACHE_MISSES"};
