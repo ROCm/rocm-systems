@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 
 import os
 import re
@@ -5,6 +6,7 @@ import shutil
 import subprocess
 import argparse
 from datetime import datetime
+from decimal import Decimal
 import csv
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -17,7 +19,7 @@ def detect_path_mode(path):
     """
     Inspects the given path and returns one of four modes:
       'single'   - path points to a single .jpg file
-      'category' - path is a folder whose subdirs are resolution folders (e.g. jpeg_images/flowers)
+      'category' - path is a folder whose subdirs are resolution folders (e.g. jpeg_images/<category>)
       'parent'   - path is a folder whose subdirs are category folders, each containing resolution folders (e.g. jpeg_images/)
       'flat'     - path is a folder with arbitrary images or subfolders, no resolution structure (e.g. jpeg_images/foo)
     """
@@ -146,11 +148,13 @@ def build_jpegdecodeperf(rocm_path):
 
 # ── Benchmark execution ───────────────────────────────────────────────────────
 
-def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format=None, crop=None, output_path=None):
+def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format=None, crop=None, output_path=None, num_iterations=1):
     """
     Runs jpegdecodeperf on dir_path three times and returns the metrics from
-    the best run (highest IPS). Parsed from app stdout:
-      Images/Sec, Mpixels/Sec, Average processing time per image, Total wall time.
+    the best run (highest IPS). Each run decodes every image num_iterations
+    times (jpegdecodeperf -n). Parsed from app stdout:
+      Images/Sec, Mpixels/Sec, Average processing time per image,
+      Total wall time (converted to seconds), Total decoded images.
     """
     home_dir = os.path.expanduser('~')
     exe = os.path.join(home_dir, 'jpegdecodeperf-test/jpegdecodeperf')
@@ -158,6 +162,9 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
     best_ips, best_mps, best_proc_time, best_wall_time, total_images = 0, 0, 0, 0, 0
 
     base_cmd = [exe, '-i', dir_path, '-b', str(batch_size), '-t', str(num_threads), '-d', str(device_id)]
+    if num_iterations > 1:
+        # Passed only when above the app's default of 1, so the command is unchanged without --num_iterations
+        base_cmd += ['-n', str(num_iterations)]
     if output_format:
         base_cmd += ['-fmt', output_format]
     if crop:
@@ -167,9 +174,10 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
 
     for _ in range(3):
         print(f"Decoding images in {dir_path}")
+        # PIPE and universal_newlines instead of capture_output and text, which need Python 3.7
         result = subprocess.run(
             base_cmd,
-            capture_output=True, text=True, env=env
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, env=env
         )
         if result.returncode != 0:
             print(result.stderr)
@@ -177,6 +185,28 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
                 f"jpegdecodeperf failed (exit {result.returncode}) on {dir_path}"
             )
         print(result.stdout)
+        # jpegdecodeperf answers an option it rejects (e.g. -t above its limit, or a -crop without four values)
+        # with its help text and exit status 0. Every run that gets past its options prints this line.
+        started = re.search(r'^Decoding started with .*$', result.stdout, re.MULTILINE)
+        if not started:
+            message = (f"jpegdecodeperf printed its help text instead of decoding {dir_path}, so it rejected one of "
+                       f"the options in: {' '.join(base_cmd)}")
+            if num_iterations > 1 or num_threads > 32:
+                # Builds before rocJPEG 1.7.0 reject -n, and builds before 1.14.0 reject more than 32 threads
+                message += (f". If those options are valid, {exe} may predate rocJPEG 1.14.0, which added -n and "
+                            f"up to 64 threads: delete {os.path.dirname(exe)} to rebuild it from {rocm_path}, "
+                            f"which must have rocJPEG 1.14.0 or later.")
+            raise RuntimeError(message)
+        # Builds that honor -n report the iteration count in that line, e.g. "Decoding started with 1 threads,
+        # 4 iteration(s) over the image set". jpegdecodeperf from rocJPEG 1.7.0 to 1.13 accepts -n but decodes
+        # each image only once, and its line has no count.
+        if num_iterations > 1 and not re.search(rf'\b{num_iterations} iteration\(s\)', started.group(0)):
+            raise RuntimeError(
+                f"{exe} did not decode the images {num_iterations} times (-n {num_iterations}), so it was "
+                f"built from a rocJPEG older than 1.14.0 (it printed \"{started.group(0)}\"). Delete "
+                f"{os.path.dirname(exe)} to rebuild it from {rocm_path}, which must have rocJPEG 1.14.0 or "
+                f"later for --num_iterations."
+            )
 
         ips, mps, proc_time, wall_time, images = 0, 0, 0, 0, 0
         for line in result.stdout.split('\n'):
@@ -187,12 +217,13 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
             if 'Average processing time per image' in line:
                 proc_time = float(line.split(':')[-1].strip())
             if 'Total wall time' in line:
-                wall_time = float(line.split(':')[-1].strip())
-            if 'Total Images' in line or 'Number of Images' in line:
-                try:
-                    images = int(line.split(':')[-1].strip())
-                except ValueError:
-                    pass
+                # Printed in sec, min, or hours, depending on the length of the run. Decimal keeps the converted
+                # value as short as the printed one: 59.9999 min is 3599.994, not 3599.9939999999997.
+                scale = 3600 if '(hours)' in line else 60 if '(min)' in line else 1
+                wall_time = float(Decimal(line.split(':')[-1].strip()) * scale)
+            if 'Total decoded images' in line:
+                # Every decode counts: each image once per iteration, without the images the app skipped
+                images = int(line.split(':')[-1].strip())
 
         # Keep only the metrics from the best-performing run
         if ips > best_ips:
@@ -204,12 +235,14 @@ def run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_form
 
     return best_ips, best_mps, best_proc_time, best_wall_time, total_images
 
-def run_benchmark(images_path, batch_size, num_threads, num_images, device_id, benchmark_mode, rocm_path, direct=False, output_format=None, crop=None, output_path=None):
+def run_benchmark(images_path, batch_size, num_threads, num_images, device_id, benchmark_mode, rocm_path, direct=False, output_format=None, crop=None, output_path=None, num_iterations=1):
     """
     Drives run_one() across all relevant directories and collects results for
     every category/resolution combination.
     When direct=True (i.e. -n 1), images_path is passed straight to the app
     without any remapping to ~/jpeg_images/.
+    The number of images in each result is the number of images jpegdecodeperf
+    decoded, which counts each image once per iteration.
     """
     home_dir = os.path.expanduser('~')
     dst_base = os.path.join(home_dir, 'jpeg_images')
@@ -228,8 +261,7 @@ def run_benchmark(images_path, batch_size, num_threads, num_images, device_id, b
                 dir_path = os.path.join(cat_dir, resolution)
                 if not os.path.exists(dir_path):
                     continue
-                total = sum(1 for f in os.listdir(dir_path) if f.endswith('.jpg'))
-                ips, mps, proc_time, wall_time, _ = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path)
+                ips, mps, proc_time, wall_time, total = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path, num_iterations)
                 results.append([category, decode_type, resolution.replace('_', 'x'), total, proc_time, ips, mps, wall_time])
 
     elif mode == 'category':
@@ -240,40 +272,39 @@ def run_benchmark(images_path, batch_size, num_threads, num_images, device_id, b
             dir_path = os.path.join(cat_dir, resolution)
             if not os.path.exists(dir_path):
                 continue
-            total = sum(1 for f in os.listdir(dir_path) if f.endswith('.jpg'))
-            ips, mps, proc_time, wall_time, _ = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path)
+            ips, mps, proc_time, wall_time, total = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path, num_iterations)
             results.append([category, decode_type, resolution.replace('_', 'x'), total, proc_time, ips, mps, wall_time])
 
-    else:  # flat or single — benchmark the whole folder (or file's parent folder) as one unit
+    else:  # flat or single — benchmark the whole folder, or the single file, as one unit
+        label = os.path.splitext(os.path.basename(images_path))[0] if mode == 'single' \
+                else os.path.basename(images_path.rstrip('/'))
         if direct:
-            # Use images_path directly: resolve to containing folder if it's a single file
-            dir_path = os.path.dirname(images_path) if mode == 'single' else images_path.rstrip('/')
-            label = os.path.basename(dir_path)
+            # Use images_path directly: jpegdecodeperf takes a single file as well as a folder
+            dir_path = images_path if mode == 'single' else images_path.rstrip('/')
         else:
-            label = os.path.splitext(os.path.basename(images_path))[0] if mode == 'single' \
-                    else os.path.basename(images_path.rstrip('/'))
             dir_path = os.path.join(dst_base, label)
-        # Count files directly since the app output doesn't reliably report the total
-        total = sum(1 for f in os.listdir(dir_path) if f.endswith('.jpg'))
-        ips, mps, proc_time, wall_time, _ = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path)
+        ips, mps, proc_time, wall_time, total = run_one(dir_path, batch_size, num_threads, device_id, rocm_path, output_format, crop, output_path, num_iterations)
         results.append([label, decode_type, 'mixed', total, proc_time, ips, mps, wall_time])
 
     return results
 
 # ── Results persistence ───────────────────────────────────────────────────────
 
-def save_results(results, batch_size, num_threads, device_id):
+def save_results(results, batch_size, num_threads, device_id, num_iterations=1):
     """
     Writes benchmark results to a timestamped CSV file inside
     ~/jpeg_decoding_benchmark_results/. The directory is created on first run.
+    The file name records num_iterations only when it is above 1, so it is
+    unchanged without --num_iterations.
     Returns the full path to the saved file.
     """
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     results_dir = os.path.join(os.path.expanduser('~'), 'jpeg_decoding_benchmark_results')
     os.makedirs(results_dir, exist_ok=True)
+    iterations_suffix = f'_num_iterations_{num_iterations}' if num_iterations > 1 else ''
     csv_filename = os.path.join(
         results_dir,
-        f'benchmark_results_{timestamp}_batch_size_{batch_size}_num_threads_{num_threads}_device_id_{device_id}.csv'
+        f'benchmark_results_{timestamp}_batch_size_{batch_size}_num_threads_{num_threads}_device_id_{device_id}{iterations_suffix}.csv'
     )
     with open(csv_filename, 'w', newline='') as csvfile:
         fieldnames = [
@@ -299,18 +330,18 @@ def save_results(results, batch_size, num_threads, device_id):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main():
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    default_images_path = os.path.join(script_dir, 'jpeg_images', 'flowers')
-
     parser = argparse.ArgumentParser(description='Benchmark JPEG decoding using AMD ROCm rocJPEG APIs.')
     parser.add_argument('--rocm_path', type=str, required=True,
                         help='Path to the ROCm installation (e.g. /opt/rocm)')
-    parser.add_argument('-i', '--images_path', type=str, default=default_images_path,
-                        help='Path to images to benchmark. Can be a single .jpg file, a category folder '
-                             '(e.g. jpeg_images/flowers), a parent folder (e.g. jpeg_images/), or a flat '
-                             f'folder of images. (default: {default_images_path})')
+    parser.add_argument('-i', '--images_path', type=str, required=True,
+                        help='Path to images to benchmark. Can be a single .jpg file, a category folder of '
+                             '<width>_<height> resolution folders, a parent folder of category folders, or a flat '
+                             'folder of images')
     parser.add_argument('-n', '--num_images', type=int, default=1,
                         help='Number of images per source image to copy into the benchmark folder (default: 1)')
+    parser.add_argument('-iter', '--num_iterations', type=int, default=1,
+                        help='Number of times jpegdecodeperf decodes each image in a run, passed as its -n option. '
+                             'Lengthens runs without copying images. Requires rocJPEG 1.14.0 or later (default: 1)')
     parser.add_argument('-b', '--batch_size', type=int, default=32,
                         help='Batch size for benchmarking (default: 32)')
     parser.add_argument('-t', '--num_threads', type=int, default=1,
@@ -323,10 +354,21 @@ def main():
                         choices=['native', 'yuv_planar', 'y', 'rgb', 'rgb_planar'],
                         help='rocJPEG output format for decoding: native, yuv_planar, y, rgb, rgb_planar (default: native)')
     parser.add_argument('-crop', '--crop', type=str, default=None,
-                        help='Crop rectangle for output in comma-separated format: left,top,right,bottom (optional)')
+                        help='Crop rectangle for output in comma-separated format: left,top,right,bottom. Images '
+                             'that it does not fit in are decoded in full (optional)')
     parser.add_argument('-o', '--output_path', type=str, default=None,
-                        help='Path to an output file or directory to write decoded images (optional)')
+                        help='Existing directory to write the decoded images to (optional)')
     args = parser.parse_args()
+    if not os.path.exists(args.images_path):
+        # Checked before copying images or building jpegdecodeperf
+        parser.error(f'-i/--images_path {args.images_path} does not exist')
+    if args.output_path and not os.path.isdir(args.output_path):
+        # jpegdecodeperf saves each image in this directory, and saves nothing, without an error, if it is missing
+        parser.error(f'-o/--output_path {args.output_path} is not an existing directory')
+    if args.num_iterations < 1:
+        # Checked here because run_one passes -n only when it is above 1, so a smaller value would silently run
+        # one iteration
+        parser.error('-iter/--num_iterations must be at least 1')
 
     if args.num_images == 1:
         # Skip copying entirely and benchmark the source images_path directly
@@ -336,8 +378,8 @@ def main():
         copy_images(args.images_path, args.num_images, args.benchmark_mode)
         direct = False
     build_jpegdecodeperf(args.rocm_path)
-    results = run_benchmark(args.images_path, args.batch_size, args.num_threads, args.num_images, args.device_id, args.benchmark_mode, args.rocm_path, direct=direct, output_format=args.output_format, crop=args.crop, output_path=args.output_path)
-    csv_path = save_results(results, args.batch_size, args.num_threads, args.device_id)
+    results = run_benchmark(args.images_path, args.batch_size, args.num_threads, args.num_images, args.device_id, args.benchmark_mode, args.rocm_path, direct=direct, output_format=args.output_format, crop=args.crop, output_path=args.output_path, num_iterations=args.num_iterations)
+    csv_path = save_results(results, args.batch_size, args.num_threads, args.device_id, args.num_iterations)
     print(f"Results saved to: {csv_path}")
     print("Benchmarking completed!")
 
