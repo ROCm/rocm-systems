@@ -956,29 +956,6 @@ TEST(UtilSimd, IeeeMaximum3_F32_BitExact) {
       }
 }
 
-// --- Normalized pack-convert lanes (v_cvt_pk[_]norm_{i16,u16}_*) -------------
-
-int16_t scalar_cvt_pknorm_i16(float f) {
-  if (std::isnan(f))
-    return 0;
-  double scaled = std::clamp(static_cast<double>(f) * 32767.0, -32767.0, 32767.0);
-  double lower = std::floor(scaled);
-  double fraction = scaled - lower;
-  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0;
-  return static_cast<int16_t>(lower);
-}
-uint16_t scalar_cvt_pknorm_u16(float f) {
-  if (std::isnan(f))
-    return 0;
-  double scaled = std::clamp(static_cast<double>(f) * 65535.0, 0.0, 65535.0);
-  double lower = std::floor(scaled);
-  double fraction = scaled - lower;
-  if (fraction > 0.5 || (fraction == 0.5 && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
-    lower += 1.0;
-  return static_cast<uint16_t>(lower);
-}
-
 TEST(UtilSimd, RoundToNearestEvenIgnoresHostRoundingMode) {
   SKIP_IF_NO_SIMD();
   const int original_mode = std::fegetround();
@@ -1057,61 +1034,6 @@ TEST(UtilSimd, RndneF32IgnoresHostRoundingAndPreservesEnvironment) {
 TEST(UtilSimd, RndneF64IgnoresHostRoundingAndPreservesEnvironment) {
   SKIP_IF_NO_SIMD();
   check_rndne_host_independence<double>();
-}
-
-TEST(UtilSimd, CvtPkNormI16_F32_BitExact) {
-  SKIP_IF_NO_SIMD();
-  using V = util::native<float>;
-  constexpr std::size_t W = V::size();
-  const std::array<float, 14> grid = {{0.0f, -0.0f, 0.5f, -0.5f, 1.0f, -1.0f, 2.0f, -2.0f, 0.99999f,
-                                       1e30f, -1e30f, std::numeric_limits<float>::infinity(),
-                                       -std::numeric_limits<float>::infinity(),
-                                       std::numeric_limits<float>::quiet_NaN()}};
-  for (float fv : grid) {
-    alignas(V) float fb[W];
-    for (std::size_t i = 0; i < W; ++i)
-      fb[i] = fv;
-    V f(fb, util::stdx::vector_aligned);
-    auto ri = util::cvt_pknorm_i16_f32_simd(f);
-    auto ru = util::cvt_pknorm_u16_f32_simd(f);
-    for (std::size_t i = 0; i < W; ++i) {
-      EXPECT_EQ(static_cast<uint16_t>(static_cast<int32_t>(ri[i])),
-                static_cast<uint16_t>(scalar_cvt_pknorm_i16(fv)))
-          << "i16 f=" << fv << " lane=" << i;
-      EXPECT_EQ(static_cast<uint16_t>(ru[i]), scalar_cvt_pknorm_u16(fv)) << "u16 f=" << fv;
-    }
-  }
-}
-
-TEST(UtilSimd, PackedNormalizedThresholdsIgnoreHostRounding) {
-  SKIP_IF_NO_SIMD();
-  using V = util::native<float>;
-  RestoreEnvironment restore_environment;
-  // Generate the neighborhood in nearest mode, then evaluate under every mode.
-  ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
-  std::vector<float> inputs;
-  for (int i = 0; i < 65536; ++i) {
-    for (float center : {float((i + 0.5) / 65535), float((i - 32768 + 0.5) / 32767)}) {
-      inputs.push_back(std::nextafter(center, -std::numeric_limits<float>::infinity()));
-      inputs.push_back(center);
-      inputs.push_back(std::nextafter(center, std::numeric_limits<float>::infinity()));
-    }
-  }
-  for (int mode : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    ASSERT_EQ(std::fesetround(mode), 0);
-    SCOPED_TRACE(mode);
-    for (size_t base = 0; base < inputs.size(); base += V::size()) {
-      V f([&](auto lane) { return inputs[(base + lane) % inputs.size()]; });
-      const auto signed_result = util::cvt_pknorm_i16_f32_simd(f);
-      const auto unsigned_result = util::cvt_pknorm_u16_f32_simd(f);
-      for (size_t lane = 0; lane < V::size(); ++lane) {
-        EXPECT_EQ(static_cast<int32_t>(signed_result[lane]), scalar_cvt_pknorm_i16(f[lane]))
-            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
-        EXPECT_EQ(static_cast<uint32_t>(unsigned_result[lane]), scalar_cvt_pknorm_u16(f[lane]))
-            << "input bits=" << std::bit_cast<uint32_t>(float(f[lane]));
-      }
-    }
-  }
 }
 
 #undef SKIP_IF_NO_SIMD

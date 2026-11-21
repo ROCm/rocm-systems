@@ -15744,7 +15744,13 @@ class CodeGenerator:
                                     mask = f'(amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : {low}'
                                 elif interp_half_result or (
                                     enc.enc_name.upper() == 'ENC_VOP3'
-                                    and self._vop3_uses_half_selectors(inst)
+                                    and (
+                                        self._vop3_uses_half_selectors(inst)
+                                        # Normalized GFX10 writes already used OPSEL
+                                        # through the legacy raw-register helper.
+                                        or inst.name
+                                        in ('V_CVT_NORM_I16_F16', 'V_CVT_NORM_U16_F16')
+                                    )
                                 ):
                                     mask = '(amdgpu::vop3_opsel(inst_) & 8) ? 0xc : 0x3'
                                 statement = (
@@ -18546,6 +18552,43 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna2',
+                    'rdna3_5',
+                ) and any(
+                    i.name.replace('_PKNORM_', '_PK_NORM_') in NORMALIZED_NAMES
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna2',
+                    'rdna3_5',
+                ):
+                    if any(
+                        i.name in BIT_PACK_NAMES | {'V_CVT_PKACCUM_U8_F32'}
+                        for i in all_insts
+                    ):
+                        cpp_includes.append(
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h',
+                                False,
+                            )
+                        )
+                    if any(i.name == 'V_SAT_PK_U8_I16' for i in all_insts):
+                        cpp_includes.append(
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h',
+                                False,
+                            )
+                        )
                 if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
                     i.name in CONVERSION16_NAMES for i in all_insts
                 ):

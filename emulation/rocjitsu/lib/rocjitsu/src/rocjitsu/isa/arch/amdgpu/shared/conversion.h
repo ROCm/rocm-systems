@@ -16,7 +16,7 @@
 ///      floating destinations).
 ///   4. OMOD, then CLAMP, on a floating result (output_modifier.h).
 ///
-/// ToFloat, F32ToInteger (FloorI32, NearestI32), PackU8, PackB32F16 and ToFp8
+/// ToFloat, F32ToInteger (FloorI32, NearestI32) and ToFp8
 /// hold the settings of every stage that applies to them, so a scalar body and
 /// its SIMD probe pass the same object. Every stage works on raw encodings in
 /// unsigned integer lanes, so host rounding, DAZ and FTZ cannot change a result.
@@ -169,54 +169,6 @@ template <typename Int, Rounding Direction, NanResult Nan> struct F32ToInteger {
 using FloorI32 = F32ToInteger<int32_t, Rounding::FLOOR, NanResult::SATURATE_BY_SIGN>;
 /// V_CVT_NEAREST_I32_F32 (V_CVT_RPI_I32_F32).
 using NearestI32 = F32ToInteger<int32_t, Rounding::NEAREST_UP, NanResult::SATURATE_BY_SIGN>;
-
-/// @brief V_CVT_PK_U8_F32: an F32 source rounded in MODE to an unsigned byte.
-/// @details The byte replaces the one that bits [1:0] of the selector pick in
-/// the third source; the other bytes pass through. A NaN gives zero.
-struct PackU8 {
-  /// VOP3 ABS and NEG fields; bit 0 applies to the F32 source.
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-  input_denormal::Policy input;
-  Rounding rounding = Rounding::NEAREST_EVEN;
-
-  template <typename V> constexpr V operator()(V value, V selector, V packed) const {
-    using L = typename fp_format::F32::Lane;
-    value = source_modifier::apply<fp_format::F32>(value, 0, abs, neg);
-    value = input_denormal::flush_input<fp_format::F32>(value, input);
-    const V byte = f32_to_integer<uint8_t>(value, rounding, NanResult::ZERO);
-    const V shift = (selector & V(L{3})) << 3;
-    return (packed & ~(V(L{0xff}) << shift)) | (byte << shift);
-  }
-};
-
-/// @brief V_PACK_B32_F16: two F16 sources in the low and high halves of the result.
-/// @details Each half takes its ABS/NEG bit, a flush of a subnormal under MODE and,
-/// when the target quiets NaNs, the quiet bit of a NaN.
-// ISA manual discrepancy: the manual expects the halves to be copied unchanged,
-// but gfx1201 applies ABS/NEG, flushes input denormals and quiets signaling NaNs.
-struct PackB32F16 {
-  /// VOP3 ABS and NEG fields; bit i applies to source i.
-  uint32_t abs = 0;
-  uint32_t neg = 0;
-  input_denormal::Policy input;
-  bool quiet_nan = true;
-
-  template <typename V> constexpr V operator()(V low, V high) const {
-    return half(low, 0) | (half(high, 1) << 16);
-  }
-
-private:
-  template <typename V> constexpr V half(V bits, unsigned index) const {
-    using F16 = fp_format::F16;
-    bits = source_modifier::apply<F16>(bits & V(F16::kBits), index, abs, neg);
-    bits = input_denormal::flush_input<F16>(bits, input);
-    if (quiet_nan)
-      bits = detail::choose((bits & V(F16::kMagnitude)) > V(F16::kInfinity), bits | V(F16::kQuiet),
-                            bits);
-    return bits;
-  }
-};
 
 /// @brief Rounding into a floating destination, fixed before any lane is evaluated.
 /// @details Every value is rounded once, in the destination format:

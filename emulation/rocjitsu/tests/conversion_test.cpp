@@ -95,34 +95,6 @@ TEST(ConversionTest, SimdLanesMatchScalarLanes) {
   }
 }
 
-TEST(ConversionTest, PackU8RoundsInModeAndKeepsOtherBytes) {
-  const conversion::PackU8 nearest{0, 0, kKeep, conversion::mode_rounding(0)};
-  const conversion::PackU8 down{0, 0, kKeep, conversion::mode_rounding(2)};
-  const conversion::PackU8 up{0, 0, kKeep, conversion::mode_rounding(1)};
-  EXPECT_EQ(nearest(0x3fc00000u, 0u, 0u), 2u); // 1.5
-  EXPECT_EQ(nearest(0x40200000u, 0u, 0u), 2u); // 2.5 ties to even
-  EXPECT_EQ(down(0x3fc00000u, 0u, 0u), 1u);
-  EXPECT_EQ(up(0x3f000000u, 0u, 0u), 1u);                        // 0.5
-  EXPECT_EQ(up(0xbf000000u, 0u, 0u), 0u);                        // -0.5 rounds to -0
-  EXPECT_EQ(nearest(0x437f8000u, 2u, 0x11223344u), 0x11ff3344u); // 255.5 saturates
-  EXPECT_EQ(nearest(0x7fc00000u, 3u, 0x11223344u), 0x00223344u); // NaN gives zero
-  const conversion::PackU8 negated{0, 1, kKeep, conversion::mode_rounding(0)};
-  EXPECT_EQ(negated(0xc0400000u, 1u, 0u), 0x300u); // -(-3)
-}
-
-TEST(ConversionTest, PackB32F16ModifiesFlushesAndQuietsEachHalf) {
-  const conversion::PackB32F16 keep{0, 0, kKeep, true};
-  EXPECT_EQ(keep(0x12347c01u, 0x5678fc00u), 0xfc007e01u); // upper source bits are ignored
-  EXPECT_EQ(keep(0x03ffu, 0x8001u), 0x800103ffu);
-  const conversion::PackB32F16 flush{0, 0, kFlush, true};
-  EXPECT_EQ(flush(0x03ffu, 0x8001u), 0x80000000u);
-  const conversion::PackB32F16 modified{1, 2, kKeep, true};
-  EXPECT_EQ(modified(0xbc00u, 0x3c00u), 0xbc003c00u);
-  // Targets that keep signaling NaNs copy their payload unchanged.
-  const conversion::PackB32F16 raw{0, 0, kKeep, false};
-  EXPECT_EQ(raw(0x7c01u, 0u), 0x7c01u);
-}
-
 TEST(ConversionTest, Fp8DecodeIsExactAndCanonicalizesNan) {
   // Every non-NaN byte decodes to a value that encodes back to the same byte.
   for (uint32_t byte = 0; byte < 0x100u; ++byte) {
