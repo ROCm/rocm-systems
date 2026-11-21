@@ -28,6 +28,10 @@ DIFF_FILE_RE = re.compile(r'^\+\+\+\ "?b/([^ \t\n"]*)')
 DIFF_HUNK_RE = re.compile(r"^@@.*\+(\d+)(,(\d+))?")
 DIAGNOSTIC_RE = re.compile(r"^(.*):(\d+):(\d+): (warning|error): (.*) \[([\w,.\-]+)\]$")
 
+# `--base fork` selects the point where the current branch diverged from this ref.
+FORK_SELECTOR = "fork"
+FORK_REF = "origin/develop"
+
 _ANSI = {
     "reset": "\033[0m",
     "bold": "\033[1m",
@@ -126,6 +130,16 @@ def _git(git_args: list[str], cwd: str | None = None) -> str:
 def get_repo_root() -> str:
     """Return the top-level directory of the current git repository."""
     return _git(["rev-parse", "--show-toplevel"]).strip()
+
+
+def get_fork_point() -> str:
+    """Return the SHA where the current branch diverged from FORK_REF."""
+    return _git(["merge-base", "HEAD", FORK_REF]).strip()
+
+
+def resolve_base(base: str) -> str:
+    """Resolve the `fork` selector to a SHA; any other value is used as-is."""
+    return get_fork_point() if base == FORK_SELECTOR else base
 
 
 def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, ChangedFile]:
@@ -363,9 +377,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--base",
-        default=None,
+        default="HEAD",
         help=(
-            "Diff against this ref instead of HEAD, e.g. origin/develop. "
+            "Diff against this ref (default: %(default)s) "
+            f"Use '{FORK_SELECTOR}' for the point where this "
+            f"branch diverged from {FORK_REF}, or pass any ref/SHA."
             "Covers committed changes since the ref plus any "
             "staged/unstaged changes on top."
         ),
@@ -382,8 +398,10 @@ def main() -> int:
     """Run clang-tidy over changed files and print the results; return an exit code."""
     args = parse_args()
     repo_root = get_repo_root()
+    base = resolve_base(args.base)
+    print(f"Checking changes since base commit: {base}")
 
-    changed_files = get_changed_files(repo_root, args.base)
+    changed_files = get_changed_files(repo_root, base)
     if not changed_files:
         print("No relevant changes found.")
         return 0

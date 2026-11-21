@@ -35,7 +35,7 @@ def _args(**overrides) -> argparse.Namespace:
         "build_path": "/build",
         "jobs": 4,
         "timeout": None,
-        "base": None,
+        "base": "HEAD",
         "verbose": False,
     }
     defaults.update(overrides)
@@ -269,6 +269,59 @@ def test_git_failure_surfaces_stderr(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# get_fork_point / resolve_base
+# --------------------------------------------------------------------------- #
+def test_get_fork_point_returns_merge_base_sha(monkeypatch):
+    calls = []
+
+    def fake_git(git_args, **_kwargs):
+        calls.append(git_args)
+        return "abc123\n"
+
+    monkeypatch.setattr(ctc, "_git", fake_git)
+    assert ctc.get_fork_point() == "abc123"
+    assert calls == [["merge-base", "HEAD", ctc.FORK_REF]]
+
+
+def test_get_fork_point_failure_exits_instead_of_falling_back(monkeypatch):
+    # An explicit `--base fork` must not silently degrade to HEAD.
+    def boom(_git_args, **_kwargs):
+        sys.exit("error: unknown revision")
+
+    monkeypatch.setattr(ctc, "_git", boom)
+    with pytest.raises(SystemExit):
+        ctc.get_fork_point()
+
+
+def test_resolve_base_fork_selector_resolves_to_fork_point(monkeypatch):
+    monkeypatch.setattr(ctc, "get_fork_point", lambda: "abc123")
+    assert ctc.resolve_base("fork") == "abc123"
+
+
+@pytest.mark.parametrize("base", ["HEAD", "origin/release", "deadbeef"])
+def test_resolve_base_other_values_pass_through(monkeypatch, base):
+    def fail():
+        raise AssertionError("git must not be called")
+
+    monkeypatch.setattr(ctc, "get_fork_point", fail)
+    assert ctc.resolve_base(base) == base
+
+
+# --------------------------------------------------------------------------- #
+# parse_args  (--base)
+# --------------------------------------------------------------------------- #
+def test_parse_args_base_defaults_to_head(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build"])
+    assert ctc.parse_args().base == "HEAD"
+
+
+@pytest.mark.parametrize("base", ["fork", "origin/release", "deadbeef"])
+def test_parse_args_explicit_base_is_kept_verbatim(monkeypatch, base):
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build", "--base", base])
+    assert ctc.parse_args().base == base
+
+
+# --------------------------------------------------------------------------- #
 # get_diff_changed_files
 # --------------------------------------------------------------------------- #
 _DIFF = """\
@@ -297,6 +350,18 @@ def test_get_diff_changed_files_parses_ranges_and_filters(monkeypatch):
     assert set(changed) == {"src/foo.cpp"}
     # +11,3 -> (11, 13); the pure-deletion hunk (+34,0) is skipped
     assert changed["src/foo.cpp"].line_ranges == [(11, 13)]
+
+
+def test_get_diff_changed_files_diffs_against_given_base(monkeypatch):
+    calls = []
+
+    def fake_git(git_args, cwd=None):
+        calls.append(git_args)
+        return ""
+
+    monkeypatch.setattr(ctc, "_git", fake_git)
+    ctc.get_diff_changed_files("/repo", "origin/release")
+    assert calls == [["diff", "--no-color", "-U0", "origin/release"]]
 
 
 def test_get_diff_changed_files_skips_missing_files(monkeypatch):
@@ -402,6 +467,33 @@ def test_main_gates_preexisting_diagnostics_on_verbose(monkeypatch, capsys, verb
     assert "check-a" in out
     assert ("Pre-existing issues (outside this diff):" in out) is verbose
     assert ("check-b" in out) is verbose
+
+
+def test_main_prints_base(monkeypatch, capsys):
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
+    monkeypatch.setattr(ctc, "get_changed_files", lambda repo, base: [changed_file])
+    monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
+    monkeypatch.setattr(ctc, "run_clang_tidy", lambda a, f, t: ("", True))
+    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="abc123"))
+    assert ctc.main() == 0
+    assert "Checking changes since base commit: abc123" in capsys.readouterr().out
+
+
+def test_main_fork_selector_passes_resolved_sha(monkeypatch, capsys):
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    seen = []
+    monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
+    monkeypatch.setattr(ctc, "get_fork_point", lambda: "fork123")
+    monkeypatch.setattr(
+        ctc, "get_changed_files", lambda repo, base: seen.append(base) or [changed_file]
+    )
+    monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
+    monkeypatch.setattr(ctc, "run_clang_tidy", lambda a, f, t: ("", True))
+    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="fork"))
+    assert ctc.main() == 0
+    assert seen == ["fork123"]
+    assert "base commit: fork123" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("verbose", [False, True])
