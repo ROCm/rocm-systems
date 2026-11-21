@@ -2792,6 +2792,28 @@ TEST_F(NetSendProxyConnectMicrotest, RemoteProxy_ZeroesShmControlWords) {
   EXPECT_EQ(r->recvMem->tail, 0u);
 }
 
+// NCCL 2.32.6 (rn-a00d56c784): a PXN proxy that asks for a device pointer to its legacy SHM bank makes
+// ncclShmOpen hipHostRegister it, which can block on a driver lock held by a thread waiting on that
+// proxy. The proxy touches the bank from the CPU only, so it must not ask for the device mapping.
+TEST_F(NetSendProxyConnectMicrotest, RemoteProxy_ShmBankNotRegisteredWithGpu) {
+  AddConn();
+  conns_[0].sameProcess = 0;
+  int devPtrRequests = 0;
+  ScopedHook shm(g_shmAllocateShareableBuffer, [&](size_t n, bool, void*, void** h, void** d) {
+    *h = Alloc(n);
+    if (d) {
+      devPtrRequests++;
+      *d = *h;  // keep the unfixed path running so it fails only on the oracle below
+    }
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(shm.calls, 1);
+  EXPECT_EQ(devPtrRequests, 0) << "the proxy requested a GPU mapping (hipHostRegister) of its legacy SHM bank";
+}
+
 TEST_F(NetSendProxyConnectMicrotest, SharedBuffers_UsesPoolAndWithholdsCredits) {
   sendNetResources* r = AddConn(/*shared=*/1);
 
