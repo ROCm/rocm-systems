@@ -31,6 +31,8 @@ import glob
 import json
 from pathlib import Path
 
+from rocprofiler_sdk.pytest_utils import gpu_uses_auto_perf_level
+
 OCCUPANCY_FIELDS = (
     "time",
     "cu",
@@ -656,6 +658,15 @@ def test_att_marker_trace(json_data, att_marker_trace_out_dir_path):
         if p.is_dir()
     ]
     assert len(att_ui_dirs) > 0, "No ui_output_agent_* directories found"
+
+    # At AUTO, gfx11/gfx12 GPUs can lose the trace state while idle between the
+    # roctxProfilerResume and the first traced dispatch, leaving every SE trace empty
+    att_bytes = sum(
+        os.path.getsize(Path(att_marker_trace_out_dir_path) / f) for f in att_files
+    )
+    first_gpu = next((a for a in data["agents"] if a["type"] == 2), None)
+    if att_bytes == 0 and first_gpu is not None and gpu_uses_auto_perf_level(first_gpu):
+        pytest.skip("Empty ATT data with AMDSMI_DEV_PERF_LEVEL_AUTO")
 
     traced_kernel_names = read_att_stats_kernel_names(att_marker_trace_out_dir_path)
 

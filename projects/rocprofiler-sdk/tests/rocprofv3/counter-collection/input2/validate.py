@@ -26,7 +26,9 @@ import sys
 import pytest
 
 from rocprofiler_sdk.pytest_utils.hardware_counters import (
+    first_gpu_agent,
     skip_if_hw_counter_values_unavailable,
+    skip_if_zero_counters_in_auto_mode,
 )
 
 
@@ -48,12 +50,9 @@ def test_agent_info(agent_info_input_data):
             assert int(row["Max_Waves_Per_Simd"]) > 0
 
 
-def test_validate_counter_collection_pmc2(counter_input_data):
+def test_validate_counter_collection_pmc2(counter_input_data, agent_info_input_data):
     counter_names = ["SQ_WAVES", "GRBM_COUNT"]
     di_list = []
-    skip_if_hw_counter_values_unavailable(
-        row["Counter_Value"] for row in counter_input_data
-    )
 
     for row in counter_input_data:
         assert int(row["Agent_Id"].split(" ")[-1]) >= 0
@@ -64,7 +63,6 @@ def test_validate_counter_collection_pmc2(counter_input_data):
         assert len(row["Counter_Value"]) > 0
         # assert row["Counter_Name"].contains("SQ_WAVES").all()
         assert row["Counter_Name"] in counter_names
-        assert float(row["Counter_Value"]) > 0
 
         di_list.append(int(row["Dispatch_Id"]))
 
@@ -72,6 +70,10 @@ def test_validate_counter_collection_pmc2(counter_input_data):
     di_list = list(dict.fromkeys(di_list))
     di_expect = [idx + 1 for idx in range(len(di_list))]
     assert di_expect == di_list
+
+    values = [row["Counter_Value"] for row in counter_input_data]
+    skip_if_zero_counters_in_auto_mode(values, first_gpu_agent(agent_info_input_data))
+    skip_if_hw_counter_values_unavailable(values)
 
 
 if __name__ == "__main__":

@@ -109,6 +109,7 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             std::unique_lock<std::mutex> lk(callback_state->mut);
             callback_state->captured_ids.insert(dispatch_id);
+            Callbacks::add_traced_agent(rdata->dispatch_info.agent_id);
         }
         if(dispatch_id > end_dispatch) callback_state->stop_profiling.store(true);
         return;
