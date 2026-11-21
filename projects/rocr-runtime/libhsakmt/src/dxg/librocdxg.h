@@ -243,7 +243,7 @@ extern hsakmtRuntime *dxg_runtime;
         }                                       \
 }
 
-/* Expects HSA_ENGINE_ID.ui32, returns gfxv (full) in hex */
+/* Expects HSA_GFXIP_VERSION.ui32, returns gfxv (full) in hex */
 #define HSA_GET_GFX_VERSION_FULL(ui32) \
 	(((ui32.Major) << 16) | ((ui32.Minor) << 8) | (ui32.Stepping))
 
@@ -301,7 +301,7 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
 bool queue_acquire_buffer(void *MemoryAddress);
 bool queue_release_buffer(void *MemoryAddress);
 /* Calculate VGPR and SGPR register file size per CU */
-uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
+uint32_t get_vgpr_size_per_cu(HSA_GFXIP_VERSION id);
 #define SGPR_SIZE_PER_CU 0x4000
 
 bool is_ipc_sysmemfd(uint64_t fd);

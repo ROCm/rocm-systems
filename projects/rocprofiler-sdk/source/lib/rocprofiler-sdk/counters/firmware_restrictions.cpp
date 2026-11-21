@@ -163,8 +163,15 @@ check_agents_against_restrictions(const std::vector<FirmwareRestriction>& restri
             if(!restriction.feature.empty()) continue;
             if(!affects(restriction, agent_arch)) continue;
 
-            auto agent_fw_version = firmware_version(
-                restriction.firmware_type, agent->fw_version.Value, agent->sdma_fw_version.Value);
+            auto agent_fw_version = firmware_version(restriction.firmware_type,
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
+                                                     agent->sdma_fw_version.uCodeCompute,
+                                                     agent->sdma_fw_version.uCodeSDMA
+#else
+                                                     agent->fw_version.Value,
+                                                     agent->sdma_fw_version.Value
+#endif
+            );
             if(!agent_fw_version)
             {
                 ROCP_WARNING << "Unknown firmware type '" << restriction.firmware_type
@@ -315,8 +322,16 @@ agent_supports_feature(const rocprofiler_agent_t* agent, std::string_view featur
     const auto& restrictions = installed_firmware_restrictions();
     if(!restrictions) return std::nullopt;
 
-    return evaluate_feature_support(
-        *restrictions, agent->name, agent->fw_version.Value, agent->sdma_fw_version.Value, feature);
+    return evaluate_feature_support(*restrictions,
+                                    agent->name,
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
+                                    agent->sdma_fw_version.uCodeCompute,
+                                    agent->sdma_fw_version.uCodeSDMA,
+#else
+                                    agent->fw_version.Value,
+                                    agent->sdma_fw_version.Value,
+#endif
+                                    feature);
 }
 
 }  // namespace counters

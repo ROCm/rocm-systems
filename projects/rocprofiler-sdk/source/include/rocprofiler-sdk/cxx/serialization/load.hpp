@@ -189,7 +189,11 @@ void
 load(ArchiveT& ar, HSA_ENGINE_VERSION& data)
 {
     ROCP_SDK_LOAD_DATA_BITFIELD("uCodeSDMA", uCodeSDMA);
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
+    ROCP_SDK_LOAD_DATA_BITFIELD("uCodeCompute", uCodeCompute);
+#else
     ROCP_SDK_LOAD_DATA_BITFIELD("uCodeRes", uCodeRes);
+#endif
 }
 
 template <typename ArchiveT>
@@ -197,6 +201,15 @@ void
 load(ArchiveT& ar, HSA_ENGINE_ID& data)
 {
     ROCP_SDK_LOAD_DATA_BITFIELD("uCode", ui32.uCode);
+    ROCP_SDK_LOAD_DATA_BITFIELD("Major", ui32.Major);
+    ROCP_SDK_LOAD_DATA_BITFIELD("Minor", ui32.Minor);
+    ROCP_SDK_LOAD_DATA_BITFIELD("Stepping", ui32.Stepping);
+}
+
+template <typename ArchiveT>
+void
+load(ArchiveT& ar, HSA_GFXIP_VERSION& data)
+{
     ROCP_SDK_LOAD_DATA_BITFIELD("Major", ui32.Major);
     ROCP_SDK_LOAD_DATA_BITFIELD("Minor", ui32.Minor);
     ROCP_SDK_LOAD_DATA_BITFIELD("Stepping", ui32.Stepping);
@@ -304,6 +317,7 @@ load(ArchiveT& ar, rocprofiler_agent_v0_t& data)
     ROCP_SDK_LOAD_DATA_FIELD(node_id);
     ROCP_SDK_LOAD_DATA_FIELD(logical_node_id);
     ROCP_SDK_LOAD_DATA_FIELD(logical_node_type_id);
+    ROCP_SDK_LOAD_DATA_FIELD(gfxip_version);
 
     auto generate = [&](auto name, const auto*& value, auto& size) {
         using value_type =

@@ -125,8 +125,8 @@ match_node_to_adapter(const std::vector<DxgNode>& nodes,
 // Resolve the gfx target name for a node, or an empty string if the node does
 // not report one.
 //
-// The thunk reports HSA_OVERRIDE_GFX_VERSION through OverrideEngineId and
-// leaves EngineId's version fields zero in that case, which is the precedence
+// The thunk reports HSA_OVERRIDE_GFX_VERSION through OverrideGfxIpVersion and
+// leaves GfxIpVersion's version fields zero in that case, which is the precedence
 // the HSA runtime applies too (see amd_gpu_agent.cpp). An explicit, valid
 // ROCPROFILER_FORCE_GFX wins over both, so a user can select the counter
 // definitions for a target rocprofiler-sdk does not know about.
