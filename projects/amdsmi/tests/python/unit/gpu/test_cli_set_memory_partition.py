@@ -21,6 +21,7 @@ try:
     from common.common import (
         amdsmi_path,
         cli_search_order,
+        fake_amdsmi_init,
         find_cli_dir,
         load_cli_module,
         stub_modules,
@@ -63,6 +64,13 @@ def _build_fake_amdsmi():
     interface.AMDSMI_MAX_UTIL = 100
     wrapper.AMDSMI_STATUS_NO_PERM = 4
     wrapper.AMDSMI_STATUS_INVAL = 1
+    # Read at import by amdsmi_helpers (CPER_DECODE_MESSAGES), which set_value.py imports.
+    wrapper.AMDSMI_STATUS_NOT_SUPPORTED = 2
+    wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE = 3
+    wrapper.AMDSMI_STATUS_UNEXPECTED_DATA = 5
+    interface.AmdSmiInitFlags = types.SimpleNamespace(
+        INIT_ALL_PROCESSORS=0xFFFFFFFF, INIT_AMD_GPUS=1, INIT_AMD_CPUS=2, INIT_AMD_NICS=4
+    )
     interface.amdsmi_wrapper = wrapper
     interface.AmdSmiMemoryPartitionType = _MODES
     interface.amdsmi_get_gpu_device_bdf = lambda _handle: "0000:00:00.0"
@@ -77,6 +85,7 @@ def _build_fake_amdsmi():
         "amdsmi.amdsmi_interface": interface,
         "amdsmi.amdsmi_exception": exception,
         "amdsmi.amdsmi_wrapper": wrapper,
+        "amdsmi_init": fake_amdsmi_init(interface, exception),
     }
 
 

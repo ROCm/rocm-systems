@@ -38,6 +38,7 @@ import unittest
 try:
     from common.common import (
         cli_search_order,
+        fake_amdsmi_init,
         fake_module,
         find_cli_dir,
         load_cli_module,
@@ -137,7 +138,7 @@ def _import_real_amdsmi_helpers():
             "amdsmi": amdsmi_pkg,
             "amdsmi.amdsmi_interface": interface,
             "amdsmi.amdsmi_exception": exception,
-            "amdsmi_init": None,
+            "amdsmi_init": fake_amdsmi_init(interface, exception),
         }
     )
     try:

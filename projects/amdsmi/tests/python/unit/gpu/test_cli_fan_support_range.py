@@ -18,7 +18,13 @@ import tempfile
 import types
 import unittest
 
-from common.common import cli_search_order, fake_module, find_cli_dir, stub_modules
+from common.common import (
+    cli_search_order,
+    fake_amdsmi_init,
+    fake_module,
+    find_cli_dir,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 
@@ -72,7 +78,7 @@ def _fake_amdsmi():
         "amdsmi.amdsmi_interface": interface,
         "amdsmi.amdsmi_exception": exception,
         "amdsmi.amdsmi_wrapper": wrapper,
-        "amdsmi_init": None,
+        "amdsmi_init": fake_amdsmi_init(interface, exception),
         "amdsmi_helpers": None,
         "amdsmi_cli_exceptions": None,
         "BDF": None,

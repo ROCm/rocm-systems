@@ -22,6 +22,7 @@ Imported by every functional/unit leaf test and by all three runners
 
 import contextlib
 import fnmatch
+import importlib.abc
 import importlib.util
 import inspect
 import io
@@ -212,26 +213,41 @@ def load_cli_module(name, path, sys_path_dir=None):
     return module
 
 
+# Cleanup lists of every class that registered one; empty once its tearDownClass has run.
+_class_cleanup_lists = []
+
+
+def _run_cleanups(cleanups):
+    while cleanups:  # last registered runs first, as addClassCleanup does
+        cleanup, cleanup_args = cleanups.pop()
+        cleanup(*cleanup_args)
+
+
+def run_pending_class_cleanups():
+    """Run the cleanups of a class whose ``setUpClass`` raised, as unittest skips its teardown."""
+    for cleanups in _class_cleanup_lists:
+        _run_cleanups(cleanups)
+
+
 def add_class_cleanup(test_cls, func, *args):
     """Run ``func`` after ``test_cls`` finishes.
 
     Not ``addClassCleanup`` (3.8+, and Debian 10 ships 3.7). This runs off
-    ``tearDownClass``, which unittest skips when ``setUpClass`` raises, so a
-    class that dies mid-setup leaves its cleanups unrun.
+    ``tearDownClass``, which unittest skips when ``setUpClass`` raises; the
+    runner then calls ``run_pending_class_cleanups()`` instead.
     """
     # Own the list rather than inherit a base class's, so subclasses do not share.
     cleanups = test_cls.__dict__.get("_pending_class_cleanups")
     if cleanups is None:
         cleanups = test_cls._pending_class_cleanups = []
+        _class_cleanup_lists.append(cleanups)
         previous = test_cls.tearDownClass.__func__
 
         def _run_class_cleanups(cls):
             try:
                 previous(cls)
             finally:
-                while cleanups:  # last registered runs first, as addClassCleanup does
-                    cleanup, cleanup_args = cleanups.pop()
-                    cleanup(*cleanup_args)
+                _run_cleanups(cleanups)
 
         test_cls.tearDownClass = classmethod(_run_class_cleanups)
 
@@ -249,6 +265,55 @@ def fake_module(name, **attrs):
     for key, value in attrs.items():
         setattr(module, key, value)
     return module
+
+
+def fake_amdsmi_init(interface, exception, init_flag=None):
+    """Stand-in for the CLI's ``amdsmi_init`` module, so a test never runs the real one.
+
+    Importing the real ``amdsmi_init`` runs ``amdsmi_cli_init()``, which probes the host for
+    the amdgpu/hsmp drivers. Without them it calls into ``amdsmi_interface`` and exits, so a
+    test that stubs ``amdsmi_interface`` passes on a host with a driver and errors on one
+    without. ``amdsmi_helpers`` only star-imports ``amdsmi_interface``, ``amdsmi_exception``
+    and the init flag from it, so supply those and the result no longer depends on the host.
+    Install it as the ``"amdsmi_init"`` entry of the mapping given to ``stub_modules``.
+    """
+    if init_flag is None:
+        init_flag = getattr(getattr(interface, "AmdSmiInitFlags", None), "INIT_ALL_PROCESSORS", 0)
+    return fake_module(
+        "amdsmi_init",
+        AMDSMI_INIT_FLAG=init_flag,
+        AMDSMI_INITIALIZED=True,
+        amdsmi_interface=interface,
+        amdsmi_exception=exception,
+    )
+
+
+class RealAmdsmiInitImportError(ImportError):
+    """A unit test imported the real ``amdsmi_init``; reported without a traceback."""
+
+
+class _ForbidRealAmdsmiInit(importlib.abc.MetaPathFinder):
+    """Make ``import amdsmi_init`` an error unless a test already put a stub in sys.modules."""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "amdsmi_init":
+            raise RealAmdsmiInitImportError(
+                "imported the real amdsmi_init, which probes host drivers. "
+                "Add common.fake_amdsmi_init() as the 'amdsmi_init' entry in stub_modules()."
+            )
+        return None
+
+
+def forbid_real_amdsmi_init():
+    """Fail any import of the CLI's real ``amdsmi_init`` for the rest of this process.
+
+    Called from ``unit/__init__.py``. Importing it runs ``amdsmi_cli_init()``, so a test that does
+    passes on a host with a driver and fails on one without. A test that needs the module
+    puts ``fake_amdsmi_init()`` in sys.modules first, which the import system finds before
+    it asks this finder.
+    """
+    if not any(isinstance(finder, _ForbidRealAmdsmiInit) for finder in sys.meta_path):
+        sys.meta_path.insert(0, _ForbidRealAmdsmiInit())
 
 
 def stub_modules_at_import(modules):
@@ -860,6 +925,8 @@ class _IsolationLeakMarker:
     class cannot be identified (rare fallback). Implements the minimal
     ``TestResult`` surface (``id``/``shortDescription``/``str``)."""
 
+    failureException = AssertionError  # read by TestResult._exc_info_to_string
+
     def __init__(self, label):
         self._label = label
 
@@ -913,6 +980,22 @@ class _ModuleIsolationResult(unittest.TextTestResult):
         # (class label, [leaked module names]) per offending class, so the runner
         # can print a distinct root-cause banner after the normal summary.
         self._iso_leaks = []
+
+    @staticmethod
+    def _is_setup_class_failure(test):
+        # unittest reports a failed setUpClass against a stand-in described "setUpClass (...)".
+        return str(getattr(test, "description", "")).startswith("setUpClass")
+
+    def addError(self, test, err):
+        if self._is_setup_class_failure(test):
+            run_pending_class_cleanups()
+        super().addError(test, err)
+
+    def _exc_info_to_string(self, err, test):
+        exc_type, exc_value = err[:2]
+        if issubclass(exc_type, RealAmdsmiInitImportError):
+            return f"{exc_type.__name__}: {exc_value}\n"  # the test id names the culprit
+        return super()._exc_info_to_string(err, test)
 
     @staticmethod
     def _iso_looks_like_stub(mod):

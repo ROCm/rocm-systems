@@ -84,6 +84,7 @@ from unittest import mock
 from common.common import (
     amdsmi_path,
     cli_search_order,
+    fake_amdsmi_init,
     fake_module,
     find_cli_dir,
     load_cli_module,
@@ -161,6 +162,7 @@ def _build_fake_amdsmi():
         "amdsmi": amdsmi_pkg,
         "amdsmi.amdsmi_interface": interface,
         "amdsmi.amdsmi_exception": exception,
+        "amdsmi_init": fake_amdsmi_init(interface, exception),
         "amdsmi.amdsmi_wrapper": wrapper,
     }
 

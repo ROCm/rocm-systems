@@ -80,7 +80,13 @@ import types
 import unittest
 from unittest import mock
 
-from common.common import cli_search_order, fake_module, find_cli_dir, stub_modules
+from common.common import (
+    cli_search_order,
+    fake_amdsmi_init,
+    fake_module,
+    find_cli_dir,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 SET_VALUE_PATH = os.path.join(_CLI_DIR, "subcommands", "set_value.py") if _CLI_DIR else ""
@@ -345,7 +351,7 @@ def _install_fake_amdsmi_for_helpers():
 
 
 class TestValidateAndSetNodePowerLimit(unittest.TestCase):
-    _EXTRA_STUBBED_NAMES = ("amdsmi_init", "amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")
+    _EXTRA_STUBBED_NAMES = ("amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")
 
     @classmethod
     def setUpClass(cls):
@@ -353,6 +359,9 @@ class TestValidateAndSetNodePowerLimit(unittest.TestCase):
             raise unittest.SkipTest("amd-smi CLI source not found")
         modules = _install_fake_amdsmi_for_helpers()
         modules.update({name: None for name in cls._EXTRA_STUBBED_NAMES})
+        modules["amdsmi_init"] = fake_amdsmi_init(
+            modules["amdsmi.amdsmi_interface"], modules["amdsmi.amdsmi_exception"]
+        )
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
 
@@ -465,6 +474,9 @@ class TestGetMaxNodePowerLimit(unittest.TestCase):
             raise unittest.SkipTest("amd-smi CLI source not found")
         modules = _install_fake_amdsmi_for_helpers()
         modules.update({name: None for name in cls._EXTRA_STUBBED_NAMES})
+        modules["amdsmi_init"] = fake_amdsmi_init(
+            modules["amdsmi.amdsmi_interface"], modules["amdsmi.amdsmi_exception"]
+        )
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
 

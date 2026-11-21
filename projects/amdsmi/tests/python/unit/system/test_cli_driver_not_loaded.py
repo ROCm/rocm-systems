@@ -28,6 +28,7 @@ from unittest import mock
 
 from common.common import (
     cli_search_order,
+    fake_amdsmi_init,
     fake_module,
     find_cli_dir,
     generated_version_stub,
@@ -55,13 +56,7 @@ def setUpModule() -> None:
     if "amdsmi_init" not in sys.modules:
         from amdsmi import amdsmi_exception, amdsmi_interface
 
-        stubs["amdsmi_init"] = fake_module(
-            "amdsmi_init",
-            AMDSMI_INIT_FLAG=0,
-            AMDSMI_INITIALIZED=True,
-            amdsmi_interface=amdsmi_interface,
-            amdsmi_exception=amdsmi_exception,
-        )
+        stubs["amdsmi_init"] = fake_amdsmi_init(amdsmi_interface, amdsmi_exception, init_flag=0)
     if "_version" not in sys.modules:
         stubs.update(generated_version_stub())
     _restore_stubs = stub_modules_at_import(stubs)

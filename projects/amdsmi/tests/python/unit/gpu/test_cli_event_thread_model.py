@@ -38,7 +38,14 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
-from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
+from common.common import (
+    cli_search_order,
+    fake_amdsmi_init,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 EVENT_PATH = os.path.join(_CLI_DIR, "subcommands", "event.py") if _CLI_DIR else None
@@ -717,8 +724,9 @@ class TestEventOpenListenersRealRecordOrRaise(unittest.TestCase):
 
         # amdsmi_helpers.py does `from amdsmi_init import *`; evict any stale
         # fake a sibling test file left behind so this loads the real sources.
-        modules.update(
-            dict.fromkeys(("amdsmi_init", "amdsmi_helpers", "amdsmi_cli_exceptions", "BDF"))
+        modules.update(dict.fromkeys(("amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")))
+        modules["amdsmi_init"] = fake_amdsmi_init(
+            modules["amdsmi.amdsmi_interface"], modules["amdsmi.amdsmi_exception"]
         )
         stub_modules(cls, modules)
         if _CLI_DIR not in sys.path:

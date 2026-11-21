@@ -20,7 +20,7 @@ from typing import Any
 from common.common import (
     amdsmi,
     cli_search_order,
-    fake_module,
+    fake_amdsmi_init,
     find_cli_dir,
     generated_version_stub,
     stub_modules_at_import,
@@ -60,13 +60,7 @@ if "amdsmi_init" not in sys.modules:
     from amdsmi import amdsmi_exception as _amdsmi_exception
     from amdsmi import amdsmi_interface as _amdsmi_interface
 
-    _stubs["amdsmi_init"] = fake_module(
-        "amdsmi_init",
-        AMDSMI_INIT_FLAG=0,
-        AMDSMI_INITIALIZED=True,
-        amdsmi_interface=_amdsmi_interface,
-        amdsmi_exception=_amdsmi_exception,
-    )
+    _stubs["amdsmi_init"] = fake_amdsmi_init(_amdsmi_interface, _amdsmi_exception, init_flag=0)
 
 _stubs.update(generated_version_stub())
 
@@ -1068,8 +1062,13 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
         parser: Any = None
         action_cls = AMDSMIParser._level_select(host)
         action = action_cls(option_strings=["-c", "--clk-level"], dest="clk_level")
-        with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
-            action(parser, argparse.Namespace(), ["badclk", "0"])
+        # The error names the subcommand from sys.argv[1], which is empty when the runner
+        # is started without arguments.
+        from unittest import mock
+
+        with mock.patch.object(sys, "argv", ["amd-smi", "set"]):
+            with self.assertRaises(cli_exc.AmdSmiInvalidParameterException) as ctx:
+                action(parser, argparse.Namespace(), ["badclk", "0"])
         self.assertEqual(ctx.exception.value, int(self.ExitCode.INVALID_PARAMETER))
         message = str(ctx.exception)
         self.assertIn("badclk", message)
