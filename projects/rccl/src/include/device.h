@@ -40,7 +40,11 @@ typedef __hip_bfloat16 hip_bfloat16;
 #include <rocshmem/rocshmem.hpp>
 #endif
 #if SQTT_ENABLED
-#include <rocprof-trace-decoder/rocprof_trace_decoder/cxx/markers.hpp>
+// The marker header lives inside LLVM's own include dir (amd-sqtt-marker),
+// added to this target's include path alongside the pass plugin; see
+// SQTT_MARKER_INCLUDE_DIR in CMakeLists.txt / src/CMakeLists.txt.
+#define AMD_SQTT_MARKER_ENABLE 1
+#include <amd_sqtt_marker/sqtt_marker.h>
 #else
 #define sqtt_marker_enter(name) do {} while(0)
 #define sqtt_marker_exit(name) do {} while(0)
