@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hip/graph.hpp"
 
+#include "lib/common/static_tl_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -183,7 +184,13 @@ auto graph_destroy(RetT (*next)(::hipGraphExec_t))
 }
 
 // std::deque preserves references when nested host-callback launches push onto the stack.
-thread_local std::deque<launch_state> g_launch_stack;
+// Read from the queue write interceptor inside HIP's dispatch, so not a thread_local with a
+// destructor (see common::static_tl_object::instance).
+auto&
+get_launch_stack()
+{
+    return common::static_tl_object<std::deque<launch_state>>::instance();
+}
 
 // GPU agent for the launch stream's device, or {0} on failure.
 rocprofiler_agent_id_t
@@ -275,8 +282,9 @@ auto graph_launch(RetT (*next)(::hipGraphExec_t, ::hipStream_t))
                                    callback_contexts,
                                    external_corr_ids);
 
-        g_launch_stack.emplace_back();
-        auto& s = g_launch_stack.back();
+        auto& launch_stack = get_launch_stack();
+        launch_stack.emplace_back();
+        auto& s = launch_stack.back();
 
         // Attach-mid-process fallback: synthesize CREATE so subscribers see lifecycle in order.
         bool fallback_assigned = false;
@@ -348,7 +356,7 @@ auto graph_launch(RetT (*next)(::hipGraphExec_t, ::hipStream_t))
                 ROCPROFILER_HIP_GRAPH_OPERATION_EXEC_DESTROY, s.graph_exec_id, exec);
             forget_graph_exec(exec);
         }
-        g_launch_stack.pop_back();
+        launch_stack.pop_back();
         return ret;
     };
 }
@@ -397,7 +405,8 @@ get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<OpIdx, OpIdxTail...
 launch_state*
 current_launch_state()
 {
-    return g_launch_stack.empty() ? nullptr : &g_launch_stack.back();
+    auto& launch_stack = get_launch_stack();
+    return launch_stack.empty() ? nullptr : &launch_stack.back();
 }
 
 uint64_t

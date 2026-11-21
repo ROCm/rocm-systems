@@ -14,6 +14,7 @@ set(common_sources
     regex.cpp
     sha256.cpp
     static_object.cpp
+    static_tl_object.cpp
     string_entry.cpp
     uuid_v7.cpp)
 
@@ -26,7 +27,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-output-library
             rocprofiler-sdk::rocprofiler-sdk-cereal
             GTest::gtest
-            GTest::gtest_main)
+            GTest::gtest_main
+            ${CMAKE_DL_LIBS})
 
 rocprofiler_add_unit_test(
     TARGET common-tests

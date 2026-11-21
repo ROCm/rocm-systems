@@ -21,12 +21,8 @@
 // THE SOFTWARE.
 
 #include "lib/common/static_tl_object.hpp"
-#include "lib/common/scope_destructor.hpp"
 
-#include <array>
-#include <cstddef>
-#include <functional>
-#include <mutex>
+#include <pthread.h>
 #include <stack>
 
 namespace rocprofiler
@@ -35,44 +31,72 @@ namespace common
 {
 namespace
 {
+using static_tl_dtor_stack_t = std::stack<static_dtor_func_t>;
+
 auto*&
 get_static_tl_object_stack()
 {
-    static thread_local auto* _v = new std::stack<static_dtor_func_t>{};
+    static thread_local static_tl_dtor_stack_t* _v = nullptr;
+    return _v;
+}
+
+struct static_tl_object_key
+{
+    pthread_key_t key   = {};
+    bool          valid = false;
+};
+
+// Thread-exit cleanup runs from a pthread key destructor, not from a thread_local with a
+// destructor: the first use of such a thread_local on a thread calls __cxa_thread_atexit, which
+// takes glibc's dl_load_lock. That first use can happen inside a HIP or HSA call (or a ROCr
+// internal thread) that holds a runtime lock or waits on the GPU, while dlopen holds
+// dl_load_lock and runs a library constructor that needs the same runtime.
+const static_tl_object_key&
+get_static_tl_object_key()
+{
+    static const auto _v = []() {
+        auto _ret = static_tl_object_key{};
+        _ret.valid =
+            (pthread_key_create(&_ret.key, [](void*) { destroy_static_tl_objects(); }) == 0);
+        return _ret;
+    }();
     return _v;
 }
 }  // namespace
 
-thread_local auto _static_tl_object_dtor = std::optional<scope_destructor>{};
-
 void
 destroy_static_tl_objects()
 {
-    if(auto*& _stack = get_static_tl_object_stack(); _stack)
-    {
-        while(!_stack->empty())
-        {
-            auto& itr = _stack->top();
-            if(itr) itr();
-            _stack->pop();
-        }
+    auto*& _stack = get_static_tl_object_stack();
+    if(!_stack) return;
 
-        delete _stack;
-        _stack = nullptr;
+    while(!_stack->empty())
+    {
+        auto _func = _stack->top();
+        _stack->pop();
+        if(_func) _func();
     }
+
+    delete _stack;
+    _stack = nullptr;
+
+    if(const auto& _key = get_static_tl_object_key(); _key.valid)
+        pthread_setspecific(_key.key, nullptr);
 }
 
 void
 register_static_tl_dtor(static_dtor_func_t&& _func)
 {
-    // make sure the thread-local scope destructor exists
-    if(!_static_tl_object_dtor)
-        _static_tl_object_dtor = scope_destructor{[]() { destroy_static_tl_objects(); }};
-
-    if(auto*& _stack = get_static_tl_object_stack(); _stack)
+    auto*& _stack = get_static_tl_object_stack();
+    if(!_stack)
     {
-        _stack->push(_func);
+        _stack = new static_tl_dtor_stack_t{};
+        // a non-null value is what makes the key's destructor run when this thread exits
+        if(const auto& _key = get_static_tl_object_key(); _key.valid)
+            pthread_setspecific(_key.key, _stack);
     }
+
+    _stack->push(_func);
 }
 }  // namespace common
 }  // namespace rocprofiler

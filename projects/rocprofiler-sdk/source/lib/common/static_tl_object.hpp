@@ -70,6 +70,11 @@ struct static_tl_object
 
     static Tp* get() { return m_object; }
 
+    /// This thread's object, default-constructed on first use. Unlike a `thread_local` of a type
+    /// with a non-trivial destructor, first use does not take glibc's dl_load_lock, so it is safe
+    /// on paths that run inside HIP/HSA calls and runtime callbacks (see register_static_tl_dtor).
+    static Tp& instance();
+
     static constexpr bool is_trivial_standard_layout();
 
 private:
@@ -96,25 +101,32 @@ template <typename... Args>
 Tp*&
 static_tl_object<Tp, ContextT>::construct(Args&&... args)
 {
-    if constexpr(!is_trivial_standard_layout())
-    {
-        static thread_local auto _once = std::once_flag{};
-        std::call_once(_once, []() {
-            register_static_tl_dtor([]() {
-                if(static_tl_object<Tp, ContextT>::m_object)
-                {
-                    static_tl_object<Tp, ContextT>::m_object->~Tp();
-                    static_tl_object<Tp, ContextT>::m_object = nullptr;
-                }
-            });
-        });
-    }
-
     ROCP_FATAL_IF(m_object)
         << "reconstructing static object. Use get() function to retrieve pointer";
 
+    // registered per construction: an object rebuilt on this thread after its destructor ran
+    // (e.g. by a later thread-exit destructor) is destroyed again
+    if constexpr(!is_trivial_standard_layout())
+    {
+        register_static_tl_dtor([]() {
+            if(static_tl_object<Tp, ContextT>::m_object)
+            {
+                static_tl_object<Tp, ContextT>::m_object->~Tp();
+                static_tl_object<Tp, ContextT>::m_object = nullptr;
+            }
+        });
+    }
+
     m_object = new(m_buffer.data()) Tp{std::forward<Args>(args)...};
     return m_object;
+}
+
+template <typename Tp, typename ContextT>
+Tp&
+static_tl_object<Tp, ContextT>::instance()
+{
+    if(ROCPROFILER_UNLIKELY(!m_object)) construct();
+    return *m_object;
 }
 }  // namespace common
 }  // namespace rocprofiler

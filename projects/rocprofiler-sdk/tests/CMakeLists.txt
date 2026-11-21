@@ -109,6 +109,7 @@ add_subdirectory(hip-host-tracing)
 add_subdirectory(code-object-multi-threaded)
 add_subdirectory(code-object-host-symbols)
 add_subdirectory(hip-fatbin-unload)
+add_subdirectory(dlopen-ctor-deadlock)
 add_subdirectory(spm)
 
 # environment variable tests
