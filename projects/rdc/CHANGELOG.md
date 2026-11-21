@@ -6,6 +6,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
+- **`rdc_policy_register()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**, and through `rdcd` it returns `RDC_ST_MAX_LIMIT` when `rdcd` already serves 64 policy registrations from all of its clients. Through `rdcd`, it also waits up to 5 seconds for `rdcd` to admit the registration; with an `rdcd` older than this release, the first registration of a connection takes up to 5 seconds.
+
+- `rdcd` pings the connection of each client every 60 seconds and closes a connection whose client does not answer within 20 seconds.
+
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
@@ -18,7 +22,18 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci stats -j` labels each GPU by its ID, such as `GPU 3`, or `GPU g0.1` for partition 1 of GPU 0, instead of by its position in the job. The JSON keys follow, such as `gpu_3` and `gpu_g0.1`. A statistic without samples prints as `N/A` in the text output and as `null` in JSON, instead of zeros and a minimum of 18446744073709551615. PCIe standard deviations print with two decimals, like the other statistics.
 
+- `rdcd` exits with status 1 for an unknown option or a missing option argument, instead of ignoring it and starting, and whenever it finds another `rdcd` running; it exited with status 0 when two started at the same time.
+
+- A non-root `rdcd` no longer refuses to start when it cannot read the lock file of the root `rdcd`, `/var/run/rdcd.lock`. It still stops when it can read that file and the root `rdcd` holds it.
+
 ### Resolved Issues
+
+- `rdcd` no longer keeps a thread and memory for each policy registration whose client went away, and no longer hangs at shutdown while policy registrations arrive. Unregistering the policies of a group also ends a registration whose client stays connected but stopped reading notifications.
+
+- All clients registered for the policies of one GPU group receive every notification. Each notification went to only one of them, and a client could miss some when several GPUs met a condition at once.
+  - `rdcd` holds up to 1,024 notifications for a client that is slow to read them, and drops the oldest beyond that.
+
+- `rdc_policy_register()` through `rdcd` works again for a group whose registration ended by itself, for example because `rdcd` restarted. It returned `RDC_ST_CONFLICT` for that group until the connection was closed.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
@@ -55,6 +70,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc_policy_set()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist, instead of accepting the policy, and `rdci policy` exits with the status of a failed set.
 
+- A process that uses AMD SMI itself keeps working AMD SMI handles after it starts RDC in embedded mode. Loading RDC shut AMD SMI down and initialized it again, which invalidated the handles of the host process. Such a process must pass `AMDSMI_INIT_AMD_CPUS` in its first `amdsmi_init()` call for RDC to read CPU fields.
+
+- `rdc_start_embedded()` returns `RDC_ST_FAIL_LOAD_MODULE`, and `rdcd` exits with an error, when AMD SMI fails to initialize. Both aborted the process.
+
+- GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values. `rdci config` sets and clears the settings of a group that holds such a GPU on the other GPUs, instead of stopping at it; after a set, that GPU gets the settings once AMD SMI identifies it.
+
+- The node topology check of `rdci diag` reports the link weight between each pair of GPUs in the group. It reported each GPU's weight to itself.
+
 - Opening or stopping an RDC handle no longer crashes the process when another handle is in use, and concurrent `rdc_connect()` calls no longer fail at random.
 
 - Certificates signed with the RDC certificate authority setup in `authentication/openssl.cnf` can no longer sign other certificates. A certificate request could ask to become a signing certificate, and its holder could then create client and server certificates that `rdcd` and `rdci` trust.
@@ -76,11 +99,11 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Field watches with a `max_keep_samples` above 2147483647, such as `UINT32_MAX`, no longer crash `rdcd` or the process that embeds RDC.
 
-- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port. It printed "Server listening" and then crashed.
+- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port, and the message asks whether `rdcd` is already running. It printed "Server listening" and then crashed.
 
 - `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
 
-- `rdci config --set` no longer reports success when a setting was not applied to every GPU of the group.
+- `rdci config --set` no longer reports success when the setting is rejected.
   - An empty group, an unknown setting type and a power limit too large to apply are rejected, and when one GPU of the group rejects a setting, the GPUs that already took it get their previous setting back. A clock limit that is put back keeps the group's limit of the other clock, and a GPU that rejects a clock limit goes back to the automatic performance level when the group has no clock limit.
 
 - `rdci config --clear` no longer stops at the first GPU it cannot reset. It resets the other GPUs of the group and reports the failure.
@@ -90,6 +113,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdcd` no longer stops unexpectedly when configuration settings are set and cleared at the same time.
 
 - `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
+
+- `rdcd` no longer follows a symbolic link at its lock file path or writes into a file that belongs to another user or has another name, and a root `rdcd` no longer refuses to start because of a `/tmp/rdcd.lock` that another user created and locked. For a lock file it refuses to use, `rdcd` exits with an error that names it.
 
 - When `rdcd` takes more than 5 seconds to stop, another SIGTERM or SIGINT ends it at once, with status 1.
 

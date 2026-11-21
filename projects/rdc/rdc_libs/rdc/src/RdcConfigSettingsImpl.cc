@@ -177,6 +177,9 @@ void RdcConfigSettingsImpl::monitorSettings() {
         amdsmi_processor_handle processor_handle;
         amdsmi_status_t status =
             get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
+        if (status == AMDSMI_STATUS_NOT_FOUND) {
+          continue;  // a GPU AMD SMI cannot identify gets the settings once AMD SMI identifies it
+        }
         if (status != AMDSMI_STATUS_SUCCESS) {
           RDC_LOG(RDC_ERROR,
                   "RdcConfigSettingsImpl::monitorSettings(): get_processor_handle_from_id failed: "
@@ -262,6 +265,12 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_set(rdc_gpu_group_t group_id,
   for (uint32_t i = 0; i < rdc_group_info.count; ++i) {
     amdsmi_processor_handle processor_handle;
     amd_ret = get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
+    if (amd_ret == AMDSMI_STATUS_NOT_FOUND) {
+      // A GPU AMD SMI cannot identify stays in the group: the monitoring thread gives it the
+      // setting once AMD SMI identifies it.
+      amd_ret = AMDSMI_STATUS_SUCCESS;
+      continue;
+    }
     if (amd_ret != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(
           RDC_ERROR,
@@ -392,6 +401,9 @@ rdc_status_t RdcConfigSettingsImpl::rdc_config_clear(rdc_gpu_group_t group_id) {
     amdsmi_processor_handle processor_handle;
     amdsmi_status_t status =
         get_processor_handle_from_id(rdc_group_info.entity_ids[i], &processor_handle);
+    if (status == AMDSMI_STATUS_NOT_FOUND) {
+      continue;  // a GPU AMD SMI cannot identify has no handle to reset
+    }
     if (status != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(
           RDC_ERROR,

@@ -4,6 +4,7 @@
 #include "race-detector/race_test_instruction.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 #include "util/result.h"
@@ -388,7 +389,7 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
         test.write, Dim3d(1, 2, 3),
         event};
     const std::string report =
-        formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_CDNA4);
+        formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4);
     EXPECT_NE(report.find(test.resource), std::string::npos);
     EXPECT_NE(report.find(std::string("(") + test.hazard + ")"), std::string::npos);
     EXPECT_NE(report.find(std::string("Conflict: ") + test.operation + " at PC 0x100"),
@@ -424,37 +425,37 @@ TEST(RaceReportDescriptionTest, ReportsOnlyRemainingCounterObligationsAfterAPart
                          WaitCounterType::DSCNT),
       MemoryOrderClass::UNORDERED);
   const RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), event};
-  EXPECT_NE(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_RDNA4)
+  EXPECT_NE(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4)
                 .find("pending counters: loadcnt, dscnt."),
             std::string::npos);
   EXPECT_FALSE(detector.satisfyEventWaitCounter(event, WaitCounterType::DSCNT));
   const std::string report =
-      formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_RDNA4);
+      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4);
   EXPECT_NE(report.find("pending counters: loadcnt."), std::string::npos);
   EXPECT_EQ(report.find("dscnt"), std::string::npos);
 }
 
 TEST(RaceReportDescriptionTest, ArchitecturalCounterNamesPreservePendingSubsetChecks) {
   struct Case {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     WaitCounterType first;
     WaitCounterType second;
     const char *both;
     const char *remaining;
   };
   const Case cases[] = {
-      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterType::DSCNT, WaitCounterType::KMCNT, "lgkmcnt",
+      {rocjitsu::IsaFamily::Rdna3, WaitCounterType::DSCNT, WaitCounterType::KMCNT, "lgkmcnt",
        "lgkmcnt"},
-      {ROCJITSU_CODE_ARCH_RDNA3_5, WaitCounterType::LOADCNT, WaitCounterType::DSCNT,
+      {rocjitsu::IsaFamily::Rdna3_5, WaitCounterType::LOADCNT, WaitCounterType::DSCNT,
        "vmcnt, lgkmcnt", "lgkmcnt"},
-      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterType::STORECNT, WaitCounterType::EXPCNT,
+      {rocjitsu::IsaFamily::Rdna3, WaitCounterType::STORECNT, WaitCounterType::EXPCNT,
        "vscnt, expcnt", "expcnt"},
-      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterType::DSCNT, WaitCounterType::KMCNT, "dscnt, kmcnt",
+      {rocjitsu::IsaFamily::Rdna4, WaitCounterType::DSCNT, WaitCounterType::KMCNT, "dscnt, kmcnt",
        "kmcnt"},
-      {ROCJITSU_CODE_ARCH_CDNA5, WaitCounterType::ASYNCCNT, WaitCounterType::TENSORCNT,
+      {rocjitsu::IsaFamily::Cdna5, WaitCounterType::ASYNCCNT, WaitCounterType::TENSORCNT,
        "asynccnt, tensorcnt", "tensorcnt"},
-      {ROCJITSU_CODE_ARCH_CDNA3, WaitCounterType::VMCNT, WaitCounterType::LGKMCNT, "vmcnt, lgkmcnt",
-       "lgkmcnt"},
+      {rocjitsu::IsaFamily::Cdna3, WaitCounterType::VMCNT, WaitCounterType::LGKMCNT,
+       "vmcnt, lgkmcnt", "lgkmcnt"},
   };
   for (const auto &test : cases) {
     SCOPED_TRACE(test.both);
@@ -486,7 +487,7 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
     detector.satisfyEventWaitCounter(event, obligation.wait_counter_type());
   detector.markEventWaveComplete(event);
   const RaceViolation violation{RaceViolation::Space::LDS, 16, 0, 3, true, Dim3d(1, 2, 3), event};
-  EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_RDNA3),
+  EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna3),
             "Race on LDS byte 16 [workgroup (1, 2, 3), wave 0, lane 3]: write-after-read (WAR).\n"
             "  Current access: write at PC 0x200.\n"
             "  Conflict: transfer from LDS into VGPRs at PC 0x100, wave 1.\n"
@@ -497,17 +498,19 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
 TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {
   RaceDetector detector(1, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), {}};
-  EXPECT_THROW(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_CDNA4),
-               std::out_of_range);
+  EXPECT_THROW(
+      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4),
+      std::out_of_range);
   violation.conflictingEvent = detector.allocateEventId(
       WaveId{0}, testInstruction(0x100), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
       CounterObligations(WaitCounterType::VMCNT, MemoryOrderClass::VMEM), MemoryOrderClass::VMEM);
   EXPECT_THROW(
-      formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_INVALID),
+      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Invalid),
       std::invalid_argument);
   detector.retireEvent(violation.conflictingEvent);
-  EXPECT_THROW(formatRaceDescription(violation, detector.events(), 0x200, ROCJITSU_CODE_ARCH_CDNA4),
-               std::logic_error);
+  EXPECT_THROW(
+      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4),
+      std::logic_error);
 }
 
 static_assert(sizeof(InstructionSnapshot) == 32);

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -290,7 +291,7 @@ TEST_F(ConSanPrepare, Gfx1100Wave32RequiresTheInputSgprPaddingWorkaround) {
       build_input_program(original_, *target_profile("gfx1100"), "lds_producer_consumer", error_);
   ASSERT_TRUE(input.succeeded());
   rocjitsu::amdhsa::kernel_descriptor_t descriptor = input.value().kernel.descriptor;
-  set_kernel_descriptor_user_sgpr_count(ROCJITSU_CODE_ARCH_RDNA3, descriptor, 2);
+  set_kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily::Rdna3, descriptor, 2);
   std::memcpy(original_.data() + input.value().kernel.descriptor_file_offset, &descriptor,
               sizeof(descriptor));
   EXPECT_TRUE(

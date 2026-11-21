@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "concurrent_dispatch_fuzz_core.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "embedded_schema.h"
 #include "execution_fuzz_core.h"
@@ -128,7 +129,7 @@ template <typename Words> void append_words(std::vector<uint8_t> &bytes, const W
 
 std::vector<uint8_t> cache_program(execution_fuzz::FuzzTarget target) {
   std::vector<uint8_t> code;
-  const rj_code_arch_t arch = execution_fuzz::target_arch(target);
+  const rocjitsu::IsaFamily arch = execution_fuzz::target_arch(target);
   const util::FailureOr<uint32_t> address_lo = build_v_mov_b32_src(0, 0, arch);
   const util::FailureOr<uint32_t> address_hi = build_v_mov_b32_src(1, 1, arch);
   const util::FailureOr<uint32_t> increment = build_v_mov_b32_src(2, kInlineOne, arch);
@@ -177,7 +178,7 @@ std::vector<uint8_t> cache_program(execution_fuzz::FuzzTarget target) {
     append_words(code,
                  rdna3::build_sopk(rdna3::kSWaitcntVscntSopk, {.sdst = rdna3::OPR_SREG_NULL}));
     break;
-  case execution_fuzz::FuzzTarget::Gfx1151:
+  case execution_fuzz::FuzzTarget::Gfx1150:
     append_words(code,
                  rdna3_5::build_flat(rdna3_5::kFlatAtomicAddU32Flat,
                                      {.addr = 0, .data = 2, .saddr = rdna3_5::OPR_SREG_NULL}));
@@ -221,7 +222,7 @@ uint32_t representative_xcd_count(execution_fuzz::FuzzTarget target) {
   case execution_fuzz::FuzzTarget::Gfx1010:
   case execution_fuzz::FuzzTarget::Gfx1030:
   case execution_fuzz::FuzzTarget::Gfx1100:
-  case execution_fuzz::FuzzTarget::Gfx1151:
+  case execution_fuzz::FuzzTarget::Gfx1150:
   case execution_fuzz::FuzzTarget::Gfx1200:
   case execution_fuzz::FuzzTarget::Gfx1201:
     return 1;
@@ -232,18 +233,14 @@ uint32_t representative_xcd_count(execution_fuzz::FuzzTarget target) {
 }
 
 std::string fuzz_config(execution_fuzz::FuzzTarget target, uint32_t xcd_count) {
-  const rj_code_arch_t arch = execution_fuzz::target_arch(target);
+  const rocjitsu::IsaFamily arch = execution_fuzz::target_arch(target);
   std::string json =
       R"({"max_ticks":100000,"num_threads":1,"async_helper_threads":0,"exec_mode":"functional","vm":{"arch":")";
   json += config::arch_to_string(arch);
-  json += '"';
-  if (execution_fuzz::target_id(target) != ROCJITSU_CODE_TARGET_INVALID) {
-    json += R"(,"target":")";
-    json += execution_fuzz::target_name(target);
-    json += '"';
-  }
+  json += R"(","target":")";
+  json += execution_fuzz::target_name(target);
   json +=
-      R"(},"wait_checking":"off","topology":{"root":{"name":"soc","type":"soc","children":[{"name":"vram","type":"gpu_memory"},{"name":"iod0","type":"iod","config":[{"key":"num_hbm_stacks","value":"1"}]},{"name":"xcd[0:)";
+      R"("},"wait_checking":"off","topology":{"root":{"name":"soc","type":"soc","children":[{"name":"vram","type":"gpu_memory"},{"name":"iod0","type":"iod","config":[{"key":"num_hbm_stacks","value":"1"}]},{"name":"xcd[0:)";
   json += std::to_string(xcd_count);
   json +=
       R"(]","type":"xcd","children":[{"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},{"name":"se0","type":"shader_engine","children":[{"name":"cu[0:)";
@@ -526,7 +523,7 @@ private:
 
 void install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario) {
   using namespace rocjitsu::amdhsa;
-  const rj_code_arch_t arch = execution_fuzz::target_arch(scenario.target);
+  const rocjitsu::IsaFamily arch = execution_fuzz::target_arch(scenario.target);
   const IsaProperties properties = isa_properties(arch);
   const uint32_t wave_size = properties.wave_size;
   const std::optional<uint32_t> granule =
