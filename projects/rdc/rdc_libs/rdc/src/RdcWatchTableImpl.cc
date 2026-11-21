@@ -1010,11 +1010,13 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
 }
 
 uint64_t RdcWatchTableImpl::ms_until_next_update() {
+  // The clock is read with the lock held: an update that held it meanwhile may have moved the
+  // fields' last update times on.
+  std::lock_guard<std::mutex> guard(watch_mutex_);
   struct timeval tv;
   gettimeofday(&tv, NULL);
   uint64_t now = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 
-  std::lock_guard<std::mutex> guard(watch_mutex_);
   // As rdc_field_update_all() decides: the clean-up runs once more than a second has
   // passed, and a field falls due update_freq microseconds after its last update.
   uint64_t next = last_cleanup_time_ + 1001;
