@@ -207,6 +207,14 @@ if(NOT _archs)
     endif()
 endif()
 
+# Keep the bare gfxNNN: a target ID such as gfx942:sramecc+:xnack-, which
+# GPU_TARGETS can carry from the GPU detection, pins the code object to the
+# XNACK mode of the node it was configured on, and the tests run in both.
+list(TRANSFORM _archs REPLACE ":.*$" "")
+list(REMOVE_DUPLICATES _archs)
+if(_archs)
+    message(STATUS "HIP: the Fortran binding tests build GPU code for ${_archs}")
+endif()
 if(_archs AND NOT CMAKE_HIP_ARCHITECTURES)
     set(CMAKE_HIP_ARCHITECTURES "${_archs}")
 endif()
