@@ -711,6 +711,13 @@ TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
     RunCustomTestEpilog(&mf);
 }
 
+TEST(rocrtstFunc, Memory_Fragment_Device_Kernarg_Test) {
+  MemoryFragment mf;
+  if (!RunCustomTestProlog(&mf)) return;
+  mf.FragmentDeviceKernargTest();
+  RunCustomTestEpilog(&mf);
+}
+
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
     DebugBasicTest mt;
     if (!RunCustomTestProlog(&mt)) return;
