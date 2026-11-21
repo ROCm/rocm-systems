@@ -72,7 +72,9 @@ constexpr rdc_gpu_group_t kAll = 1;     // GPUs 0 to 3
 constexpr rdc_gpu_group_t kFirst = 2;   // GPU 0
 constexpr rdc_gpu_group_t kSecond = 3;  // GPU 1
 constexpr rdc_gpu_group_t kNone = 4;    // no GPU
-constexpr rdc_gpu_group_t kGroups[] = {kAll, kFirst, kSecond, kNone};
+// GPU 0, a GPU that AMD SMI cannot identify, and GPU 1
+constexpr rdc_gpu_group_t kUnknown = 5;
+constexpr rdc_gpu_group_t kGroups[] = {kAll, kFirst, kSecond, kNone, kUnknown};
 
 // One amd-smi call: the clock it names (-1 if none) and, for a setter, the
 // value it was asked to write.
@@ -270,7 +272,7 @@ class FakeGroups : public amd::rdc::RdcGroupSettings {
  private:
   std::mutex mutex_;
   const std::map<rdc_gpu_group_t, std::vector<uint32_t>> gpus_ = {
-      {kAll, {0, 1, 2, 3}}, {kFirst, {0}}, {kSecond, {1}}, {kNone, {}}};
+      {kAll, {0, 1, 2, 3}}, {kFirst, {0}}, {kSecond, {1}}, {kNone, {}}, {kUnknown, {0, kGpus, 1}}};
   std::map<rdc_gpu_group_t, Report> how_;
   int info_calls_ = 0;
 };
@@ -728,6 +730,35 @@ TEST_F(Config, ClearResetsEveryGpuAndSettingWhenOneFails) {
     }
     EXPECT_EQ(get(kAll).first, RDC_ST_NOT_FOUND) << api;
   }
+}
+
+// A GPU of the group that AMD SMI cannot identify is skipped, not taken for a
+// rejection: the set reaches the GPUs after it and is kept, for the monitoring
+// thread to set on that GPU once AMD SMI identifies it, and the clear resets
+// the other GPUs.
+TEST_F(Config, SetAndClearSkipAGpuThatAmdSmiCannotIdentify) {
+  ASSERT_EQ(set(kUnknown, kPower, 400), RDC_ST_OK);
+  EXPECT_EQ(gpu(0).cap_uw, 400 * kMicro);
+  EXPECT_EQ(gpu(1).cap_uw, 400 * kMicro);
+  const auto got = get(kUnknown);
+  EXPECT_EQ(got.first, RDC_ST_OK);
+  EXPECT_EQ(got.second, (std::map<uint32_t, uint64_t>{{kPower, 400}}));
+
+  EXPECT_EQ(clear(kUnknown), RDC_ST_OK);
+  EXPECT_EQ(gpu(0).cap_uw, kDefaultCapUw);
+  EXPECT_EQ(gpu(1).cap_uw, kDefaultCapUw);
+  EXPECT_EQ(get(kUnknown).first, RDC_ST_NOT_FOUND);
+}
+
+// A rejection by a GPU after the one that AMD SMI cannot identify still fails
+// the set: the GPU that took it is put back, and nothing is kept.
+TEST_F(Config, ARejectionPastAGpuThatAmdSmiCannotIdentifyPutsTheChangedGpuBack) {
+  fail("amdsmi_set_power_cap", 1);
+  EXPECT_EQ(set(kUnknown, kPower, 400), RDC_ST_UNKNOWN_ERROR);
+  EXPECT_EQ(gpus_of(calls("amdsmi_set_power_cap")), (std::vector<uint32_t>{0, 1, 0}));
+  EXPECT_EQ(gpu(0).cap_uw, kDefaultCapUw);
+  EXPECT_EQ(gpu(1).cap_uw, kDefaultCapUw);
+  EXPECT_EQ(get(kUnknown).first, RDC_ST_NOT_FOUND);
 }
 
 // The monitoring thread puts a power cap that changed back, and leaves one that
