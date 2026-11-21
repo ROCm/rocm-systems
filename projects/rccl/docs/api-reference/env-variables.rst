@@ -136,11 +136,13 @@ in the following table.
         | Default: unset (effective default ``1``).
 
     * - | ``NCCL_RUNTIME_CONNECT``
-        | Enables deferred (lazy) transport connection setup. When disabled,
+        | Enables deferred (lazy) transport connection setup. When enabled,
           connections for each algorithm are established on demand the first
-          time a collective using that algorithm is enqueued. PAT algorithm
-          connections are always lazy regardless of this setting. Requires
-          cuMem (VMM) support on the device.
+          time a collective using that algorithm is enqueued; when disabled,
+          ring transports are connected at init. PAT connections are deferred
+          independently by ``NCCL_PAT_LAZY_INIT`` (default ``1``), which can
+          restore eager PAT connect at init. Requires cuMem (VMM) support on
+          the device.
       - | ``0``: Init-stage connection setup (default).
         | ``1``: Runtime (lazy) connection setup.
 
@@ -518,7 +520,7 @@ collected in the following table.
     * - | ``NCCL_TUNER_PLUGIN``
         | Selects a tuner plugin by suffix or library name. RCCL first tries the
           exact value as a library name; for suffix-style values it tries
-          ``libnccl-tuner-<suffix>.so``; ``none`` disables external tuner loading;
+          ``librccl-tuner-<suffix>.so``; ``none`` disables external tuner loading;
           if no standalone tuner plugin is found RCCL checks the net plugin for
           tuner symbols, then falls back to the built-in CSV tuner.
       - | Plugin suffix, plugin library name/path, or ``none``.
@@ -700,8 +702,8 @@ in the following table.
           same GPU into a single logical network device (NIC Fusion). This allows
           RCCL to aggregate the bandwidth of those NICs. Use
           ``NCCL_NET_MERGE_LEVEL`` and ``NCCL_NET_FORCE_MERGE`` to control which
-          NICs are combined. On AINIC with the ``IB-CAST`` transport, merging is
-          off unless this variable is explicitly set to ``1``.
+          NICs are combined. This also applies on AINIC with the ``IB-CAST``
+          transport, where the default leaves merging enabled.
       - | ``1``: Enabled (default).
         | ``0``: Disabled.
 
@@ -809,9 +811,9 @@ in the following table.
     * - | ``NCCL_IB_DATA_DIRECT``
         | Controls mlx5 Data Direct DMA Interface probing for the ``net_ib``
           transport.
-      - | ``0``: Disable Data Direct probing (default).
+      - | ``0``: Disable Data Direct probing.
         | ``1``: Enable probing; when detected, expose only the data-direct NIC
-          view.
+          view (default).
         | ``2``: Enable probing; keep both the regular and data-direct NIC views.
 
     * - | ``NCCL_IB_MQP_RETRY_CNT``
@@ -1586,8 +1588,8 @@ the following table.
     * - | ``RCCL_SYM_MODEL``
         | Selects the symmetric-kernel cost model used to tune ``AllReduce``,
           ``AllGather``, and ``ReduceScatter``.
-      - | ``0``: Default model.
-        | ``1``: Cost model without ReduceScatter tuning.
+      - | ``0``: Default model (default).
+        | ``1``: Alternate model with ReduceScatter tuning.
         | Values outside 0 and 1 fall back to 0.
 
     * - | ``RCCL_DIRECT_ALLGATHER_THRESHOLD``
@@ -2130,18 +2132,20 @@ threshold table introduced for gfx1250.
         | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement
           for CE AllReduce, allowing CE to run without symmetric window
           registration. Does not override the staging buffer size cap
-          (``RCCL_CE_AR_MAX_MSG_BYTES`` or the arch table ``ceNonRegMax[AR]``).
+          (``RCCL_CE_AR_2SHOT_MAX_BYTES`` or the arch table ``ceNonRegMax[AR]``).
           When ``-1`` (auto), follows the same gfx1250-default logic as
           ``RCCL_CE_ALLREDUCE``.
       - | ``-1``: Auto — same default as ``RCCL_CE_ALLREDUCE`` (default).
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
-    * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
+    * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1``
           (default), the cap is read from ``ceNonRegMax[AllReduce]`` in the
           per-arch table. This variable sizes the selector only; it does not
           affect the staging buffer allocation (see ``RCCL_CE_AR_STAGING_BYTES``).
+          Earlier releases spelled this ``RCCL_CE_AR_MAX_MSG_BYTES``; that name
+          is no longer recognized.
       - | ``-1``: Resolved from the per-arch table (default).
         | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce size cap.
 
@@ -2159,7 +2163,7 @@ threshold table introduced for gfx1250.
           compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. The selector cap is controlled separately by
-          ``RCCL_CE_AR_MAX_MSG_BYTES``.
+          ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
       - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``;
           ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
