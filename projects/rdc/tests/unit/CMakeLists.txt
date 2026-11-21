@@ -305,9 +305,10 @@ install(
 )
 
 # rdc_metric_fetcher_tests: builds and destroys metric fetchers from several
-# threads at once. Compiles the metric fetcher into the test, so it runs on
-# GPU-less CI. amd_smi provides the calls the fetcher's other functions make,
-# librdc_bootstrap the logger.
+# threads at once, and checks RDC_FI_GPU_MEMORY_CUR_BANDWIDTH against fake
+# gpu_metrics replies. Compiles the metric fetcher into the test, which defines
+# the amdsmi calls the tests reach, so it runs on GPU-less CI. amd_smi provides
+# the calls the tests never make, librdc_bootstrap the logger.
 add_executable(
     rdc_metric_fetcher_tests
     ${SRC_DIR}/test_metric_fetcher.cc
@@ -331,6 +332,27 @@ add_test(NAME rdc_metric_fetcher_tests COMMAND rdc_metric_fetcher_tests)
 set_tests_properties(rdc_metric_fetcher_tests PROPERTIES TIMEOUT 120)
 install(
     TARGETS rdc_metric_fetcher_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# rdc_cache_bounds_tests: the retention limits of cached samples. It compiles
+# RdcCacheManagerImpl.cc instead of linking librdc, so it needs no GPU;
+# librdc_bootstrap provides the logger.
+add_executable(
+    rdc_cache_bounds_tests
+    ${SRC_DIR}/test_cache_bounds.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcCacheManagerImpl.cc
+)
+target_include_directories(rdc_cache_bounds_tests PRIVATE ${PROJECT_SOURCE_DIR}/include)
+target_link_libraries(rdc_cache_bounds_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(
+    rdc_cache_bounds_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
+add_test(NAME rdc_cache_bounds_tests COMMAND rdc_cache_bounds_tests)
+install(
+    TARGETS rdc_cache_bounds_tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )

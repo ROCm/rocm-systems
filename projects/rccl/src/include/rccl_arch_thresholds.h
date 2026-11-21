@@ -98,6 +98,10 @@ struct rcclArchThresholds {
   size_t symTdmMaxR2Graph[RCCL_DDA_FUNC_COUNT];
   // Upper edge across UALink trays; it only lowers the window. 0 = no cap.
   size_t symTdmCrossTrayMaxR2[RCCL_DDA_FUNC_COUNT];
+  // AllGather only, R2 total bytes. On a comm where the hierarchical LSA AllGather kernel can run,
+  // these replace symMinR2 / symMaxR2 / symMaxR2Graph for AllGather. 0 = no hierarchical window.
+  size_t agHierSymMinR2;
+  size_t agHierSymMaxR2;
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
@@ -119,19 +123,19 @@ struct rcclArchThresholds {
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
 
+  // AllReduce only: with the peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL) the LL128 one-shot runs
+  // to min(RCCL_DDA_LL128_ONESHOT_THRESHOLD's default, this / nRanks), since it moves (nRanks - 1) x the message per
+  // rank. 0 = that default at every rank count.
+  size_t ddaArLL128OneShotRankBytes;
+
   // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_wrap.cc). 0 turns that re-route off.
   size_t ddaArRegCaptureMinBytes;      // graph capture: DDA instead of Ring up to max(this, nRanks x the next)
   size_t ddaArRegCapturePerRankBytes;  // per-rank part of the capture bound
   size_t ddaArRegEagerMinShardBytes;   // eager: DDA LL128 instead of CE-registered from this per-rank shard
   size_t ddaArRegEagerMaxShardBytes;   // up to this per-rank shard
 
-  // AllReduce only: DDA LL two-shot up to nRanks x this on comms below rankScaledMinRanks ranks (larger comms run it
-  // to the LL tier's cap). 0 = the RCCL_DDA_LL_TWOSHOT_THRESHOLD default; that env var, when set, wins.
-  size_t ddaArLLTwoShotMaxPerRank;
-
-  // On comms of at most ddaNarrowMaxRanks ranks: the DDA LL AllReduce one-shot and two-shot (to 8 MiB) launch
-  // ddaNarrowThreads-wide blocks instead of 512 and 1024, and the warp-per-slice DDA LL128 AllReduce two-shot grid
-  // does instead of 512 while one pass of them covers the shard. 0 threads = off.
+  // On comms of at most ddaNarrowMaxRanks ranks the DDA LL AllReduce one-shot launches ddaNarrowThreads-wide blocks
+  // instead of 512. 0 threads = off.
   int ddaNarrowThreads;
   int ddaNarrowMaxRanks;
 
@@ -169,6 +173,9 @@ struct rcclArchThresholds {
   int ddaA2aLL128MaxBlocks;
   size_t ddaA2aLL128MaxBlocksMinBytes;
   size_t ddaA2aLL128MaxBlocksMaxBytes;
+  // DDA LL128 two-shot Broadcast: threads per block (0 = use kDdaLL128BcDefaultThreads).
+  // The two-shot variant benefits from fewer threads (better occupancy at large messages).
+  unsigned ddaLL128BcTwoShotThreads;
 
   // DDA LL128 ReduceScatter batched kernel block size at every size. 0 keeps 512 threads.
   int ddaRsLL128Threads;

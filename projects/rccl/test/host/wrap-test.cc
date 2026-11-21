@@ -1773,7 +1773,7 @@ rcclArchThresholds MakeRankScaledTable() {
   t.ddaRsLL128LargeCommMaxBytes = 512 * kMiB;
   t.ddaRsLLLargeCommMinRanks = 32;
   t.ddaRsLLLargeCommMaxBytes = 2 * kMiB;
-  t.ddaArVmmFirstMinRanks = 33;
+  t.ddaArVmmFirstMinRanks = 32;
   t.ddaArVmmFirstMinBytes = 2 * kMiB;
   t.ddaArVmmFirstMaxPerRank = 512 * kKiB;
   t.ddaArRegCaptureMinBytes = 32 * kMiB;
@@ -7110,6 +7110,34 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel)
       });
 }
 
+// The hierarchical AllGather window applies only where the hierarchical kernel can run.
+TEST(WrapMicrotestIsolated, SelectAllGather_HierWindowOnlyWhereHierRuns) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_HierWindowOnlyWhereHierRuns",
+      []() {
+        SymkRequestedHooks symk;
+        rcclArchThresholds table{};
+        table.symMinR2[ncclFuncAllGather] = 128 * kKiB;
+        table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
+        table.symMaxR2Graph[ncclFuncAllGather] = 2 * kMiB;
+        table.agHierSymMinR2 = 16 * kMiB;
+        table.agHierSymMaxR2 = kThreshUnlimited;
+        auto picksSymk = [&table](size_t totalBytes) {
+          return Gfx1250AllGatherPicksSymk(&table, totalBytes, ncclSymkKernelId_AllGather_HierLsaST,
+                                           /*spansTrays=*/false, /*graph=*/false);
+        };
+        EXPECT_FALSE(picksSymk(64 * kMiB)) << "no hierarchical kernel: the regular window";
+
+        ScopedHook hier(g_symkAgHierGroups, [](struct ncclComm*) { return 8; });
+        EXPECT_TRUE(picksSymk(64 * kMiB)) << "hierarchical kernel: the hierarchical window";
+
+        g_loadParam = ForceParam("RCCL_SYM_K_MAX_BYTES", 32 * kMiB);
+        EXPECT_FALSE(picksSymk(64 * kMiB)) << "RCCL_SYM_K_MAX_BYTES wins over the hierarchical window";
+        g_loadParam = ForceParam("RCCL_SYM_K_MIN_BYTES", 128 * kMiB);
+        EXPECT_FALSE(picksSymk(64 * kMiB)) << "RCCL_SYM_K_MIN_BYTES wins over the hierarchical window";
+      });
+}
+
 // RCCL_SYM_K_MIN_BYTES / RCCL_SYM_K_MAX_BYTES narrow the TDM window (64 MiB..1 GiB here). The comm spans
 // trays, so only the window can admit symk. Returns whether each size goes to symk with param set to value.
 namespace {
@@ -7958,6 +7986,76 @@ TEST(WrapMicrotestIsolated, DdaLL128TwoShotThreshold_EmptyEnvIsUnset) {
       });
 }
 
+// With the peer-parallel kernels the LL128 one-shot AllReduce runs to the arch table's ddaArLL128OneShotRankBytes over
+// nRanks, at most RCCL_DDA_LL128_ONESHOT_THRESHOLD's 4 MiB default; a table without the entry, or no table (as under
+// RCCL_IGNORE_ARCH_TABLE), keeps that default at every rank count.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_TableRankBytesOverNRanksElseEnvDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_TableRankBytesOverNRanksElseEnvDefault",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        const struct {
+          int nRanks;
+          size_t cap;
+        } cases[] = {{2, 2 * kMiB}, {3, 4 * kMiB / 3}, {4, 1 * kMiB}, {8, 512 * kKiB},
+                     {16, 256 * kKiB}, {32, 128 * kKiB}, {1, 4 * kMiB}};
+        for (const auto& c : cases) {
+          comm->nRanks = c.nRanks;
+          EXPECT_EQ(c.cap, rcclDdaLL128OneShotThreshold(comm)) << "nRanks " << c.nRanks;
+        }
+        comm->nRanks = 2;
+        table.ddaArLL128OneShotRankBytes = 16 * kMiB;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "never past the env default";
+        comm->nRanks = 8;
+        table.ddaArLL128OneShotRankBytes = 0;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "table without the entry";
+        comm->archThresholds = nullptr;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "no table";
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(nullptr)) << "no comm";
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_DDA_LL128_AR_PEER_PARALLEL=0 keeps the one-warp-per-slice kernels, and with them the flat 4 MiB one-shot cap.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_PeerParallelOffKeepsTheEnvDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_PeerParallelOffKeepsTheEnvDefault",
+      []() {
+        SetMicroEnvAbsent("RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+        g_loadParam = ForceParam("RCCL_DDA_LL128_AR_PEER_PARALLEL", int64_t(0));
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        comm->nRanks = 32;
+        EXPECT_EQ(4 * kMiB, rcclDdaLL128OneShotThreshold(comm));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// A user-set RCCL_DDA_LL128_ONESHOT_THRESHOLD is the cap at every rank count.
+TEST(WrapMicrotestIsolated, DdaLL128OneShotThreshold_EnvIsTheCapAtEveryRankCount) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaLL128OneShotThreshold_EnvIsTheCapAtEveryRankCount",
+      []() {
+        SetMicroEnv("RCCL_DDA_LL128_ONESHOT_THRESHOLD", "2097152");
+        g_loadParam = ForceParam("RCCL_DDA_LL128_ONESHOT_THRESHOLD", int64_t(2) << 20);
+        rcclArchThresholds table = MakeRankScaledTable();
+        table.ddaArLL128OneShotRankBytes = 4 * kMiB;
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &table;
+        for (int nRanks : {4, 8, 32}) {
+          comm->nRanks = nRanks;
+          EXPECT_EQ(2 * kMiB, rcclDdaLL128OneShotThreshold(comm)) << "nRanks " << nRanks;
+        }
+        DeleteCommWithArch(comm);
+      });
+}
+
 // ===========================================================================
 // AICOMRCCL-1756: rank-scaled gfx1250 DDA tiers, Tree for small AllReduce,
 // Ring protocol ranges and the ReduceScatter channel cap.
@@ -8080,42 +8178,16 @@ TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_FollowsRankScaledLLTier) {
       });
 }
 
-// Below rankScaledMinRanks a table's ddaArLLTwoShotMaxPerRank replaces the default; rank-scaled comms ignore it.
-TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_SmallCommPerRankCap) {
-  RUN_ISOLATED_TEST(
-      "Wrap_DdaLLTwoShotThreshold_SmallCommPerRankCap",
-      []() {
-        SetMicroEnvAbsent("RCCL_DDA_LL_TWOSHOT_THRESHOLD");
-        rcclArchThresholds table = MakeRankScaledTable();
-        table.ddaArLLTwoShotMaxPerRank = 1 * kMiB;
-        ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->archThresholds = &table;
-        comm->nRanks = 4;
-        EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm));
-        comm->nRanks = 2;
-        EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm));
-        comm->nRanks = 16;
-        EXPECT_EQ(16 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "the LL tier cap";
-        table.ddaLLMaxPerRank[ncclFuncAllReduce] = 0;
-        EXPECT_EQ(2 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "rank-scaled comms ignore the per-rank cap";
-        DeleteCommWithArch(comm);
-      });
-}
-
 TEST(WrapMicrotestIsolated, DdaLLTwoShotThreshold_EnvOverridesRankScaling) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLLTwoShotThreshold_EnvOverridesRankScaling",
       []() {
         SetMicroEnv("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "4194304");
         g_loadParam = ForceParam("RCCL_DDA_LL_TWOSHOT_THRESHOLD", int64_t(4) << 20);
-        rcclArchThresholds table = MakeRankScaledTable();
-        table.ddaArLLTwoShotMaxPerRank = 1 * kMiB;
         ncclComm* comm = MakeCommWithArch("gfx1250");
-        comm->archThresholds = &table;
+        comm->archThresholds = Gfx1250Table();
         comm->nRanks = 16;
         EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm));
-        comm->nRanks = 2;
-        EXPECT_EQ(4 * kMiB, rcclDdaLLTwoShotThreshold(comm)) << "over ddaArLLTwoShotMaxPerRank too";
         DeleteCommWithArch(comm);
       });
 }
@@ -8148,26 +8220,23 @@ TEST(WrapMicrotestIsolated, DdaFabricVmmBlocks_BudgetPerRank) {
 }
 
 
-// From 33 ranks, DDA VMM claims (2 MiB, nRanks x 512 KiB] ahead of LL; at and below
-// 2 MiB, past the window, or on a 16- or 32-rank comm, LL keeps it.
+// From 32 ranks, DDA VMM claims (2 MiB, nRanks x 512 KiB] ahead of LL; at and below
+// 2 MiB, past the window, or on a 16-rank comm, LL keeps it.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstWindow) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_Gfx1250VmmFirstWindow",
       []() {
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
-        ncclComm* comm = MakeArDdaComm(64);
+        ncclComm* comm = MakeArDdaComm(32);
         const int vmm = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM;
         const int ll = (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL;
         EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 2 * kMiB));
         EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 2 * kMiB + 16));
+        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 16 * kMiB));
+        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 16 * kMiB + 16));
+        comm->nRanks = 64;
         EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 24 * kMiB)) << "past ddaVmmMax (16 MiB) inside the window";
-        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 32 * kMiB));
-        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 32 * kMiB + 16));
-        comm->nRanks = 33;
-        EXPECT_EQ(vmm, SelectAllReduceDdaAlgo(comm, 4 * kMiB)) << "the floor";
-        comm->nRanks = 32;
-        EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 4 * kMiB));
         comm->nRanks = 16;
         EXPECT_EQ(ll, SelectAllReduceDdaAlgo(comm, 4 * kMiB));
         DeleteCommWithArch(comm);
@@ -8186,7 +8255,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstUnregisteredOnly) {
           *out = ncclSymSendNonregRecvReg;
           return ncclSuccess;
         });
-        ncclComm* comm = MakeArDdaComm(64);
+        ncclComm* comm = MakeArDdaComm(32);
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL, SelectAllReduceDdaAlgo(comm, 8 * kMiB));
         DeleteCommWithArch(comm);
       });
@@ -8243,7 +8312,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250VmmFirstFallsBackUnderZeroPol
         RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
         ArDdaHooks hooks;
         ArVmmEligible vmmHook;
-        ncclComm* comm = MakeArDdaComm(64);
+        ncclComm* comm = MakeArDdaComm(32);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         // ceARTmpBuf stays null → CE 2-shot not available → vmmFirst VMM is the
         // only candidate, but CE is preferred → fallback is used with a warning.
@@ -8976,15 +9045,15 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RegisteredRerouteFollowsTheArchTable
       });
 }
 
-// Only the SPX table sets the narrow DDA LL / LL128 width, and only up to 32 ranks.
-TEST(WrapMicrotestIsolated, DdaFabricNarrowThreads_FromSpxTableUpTo32Ranks) {
+// Only the SPX table sets the narrow DDA LL one-shot width, and only up to 16 ranks.
+TEST(WrapMicrotestIsolated, DdaFabricNarrowThreads_FromSpxTableUpTo16Ranks) {
   RUN_ISOLATED_TEST(
-      "Wrap_DdaFabricNarrowThreads_FromSpxTableUpTo32Ranks",
+      "Wrap_DdaFabricNarrowThreads_FromSpxTableUpTo16Ranks",
       []() {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
         ASSERT_NE(nullptr, comm->archThresholds);
-        for (const std::pair<int, int> c : {std::make_pair(2, 256), {4, 256}, {16, 256}, {32, 256}, {33, 0}, {64, 0}}) {
+        for (const std::pair<int, int> c : {std::make_pair(2, 256), {4, 256}, {16, 256}, {17, 0}, {32, 0}, {64, 0}}) {
           comm->nRanks = c.first;
           EXPECT_EQ(c.second, rcclDdaFabricNarrowThreads(comm)) << c.first << " ranks";
         }
@@ -9016,9 +9085,9 @@ TEST(WrapMicrotestIsolated, ReduceScatterSmallComm_FromSpxTable) {
       });
 }
 
-// The SPX table's 32-rank DDA caps: AllReduce LL to 16M with one-shot to 4M and LL128 to 128M; ReduceScatter keeps
-// its own LL caps (1M, and 2M from 32 ranks through ddaRsLLLargeComm*). 16 and 64 ranks keep the rank-scaled caps and
-// the 1M one-shot default; DPX sets none.
+// The SPX table's 32-rank DDA caps: AllReduce LL and its one-shot to 2M, and LL128 to 64M; ReduceScatter keeps its
+// own LL caps (1M, and 2M from 32 ranks through ddaRsLLLargeComm*). 16 and 64 ranks keep the 1M AllReduce LL tier and
+// the 1M one-shot default; the two-shot keeps its 2M default; DPX sets none.
 TEST(WrapMicrotestIsolated, DdaLargeComm_FromSpxTable) {
   RUN_ISOLATED_TEST(
       "Wrap_DdaLargeComm_FromSpxTable",
@@ -9032,15 +9101,15 @@ TEST(WrapMicrotestIsolated, DdaLargeComm_FromSpxTable) {
         ASSERT_NE(nullptr, comm->archThresholds);
         struct Case {
           int nRanks;
-          size_t arLL, arOneShot, arLL128, rsLL;
+          size_t arLL, arTwoShot, arOneShot, arLL128, rsLL;
         };
-        const Case cases[] = {{16, 16 * kMiB, kMiB, 256 * kMiB, kMiB},
-                              {32, 16 * kMiB, 4 * kMiB, 128 * kMiB, 2 * kMiB},
-                              {64, 64 * kMiB, kMiB, 256 * kMiB, 2 * kMiB}};
+        const Case cases[] = {{16, kMiB, 2 * kMiB, kMiB, 256 * kMiB, kMiB},
+                              {32, 2 * kMiB, 2 * kMiB, 2 * kMiB, 64 * kMiB, 2 * kMiB},
+                              {64, kMiB, 2 * kMiB, kMiB, 256 * kMiB, 2 * kMiB}};
         for (const Case& c : cases) {
           comm->nRanks = c.nRanks;
           EXPECT_EQ(c.arLL, rcclDdaLLThreshold(comm, ncclFuncAllReduce)) << c.nRanks << " ranks";
-          EXPECT_EQ(c.arLL, rcclDdaLLTwoShotThreshold(comm)) << c.nRanks << " ranks";
+          EXPECT_EQ(c.arTwoShot, rcclDdaLLTwoShotThreshold(comm)) << c.nRanks << " ranks";
           EXPECT_EQ(c.arOneShot, rcclDdaLLOneShotThreshold(comm)) << c.nRanks << " ranks";
           EXPECT_EQ(c.arLL128, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << c.nRanks << " ranks";
           EXPECT_EQ(c.rsLL, rcclDdaLLThreshold(comm, ncclFuncReduceScatter)) << c.nRanks << " ranks";
@@ -10944,8 +11013,9 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndNoTableTier_ReturnsRingPla
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    // Use a local copy with Broadcast caps zeroed to isolate the no-tier case from real table values.
     const rcclArchThresholds* real =
-      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, real);
     rcclArchThresholds table = *real;
     table.ddaLLMax[ncclFuncBroadcast] = 0;
@@ -10968,8 +11038,9 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcOnAndNoTableTier_ReturnsRingPlaceh
     ScopedHook ll(g_broadcastDdaFabricLLEligible, [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
     ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
                      [&](ncclComm*, size_t, ncclDataType_t) { return ++calls > 0; });
+    // Use a local copy with Broadcast caps zeroed to isolate the no-tier case from real table values.
     const rcclArchThresholds* real =
-      real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, real);
     rcclArchThresholds table = *real;
     table.ddaLLMax[ncclFuncBroadcast] = 0;
@@ -11025,6 +11096,39 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetAndPerRankTableTier_PicksDdaL
   });
 }
 
+// Real SPX table with RCCL_DDA_BC unset: a non-zero ddaLL128Max[Broadcast] enables the two-shot
+// tier. 256 KiB (well below the cap) picks LL128; cap + 16 bytes (above the cap) falls back to Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetSpxTable_PicksTwoShotByCap", []() {
+    // llMax=-1 and ll128Max=-1 leave both RCCL_DDA_LL_THRESHOLD and RCCL_DDA_LL128_THRESHOLD
+    // unset so the selector uses the table caps rather than an env override.
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds =
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(ll128Cap, 0u);
+
+    rcclCollDecision d = PoisonedDecision();
+    // 256 KiB is well below the cap: two-shot LL128 selected.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, 256 * 1024 / sizeof(float), ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+
+    d = PoisonedDecision();
+    // cap + 16 bytes is above the cap: Ring.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
+                                  0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
+    DeleteCommWithArch(comm);
+  });
+}
+
 // Out of the box on DPX: the real table's Broadcast caps pick LL to 16 KiB, LL128 to 128 KiB, then Ring.
 TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
   RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTierByCap", []() {
@@ -11034,20 +11138,57 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTierByCap) {
     ncclComm* comm = MakeBroadcastComm();
     comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
     ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
     const struct {
       size_t bytes;
       int algo;
     } cases[] = {
-      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
-      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024 + 16, NCCL_ALGO_RING},
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
     };
     for (const auto& c : cases) {
       rcclCollDecision d = PoisonedDecision();
       EXPECT_EQ(ncclSuccess, rcclSelectBroadcast(comm, c.bytes / 4, ncclFloat32, 0, false, &d)) << c.bytes;
       EXPECT_EQ(c.algo, d.algo) << c.bytes;
     }
+    DeleteCommWithArch(comm);
+  });
+}
+
+// Real DPX table with RCCL_DDA_BC unset: a non-zero ddaLL128Max[Broadcast] enables the two-shot
+// tier. 256 KiB (well below the cap) picks LL128; cap + 16 bytes (above the cap) falls back to Ring.
+TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap) {
+  RUN_ISOLATED_TEST("Wrap_SelectBroadcast_BcUnsetDpxTable_PicksTwoShotByCap", []() {
+    // llMax=-1 and ll128Max=-1 leave both RCCL_DDA_LL_THRESHOLD and RCCL_DDA_LL128_THRESHOLD
+    // unset so the selector uses the table caps rather than an env override.
+    g_loadParam = BroadcastDdaParams(/*llMax=*/-1, /*ll128Max=*/-1, /*ddaEnable=*/1, /*ddaBc=*/-1);
+    ScopedHook ll128(g_broadcastDdaFabricLL128Eligible,
+                     [](ncclComm*, size_t, ncclDataType_t) { return true; });
+    ncclComm* comm = MakeBroadcastComm();
+    comm->archThresholds =
+        real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(nullptr, comm->archThresholds);
+    // ddaLLMax[Broadcast] is non-zero (LL tier active); test focuses on the LL128 cap.
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(ll128Cap, 0u);
+
+    rcclCollDecision d = PoisonedDecision();
+    // 256 KiB is well below the cap: two-shot LL128 selected.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, 256 * 1024 / sizeof(float), ncclFloat32, 0, false, &d));
+    EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128, d.algo);
+
+    d = PoisonedDecision();
+    // cap + 16 bytes is above the cap: Ring.
+    EXPECT_EQ(ncclSuccess,
+              rcclSelectBroadcast(comm, (ll128Cap + 16) / sizeof(float), ncclFloat32,
+                                  0, false, &d));
+    EXPECT_EQ(NCCL_ALGO_RING, d.algo);
     DeleteCommWithArch(comm);
   });
 }
@@ -11061,14 +11202,18 @@ TEST(WrapMicrotestIsolated, SelectBroadcast_BcUnsetSpxTable_PicksTierByCap) {
     ncclComm* comm = MakeBroadcastComm();
     comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
     ASSERT_NE(nullptr, comm->archThresholds);
+    const size_t llCap    = comm->archThresholds->ddaLLMax[ncclFuncBroadcast];
+    const size_t ll128Cap = comm->archThresholds->ddaLL128Max[ncclFuncBroadcast];
+    ASSERT_GT(llCap, 0u);
+    ASSERT_GT(ll128Cap, llCap);
     const struct {
       size_t bytes;
       int algo;
     } cases[] = {
-      {16 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
-      {16 * 1024 + 16, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024, (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
-      {128 * 1024 + 16, NCCL_ALGO_RING},
+      {llCap,         (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL},
+      {llCap + 16,    (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap,      (int)rcclAddonAlgos_t::RCCL_DDA_FABRIC_LL128},
+      {ll128Cap + 16, NCCL_ALGO_RING},
     };
     for (const auto& c : cases) {
       rcclCollDecision d = PoisonedDecision();
@@ -12571,28 +12716,45 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableOutOfPlace) {
       });
 }
 
-TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250FabricTableInPlace) {
+// In place, every size the fabric table sends to DDA LL, LL128 or VMM out of place takes Direct p2p instead, without
+// probing any fabric tier's eligibility.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceTakesDirect) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAlltoAll_Gfx1250FabricTableInPlace",
+      "Wrap_SelectAlltoAll_Gfx1250InPlaceTakesDirect",
       []() {
         A2aGfx1250Comm a2a;
         ncclComm* const comm = a2a.comm;
+        a2a.tbl.ddaVmmMax[ncclFuncAlltoAll] = 256u << 20;
+        int fabricCalls = 0;
+        auto count = [&fabricCalls](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          ++fabricCalls;
+          return true;
+        };
+        g_allToAllDdaFabricLLEligible = count;
+        g_allToAllDdaFabricLL128Eligible = count;
+        ScopedHook vmmEligible(g_allToAllDdaFabricEligible, count);
         struct Case {
           int n;
           size_t perPeer;
-          int algo;
+          int outOfPlace;
         } cases[] = {
             {8, 512, RCCL_DDA_FABRIC_LL},
             {8, 1u << 20, RCCL_DDA_FABRIC_LL128},
             {8, 2u << 20, RCCL_DDA_FABRIC_LL128},        // T = 16 MiB
             {16, 1u << 20, RCCL_DDA_FABRIC_LL128},
+            {8, 4u << 20, RCCL_DDA_FABRIC_VMM},          // T = 32 MiB
+            {8, 32u << 20, RCCL_DDA_FABRIC_VMM},         // T = 256 MiB == ddaVmmMax
         };
         for (const Case& c : cases) {
           comm->nRanks = c.n;
           for (bool query : {true, false}) {
             rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aSend, kA2aRecv, query, &d));
+            EXPECT_EQ(c.outOfPlace, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+            fabricCalls = 0;
             ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aRecv, kA2aRecv, query, &d));
-            EXPECT_EQ(c.algo, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+            EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+            EXPECT_EQ(0, fabricCalls) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
           }
         }
       });
@@ -12680,8 +12842,8 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DdaLLOffFallsToLL128) {
       });
 }
 
-// Buffer alignment does not move a call off LL128, in or out of place, so ranks whose buffers differ
-// in alignment pick the same kernel. Live dispatch and the query report the same decision.
+// Buffer alignment does not move an out-of-place call off LL128, so ranks whose buffers differ in alignment
+// pick the same kernel; in place takes Direct at every alignment. Live dispatch and the query agree.
 TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128",
@@ -12702,17 +12864,17 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250AnyAlignmentTakesLL128) {
               SCOPED_TRACE(testing::Message() << "query=" << query << " n=" << n << " P=" << perPeer);
               rcclCollDecision d{};
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, inPlace4, inPlace4, query, &d));
+              EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send4, kA2aRecv, query, &d));
               EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               EXPECT_EQ(NCCL_PROTO_LL128, d.protocol);
               EXPECT_EQ(132u, d.nMaxChannels);
-              ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send4, kA2aRecv, query, &d));
-              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, send2, kA2aRecv, query, &d));
               EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, recv1, query, &d));
               EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
               ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, inPlace2, inPlace2, query, &d));
-              EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+              EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
             }
           }
         }

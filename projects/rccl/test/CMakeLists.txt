@@ -309,14 +309,16 @@ if(BUILD_TESTS)
     P2pChannelScalingTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
+    HipProbeTests.cpp
     SendRecvTests.cpp
     SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
-    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so they run the b128 paths.
     device/DdaReduceScatterFabricLLTests.cpp
     device/DdaAllReduceFabricLLTests.cpp
+    device/DdaAllReduceFabricLL128PeerParTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -435,6 +437,7 @@ if(BUILD_TESTS)
       device/DdaReduceScatterFabricLLTests.cpp
       device/DdaAllReduceFabricLLTests.cpp
       device/DdaAllReduceFabricLL128TwoShotTests.cpp
+      device/DdaAllReduceFabricLL128PeerParTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/DdaLL128ArchGeometryTests.cpp
@@ -1171,6 +1174,7 @@ if(BUILD_TESTS)
       DdaIpcIndexDataMPITests.cpp
       DdaFp8MPITests.cpp
       DdaAlltoAllInPlaceMPITests.cpp
+      DdaAlltoAllLLBankMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
@@ -1514,9 +1518,9 @@ if(BUILD_TESTS)
     RENAME "CTestTestfile.cmake"
   )
 
-  # Host-only micro-test binaries (rccl-UnitTestsMicro). The host/ CMakeLists
+  # Host-only micro-test binaries (rccl-UnitTestsMicro*). The host/ CMakeLists
   # is dual-mode: under BUILD_TESTS it builds only the in-RCCL-build micro-test
-  # target and returns; invoked standalone it builds rccl-HostUnitTests too.
+  # targets and returns; invoked standalone it builds rccl-HostUnitTests too.
   add_subdirectory(host)
 
   # Those headers are installed by the rocSHMEM sub-build, and targets that do

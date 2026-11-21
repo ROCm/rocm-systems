@@ -32,18 +32,16 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [1] Reduce          -- not used
     64ULL*1024,          // [2] AllGather         // [2] AllGather
     1ULL*1024*1024,      // [3] ReduceScatter   -- LL beats LL128 to 1M on 4-16 ranks
-    32ULL*1024*1024,     // [4] AllReduce
+    1ULL*1024*1024,      // [4] AllReduce       -- the LL one-shot; peer-parallel LL128 above it
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    64ULL*1024,          // [8] AlltoAll
+    128ULL*1024,         // [8] AlltoAll        -- LL128 takes over from 256K
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
-    128ULL*1024,         // [0] Broadcast       -- LL128 beats Ring to 1M/512K/512K/256K at 4/8/12/16 ranks and
-                         //                        ties it at 64K-128K at 24; the crossover halves as ranks
-                         //                        double, so this is the 24-rank total
+    32ULL*1024*1024,     // [0] Broadcast      -- DDA LL128 two-shot (SPX)
     0,                   // [1] Reduce          -- not used
     128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
     224ULL*1024*1024,    // [3] ReduceScatter   -- LL128 through 224M total below 8 ranks
@@ -52,7 +50,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    8ULL*1024*1024,      // [8] AlltoAll        -- beats Direct p2p to 8M
+    16ULL*1024*1024,     // [8] AlltoAll        -- LL128 above the 128K LL ceiling; DDA VMM above 16M
   },
   // ddaVmmMax: DDA VMM (fabric simple) tier ceiling per collective.
   // Messages above this fall to Ring/CE (or sym kernel for R2).
@@ -65,7 +63,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- 0 = disabled
+    256ULL*1024*1024,    // [8] AlltoAll        -- TDM push above the 16M LL128 ceiling; Direct p2p above 256M
   },
   // ddaVmmMaxR2: DDA VMM cap when recv buffer is registered (R2 mode).
   // DDA is gated on !symEligible (AR: !symkRequested) on every arch, including
@@ -204,7 +202,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
     0,                   // [3] ReduceScatter   -- ddaLLMax total: LL128 takes over at 2M-4M on 8 and 16 ranks,
                          //                        and LL runs to 2M from 32 ranks (ddaRsLLLargeComm*)
-    1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
+    0,                   // [4] AllReduce       -- not rank-scaled: LL stops at 1M at every rank count
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -230,42 +228,40 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- VMM off
+    0,                   // [8] AlltoAll        -- ddaVmmMax total
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
-  // From 32 ranks, AllReduce VMM beats 1024-thread LL two-shot / 512-thread LL128 1.3-3.7x between 2M and
-  // nRanks x 512K. 32 ranks run the LL spread and 256-thread blocks instead (ddaLargeComm*), so VMM-first starts at 33.
-  .ddaArVmmFirstMinRanks = 33,
-  .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
-  .ddaArVmmFirstMaxPerRank = 512ULL*1024,
+  // Off: peer-parallel LL128 beats AllReduce VMM 2.3-3.4x between 4M and 16M on 32 ranks, so VMM no longer
+  // goes ahead of the LL tiers.
+  .ddaArVmmFirstMinRanks = 0,
+  .ddaArVmmFirstMinBytes = 0,
+  .ddaArVmmFirstMaxPerRank = 0,
+  // LL128 one-shot beats the peer-parallel two-shot to 1M / 512K / 256K at 4 / 8 / 16 ranks, i.e. 4M / nRanks.
+  .ddaArLL128OneShotRankBytes = 4ULL*1024*1024,
   // Registered sum AllReduce past symMinR2: DDA beats Ring in capture to max(32M, n x 2M)
   // and CE-registered eager on whole 512K-1M shards.
   .ddaArRegCaptureMinBytes = 32ULL*1024*1024,
   .ddaArRegCapturePerRankBytes = 2ULL*1024*1024,
   .ddaArRegEagerMinShardBytes = 512ULL*1024,
   .ddaArRegEagerMaxShardBytes = 1ULL*1024*1024,
-  // Below 8 ranks: LL two-shot beats DDA LL128 1.2x at 4M on 4 ranks and loses 1.2x from 8M; on 2 ranks it
-  // loses 1.2x at 4M, so 2M stays.
-  .ddaArLLTwoShotMaxPerRank = 1ULL*1024*1024,
-  // 4, 8, 16 and 32 ranks (1-8 SPX nodes): 256-thread DDA LL blocks beat 512/1024 by up to 1.9x at 4K-8M, and
-  // 256-thread LL128 blocks beat 512 by 1.2-1.7x where one pass covers the shard (8M-64M). Every count up to 32
-  // takes them, so the others are extrapolated; on 13-15 ranks that also moves about 4K-170K from the spread to the
-  // one-shot, as 4K-128K does on 16.
+  // 4, 8 and 16 ranks (1-4 SPX nodes): 256-thread DDA LL one-shot blocks beat 512 by 1.1-1.4x at 4K-1M. Every count
+  // up to 16 takes them, so the others are extrapolated; on 13-15 ranks that also moves about 4K-170K from the spread
+  // to the one-shot, as 4K-128K does on 16. On 32 ranks the 512-thread spread runs those sizes either way.
   .ddaNarrowThreads = 256,
-  .ddaNarrowMaxRanks = 32,
-  // 32 ranks (8 SPX nodes). AllReduce: the LL spread beats VMM and LL two-shot 1.7-3.1x at 2M/4M, LL two-shot beats
-  // VMM 1.3x at 8M and ties it at 16M (LL128 is 1.1x slower there), LL128 beats LL two-shot / VMM 1.2x at 32M/64M,
-  // and Ring LL128 beats LL128 1.1x at 256M.
+  .ddaNarrowMaxRanks = 16,
+  // 32 ranks (8 SPX nodes), against the peer-parallel DDA LL128 AllReduce: the LL spread is 1.1x faster at 2M, and
+  // Ring LL128 1.1x at 128M and 1.15x at 256M; DDA LL128 keeps 4M-64M.
   .ddaLargeCommMinRanks = 32,
   .ddaLargeCommMaxRanks = 32,
-  .ddaLargeCommLLMaxPerRank = {0, 0, 0, 0, 512ULL*1024, 0, 0, 0, 0},            // [4] AR 16M
-  .ddaLargeCommLL128MaxPerRank = {0, 0, 0, 0, 4ULL*1024*1024, 0, 0, 0, 0},      // [4] AR 128M
-  .ddaLargeCommArLLOneShotMax = 4ULL*1024*1024,
+  .ddaLargeCommLLMaxPerRank = {0, 0, 0, 0, 64ULL*1024, 0, 0, 0, 0},             // [4] AR 2M
+  .ddaLargeCommLL128MaxPerRank = {0, 0, 0, 0, 2ULL*1024*1024, 0, 0, 0, 0},      // [4] AR 64M
+  .ddaLargeCommArLLOneShotMax = 2ULL*1024*1024,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
+  .ddaLL128BcTwoShotThreads = 256,  // two-shot broadcast: 256 threads
   // ReduceScatter LL128 block size: 256 threads beat 512 at 8M-128M on 4-32 ranks.
   .ddaRsLL128Threads = 256,
   // ReduceScatter LL128 kernel crossover by shard and message size.
@@ -290,7 +286,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024,// 128 channels beat 192 by 1.1-1.3x in (8M, 32M]
   .rsRingSimpleCappedChannels = 128,
   // 8-32 ranks (2-8 SPX nodes): Ring LL128 beats Simple 1.08-1.16x to 256M/512M/1G (rccl-tests -R 0,
-  // median of 2-5).
+  // median of 2-5). Above the DDA LL128 caps that is 512M on 16 ranks and 1G on 32, 1.1x each.
   .rsSmallCommMaxRanks = 32,
   .rsSmallCommRingLL128MaxPerRank = 32ULL*1024*1024,
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
@@ -326,7 +322,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
-    128ULL*1024,         // [0] Broadcast       -- LL128 beats Ring 1.5x to 128K at 16 ranks (256K at 8)
+    8ULL*1024*1024,      // [0] Broadcast      -- DDA LL128 two-shot through 8M (DPX)
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather       -- Ring beats it 1.1-1.4x at 128M-256M on 8/16/32 (DPX)
     4ULL*1024*1024,      // [3] ReduceScatter   -- below 8 ranks: LL128 through 1 MiB/rank at 4 GPUs.
@@ -461,6 +457,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  .agHierSymMinR2 = 16ULL*1024*1024,
+  .agHierSymMaxR2 = kThreshUnlimited,
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -498,7 +496,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    0,                   // [8] AlltoAll        -- VMM off
+    0,                   // [8] AlltoAll        -- ddaVmmMax total
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
@@ -528,6 +526,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaA2aLL128MaxBlocks = 72,
   .ddaA2aLL128MaxBlocksMinBytes = 256ULL*1024,
   .ddaA2aLL128MaxBlocksMaxBytes = 16ULL*1024*1024,
+
+  .ddaLL128BcTwoShotThreads = 256,  // two-shot broadcast: 256 threads
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
   .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
                                                   // at 8/16/32 (DPX)

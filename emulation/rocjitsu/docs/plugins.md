@@ -48,7 +48,7 @@ per-dispatch output and the summary.
 
 Memory instructions take precedence over their scalar or vector encoding. The
 `lds` and `global` families describe the instruction's pre-routing pipeline tag
-or mnemonic fallback: `lds` covers DS/LDS local-memory instructions, while
+or decoded addressing metadata: `lds` covers DS/LDS local-memory instructions, while
 `global` covers global, scalar-memory, flat, buffer, typed-buffer, image,
 tensor, and scratch instructions. A later shared-aperture FLAT-to-LDS remap is
 therefore still reported as `global`. Their `execution_seconds` measure
@@ -58,19 +58,14 @@ includes MFMA, SMFMAC, WMMA, and SWMMAC instructions. Control covers branches,
 waits, barriers, termination, no-ops, sleeps, and delays, including the LDS-pipe
 `ds_nop` and the GWS barrier/semaphore instructions, which move no data.
 
-The mnemonic fallback is not just for synthetic instructions: whole prefix
-families never set the memory-op flag — RDNA4 `ds_direct_load` and `tbuffer_*`,
-RDNA3.5 `lds_direct_load`, the image encodings, the CDNA5 tensor transfers, and
-every scalar-memory encoding, since `smem` stopped setting the flag when the
-decoded memory-issue metadata landed — and some mnemonics carry it on one
-architecture but not another. Classification is by flag *and* by prefix so that
-a mnemonic reports the same family whichever architecture executed it.
-
-Where neither applies, the decoded memory-issue metadata is consulted last: it
-names the completion domain, so an encoding that follows no naming convention
-is still placed. The CDNA5 `cluster_load_*` set is the live case. The metadata
-is checked after the prefix so that generic FLAT, which reports both LDS and
-VMEM obligations, keeps the `global` bucket described above.
+Classification uses numeric operation identity, instruction flags, and decoded
+memory addressing. Addressing metadata covers direct LDS, typed-buffer, image,
+tensor, cluster, and scalar-memory instructions even when they do not set the
+memory-op flag. Generic FLAT keeps the `global` bucket described above, while
+scalar timestamp reads report scalar work. Existing pipeline flags and
+memory-issue completion domains provide a final fallback when addressing
+metadata is absent. Synthetic instructions must supply the same metadata;
+their mnemonic text does not determine their family.
 
 For a machine-readable report:
 
@@ -178,7 +173,7 @@ The logging plugin records kernel dispatch metadata and detects MMA
 ### Perfsim compatibility plugin
 
 The optional Linux-only Perfsim adapter loads a separately built Perfsim backend at
-runtime. RocJITsu does not build, link, vendor, or install Perfsim and does not
+runtime. rocjitsu does not build, link, vendor, or install Perfsim and does not
 write a persistent Perfsim trace; Perfsim continues to own its `GPUCSIM_*`
 configuration and reports. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md)
 for the runtime-first setup, independent build boundary, compatibility
@@ -241,7 +236,7 @@ configured through a profile or an explicit `--config <file>`.
 
 ### Plugin loader boundary
 
-Plugins are repository-owned components built and shipped with rocJitsu. The
+Plugins are repository-owned components built and shipped with rocjitsu. The
 loader boundary does not provide compatibility or versioning for independently
 built plugins; the host and plugins must always be rebuilt together.
 
@@ -415,12 +410,20 @@ Callback policy is derived from the plugins contained by an
 `ExecutionPluginGroup`. An empty group returns before dispatch or locking. The
 group divides hooks by frequency and synchronization cost:
 
-- Lifecycle, dispatch, workgroup, wavefront, and barrier callbacks are
+- Lifecycle, dispatch, workgroup, wavefront, and barrier-completion callbacks
+  (`onAmdgpuBarrierResolved` and `onAmdgpuBarrierRoundCompleted`) are
   infrequent. The group takes one recursive mutex before iterating its plugins,
   so two infrequent callbacks cannot overlap across simulation partitions. With
   the default hot-hook policy, an infrequent callback can still overlap a
   high-frequency callback. Recursive acquisition lets a callback synchronously
   read registers and fire register-observation hooks without deadlocking.
+- The barrier signal and wait callbacks (`onAmdgpuBarrierSignaled` and
+  `onAmdgpuBarrierWaitPassed`) fire as instructions execute. Like the
+  high-frequency callbacks below, they take the mutex only when a plugin
+  requires serial hot hooks, and otherwise can run concurrently across
+  simulation partitions, with each other and with every other callback. A
+  plugin that shares state between them and the completion callbacks must
+  synchronize it or require serial hot hooks.
 - Instruction before/after, memory-routing, tensor-DMA issue, tensor-DMA
   memory, and register-access callbacks are high-frequency and run concurrently
   with both other high-frequency callbacks and infrequent callbacks by default.
@@ -549,7 +552,7 @@ plugins may override the observation-only
 instead override `onAmdgpuMemoryAccessRouted(access, wf)`, avoiding a shared
 identity lookup. Plugins that also need the decoded instruction may override
 the context-preserving `onAmdgpuMemoryAccessRouted(access, inst, wf)` form.
-RocJITsu calls the most specific form; its defaults forward through the
+rocjitsu calls the most specific form; its defaults forward through the
 wavefront-aware form to the observation-only form. The borrowed instruction and
 wavefront already reflect the selected route and are valid only during the
 callback.
