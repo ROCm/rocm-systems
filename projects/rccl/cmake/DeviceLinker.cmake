@@ -424,6 +424,11 @@ function(dl_add_fat_object NAME SRC)
   if(FO_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR "dl_add_fat_object(${NAME}): unknown arguments: ${FO_UNPARSED_ARGUMENTS}")
   endif()
+  # Past the per-target loop, the device halves would miss every device.o: the build would pass
+  # and the kernels would fail at launch with invalid device function.
+  if(_dl_device_links_defined)
+    message(FATAL_ERROR "dl_add_fat_object(${NAME}) must come before the per-GPU-target loop")
+  endif()
   set(_targets ${DL_GPU_TARGETS})
   set(_arch_flags ${DL_OFFLOAD_ARCH_FLAGS})
   if(FO_GPU_TARGETS)
@@ -743,6 +748,7 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
   endforeach()
 
 endforeach()  # end per-GPU-target loop
+set(_dl_device_links_defined TRUE)
 
 # ===========================================================================
 # Package all per-arch device.o files into one offload binary
