@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -37,7 +38,8 @@
 namespace rocjitsu {
 namespace {
 
-class LegacyMinMaxInstruction : public testing::TestWithParam<std::tuple<rj_code_arch_t, bool>> {
+class LegacyMinMaxInstruction
+    : public testing::TestWithParam<std::tuple<rocjitsu::IsaFamily, bool>> {
 protected:
   void SetUp() override {
     saved_scalar_ = util::force_scalar();
@@ -113,7 +115,7 @@ TEST_P(LegacyMinMaxInstruction, MinMaxSignedZeroAndSignalingNanSelection) {
 }
 
 TEST_P(LegacyMinMaxInstruction, MinimumMaximumPropagateNanPayload) {
-  if (std::get<0>(GetParam()) != ROCJITSU_CODE_ARCH_CDNA4)
+  if (std::get<0>(GetParam()) != rocjitsu::IsaFamily::Cdna4)
     GTEST_SKIP() << "MINIMUM3/MAXIMUM3 starts with CDNA4";
   for (unsigned nan_source = 0; nan_source != 3; ++nan_source) {
     put(0, 0x3f800000);
@@ -206,13 +208,13 @@ TEST_P(LegacyMinMaxInstruction, PackedHalfMinMaxSelectNanPayloads) {
 class LegacySelectionPolicy : public LegacyMinMaxInstruction {
 protected:
   bool rdna12() const {
-    return std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA1 ||
-           std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA2;
+    return std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna1 ||
+           std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna2;
   }
 
   bool rdna() const {
-    return rdna12() || std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA3 ||
-           std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA3_5;
+    return rdna12() || std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna3 ||
+           std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna3_5;
   }
 
   void check_vop3(uint32_t cdna_opcode, uint32_t rdna_opcode, uint32_t expected,
@@ -415,10 +417,10 @@ TEST_P(LegacySelectionPolicy, PackedHalfNanPriorityAndClamp) {
 
 INSTANTIATE_TEST_SUITE_P(
     Legacy, LegacySelectionPolicy,
-    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                     ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                     ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                     ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5),
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                     rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4,
+                                     rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                     rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5),
                      testing::Bool()));
 
 class ScalarFloatMinMax : public LegacyMinMaxInstruction {};
@@ -457,15 +459,15 @@ TEST_P(ScalarFloatMinMax, HalfAndFloatUseArchitecturePolicy) {
   }
 }
 INSTANTIATE_TEST_SUITE_P(Rdna35, ScalarFloatMinMax,
-                         testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA3_5),
+                         testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna3_5),
                                           testing::Bool()));
 
 class RdnaMinMax : public LegacyMinMaxInstruction {};
 
 TEST_P(RdnaMinMax, NanSelectionAcrossScalarSimdAndDualIssue) {
   const auto arch = std::get<0>(GetParam());
-  const bool number = arch == ROCJITSU_CODE_ARCH_RDNA4;
-  const bool legacy = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool number = arch == rocjitsu::IsaFamily::Rdna4;
+  const bool legacy = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   // RDNA1-3 hardware prefers src0 when both sources are NaN; RDNA4 *_NUM
   // also quiets the selected NaN. All cases run in both input orders.
   constexpr std::array<std::array<uint32_t, 2>, 5> inputs{{
@@ -520,9 +522,9 @@ TEST_P(RdnaMinMax, NanSelectionAcrossScalarSimdAndDualIssue) {
 
 TEST_P(RdnaMinMax, DoubleNanPayloadPriority) {
   const auto arch = std::get<0>(GetParam());
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna4)
     GTEST_SKIP() << "RDNA4 uses MIN_NUM/MAX_NUM rather than legacy selection";
-  const bool rdna12 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool rdna12 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   constexpr uint64_t kQuiet0 = 0x7ff8000000000000ull;
   constexpr uint64_t kQuiet1 = 0x7ff8000012345678ull;
   constexpr uint64_t kSignaling0 = 0x7ff0000000000001ull;
@@ -607,27 +609,28 @@ TEST_P(PackedNumberSelection, SignalingNanUsesNumberSemantics) {
 }
 
 TEST(LegacyMinMaxPolicyDeathTest, RejectsUnsupportedArchitectures) {
-  static_assert(noexcept(amdgpu::fp_mode::legacy_minmax_policy(ROCJITSU_CODE_ARCH_CDNA1, false)));
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RV32I,
-                    ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID})
+  static_assert(noexcept(amdgpu::fp_mode::legacy_minmax_policy(rocjitsu::IsaFamily::Cdna1, false)));
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rv32i,
+        rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid})
     EXPECT_DEATH(amdgpu::fp_mode::legacy_minmax_policy(arch, false), "");
 }
 
 INSTANTIATE_TEST_SUITE_P(Rdna4, PackedNumberSelection,
-                         testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA4),
+                         testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna4),
                                           testing::Bool()));
 
 INSTANTIATE_TEST_SUITE_P(
     Rdna, RdnaMinMax,
-    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                     ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                     ROCJITSU_CODE_ARCH_RDNA4),
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                     rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                     rocjitsu::IsaFamily::Rdna4),
                      testing::Bool()));
 
 INSTANTIATE_TEST_SUITE_P(
     Cdna, LegacyMinMaxInstruction,
-    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                     ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4),
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                     rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4),
                      testing::Bool()));
 
 } // namespace

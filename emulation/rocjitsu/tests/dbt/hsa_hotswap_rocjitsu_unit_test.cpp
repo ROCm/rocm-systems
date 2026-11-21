@@ -5,7 +5,7 @@
 
 #include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -40,7 +40,7 @@ extern "C" void rj_test_clear_retained_storage();
 extern "C" void rj_test_log_translation(uint64_t source_id, size_t changed);
 extern "C" void
 rj_test_log_translation_diagnostic(uint64_t source_id,
-                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic);
+                                   const rocjitsu::Gfx1250B0ToA0DiagnosticView *diagnostic);
 extern "C" uint64_t rj_test_translation_count();
 extern "C" uint64_t rj_test_translation_memo_bytes();
 extern "C" void rj_test_set_translation_memo_capacity(uint64_t bytes);
@@ -598,7 +598,7 @@ TEST_F(HsaHotswapHookTest, RendersTranslatorDiagnosticsAndDumpsFailedSource) {
 }
 
 TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
-  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+  const rocjitsu::Gfx1250B0ToA0DiagnosticView diagnostic{
       "warning", "translator-data-only", 0, 0, "", "test warning", 0,
   };
   testing::internal::CaptureStderr();
@@ -612,7 +612,7 @@ TEST_F(HsaHotswapHookTest, DiagnosticPrefixMatchesWarningSeverity) {
 }
 
 TEST_F(HsaHotswapHookTest, RendersRequiredWorkDiagnostic) {
-  const rj_gfx1250_b0_to_a0_diagnostic_t diagnostic{
+  const rocjitsu::Gfx1250B0ToA0DiagnosticView diagnostic{
       "error", "translator-expand-missing", 1, 8, "v_test", "required step", 1,
   };
   testing::internal::CaptureStderr();

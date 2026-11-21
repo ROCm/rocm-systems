@@ -1,8 +1,8 @@
 ---
 myst:
     html_meta:
-        "description": "How to save and restore a rocJITsu virtual machine checkpoint for resuming simulations or reproducing failures."
-        "keywords": "rocJITsu, ROCm, checkpoint, restore, simulation, rj_vm_save_checkpoint, rj_vm_restore_checkpoint, FlatBuffers"
+        "description": "How to save and restore a rocjitsu virtual machine checkpoint for resuming simulations or reproducing failures."
+        "keywords": "rocjitsu, ROCm, checkpoint, restore, simulation, rj_vm_save_checkpoint, rj_vm_restore_checkpoint, FlatBuffers"
 ---
 # Save and restore a simulation checkpoint
 
@@ -31,7 +31,7 @@ simulation mode, where you drive the simulation through `rj_vm_step` or
 can choose when to save state.
 
 The checkpoint file uses a FlatBuffers schema located at
-`schemas/checkpoint.fbs` in the rocJITsu source tree. For details on the
+`schemas/checkpoint.fbs` in the rocjitsu source tree. For details on the
 JSON configuration that creates the VM in the first place, see
 [JSON topology configuration](../conceptual/json-configuration.md).
 

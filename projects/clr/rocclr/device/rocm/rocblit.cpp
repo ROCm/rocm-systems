@@ -3417,11 +3417,12 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     bool useShaderCopyPath =
         isLinearCopyOp && useShaderCopyBufferPath(srcMem, dstMem, op.size, op.metadata);
 
-    if (useShaderCopyPath) {
-      d2dCopyOps.push_back(op);
-    } else {
-      p2pCopyOps.push_back(op);
+    // Size each vector once on first use, so the one a batch doesn't use is never allocated.
+    auto& dst_ops = useShaderCopyPath ? d2dCopyOps : p2pCopyOps;
+    if (dst_ops.capacity() == 0) {
+      dst_ops.reserve(copyOps.size());
     }
+    dst_ops.push_back(op);
   }
 
   // Dispatch inter-device/pagelocked read/write batch first so SDMA engines start early.
@@ -3465,6 +3466,16 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
 
     std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>>
         d2d_copy_ops_by_size;
+    {
+      // Count per size first so each group is allocated once instead of regrown.
+      std::map<size_t, size_t, std::greater<size_t>> size_counts;
+      for (const auto &op : d2dCopyOps) {
+        ++size_counts[op.size];
+      }
+      for (const auto &[size, n] : size_counts) {
+        d2d_copy_ops_by_size[size].reserve(n);
+      }
+    }
     for (const auto &op : d2dCopyOps) {
       d2d_copy_ops_by_size[op.size].push_back(op);
     }

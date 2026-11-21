@@ -316,7 +316,7 @@ size_t
 maxReadSize()
 {
     const long page_size{sysconf(_SC_PAGESIZE)};
-    return (size_t{1} << 31) - (page_size > 0 ? static_cast<size_t>(page_size) : size_t{4_KiB});
+    return (size_t{1} << 31) - (page_size > 0 ? static_cast<size_t>(page_size) : 4_KiB);
 }
 
 /// @brief Writes all of a buffer to a file, continuing after partial writes

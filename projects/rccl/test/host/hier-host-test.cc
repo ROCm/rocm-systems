@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -237,6 +238,33 @@ TEST_F(HostHierEnsureTest, TwoRankChildrenGetFabricInit) {
   EXPECT_EQ(hc.comm.hostHier->inter, inits[1]);
   EXPECT_EQ(4, votes.calls);
   rcclHostHierTeardown(hc.get());
+}
+
+// The splits run blocking and unshared: a child sharing the parent's resources shares its abort flag, which the
+// failure path would set. The parent's settings come back on success and on failure.
+TEST_F(HostHierEnsureTest, SplitsRunBlockingAndUnsharedThenRestoreTheParent) {
+  for (int failOnCall : {-1, 1}) {
+    HierComm hc;
+    hc.comm.config.blocking = 0;
+    hc.comm.config.splitShare = 1;
+    Children children;
+    Votes votes;
+    std::vector<std::pair<int, int>> seen;  // parent's {blocking, splitShare} at each split
+    int splits = 0;
+    auto inner = SplitHook(&children, &splits, failOnCall);
+    ScopedHook split(g_ncclCommSplit, [&seen, inner](ncclComm_t parent, int color, int key, ncclComm_t* newcomm,
+                                                     ncclConfig_t* config) {
+      seen.emplace_back(parent->config.blocking, parent->config.splitShare);
+      return inner(parent, color, key, newcomm, config);
+    });
+    ScopedHook vote(g_bootstrapAllGather, VoteHook(&votes));
+    EXPECT_EQ(failOnCall < 0 ? ncclSuccess : ncclSystemError, rcclHostHierEnsure(hc.get()));
+    ASSERT_EQ(2u, seen.size()) << "failOnCall " << failOnCall;
+    for (const auto& s : seen) EXPECT_EQ(std::make_pair(1, 0), s) << "failOnCall " << failOnCall;
+    EXPECT_EQ(0, hc.comm.config.blocking) << "failOnCall " << failOnCall;
+    EXPECT_EQ(1, hc.comm.config.splitShare) << "failOnCall " << failOnCall;
+    rcclHostHierTeardown(hc.get());
+  }
 }
 
 // Every step votes once: the two splits and the two fabric inits.

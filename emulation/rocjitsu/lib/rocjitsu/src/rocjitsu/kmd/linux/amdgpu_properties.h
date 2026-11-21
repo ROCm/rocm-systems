@@ -5,6 +5,7 @@
 #define ROCJITSU_KMD_LINUX_AMDGPU_PROPERTIES_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/bit.h"
 
@@ -182,15 +183,15 @@ constexpr uint32_t num_hw_gfx_contexts_for_gfx_target_version(uint32_t gfx_targe
 // RDNA1/2 use the Navi10/Navi21 defaults from gc_10_1_0/gc_10_3_0_default.h.
 // RDNA3/4 use W7900/R9700 captures through AMDKFD_IOC_GET_TILE_CONFIG, whose
 // gfx_v11_0/gfx_v12_0 kernel implementations read the hardware register.
-constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
+constexpr uint32_t gb_addr_config_for_arch(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return 0x44;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return 0x444;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return 0x545;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return 0x8200545;
   default:
     return 0;
@@ -205,9 +206,9 @@ constexpr uint32_t gb_addr_config_for_gfx_target_version(uint32_t gfx_target_ver
     return 0x444;
   auto ip = decode_gfx_target_version(gfx_target_version);
   if (ip.major == 12 && ip.minor == 0)
-    return gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
+    return gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna4);
   if (ip.major == 11 && ip.minor == 0)
-    return gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3);
+    return gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna3);
   return 0;
 }
 

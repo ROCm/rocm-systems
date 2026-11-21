@@ -27,6 +27,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -124,7 +125,7 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     amdgpu::GpuMemory gpu_mem("vop3p_dot_int_mem");
     amdgpu::L2Cache l2("vop3p_dot_int_l2");
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -133,7 +134,7 @@ void check_int_case(const IntCase &c, uint64_t exec, uint32_t clamp) {
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot_int", cfg, &gpu_mem, &l2);
     if (!cu)
       return {};
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     EXPECT_NE(wf, nullptr);
 
@@ -204,7 +205,7 @@ TEST(Vop3pDotIntSimdCorrectness, PartialExec) {
 // experiments show saturation. GFX11 also saturates; gfx1250 ignores CLAMP.
 // These fixed overflow vectors check both scalar and SIMD paths against the
 // observed ISA behavior rather than only comparing the paths with each other.
-uint32_t run_modern_dot4(rj_code_arch_t arch, uint32_t opcode, uint32_t src0_value,
+uint32_t run_modern_dot4(rocjitsu::IsaFamily arch, uint32_t opcode, uint32_t src0_value,
                          uint32_t src1_value, uint32_t accumulator, uint32_t neg,
                          bool force_scalar) {
   ForceScalarGuard gate_guard;
@@ -255,29 +256,29 @@ TEST(Vop3pDotIntSimdCorrectness, Dot4ClampPolicyMatchesArchitecture) {
 
   for (bool force_scalar : {true, false}) {
     // v_dot4_u32_u8: 0xffffff00 + 4 * 255 * 255.
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA3, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
+    EXPECT_EQ(run_modern_dot4(rocjitsu::IsaFamily::Rdna3, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
               std::numeric_limits<uint32_t>::max());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
+    EXPECT_EQ(run_modern_dot4(rocjitsu::IsaFamily::Rdna4, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
               std::numeric_limits<uint32_t>::max());
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
+    EXPECT_EQ(run_modern_dot4(rocjitsu::IsaFamily::Cdna5, 23, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFF00u,
                               0, force_scalar),
               kUnsignedWrapped);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
 
     // v_dot4_i32_iu8 with both inputs signed: INT_MAX-10 + 4 * 127 * 127.
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA3, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
+    EXPECT_EQ(run_modern_dot4(rocjitsu::IsaFamily::Rdna3, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
               static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_RDNA4, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
+    EXPECT_EQ(run_modern_dot4(rocjitsu::IsaFamily::Rdna4, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
               static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    EXPECT_EQ(run_modern_dot4(ROCJITSU_CODE_ARCH_CDNA5, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
+    EXPECT_EQ(run_modern_dot4(rocjitsu::IsaFamily::Cdna5, 22, 0x7F7F7F7Fu, 0x7F7F7F7Fu, 0x7FFFFFF5u,
                               3, force_scalar),
               kMixedSignedWrapped);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -322,7 +323,7 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     amdgpu::GpuMemory gpu_mem("vop3p_dot_f16_mem");
     amdgpu::L2Cache l2("vop3p_dot_f16_l2");
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
@@ -331,7 +332,7 @@ void check_f16_case(uint64_t exec, uint32_t neg, uint32_t neg_hi, uint32_t clamp
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_dot_f16", cfg, &gpu_mem, &l2);
     if (!cu)
       return {};
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
     EXPECT_NE(wf, nullptr);
 

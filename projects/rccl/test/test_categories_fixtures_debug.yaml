@@ -50,6 +50,7 @@ test_categories:
       - "GinAllReduceEligibilityTest.*"
       - "HostHierLayout.*"
       - "HostHierAllReduce.*"
+      - "GinAllGatherEligibilityTest.*"
       - "NetSocketTests.*"
       - "NetBootstrapInterfaceTest.*"
       - "BcmLinksTest.*"

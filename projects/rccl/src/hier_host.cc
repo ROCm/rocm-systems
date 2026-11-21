@@ -209,9 +209,12 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm) {
   if (layout == nullptr) return ncclInvalidUsage;
   struct rcclHostHier* h = comm->hostHier;
 
-  // A non-blocking split can return before the child exists, so split synchronously.
+  // A non-blocking split can return before the child exists, so split synchronously. Children sharing the parent's
+  // resources would share its abort flag, and aborting them after a failed setup would abort the parent.
   const int parentBlocking = comm->config.blocking;
+  const int parentSplitShare = comm->config.splitShare;
   comm->config.blocking = 1;
+  comm->config.splitShare = 0;
   ncclResult_t res = ncclCommSplit(comm, layout->hostIndex, layout->localRank, &h->intra, nullptr);
   if (res == ncclSuccess) res = ncclCommEnsureReady(h->intra);
   if (h->intra != nullptr) h->intra->hostHierState = rcclHostHierOff;
@@ -228,6 +231,7 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm) {
   if (!allRanksReady(comm, &res)) goto fail;
 
   comm->config.blocking = parentBlocking;
+  comm->config.splitShare = parentSplitShare;
   comm->hostHierState = rcclHostHierReady;
   INFO(NCCL_INIT, "Host-hierarchical comms: rank %d host %d/%d localRank %d/%d intraDda %d interDda %d", comm->rank,
        layout->hostIndex, layout->nHosts, layout->localRank, layout->ranksPerHost,
@@ -236,6 +240,7 @@ ncclResult_t rcclHostHierEnsure(struct ncclComm* comm) {
 
 fail:
   comm->config.blocking = parentBlocking;
+  comm->config.splitShare = parentSplitShare;
   // A failed split can leave the parent's bootstrap mid-exchange, so never retry.
   comm->hostHierState = rcclHostHierFailed;
   (void)releaseChild(h->inter, /*abort=*/true);
