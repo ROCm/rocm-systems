@@ -1635,6 +1635,15 @@ typedef union rocprofiler_hsa_api_args_t
         hsa_amd_signal_batch_t batch;
     } hsa_amd_signal_batch_destroy;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x18
+    struct
+    {
+        void*       ptr;
+        uint8_t     value;
+        size_t      size;
+        hsa_agent_t agent;
+    } hsa_amd_memory_fill_bytes;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
