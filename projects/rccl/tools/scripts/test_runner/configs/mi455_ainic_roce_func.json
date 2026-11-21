@@ -2816,6 +2816,16 @@
           "name": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled",
           "description": "With cuMem disabled, rcclSymKGetInfo falls back to the real ReduceScatter backend and never claims SYM",
           "test_filter": "CollImplInfo.ReduceScatterSymkNotReportedWhenCuMemDisabled"
+        },
+        {
+          "name": "Nccl4pyVersion.BindingsMatchLibrary",
+          "description": "Every version the generated nccl4py bindings record equals ncclGetVersion() of librccl",
+          "test_filter": "Nccl4pyVersion.BindingsMatchLibrary"
+        },
+        {
+          "name": "Nccl4pyVersion.RecordsAtLeast_2_32_6",
+          "description": "The generated nccl4py bindings record NCCL 2.32.6 or later, equal to ncclGetVersion() of librccl",
+          "test_filter": "Nccl4pyVersion.RecordsAtLeast_2_32_6"
         }
       ]
     },

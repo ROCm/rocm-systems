@@ -2109,6 +2109,16 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "Nccl4pyVersion.BindingsMatchLibrary",
+          "description": "Every version the generated nccl4py bindings record equals ncclGetVersion() of librccl",
+          "test_filter": "Nccl4pyVersion.BindingsMatchLibrary"
+        },
+        {
+          "name": "Nccl4pyVersion.RecordsAtLeast_2_32_6",
+          "description": "The generated nccl4py bindings record NCCL 2.32.6 or later, equal to ncclGetVersion() of librccl",
+          "test_filter": "Nccl4pyVersion.RecordsAtLeast_2_32_6"
         }
       ]
     },

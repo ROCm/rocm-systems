@@ -330,6 +330,7 @@ if(BUILD_TESTS)
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
+    Nccl4pyVersionTests.cpp
     common/main.cpp
     common/CallCollectiveForked.cpp
     common/CollectiveArgs.cpp
@@ -393,6 +394,11 @@ if(BUILD_TESTS)
   add_dependencies(rccl-UnitTests rccl-test-profiler-stub)
   target_compile_definitions(rccl-UnitTests PRIVATE
     RCCL_TEST_PROFILER_STUB_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-stub>")
+
+  # Nccl4pyVersionTests reads the generated nccl4py bindings from the source tree; it skips
+  # in an installed run, where they are absent.
+  set_source_files_properties(Nccl4pyVersionTests.cpp PROPERTIES COMPILE_DEFINITIONS
+    "RCCL_NCCL4PY_BINDINGS_DIR=\"${PROJECT_SOURCE_DIR}/bindings/nccl4py/nccl/bindings\"")
 
   # The test suite also runs from an install: TheRock CI executes the packaged
   # rccl-UnitTests with no build tree present, so the stub has to ship with it.
