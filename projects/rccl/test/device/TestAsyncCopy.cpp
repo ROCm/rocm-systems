@@ -48,17 +48,19 @@ constexpr CachePolicy kAltCachePolicy = createCachePolicy(TemporalHint::NT, MemS
 //  Device kernels: thin wrappers so a whole block (or a team) drives one copy.
 // ---------------------------------------------------------------------------
 
-// Whole-block copy of [0, n): dst <- src. Every thread calls with identical args.
+// Whole-block copy of [0, n): dst <- src. Every thread calls with identical args. The copy's LDS region starts
+// ldsOff bytes into the dynamic allocation, which must hold ldsOff + ldsBytes.
 template<bool ASYNC, CachePolicy CP = DEFAULT_CACHE_POLICY>
 __global__ void kAsyncBlockCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
-                                [[maybe_unused]] size_t n, [[maybe_unused]] size_t ldsBytes) {
+                                [[maybe_unused]] size_t n, [[maybe_unused]] size_t ldsBytes,
+                                [[maybe_unused]] size_t ldsOff) {
 #if ASYNC_COPY_SUPPORTED
   extern __shared__ __align__(128) uint8_t lds[];
   if constexpr (ASYNC) {
-    async::tdmCopyAsync<CP>(dst, src, n, lds, ldsBytes);
+    async::tdmCopyAsync<CP>(dst, src, n, lds + ldsOff, ldsBytes);
     async::tdmWait();
   } else {
-    async::tdmCopy<CP>(dst, src, n, lds, ldsBytes);
+    async::tdmCopy<CP>(dst, src, n, lds + ldsOff, ldsBytes);
   }
   __syncthreads();
 #endif
@@ -100,6 +102,16 @@ __global__ void kAsyncTwoTeamCopy([[maybe_unused]] uint8_t* dst0, [[maybe_unused
     async::tdmCopyByTeam(dst1, src1, n, lds1, ldsBytesPerTeam, split, kAsyncTeamToEnd);
   }
   __syncthreads();
+#endif
+}
+
+// Each block copies its own `per`-byte slice of [0, gridDim.x * per).
+__global__ void kAsyncGridCopy([[maybe_unused]] uint8_t* dst, [[maybe_unused]] const uint8_t* src,
+                               [[maybe_unused]] size_t per, [[maybe_unused]] size_t ldsBytes) {
+#if ASYNC_COPY_SUPPORTED
+  extern __shared__ __align__(128) uint8_t lds[];
+  const size_t o = blockIdx.x * per;
+  async::tdmCopy(dst + o, src + o, per, lds, ldsBytes);
 #endif
 }
 
@@ -184,9 +196,11 @@ TEST_F(AsyncCopyTest, DeviceCapabilityMatchesHost) {
 struct AsyncBlockCase {
   size_t      n;          // bytes to copy
   size_t      lds;        // LDS staging bytes handed to the copy
-  int         off;        // matched src/dst byte offset
+  int         soff;       // src byte offset from a 512B boundary
+  int         doff;       // dst byte offset past the 128B guard
   int         block;      // threads per block
   std::string name;
+  size_t      ldsOff = 0; // offset of the copy's LDS region within the allocation
 };
 
 class AsyncBlockCopyTest : public AsyncCopyTest,
@@ -196,11 +210,11 @@ protected:
   void run(const AsyncBlockCase& c) {
     if (!supported_) GTEST_SKIP() << "async copy not supported on this device";
 
-    const size_t srcTotal = static_cast<size_t>(c.off) + c.n;
-    const size_t dstTotal = static_cast<size_t>(kAsyncGuard) + c.off + c.n + kAsyncGuard;
-    const size_t copyStart = static_cast<size_t>(kAsyncGuard) + c.off;
+    const size_t srcTotal = static_cast<size_t>(c.soff) + c.n;
+    const size_t dstTotal = static_cast<size_t>(kAsyncGuard) + c.doff + c.n + kAsyncGuard;
+    const size_t copyStart = static_cast<size_t>(kAsyncGuard) + c.doff;
 
-    auto h_src = makePattern(srcTotal, static_cast<uint32_t>(c.n ^ (c.off * 131) ^ c.block));
+    auto h_src = makePattern(srcTotal, static_cast<uint32_t>(c.n ^ (c.soff * 131) ^ (c.doff * 17) ^ c.block));
     DeviceBuffer<uint8_t> d_src(srcTotal ? srcTotal : 1);
     if (srcTotal) d_src.copyFrom(h_src);
 
@@ -209,12 +223,16 @@ protected:
     d_dst.copyFrom(h_dstInit);
 
     uint8_t* dstPtr = d_dst.ptr + copyStart;
-    const uint8_t* srcPtr = d_src.ptr + c.off;
-    kAsyncBlockCopy<ASYNC><<<1, c.block, c.lds>>>(dstPtr, srcPtr, c.n, c.lds);
+    const uint8_t* srcPtr = d_src.ptr + c.soff;
+    const size_t ldsAlloc = c.lds + c.ldsOff;
+    ASSERT_EQ(hipFuncSetAttribute(reinterpret_cast<const void*>(kAsyncBlockCopy<ASYNC>),
+                                  hipFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(ldsAlloc)),
+              hipSuccess);
+    kAsyncBlockCopy<ASYNC><<<1, c.block, ldsAlloc>>>(dstPtr, srcPtr, c.n, c.lds, c.ldsOff);
     syncAndCheck();
 
     auto h_out = d_dst.copyTo();
-    checkCopy(h_out, h_src, static_cast<size_t>(c.off), copyStart, c.n, c.name);
+    checkCopy(h_out, h_src, static_cast<size_t>(c.soff), copyStart, c.n, c.name);
   }
 };
 
@@ -227,21 +245,63 @@ TEST_P(AsyncBlockCopyTest, Async)     { run<true>(GetParam());  }
 INSTANTIATE_TEST_SUITE_P(
   Gamut, AsyncBlockCopyTest,
   ::testing::Values(
-    AsyncBlockCase{4096,        4096, 0,   64,  "aligned_bulk_2warp"},
-    AsyncBlockCase{8192,        8192, 0,   256, "aligned_bulk_8warp"},
-    AsyncBlockCase{256,         1024, 0,   32,  "exactly_one_row"},
-    AsyncBlockCase{255,         1024, 0,   32,  "tail_only_255"},
-    AsyncBlockCase{257,         1024, 0,   32,  "one_row_plus_tail"},
-    AsyncBlockCase{100,         1024, 0,   32,  "tail_only_100"},
-    AsyncBlockCase{4096,        4096, 5,   128, "head_bulk_tail_off5"},
-    AsyncBlockCase{6000,        2048, 64,  256, "head_bulk_tail_off64"},
-    AsyncBlockCase{50,          1024, 100, 32,  "head_only_clamped"},
-    AsyncBlockCase{4096,        64,   0,   64,  "tiny_lds_direct_fallback"},
-    AsyncBlockCase{16384,       512,  0,   256, "lds_limits_issuers"},
-    AsyncBlockCase{4096,        1024, 0,   32,  "single_warp_block"},
-    AsyncBlockCase{65536 + 37,  8192, 0,   256, "large_odd_remainder"},
-    AsyncBlockCase{1,           1024, 3,   32,  "one_byte_head"}
+    AsyncBlockCase{4096,        4096, 0,   0,   64,  "aligned_bulk_2warp"},
+    AsyncBlockCase{8192,        8192, 0,   0,   256, "aligned_bulk_8warp"},
+    AsyncBlockCase{256,         1024, 0,   0,   32,  "exactly_one_row"},
+    AsyncBlockCase{255,         1024, 0,   0,   32,  "tail_only_255"},
+    AsyncBlockCase{257,         1024, 0,   0,   32,  "one_row_plus_tail"},
+    AsyncBlockCase{100,         1024, 0,   0,   32,  "tail_only_100"},
+    AsyncBlockCase{4096,        4096, 5,   5,   128, "head_bulk_tail_off5"},
+    AsyncBlockCase{6000,        2048, 64,  64,  256, "head_bulk_tail_off64"},
+    AsyncBlockCase{50,          1024, 100, 100, 32,  "head_only_clamped"},
+    AsyncBlockCase{4096,        64,   0,   0,   64,  "tiny_lds_direct_fallback"},
+    AsyncBlockCase{16384,       512,  0,   0,   256, "lds_limits_issuers"},
+    AsyncBlockCase{4096,        1024, 0,   0,   32,  "single_warp_block"},
+    // Only full warps issue the async path: a partial final warp sits out, and a block with no full warp falls back.
+    AsyncBlockCase{4096,        4096, 0,   0,   48,  "partial_warp_48"},
+    AsyncBlockCase{4096,        4096, 0,   0,   16,  "no_full_warp_16"},
+    AsyncBlockCase{65536 + 37,  8192, 0,   0,   256, "large_odd_remainder"},
+    AsyncBlockCase{1,           1024, 3,   3,   32,  "one_byte_head"},
+    AsyncBlockCase{4096,        4096, 8,   8,   64,  "head_width8"},
+    // Load frames under the issuer split: a budget that narrows the team for the ring frames, and one that doesn't.
+    AsyncBlockCase{(1 << 20) + 13, 65536, 128, 0, 256, "team_slot"},
+    AsyncBlockCase{(1 << 20) + 13, 65536, 0,   0, 256, "team_ring"},
+    AsyncBlockCase{(1 << 20) + 13, 65536, 4,   0, 256, "team_ring4"},
+    AsyncBlockCase{(1 << 20) + 13, 65536, 5,   0, 256, "team_shift"},
+    AsyncBlockCase{(1 << 20) + 13, 32768, 0,   0, 256, "team_ring_narrowed"},
+    AsyncBlockCase{(1 << 20) + 13, 32768, 5,   0, 256, "team_shift_32k"},
+    // An LDS region that is not 16B aligned.
+    AsyncBlockCase{(1 << 18) + 7, 16384, 5,   0, 32,  "lds_off4_shift", 4},
+    AsyncBlockCase{(1 << 18) + 7, 16384, 4,   0, 32,  "lds_off5_ring4", 5},
+    AsyncBlockCase{(1 << 18) + 7, 16384, 128, 0, 64,  "lds_off12_slot", 12}
   ),
+  [](const ::testing::TestParamInfo<AsyncBlockCase>& i){ return i.param.name; });
+
+// Every load frame of the pipeline at every window tier, on one warp so that the window is the whole budget. With
+// doff 0 the dst sits 128 bytes past a 512B boundary, so after the head the source is t0 = (soff - 128) % 512
+// bytes past one: soff 128 gives the Slot frame, 0 Ring, 4 Ring4 and 5 Shift. Each window is run with a copy that
+// fits in it, one whose bulk ends exactly on a slot boundary, and one with an odd tail.
+std::vector<AsyncBlockCase> frameTierCases() {
+  struct Frame {
+    const char* name;
+    int soff;
+  };
+  const Frame frames[] = {{"slot", 128}, {"ring", 0}, {"ring4", 4}, {"shift", 5}};
+  const size_t windows[] = {512, 1024, 2048, 3072, 4096, 6144, 8192, 12288, 16384, 24576, 32768, 49152, 65536};
+  std::vector<AsyncBlockCase> v;
+  for (const Frame& f : frames) {
+    for (size_t w : windows) {
+      const std::string tag = std::string(f.name) + "_w" + std::to_string(w);
+      v.push_back({w / 2 + 3, w, f.soff, 0, 32, tag + "_whole"});
+      v.push_back({(512 - kAsyncGuard) + 3 * w, w, f.soff, 0, 32, tag + "_slot_end"}); // head + 3 windows
+      v.push_back({3 * w + 37, w, f.soff, 0, 32, tag + "_odd"});
+    }
+  }
+  return v;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+  FrameTiers, AsyncBlockCopyTest, ::testing::ValuesIn(frameTierCases()),
   [](const ::testing::TestParamInfo<AsyncBlockCase>& i){ return i.param.name; });
 
 // ===========================================================================
@@ -347,6 +407,47 @@ TEST_F(AsyncTwoTeamTest, Blocking) { run<false>(8192, 2048, 256); }
 TEST_F(AsyncTwoTeamTest, Async)    { run<true>(8192, 2048, 256);  }
 
 // ===========================================================================
+//  One block per CU, each copying its own slice at a misaligned offset.
+// ===========================================================================
+
+// The Shift frame's stores read LDS that the realign just wrote. A store that runs ahead of those writes copies
+// stale bytes, which a lone block rarely shows but a full device shows on nearly every run.
+class AsyncGridCopyTest : public AsyncCopyTest {
+protected:
+  void run(int soff, int doff, size_t lds, size_t per) {
+    if (!supported_) GTEST_SKIP() << "async copy not supported on this device";
+    hipDeviceProp_t p{};
+    ASSERT_EQ(hipGetDeviceProperties(&p, 0), hipSuccess);
+    const int grid = p.multiProcessorCount;
+    const size_t n = per * grid;
+
+    const size_t srcTotal  = static_cast<size_t>(soff) + n;
+    const size_t dstTotal  = static_cast<size_t>(kAsyncGuard) + doff + n + kAsyncGuard;
+    const size_t copyStart = static_cast<size_t>(kAsyncGuard) + doff;
+
+    auto h_src = makePattern(srcTotal, static_cast<uint32_t>(soff * 131 + doff));
+    DeviceBuffer<uint8_t> d_src(srcTotal);
+    d_src.copyFrom(h_src);
+    std::vector<uint8_t> h_dstInit(dstTotal, kAsyncSentinel);
+    DeviceBuffer<uint8_t> d_dst(dstTotal);
+    d_dst.copyFrom(h_dstInit);
+
+    ASSERT_EQ(hipFuncSetAttribute(reinterpret_cast<const void*>(kAsyncGridCopy),
+                                  hipFuncAttributeMaxDynamicSharedMemorySize, static_cast<int>(lds)),
+              hipSuccess);
+    kAsyncGridCopy<<<grid, 256, lds>>>(d_dst.ptr + copyStart, d_src.ptr + soff, per, lds);
+    syncAndCheck();
+
+    auto h_out = d_dst.copyTo();
+    checkCopy(h_out, h_src, static_cast<size_t>(soff), copyStart, n, "grid_shift");
+  }
+};
+
+TEST_F(AsyncGridCopyTest, ShiftOdd)     { run(1, 0, 65536, (256 << 10) + 37); }
+TEST_F(AsyncGridCopyTest, ShiftTwoByte) { run(2, 0, 65536, (256 << 10) + 37); }
+TEST_F(AsyncGridCopyTest, ShiftBoth)    { run(3, 1, 65536, (256 << 10) + 37); }
+
+// ===========================================================================
 //  Non-default cache policy still copies correctly.
 // ===========================================================================
 
@@ -368,7 +469,7 @@ protected:
     d_dst.copyFrom(h_dstInit);
 
     kAsyncBlockCopy<false, kAltCachePolicy><<<1, block, lds>>>(
-        d_dst.ptr + copyStart, d_src.ptr + off, n, lds);
+        d_dst.ptr + copyStart, d_src.ptr + off, n, lds, 0);
     syncAndCheck();
 
     auto h_out = d_dst.copyTo();
