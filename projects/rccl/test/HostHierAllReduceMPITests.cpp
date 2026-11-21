@@ -367,6 +367,43 @@ TEST_F(HostHierAllReduceMPITest, ShortLastRound)
     ASSERT_MPI_FALSE(skippedFusedKernel(count, ncclFloat32));
 }
 
+// A larger call on a second stream grows the scratch while the first call, on the test stream, may still read it.
+TEST_F(HostHierAllReduceMPITest, LargerCallOnAnotherStreamGrowsScratch)
+{
+    const size_t counts[] = {countFor(64 * 1024), countFor(1024 * 1024)};
+    hipStream_t  streams[2] = {getActiveStream(), nullptr};
+    ASSERT_MPI_EQ(hipSuccess, hipStreamCreateWithFlags(&streams[1], hipStreamNonBlocking));
+    DeviceBuffer             send[2], recv[2];
+    std::vector<float>       host[2];
+    hipError_t               hip  = hipSuccess;
+    ncclResult_t             nccl = ncclSuccess;
+    for(int c = 0; c < 2 && hip == hipSuccess; c++)
+    {
+        host[c].resize(counts[c]);
+        for(size_t i = 0; i < counts[c]; i++)
+            host[c][i] = static_cast<float>((rank_ + i) % 16);
+        const size_t bytes = counts[c] * sizeof(float);
+        if((hip = hipMalloc(&send[c].ptr, bytes)) == hipSuccess && (hip = hipMalloc(&recv[c].ptr, bytes)) == hipSuccess)
+            hip = hipMemcpy(send[c].ptr, host[c].data(), bytes, hipMemcpyHostToDevice);
+    }
+    for(int c = 0; c < 2 && hip == hipSuccess && nccl == ncclSuccess; c++)
+        nccl = ncclAllReduce(send[c].ptr, recv[c].ptr, counts[c], ncclFloat32, ncclSum, comm(), streams[c]);
+    for(int c = 0; c < 2 && hip == hipSuccess; c++)
+        hip = hipStreamSynchronize(streams[c]);
+    size_t mismatches = 0;
+    for(int c = 0; c < 2 && hip == hipSuccess; c++)
+    {
+        hip = hipMemcpy(host[c].data(), recv[c].ptr, counts[c] * sizeof(float), hipMemcpyDeviceToHost);
+        for(size_t i = 0; hip == hipSuccess && i < counts[c]; i++)
+            mismatches += host[c][i] != rankSumMod(i, 16);
+    }
+    (void)hipStreamDestroy(streams[1]);
+    ASSERT_MPI_EQ(hipSuccess, hip);
+    ASSERT_MPI_EQ(ncclSuccess, nccl);
+    ASSERT_MPI_EQ(size_t{0}, mismatches);
+    ASSERT_MPI_TRUE(builtChildComms());
+}
+
 TEST_F(HostHierAllReduceMPITest, UnevenCountUsesDefaultPath)
 {
     RunResult run = fp32Sum(countFor(1024) + 1, false);
