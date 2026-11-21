@@ -341,7 +341,7 @@ protected:
     cmd += tmp_dir_;
     cmd += " ";
     cmd += daemon_bin();
-    cmd += " --attach --config ";
+    cmd += " --attach default --config ";
     cmd += daemon_config();
     cmd += " -- ";
     cmd += hip_rccl_bin();
@@ -487,7 +487,7 @@ TEST_F(DaemonTest, AttachExecFailurePreservesDaemonSocket) {
   if (client == 0) {
     setenv("XDG_RUNTIME_DIR", tmp_dir_.c_str(), 1);
     setenv("ROCJITSU_RUNTIME_DIR", runtime_dir_.c_str(), 1);
-    execl(daemon_bin(), daemon_bin(), "--attach", "--config", daemon_config(), "--",
+    execl(daemon_bin(), daemon_bin(), "--attach", "default", "--config", daemon_config(), "--",
           "/does/not/exist", nullptr);
     _exit(127);
   }
@@ -789,7 +789,7 @@ protected:
            " NCCL_SOCKET_NTHREADS=1 NCCL_NSOCKS_PERTHREAD=1"
            " NCCL_SOCKET_IFNAME=lo ";
     cmd += daemon_bin();
-    cmd += " --attach --config ";
+    cmd += " --attach default --config ";
     cmd += daemon_config_2gpu();
     cmd += " -- ";
     cmd += hip_rccl_bin();

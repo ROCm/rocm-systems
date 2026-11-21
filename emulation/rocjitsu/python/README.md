@@ -115,7 +115,7 @@ separate `startup_timeout` (30 seconds by default).
 | `cpu_thread_budget=N` | Native `--cpu-thread-budget` override; zero selects automatic sizing; source config is unchanged. |
 | `mode="local"` | In-process simulation inside the Python worker (default). |
 | `mode="daemon"` | Native `--daemon` with an owned simulator child. Closing the session terminates the whole private process group. |
-| `mode="attach"` | Native `--attach` to an existing daemon; closing the session leaves that daemon running. The daemon owns the config; budget overrides are rejected. |
+| `mode="attach"` | Native `--attach default` to an existing daemon; closing the session leaves that daemon running. The daemon owns the config; budget overrides are rejected. |
 | `env={...}`, `cwd=...` | Worker-only environment overrides and working directory; `None` removes a variable. Config paths resolve in the caller's directory. |
 | `python=...` | Worker Python interpreter; defaults to the caller's interpreter. |
 | `startup_timeout=30` | Deadline for both worker handshakes, in seconds. |
@@ -235,7 +235,7 @@ for the workload.
 ## Daemon execution
 
 Use `Session(mode="daemon")` to start a simulator owned by that session, or
-`Session(mode="attach")` to reuse an existing daemon. Closing an attached
+`Session(mode="attach")` to reuse the daemon in the current runtime directory. Closing an attached
 session leaves the daemon running for other clients. A daemon's devices and
 configuration are fixed when it starts; Python does not request new devices
 or reconfigure a running daemon.

@@ -139,8 +139,12 @@ private:
 struct LaunchFlags {
   std::shared_ptr<rjtools::NonEmptyStringFlag> config =
       std::make_shared<rjtools::NonEmptyStringFlag>(
-          ucli::FlagInfo{"--config", {}, "Simulation config JSON (required)"},
-          "requires a nonempty path");
+          ucli::FlagInfo{
+              "--config", {}, "Simulation config JSON. Cannot be combined with --profile"},
+          "requires a value");
+  std::shared_ptr<rjtools::NonEmptyStringFlag> profile =
+      std::make_shared<rjtools::NonEmptyStringFlag>(
+          ucli::FlagInfo{"--profile", {}, "Bundled profile config to run"}, "requires a value");
   std::shared_ptr<rjtools::NonEmptyStringFlag> node = std::make_shared<rjtools::NonEmptyStringFlag>(
       ucli::FlagInfo{
           "--node",
@@ -170,8 +174,14 @@ struct LaunchFlags {
                      {},
                      "Run a daemon, optionally launching an application",
                      ucli::ValueMode::Switch});
-  std::shared_ptr<ucli::BoolFlag> attach = std::make_shared<ucli::BoolFlag>(ucli::FlagInfo{
-      "--attach", {}, "Attach the application to a running daemon", ucli::ValueMode::Switch});
+  std::shared_ptr<rjtools::NonEmptyStringFlag> attach =
+      std::make_shared<rjtools::NonEmptyStringFlag>(
+          ucli::FlagInfo{"--attach",
+                         {},
+                         "Attach the application to a running daemon target",
+                         ucli::ValueMode::Required,
+                         "id_or_path"},
+          "requires an attach target");
   std::shared_ptr<ucli::BoolFlag> fabric_effect_trace = std::make_shared<ucli::BoolFlag>(
       ucli::FlagInfo{"--fabric-effect-trace",
                      {},
@@ -201,9 +211,10 @@ struct LaunchFlags {
 
   util::Result register_flags(ucli::Command &command, util::DiagnosticEmitter diagnostic) const {
     if (command
-            .add_flags("Simulation configuration",
-                       {config, node, cpu_thread_budget, wait_checking, thread_budget_table},
-                       diagnostic)
+            .add_flags(
+                "Simulation configuration",
+                {config, profile, node, cpu_thread_budget, wait_checking, thread_budget_table},
+                diagnostic)
             .failed() ||
         command
             .add_flags("Launch modes",
