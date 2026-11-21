@@ -222,7 +222,7 @@ extern bool IbCastUseInline;
  *
  *  reqIdx : receiver-side request index
  *  SD     : split-data flag (set when data spans >1 QPs)
- *  The receiver takes a one-request size from the completion byte count.
+ *  The receiver takes a one-request size from the completion byte count, unless the size record has it.
  */
 #define WR_IMM_RX_REQ_IDX_BITS  8
 #define WR_IMM_RX_REQ_IDX_BIT_POS 24

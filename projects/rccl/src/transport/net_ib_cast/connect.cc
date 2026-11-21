@@ -497,7 +497,8 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
   qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = IbCastUseInline ? sizeof(struct ncclIbSendFifo) * NCCL_NET_IB_MAX_RECVS : 0;
+  // One CTS entry: IbCastPostFifo does not inline multi-receive CTS writes.
+  qpInitAttr.cap.max_inline_data = IbCastUseInline ? sizeof(struct ncclIbSendFifo) : 0;
 
   qpInitAttr.comp_mask = IBV_QP_INIT_ATTR_PD;
   qpInitAttr.pd = createQpAttrs->pd;
@@ -630,7 +631,9 @@ ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* crea
   qpInitAttr.cap.max_send_wr = createQpAttrs->maxSendWorkRequest;
   qpInitAttr.cap.max_send_sge = 1;
   qpInitAttr.cap.max_recv_sge = 1;
-  qpInitAttr.cap.max_inline_data = IbCastUseInline ? sizeof(struct ncclIbSendFifo) * NCCL_NET_IB_MAX_RECVS : 0;
+  // One CTS entry: IbCastPostFifo does not inline multi-receive CTS writes. Eight entries exceed
+  // what some providers (bnxt_re) accept, and ibv_create_qp fails with EAGAIN.
+  qpInitAttr.cap.max_inline_data = IbCastUseInline ? sizeof(struct ncclIbSendFifo) : 0;
   NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
   return ncclSuccess;
 }
