@@ -11,6 +11,7 @@ case is exercised against both front-ends.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from conftest import RocprofsysTest, assert_resolved_settings, host_counters_expected
@@ -891,6 +892,11 @@ class TestCpuTargetFlags(RocprofsysTest):
                 "CPU agent unavailable; settings checked, frequency counters "
                 "not sampled on this host"
             )
+        if (
+            cpus != "none"
+            and not Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").exists()
+        ):
+            pytest.skip("host exposes no cpufreq sysfs; Frequency counter not sampled")
         if cpus == "none":
             self.assert_perfetto(
                 result,

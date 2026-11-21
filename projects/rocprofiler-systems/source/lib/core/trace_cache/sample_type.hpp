@@ -294,7 +294,8 @@ struct in_time_sample
         size_t category_enum_id_in, std::string_view track_name_in,
         size_t timestamp_ns_in, std::string_view event_metadata_in, size_t stack_id_in,
         size_t parent_stack_id_in, size_t correlation_id_in,
-        std::string_view call_stack_in, std::string_view line_info_in)
+        std::string_view call_stack_in, std::string_view line_info_in,
+        std::uint32_t device_id_in)
     : category_enum_id(category_enum_id_in)
     , track_name(track_name_in)
     , timestamp_ns(timestamp_ns_in)
@@ -304,6 +305,7 @@ struct in_time_sample
     , correlation_id(correlation_id_in)
     , call_stack(call_stack_in)
     , line_info(line_info_in)
+    , device_id(device_id_in)
     {}
 
     size_t           category_enum_id;
@@ -315,12 +317,14 @@ struct in_time_sample
     size_t           correlation_id;
     std::string_view call_stack;
     std::string_view line_info;
+    /// Type index of the CPU agent the event belongs to.
+    std::uint32_t device_id;
 
     template <typename Archive>
     void serialize(Archive& archive)
     {
         archive(category_enum_id, track_name, timestamp_ns, event_metadata, stack_id,
-                parent_stack_id, correlation_id, call_stack, line_info);
+                parent_stack_id, correlation_id, call_stack, line_info, device_id);
     }
 };
 
@@ -340,15 +344,13 @@ struct pmc_event_with_sample : in_time_sample
         std::optional<std::int64_t> system_tid_in)
     : in_time_sample(category_enum_id_in, track_name_in, timestamp_ns_in,
                      event_metadata_in, stack_id_in, parent_stack_id_in,
-                     correlation_id_in, call_stack_in, line_info_in)
-    , device_id(device_id_in)
+                     correlation_id_in, call_stack_in, line_info_in, device_id_in)
     , device_type(device_type_in)
     , pmc_info_name(pmc_info_name_in)
     , value(value_in)
     , system_tid(system_tid_in)
     {}
 
-    std::uint32_t               device_id;
     std::uint8_t                device_type;
     std::string_view            pmc_info_name;
     double                      value;
@@ -358,7 +360,7 @@ struct pmc_event_with_sample : in_time_sample
     void serialize(Archive& archive)
     {
         in_time_sample::serialize(archive);
-        archive(device_id, device_type, pmc_info_name, value, system_tid);
+        archive(device_type, pmc_info_name, value, system_tid);
     }
 };
 
