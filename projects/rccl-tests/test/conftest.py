@@ -21,3 +21,8 @@
 
 def pytest_addoption(parser):
     parser.addoption("--hostfile", action="store", default="", help="specify MPI hostfile")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "gin_ci: subset the RCCL GIN CI job runs (rccl/tools/ci/lib/gin-tests.json)")
