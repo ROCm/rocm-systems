@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/patch/text_edit_error.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/result.h"
 
 #include <cstdint>
@@ -33,14 +34,14 @@ struct CheckedTextEdit {
 /// observation resolution. It emits no ELF and retains no facts after the call.
 class CheckedTextEdits {
 private:
-  CheckedTextEdits(const AmdGpuCodeObject &source, rj_code_arch_t architecture, Decoder &decoder,
-                   const InstructionBoundaries &boundaries, const CodeObjectPatcher &patcher,
-                   std::span<const uint64_t> kernel_entries);
+  CheckedTextEdits(const AmdGpuCodeObject &source, rocjitsu::IsaFamily architecture,
+                   Decoder &decoder, const InstructionBoundaries &boundaries,
+                   const CodeObjectPatcher &patcher, std::span<const uint64_t> kernel_entries);
   Result apply(std::span<const CheckedTextEdit> edits, std::span<uint8_t> destination,
                TextEditError &error) const;
 
   const AmdGpuCodeObject &source_;
-  rj_code_arch_t architecture_;
+  rocjitsu::IsaFamily architecture_;
   Decoder &decoder_;
   const InstructionBoundaries &boundaries_;
   const CodeObjectPatcher &patcher_;

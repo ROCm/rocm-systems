@@ -100,30 +100,16 @@ pub(crate) unsafe fn ais_file_io(
     let Some(offset) = description.offset_range(address, transfer_size) else {
         return ERROR;
     };
-    // Hold the runtime lock through either synchronous transfer, preventing
-    // another HSA call from freeing the allocation during the borrow.
-    let status = if let Some(host) = description.host_address(address) {
-        // SAFETY: The mapped host range stays owned by the locked runtime.
-        // The public call keeps its descriptor live until this call returns.
-        unsafe {
-            ais_transfer(
-                descriptor,
-                host,
-                transfer_size,
-                file_offset,
-                size_copied,
-                operation_status,
-                operation,
-            )
-        }
-    } else {
-        let Some(memory) = owned_memory(runtime, address).filter(|memory| {
-            memory.description.agent_base == description.agent_base
-                && memory.description.host_base == description.host_base
-                && memory.description.offset_range(address, transfer_size) == Some(offset)
-        }) else {
-            return ERROR;
-        };
+    // A CPU-visible VRAM mapping is not ordinary host memory: direct file I/O
+    // may be unable to pin its pages, especially for a write into the mapping.
+    // Prefer the allocation's native AIS path even when a host alias exists.
+    // Keep the registry lock through either synchronous transfer.
+    let host = description.host_address(address);
+    if let Some(memory) = owned_memory(runtime, address).filter(|memory| {
+        memory.description.agent_base == description.agent_base
+            && memory.description.host_base == description.host_base
+            && memory.description.offset_range(address, transfer_size) == Some(offset)
+    }) {
         let offset = match u64::try_from(offset) {
             Ok(offset) => offset,
             Err(_) => return ERROR,
@@ -142,8 +128,15 @@ pub(crate) unsafe fn ais_file_io(
         ) {
             Ok(result) => {
                 // SAFETY: Optional outputs belong to the caller for this call.
-                unsafe { publish_ais_result(result, size_copied, operation_status) }
+                return unsafe { publish_ais_result(result, size_copied, operation_status) };
             }
+            // System-memory allocations can lack native AIS. Preserve their
+            // host path, but never replay an I/O operation after a native error
+            // that might have transferred bytes.
+            Err(error)
+                if error.kind() == rocddi::ErrorKind::Unsupported
+                    && error.native_status().is_none()
+                    && host.is_some() => {}
             Err(error) => {
                 // The ioctl input overlaps its output. On error KFD's copied
                 // count cannot be trusted, so leave size_copied untouched.
@@ -156,10 +149,24 @@ pub(crate) unsafe fn ais_file_io(
                     // SAFETY: The non-null optional output is caller-owned.
                     unsafe { operation_status.write(-errno) };
                 }
-                ERROR
+                return ERROR;
             }
         }
+    }
+    let Some(host) = host else {
+        return ERROR;
     };
-    drop(guard);
-    status
+    // SAFETY: The mapped host range stays owned by the locked runtime. The
+    // caller keeps its descriptor live until this synchronous call returns.
+    unsafe {
+        ais_transfer(
+            descriptor,
+            host,
+            transfer_size,
+            file_offset,
+            size_copied,
+            operation_status,
+            operation,
+        )
+    }
 }

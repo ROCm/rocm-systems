@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
@@ -35,6 +36,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -57,6 +60,20 @@ enum MemPipelineTag : uint8_t {
   LOCAL_MEM = 3,
   TENSOR_DMA = 4,
 };
+
+/// Host allocation policy for retired ordinary memory instructions. The six
+/// retained vectors in VectorMemState total at most 24 KiB per cache entry
+/// (6 MiB for 256 entries per CU), in addition to the fixed state/decoded object.
+/// Scalar states retain only the two translated buffers. Larger transfers still
+/// execute normally; their capacity is released at retirement.
+constexpr size_t kMaxRetainedMemoryBufferBytes = 4096;
+
+template <typename Element> void clear_reusable_memory_buffer(std::vector<Element> &buffer) {
+  if (buffer.capacity() > kMaxRetainedMemoryBufferBytes / sizeof(Element))
+    std::vector<Element>().swap(buffer);
+  else
+    buffer.clear();
+}
 
 /// @brief One physical-transfer request prepared from a vector memory operation.
 struct TranslatedMemoryRequest {
@@ -91,6 +108,14 @@ public:
   // with its VM snapshot and request cursor across retries.
   bool peer_data_route = false;
   bool mixed_local_peer_route = false;
+
+  /// @brief Release the VM epoch at retirement, even if the cache is never hit.
+  void retire_for_reuse() {
+    transfer_token = {};
+    access.reset();
+    clear_reusable_memory_buffer(requests);
+    clear_reusable_memory_buffer(reordered_data);
+  }
 };
 
 /// Per-lane texture status. A resident fetch leaves the status VGPR unchanged.
@@ -141,9 +166,9 @@ struct ImageSampleAccess {
 };
 
 /// @brief Dynamic pipeline state for scalar memory instructions (SMEM).
-class ScalarMemState : public DynamicInstState {
+class ScalarMemState final : public DynamicInstState {
 public:
-  ScalarMemState() { tag_ = SCALAR_MEM; }
+  ScalarMemState() noexcept { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
   bool request_force_l1_bypass = false;
   bool translation_probe = false; ///< Nonfaulting ATC probe, with no register writeback.
@@ -167,6 +192,21 @@ public:
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
   TranslatedMemoryProgress translated;
+
+  bool retire_for_reuse() noexcept override {
+    translated.retire_for_reuse();
+    return true;
+  }
+
+  /// @brief Reset every semantic field while keeping the retired buffer capacity.
+  void reset_for_reuse() noexcept {
+    std::vector<TranslatedMemoryRequest> requests = std::move(translated.requests);
+    std::vector<uint8_t> reordered_data = std::move(translated.reordered_data);
+    std::destroy_at(this);
+    ScalarMemState *fresh = std::construct_at(this);
+    fresh->translated.requests = std::move(requests);
+    fresh->translated.reordered_data = std::move(reordered_data);
+  }
 };
 
 /// @brief Per-element vector-memory lane masks with inline storage for the
@@ -236,9 +276,9 @@ enum class TransposeKind : uint8_t {
 
 /// @brief Dynamic pipeline state for vector memory instructions
 /// (FLAT, MUBUF, MTBUF, DS).
-class VectorMemState : public DynamicInstState {
+class VectorMemState final : public DynamicInstState {
 public:
-  VectorMemState(MemPipelineTag pipeline) {
+  VectorMemState(MemPipelineTag pipeline) noexcept {
     tag_ = pipeline;
     wait_counter_type = (pipeline == LOCAL_MEM) ? WaitCounterType::LGKMCNT : WaitCounterType::VMCNT;
   }
@@ -493,6 +533,48 @@ public:
     }
   }
 
+  bool retire_for_reuse() noexcept override {
+    translated.retire_for_reuse();
+    texel_status.reset();
+    image_bc.reset();
+    image_status.reset();
+    feedback_wait.reset();
+    bvh.reset();
+    image_metadata.reset();
+    graphics_sample.reset();
+    image_sample.reset();
+    element_lane_masks = ElementLaneMasks{};
+    clear_reusable_memory_buffer(response_data);
+    clear_reusable_memory_buffer(store_data);
+    clear_reusable_memory_buffer(ds2_response_data);
+    clear_reusable_memory_buffer(ds2_store_data);
+    return true;
+  }
+
+  /// @brief Reset routing, payload, and writeback fields to constructor defaults.
+  /// @details Retirement already cleared the bounded buffers and released all
+  /// VM snapshots. Reconstructing this final, exclusively owned type in place
+  /// preserves constructor defaults without copying a large temporary state.
+  /// Construction cannot throw, and complete same-type replacement preserves
+  /// the acquiring unique_ptr's pointer. No old base/member observers survive
+  /// this boundary; acquire_data() detached the state before calling it.
+  void reset_for_reuse(MemPipelineTag pipeline) noexcept {
+    std::vector<uint8_t> response = std::move(response_data);
+    std::vector<uint8_t> store = std::move(store_data);
+    std::vector<uint8_t> ds2_response = std::move(ds2_response_data);
+    std::vector<uint8_t> ds2_store = std::move(ds2_store_data);
+    std::vector<TranslatedMemoryRequest> requests = std::move(translated.requests);
+    std::vector<uint8_t> reordered_data = std::move(translated.reordered_data);
+    std::destroy_at(this);
+    VectorMemState *fresh = std::construct_at(this, pipeline);
+    fresh->response_data = std::move(response);
+    fresh->store_data = std::move(store);
+    fresh->ds2_response_data = std::move(ds2_response);
+    fresh->ds2_store_data = std::move(ds2_store);
+    fresh->translated.requests = std::move(requests);
+    fresh->translated.reordered_data = std::move(reordered_data);
+  }
+
   /// Capture the issue-time M0 mask and populate element_lane_masks from the
   /// current lane_mask. An empty mask clears lane_mask; exec_mask is retained
   /// so the instruction still participates in wait-counter accounting.
@@ -555,7 +637,7 @@ public:
   /// DS2 offsets are wave-uniform. CDNA1–4 and GFX10 coalesce equal
   /// offsets into one memory access, including reads with two result words.
   /// Their two-address DS specification also uses only DATA0 for such writes.
-  [[nodiscard]] bool has_second_ds_address(rj_code_arch_t arch, uint64_t lanes) const {
+  [[nodiscard]] bool has_second_ds_address(rocjitsu::IsaFamily arch, uint64_t lanes) const {
     if (!ds2_active || !lanes)
       return false;
     const unsigned lane = std::countr_zero(lanes);
@@ -571,9 +653,12 @@ public:
   }
 };
 
+static_assert(std::is_nothrow_default_constructible_v<ScalarMemState>);
+static_assert(std::is_nothrow_constructible_v<VectorMemState, MemPipelineTag>);
+
 /// CDNA1-4 buffer-OOB reads still write zeros to legal LDS destinations.
 /// Later architectures suppress the LDS write for lanes that did not request data.
-inline uint64_t lds_destination_write_mask(const VectorMemState &state, rj_code_arch_t arch) {
+inline uint64_t lds_destination_write_mask(const VectorMemState &state, rocjitsu::IsaFamily arch) {
   uint64_t mask = arch_is_cdna_4_or_lower(arch) ? state.exec_mask : state.lane_mask;
   if (state.lds_per_lane_addr)
     for (uint32_t lane = 0; lane < state.wf_size; ++lane)
