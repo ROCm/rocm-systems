@@ -75,6 +75,70 @@ def _describe_codes(codes):
 # declared to fail counts as a pass when it does.
 Verdict = collections.namedtuple("Verdict", "message counts_as_failure")
 
+# How RunCmds grades an all-GPU command on a multi-GPU host: by the runs of the
+# same command on each GPU (``members``, in GPU order) and the codes each GPU may
+# answer with (``member_conds``). With ``exact`` the all-GPU code must equal the
+# aggregate of the codes the members returned; otherwise it may be any aggregate
+# the members' expected codes can produce.
+GroupCheck = collections.namedtuple("GroupCheck", "members member_conds exact")
+
+
+def _aggregate_exit_code(codes):
+    """The exit code the CLI returns for one run over several GPUs.
+
+    Mirrors ``AmdSmiErrorCollector.resolve_exit_code``: no failure -> SUCCESS,
+    every failure the same code -> that code, otherwise MIXED_DEVICE_ERRORS. Each
+    GPU's own exit code stands in for the codes it recorded; that gives the same
+    answer, because a GPU only exits MIXED_DEVICE_ERRORS when its own codes differ.
+
+    Args:
+        codes: one exit code per GPU.
+
+    Returns:
+        int: the aggregate exit code.
+    """
+    failures = {int(code) for code in codes if code}
+    if not failures:
+        return int(AmdSmiExitCode.SUCCESS)
+    if len(failures) == 1:
+        return failures.pop()
+    return int(AmdSmiExitCode.MIXED_DEVICE_ERRORS)
+
+
+def _reachable_aggregates(per_gpu_codes):
+    """Every code _aggregate_exit_code returns when each GPU answers with one of its codes.
+
+    The same set as aggregating every combination of the GPUs' codes, computed
+    without enumerating the combinations, whose number grows exponentially with
+    the GPU count:
+    - SUCCESS when every GPU may succeed;
+    - a failure code c when every GPU may answer c or succeed, and one may answer c;
+    - MIXED_DEVICE_ERRORS also when two GPUs may fail with different codes. A GPU
+      that may answer MIXED_DEVICE_ERRORS itself is covered by these two rules.
+
+    Args:
+        per_gpu_codes: per GPU, the exit codes it may answer with.
+
+    Returns:
+        list: the reachable aggregate codes, sorted; empty when a GPU has none.
+    """
+    code_sets = [{int(code) for code in codes} for codes in per_gpu_codes]
+    if not all(code_sets):
+        return []
+    success = int(AmdSmiExitCode.SUCCESS)
+    reachable = set()
+    if all(success in codes for codes in code_sets):
+        reachable.add(success)
+    failures = [{code for code in codes if code} for codes in code_sets]
+    for code in set().union(*failures):
+        if all(code in codes or success in codes for codes in code_sets):
+            reachable.add(code)
+    failing = [codes for codes in failures if codes]
+    if len(failing) > 1 and len(set().union(*failing)) > 1:
+        reachable.add(int(AmdSmiExitCode.MIXED_DEVICE_ERRORS))
+    return sorted(reachable)
+
+
 # --clk-level placeholder -> the clock name the CLI expects. PCIE is sized from
 # a different source than the rest; see _clk_level_count().
 CLK_LEVEL_TYPES = {
@@ -172,6 +236,34 @@ class TestCliBase(unittest.TestCase):
     # Order for the amd-smi reset commands, putting --clocks last since
     # it resets clocks and overdrive to default
     SWEEP_ARG_ORDER = {"reset": {"first": "--fans", "last": "--clocks"}}
+
+    # Commands whose sweep, on a multi-GPU host, also runs each all-GPU command
+    # once per GPU: the CLI folds every GPU's answer into one exit code, so only
+    # the per-GPU runs show which GPU answered what.
+    PER_GPU_SWEEP_COMMANDS = frozenset({"set"})
+
+    # Placeholders whose value comes from one GPU's data. On a multi-GPU host the
+    # sweep also resolves them with every other GPU's data.
+    OWN_VALUE_PLACEHOLDERS = (
+        "{min_power}",
+        "{avg_power}",
+        "{max_power}",
+        "{perf_determinism}",
+        "{soc_pstate}",
+        "{xgmi_plpd}",
+        "{clk_level_",
+        "{clk_limit_",
+    )
+
+    # Options whose answer can change between two runs of the same command: a DPM
+    # table's length and a clock's range move at runtime, and a memory partition
+    # write only queues a change. An all-GPU run of these is checked against every
+    # aggregate its per-GPU expectations allow, not against what the per-GPU runs
+    # returned. --clk-level is one too, except for PCIE, whose level count is fixed.
+    RUNTIME_DEPENDENT_OPTIONS = frozenset({"--clk-limit", "--memory-partition"})
+
+    # Device selectors other than --gpu; a command naming one does not target GPUs.
+    OTHER_DEVICE_OPTIONS = frozenset({"--cpu", "--core", "--nic"})
 
     # Scaffolding shared across every CLI test class.  setUpClass populates
     # these once, directly on ``TestCliBase``; subclasses then resolve them
@@ -658,195 +750,11 @@ class TestCliBase(unittest.TestCase):
 
         # Calculate and substitute in dependent values
         # Removes cmds that are invalid
-        for index, cmd_cond in enumerate(cmds):
-            cmd, cond = cmd_cond
-            tolerated = self._lookup(self.SWEEP_TOLERATED_CODES, cmd)
-            if tolerated is not None:
-                cond = [*ok, tolerated]
-            while self.openCurlyBrace in cmd:
-                items = cmd.split()
-                # Find gpu index. No --gpu, "all" or a bdf all target every device.
-                explicit_gpu = False
-                try:
-                    i = items.index("--gpu")
-                    gpu = items[i + 1]
-                    if gpu.isdigit():
-                        gpu_index = int(gpu)
-                        explicit_gpu = True
-                    else:
-                        gpu_index = 0
-                except ValueError:
-                    gpu_index = 0
-
-                # Find conditional arguments
-                posOpen = cmd.find(self.openCurlyBrace)
-                if posOpen < 0:
-                    break
-                posClose = cmd.find(self.closeCurlyBrace, posOpen)
-                if posClose < 0:
-                    break
-                nameStr = cmd[posOpen : posClose + 1]
-
-                if (
-                    nameStr == "{json}"
-                    or "json_file" in nameStr
-                    or nameStr == "{csv}"
-                    or "csv_file" in nameStr
-                ):
-                    # For adding file options
-                    if nameStr == "{json}":
-                        cmd = cmd.replace(nameStr, "--json", 1)
-                    elif nameStr == "{json_file}":
-                        cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename}", 1)
-                    elif nameStr == "{json_file_append}":
-                        cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename} --append", 1)
-                    elif nameStr == "{json_file_overwrite}":
-                        cmd = cmd.replace(
-                            nameStr, f"--json --file {self.tmp_filename} --overwrite", 1
-                        )
-                    elif nameStr == "{csv}":
-                        cmd = cmd.replace(nameStr, "--csv", 1)
-                    elif nameStr == "{csv_file}":
-                        cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename}", 1)
-                    elif nameStr == "{csv_file_append}":
-                        cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename} --append", 1)
-                    elif nameStr == "{csv_file_overwrite}":
-                        cmd = cmd.replace(
-                            nameStr, f"--csv --file {self.tmp_filename} --overwrite", 1
-                        )
-                    else:
-                        print(f"Error: could not replace json/csv options, {nameStr}  cmd={cmd}")
-                        cmd = ""
-                elif nameStr == "{watch_time}" or nameStr == "{watch_iterations}":
-                    # For adding watch options
-                    if nameStr == "{watch_time}":
-                        cmd = cmd.replace(nameStr, "--watch 1 --watch_time 2", 1)
-                    else:
-                        cmd = cmd.replace(nameStr, "--watch 1 --iterations 2", 1)
-                elif (
-                    nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}"
-                ):
-                    # For setting --power-cap
-                    # Stop at the match; a later iteration would overwrite it with "N/A".
-                    for power_type in self.power_types:
-                        if power_type in cmd:
-                            power_type = self.static_data["gpu_data"][gpu_index]["limit"][
-                                power_type
-                            ]
-                            break
-                    else:
-                        power_type = "N/A"
-                    if (
-                        power_type == "N/A"
-                        or not isinstance(power_type, dict)
-                        or power_type["min_power_limit"] == "N/A"
-                        or power_type["max_power_limit"] == "N/A"
-                    ):
-                        cmd = ""
-                    else:
-                        # A current cap of 0 means the CLI refuses every write to this
-                        # sensor, whatever value is asked for.
-                        current_cap = power_type["socket_power_limit"]
-                        if isinstance(current_cap, dict) and current_cap["value"] == 0:
-                            cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                        # The CLI clamps its lower bound to 1, so a reported min of 0
-                        # is refused rather than being the smallest settable cap.
-                        min_power = max(power_type["min_power_limit"]["value"], 1)
-                        max_power = power_type["max_power_limit"]["value"]
-                        avg_power = int((min_power + max_power) / 2)
-                        if nameStr == "{min_power}":
-                            cmd = cmd.replace("{min_power}", str(min_power), 1)
-                        elif nameStr == "{avg_power}":
-                            cmd = cmd.replace("{avg_power}", str(avg_power), 1)
-                        elif nameStr == "{max_power}":
-                            cmd = cmd.replace("{max_power}", str(max_power), 1)
-                elif nameStr == "{perf_determinism}":
-                    clock_sys = self.static_data["gpu_data"][gpu_index]["clock"]["sys"]
-                    if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
-                        num = len(clock_sys["frequency_levels"])
-                        level = f"Level {num - 1}"
-                        clock_freq = int(clock_sys["frequency_levels"][level]["value"])
-                        cmd = cmd.replace(
-                            "{perf_determinism}", f"--perf-determinism {clock_freq + 50}", 1
-                        )
-                    else:
-                        cmd = ""
-                elif "clk_limit" in nameStr:
-                    clk_type, bound = CLK_LIMIT_TARGETS[nameStr]
-                    value = self._clk_limit_probe_value(
-                        self.metric_data["gpu_data"][gpu_index]["clock"], clk_type, bound
-                    )
-                    if value is None:
-                        cmd = ""
-                    else:
-                        # The sweep writes MAX before MIN, and that write can narrow the
-                        # range, so a value probed from the snapshot may no longer fit.
-                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                        cmd = cmd.replace(nameStr, f"{clk_type} {bound} {value}", 1)
-                elif "clk_level" in nameStr:
-                    clk_type = CLK_LEVEL_TYPES[nameStr]
-                    count = self._clk_level_count(clk_type, gpu_index, explicit_gpu)
-                    if clk_type != "PCIE":
-                        # A DPM table's length is a runtime value, not a fixed property:
-                        # the same device reports fewer levels when the domain is idle.
-                        # The CLI re-reads it as the command runs, so a mask sized here
-                        # can name a level it no longer accepts.
-                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
-                    if count:
-                        levels = " ".join(str(level) for level in range(count))
-                        cmd = cmd.replace(nameStr, f"{clk_type} {levels}", 1)
-                    else:
-                        cmd = ""
-                elif nameStr.startswith("{profile_"):
-                    profile = nameStr[len("{profile_") : -1]
-                    if self._profile_supported(gpu_index, explicit_gpu, profile):
-                        cmd = cmd.replace(nameStr, profile, 1)
-                    else:
-                        cmd = ""
-                elif nameStr == "{reset_profile}":
-                    if self._profile_supported(gpu_index, explicit_gpu):
-                        cmd = cmd.replace(nameStr, "--profile", 1)
-                    else:
-                        cmd = ""
-                elif nameStr == "{soc_pstate}":
-                    soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
-                    if type(soc_pstate) is dict:
-                        num_supported = int(soc_pstate["num_supported"])
-                        if num_supported > 0:
-                            current = int(soc_pstate["current_id"])
-                            if current == 0:
-                                num = num_supported - 1
-                            else:
-                                num = 0
-                            cmd = cmd.replace(nameStr, f"{num}", 1)
-                        else:
-                            cmd = ""
-                    else:
-                        cmd = ""
-                elif nameStr == "{xgmi_plpd}":
-                    xgmi_plpd = self.static_data["gpu_data"][gpu_index]["xgmi_plpd"]
-                    if type(xgmi_plpd) is dict:
-                        num_supported = int(xgmi_plpd["num_supported"])
-                        if num_supported > 0:
-                            current = int(xgmi_plpd["current_id"])
-                            if current == 0:
-                                num = num_supported - 1
-                            else:
-                                num = 0
-                            cmd = cmd.replace(nameStr, f"{num}", 1)
-                        else:
-                            cmd = ""
-                    else:
-                        cmd = ""
-            # The NIC path prints once and never loops, so the parser rejects --watch with --nic
-            words = cmd.split()
-            if "--nic" in words and ("--watch" in words):
-                cond = [AmdSmiExitCode.INVALID_PARAMETER]
-            if (words[1:2] == ["metric"]) and ("--nic" in words):
-                given_flags = {word for word in words if word.startswith("--")}
-                if given_flags - self.NIC_METRIC_FLAGS:
-                    cond = [AmdSmiExitCode.INVALID_PARAMETER]
-            cmds[index] = (cmd, cond)
+        # The unresolved text of each command, so per-GPU runs can resolve it
+        # again with another GPU's data.
+        templates = [cmd for cmd, _ in cmds]
+        for index, (cmd, cond) in enumerate(cmds):
+            cmds[index] = self._resolve_cmd(cmd, cond, ok)
 
         # Pare down commands
         if self.ReduceCmds:
@@ -936,6 +844,12 @@ class TestCliBase(unittest.TestCase):
                 self.common.print(f"{self.tab}Excluded ({reason}): amd-smi {key}")
             cmds[index] = ("", cond)
 
+        # On a multi-GPU host, follow each all-GPU command with its per-GPU runs.
+        # Done after the pare-down, so it does not remove them.
+        gpu_count = len(self.static_data.get("gpu_data", []))
+        if cmd_name in self.PER_GPU_SWEEP_COMMANDS and gpu_count > 1:
+            cmds = self._expand_per_gpu(cmds, templates, ok)
+
         # Remove empty (cmd,cond) arguments
         cmds = [cmd_cond for cmd_cond in cmds if cmd_cond[0] != ""]
 
@@ -949,6 +863,375 @@ class TestCliBase(unittest.TestCase):
             print(f"cmds: {'*' * 80}")
             print(json.dumps(cmds, sort_keys=False, indent=4), flush=True)
         return cmds
+
+    def _resolve_cmd(self, cmd, cond, ok):
+        """Substitute *cmd*'s placeholders and pick the codes it may answer with.
+
+        Placeholders take the values of the GPU the command names with
+        ``--gpu N``, or of GPU 0 when it names none. Two kinds are checked against
+        every GPU when no ``--gpu N`` is named: non-PCIE ``{clk_level_*}`` use the
+        smallest level table across all GPUs, and ``{profile_*}``/``{reset_profile}``
+        resolve only when every GPU lists the profile (any profile, for reset).
+
+        Args:
+            cmd: the command, with its ``{placeholder}`` values unresolved.
+            cond: the codes the command was declared to answer with.
+            ok: the codes the whole sweep accepts.
+
+        Returns:
+            tuple: (cmd, cond); cmd is "" when the target cannot take the command.
+        """
+        tolerated = self._lookup(self.SWEEP_TOLERATED_CODES, cmd)
+        if tolerated is not None:
+            cond = [*ok, tolerated]
+        while self.openCurlyBrace in cmd:
+            items = cmd.split()
+            # Find gpu index. No --gpu, "all" or a bdf all target every device.
+            explicit_gpu = False
+            try:
+                i = items.index("--gpu")
+                gpu = items[i + 1]
+                if gpu.isdigit():
+                    gpu_index = int(gpu)
+                    explicit_gpu = True
+                else:
+                    gpu_index = 0
+            except ValueError:
+                gpu_index = 0
+
+            # Find conditional arguments
+            posOpen = cmd.find(self.openCurlyBrace)
+            if posOpen < 0:
+                break
+            posClose = cmd.find(self.closeCurlyBrace, posOpen)
+            if posClose < 0:
+                break
+            nameStr = cmd[posOpen : posClose + 1]
+
+            if (
+                nameStr == "{json}"
+                or "json_file" in nameStr
+                or nameStr == "{csv}"
+                or "csv_file" in nameStr
+            ):
+                # For adding file options
+                if nameStr == "{json}":
+                    cmd = cmd.replace(nameStr, "--json", 1)
+                elif nameStr == "{json_file}":
+                    cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename}", 1)
+                elif nameStr == "{json_file_append}":
+                    cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename} --append", 1)
+                elif nameStr == "{json_file_overwrite}":
+                    cmd = cmd.replace(nameStr, f"--json --file {self.tmp_filename} --overwrite", 1)
+                elif nameStr == "{csv}":
+                    cmd = cmd.replace(nameStr, "--csv", 1)
+                elif nameStr == "{csv_file}":
+                    cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename}", 1)
+                elif nameStr == "{csv_file_append}":
+                    cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename} --append", 1)
+                elif nameStr == "{csv_file_overwrite}":
+                    cmd = cmd.replace(nameStr, f"--csv --file {self.tmp_filename} --overwrite", 1)
+                else:
+                    print(f"Error: could not replace json/csv options, {nameStr}  cmd={cmd}")
+                    cmd = ""
+            elif nameStr == "{watch_time}" or nameStr == "{watch_iterations}":
+                # For adding watch options
+                if nameStr == "{watch_time}":
+                    cmd = cmd.replace(nameStr, "--watch 1 --watch_time 2", 1)
+                else:
+                    cmd = cmd.replace(nameStr, "--watch 1 --iterations 2", 1)
+            elif nameStr == "{min_power}" or nameStr == "{avg_power}" or nameStr == "{max_power}":
+                # For setting --power-cap
+                # Stop at the match; a later iteration would overwrite it with "N/A".
+                for power_type in self.power_types:
+                    if power_type in cmd:
+                        power_type = self.static_data["gpu_data"][gpu_index]["limit"][power_type]
+                        break
+                else:
+                    power_type = "N/A"
+                if (
+                    power_type == "N/A"
+                    or not isinstance(power_type, dict)
+                    or power_type["min_power_limit"] == "N/A"
+                    or power_type["max_power_limit"] == "N/A"
+                ):
+                    cmd = ""
+                else:
+                    # A current cap of 0 means the CLI refuses every write to this
+                    # sensor, whatever value is asked for.
+                    current_cap = power_type["socket_power_limit"]
+                    if isinstance(current_cap, dict) and current_cap["value"] == 0:
+                        cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                    # The CLI clamps its lower bound to 1, so a reported min of 0
+                    # is refused rather than being the smallest settable cap.
+                    min_power = max(power_type["min_power_limit"]["value"], 1)
+                    max_power = power_type["max_power_limit"]["value"]
+                    avg_power = int((min_power + max_power) / 2)
+                    if nameStr == "{min_power}":
+                        cmd = cmd.replace("{min_power}", str(min_power), 1)
+                    elif nameStr == "{avg_power}":
+                        cmd = cmd.replace("{avg_power}", str(avg_power), 1)
+                    elif nameStr == "{max_power}":
+                        cmd = cmd.replace("{max_power}", str(max_power), 1)
+            elif nameStr == "{perf_determinism}":
+                clock_sys = self.static_data["gpu_data"][gpu_index]["clock"]["sys"]
+                if clock_sys != "N/A" and len(clock_sys["frequency_levels"]):
+                    num = len(clock_sys["frequency_levels"])
+                    level = f"Level {num - 1}"
+                    clock_freq = int(clock_sys["frequency_levels"][level]["value"])
+                    cmd = cmd.replace(
+                        "{perf_determinism}", f"--perf-determinism {clock_freq + 50}", 1
+                    )
+                else:
+                    cmd = ""
+            elif "clk_limit" in nameStr:
+                clk_type, bound = CLK_LIMIT_TARGETS[nameStr]
+                value = self._clk_limit_probe_value(
+                    self.metric_data["gpu_data"][gpu_index]["clock"], clk_type, bound
+                )
+                if value is None:
+                    cmd = ""
+                else:
+                    # The sweep writes MAX before MIN, and that write can narrow the
+                    # range, so a value probed from the snapshot may no longer fit.
+                    cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                    cmd = cmd.replace(nameStr, f"{clk_type} {bound} {value}", 1)
+            elif "clk_level" in nameStr:
+                clk_type = CLK_LEVEL_TYPES[nameStr]
+                count = self._clk_level_count(clk_type, gpu_index, explicit_gpu)
+                if clk_type != "PCIE":
+                    # A DPM table's length is a runtime value, not a fixed property:
+                    # the same device reports fewer levels when the domain is idle.
+                    # The CLI re-reads it as the command runs, so a mask sized here
+                    # can name a level it no longer accepts.
+                    cond = [*ok, AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+                if count:
+                    levels = " ".join(str(level) for level in range(count))
+                    cmd = cmd.replace(nameStr, f"{clk_type} {levels}", 1)
+                else:
+                    cmd = ""
+            elif nameStr.startswith("{profile_"):
+                profile = nameStr[len("{profile_") : -1]
+                if self._profile_supported(gpu_index, explicit_gpu, profile):
+                    cmd = cmd.replace(nameStr, profile, 1)
+                else:
+                    cmd = ""
+            elif nameStr == "{reset_profile}":
+                if self._profile_supported(gpu_index, explicit_gpu):
+                    cmd = cmd.replace(nameStr, "--profile", 1)
+                else:
+                    cmd = ""
+            elif nameStr == "{soc_pstate}":
+                soc_pstate = self.static_data["gpu_data"][gpu_index]["soc_pstate"]
+                if type(soc_pstate) is dict:
+                    num_supported = int(soc_pstate["num_supported"])
+                    if num_supported > 0:
+                        current = int(soc_pstate["current_id"])
+                        if current == 0:
+                            num = num_supported - 1
+                        else:
+                            num = 0
+                        cmd = cmd.replace(nameStr, f"{num}", 1)
+                    else:
+                        cmd = ""
+                else:
+                    cmd = ""
+            elif nameStr == "{xgmi_plpd}":
+                xgmi_plpd = self.static_data["gpu_data"][gpu_index]["xgmi_plpd"]
+                if type(xgmi_plpd) is dict:
+                    num_supported = int(xgmi_plpd["num_supported"])
+                    if num_supported > 0:
+                        current = int(xgmi_plpd["current_id"])
+                        if current == 0:
+                            num = num_supported - 1
+                        else:
+                            num = 0
+                        cmd = cmd.replace(nameStr, f"{num}", 1)
+                    else:
+                        cmd = ""
+                else:
+                    cmd = ""
+        # The NIC path prints once and never loops, so the parser rejects --watch with --nic
+        words = cmd.split()
+        if "--nic" in words and ("--watch" in words):
+            cond = [AmdSmiExitCode.INVALID_PARAMETER]
+        if (words[1:2] == ["metric"]) and ("--nic" in words):
+            given_flags = {word for word in words if word.startswith("--")}
+            if given_flags - self.NIC_METRIC_FLAGS:
+                cond = [AmdSmiExitCode.INVALID_PARAMETER]
+        return cmd, cond
+
+    def _expand_per_gpu(self, cmds, templates, ok):
+        """The sweep with the per-GPU runs a multi-GPU host needs.
+
+        The CLI runs an all-GPU command on each GPU in turn and folds their answers
+        into one exit code, so each all-GPU command is followed by the same command
+        on every GPU (``--gpu N``) and graded against those runs. A template whose
+        values come from GPU data is also resolved with each GPU's own data. No
+        command text is queued twice: one already queued is reused, and a later
+        copy of it is dropped.
+
+        Args:
+            cmds: (cmd, cond) for each template; cmd is "" where it was dropped.
+            templates: each command before its placeholders were resolved.
+            ok: the codes the whole sweep accepts.
+
+        Returns:
+            list: the (cmd, cond) entries to run, in order. An all-GPU command's
+            cond is a GroupCheck.
+        """
+        gpu_count = len(self.static_data["gpu_data"])
+        queued = set()
+        expanded = []
+
+        def queue(cmd, cond):
+            queued.add(cmd)
+            expanded.append((cmd, cond))
+
+        for (cmd, cond), template in zip(cmds, templates):
+            cmd = " ".join(cmd.split())
+            if cmd and cmd not in queued:
+                if self._targets_all_gpus(cmd):
+                    members = [self._with_gpu(cmd, gpu) for gpu in range(gpu_count)]
+                    member_conds = [
+                        self._per_gpu_cond(member, cond, gpu) for gpu, member in enumerate(members)
+                    ]
+                    check = GroupCheck(
+                        tuple(members), tuple(member_conds), self._aggregate_is_exact(cmd)
+                    )
+                    queue(cmd, check)
+                    for member, member_cond in zip(members, member_conds):
+                        if member not in queued:
+                            queue(member, member_cond)
+                else:
+                    queue(cmd, cond)
+            if self._has_own_values(template):
+                for gpu in range(gpu_count):
+                    own, own_cond = self._resolve_cmd(self._with_gpu(template, gpu), ok, ok)
+                    own = " ".join(own.split())
+                    if own and own not in queued:
+                        queue(own, self._per_gpu_cond(own, own_cond, gpu))
+        return expanded
+
+    def _targets_all_gpus(self, cmd):
+        """Whether *cmd* runs on every GPU: no --gpu, or --gpu all."""
+        words = cmd.split()
+        if self.OTHER_DEVICE_OPTIONS.intersection(words):
+            return False
+        if "--gpu" not in words:
+            return True
+        return words[words.index("--gpu") + 1 :][:1] == ["all"]
+
+    @staticmethod
+    def _with_gpu(cmd, gpu):
+        """*cmd* aimed at GPU *gpu*: its --gpu value replaced, or --gpu added.
+
+        An added --gpu goes before --loglevel, where the sweep's own --gpu
+        commands carry it, so the same command never gets two spellings.
+        """
+        words = cmd.split()
+        if "--gpu" in words:
+            words[words.index("--gpu") + 1] = str(gpu)
+        else:
+            at = words.index("--loglevel") if "--loglevel" in words else len(words)
+            words[at:at] = ["--gpu", str(gpu)]
+        return " ".join(words)
+
+    def _has_own_values(self, template):
+        """Whether *template* is an all-GPU command whose values come from GPU data."""
+        words = template.split()
+        if "--gpu" in words or self.OTHER_DEVICE_OPTIONS.intersection(words):
+            return False
+        # Output and watch modifiers only ride on the sweep's --gpu 0 commands.
+        if "--file" in words or any(word.startswith(("{json", "{csv", "{watch")) for word in words):
+            return False
+        if self._lookup(self.SWEEP_EXCLUDED_ARGS, template) is not None:
+            return False
+        return any(placeholder in template for placeholder in self.OWN_VALUE_PLACEHOLDERS)
+
+    def _per_gpu_cond(self, cmd, cond, gpu_index):
+        """The codes *cmd*, aimed at one GPU, may answer with.
+
+        Only --power-cap and --clk-level PCIE are predicted exactly, from fixed
+        data the baseline recorded; every other command keeps its own codes.
+        """
+        words = cmd.split()
+        if "--power-cap" in words:
+            return self._power_cap_cond(words, gpu_index)
+        if "--clk-level" in words:
+            at = words.index("--clk-level")
+            if words[at + 1] == "PCIE":
+                return self._pcie_level_cond(words[at + 2 :], gpu_index, cond)
+        return cond
+
+    def _power_cap_cond(self, words, gpu_index):
+        """The codes ``set --power-cap`` answers with on one GPU.
+
+        Follows AMDSMIHelpers.validate_and_set_power_cap, in its order: a sensor
+        without a reported cap is NOT_SUPPORTED; the current cap is "already set";
+        a current cap of 0 refuses every write; so does a value outside
+        [max(min, 1), max]. Anything else reaches the library, which may still
+        lack the feature.
+
+        Args:
+            words: the command, split into words.
+            gpu_index: the GPU the command runs on.
+
+        Returns:
+            list: the accepted exit codes.
+        """
+        at = words.index("--power-cap")
+        watts = int(words[at + 1])
+        sensor = words[at + 2] if at + 2 < len(words) else ""
+        if sensor not in self.power_types:
+            sensor = "ppt0"
+        limit = self.static_data["gpu_data"][gpu_index]["limit"].get(sensor)
+        bounds = []
+        for key in ("min_power_limit", "max_power_limit", "socket_power_limit"):
+            value = limit.get(key) if isinstance(limit, dict) else None
+            bounds.append(value["value"] if isinstance(value, dict) else None)
+        low, high, current = bounds
+        if None in bounds:
+            return [amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+        if watts == current:
+            return [self.PASS]
+        if current == 0 or not max(low, 1) <= watts <= high:
+            return [AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+        return [self.PASS, amdsmi.AmdSmiStatus.NOT_SUPPORTED]
+
+    def _pcie_level_cond(self, level_words, gpu_index, cond):
+        """The codes ``set --clk-level PCIE`` answers with on one GPU.
+
+        The CLI refuses a level at or past the GPU's PCIe level count before it
+        writes anything. Without a level list the CLI fails reading the bandwidth
+        table first, so the command keeps its own codes.
+
+        Args:
+            level_words: the words after ``PCIE``; the levels are the leading digits.
+            gpu_index: the GPU the command runs on.
+            cond: the command's own codes.
+
+        Returns:
+            list: the accepted exit codes.
+        """
+        levels = []
+        for word in level_words:
+            if not word.isdigit():
+                break
+            levels.append(int(word))
+        count = self._clk_level_count("PCIE", gpu_index, True)
+        if count and levels and max(levels) >= count:
+            return [AmdSmiExitCode.INVALID_PARAMETER_VALUE]
+        return cond
+
+    def _aggregate_is_exact(self, cmd):
+        """Whether *cmd*'s all-GPU code must equal the observed per-GPU aggregate."""
+        words = cmd.split()
+        if self.RUNTIME_DEPENDENT_OPTIONS.intersection(words):
+            return False
+        if "--clk-level" in words:
+            return words[words.index("--clk-level") + 1] == "PCIE"
+        return True
 
     def _order_sweep_args(self, cmd_name, args):
         """Move one of *args* to the front and one to the back, per SWEEP_ARG_ORDER.
@@ -1150,6 +1433,55 @@ class TestCliBase(unittest.TestCase):
             return Verdict(f" {prefix}: Received and Allowed FAIL ({detail})", False)
         return Verdict(f" Success: Received and Expected FAIL ({detail})", False)
 
+    def _grade_group(self, check, results, rc, file_error, detail):
+        """Judge an all-GPU command by the runs of the same command on each GPU.
+
+        Args:
+            check: the command's GroupCheck.
+            results: exit code per command text run so far.
+            rc, file_error, detail: as for _grade.
+
+        Returns:
+            Verdict: as _grade's, with each GPU's exit code appended.
+        """
+        member_rcs = [results[member] for member in check.members]
+        if check.exact:
+            accept = [_aggregate_exit_code(member_rcs)]
+        else:
+            accept = _reachable_aggregates(
+                [self._accepted_codes(cond) for cond in check.member_conds]
+            )
+        verdict = self._grade(accept, rc, file_error, detail)
+        codes = ", ".join(f"GPU {gpu} rc={code}" for gpu, code in enumerate(member_rcs))
+        basis = "aggregate of" if check.exact else "aggregates allowed by"
+        return Verdict(
+            f"{verdict.message} [{basis} per-GPU runs: {codes}]", verdict.counts_as_failure
+        )
+
+    def _grade_ready_groups(self, pending, results, errors):
+        """Grade each pending all-GPU command whose per-GPU runs have all run.
+
+        Args:
+            pending: (msg, check, rc, file_error, detail) per all-GPU command
+                still waiting for its per-GPU runs.
+            results: exit code per command text run so far.
+            errors: failure lines; a failing verdict is appended.
+
+        Returns:
+            list: the entries still waiting.
+        """
+        waiting = []
+        for msg, check, rc, file_error, detail in pending:
+            if not all(member in results for member in check.members):
+                waiting.append((msg, check, rc, file_error, detail))
+                continue
+            verdict = self._grade_group(check, results, rc, file_error, detail)
+            msg += verdict.message
+            if verdict.counts_as_failure:
+                errors.append(msg)
+            self.common.print(f"{self.tab}{msg}")
+        return waiting
+
     def RunCmds(self, cmds):
         errors = []
         msg_len = 0
@@ -1158,6 +1490,10 @@ class TestCliBase(unittest.TestCase):
             if num > msg_len:
                 msg_len = num
         msg_len += 2
+        # Exit code per command text, so an all-GPU command can be graded once the
+        # per-GPU runs queued after it are in.
+        results = {}
+        pending = []
         for cmd, cond in cmds:
             if self.Debug or self.PrintCmdsOnly:
                 print(f"cmd={cmd}")
@@ -1190,17 +1526,24 @@ class TestCliBase(unittest.TestCase):
                     os.chmod(self.tmp_filename, stat.S_IWRITE)
                     os.remove(self.tmp_filename)
 
-            verdict = self._grade(cond, rc, file_error, detail)
-            msg += verdict.message
-            if verdict.counts_as_failure:
-                errors.append(msg)
+            results[cmd] = rc
+            if isinstance(cond, GroupCheck):
+                pending.append((msg, cond, rc, file_error, detail))
+            else:
+                verdict = self._grade(cond, rc, file_error, detail)
+                msg += verdict.message
+                if verdict.counts_as_failure:
+                    errors.append(msg)
 
-            self.common.print(f"{self.tab}{msg}")
+                self.common.print(f"{self.tab}{msg}")
             if self.Debug:
                 print(f"{self.tab}rc={rc}")
                 print(f"{self.tab}error_code={error_code}")
                 print(f"{self.tab}std_out={std_out}")
                 print(f"{self.tab}std_err={std_err}")
+            pending = self._grade_ready_groups(pending, results, errors)
+        for msg, *_ in pending:
+            errors.append(f"{msg} Failure: not every per-GPU run of it ran")
         if len(errors):
             msg = f"\n{self.tab}".join(errors)
             self.fail(f"Fail:\n{self.tab}{msg}")
