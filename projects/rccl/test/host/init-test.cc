@@ -10836,6 +10836,10 @@ struct Tr_AllGatherInfo {
   int nc;
   int romeTopoModelIdx;
   int treeCompact;
+  // CE ReduceScatter per-chunk mode and resolved staging-slot count. Ranks that
+  // disagree size peer windows differently and can SDMA past them.
+  int ceReducePerChunk;
+  int ceReduceNumStagingSlots;
   bool blocking;
   bool pivotA2AEnabled;
   bool ll128Enabled;

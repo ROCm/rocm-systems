@@ -1865,15 +1865,31 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
     return false;
   }
 
-  // No message-size cap: CE ReduceScatter pipelines through ceARTmpBuf slots, so
+  // No upper size cap: CE ReduceScatter pipelines through ceARTmpBuf slots, so
   // large messages are chunked rather than rejected (unlike CE AllReduce 2-shot).
+  // Honour the shared non-AR CE floor (arch table / RCCL_CE_COLL_MIN_BYTES).
+  const size_t totalBytes = (size_t)comm->nRanks * recvcount * ncclTypeSize(datatype);
+  const size_t minBytes = rcclCeNonRegMinTab(extAlgoArchTable(comm), ncclFuncReduceScatter);
+  if (totalBytes < minBytes) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: totalBytes %zu < ceNonRegMin %zu", totalBytes,
+         minBytes);
+    return false;
+  }
 
   if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) {
     WARN("Skipping CE ReduceScatter: CTA policy is not ZERO");
     return false;
   }
-  if (op != ncclSum && op != ncclProd && op != ncclMin && op != ncclMax) {
+  const bool opSupported = op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax ||
+                           (op == ncclAvg && datatype == ncclBfloat16);
+  if (!opSupported) {
     WARN("Skipping CE ReduceScatter: unsupported reduction operation");
+    return false;
+  }
+  // Grouped CE ReduceScatter is validated for Primus BF16 Avg; keep other ops on
+  // ring/symk inside ncclGroupStart/End.
+  if (ncclGroupDepth > 0 && !(op == ncclAvg && datatype == ncclBfloat16)) {
+    INFO(NCCL_TUNING, "Skipping CE ReduceScatter: grouped path requires BF16 Avg");
     return false;
   }
   if (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2) {
@@ -2699,18 +2715,24 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       ncclDevrWindowHasSysmemSegment(rsSendWin) || ncclDevrWindowHasSysmemSegment(rsRecvWin);
     // CE ReduceScatter always stages through ceARTmpBuf, so user-buffer symmetric
     // registration is not required (unlike CE AllReduce's registered-window path).
-    const bool ceReduceScatterAllowed =
-      ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeReduceScatter(comm, recvcount, datatype, op);
-    if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    // Eager 2-shot requires ncclGroupDepth == 0; CE_REGISTERED stays available
+    // inside a group so Primus-style ncclGroupStart/End batches can still queue CE.
+    const bool ceReduceScatterEligible =
+      ceArGraphAllowed && rcclUseCeReduceScatter(comm, recvcount, datatype, op);
+    const bool ceReduceScatterEagerAllowed = ncclGroupDepth == 0 && ceReduceScatterEligible;
+    // Preserve tuned symk precedence on the early arms; the late CE arm below can
+    // still win when both CE and symk are eligible.
+    if (!symEligible && ceReduceScatterEagerAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
     }
-    // ceReduceScatterAllowed does not look at ceARTmpBuf. The buffer is allocated
+    // ceReduceScatterEligible does not look at ceARTmpBuf. The buffer is allocated
     // by the CE launch, which the eager CE early-return never reaches. Hand this
     // call to enqueue so CE init runs and ncclLaunchCeColl allocates staging.
     // Otherwise DDA is suppressed below and the call stays on the ring kernel.
-    if (!symEligible && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf == NULL) {
+    // Also covers grouped calls (eagerAllowed is false) that must stay queued.
+    if (!symEligible && ceReduceScatterEligible && comm->ceColl.ceARTmpBuf == NULL) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
@@ -2782,12 +2804,13 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     }
 
     // (5) CE ReduceScatter via enqueue when an earlier CE arm did not return
-    // (e.g. symEligible skipped the eager arms). Reuse ceReduceScatterAllowed so
-    // this arm keeps the same gates as rcclUseCeReduceScatter (nNodes==1,
-    // symmetricSupport, recvcount, op, datatype, CTA ZERO) instead of rebuilding
-    // a weaker subset. CE intentionally has priority over symk when both are
-    // eligible; symk remains the fallback when CE is not.
-    if (ceReduceScatterAllowed && !hasSysmemSegment) {
+    // (e.g. symEligible skipped the eager arms, or the call is inside a group
+    // with staging already allocated). Reuse ceReduceScatterEligible so this
+    // arm keeps the same gates as rcclUseCeReduceScatter (nNodes==1,
+    // symmetricSupport, recvcount, op incl. Avg+bf16, datatype, CTA ZERO)
+    // instead of rebuilding a weaker subset. CE intentionally has priority
+    // over symk when both are eligible; symk remains the fallback when CE is not.
+    if (ceReduceScatterEligible && !hasSysmemSegment) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;

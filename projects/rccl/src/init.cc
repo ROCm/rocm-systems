@@ -1960,6 +1960,10 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int nc;
     int romeTopoModelIdx;
     int treeCompact;
+    // CE ReduceScatter per-chunk mode and resolved staging-slot count. Ranks that
+    // disagree size peer windows differently and can SDMA past them.
+    int ceReducePerChunk;
+    int ceReduceNumStagingSlots;
     bool blocking;
     bool pivotA2AEnabled;
     bool ll128Enabled;
@@ -2560,6 +2564,9 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
+  allGather3Data[rank].ceReducePerChunk = rcclParamCeReducePerChunk() > 0 ? 1 : 0;
+  allGather3Data[rank].ceReduceNumStagingSlots = (int)ncclCeReduceScatterNumStagingSlots(
+      rcclParamCeReduceScatter() != 0, (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
   allGather3Data[rank].blocking = comm->config.blocking;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
@@ -2606,6 +2613,21 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       WARN("NCCL_TREE_COMPACT mismatch: rank %d (%s) has %d, rank %d (%s) has %d; all ranks must set the same value",
            rank, allGather3Data[rank].hostname, allGather3Data[rank].treeCompact, r, allGather3Data[r].hostname,
            allGather3Data[r].treeCompact);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+  }
+
+  // RCCL_CE_REDUCE_PER_CHUNK / RCCL_CE_REDUCE_PER_CHUNK_SLOTS size each rank's CE
+  // staging and signal windows. Ranks that disagree write past peers' windows.
+  for (int r = 0; r < nranks; r++) {
+    if (allGather3Data[r].ceReducePerChunk != allGather3Data[rank].ceReducePerChunk ||
+        allGather3Data[r].ceReduceNumStagingSlots != allGather3Data[rank].ceReduceNumStagingSlots) {
+      WARN("RCCL_CE_REDUCE_PER_CHUNK/SLOTS mismatch: rank %d (%s) has perChunk=%d slots=%d, "
+           "rank %d (%s) has perChunk=%d slots=%d; all ranks must set the same values",
+           rank, allGather3Data[rank].hostname, allGather3Data[rank].ceReducePerChunk,
+           allGather3Data[rank].ceReduceNumStagingSlots, r, allGather3Data[r].hostname,
+           allGather3Data[r].ceReducePerChunk, allGather3Data[r].ceReduceNumStagingSlots);
       ret = ncclInvalidUsage;
       goto fail;
     }

@@ -14,6 +14,8 @@
 #include "sym_kernels.h"
 #include "profiler_event.h"
 
+#include <stdint.h>
+
 // Memory operations per rank for different synchronization protocols
 #define NCCL_CE_SYNC_OPS_PER_RANK_MC 2
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
@@ -34,11 +36,19 @@
 #endif
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
-#define NCCL_CE_REDUCE_MAX_BLOCKS 46
+#define NCCL_CE_REDUCE_MAX_BLOCKS 92
+#endif
+
+#ifndef NCCL_CE_REDUCE_DEFAULT_BLOCKS
+#define NCCL_CE_REDUCE_DEFAULT_BLOCKS 46
 #endif
 
 #ifndef NCCL_CE_NUM_SLOTS
 #define NCCL_CE_NUM_SLOTS 2
+#endif
+
+#ifndef NCCL_CE_REDUCE_PER_CHUNK_SLOTS
+#define NCCL_CE_REDUCE_PER_CHUNK_SLOTS 2
 #endif
 
 // Block width of the CE local reduce kernel (ce_reduce_launcher.cpp.in, ce_reduce_impl.h.in).
@@ -107,6 +117,39 @@ inline bool ncclCeCollNeedsStaging(ncclFunc_t func) {
   return func == ncclFuncAllReduce || func == ncclFuncReduceScatter;
 }
 
+// Finite per-chunk ReduceScatter: only when the message needs more than one
+// staging step and RCCL_CE_REDUCE_PER_CHUNK is on. Extracted for host tests.
+inline bool ncclCeReduceScatterPerChunkReduce(size_t totalSteps, int perChunkParam) {
+  return totalSteps > 1 && perChunkParam > 0;
+}
+
+// Resolve RCCL_CE_REDUCE_PER_CHUNK_SLOTS. Non-positive keeps the compile-time
+// default; values below NCCL_CE_NUM_SLOTS are raised so the pool is never smaller
+// than the double-buffered path.
+inline size_t ncclCeResolvePerChunkSlots(int64_t requested) {
+  if (requested <= 0) return (size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS;
+  if (requested < (int64_t)NCCL_CE_NUM_SLOTS) return (size_t)NCCL_CE_NUM_SLOTS;
+  return (size_t)requested;
+}
+
+// Staging-slot count reserved at CE init. Per-chunk mode needs the larger
+// pool so more chunks land on fresh slots before reuse.
+inline size_t ncclCeReduceScatterNumStagingSlots(bool ceReduceScatterEnabled, int perChunkParam,
+                                                 int64_t perChunkSlotsParam) {
+  if (ceReduceScatterEnabled && perChunkParam > 0) {
+    return ncclCeResolvePerChunkSlots(perChunkSlotsParam);
+  }
+  return (size_t)NCCL_CE_NUM_SLOTS;
+}
+
+// Runtime reduction-grid cap. Host and device share this clamp so a param of
+// 0 or above NCCL_CE_REDUCE_MAX_BLOCKS cannot escape the compiled range.
+inline int ncclCeClampReduceMaxBlocks(int64_t requested) {
+  if (requested < 1) return 1;
+  if (requested > (int64_t)NCCL_CE_REDUCE_MAX_BLOCKS) return NCCL_CE_REDUCE_MAX_BLOCKS;
+  return (int)requested;
+}
+
 enum ncclCeMethodId {
   ncclCeMethodId_AllGather_UC,
   ncclCeMethodId_AllGather_MC,
@@ -137,14 +180,16 @@ struct ncclCeColl {
   uint32_t ceFaults;  // bitmask of CE_FAULT_* bits; see ce_fault_inject.h
 #endif
 
-  // CE AllReduce staging buffer (symmetric), double-buffered scatter staging:
-  // Layout: [slot 0: nRanks chunks][slot 1: nRanks chunks], slot stride = nRanks*chunkBytes.
+  // CE AllReduce/ReduceScatter staging buffer (symmetric). The default path is
+  // double-buffered; opt-in per-chunk ReduceScatter reserves additional slots
+  // so more staged chunks can use fresh slots before reuse.
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
   bool stagingPending;     // set at task append, consumed by the group's SymRegister job
   size_t ceArMaxBytes;     // RCCL: 2-shot cap from RCCL_CE_AR_2SHOT_MAX_BYTES, else the arch table.
   size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
+  size_t numStagingSlots;  // NCCL_CE_NUM_SLOTS, or the per-chunk RS slot count when that mode is enabled
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
@@ -187,7 +232,7 @@ struct alignas(16) ncclCeCollArgs {
   void*
     ddaUserRecvBuff; // user recvbuff (using DDA staging) or NULL otherwise (if recvbuffer is using symmetric windows)
   size_t ddaCopyBackBytes; // bytes to copy scratch -> user recvbuff
-  ncclRedOp_t redOp; // Only used for AllReduce
+  ncclRedOp_t redOp; // Used for AllReduce and ReduceScatter
 };
 
 struct ncclCeBatchOpsParams {
@@ -280,8 +325,10 @@ ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* p
 // Phase 3 writes the full receive range through peer mappings.
 int ncclCeRecvRangeContainedInWindow(struct ncclDevrWindow const* win, void const* recvbuff, size_t totalBytes);
 
-// Bytes allocated for ceARTmpBuf from the resolved runtime staging capacity.
-size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes);
+// Bytes allocated for ceARTmpBuf from the resolved runtime staging capacity and
+// slot count (defaults to NCCL_CE_NUM_SLOTS when omitted by callers).
+size_t ncclCeAllReduceStagingBufBytes(int nRanks, size_t stagingBytes,
+                                      size_t numSlots = (size_t)NCCL_CE_NUM_SLOTS);
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).
