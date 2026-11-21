@@ -357,16 +357,6 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         // One node, but the LSA team is narrower than the comm.
         {"SplitLsaTeamRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv, "", 2},
         {"SplitLsaTeamSixRanksRejected_Isolated", 6, 1, true, NCCL_CTA_POLICY_ZERO, 4098, ncclSum, ncclFloat32, false, baseEnv, "", 3},
-        // Min-bound env-override: RCCL_CE_AR_2SHOT_MIN_BYTES=1024.
-        // 252 * sizeof(float) = 1008 bytes < 1024 -- rejected.
-        // 256 * sizeof(float) = 1024 bytes == min  -- accepted.
-        // Both counts are divisible by nRanks=4.
-        {"MinBoundRejects_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 252, ncclSum, ncclFloat32, false,
-            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
-             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
-        {"AtMinBoundPasses_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 256, ncclSum, ncclFloat32, true,
-            {{"RCCL_CE_ALLREDUCE", "1"}, {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
-             {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"}}},
     };
 
     for(const auto& tc : cases)
@@ -637,6 +627,76 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ZeroPolicyForceOff_NoCe_Isolate
     ProcessIsolatedTestRunner::ExecutionOptions options;
     options.stopOnFirstFailure = false;
     options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// Min-bound env-override via rcclSelectAllReduce: RCCL_CE_AR_2SHOT_MIN_BYTES=1024.
+// rcclUseCeAr2Shot (tested above) checks basic eligibility but not the
+// message-size window; the min-bound is enforced in rcclSelectAllReduce via
+// rcclWindowFits(msgBytes, arTwoShotMin, arTwoShotMax).
+//
+// 252 * sizeof(float) = 1008 bytes < 1024 → rejected (no CE algo selected).
+// 256 * sizeof(float) = 1024 bytes == min  → accepted (CE algo selected).
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_MinBound_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    struct MinBoundCase {
+        const char*  name;
+        size_t       count;
+        bool         expectCe;
+    };
+    const MinBoundCase cases[] = {
+        {"MinBoundRejects",  252, false},
+        {"AtMinBoundPasses", 256, true},
+    };
+    for (const auto& tc : cases)
+    {
+        ProcessIsolatedTestRunner::registerTest(
+            ProcessIsolatedTestRunner::TestConfig(
+                tc.name,
+                [tc]()
+                {
+                    CeAllReduceMockComm mock;
+                    mock.comm.nRanks           = 4;
+                    mock.comm.devrState.lsaTeamSize = mock.comm.nRanks;
+                    mock.comm.nNodes           = 1;
+                    mock.comm.symmetricSupport = true;
+                    mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                    mock.comm.ceColl.ceARTmpBuf = nullptr;
+                    mock.comm.ceColl.ceArMaxBytes = kCeArMaxMsgBytesDefault;
+
+                    rcclCollDecision decision{};
+                    ncclResult_t res = rcclSelectAllReduce(
+                        mock.get(),
+                        reinterpret_cast<void*>(0x1000),
+                        reinterpret_cast<void*>(0x2000),
+                        tc.count, ncclFloat32, ncclSum,
+                        /*stream=*/nullptr, /*query=*/true,
+                        /*graphCapturingHint=*/false, &decision);
+                    EXPECT_EQ(res, ncclSuccess);
+                    if (tc.expectCe) {
+                        EXPECT_TRUE(decision.algo == RCCL_CE_REGISTERED ||
+                                    decision.algo == RCCL_CE_2SHOT)
+                            << tc.name << ": expected CE algo, got algo=" << decision.algo;
+                    } else {
+                        EXPECT_NE(decision.algo, RCCL_CE_REGISTERED)
+                            << tc.name << ": min bound must reject CE-registered";
+                        EXPECT_NE(decision.algo, RCCL_CE_2SHOT)
+                            << tc.name << ": min bound must reject CE-2shot";
+                    }
+                })
+                .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                                  {"RCCL_CE_AR_2SHOT_MAX_BYTES", std::to_string(kCeArMaxMsgBytesDefault)},
+                                  {"RCCL_CE_AR_2SHOT_MIN_BYTES", "1024"},
+                                  {"RCCL_DDA_ENABLE", "0"}})
+                .withTimeout(std::chrono::seconds(30))
+                .withNumGpus(0));
+    }
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging     = true;
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
 }
 
