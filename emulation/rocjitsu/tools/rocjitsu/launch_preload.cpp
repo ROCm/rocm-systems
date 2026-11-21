@@ -90,7 +90,9 @@ std::string find_loaded_sanitizer_runtime(void *init_symbol, std::string_view ru
 #endif
 } // namespace
 
-LaunchEnvironment::LaunchEnvironment() {
+LaunchEnvironment::LaunchEnvironment(ParentEnvironment parent_environment) {
+  if (parent_environment == ParentEnvironment::Omit)
+    return;
   for (char **entry = environ; entry && *entry; ++entry)
     entries_.emplace_back(*entry);
 }
@@ -121,7 +123,7 @@ void LaunchEnvironment::prepend_path(const std::string &name, const std::string 
   set(name, value);
 }
 
-char *const *LaunchEnvironment::envp() {
+char **LaunchEnvironment::envp() {
   if (envp_dirty_) {
     envp_.clear();
     envp_.reserve(entries_.size() + 1);
@@ -169,7 +171,15 @@ void configure_dbt_guest_tool_environment(LaunchEnvironment &environment,
 }
 
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment) {
-  return execvpe(file, argv, environment.envp());
+  char **old_environ = environ;
+  // execvp() searches the caller's PATH, not a separate envp argument. Temporarily
+  // install the child environment so unqualified apps and rocgdb use the same PATH
+  // the launched process will receive, then restore it if exec fails so exit
+  // handlers do not observe pointers owned by LaunchEnvironment.
+  environ = environment.envp();
+  const int result = execvp(file, argv);
+  environ = old_environ;
+  return result;
 }
 
 } // namespace rocjitsu::launcher

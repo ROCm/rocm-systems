@@ -149,7 +149,8 @@ FailureOr<std::string> json_with_local_node(std::string_view json, std::string_v
 }
 
 FailureOr<std::string> write_effective_config(const std::string &source_path,
-                                              const LaunchOverrides &overrides, pid_t pid,
+                                              const LaunchOverrides &overrides,
+                                              const std::filesystem::path &invocation_runtime_dir,
                                               const util::DiagnosticEmitter &emit_error) {
   FailureOr<std::string> source_json = read_config_file(source_path, emit_error);
   if (source_json.failed())
@@ -160,7 +161,7 @@ FailureOr<std::string> write_effective_config(const std::string &source_path,
     return Result::failure();
   std::string effective_json = std::move(json.value());
 
-  const std::filesystem::path directory(rocjitsu::rpc_invocation_runtime_dir(pid));
+  const std::filesystem::path directory(invocation_runtime_dir);
   std::error_code directory_error;
   std::filesystem::create_directories(directory, directory_error);
   if (directory_error)
@@ -196,7 +197,8 @@ FailureOr<std::string> write_effective_config(const std::string &source_path,
   LaunchOverrides overrides;
   overrides.cpu_thread_budget = budget;
   overrides.local_node = node_id;
-  return write_effective_config(source_path, overrides, pid, emit_error);
+  return write_effective_config(source_path, overrides, rocjitsu::rpc_invocation_runtime_dir(pid),
+                                emit_error);
 }
 
 } // namespace config

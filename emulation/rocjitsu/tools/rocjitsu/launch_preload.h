@@ -8,16 +8,20 @@
 
 namespace rocjitsu::launcher {
 
+enum class ParentEnvironment { Inherit, Omit };
+
 class LaunchEnvironment {
 public:
-  LaunchEnvironment();
+  // Defaults to inheriting the parent process environment. Use
+  // ParentEnvironment::Omit for a clean launch environment.
+  explicit LaunchEnvironment(ParentEnvironment parent_environment = ParentEnvironment::Inherit);
   LaunchEnvironment(const LaunchEnvironment &) = delete;
   LaunchEnvironment &operator=(const LaunchEnvironment &) = delete;
 
   const char *get(const std::string &name) const;
   void set(const std::string &name, const std::string &value);
   void prepend_path(const std::string &name, const std::string &value);
-  char *const *envp();
+  char **envp();
 
 private:
   std::vector<std::string> entries_;
