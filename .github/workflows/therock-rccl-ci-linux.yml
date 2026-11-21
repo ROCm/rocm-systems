@@ -275,6 +275,29 @@ jobs:
       notify_email: ${{ inputs.notify_email }}
       teams_webhook: ${{ inputs.notify_webhook }}
 
+  # The same nightly gate on Crusoe, which schedules with SPUR. Its own runner
+  # and partition, so it runs alongside the Ruby job rather than after it.
+  therock-test-madengine-crusoe:
+    name: "Test MADEngine workloads on Crusoe (scheduled)"
+    if: ${{ !cancelled() && contains(fromJSON(needs.test-plan.outputs.suites || '[]'), 'madengine') }}
+    needs: [test-plan]
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/therock-rccl-test-madengine.yml
+    secrets: inherit
+    with:
+      amdgpu_families: ${{ inputs.amdgpu_families }}
+      artifact_group: ${{ inputs.artifact_group }}
+      test_runs_on: crusoe-linux-slurm-scale-runner
+      cluster: crusoe
+      artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
+      workload: llama-3.1-70b-training
+      nodes: ${{ inputs.madengine_nodes || '2' }}
+      job_timeout_minutes: '390'
+      notify_email: ${{ inputs.notify_email }}
+      teams_webhook: ${{ inputs.notify_webhook }}
+
   # Every other workload, on the weekly run only: test_scope == 'all' is what
   # the Saturday cron in therock-rccl-ci.yml sets, and a dispatch can ask for
   # it. The job above stays the nightly gate on its own.
