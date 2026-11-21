@@ -44,7 +44,7 @@ protected:
     l2_.set_backing_memory(&memory_);
     ASSERT_NO_FATAL_FAILURE(make_cu(cu_));
     cu_->set_apertures(kShared, kShared + UINT32_MAX, kPrivate, kPrivate + UINT32_MAX);
-    wf_ = cu_->dispatch_wf(0, 0, 106, 32, architecture() == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+    wf_ = cu_->dispatch_wf(0, 0, 106, 32, arch_is_cdna_4_or_lower(architecture()) ? 64 : 32);
     ASSERT_NE(wf_, nullptr);
     wf_->set_apertures(kShared, kShared + UINT32_MAX, kPrivate, kPrivate + UINT32_MAX,
                        /*override_launch=*/true);
@@ -442,8 +442,9 @@ TEST_F(Rdna35MemoryTest, BufferTfePreservesResidentDwordsAndReportsMissingPages)
   EXPECT_EQ(faults, 1u);
 
   write_scalar(0, 0x50000);
-  issue(0xf4880000, 0x0a000000); // Unmapped ATC probe drops without a VM fault.
-  EXPECT_EQ(faults, 1u);
+  // gfx1151 reports a VM read fault for an ATC probe at an unmapped address.
+  issue(0xf4880000, 0x0a000000, VmAccessOutcome::Faulted);
+  EXPECT_EQ(faults, 2u);
   wf_->set_address_space({});
   cu_->set_gpu_vm(nullptr);
 }
@@ -472,6 +473,158 @@ TEST_F(Rdna35MemoryTest, FlatIgnoresOffsetBitTwelve) {
   memory_.write32(0x6f000, 42);
   issue(0xdc501000, 0x007c0002); // flat_load_b32 v0, v[2:3], raw offset 0x1000
   EXPECT_EQ(read_vector(), 41u);
+}
+
+class ScalarControlsTest : public Rdna35MemoryTest,
+                           public testing::WithParamInterface<rj_code_arch_t> {
+  rj_code_arch_t architecture() const override { return GetParam(); }
+};
+
+INSTANTIATE_TEST_SUITE_P(Architectures, ScalarControlsTest,
+                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
+                                         ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
+                                         ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                                         ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
+
+TEST_P(ScalarControlsTest, AtcUsesScalarAddressAndBoundsWithoutWriteback) {
+  const auto arch = GetParam();
+  const bool gfx9 = arch_is_cdna_4_or_lower(arch);
+  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  // LLVM MC: s_atc_probe[_buffer] 7, s[4:5]/s[4:7], 0x40
+  const uint32_t probe = gfx9 ? 0xc09a01c2 : gfx10 ? 0xf49801c2 : gfx12 ? 0xf40441c2 : 0xf48801c2;
+  const uint32_t offset = (gfx9 ? 0u : gfx10 ? 0xfa000000u : 0xf8000000u) | 64u;
+  constexpr uint32_t base = 0x80000;
+  uint32_t cached = 17;
+  std::array<uint8_t, 64> resident{};
+  ASSERT_EQ(l2_.read(base + 64, resident.data(), resident.size(), Mtype::RW),
+            VmAccessOutcome::Complete);
+  // Sample the live counters during issue, before the synchronous hint completes.
+  class ProbePipeline : public ScalarMemPipeline {
+  public:
+    using ScalarMemPipeline::ScalarMemPipeline;
+    WaitCounters issued{};
+    VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override {
+      issued = wf.wait_counters();
+      return ScalarMemPipeline::initiate_access(inst, wf);
+    }
+  } pipeline(&cu_->l1_scalar());
+  for (bool buffer : {false, true}) {
+    for (bool bounded_out : {false, true}) {
+      const bool warm = !buffer || !bounded_out;
+      cu_->l1_scalar().invalidate_all();
+      ASSERT_EQ(l2_.write(base + 64, reinterpret_cast<const uint8_t *>(&cached), sizeof(cached),
+                          Mtype::RW),
+                VmAccessOutcome::Complete);
+      // Exercise an immediate alone, then S8 plus an immediate for the same address.
+      write_scalar(4, bounded_out ? base - 32 : base);
+      write_scalar(8, 32);
+      const bool packed_size = arch == ROCJITSU_CODE_ARCH_CDNA5 && buffer && !bounded_out;
+      write_scalar(5, packed_size ? (68u << 25) : 0u);
+      write_scalar(6, bounded_out || packed_size ? 0 : 128);
+      write_scalar(7, 0);
+      const auto reads = l2_.backing_read_transactions();
+      uint32_t op = probe + (buffer ? (gfx12 ? 0x2000u : 0x40000u) : 0u);
+      if (gfx9 && bounded_out)
+        op |= 1u << 14; // SOE selects the SOFFSET field in the second word.
+      const std::array words{op, bounded_out ? 0x10000040u : offset};
+      auto decoded = decoder_->decode_window(words);
+      ASSERT_TRUE(decoded.succeeded());
+      auto inst = std::move(decoded).value();
+      ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
+      ASSERT_NE(inst->data(), nullptr);
+      const auto *hint = inst->data_as<ScalarMemState>();
+      ASSERT_TRUE(hint->translation_probe);
+      EXPECT_TRUE(inst->is_memory_op());
+      ASSERT_NE(inst->amdgpu_memory_issue_info(), nullptr);
+      EXPECT_TRUE(inst->amdgpu_memory_issue_info()->empty());
+      EXPECT_FALSE(inst->flags() & MEMORY_WAIT_PRODUCER);
+      EXPECT_FALSE(hint->is_load);
+      EXPECT_EQ(hint->addr, base + 64);
+      EXPECT_EQ(hint->load_dword_mask != 0, warm);
+      ASSERT_EQ(pipeline.issue(inst.release(), *wf_), VmAccessOutcome::Complete);
+      EXPECT_TRUE(pipeline.issued.empty());
+      EXPECT_TRUE(wf_->wait_counters().empty());
+      EXPECT_EQ(l2_.backing_read_transactions(), reads);
+      const uint32_t next = cached + 1;
+      ASSERT_EQ(
+          l2_.write(base + 64, reinterpret_cast<const uint8_t *>(&next), sizeof(next), Mtype::RW),
+          VmAccessOutcome::Complete);
+      uint32_t actual = 0;
+      ASSERT_EQ(cu_->l1_scalar().load(base + 64, 1, &actual), VmAccessOutcome::Complete);
+      EXPECT_EQ(actual, warm ? cached : next);
+      EXPECT_EQ(cu_->read_sgpr(wf_->sgpr_alloc().base + 7), 0u);
+      cached = next;
+    }
+  }
+  // Normal CU retirement must still route the uncounted instruction to L1.
+  cu_->l1_scalar().invalidate_all();
+  write_scalar(4, base);
+  write_scalar(5, 0);
+  wf_->pc = 0x1000;
+  memory_.write32(wf_->pc, probe);
+  memory_.write32(wf_->pc + 4, offset);
+  cu_->step();
+  ASSERT_EQ(wf_->pc, 0x1008u);
+  const uint32_t changed = cached + 1;
+  ASSERT_EQ(
+      l2_.write(base + 64, reinterpret_cast<const uint8_t *>(&changed), sizeof(changed), Mtype::RW),
+      VmAccessOutcome::Complete);
+  uint32_t actual = 0;
+  ASSERT_EQ(cu_->l1_scalar().load(base + 64, 1, &actual), VmAccessOutcome::Complete);
+  EXPECT_EQ(actual, cached);
+}
+
+TEST_P(ScalarControlsTest, ProfilingGatesLevelsAndM0Payload) {
+  const auto arch = GetParam();
+  const bool gfx9 = arch_is_cdna_4_or_lower(arch);
+  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const uint32_t inc = gfx9 || gfx10 ? 0xbf940005 : 0xbfb80005;
+  const uint32_t dec = inc + 0x10000;
+  const uint32_t trace = (inc & 0xffff0000u) + 0x20000;
+  const uint32_t short_trace = gfx10 ? 0xbfa8ab3c : 0xbfbbab3c;
+  std::vector<uint32_t> program{inc, trace, inc, inc, dec, dec, trace};
+  if (!gfx9)
+    program.push_back(short_trace);
+  program.push_back(trace);
+  cu_->set_functional_quantum(1);
+  wf_->pc = 0x1000;
+  for (unsigned i = 0; i < program.size(); ++i)
+    memory_.write32(wf_->pc + i * 4, program[i]);
+  auto retire = [&] {
+    const auto pc = wf_->pc;
+    cu_->step();
+    EXPECT_EQ(wf_->pc, pc + 4);
+  };
+  wf_->set_exec(0);
+  wf_->set_m0(0x91ab2345);
+  std::vector<uint32_t> events;
+  cu_->set_shader_trace_handler([&](const auto &, uint32_t value) { events.push_back(value); });
+  wf_->set_status_raw(0);
+  retire();
+  retire();
+  EXPECT_TRUE(events.empty());
+  EXPECT_EQ(cu_->performance_levels()[5], 0u);
+  wf_->set_status_raw(Wavefront::kStatusPerfEnableMask | Wavefront::kStatusTraceEnableMask);
+  retire();
+  EXPECT_EQ(cu_->performance_levels()[5], 1u);
+  wf_->set_mode_raw(1u << (gfx9 ? 26 : 27));
+  retire();
+  EXPECT_EQ(cu_->performance_levels()[5], 1u);
+  retire();
+  EXPECT_EQ(cu_->performance_levels()[5], 1u);
+  wf_->set_mode_raw(0);
+  retire();
+  EXPECT_EQ(cu_->performance_levels()[5], 0u);
+  retire();
+  EXPECT_EQ(events, std::vector<uint32_t>{0x91ab2345});
+  if (!gfx9) {
+    retire();
+    EXPECT_EQ(events, (std::vector<uint32_t>{0x91ab2345, 0x3c}));
+  }
+  cu_->set_shader_trace_handler({});
+  retire();
 }
 
 TEST_F(Rdna35MemoryTest, AtcProbesWarmResidentScalarLinesWithoutReadingBackingOnMiss) {
@@ -780,8 +933,15 @@ TEST_P(Gfx11MemoryTest, EmptyOrderedCountKeepsCounterAndAdvancesWalker) {
   EXPECT_EQ(read_vector(), 9u);
 }
 
-TEST_F(Rdna35MemoryTest, DebuggerTreatsAtcProbesAsNonfaultingHints) {
+TEST_P(ScalarControlsTest, AtcProbeFaultPolicyPreservesReadFaultsAndSkipsWatchpoints) {
   constexpr uint32_t kernel = 0x1000, readable = 0x40000, hole = 0x50000;
+  const auto arch = GetParam();
+  const bool gfx9 = arch_is_cdna_4_or_lower(arch);
+  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  // LLVM MC: s_atc_probe[_buffer] 7, s[4:5]/s[4:7], 0; s_load_b32 s8, s[4:5], 0.
+  const uint32_t probe = gfx9 ? 0xc09a01c2u : gfx10 ? 0xf49801c2u : gfx12 ? 0xf40441c2u : 0xf48801c2u;
+  const uint32_t offset = gfx9 ? 0u : gfx10 ? 0xfa000000u : 0xf8000000u;
   class ReadOnlyData final : public AddressSpaceTranslator {
     IdentityAddressSpaceTranslator identity;
     VmTranslationResult translate(uint64_t address, size_t size,
@@ -800,14 +960,10 @@ TEST_F(Rdna35MemoryTest, DebuggerTreatsAtcProbesAsNonfaultingHints) {
   const auto snapshot = wf_->snapshot_vm_access();
   ASSERT_TRUE(snapshot);
   EXPECT_EQ(snapshot->query_access(readable, 4, VmAccessKind::Write), VmAccessOutcome::Faulted);
-  write_scalar(1, 0);
-  write_scalar(2, 64);
-  write_scalar(3, 0);
-  write_scalar(5, 0);
+  write_scalar(7, 0);
   memory_.write32(readable, 42);
-  const std::array code{0xf4880000u, 0x0a000000u,  // s_atc_probe
-                        0xf48c0000u, 0x0a000000u,  // s_atc_probe_buffer
-                        0xf4000100u, 0x0a000000u}; // s_load_b32 s4
+  const std::array code{probe, offset, probe + (gfx12 ? 0x2000u : 0x40000u), offset,
+                        gfx9 ? 0xc0020202u : 0xf4000202u, offset};
   memory_.load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kernel);
   std::vector<std::pair<uint64_t, bool>> faults;
   std::vector<uint64_t> watches;
@@ -821,15 +977,19 @@ TEST_F(Rdna35MemoryTest, DebuggerTreatsAtcProbesAsNonfaultingHints) {
     return false;
   });
   for (const uint32_t address : {readable, hole}) {
-    write_scalar(0, address);
+    write_scalar(4, address);
     for (size_t i = 0; i < code.size(); i += 2) {
       SCOPED_TRACE(testing::Message() << address << "/" << i);
+      const bool packed_size = i == 2 && arch == ROCJITSU_CODE_ARCH_CDNA5;
+      write_scalar(5, packed_size ? (64u << 25) : 0u);
+      write_scalar(6, packed_size ? 0u : 64u);
       faults.clear();
       watches.clear();
       wf_->pc = kernel + 4 * i;
       ASSERT_TRUE(cu_->step());
       const bool load = i == 4;
-      EXPECT_EQ(faults.size(), load && address == hole ? 1u : 0u);
+      const bool expects_fault = address == hole && (load || arch == ROCJITSU_CODE_ARCH_RDNA3_5);
+      EXPECT_EQ(faults.size(), expects_fault ? 1u : 0u);
       if (!faults.empty()) {
         EXPECT_EQ(faults.front(), std::make_pair(uint64_t{address}, false));
       }
@@ -838,7 +998,7 @@ TEST_F(Rdna35MemoryTest, DebuggerTreatsAtcProbesAsNonfaultingHints) {
         EXPECT_EQ(watches.front(), address);
       }
       if (load && address == readable) {
-        EXPECT_EQ(cu_->read_sgpr(wf_->sgpr_alloc().base + 4), 42u);
+        EXPECT_EQ(cu_->read_sgpr(wf_->sgpr_alloc().base + 8), 42u);
       }
     }
   }

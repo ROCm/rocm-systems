@@ -1,0 +1,105 @@
+<IsaAdditions Id="rdna3-atc-probe" BaseArchitecture="AMD RDNA 3" BaseSchemaVersion="1.1.1">
+  <!-- GFX11 LLVM encodings verified on gfx1100. See isa_additions_sources.md. -->
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_SMEM</EncodingName>
+      <Opcode>34</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011110100100010000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_SMEM</EncodingName>
+      <Opcode>35</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011110100100011000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>S_ATC_PROBE</InstructionName>
+      <Description>Probe or prefetch an address into the scalar data cache.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_SMEM</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">34</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>SDATA</FieldName>
+              <DataFormatName>FMT_NUM_B8</DataFormatName>
+              <OperandType>OPR_SIMM16</OperandType>
+              <OperandSize>8</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SBASE</FieldName>
+              <DataFormatName>FMT_BUF</DataFormatName>
+              <OperandType>OPR_SREG</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SOFFSET</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_SMEM_OFFSET</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>SMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>S_ATC_PROBE_BUFFER</InstructionName>
+      <Description>Probe or prefetch an address into the scalar data cache.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_SMEM</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">35</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>SDATA</FieldName>
+              <DataFormatName>FMT_NUM_B8</DataFormatName>
+              <OperandType>OPR_SIMM16</OperandType>
+              <OperandSize>8</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SBASE</FieldName>
+              <DataFormatName>FMT_RSRC_SCALAR</DataFormatName>
+              <OperandType>OPR_SREG</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SOFFSET</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_SMEM_OFFSET</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>SMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>

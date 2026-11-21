@@ -1913,14 +1913,14 @@ _SMEM_ATOMIC_OPS = frozenset(
 def _derive_smem(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SMEM (Scalar Memory) instruction."""
     upper = name.upper()
+    if upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
+        return InstructionSemantics(name, 'atc_probe')
     if upper in (
         'S_PREFETCH_INST',
         'S_PREFETCH_INST_PC_REL',
         'S_PREFETCH_DATA',
         'S_PREFETCH_DATA_PC_REL',
         'S_BUFFER_PREFETCH_DATA',
-        'S_ATC_PROBE',
-        'S_ATC_PROBE_BUFFER',
     ):
         return InstructionSemantics(name, 'true_nop')
     # Cache invalidation / writeback instructions.
@@ -1939,7 +1939,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if upper in ('S_MEMTIME', 'S_MEMREALTIME'):
         return InstructionSemantics(name, 'smem_time')
     # Remaining scalar cache / special instructions.
-    if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
+    if 'DCACHE' in upper:
         return InstructionSemantics(name, 'nop')
 
     if upper.startswith(('S_ATOMIC_', 'S_BUFFER_ATOMIC_')):

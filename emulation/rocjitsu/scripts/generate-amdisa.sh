@@ -114,6 +114,7 @@ log "Running amdisa generator"
   --isa-additions "cdna3:$isa_xml/amdgpu_isa_cdna3_legacy_math.xml" \
   --isa-additions "cdna4:$isa_xml/amdgpu_isa_cdna4_legacy_math.xml" \
   --isa-additions "rdna2:$isa_xml/amdgpu_isa_rdna2_atc_probe.xml" \
+  --isa-additions "rdna3:$isa_xml/amdgpu_isa_rdna3_atc_probe.xml" \
   --isa-additions "rdna4:$isa_xml/amdgpu_isa_rdna4_barrier_state.xml" \
   --isa-additions "cdna5:$cdna5_delta" \
   --isa-variants "cdna5:$cdna5_variants" \

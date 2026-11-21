@@ -167,19 +167,19 @@ void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, 1);
+  amdgpu::execute_s_incperflevel_sopp(*this, wf);
 }
 
 void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, -1);
+  amdgpu::execute_s_decperflevel_sopp(*this, wf);
 }
 
 void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().emit_shader_trace_data(wf.m0());
+  amdgpu::execute_s_ttracedata_sopp(*this, wf);
 }
 
 void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) {
-  wf.cu().emit_shader_trace_data(simm16.encoding_value_ & 0xffu);
+  amdgpu::execute_s_ttracedata_imm_sopp(*this, wf);
 }
 
 void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {

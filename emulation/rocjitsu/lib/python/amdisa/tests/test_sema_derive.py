@@ -2150,6 +2150,10 @@ class TestDeriveSmemStore:
 
 
 class TestDeriveSmemHints:
+    @pytest.mark.parametrize('name', ['S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'])
+    def test_atc_probe_uses_scalar_memory(self, name):
+        assert derive_semantics(name, 'ENC_SMEM').semantic_class == 'atc_probe'
+
     @pytest.mark.parametrize(
         'name',
         [
@@ -2158,8 +2162,6 @@ class TestDeriveSmemHints:
             'S_PREFETCH_DATA',
             'S_PREFETCH_DATA_PC_REL',
             'S_BUFFER_PREFETCH_DATA',
-            'S_ATC_PROBE',
-            'S_ATC_PROBE_BUFFER',
         ],
     )
     def test_gfx1250_prefetch_hints_are_true_nop(self, name):

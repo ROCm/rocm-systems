@@ -118,11 +118,17 @@ void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_icache_inv_sopp(*this, wf);
 }
 
-void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_incperflevel_sopp(*this, wf);
+}
 
-void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_decperflevel_sopp(*this, wf);
+}
 
-void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_s_ttracedata_sopp(*this, wf);
+}
 
 void SCbranchCdbgsysSopp::execute_impl(amdgpu::Wavefront &wf) {
   if ((wf.status_raw() & (1u << 21)) != 0) {

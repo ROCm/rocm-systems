@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/rdna4/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
@@ -76,11 +77,12 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   off = (off & ~static_cast<int64_t>(align_mask)) + (*soffset & ~align_mask);
   // RDNA4 section 8.1.1 restricts the immediate for buffer loads, the sum otherwise.
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  const bool buffer = buffer_load || inst.op == kSAtcProbeBufferSmem;
   const bool ordinary_load = amdgpu::addr_calc::gfx12_smem_is_ordinary_load_op(inst.op);
   if ((buffer_load && immediate < 0) || (ordinary_load && immediate + *soffset < 0))
     wf.report_undefined_behavior(buffer_load ? "negative scalar-buffer load immediate"
                                              : "negative combined scalar-memory offset");
-  if (buffer_load) {
+  if (buffer) {
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state, align_mask,
                                                     align_mask);
   }

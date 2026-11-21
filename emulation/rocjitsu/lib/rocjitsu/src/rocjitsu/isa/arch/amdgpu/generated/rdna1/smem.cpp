@@ -582,10 +582,7 @@ SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
-  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_memory_issue_info({}, false);
   set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
 }
@@ -612,10 +609,7 @@ SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
   src_operands_[2] = &soffset;
   num_src_ = 3;
   num_dst_ = 0;
-  set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
-                        false);
-  flags_ |= MEMORY_WAIT_PRODUCER;
+  set_memory_issue_info({}, false);
   set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE_BUFFER);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
 }

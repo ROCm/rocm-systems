@@ -170,8 +170,9 @@ public:
   ScalarMemState() noexcept { tag_ = SCALAR_MEM; }
   uint64_t addr = 0;
   bool request_force_l1_bypass = false;
-  bool translation_probe = false; ///< Nonfaulting ATC probe, with no register writeback.
+  bool translation_probe = false; ///< ATC probe, with no register writeback or counter.
   bool memviol = false;           ///< Invalid scalar-buffer offset faults before memory access.
+
   /// Architectural destination resolved and range-checked at issue time.
   ScalarRegisterRange dst_register;
   uint32_t num_dwords = 0;
@@ -191,6 +192,11 @@ public:
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
   TranslatedMemoryProgress translated;
+
+  [[nodiscard]] bool can_fault_on_translation(rj_code_arch_t arch) const {
+    // gfx1151 faults unmapped probes. W7900 and R9700 retire them as hints.
+    return !translation_probe || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  }
 
   bool retire_for_reuse() noexcept override {
     translated.retire_for_reuse();

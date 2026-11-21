@@ -258,6 +258,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<SBufferLoadB512Smem>,
     &execute_with_backend<SGl1InvSmem>,
     &execute_with_backend<SDcacheInvSmem>,
+    &execute_with_backend<SAtcProbeSmem>,
+    &execute_with_backend<SAtcProbeBufferSmem>,
     &execute_with_backend<VNopVop1>,
     &execute_with_backend<VMovB32Vop1>,
     &execute_with_backend<VReadfirstlaneB32Vop1>,

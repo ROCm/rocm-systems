@@ -335,7 +335,6 @@ def _memory_wait_producer(name: str) -> bool:
             's_buffer_',
             's_store',
             's_prefetch_',
-            's_atc_probe',
             's_atomic_',
             's_scratch_',
             's_dcache_',
@@ -539,6 +538,7 @@ class CodeGenerator:
     # not represented here.
     _MEMORY_ISSUE_KINDS = {
         'smem_load': 'scalar',
+        'atc_probe': 'scalar',
         'smem_store': 'scalar',
         'smem_atomic': 'scalar',
         'dcache_discard': 'scalar',
@@ -572,7 +572,6 @@ class CodeGenerator:
         'ds_barrier_arrive': 'local',
         'ds_gws': 'local',
         'ds_gs_reg': 'local',
-        'atc_probe': 'scalar',
         'ds_ordered_count': 'local',
         'ds_read_addtid': 'local',
         'ds_write_addtid': 'local',
@@ -1730,6 +1729,7 @@ class CodeGenerator:
                 'smem_load',
                 'tensor_load_to_lds',
                 'true_nop',
+                'atc_probe',
             }
         )
         op_kinds: dict[int, str] = {}
@@ -8561,14 +8561,15 @@ class CodeGenerator:
                 and sem.name == 'S_SET_INST_PREFETCH_DISTANCE'
             ):
                 return '  wf.set_instruction_prefetch(simm16.encoding_value_);'
-            if self.isa_spec.arch_name in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4'):
-                if sem.name in ('S_INCPERFLEVEL', 'S_DECPERFLEVEL'):
-                    change = 1 if sem.name == 'S_INCPERFLEVEL' else -1
-                    return f'  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, {change});'
-                if sem.name == 'S_TTRACEDATA':
-                    return '  wf.cu().emit_shader_trace_data(wf.m0());'
-                if sem.name == 'S_TTRACEDATA_IMM':
-                    return '  wf.cu().emit_shader_trace_data(simm16.encoding_value_ & 0xffu);'
+            if sem.name in ('S_INCPERFLEVEL', 'S_DECPERFLEVEL'):
+                change = 1 if sem.name == 'S_INCPERFLEVEL' else -1
+                return f'  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, {change});'
+            if sem.name == 'S_TTRACEDATA':
+                return '  wf.cu().emit_shader_trace_data(wf.m0());'
+            if sem.name == 'S_TTRACEDATA_IMM':
+                return (
+                    '  wf.cu().emit_shader_trace_data(simm16.encoding_value_ & 0xffu);'
+                )
             if sem.name == 'S_WAIT_EVENT' and self.isa_spec.arch_name in (
                 'rdna3',
                 'rdna3_5',
@@ -9392,10 +9393,16 @@ class CodeGenerator:
             L.append('  d->translation_probe = true;')
             L.append('  d->num_dwords = 1;')
             L.append('  d->is_load = false;')
-            L.append('  auto addr = smem_calculate_address(inst_, wf, d.get());')
+            size_arg = (
+                'd->elem_size, '
+                if self.isa_spec.profile.smem_address_uses_access_size
+                else ''
+            )
+            L.append(
+                f'  auto addr = smem_calculate_address(inst_, wf, {size_arg}d.get());'
+            )
             L.append('  if (!addr) return;')
             L.append('  d->addr = *addr;')
-            self._append_wait_counter_type(L, sem, cls)
             L.append('  set_data(std::move(d));')
             return '\n'.join(L)
 
@@ -10409,6 +10416,8 @@ class CodeGenerator:
     ) -> str:
         """Emit decoded memory-issue metadata for an instruction constructor."""
         sem_class = self._memory_issue_semantic_class(sem)
+        if sem_class == 'atc_probe':
+            return 'set_memory_issue_info({}, false);'
         is_load_expr = self._memory_issue_is_load_expr(sem, sem_class)
         counter = self._wait_counter_type(sem_class, is_load_expr)
         if counter is None:

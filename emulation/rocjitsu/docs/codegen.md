@@ -405,6 +405,7 @@ python -m amdisa \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
   --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna3:$MRISA/amdgpu_isa_rdna3_atc_probe.xml \
   --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
@@ -436,6 +437,7 @@ python -m amdisa \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
   --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna3:$MRISA/amdgpu_isa_rdna3_atc_probe.xml \
   --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
@@ -467,6 +469,7 @@ python -m amdisa \
   --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
   --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
   --isa-additions rdna2:$MRISA/amdgpu_isa_rdna2_atc_probe.xml \
+  --isa-additions rdna3:$MRISA/amdgpu_isa_rdna3_atc_probe.xml \
   --isa-additions rdna4:$MRISA/amdgpu_isa_rdna4_barrier_state.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \

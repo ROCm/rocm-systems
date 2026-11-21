@@ -491,7 +491,7 @@ public:
   /// @details AMDGPU generated memory-instruction constructors populate this
   /// descriptor. Other architectures and non-memory instructions return nullptr.
   [[nodiscard]] const amdgpu::MemoryIssueInfo *amdgpu_memory_issue_info() const {
-    return memory_issue_info_.empty() ? nullptr : &memory_issue_info_;
+    return has_memory_issue_info_ ? &memory_issue_info_ : nullptr;
   }
 
   uint64_t flags() const { return flags_; }
@@ -674,6 +674,7 @@ protected:
   void
   set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
                         bool exec_masked = true, bool counts_with_empty_exec = false) {
+    has_memory_issue_info_ = true;
     memory_issue_info_ = {};
     memory_issue_info_.exec_masked = exec_masked;
     memory_issue_info_.counts_with_empty_exec = counts_with_empty_exec;
@@ -688,7 +689,8 @@ protected:
       memory_issue_info_.counter_obligations_[memory_issue_info_.num_counter_obligations_++] =
           obligation;
     }
-    assert(!memory_issue_info_.empty());
+    // An explicit empty list routes an uncounted hint through the memory pipeline.
+    assert(counter_obligations.size() == 0 || !memory_issue_info_.empty());
     flags_ |= MEMORY_OP;
   }
 
@@ -702,11 +704,12 @@ protected:
   // These fixed-width facts occupy the existing padding before dst_operands_
   // on supported 64-bit hosts. Keep their payload within this byte budget.
   static_assert(2 * sizeof(amdgpu::Operation) + sizeof(amdgpu::MemoryAddressing) +
-                        sizeof(amdgpu::MemoryKind) <=
-                    6,
+                        sizeof(amdgpu::MemoryKind) + sizeof(bool) <=
+                    7,
                 "decoded identity and memory facts must remain compact");
   amdgpu::MemoryAddressing memory_addressing_ = amdgpu::MemoryAddressing::None;
   amdgpu::MemoryKind memory_kind_ = amdgpu::MemoryKind::None;
+  bool has_memory_issue_info_ = false;
   amdgpu::Operation operation_ = amdgpu::Operation::Unknown;
   amdgpu::Operation secondary_operation_ = amdgpu::Operation::Unknown;
   /// @brief Instruction's destination operands (max 3). KEEP IN SYNC with

@@ -2450,8 +2450,6 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     semantic_class_overrides = {
         'DS_ORDERED_COUNT': 'ds_ordered_count',
-        'S_ATC_PROBE': 'atc_probe',
-        'S_ATC_PROBE_BUFFER': 'atc_probe',
     }
 
     @property
@@ -2937,14 +2935,6 @@ class Rdna3_5Profile(Rdna3Profile):
     class so the codegen pipeline can auto-detect RDNA3.5 XML files
     separately from RDNA3.
     """
-
-    @property
-    def semantic_class_overrides(self) -> dict[str, str]:
-        return {
-            **super().semantic_class_overrides,
-            'S_ATC_PROBE': 'atc_probe',
-            'S_ATC_PROBE_BUFFER': 'atc_probe',
-        }
 
     @property
     def uses_rj_arith_matrix(self) -> bool:

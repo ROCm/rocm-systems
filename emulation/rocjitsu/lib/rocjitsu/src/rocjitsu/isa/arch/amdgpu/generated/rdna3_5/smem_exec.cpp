@@ -228,7 +228,6 @@ void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!addr)
     return;
   d->addr = *addr;
-  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   set_data(std::move(d));
 }
 
@@ -241,7 +240,6 @@ void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!addr)
     return;
   d->addr = *addr;
-  d->wait_counter_type = amdgpu::WaitCounterType::KMCNT;
   set_data(std::move(d));
 }
 

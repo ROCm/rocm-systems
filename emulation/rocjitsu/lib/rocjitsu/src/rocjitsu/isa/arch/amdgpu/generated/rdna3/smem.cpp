@@ -404,5 +404,58 @@ DecodeResult decodeSDcacheInvSmem(const MachineInst *opcode, const DecodeErrorEm
 }
 } // namespace detail
 
+SAtcProbeSmem::SAtcProbeSmem(const MachineInst *inst)
+    : Smem("s_atc_probe", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SAtcProbeSmem)),
+      sdata(8, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sbase(64, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+  src_operands_[0] = &sdata;
+  src_operands_[1] = &sbase;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 0;
+  set_memory_issue_info({}, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
+}
+
+namespace detail {
+DecodeResult decodeSAtcProbeSmem(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atc_probe", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtcProbeSmem>(opcode);
+}
+} // namespace detail
+
+SAtcProbeBufferSmem::SAtcProbeBufferSmem(const MachineInst *inst)
+    : Smem("s_atc_probe_buffer", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::SAtcProbeBufferSmem)),
+      sdata(8, OperandType::OPR_SIMM16, reinterpret_cast<const OpEncoding *>(inst)->sdata),
+      sbase(128, OperandType::OPR_SREG, (reinterpret_cast<const OpEncoding *>(inst)->sbase * 2)),
+      soffset(make_smem_offset(reinterpret_cast<const OpEncoding *>(inst))) {
+  src_operands_[0] = &sdata;
+  src_operands_[1] = &sbase;
+  src_operands_[2] = &soffset;
+  num_src_ = 3;
+  num_dst_ = 0;
+  set_memory_issue_info({}, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ATC_PROBE_BUFFER);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Scalar, amdgpu::MemoryKind::Probe);
+}
+
+namespace detail {
+DecodeResult decodeSAtcProbeBufferSmem(const MachineInst *opcode,
+                                       const DecodeErrorEmitter &emit_error) {
+  Result validation = Smem::validate_encoding(
+      "s_atc_probe_buffer", reinterpret_cast<const Smem::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<SAtcProbeBufferSmem>(opcode);
+}
+} // namespace detail
+
 } // namespace rdna3
 } // namespace rocjitsu

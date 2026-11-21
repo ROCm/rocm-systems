@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
@@ -199,11 +200,12 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
     return std::nullopt;
   int64_t off = static_cast<int64_t>(signed_ioffset(inst.ioffset));
   const bool buffer_load = amdgpu::addr_calc::gfx12_smem_is_buffer_load_op(inst.op);
+  const bool buffer = buffer_load || inst.op == kSAtcProbeBufferSmem;
   // CDNA5 section 8.1.1 allows negative ordinary-load offsets, but not buffer IOFFSET.
   if (buffer_load && off < 0)
     wf.report_undefined_behavior("negative scalar-buffer load immediate");
   const uint64_t align_mask = std::min<uint64_t>(access_size_bytes, 4u) - 1;
-  const uint32_t scale = inst.scale_offset && !buffer_load ? access_size_bytes : 1;
+  const uint32_t scale = inst.scale_offset && !buffer ? access_size_bytes : 1;
   off &= ~static_cast<int64_t>(align_mask);
   if (has_smem_offset(inst.soffset)) {
     auto soffset = read_sreg_m0_operand(wf, inst.soffset);
@@ -211,7 +213,7 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
       return std::nullopt;
     off += (static_cast<uint64_t>(*soffset) * scale) & ~align_mask;
   }
-  if (buffer_load) {
+  if (buffer) {
     auto word2 = amdgpu::try_read_scalar_selector(wf, sbase_sel + 2);
     auto word3 = amdgpu::try_read_scalar_selector(wf, sbase_sel + 3);
     if (!word2 || !word3)

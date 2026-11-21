@@ -44,6 +44,25 @@ size and `FMT_NUM_B8`. The SBASE and SOFFSET fields also match RDNA2
 buffer forms. Write the identifier as 64 binary digits for
 `0xf4000000 | (opcode << 18)`, with all operand fields zero.
 
+## RDNA3 `amdgpu_isa_rdna3_atc_probe.xml`
+
+LLVM `SMInstructions.td` defines both GFX11 probe opcodes (0x22 and 0x23).
+The published RDNA3 XML and Markdown omit both. The RDNA3.5 XML supplies
+the operand layout. As in the RDNA2 supplement, use the target’s integer
+immediate class with OperandSize 8 for SDATA. The raw gfx1100 words
+`f48801c2 f8000000` and `f48c01c2 f8000000` select probe type 7, a base
+at s4 and a null offset. A Radeon Pro W7900 retired both in mapped-address
+compute kernels followed by LGKM waits. Immediately after 16 copies of
+either form, IB_STS.LGKM_CNT read zero on all 128 waves. The same wave
+register read 16 after 16 scalar loads. An R9700 gave the corresponding
+KMCNT results for the GFX12 encodings. On a gfx1151 (RDNA3.5), probe
+types 0 through 7 in both forms faulted at unmapped addresses. The
+kernel log showed an SQC data read fault, as for a scalar load. Both type 7
+probes retired normally at a reserved, unmapped address on the W7900 and
+R9700, while a scalar load from such an address on each device faulted.
+The simulator enables probe faults on RDNA3.5. Cache fill, TLB residency
+and probe-type-specific hardware actions were not measured.
+
 ## RDNA4 `amdgpu_isa_rdna4_barrier_state.xml`
 
 RDNA4 SOP1 assigns `S_GET_BARRIER_STATE` opcode 80. LLVM encodes both M0 and

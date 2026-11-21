@@ -183,7 +183,8 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   }
   if (inst.is_barrier())
     return "barrier ordering is not analyzed";
-  if (inst.is_memory_op() && events.empty())
+  // ATC probes read their address operands without taking a wait-counter token.
+  if (inst.is_memory_op() && events.empty() && inst.amdgpu_memory_kind() != MemoryKind::Probe)
     return "memory instruction has no event policy";
   if ((inst.flags() & (SALU | SMEM)) && events.empty() && !inst.is_waitcnt() &&
       !is_program_path_terminator(inst) && operation != Operation::S_NOP &&

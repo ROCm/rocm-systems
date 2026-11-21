@@ -79,8 +79,8 @@ inline std::optional<uint64_t> scalar_buffer_address(Wavefront &wf, uint32_t sel
 constexpr bool smem_is_buffer_load_op(uint32_t op) { return op >= 8 && op <= 12; }
 /// @brief GFX9 scalar-buffer loads, stores and atomics.
 constexpr bool gfx9_smem_is_buffer_op(uint32_t op) {
-  return smem_is_buffer_load_op(op) || (op >= 24 && op <= 26) || (op >= 64 && op <= 76) ||
-         (op >= 96 && op <= 108);
+  return smem_is_buffer_load_op(op) || op == 39 /* S_ATC_PROBE_BUFFER */ ||
+         (op >= 24 && op <= 26) || (op >= 64 && op <= 76) || (op >= 96 && op <= 108);
 }
 /// @brief Ordinary GFX12 scalar loads; prefetches have defined drop behavior.
 constexpr bool gfx12_smem_is_ordinary_load_op(uint32_t op) {

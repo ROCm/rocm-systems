@@ -203,7 +203,6 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
   case MemoryKind::Load:
   case MemoryKind::Store:
   case MemoryKind::Atomic:
-  case MemoryKind::Probe:
   case MemoryKind::Cache:
     return true;
   default:

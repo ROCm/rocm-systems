@@ -170,6 +170,40 @@ private:
   WaveRaceState *state_ = nullptr;
 };
 
+TEST(RaceDetectorPluginTest, AtcProbesRetireWithoutRegisteringMemoryEvents) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "rdna3", 32, 128));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  auto *detector = plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+  fixture.soc->set_plugin_group(fixture.plugin_group_);
+  fixture.plugin_group_->onInit();
+
+  constexpr uint64_t pc = 0x1000;
+  auto *wave = fixture.cu()->dispatch_wf(0, pc, 128, 256, 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_exec(1);
+  std::array<Wavefront *, 1> waves{wave};
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+  const auto *state = static_cast<RaceWavefrontState *>(wave->plugin_state(detector->slot_index()));
+  ASSERT_NE(state, nullptr);
+  const auto &events = state->race_state->getDetector()->events();
+  const auto initial_events = events.totalAllocated();
+  const auto base = wave->sgpr_alloc().base;
+  fixture.cu()->write_sgpr(base + 4, 0x4000);
+  fixture.cu()->write_sgpr(base + 6, 128);
+  const uint32_t code[]{0xf48801c2, 0xf8000040, 0xf48c01c2, 0xf8000040};
+  fixture.mem->load_image(reinterpret_cast<const uint8_t *>(code), sizeof(code), pc);
+  for (uint64_t next_pc : {pc + 8, pc + 16}) {
+    ASSERT_TRUE(fixture.cu()->step());
+    EXPECT_EQ(wave->pc, next_pc);
+    EXPECT_TRUE(wave->wait_counters().empty());
+    EXPECT_EQ(events.totalAllocated(), initial_events);
+  }
+  wave->halt();
+}
+
 class FormattedLoadRaceTest : public ::testing::Test {
 protected:
   PluginFixture fixture;

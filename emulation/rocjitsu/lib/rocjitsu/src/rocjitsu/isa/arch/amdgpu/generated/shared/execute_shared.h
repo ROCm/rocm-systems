@@ -406,13 +406,6 @@ inline void execute_s_ashr_i64_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 }
 
 template <typename Inst>
-inline void execute_s_atc_probe_smem([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
-inline void execute_s_atc_probe_buffer_smem([[maybe_unused]] Inst &inst,
-                                            [[maybe_unused]] Wavefront &wf) {}
-
-template <typename Inst>
 inline void execute_s_barrier_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.set_state(amdgpu::WfState::BARRIER);
 }
@@ -968,6 +961,12 @@ inline void execute_s_ctz_i32_b64_sop1([[maybe_unused]] Inst &inst,
 }
 
 template <typename Inst>
+inline void execute_s_decperflevel_sopp([[maybe_unused]] Inst &inst,
+                                        [[maybe_unused]] Wavefront &wf) {
+  wf.cu().update_shader_perf_level(inst.simm16.encoding_value_ & 15u, -1);
+}
+
+template <typename Inst>
 inline void execute_s_delay_alu_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
 
 template <typename Inst>
@@ -1081,6 +1080,12 @@ inline void execute_s_gl1_inv_smem([[maybe_unused]] Inst &inst, [[maybe_unused]]
 template <typename Inst>
 inline void execute_s_icache_inv_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   wf.cu().instruction_cache().invalidate_all();
+}
+
+template <typename Inst>
+inline void execute_s_incperflevel_sopp([[maybe_unused]] Inst &inst,
+                                        [[maybe_unused]] Wavefront &wf) {
+  wf.cu().update_shader_perf_level(inst.simm16.encoding_value_ & 15u, 1);
 }
 
 template <typename Inst>
@@ -1837,6 +1842,17 @@ inline void execute_s_subb_u32_sop2([[maybe_unused]] Inst &inst, [[maybe_unused]
 
 template <typename Inst>
 inline void execute_s_trap_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}
+
+template <typename Inst>
+inline void execute_s_ttracedata_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
+  wf.cu().emit_shader_trace_data(wf.m0());
+}
+
+template <typename Inst>
+inline void execute_s_ttracedata_imm_sopp([[maybe_unused]] Inst &inst,
+                                          [[maybe_unused]] Wavefront &wf) {
+  wf.cu().emit_shader_trace_data(inst.simm16.encoding_value_ & 0xffu);
+}
 
 template <typename Inst>
 inline void execute_s_version_sopk([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {}

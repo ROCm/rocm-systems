@@ -1770,7 +1770,9 @@ RJ_DECODE_CASE(11, detail, decodeSBufferLoadB256Smem) \
 RJ_DECODE_CASE(12, detail, decodeSBufferLoadB512Smem) \
 RJ_DECODE_CASE(32, detail, decodeSGl1InvSmem) \
 RJ_DECODE_CASE(33, detail, decodeSDcacheInvSmem) \
+RJ_DECODE_CASE(34, detail, decodeSAtcProbeSmem) \
+RJ_DECODE_CASE(35, detail, decodeSAtcProbeBufferSmem) \
 RJ_DECODE_DEFAULT(DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(5, 3, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(13, 19, DecoderImpl, decodeInvalid) \
-RJ_DECODE_GAP(34, 222, DecoderImpl, decodeInvalid)
+RJ_DECODE_GAP(36, 220, DecoderImpl, decodeInvalid)

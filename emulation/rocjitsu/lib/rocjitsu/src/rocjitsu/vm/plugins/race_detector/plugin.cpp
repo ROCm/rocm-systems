@@ -898,7 +898,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     return;
   const auto *decoded = inst.amdgpu_memory_issue_info();
   assert(decoded && "memory instruction reached the race detector without issue metadata");
-  if (!decoded)
+  // Uncounted ATC hints have neither a memory result nor a pending store.
+  if (!decoded || decoded->empty())
     return;
   const auto arch = wf.cu().arch();
   auto routed = routed_flat_issue_info(access, *decoded, arch, inst);

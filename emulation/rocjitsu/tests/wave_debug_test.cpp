@@ -517,11 +517,11 @@ TEST(WaveDebugTest, Rdna3PerformanceCountersAndTracePayloads) {
 TEST(WaveDebugTest, TraceConsumerLatchesTraceEnableAtLaunch) {
   // gfx1151 waves launched under thread trace read STATUS bit 7 set and emit
   // S_TTRACEDATA. Waves launched before tracing starts keep the bit clear.
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                    ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
+                    ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     SCOPED_TRACE(arch);
-    const uint32_t trace =
-        arch == ROCJITSU_CODE_ARCH_RDNA2 ? 0xbf960000 : 0xbfba0000; // s_ttracedata
+    const bool gfx9_or_gfx10 = arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const uint32_t trace = gfx9_or_gfx10 ? 0xbf960000 : 0xbfba0000; // s_ttracedata
     for (bool traced_at_launch : {false, true}) {
       SCOPED_TRACE(traced_at_launch);
       WaveDebugFixture fx(arch, 1, 1);

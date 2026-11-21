@@ -608,6 +608,43 @@ TEST(WaitcheckStream, ScalarMemoryCannotUseAPartialWait) {
   EXPECT_TRUE(report.diagnostics.empty());
 }
 
+TEST(WaitcheckStream, AtcProbesContinueWithoutAddingWaitEvents) {
+  struct ProbeEncodings {
+    rj_code_arch_t arch;
+    uint32_t load;
+    uint32_t load_offset;
+    uint32_t probe;
+    uint32_t buffer_probe;
+    uint32_t probe_offset;
+    uint32_t end;
+  };
+  // s_load_dwordx2 s[4:5], s[8:9], 0; s_atc_probe[_buffer] 7, s[4:5 or 7], 0x40.
+  for (const auto &ops : std::array<ProbeEncodings, 2>{{
+           {ROCJITSU_CODE_ARCH_RDNA3_5, 0xf4040104u, 0xf8000000u, 0xf48801c2u, 0xf48c01c2u,
+            0xf8000040u, 0xbfb00000u},
+           {ROCJITSU_CODE_ARCH_CDNA3, 0xc0060104u, 0u, 0xc09a01c2u, 0xc09e01c2u, 0x40u,
+            0xbf810000u},
+       }}) {
+    for (uint32_t probe : {ops.probe, ops.buffer_probe}) {
+      SCOPED_TRACE(testing::Message() << "arch=" << ops.arch << " probe=" << probe);
+      const auto independent = analyze({probe, ops.probe_offset, ops.end}, ops.arch);
+      EXPECT_FALSE(independent.incomplete);
+      EXPECT_EQ(independent.instructions_analyzed, 2u);
+      EXPECT_TRUE(independent.diagnostics.empty());
+
+      const auto dependent =
+          analyze({ops.load, ops.load_offset, probe, ops.probe_offset}, ops.arch);
+      EXPECT_FALSE(dependent.incomplete);
+      EXPECT_EQ(dependent.instructions_analyzed, 2u);
+      ASSERT_EQ(dependent.diagnostics.size(), 1u);
+      EXPECT_EQ(dependent.diagnostics.front().consumer_offset, 8u);
+      EXPECT_EQ(dependent.diagnostics.front().reg, (RegisterRef{RegClass::SGPR, 4, 1}));
+      EXPECT_EQ(dependent.diagnostics.front().access, WaitcheckAccess::Read);
+      EXPECT_EQ(dependent.diagnostics.front().required_count, 0u);
+    }
+  }
+}
+
 TEST(WaitcheckStream, UntrackedScalarMemoryDestinationsStopBeforeLosingDependencies) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     // Encodings assembled for gfx942: TTMP0, VCC, FLAT_SCRATCH and XNACK_MASK.

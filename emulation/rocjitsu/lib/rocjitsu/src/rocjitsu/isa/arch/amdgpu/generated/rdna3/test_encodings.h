@@ -229,6 +229,8 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"s_buffer_load_b512", {0xF4300000U, 0x00000000U}},
     {"s_gl1_inv", {0xF4800000U, 0x00000000U}},
     {"s_dcache_inv", {0xF4840000U, 0x00000000U}},
+    {"s_atc_probe", {0xF4880000U, 0x00000000U}},
+    {"s_atc_probe_buffer", {0xF48C0000U, 0x00000000U}},
     {"v_nop", {0x7E000000U, 0x00000000U}},
     {"v_mov_b32", {0x7E000200U, 0x00000000U}},
     {"v_readfirstlane_b32", {0x7E000400U, 0x00000000U}},
@@ -1371,7 +1373,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_add_f32", {0xDD580000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1350;
+inline constexpr size_t NUM_ENCODINGS = 1352;
 
 } // namespace rocjitsu::rdna3::test_data
 

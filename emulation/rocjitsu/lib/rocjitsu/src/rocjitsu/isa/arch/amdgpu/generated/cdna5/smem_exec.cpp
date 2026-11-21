@@ -406,9 +406,29 @@ void SBufferLoadU16Smem::execute_impl(amdgpu::Wavefront &wf) {
 
 void SDcacheInvSmem::execute_impl(amdgpu::Wavefront &wf) { wf.cu().l1_scalar().invalidate_all(); }
 
-void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d->elem_size, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  set_data(std::move(d));
+}
 
-void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d->elem_size, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  set_data(std::move(d));
+}
 
 void SPrefetchInstSmem::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
 

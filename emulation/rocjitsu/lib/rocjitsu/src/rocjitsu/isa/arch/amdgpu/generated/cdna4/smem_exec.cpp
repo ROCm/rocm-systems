@@ -467,11 +467,27 @@ void SMemrealtimeSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SAtcProbeSmem::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_atc_probe_smem(*this, wf);
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  set_data(std::move(d));
 }
 
 void SAtcProbeBufferSmem::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_s_atc_probe_buffer_smem(*this, wf);
+  std::unique_ptr<amdgpu::ScalarMemState> d = acquire_data<amdgpu::ScalarMemState>();
+  d->translation_probe = true;
+  d->num_dwords = 1;
+  d->is_load = false;
+  auto addr = smem_calculate_address(inst_, wf, d.get());
+  if (!addr)
+    return;
+  d->addr = *addr;
+  set_data(std::move(d));
 }
 
 void SDcacheDiscardSmem::execute_impl(amdgpu::Wavefront &wf) {

@@ -110,22 +110,17 @@ bool InstructionComputeUnitView::in_multiwave_workgroup() const {
 
 void InstructionComputeUnitView::update_shader_perf_level(uint32_t id, int change) {
   const auto &wave = raw_wavefront();
-  const bool gfx11_or_gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-                              arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                              arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  // GFX12 STATE_PRIV.PERF_EN is backed by the same internal status bit as
-  // GFX11 STATUS.PERF_EN. MODE.DISABLE_PERF temporarily masks an enabled wave.
-  if (gfx11_or_gfx12 && (wave.mode_raw() & (1u << 27)))
-    return;
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA5 || (wave.status_raw() & Wavefront::kStatusPerfEnableMask))
+  // Legacy GFX9 MODE.DISABLE_PERF is bit 26. RDNA and CDNA5 use bit 27.
+  const unsigned disable_bit = arch_is_cdna_4_or_lower(arch()) ? 26 : 27;
+  if ((wave.status_raw() & Wavefront::kStatusPerfEnableMask) &&
+      !(wave.mode_raw() & (1u << disable_bit)))
     raw_cu().shader_perf_levels_[id & 15u] += change;
 }
 
 void InstructionComputeUnitView::emit_shader_trace_data(uint32_t data) {
   const auto &notify = raw_cu().shader_trace_handler_;
   // GFX12 STATE_PRIV.TTRACE_EN maps to the GFX11 STATUS.TTRACE_EN backing bit.
-  if (notify && (arch() == ROCJITSU_CODE_ARCH_CDNA5 ||
-                 (raw_wavefront().status_raw() & Wavefront::kStatusTraceEnableMask)))
+  if (notify && (raw_wavefront().status_raw() & Wavefront::kStatusTraceEnableMask))
     notify(raw_wavefront(), data);
 }
 
@@ -3487,11 +3482,14 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   // The checks run after the PC advances (below) so that a wave stopped on a
   // watchpoint or memory fault resumes past the access instead of re-executing
   // it. Gated on debug_active_ so non-debugged runs pay no per-access cost.
-  // ATC hints can warm a cache line without issuing a shader data read or write.
+  // Report ATC probe faults as scalar reads. Probes skip data watchpoints.
   const bool debug_probe =
       debugger_active && inst->is_memory_op() && inst->data() &&
       (inst->data()->tag() == GLOBAL_MEM ||
-       (inst->data()->tag() == SCALAR_MEM && !inst->data_as<ScalarMemState>()->translation_probe));
+       (inst->data()->tag() == SCALAR_MEM &&
+        inst->data_as<ScalarMemState>()->can_fault_on_translation(config_.arch)));
+  const bool translation_probe = inst->data() && inst->data()->tag() == SCALAR_MEM &&
+                                 inst->data_as<ScalarMemState>()->translation_probe;
   struct DebugMemoryRange : MemoryByteRange {
     bool shared;
   };
@@ -3511,7 +3509,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
     if (inst->data()->tag() == SCALAR_MEM) {
       auto &d = *inst->data_as<ScalarMemState>();
       dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
-      dbg_is_write = !d.is_load || dbg_is_atomic;
+      dbg_is_write = !(d.is_load || d.translation_probe) || dbg_is_atomic;
       if (!d.memviol && d.load_dword_mask) {
         if (!dbg_is_atomic && d.elem_size >= sizeof(uint32_t) && d.load_dword_mask != 0xffff) {
           for (uint32_t i = 0; i < d.num_dwords; ++i)
@@ -3763,7 +3761,7 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   // serialized wave resumes at the next instruction). A memory fault is more
   // severe than a watchpoint and wins if both would fire on the same
   // instruction, which it does by returning above before reaching here.
-  if (debug_probe && !active->debug_halted() && watchpoint_handler_) {
+  if (debug_probe && !translation_probe && !active->debug_halted() && watchpoint_handler_) {
     for (const auto range : debug_ranges)
       if (watchpoint_handler_(*active, range.address, range.bytes, dbg_is_write, dbg_is_atomic))
         break;

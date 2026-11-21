@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/dbt/encoding_translator.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_cdna3.h"
+#include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna3.h"
 #include "rocjitsu/code/dbt/generated/encoding_cdna4_to_rdna4.h"
 #include "rocjitsu/code/dbt/generated/encoding_fields.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/machine_insts.h"
@@ -133,6 +134,54 @@ TEST(EncodingTranslator, SmemRemapsCoherency) {
   EXPECT_EQ(dst.th, 0);
   EXPECT_EQ(dst.nv, 0);
   EXPECT_EQ(dst.soffset, 0x7C); // CDNA4 null (0x7F) → RDNA4 null (0x7C)
+}
+
+TEST(EncodingTranslator, AtcProbeTranslatesGfx9AddressModes) {
+  struct Address {
+    uint32_t src0, src1, gfx11_offset, gfx12_offset;
+  };
+  // LLVM MC forms with type 7 and a base at s4. IMM=0 names its offset
+  // register in OFFSET[6:0]. SOE selects the separate register field.
+  constexpr Address forms[] = {
+      {0xc09a01c2, 0x40, 0xf8000040, 0xf8000040},       // 64
+      {0xc09801c2, 8, 0x10000000, 0x10000000},          // s8
+      {0xc09801c2, 124, 0xfa000000, 0xfa000000},        // m0
+      {0xc09a41c2, 0x10000040, 0x10000040, 0x10000040}, // s8 offset:64
+      {0xc09a41c2, 0x101ffffc, 0x101ffffc, 0x10fffffc}, // s8 offset:-4
+  };
+  for (bool buffer : {false, true}) {
+    const uint16_t op = buffer ? 35 : 34;
+    for (const auto &form : forms) {
+      const uint32_t src0 = form.src0 + (buffer ? 0x40000 : 0);
+      const auto g11 =
+          cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(kEnc_SMEM, src0, form.src1, 0, op);
+      const auto g12 =
+          cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SMEM, src0, form.src1, 0, op);
+      ASSERT_EQ(g11.word_count, 2);
+      ASSERT_EQ(g12.word_count, 2);
+      EXPECT_EQ(g11.words[0], buffer ? 0xf48c01c2u : 0xf48801c2u);
+      EXPECT_EQ(g11.words[1], form.gfx11_offset);
+      EXPECT_EQ(g12.words[0], buffer ? 0xf40461c2u : 0xf40441c2u);
+      EXPECT_EQ(g12.words[1], form.gfx12_offset);
+    }
+  }
+}
+
+TEST(EncodingTranslator, AtcDropsUnrepresentableCrossTargetHints) {
+  constexpr uint32_t nop = 0xbf800000;
+  // GFX9 flat_scratch_lo is not a GFX11+ offset register.
+  auto g11 = cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(kEnc_SMEM, 0xc09801c2, 102, 0, 34);
+  EXPECT_EQ(g11.word_count, 2);
+  EXPECT_EQ(g11.words[0], nop);
+  EXPECT_EQ(g11.words[1], nop);
+  // Type 63 fits GFX9/GFX11 SDATA, but GFX12 dedicates five bits to the type.
+  g11 = cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3(kEnc_SMEM, 0xc09a0fc2, 0, 0, 34);
+  EXPECT_EQ(g11.words[0], 0xf4880fc2u);
+  const auto g12 =
+      cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4(kEnc_SMEM, 0xc09a0fc2, 0, 0, 34);
+  EXPECT_EQ(g12.word_count, 2);
+  EXPECT_EQ(g12.words[0], nop);
+  EXPECT_EQ(g12.words[1], nop);
 }
 
 TEST(EncodingTranslator, Vop3PreservesModifiers) {

@@ -230,6 +230,8 @@ enum class InstructionExecutionId : size_t {
   SBufferLoadB512Smem,
   SGl1InvSmem,
   SDcacheInvSmem,
+  SAtcProbeSmem,
+  SAtcProbeBufferSmem,
   VNopVop1,
   VMovB32Vop1,
   VReadfirstlaneB32Vop1,

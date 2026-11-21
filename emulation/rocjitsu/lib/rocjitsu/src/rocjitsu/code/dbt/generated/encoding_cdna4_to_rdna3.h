@@ -472,6 +472,15 @@ inline TranslationResult encode_smem_rdna3(const SmemFields &f, uint16_t dst_op)
     dst.soffset = 0x7C;
   if (f.soffset_en == 0)
     dst.soffset = 0x7C;
+  if (f.op == 0x26 || f.op == 0x27) { // S_ATC_PROBE and S_ATC_PROBE_BUFFER
+    const bool has_reg = f.soffset_en || !f.imm;
+    const uint32_t reg = f.soffset_en ? f.soffset : f.ioffset & 0x7fu;
+    const uint32_t last_base_reg = 2 * f.sbase + (f.op == 0x27 ? 3 : 1);
+    if (last_base_reg > 101 || (has_reg && reg > 101 && reg != 124))
+      return {{0xbf800000u, 0xbf800000u}, 2};              // s_nop 0 twice
+    dst.soffset = !has_reg ? 124 : reg == 124 ? 125 : reg; // GFX11+ null / M0
+    dst.offset = f.imm ? f.ioffset : 0;
+  }
   const auto words = rocjitsu::rdna3::build_smem(dst_op, dst);
   TranslationResult r{};
   r.word_count = uint8_t{2};

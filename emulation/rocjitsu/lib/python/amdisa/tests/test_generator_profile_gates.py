@@ -9356,7 +9356,8 @@ def test_memory_preparation_reuses_dynamic_state(tmp_path, arch, name, paths):
         len(re.findall(r'acquire_data<amdgpu::(?:Scalar|Vector)MemState>', body))
         == paths
     )
-    assert body.count('d->wait_counter_type =') == paths
+    expected_counters = 0 if name == 'S_ATC_PROBE' else paths
+    assert body.count('d->wait_counter_type =') == expected_counters
     assert not re.search(r'make_unique<amdgpu::(?:Scalar|Vector)MemState>', body)
 
 
@@ -9373,16 +9374,21 @@ def test_generated_memory_paths_use_decoded_issue_metadata(
         states = len(re.findall(state_pattern, source))
         counter_initializers = source.count('d->wait_counter_type =')
         assert 'before_memory_instruction' not in source, path
-        assert counter_initializers == states, path
+        probe_states = source.count('d->translation_probe = true;')
+        assert counter_initializers + probe_states == states, path
 
         # Check the independently generated model constructors as well as the
         # execution bodies.  Iterating _MEMORY_ISSUE_KINDS alone cannot detect a
         # new memory-pipeline semantic that was omitted from that mapping.
         execution_classes = set()
+        probe_classes = set()
         current_class = None
         for line in source.splitlines():
             if match := re.match(r'void (\w+)::execute_impl\(', line):
                 current_class = match.group(1)
+            if 'd->translation_probe = true;' in line:
+                assert current_class in {'SAtcProbeSmem', 'SAtcProbeBufferSmem'}, path
+                probe_classes.add(current_class)
             if re.search(state_pattern, line):
                 assert current_class is not None, path
                 execution_classes.add(current_class)
@@ -9392,6 +9398,7 @@ def test_generated_memory_paths_use_decoded_issue_metadata(
             assert model_path.exists(), path
             model_source = model_path.read_text()
             metadata_classes = set()
+            uncounted_classes = set()
             current_class = None
             for line in model_source.splitlines():
                 if match := re.match(r'(\w+)::\1\(const MachineInst \*inst\)', line):
@@ -9399,7 +9406,10 @@ def test_generated_memory_paths_use_decoded_issue_metadata(
                 if 'set_memory_issue_info(' in line:
                     assert current_class is not None, model_path
                     metadata_classes.add(current_class)
+                    if 'set_memory_issue_info({}, false);' in line:
+                        uncounted_classes.add(current_class)
             assert execution_classes <= metadata_classes, path
+            assert probe_classes == uncounted_classes, path
 
         total_states += states
     assert total_states > 0

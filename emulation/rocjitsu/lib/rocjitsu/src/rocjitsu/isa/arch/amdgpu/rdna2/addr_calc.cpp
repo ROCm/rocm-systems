@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/amdgpu/rdna2/addr_calc.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_buffer.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/addr_calc_flat.h"
@@ -54,7 +55,7 @@ std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdg
   const auto soffset = read_smem_offset(inst.soffset, wf);
   if (!soffset)
     return std::nullopt;
-  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op))
+  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) || inst.op == kSAtcProbeBuffer)
     return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base & ~uint64_t{3},
                                                     inst_offset + *soffset, state,
                                                     /*align_mask=*/3, /*size_align_mask=*/0);

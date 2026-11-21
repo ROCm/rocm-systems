@@ -698,6 +698,34 @@ def _emit_encode_fn(trans, dst_ns, dst_name):
             if any(m.src_name == 'soffset_en' for m in trans.mappings):
                 lines.append('    if (f.soffset_en == 0) dst.soffset = 0x7C;')
 
+    if (
+        base == 'smem'
+        and dst_name in ('rdna3', 'rdna4')
+        and any(m.src_name == 'soffset_en' for m in trans.mappings)
+    ):
+        # A GFX9 probe uses OFFSET as a selector when IMM is clear. Only
+        # forward hints with a matching descriptor, probe type and selector.
+        # Keep dropped hints the same size so neither word becomes a literal.
+        immediate = 'dst.offset' if dst_name == 'rdna3' else 'dst.ioffset'
+        probe_offset = 'f.ioffset'
+        skip_type = ''
+        if dst_name == 'rdna4':
+            probe_offset = '((f.ioffset ^ 0x100000u) - 0x100000u) & 0xffffffu'
+            skip_type = ' || f.sdata > 31'
+        lines.extend(
+            [
+                '    if (f.op == 0x26 || f.op == 0x27) { // S_ATC_PROBE and S_ATC_PROBE_BUFFER',
+                '        const bool has_reg = f.soffset_en || !f.imm;',
+                '        const uint32_t reg = f.soffset_en ? f.soffset : f.ioffset & 0x7fu;',
+                '        const uint32_t last_base_reg = 2 * f.sbase + (f.op == 0x27 ? 3 : 1);',
+                f'        if (last_base_reg > 101 || (has_reg && reg > 101 && reg != 124){skip_type})',
+                '            return {{0xbf800000u, 0xbf800000u}, 2}; // s_nop 0 twice',
+                '        dst.soffset = !has_reg ? 124 : reg == 124 ? 125 : reg; // GFX11+ null / M0',
+                f'        {immediate} = f.imm ? {probe_offset} : 0;',
+                '    }',
+            ]
+        )
+
     # Builders are the canonical target-layout encoder. Alternate decoder-only
     # formats do not have builders yet because their selector conditions are
     # not represented by a single fixed encoding field; keep their generated

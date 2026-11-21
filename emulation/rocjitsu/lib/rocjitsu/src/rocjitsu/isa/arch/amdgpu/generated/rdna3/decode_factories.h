@@ -379,6 +379,8 @@ RJ_DECODE_FACTORY(rdna3, detail, decodeSAndSaveexecB32Sop1);
 RJ_DECODE_FACTORY(rdna3, detail, decodeSAndSaveexecB64Sop1);
 RJ_DECODE_FACTORY(rdna3, detail, decodeSAshrI32Sop2);
 RJ_DECODE_FACTORY(rdna3, detail, decodeSAshrI64Sop2);
+RJ_DECODE_FACTORY(rdna3, detail, decodeSAtcProbeBufferSmem);
+RJ_DECODE_FACTORY(rdna3, detail, decodeSAtcProbeSmem);
 RJ_DECODE_FACTORY(rdna3, detail, decodeSBarrierSopp);
 RJ_DECODE_FACTORY(rdna3, detail, decodeSBcnt0I32B32Sop1);
 RJ_DECODE_FACTORY(rdna3, detail, decodeSBcnt0I32B64Sop1);
