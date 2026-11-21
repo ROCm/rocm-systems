@@ -33,6 +33,7 @@ It exercises:
 |--------|----------------|
 | (wheel artifact) | `cmake --build --target nccl4py` produced a `.whl` |
 | `test_rocm_extensions.py` | RCCL-only wrappers (`all_reduce_with_bias`, `all_to_all_v`) fail controlled |
+| `test_struct_buffer_semantics.py` | Generated struct wrappers: `from_buffer` read-only flag, buffer-protocol `obj[0] = buf`, 2.32.4 GIN enums/fields |
 | `test_shim_surface.py` | HIP `cuda.core` shim (optional; self-skips without visible GPUs) |
 | `test_group_window.py` | `register_window()` inside `nccl.core.group()` returns a handle (2 GPUs; self-skips on fewer) |
 
@@ -40,6 +41,20 @@ The harness also runs an out-of-process `import nccl.bindings` check against
 the uv env after the wheel is installed. The `test_loader_stubs.py` module
 under `bindings/nccl4py/tests` is RCCL-version-specific (it expects certain
 symbols to be absent) and is not part of this build-smoke suite.
+
+## Standalone bindings check (no uv / CMake / pytest)
+
+`run_bindings_semantics.sh [test-name-regex]` Cython-compiles only the
+generated `nccl.bindings` modules into a scratch package and runs
+`bindings/nccl4py/tests/test_struct_buffer_semantics.py` against it with plain
+Python. It needs Python headers, a C++ compiler and Cython>=3.1/numpy/
+setuptools (installed into a venv under `$RCCL_BUILD/nccl4py_standalone` when
+missing). Exit codes: 0 pass, 1 failure, 2 build error, 77 skipped.
+
+```bash
+./run_bindings_semantics.sh test_baseline          # pre-2.32.4 wrapper behaviour
+./run_bindings_semantics.sh 'test_(?!baseline)'    # 2.32.4 cybind semantics
+```
 
 ## Prerequisites
 
