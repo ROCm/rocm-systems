@@ -96,7 +96,7 @@ struct rcclSubBarrier {
       __builtin_amdgcn_s_barrier();
     } else {
       // A wave signals as a whole, so a group that owned part of one would signal for all of it.
-      // Every group split is a multiple of WARP_SIZE today; this catches one that stops being so.
+      // Group splits round to whole waves on gfx1250 (see the tree splits in all_reduce.h).
       assert(nworkers % WARP_SIZE == 0);
       // The signal also sets the expected wave count, so groups of different widths can reuse a
       // slot. s_barrier_wait 1 waits on the last barrier this wave joined.
