@@ -700,6 +700,29 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
                                  allGridSum, firstDevice);
 }
 
+// Temporary trigger for the per-dispatch CU mask until the launch attribute interface lands:
+// HIP_DISPATCH_CU_MASK holds the packed launch descriptor cu_enable DWORD (hex),
+// START [3:0], CNT [7:4], SE_EN [9:8]. Parsed once; an invalid value disables the override.
+static amd::CUEnableConfig parseDispatchCUMaskFlag() {
+  amd::CUEnableConfig cfg;
+  if (HIP_DISPATCH_CU_MASK == nullptr || HIP_DISPATCH_CU_MASK[0] == '\0') {
+    return cfg;
+  }
+  char* end = nullptr;
+  const unsigned long value = strtoul(HIP_DISPATCH_CU_MASK, &end, 16);
+  constexpr unsigned long kValidBits = 0x3FF;
+  const uint32_t seEn = (value >> 8) & amd::CUEnableConfig::kMaxSEEn;
+  if (end == HIP_DISPATCH_CU_MASK || *end != '\0' || (value & ~kValidBits) != 0 || seEn == 0) {
+    LogPrintfError("HIP_DISPATCH_CU_MASK=%s is invalid (need hex, bits [9:0] only, SE_EN != 0); "
+                   "ignored", HIP_DISPATCH_CU_MASK);
+    return cfg;
+  }
+  cfg.cu_start = value & amd::CUEnableConfig::kMaxCUStart;
+  cfg.cu_count = (value >> 4) & amd::CUEnableConfig::kMaxCUCount;
+  cfg.se_en = seEn;
+  return cfg;
+}
+
 hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
                                   hipStream_t hStream, void** kernelParams, void** extra,
                                   hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags = 0,
@@ -761,6 +784,12 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   if (dynDataPrefetchConfig != nullptr && dynDataPrefetchConfig->isEnabled()) {
     amd::NDRangeKernelCommand* kernelCmd = static_cast<amd::NDRangeKernelCommand*>(command);
     kernelCmd->setDynDataPrefetchConfig(*dynDataPrefetchConfig);
+  }
+
+  static const amd::CUEnableConfig envCUEnableConfig = parseDispatchCUMaskFlag();
+  if (envCUEnableConfig.isEnabled() &&
+      (params & amd::NDRangeKernelCommand::CooperativeGroups) == 0) {
+    static_cast<amd::NDRangeKernelCommand*>(command)->setCUEnableConfig(envCUEnableConfig);
   }
 
   if (startEvent != nullptr) {

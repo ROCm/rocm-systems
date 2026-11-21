@@ -562,6 +562,36 @@ stream:
       targets: [amd_windows, amd_wsl]
       reason: "AIRUNTIME-2892 - pre-existing PAL limitation (unrelated to the barrier-bit opt): spin-wait blit stream wait-value deadlocks on HW rings; gfx1201 (amd_windows) hangs (>300s timeout); needs to be re-triaged. AIRUNTIME-3125 - test fails on WSL. Skipping for now."
     tags: [synchronization, overlap]
+  Unit_hipDispatchCUMaskEnv_ChildWorkload:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2948 - Linux-only test (unit/stream/hipDispatchCUMaskEnv.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
+    tags: [cu_mask, P2]
+  Unit_hipDispatchCUMaskEnv_SEIsolation:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2948 - Linux-only test (unit/stream/hipDispatchCUMaskEnv.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
+    tags: [cu_mask, P1]
+  Unit_hipDispatchCUMaskEnv_CURange:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2948 - Linux-only test (unit/stream/hipDispatchCUMaskEnv.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
+    tags: [cu_mask, P1]
+  Unit_hipDispatchCUMaskEnv_LaunchDescriptor:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2948 - Linux-only test (unit/stream/hipDispatchCUMaskEnv.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
+    tags: [cu_mask, P1]
+  Unit_hipDispatchCUMaskEnv_InvalidValueIgnored:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2948 - Linux-only test (unit/stream/hipDispatchCUMaskEnv.cc is wrapped in #if HT_AMD && HT_LINUX); never built or run on native Windows"
+    tags: [cu_mask, P2]
   Unit_hipStreamImplicitSync_RepeatedLaunchesAfterNullStream:
     <<: *level_default
     tags: [synchronization, P1]

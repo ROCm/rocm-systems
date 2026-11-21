@@ -56,6 +56,19 @@ struct DynDataPrefetchConfig {
   bool isEnabled() const { return numRegions > 0; }
 };
 
+struct CUEnableConfig {
+  // Derived from launch descriptor cu_enable bitfield widths (amd_launch_descriptor.h):
+  // cu_start [3:0] = 4 bits, cu_count [7:4] = 4 bits, se_en [9:8] = 2 bits.
+  static constexpr uint32_t kMaxCUStart = (1u << 4) - 1;
+  static constexpr uint32_t kMaxCUCount = (1u << 4) - 1;
+  static constexpr uint32_t kMaxSEEn   = (1u << 2) - 1;
+
+  uint32_t cu_start = 0;
+  uint32_t cu_count = 0;
+  uint32_t se_en = 0;
+  bool isEnabled() const { return se_en != 0; }
+};
+
 /*! \addtogroup Runtime
  *  @{
  *
@@ -1618,6 +1631,7 @@ class NDRangeKernelCommand : public Command {
   uint32_t firstDevice_;     //!< Device index of the first device in the gridc
   uint32_t numWorkgroups_;   //!< Total number of workgroups in the current launch
   DynDataPrefetchConfig dynDataPrefetchConfig_;  //!< Dynamic data prefetch configuration
+  CUEnableConfig cuEnableConfig_;  //!< Per-dispatch CU enable configuration
 
  public:
   enum {
@@ -1683,6 +1697,9 @@ class NDRangeKernelCommand : public Command {
 
   const DynDataPrefetchConfig& dynDataPrefetchConfig() const { return dynDataPrefetchConfig_; }
   void setDynDataPrefetchConfig(const DynDataPrefetchConfig& cfg) { dynDataPrefetchConfig_ = cfg; }
+
+  const CUEnableConfig& cuEnableConfig() const { return cuEnableConfig_; }
+  void setCUEnableConfig(const CUEnableConfig& cfg) { cuEnableConfig_ = cfg; }
 
   //! Set the number of workgroups
   void setNumWorkgroups() {
