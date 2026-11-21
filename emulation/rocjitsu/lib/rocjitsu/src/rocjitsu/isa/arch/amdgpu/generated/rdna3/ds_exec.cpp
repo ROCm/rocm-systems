@@ -1515,8 +1515,19 @@ void DsAppendDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsOrderedCountDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  if (!amdgpu::GwsDevice::prepare_register_access(
+          wf, *d, inst_.offset0, inst_.offset1, wf.vgpr_alloc().base + 0u + inst_.addr,
+          wf.vgpr_alloc().base + 0u + inst_.vdst, true, false))
+    return;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsAddU64Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2807,13 +2818,35 @@ void DsAddRtnF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsAddGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  if (!amdgpu::GwsDevice::prepare_register_access(
+          wf, *d, inst_.offset0, inst_.offset1, wf.vgpr_alloc().base + 0u + inst_.data0,
+          wf.vgpr_alloc().base + 0u + inst_.vdst, false, false))
+    return;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsSubGsRegRtnDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds) {
+    wf.report_instruction_execution_error(
+        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+    return;
+  }
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  if (!amdgpu::GwsDevice::prepare_register_access(
+          wf, *d, inst_.offset0, inst_.offset1, wf.vgpr_alloc().base + 0u + inst_.data0,
+          wf.vgpr_alloc().base + 0u + inst_.vdst, false, true))
+    return;
+  d->wait_counter_type = amdgpu::WaitCounterType::DSCNT;
+  set_data(std::move(d));
 }
 
 void DsCondxchg32RtnB64Ds::execute_impl(amdgpu::Wavefront &wf) {

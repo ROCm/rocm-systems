@@ -8549,9 +8549,11 @@ class CodeGenerator:
             if self.isa_spec.profile.models_nop_issue_delay:
                 if sem.name == 'S_NOP':
                     return '  wf.delay_nop_issue(simm16.encoding_value_ & 15u);'
+            if sem.name == 'S_CLAUSE' and self.isa_spec.arch_name in (
+                'rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4'
+            ):
+                return '  wf.begin_instruction_clause(simm16.encoding_value_);'
             if self.isa_spec.arch_name in ('rdna1', 'rdna2'):
-                if sem.name == 'S_CLAUSE':
-                    return '  wf.begin_instruction_clause(simm16.encoding_value_);'
                 if sem.name == 'S_INST_PREFETCH':
                     return '  wf.set_instruction_prefetch(simm16.encoding_value_ & 3u);'
             if (
@@ -8559,7 +8561,7 @@ class CodeGenerator:
                 and sem.name == 'S_SET_INST_PREFETCH_DISTANCE'
             ):
                 return '  wf.set_instruction_prefetch(simm16.encoding_value_);'
-            if self.isa_spec.arch_name in ('rdna1', 'rdna2', 'rdna3_5'):
+            if self.isa_spec.arch_name in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4'):
                 if sem.name in ('S_INCPERFLEVEL', 'S_DECPERFLEVEL'):
                     change = 1 if sem.name == 'S_INCPERFLEVEL' else -1
                     return f'  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, {change});'
@@ -16013,10 +16015,7 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= CONDITIONAL_MEMORY_LANES;')
                     if _mem_sem and (
                         self._uses_first_gds_lane(_mem_sem.semantic_class)
-                        or (
-                            self.isa_spec.arch_name == 'rdna3_5'
-                            and _mem_sem.semantic_class == 'ds_gs_reg'
-                        )
+                        or _mem_sem.semantic_class == 'ds_gs_reg'
                     ):
                         ctor_body_parts.append(
                             'if (inst_.gds) flags_ |= FIRST_ACTIVE_MEMORY_LANE;'

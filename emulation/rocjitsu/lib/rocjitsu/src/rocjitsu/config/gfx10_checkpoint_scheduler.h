@@ -17,6 +17,36 @@ namespace rocjitsu::config {
 /// instead marks the wave holding each live clause and rebinds it after dispatch.
 class Gfx10CheckpointScheduler {
 public:
+  static std::optional<fb::InstructionClause> instruction_clause(const amdgpu::ComputeUnitCore &cu,
+                                                                 const amdgpu::Wavefront &wf) {
+    if (!amdgpu::has_typed_instruction_clauses(cu.arch()) || !wf.clause_remaining_)
+      return std::nullopt;
+    return fb::InstructionClause(
+        wf.clause_remaining_, wf.clause_kind_, wf.clause_interval_, wf.clause_run_,
+        wf.clause_kind_ && cu.clause_owners_[cu.clause_owner_index(wf, wf.clause_kind_)] == &wf);
+  }
+
+  static util::Result restore_instruction_clause(const fb::InstructionClause &saved,
+                                                 amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wf,
+                                                 util::DiagnosticEmitter emit_error) {
+    const auto kind = saved.kind();
+    if (!amdgpu::has_typed_instruction_clauses(cu.arch()) || !saved.remaining() ||
+        saved.remaining() + saved.run() > 64 || saved.interval() > 15 ||
+        (saved.interval() && saved.run() >= saved.interval()) ||
+        kind >= amdgpu::ComputeUnitCore::ClauseTypeCount ||
+        kind == amdgpu::ComputeUnitCore::Gfx10FlatClause ||
+        kind == amdgpu::ComputeUnitCore::Gfx10VmemClause ||
+        (saved.owns_issue_type() && (!kind || cu.clause_owners_[cu.clause_owner_index(wf, kind)])))
+      return emit_error.emit() << "Invalid instruction clause in checkpoint";
+    wf.clause_remaining_ = saved.remaining();
+    wf.clause_kind_ = kind;
+    wf.clause_interval_ = saved.interval();
+    wf.clause_run_ = saved.run();
+    if (saved.owns_issue_type())
+      cu.clause_owners_[cu.clause_owner_index(wf, kind)] = &wf;
+    return util::Result::success();
+  }
+
   static util::FailureOr<flatbuffers::Offset<fb::Gfx10WaveScheduling>>
   save_wave(flatbuffers::FlatBufferBuilder &builder, const amdgpu::ComputeUnitCore &cu,
             const amdgpu::Wavefront &wf, util::DiagnosticEmitter emit_error) {
@@ -72,7 +102,7 @@ public:
                                    util::DiagnosticEmitter emit_error) {
     const auto kind = saved.clause_kind();
     if (saved.prefetch_lines() > 3 || saved.clause_remaining() > 64 ||
-        kind >= cu.clause_owners_.size() || saved.clause_interval() > 15 ||
+        kind > amdgpu::ComputeUnitCore::Gfx10VmemClause || saved.clause_interval() > 15 ||
         saved.clause_run() + saved.clause_remaining() > 64 ||
         (saved.clause_interval() && saved.clause_run() >= saved.clause_interval()) ||
         (saved.owns_clause() && (!saved.clause_remaining() || !kind || cu.clause_owners_[kind])))

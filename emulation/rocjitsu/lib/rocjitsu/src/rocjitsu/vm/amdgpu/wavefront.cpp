@@ -134,6 +134,8 @@ void Wavefront::set_in_trap_handler(bool value) {
   if (!value && trap_resume_exec_edited_)
     set_exec(trap_saved_exec_);
   trap_resume_exec_edited_ = false;
+  if (value && has_typed_instruction_clauses(cu().arch()))
+    clause_remaining_ = 0;
   in_trap_handler_ = value;
   status_raw_ = value ? status_raw_ | kStatusPrivMask
                       : (status_raw_ & ~kStatusPrivMask) | (trap_saved_status_ & kStatusPrivMask);

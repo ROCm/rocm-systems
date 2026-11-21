@@ -648,6 +648,8 @@ util::Result save_checkpoint(const std::string &path, const SoC &soc, uint64_t t
           }
           const auto exports = export_rows.empty() ? 0 : builder.CreateVector(export_rows);
           fb::WavefrontStateBuilder record(builder);
+          if (const auto clause = Gfx10CheckpointScheduler::instruction_clause(*cu, *w))
+            record.add_instruction_clause(&*clause);
           if (gfx10) {
             record.add_gfx10_resources(wave_resources);
             record.add_gfx10_scheduling(wave_scheduling);
@@ -1202,6 +1204,11 @@ util::FailureOr<LoadedConfig> restore_checkpoint(const std::string &path,
                (wave_scheduling &&
                 Gfx10CheckpointScheduler::restore_wave(*wave_scheduling, *cu, *wf, emit_error)
                     .failed())))
+            return util::Result::failure();
+          if (const auto *clause = wf_state->instruction_clause();
+              clause &&
+              Gfx10CheckpointScheduler::restore_instruction_clause(*clause, *cu, *wf, emit_error)
+                  .failed())
             return util::Result::failure();
           if (const auto *exceptions = wf_state->exceptions()) {
             const bool gfx12 =

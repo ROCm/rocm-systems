@@ -6581,50 +6581,61 @@ TEST(CheckpointTest, RestoresGfx10IssueDelaysAndShaderCounters) {
             cu->read_sgpr(first->sgpr_alloc().base + 4));
 }
 
-TEST(CheckpointTest, RestoresGfx10ClauseOwnershipAcrossWaveSlots) {
-  auto json = functional_quantum_checkpoint_config(1, 1);
-  ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")", R"("arch":"rdna1")"));
-  config::LoadedConfig source;
-  ASSERT_TRUE(test::load_valid_config_from_string(json, source));
-  auto *soc = source.soc();
-  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
-  constexpr uint64_t peer_pc = 0x6000, owner_pc = 0x7000;
-  const uint32_t move = rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = 129, .vdst = 1})[0];
-  const uint32_t nop = rdna1::build_sopp(rdna1::kSNop)[0];
-  soc->memory()->write32(peer_pc, nop);
-  soc->memory()->write32(peer_pc + 4, nop);
-  soc->memory()->write32(peer_pc + 8, move);
-  soc->memory()->write32(owner_pc, rdna1::build_sopp(rdna1::kSClause, {.simm16 = 2})[0]);
-  for (unsigned i = 1; i <= 3; ++i)
-    soc->memory()->write32(owner_pc + 4 * i, move);
-  soc->memory()->write32(owner_pc + 16, nop);
-  auto *peer = cu->dispatch_wf(0, peer_pc, 32, 16);
-  auto *owner = cu->dispatch_wf(1, owner_pc, 32, 16);
-  ASSERT_NE(peer, nullptr);
-  ASSERT_NE(owner, nullptr);
-  cu->step();
-  cu->step();
-  ASSERT_EQ(owner->pc, owner_pc + 8);
-  ASSERT_EQ(peer->pc, peer_pc + 8);
-  test::ScopedTempFile checkpoint;
-  ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-gfx10-clause-"));
-  ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 2, source.engine_config,
-                                      source.cpu_dispatch_threads, {})
-                  .succeeded());
-  config::LoadedConfig restored;
-  ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
-  auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
-  auto *restored_peer = restored_cu->wf(peer->wf_id());
-  ASSERT_NE(restored_peer, nullptr);
-  // Slot zero attempts VALU first in each cycle. It must wait for the
-  // remaining two members of the other wave's acquired VALU clause.
-  for (unsigned i = 0; i < 2; ++i) {
-    restored_cu->step();
-    EXPECT_EQ(restored_peer->pc, peer_pc + 8);
+TEST(CheckpointTest, RestoresInstructionClauseOwnershipAcrossWaveSlots) {
+  for (const std::string target : {"rdna1", "rdna3", "rdna3_5", "rdna4"}) {
+    SCOPED_TRACE(target);
+    const bool typed = target != "rdna1";
+    auto json = functional_quantum_checkpoint_config(1, 1);
+    ASSERT_TRUE(replace_exactly_once(json, R"("arch":"cdna3")",
+                                     std::string("\"arch\":\"") + target + "\""));
+    config::LoadedConfig source;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, source));
+    auto *soc = source.soc();
+    auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+    constexpr uint64_t peer_pc = 0x6000, owner_pc = 0x7000;
+    const uint32_t move = rdna1::build_vop1(rdna1::kVMovB32Vop1, {.src0 = 129, .vdst = 1})[0];
+    const uint32_t nop = typed ? 0xbf800000 : rdna1::build_sopp(rdna1::kSNop)[0];
+    soc->memory()->write32(peer_pc, nop);
+    soc->memory()->write32(peer_pc + 4, nop);
+    soc->memory()->write32(peer_pc + 8, move);
+    soc->memory()->write32(owner_pc, typed ? 0xbf850002
+                                           : rdna1::build_sopp(rdna1::kSClause, {.simm16 = 2})[0]);
+    for (unsigned i = 1; i <= 3; ++i)
+      soc->memory()->write32(owner_pc + 4 * i, move);
+    soc->memory()->write32(owner_pc + 16, nop);
+    // On GFX11 and GFX12 both SIMDs can independently own a VALU clause.
+    const unsigned arbiters = typed ? 2 : 1;
+    for (unsigned slot = 0; slot < arbiters; ++slot) {
+      ASSERT_NE(cu->dispatch_wf_at(slot, 0, peer_pc, 32, 16), nullptr);
+      ASSERT_NE(cu->dispatch_wf_at(slot + arbiters, 1, owner_pc, 32, 16), nullptr);
+    }
+    cu->step();
+    cu->step();
+    for (unsigned slot = 0; slot < arbiters; ++slot) {
+      ASSERT_EQ(cu->wf(slot)->pc, peer_pc + 8);
+      ASSERT_EQ(cu->wf(slot + arbiters)->pc, owner_pc + 8);
+    }
+    test::ScopedTempFile checkpoint;
+    ASSERT_TRUE(checkpoint.initialize("rocjitsu-checkpoint-clause-"));
+    ASSERT_TRUE(config::save_checkpoint(checkpoint.path(), *soc, 2, source.engine_config,
+                                        source.cpu_dispatch_threads, {})
+                    .succeeded());
+    config::LoadedConfig restored;
+    ASSERT_TRUE(test::restore_valid_checkpoint(checkpoint.path(), restored));
+    auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    // The peers issue first each tick. Each must wait for its SIMD's owner.
+    for (unsigned i = 0; i < 3; ++i) {
+      restored_cu->step();
+      for (unsigned slot = 0; slot < arbiters; ++slot) {
+        const auto *peer = restored_cu->wf(slot);
+        ASSERT_NE(peer, nullptr);
+        EXPECT_EQ(peer->pc, peer_pc + (i < 2 ? 8 : 12));
+        if (i == 2) {
+          EXPECT_EQ(restored_cu->read_vgpr(peer->vgpr_alloc().base + 1, 0), 1u);
+        }
+      }
+    }
   }
-  restored_cu->step();
-  EXPECT_EQ(restored_peer->pc, peer_pc + 12);
-  EXPECT_EQ(restored_cu->read_vgpr(restored_peer->vgpr_alloc().base + 1, 0), 1u);
 }
 
 TEST(CheckpointTest, RestoresShaderOwnedGfx10Halt) {

@@ -39,7 +39,9 @@ void SSetInstPrefetchDistanceSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_set_inst_prefetch_distance_sopp(*this, wf);
 }
 
-void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.begin_instruction_clause(simm16.encoding_value_);
+}
 
 void SDelayAluSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_delay_alu_sopp(*this, wf);

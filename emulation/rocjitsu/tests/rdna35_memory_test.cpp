@@ -561,7 +561,40 @@ TEST_F(Rdna35MemoryTest, GdsSharesBytesAcrossCusAndUsesFirstLaneExceptAppend) {
   peer->halt();
 }
 
-TEST_F(Rdna35MemoryTest, StreamoutRegistersPreserveIssueLanesWithoutReportingGdsBytes) {
+TEST_P(Gfx11MemoryTest, StreamoutAllocatesAndRefundsOverflowOnTheSameRegister) {
+  // Mesa's gfx1100 GS reserves output in bytes, releases the ordered walker,
+  // then refunds excess bytes when a later draw starts beyond capacity.
+  constexpr uint32_t capacity = 70 * sizeof(uint32_t);
+  constexpr uint32_t request = 129 * sizeof(uint32_t);
+  constexpr uint32_t tail = 16 * sizeof(uint32_t);
+  wf_->set_m0(0);
+  write_vector(2, 0);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd8fe0000, 0x04000002)); // ordered acquire, v4 <- pre-op
+  EXPECT_EQ(read_vector(4), 0u);
+  write_vector(5, request);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd9ea0000, 0x05000500)); // reserve, v5 is source and dest
+  EXPECT_EQ(read_vector(5), 0u);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd8fe0300, 0x02000002)); // release and done, v2 <- pre-op
+  EXPECT_EQ(read_vector(2), request);
+  wf_->set_m0(1);
+  write_vector(2, 0);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd8fe0000, 0x04000002));
+  EXPECT_EQ(read_vector(4), request);
+  write_vector(5, tail);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd9ea0000, 0x05000500));
+  EXPECT_EQ(read_vector(5), request);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd8fe0300, 0x02000002));
+  EXPECT_EQ(read_vector(2), request + tail);
+  write_vector(12, request + tail - capacity);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd9ee0000, 0x0c000c00)); // refund, v12 <- pre-op
+  EXPECT_EQ(read_vector(12), request + tail);
+  wf_->set_m0(2);
+  write_vector(2, 0);
+  ASSERT_NO_FATAL_FAILURE(issue(0xd8fe0000, 0x04000002));
+  EXPECT_EQ(read_vector(4), capacity);
+}
+
+TEST_P(Gfx11MemoryTest, StreamoutRegistersPreserveIssueLanesWithoutReportingGdsBytes) {
   using test::execution_plugin::MemoryObservationPlugin;
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<MemoryObservationPlugin>(true);
@@ -595,7 +628,7 @@ TEST_F(Rdna35MemoryTest, StreamoutRegistersPreserveIssueLanesWithoutReportingGds
   EXPECT_EQ(byte_access.addresses[1], 16u);
 }
 
-TEST_F(Rdna35MemoryTest, StreamoutRegisterAtomicsUseUnsignedSourcesAndSelectedWidth) {
+TEST_P(Gfx11MemoryTest, StreamoutRegisterAtomicsUseUnsignedSourcesAndSelectedWidth) {
   write_vector(3, UINT32_MAX);
   issue(gds(122, 32), 0x300); // ds_add_gs_reg_rtn v[0:1], v3, register 8
   EXPECT_EQ(read_vector(), 0u);
@@ -620,7 +653,38 @@ TEST_F(Rdna35MemoryTest, StreamoutRegisterAtomicsUseUnsignedSourcesAndSelectedWi
   EXPECT_EQ(read_vector(1), 0u);
 }
 
-TEST_F(Rdna35MemoryTest, OrderedCountReturnsOneWordFromWideStreamoutCounters) {
+TEST_P(Gfx11MemoryTest, StreamoutAndOrderedCountSelectFirstLaneInHighHalf) {
+  wf_->halt();
+  wf_ = cu_->dispatch_wf(0, 0, 106, 32, 64);
+  ASSERT_NE(wf_, nullptr);
+  constexpr unsigned first = 41, other = 57;
+  wf_->set_exec((uint64_t{1} << first) | (uint64_t{1} << other));
+  // Both GS operations select the source from DATA0. Ordered count uses ADDR.
+  write_vector(3, 17, first);
+  write_vector(3, 99, other);
+  write_vector(2, 5, first);
+  write_vector(0, 0xdeadbeef, other);
+  ASSERT_NO_FATAL_FAILURE(issue(gds(122, 16), 0x300));
+  ASSERT_NO_FATAL_FAILURE(issue(gds(63, 0x310), 2));
+  EXPECT_EQ(read_vector(0, first), 17u);
+  ASSERT_NO_FATAL_FAILURE(issue(gds(123, 16), 0x300));
+  EXPECT_EQ(read_vector(0, first), 22u);
+  EXPECT_EQ(read_vector(0, other), 0xdeadbeefu);
+
+  for (uint32_t opcode : {63u, 122u, 123u}) {
+    const std::array words{gds(opcode, 16) & ~(1u << 17), opcode == 63 ? 2u : 0x300u};
+    auto decoded = decoder_->decode_window(words);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).failed());
+    EXPECT_EQ(wf_->instruction_execution_error(),
+              InstructionExecutionError::InvalidInstructionEncoding);
+  }
+  write_vector(3, 0, first);
+  ASSERT_NO_FATAL_FAILURE(issue(gds(122, 16), 0x300));
+  EXPECT_EQ(read_vector(0, first), 5u);
+}
+
+TEST_P(Gfx11MemoryTest, OrderedCountReturnsOneWordFromWideStreamoutCounters) {
   for (bool m0_selects_bank : {false, true}) {
     SCOPED_TRACE(m0_selects_bank);
     constexpr uint32_t offset = 8u * sizeof(uint32_t);
@@ -670,7 +734,7 @@ TEST_F(Rdna35MemoryTest, OrderedCountReturnsOneWordFromWideStreamoutCounters) {
   }
 }
 
-TEST_F(Rdna35MemoryTest, OrderedCountScoreboardTracksOnlyTheReturnedLane) {
+TEST_P(Gfx11MemoryTest, OrderedCountScoreboardTracksOnlyTheReturnedLane) {
   const std::array words{gds(63), 0x08000002u};
   auto decoded = decoder_->decode_window(words);
   ASSERT_TRUE(decoded.succeeded());
@@ -686,7 +750,7 @@ TEST_F(Rdna35MemoryTest, OrderedCountScoreboardTracksOnlyTheReturnedLane) {
   }
 }
 
-TEST_F(Rdna35MemoryTest, EmptyOrderedCountKeepsCounterAndAdvancesWalker) {
+TEST_P(Gfx11MemoryTest, EmptyOrderedCountKeepsCounterAndAdvancesWalker) {
   unsigned id = 0;
   const auto ordered = [&](uint16_t opcode, uint64_t exec, uint32_t value) {
     wf_->set_m0(id++);
@@ -783,7 +847,7 @@ TEST_F(Rdna35MemoryTest, DebuggerTreatsAtcProbesAsNonfaultingHints) {
   cu_->set_gpu_vm(nullptr);
 }
 
-TEST_F(Rdna35MemoryTest, OrderedCountDefersYoungerWaveAndCommitsOnce) {
+TEST_P(Gfx11MemoryTest, OrderedCountDefersYoungerWaveAndCommitsOnce) {
   std::unique_ptr<ComputeUnitCore> peer_cu;
   ASSERT_NO_FATAL_FAILURE(make_cu(peer_cu));
   auto *older = peer_cu->dispatch_wf(1, 0, 106, 32, 32);

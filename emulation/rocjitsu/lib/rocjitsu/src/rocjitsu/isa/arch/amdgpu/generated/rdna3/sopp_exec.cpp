@@ -41,7 +41,9 @@ void SSetInstPrefetchDistanceSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_set_inst_prefetch_distance_sopp(*this, wf);
 }
 
-void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SClauseSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.begin_instruction_clause(simm16.encoding_value_);
+}
 
 void SDelayAluSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_delay_alu_sopp(*this, wf);
@@ -203,13 +205,21 @@ void SSendmsghaltSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_sendmsghalt_sopp(*this, wf);
 }
 
-void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SIncperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, 1);
+}
 
-void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void SDecperflevelSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.cu().update_shader_perf_level(simm16.encoding_value_ & 15u, -1);
+}
 
-void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void STtracedataSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.cu().emit_shader_trace_data(wf.m0());
+}
 
-void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void STtracedataImmSopp::execute_impl(amdgpu::Wavefront &wf) {
+  wf.cu().emit_shader_trace_data(simm16.encoding_value_ & 0xffu);
+}
 
 void SIcacheInvSopp::execute_impl(amdgpu::Wavefront &wf) {
   amdgpu::execute_s_icache_inv_sopp(*this, wf);

@@ -109,58 +109,124 @@ bool InstructionComputeUnitView::in_multiwave_workgroup() const {
 }
 
 void InstructionComputeUnitView::update_shader_perf_level(uint32_t id, int change) {
-  if (raw_wavefront().uses_separate_trap_ctrl() ||
-      (raw_wavefront().status_raw() & Wavefront::kStatusPerfEnableMask))
+  const auto &wave = raw_wavefront();
+  const bool gfx11_or_gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
+                              arch() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+                              arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  // GFX12 STATE_PRIV.PERF_EN is backed by the same internal status bit as
+  // GFX11 STATUS.PERF_EN. MODE.DISABLE_PERF temporarily masks an enabled wave.
+  if (gfx11_or_gfx12 && (wave.mode_raw() & (1u << 27)))
+    return;
+  if (arch() == ROCJITSU_CODE_ARCH_CDNA5 || (wave.status_raw() & Wavefront::kStatusPerfEnableMask))
     raw_cu().shader_perf_levels_[id & 15u] += change;
 }
 
 void InstructionComputeUnitView::emit_shader_trace_data(uint32_t data) {
   const auto &notify = raw_cu().shader_trace_handler_;
-  const bool has_enable =
-      arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2 ||
-      arch() == ROCJITSU_CODE_ARCH_CDNA1 || arch() == ROCJITSU_CODE_ARCH_CDNA2 ||
-      arch() == ROCJITSU_CODE_ARCH_CDNA3 || arch() == ROCJITSU_CODE_ARCH_CDNA4;
-  if (notify && (!has_enable || (raw_wavefront().status_raw() & Wavefront::kStatusTraceEnableMask)))
+  // GFX12 STATE_PRIV.TTRACE_EN maps to the GFX11 STATUS.TTRACE_EN backing bit.
+  if (notify && (arch() == ROCJITSU_CODE_ARCH_CDNA5 ||
+                 (raw_wavefront().status_raw() & Wavefront::kStatusTraceEnableMask)))
     notify(raw_wavefront(), data);
+}
+
+ComputeUnitCore::ClauseType ComputeUnitCore::instruction_clause_type(const Instruction &inst,
+                                                                     uint32_t encoding) const {
+  const bool typed = has_typed_instruction_clauses(arch());
+  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const auto addressing = inst.amdgpu_memory_addressing();
+  switch (inst.amdgpu_execution_block()) {
+  case ExecutionBlock::VALU:
+    return ValuClause;
+  case ExecutionBlock::SMEM:
+    return SmemClause;
+  case ExecutionBlock::LDS:
+    if (typed && addressing != MemoryAddressing::Lds)
+      return NoClause;
+    return (gfx12 || !(encoding & (1u << 17))) && !inst.mnemonic().starts_with("ds_gws") ? LdsClause
+                                                                                         : NoClause;
+  case ExecutionBlock::VMEM:
+    break;
+  default:
+    return NoClause;
+  }
+
+  const bool flat = addressing == MemoryAddressing::Flat;
+  if (!typed)
+    return flat ? Gfx10FlatClause : Gfx10VmemClause;
+  // RDNA4 section 5.3 groups all non-flat loads, stores and atomics by
+  // access direction. GFX11 gives images and sampled reads their own classes.
+  const bool image = !gfx12 && addressing == MemoryAddressing::Image;
+  if (inst.amdgpu_operation() == Operation::IMAGE_GET_LOD ||
+      inst.amdgpu_operation() == Operation::IMAGE_MSAA_LOAD)
+    return gfx12 ? BufferLoadClause : ImageSampleClause;
+  switch (inst.amdgpu_memory_kind()) {
+  case MemoryKind::Load:
+    return image ? ImageLoadClause : flat ? FlatLoadClause : BufferLoadClause;
+  case MemoryKind::Store:
+    return image ? ImageStoreClause : flat ? FlatStoreClause : BufferStoreClause;
+  case MemoryKind::Atomic:
+    return image ? ImageAtomicClause : flat ? FlatAtomicClause : BufferAtomicClause;
+  case MemoryKind::Sample:
+    return gfx12 ? BufferLoadClause : ImageSampleClause;
+  case MemoryKind::Bvh:
+    return gfx12 ? BufferLoadClause : BvhClause;
+  default:
+    return NoClause;
+  }
 }
 
 bool ComputeUnitCore::can_issue_clause_member(Wavefront &wave, const Instruction &inst,
                                               uint32_t encoding) {
-  enum : uint8_t { none, valu, smem, lds, flat, vmem };
-  uint8_t kind = none;
-  switch (inst.amdgpu_execution_block()) {
-  case ExecutionBlock::VALU:
-    kind = valu;
-    break;
-  case ExecutionBlock::SMEM:
-    kind = smem;
-    break;
-  case ExecutionBlock::LDS:
-    if (!(encoding & (1u << 17)) && !inst.mnemonic().starts_with("ds_gws"))
-      kind = lds;
-    break;
-  case ExecutionBlock::VMEM:
-    kind = inst.mnemonic().starts_with("flat_") ? flat : vmem;
-    break;
-  default:
-    break;
+  const bool typed = has_typed_instruction_clauses(arch());
+  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  uint8_t kind = instruction_clause_type(inst, encoding);
+  const auto op = inst.amdgpu_operation();
+  if (typed && wave.clause_remaining_ && !wave.clause_kind_ && !wave.exec()) {
+    // An empty first VALU or a skipped memory instruction cannot establish
+    // the type. Once a clause starts, changing EXEC does not end it.
+    const auto &counts = wave.wait_counters();
+    const auto *issue = inst.amdgpu_memory_issue_info();
+    const bool skip_memory =
+        issue && (kind == LdsClause || inst.amdgpu_execution_block() == ExecutionBlock::VMEM) &&
+        std::ranges::all_of(issue->counter_obligations(), [&](auto obligation) {
+          switch (obligation.wait_counter_type()) {
+          case WaitCounterType::DSCNT:
+            return gfx12 ? counts.dscnt == 0 : counts.lgkmcnt == 0;
+          case WaitCounterType::SAMPLECNT:
+            return gfx12 ? counts.samplecnt == 0 : counts.vmcnt == 0;
+          case WaitCounterType::BVHCNT:
+            return gfx12 ? counts.bvhcnt == 0 : counts.vmcnt == 0;
+          case WaitCounterType::STORECNT:
+            return counts.vscnt == 0;
+          case WaitCounterType::LOADCNT:
+            return counts.vmcnt == 0;
+          default:
+            return false;
+          }
+        });
+    if (kind == ValuClause || skip_memory) {
+      wave.clause_remaining_ = 0;
+      return true;
+    }
   }
-
-  // Internal NOPs consume a position, including in BREAK_SPAN. A leading
-  // NOP has no issue class yet, so it cannot reserve a pipe.
-  const bool clause_nop = wave.clause_remaining_ && inst.mnemonic() == "s_nop";
-  if (clause_nop)
+  const bool internal =
+      wave.clause_remaining_ &&
+      (op == Operation::S_NOP || (typed && op == Operation::S_DELAY_ALU) ||
+       (typed && !gfx12 && op == Operation::S_SLEEP) ||
+       (gfx12 && inst.mnemonic().starts_with("s_wait_") && inst.mnemonic().ends_with("cnt")));
+  if (internal)
     kind = wave.clause_kind_;
-  // Messages, GDS and transfers of control end a homogeneous clause.
-  if ((!kind && !clause_nop) || (wave.clause_kind_ && wave.clause_kind_ != kind)) {
+  if ((!kind && !internal) || (wave.clause_kind_ && wave.clause_kind_ != kind)) {
     wave.clause_remaining_ = 0;
-    wave.clause_kind_ = none;
+    wave.clause_kind_ = NoClause;
   }
-  if (!kind && !clause_nop)
+  if (!kind && !internal)
     return true;
-  Wavefront *&owner = clause_owners_[kind];
-  if (owner && owner != &wave && owner->clause_remaining_ && owner->clause_kind_ == kind &&
-      owner->state() == WfState::RUNNING && !owner->debug_paused())
+  const auto resource = clause_owner_index(wave, kind);
+  Wavefront *&owner = clause_owners_[resource];
+  if (owner && owner != &wave && owner->clause_remaining_ &&
+      clause_owner_index(*owner, owner->clause_kind_) == resource &&
+      (typed ? !owner->is_halted() : owner->state() == WfState::RUNNING) && !owner->debug_paused())
     return false;
   owner = nullptr;
   if (wave.clause_remaining_) {
@@ -679,8 +745,10 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   // Standalone dispatch supplies export storage and pre-populated GFX11 pixel
   // parameters. A graphics frontend may withhold either grant after dispatch.
   const bool gfx11 = arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  // Under thread trace, gfx1151 launches every wave with STATUS.TTRACE_EN set.
   wf->set_status_raw((has_typed_export_waits(arch()) ? Wavefront::kStatusExportReadyMask : 0u) |
-                     (gfx11 ? Wavefront::kStatusParamReadyMask : 0u));
+                     (gfx11 ? Wavefront::kStatusParamReadyMask : 0u) |
+                     (shader_trace_handler_ ? Wavefront::kStatusTraceEnableMask : 0u));
   wf->flat_pointer32_ = flat_pointer32_;
   wf->set_apertures(shared_aperture_base_, shared_aperture_limit_, private_aperture_base_,
                     private_aperture_limit_, /*override_launch=*/false);
@@ -3057,10 +3125,13 @@ ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<Enab
   // Skipped vector instructions never issue: no register/plugin effects, wait
   // counter changes, or async matrix submission. Scalar instructions still run.
   if ((active->mode_raw() & Wavefront::VSKIP_BIT) && inst->is_vskip_affected()) {
+    if (has_typed_instruction_clauses(config_.arch) && !active->clause_kind_)
+      active->clause_remaining_ = 0;
     active->pc += inst_size;
     return IssueOutcome::NotIssued;
   }
-  if (gfx10 && !can_issue_clause_member(*active, *inst, words[0])) {
+  if ((gfx10 || has_typed_instruction_clauses(config_.arch)) &&
+      !can_issue_clause_member(*active, *inst, words[0])) {
     --active->trace_inst_count_;
     return IssueOutcome::NotIssued;
   }

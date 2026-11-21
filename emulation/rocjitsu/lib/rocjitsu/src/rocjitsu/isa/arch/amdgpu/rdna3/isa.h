@@ -19,10 +19,11 @@ class Wavefront;
 }
 namespace rdna3 {
 
-/// @brief RDNA3 STATUS register layout (GFX11, one 32-bit scalar register per wavefront).
-///
-/// @details RDNA3/4 do not expose TTRACE_EN, EXPORT_RDY, or SKIP_EXPORT
-/// (those bits were RDNA1/2 only); kept per-ISA for consistency with RDNA1/2.
+/// @brief Named fields used by the GFX11 wave status helpers.
+/// @details PERF_EN and TTRACE_EN are also tracked in the underlying status
+/// word at bits 19 and 7 respectively. The GFX11 manuals omit TTRACE_EN, but
+/// gfx1151 waves read bit 7 set under thread trace and bit 19 set under
+/// performance-counter collection.
 class StatusReg : public ::util::Bitfield<32> {
 public:
   using Bitfield::Bitfield;

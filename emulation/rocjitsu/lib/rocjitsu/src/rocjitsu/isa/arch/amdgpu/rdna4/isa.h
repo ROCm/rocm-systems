@@ -20,10 +20,9 @@ class Wavefront;
 }
 namespace rdna4 {
 
-/// @brief RDNA4 STATUS register layout (GFX12, one 32-bit scalar register per wavefront).
-///
-/// @details Same layout as RDNA3 (GFX11); no TTRACE_EN, EXPORT_RDY, or
-/// SKIP_EXPORT. Kept per-ISA for consistency with the other RDNA ISAs.
+/// @brief Internal wave status fields shared by the GFX12 execution helpers.
+/// @details HW_REG_WAVE_STATE_PRIV maps the internal performance and trace
+/// enables to bits 19 and 20 respectively.
 class StatusReg : public ::util::Bitfield<32> {
 public:
   using Bitfield::Bitfield;

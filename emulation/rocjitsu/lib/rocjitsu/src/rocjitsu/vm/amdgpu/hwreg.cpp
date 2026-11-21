@@ -496,7 +496,7 @@ uint32_t rdna3_4_hw_id1_raw(const Wavefront &wf) {
   const auto &cu = wf.cu();
   const uint32_t cu_index = cu.shader_array_cu_id();
   return field_value(wf.wf_id() / 2, 0, 5) |
-         field_value((cu_index & 1u) | (wf.wf_id() % 2) << 1, 8, 2) |
+         field_value((cu_index & 1u) | wf.rdna_simd_in_cu() << 1, 8, 2) |
          field_value(cu_index / 2, 10, 4) | field_value(cu.shader_array_id(), 16, 1) |
          field_value(cu.shader_engine_id(), 18, 3) | field_value(1, 29, 3);
 }

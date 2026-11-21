@@ -2482,6 +2482,14 @@ DsOrderedCountDs::DsOrderedCountDs(const MachineInst *inst)
   dsmem.apply_fieldless_caps(false, false, false);
   dsmem_in.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})},
+      false);
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::DS_ORDERED_COUNT);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
@@ -4370,12 +4378,23 @@ DecodeResult decodeDsAddRtnF32Ds(const MachineInst *opcode, const DecodeErrorEmi
 DsAddGsRegRtnDs::DsAddGsRegRtnDs(const MachineInst *inst)
     : Ds("ds_add_gs_reg_rtn", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsAddGsRegRtnDs)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(((reinterpret_cast<const OpEncoding *>(inst)->offset0 & 32) ? 64 : 32),
+           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &data0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (inst_.gds)
+    flags_ |= FIRST_ACTIVE_MEMORY_LANE;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})},
+      true, inst_.gds);
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::DS_ADD_GS_REG_RTN);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);
@@ -4395,12 +4414,23 @@ DecodeResult decodeDsAddGsRegRtnDs(const MachineInst *opcode,
 DsSubGsRegRtnDs::DsSubGsRegRtnDs(const MachineInst *inst)
     : Ds("ds_sub_gs_reg_rtn", reinterpret_cast<const OpEncoding *>(inst),
          selected_exec_fn(InstructionExecutionId::DsSubGsRegRtnDs)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vdst(((reinterpret_cast<const OpEncoding *>(inst)->offset0 & 32) ? 64 : 32),
+           OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       data0(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->data0) {
   dst_operands_[0] = &vdst;
   src_operands_[0] = &data0;
   num_src_ = 1;
   num_dst_ = 1;
+  if (inst_.gds)
+    flags_ |= FIRST_ACTIVE_MEMORY_LANE;
+  set_memory_issue_info(
+      {amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
+                                       (inst_.gds != 0 ? amdgpu::MemoryCompletionClass::GDS
+                                                       : amdgpu::MemoryCompletionClass::LDS)},
+       (inst_.gds != 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
+                                                         amdgpu::MemoryCompletionClass::UNORDERED}
+                       : amdgpu::MemoryCounterObligation{})},
+      true, inst_.gds);
   flags_ |= MEMORY_WAIT_PRODUCER;
   set_amdgpu_operation(amdgpu::Operation::DS_SUB_GS_REG_RTN);
   set_amdgpu_memory(amdgpu::MemoryAddressing::Gds, amdgpu::MemoryKind::Other);

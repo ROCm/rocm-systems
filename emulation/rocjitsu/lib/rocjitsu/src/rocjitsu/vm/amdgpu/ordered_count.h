@@ -24,7 +24,8 @@ constexpr uint64_t streamout_register_lane(uint64_t exec, bool ordered) {
 // GDS accepts one wave request even if neither mask has any lanes.
 inline OrderedCountLanes ordered_count_lanes(const Wavefront &wf, uint32_t logical_dst) {
   const uint64_t exec = wf.exec();
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  const auto arch = wf.cu().arch();
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     return {exec & -exec, logical_dst < wf.num_vgprs() ? streamout_register_lane(exec, true) : 0};
   if (logical_dst >= wf.num_vgprs())
     return {};

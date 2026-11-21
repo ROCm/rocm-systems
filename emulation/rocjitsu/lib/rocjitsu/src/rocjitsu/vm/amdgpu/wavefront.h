@@ -40,6 +40,11 @@ class Gfx10CheckpointScheduler;
 
 namespace amdgpu {
 
+constexpr bool has_typed_instruction_clauses(rj_code_arch_t arch) {
+  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
+         arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
 struct Pm4FailureState;
 class ShaderExportOperands;
 enum class ShaderExportIssue : uint8_t { Skip, WaitForReady, Accept };
@@ -294,6 +299,9 @@ public:
   /// @brief Return the wavefront slot index within the CU.
   /// @returns Permanent slot index.
   uint32_t wf_id() const { return wf_id_; }
+
+  /// GFX11 and GFX12 interleave wave slots across the CU's two SIMDs.
+  uint32_t rdna_simd_in_cu() const { return wf_id() % 2; }
 
   /// @brief Generation of the current occupant of this reusable wave slot.
   uint64_t dispatch_generation() const { return dispatch_generation_; }
@@ -950,6 +958,8 @@ public:
 
   void begin_instruction_clause(uint32_t control) {
     clause_remaining_ = (control & 63u) + 1;
+    if (debug_single_step() && has_typed_instruction_clauses(cu().arch()))
+      clause_remaining_ = 0;
     clause_interval_ = (control >> 8) & 15u;
     clause_run_ = 0;
     clause_kind_ = 0;
@@ -1131,6 +1141,8 @@ public:
   bool debug_suspended() const { return debug_suspended_; }
   void set_debug_suspended(bool v) {
     const bool was_runnable = !is_halted() && !debug_paused();
+    if (v && has_typed_instruction_clauses(cu().arch()))
+      clause_remaining_ = 0;
     debug_suspended_ = v;
     if (was_runnable != (!is_halted() && !debug_paused()))
       update_activity_counts(!is_halted(), was_runnable);
@@ -1174,7 +1186,11 @@ public:
 
   /// @brief Whether a future debugger resume should request single-step mode.
   bool debug_single_step() const { return single_step_; }
-  void set_debug_single_step(bool v) { single_step_ = v; }
+  void set_debug_single_step(bool v) {
+    if (v && has_typed_instruction_clauses(cu().arch()))
+      clause_remaining_ = 0;
+    single_step_ = v;
+  }
 
   /// @brief The trap id recorded by the last s_trap (breakpoint = 1).
   uint32_t trap_id() const { return trap_id_; }

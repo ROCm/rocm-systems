@@ -497,6 +497,10 @@ public:
   }
 
   using ShaderTraceHandler = std::function<void(const Wavefront &, uint32_t)>;
+  /// @brief Install the consumer for S_TTRACEDATA and S_TTRACEDATA_IMM.
+  /// @details A handler stands in for an active thread trace. Hardware latches
+  /// STATUS.TTRACE_EN (bit 7) at wave launch, so only waves dispatched while a
+  /// handler is installed emit trace data.
   void set_shader_trace_handler(ShaderTraceHandler handler) {
     shader_trace_handler_ = std::move(handler);
   }
@@ -1937,9 +1941,36 @@ protected:
   bool external_sendmsg_handler_ = false;
   ShaderTraceHandler shader_trace_handler_;
   std::array<uint32_t, 16> shader_perf_levels_{};
-  // A GFX10 clause reserves only its own issue type while another wave can
-  // continue issuing instructions of every other type.
-  std::array<Wavefront *, 6> clause_owners_{};
+  // The first six values are also stored in GFX10 wave checkpoints.
+  enum ClauseType : uint8_t {
+    NoClause,
+    ValuClause,
+    SmemClause,
+    LdsClause,
+    Gfx10FlatClause,
+    Gfx10VmemClause,
+    ImageLoadClause,
+    ImageStoreClause,
+    ImageAtomicClause,
+    ImageSampleClause,
+    BvhClause,
+    BufferLoadClause,
+    BufferStoreClause,
+    BufferAtomicClause,
+    FlatLoadClause,
+    FlatStoreClause,
+    FlatAtomicClause,
+    ClauseTypeCount
+  };
+  // GFX11 image and buffer/global atomics share the issue arbiter on each SIMD.
+  // GFX10 keeps its existing CU-wide owners in the first bank.
+  uint32_t clause_owner_index(const Wavefront &wave, uint8_t kind) const {
+    const uint32_t simd = has_typed_instruction_clauses(arch()) ? wave.rdna_simd_in_cu() : 0;
+    return simd * ClauseTypeCount +
+           (kind == ImageAtomicClause ? uint32_t{BufferAtomicClause} : kind);
+  }
+  std::array<Wavefront *, 2 * ClauseTypeCount> clause_owners_{};
+  ClauseType instruction_clause_type(const Instruction &inst, uint32_t encoding) const;
   bool can_issue_clause_member(Wavefront &wave, const Instruction &inst, uint32_t encoding);
   ShaderExportHandler shader_export_handler_;
   QueueExceptionHandler queue_exception_handler_;

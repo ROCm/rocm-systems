@@ -2653,6 +2653,12 @@ class Rdna3Profile(_AmdgpuProfileBase):
     gfx11_buffer_tfe = True
     check_buffer_load_result_bounds = True
 
+    semantic_class_overrides = {
+        'DS_ADD_GS_REG_RTN': 'ds_gs_reg',
+        'DS_SUB_GS_REG_RTN': 'ds_gs_reg',
+        'DS_ORDERED_COUNT': 'ds_ordered_count',
+    }
+
     def saddr_null_selector_expr(self, enc_name: str) -> str | None:
         if enc_name.upper() == 'ENC_FLAT':
             return '0x7C'
@@ -2936,9 +2942,6 @@ class Rdna3_5Profile(Rdna3Profile):
     def semantic_class_overrides(self) -> dict[str, str]:
         return {
             **super().semantic_class_overrides,
-            'DS_ADD_GS_REG_RTN': 'ds_gs_reg',
-            'DS_SUB_GS_REG_RTN': 'ds_gs_reg',
-            'DS_ORDERED_COUNT': 'ds_ordered_count',
             'S_ATC_PROBE': 'atc_probe',
             'S_ATC_PROBE_BUFFER': 'atc_probe',
         }

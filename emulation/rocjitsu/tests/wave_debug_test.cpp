@@ -288,6 +288,262 @@ TEST(WaveDebugTest, SingleStepWaitsForGfx10ClauseAdmission) {
     }
 }
 
+TEST(WaveDebugTest, Rdna3ValuClauseReservesIssueUntilBreakOrEnd) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    for (bool break_after_two : {false, true}) {
+      for (bool empty_at_start : {false, true}) {
+        SCOPED_TRACE(testing::Message() << break_after_two << ", " << empty_at_start);
+        WaveDebugFixture fx(arch, 3, 1);
+        constexpr uint32_t peer_pc = 0x3000;
+        fx.gpu_mem.write32(kKernelAddr, break_after_two ? 0xbf850203 : 0xbf850003);
+        for (unsigned i = 1; i <= 4; ++i)
+          fx.gpu_mem.write32(kKernelAddr + 4 * i, 0x7e020281); // v_mov_b32 v1, 1
+        fx.gpu_mem.write32(peer_pc, 0x7e020282);               // v_mov_b32 v1, 2
+        fx.gpu_mem.write32(peer_pc + 4, 0xbfb00000);           // s_endpgm
+        auto *owner = fx.cu->dispatch_wf(0, kKernelAddr, 32, 16, 32);
+        ASSERT_NE(owner, nullptr);
+        owner->set_exec(!empty_at_start);
+        fx.cu->step();
+        fx.cu->step();
+        ASSERT_EQ(owner->pc, kKernelAddr + 8);
+        owner->set_exec(1);
+        auto *peer = fx.cu->dispatch_wf_at(2, 1, peer_pc, 32, 16, 32);
+        ASSERT_NE(peer, nullptr);
+        // A peer on the other SIMD can always issue the same operation.
+        auto *other = fx.cu->dispatch_wf_at(1, 2, peer_pc, 32, 16, 32);
+        ASSERT_NE(other, nullptr);
+        fx.cu->step(); // Owner issues its second member.
+        EXPECT_EQ(other->pc, peer_pc + 4);
+        EXPECT_EQ(peer->pc, empty_at_start || break_after_two ? peer_pc + 4 : peer_pc);
+        if (!empty_at_start && !break_after_two) {
+          fx.cu->step();
+          EXPECT_EQ(peer->pc, peer_pc);
+          fx.cu->step();
+          EXPECT_EQ(peer->pc, peer_pc + 4);
+        }
+      }
+    }
+  }
+}
+
+TEST(WaveDebugTest, RdnaValuClauseKeepsOwnershipAcrossInterpolation) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 3, 1);
+    constexpr uint32_t peer_pc = 0x3000;
+    fx.gpu_mem.write32(kKernelAddr, 0xbf850002);     // s_clause 2
+    fx.gpu_mem.write32(kKernelAddr + 4, 0x7e020281); // v_mov_b32 v1, 1
+    fx.gpu_mem.write32(kKernelAddr + 8, 0xcd000700); // v_interp_p10_f32 v0, v1, v2, v3 wait_exp:7
+    fx.gpu_mem.write32(kKernelAddr + 12, 0x040e0501);
+    fx.gpu_mem.write32(kKernelAddr + 16, 0x7e020281);
+    fx.gpu_mem.write32(peer_pc, 0x7e020282); // v_mov_b32 v1, 2
+    auto *owner = fx.cu->dispatch_wf(0, kKernelAddr, 32, 16, 32);
+    ASSERT_NE(owner, nullptr);
+    owner->set_exec(1);
+    fx.cu->step();
+    fx.cu->step();
+    ASSERT_EQ(owner->pc, kKernelAddr + 8);
+    auto *peer = fx.cu->dispatch_wf_at(2, 1, peer_pc, 32, 16, 32);
+    ASSERT_NE(peer, nullptr);
+    peer->set_exec(1);
+    fx.cu->step();
+    EXPECT_EQ(owner->pc, kKernelAddr + 16);
+    EXPECT_EQ(peer->pc, peer_pc);
+    fx.cu->step();
+    EXPECT_EQ(peer->pc, peer_pc + 4);
+  }
+}
+
+TEST(WaveDebugTest, Rdna3GlobalLoadClauseOnlyBlocksOtherLoads) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    enum class Peer { GlobalLoad, GlobalStore, ImageLoad };
+    for (auto other : {Peer::GlobalLoad, Peer::GlobalStore, Peer::ImageLoad}) {
+      WaveDebugFixture fx(arch, 3, 1);
+      fx.cu->set_gpu_vm(nullptr);
+      fx.l2.set_gpu_vm(nullptr);
+      fx.l2.set_backing_memory(&fx.gpu_mem);
+      constexpr uint32_t peer_pc = 0x3000;
+      fx.gpu_mem.write32(kKernelAddr, 0xbf850002); // s_clause 2
+      const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+      const std::vector<uint32_t> load = gfx12 ? std::vector<uint32_t>{0xee05007c, 3, 0}
+                                               : std::vector<uint32_t>{0xdc520000, 0x037c0000};
+      const std::vector<uint32_t> store = gfx12 ? std::vector<uint32_t>{0xee06807c, 0x01000000, 0}
+                                                : std::vector<uint32_t>{0xdc6a0000, 0x007c0200};
+      const auto bytes = load.size() * sizeof(uint32_t);
+      const std::vector<uint32_t> image = gfx12 ? std::vector<uint32_t>{0xd0400000, 3, 0}
+                                                : std::vector<uint32_t>{0xf0000100, 0x300};
+      for (unsigned i = 0; i < 3; ++i) {
+        auto owner_load = load;
+        owner_load[1] += gfx12 ? i : (i << 24); // Independent destination VGPRs.
+        fx.gpu_mem.load_image(reinterpret_cast<const uint8_t *>(owner_load.data()), bytes,
+                              kKernelAddr + 4 + i * bytes);
+      }
+      const auto &peer_op = other == Peer::GlobalStore ? store
+                            : other == Peer::ImageLoad ? image
+                                                       : load;
+      const bool contends = other == Peer::GlobalLoad || (gfx12 && other == Peer::ImageLoad);
+      fx.gpu_mem.load_image(reinterpret_cast<const uint8_t *>(peer_op.data()), bytes, peer_pc);
+      fx.gpu_mem.write32(0x4000, 42u);
+      auto *owner = fx.cu->dispatch_wf(0, kKernelAddr, 32, 16, 32);
+      ASSERT_NE(owner, nullptr);
+      owner->set_exec(1);
+      fx.cu->write_vgpr(owner->vgpr_alloc().base, 0, 0x4000);
+      fx.cu->step();
+      fx.cu->step();
+      ASSERT_EQ(owner->pc, kKernelAddr + 4 + bytes);
+      auto *peer = fx.cu->dispatch_wf_at(2, 1, peer_pc, 32, 16, 32);
+      ASSERT_NE(peer, nullptr);
+      peer->set_exec(1);
+      fx.cu->write_vgpr(peer->vgpr_alloc().base, 0, 0x4000);
+      fx.cu->step();
+      EXPECT_EQ(peer->pc, peer_pc + (contends ? 0 : bytes));
+      if (contends) {
+        fx.cu->step();
+        EXPECT_EQ(peer->pc, peer_pc + bytes);
+      }
+    }
+  }
+}
+
+TEST(WaveDebugTest, Rdna3AtomicClauseHoldsImageAndGlobalIssue) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 3, 1);
+    fx.cu->set_gpu_vm(nullptr);
+    fx.l2.set_gpu_vm(nullptr);
+    fx.l2.set_backing_memory(&fx.gpu_mem);
+    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const std::vector<uint32_t> global = gfx12 ? std::vector<uint32_t>{0xee0d407c, 0x01180004, 0}
+                                               : std::vector<uint32_t>{0xdcd64000, 0x047c0200};
+    const std::vector<uint32_t> image = gfx12 ? std::vector<uint32_t>{0xd0430000, 0x00180004, 0}
+                                              : std::vector<uint32_t>{0xf0304180, 0x400};
+    const auto bytes = global.size() * sizeof(uint32_t);
+    fx.gpu_mem.write32(kKernelAddr, 0xbf850002); // s_clause 2
+    for (unsigned i = 0; i < 3; ++i) {
+      auto member = global;
+      member[1] += gfx12 ? i : (i << 24);
+      fx.gpu_mem.load_image(reinterpret_cast<const uint8_t *>(member.data()), bytes,
+                            kKernelAddr + 4 + i * bytes);
+    }
+    constexpr uint32_t peer_pc = 0x3000;
+    fx.gpu_mem.load_image(reinterpret_cast<const uint8_t *>(image.data()), bytes, peer_pc);
+    fx.gpu_mem.write32(0x4000, 0);
+    auto *owner = fx.cu->dispatch_wf(0, kKernelAddr, 32, 16, 32);
+    ASSERT_NE(owner, nullptr);
+    owner->set_exec(1);
+    fx.cu->write_vgpr(owner->vgpr_alloc().base, 0, 0x4000);
+    fx.cu->step();
+    fx.cu->step();
+    ASSERT_EQ(owner->pc, kKernelAddr + 4 + bytes);
+    auto *peer = fx.cu->dispatch_wf_at(2, 1, peer_pc, 32, 16, 32);
+    ASSERT_NE(peer, nullptr);
+    peer->set_exec(1);
+    fx.cu->step();
+    EXPECT_EQ(peer->pc, peer_pc);
+    fx.cu->step();
+    EXPECT_EQ(peer->pc, peer_pc + bytes);
+  }
+}
+
+TEST(WaveDebugTest, Rdna3PerformanceCountersAndTracePayloads) {
+  for (auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    WaveDebugFixture fx(arch, 1, 1);
+    const uint32_t words[] = {
+        0xbfb80005, // s_incperflevel 5, disabled
+        0xbfb81235, // s_incperflevel 0x1235, counter 5
+        0xbfb90007, // s_decperflevel 7, independent counter
+        0xbfba0000, // s_ttracedata, tracing disabled
+        0xbfba0000, // s_ttracedata, tracing enabled
+        0xbfbbab3c, // s_ttracedata_imm 0xab3c
+        0xbfba0000, // s_ttracedata without a consumer
+        0xbfbb003c, // s_ttracedata_imm without a consumer
+        0xbfb80005, // inc and dec are masked by MODE.DISABLE_PERF
+        0xbfb90007,
+    };
+    for (unsigned i = 0; i < std::size(words); ++i)
+      fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i]);
+    auto *wave = fx.dispatch(kKernelAddr);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(0);
+    wave->set_m0(0x456789ab);
+    wave->set_status_raw(wave->status_raw() & ~amdgpu::Wavefront::kStatusPerfEnableMask);
+    std::array<uint32_t, 16> counters{};
+    counters[7] = 9;
+    ASSERT_TRUE(fx.cu->restore_performance_levels(counters));
+    std::vector<uint32_t> trace;
+    fx.cu->set_shader_trace_handler([&](const auto &source, uint32_t value) {
+      EXPECT_EQ(&source, wave);
+      trace.push_back(value);
+    });
+    fx.cu->step();
+    EXPECT_EQ(fx.cu->performance_levels(), counters);
+    wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusPerfEnableMask);
+    fx.cu->step();
+    ++counters[5];
+    EXPECT_EQ(fx.cu->performance_levels(), counters);
+    fx.cu->step();
+    --counters[7];
+    EXPECT_EQ(fx.cu->performance_levels(), counters);
+    fx.cu->step();
+    EXPECT_TRUE(trace.empty());
+    wave->set_exec(1);
+    wave->set_status_raw(wave->status_raw() | amdgpu::Wavefront::kStatusTraceEnableMask);
+    fx.cu->step();
+    EXPECT_EQ(trace, (std::vector<uint32_t>{0x456789ab}));
+    fx.cu->step();
+    EXPECT_EQ(trace, (std::vector<uint32_t>{0x456789ab, 0x3c}));
+    fx.cu->set_shader_trace_handler({});
+    const auto pc = wave->pc;
+    fx.cu->step();
+    fx.cu->step();
+    EXPECT_EQ(wave->pc, pc + 8);
+    EXPECT_EQ(trace.size(), 2u);
+    wave->set_mode_raw(wave->mode_raw() | (1u << 27));
+    fx.cu->step();
+    EXPECT_EQ(fx.cu->performance_levels(), counters);
+    fx.cu->step();
+    EXPECT_EQ(fx.cu->performance_levels(), counters);
+  }
+}
+
+TEST(WaveDebugTest, TraceConsumerLatchesTraceEnableAtLaunch) {
+  // gfx1151 waves launched under thread trace read STATUS bit 7 set and emit
+  // S_TTRACEDATA. Waves launched before tracing starts keep the bit clear.
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                    ROCJITSU_CODE_ARCH_RDNA4}) {
+    SCOPED_TRACE(arch);
+    const uint32_t trace =
+        arch == ROCJITSU_CODE_ARCH_RDNA2 ? 0xbf960000 : 0xbfba0000; // s_ttracedata
+    for (bool traced_at_launch : {false, true}) {
+      SCOPED_TRACE(traced_at_launch);
+      WaveDebugFixture fx(arch, 1, 1);
+      fx.gpu_mem.write32(kKernelAddr, trace);
+      std::vector<uint32_t> events;
+      auto handler = [&](const auto &, uint32_t value) { events.push_back(value); };
+      if (traced_at_launch)
+        fx.cu->set_shader_trace_handler(handler);
+      auto *wave = fx.dispatch(kKernelAddr);
+      ASSERT_NE(wave, nullptr);
+      EXPECT_EQ((wave->status_raw() & amdgpu::Wavefront::kStatusTraceEnableMask) != 0,
+                traced_at_launch);
+      fx.cu->set_shader_trace_handler(handler);
+      wave->set_m0(0xc0ffee42);
+      fx.cu->step();
+      ASSERT_EQ(wave->pc, kKernelAddr + 4);
+      EXPECT_EQ(events,
+                traced_at_launch ? std::vector<uint32_t>{0xc0ffee42} : std::vector<uint32_t>{});
+    }
+  }
+}
+
 TEST(WaveDebugTest, SingleStepWaitsForTheExportGrant) {
   for (auto arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
@@ -500,7 +756,8 @@ TEST(WaveDebugTest, Gfx1151PrivilegedDestinationsAndPerformanceTrace) {
     fx.gpu_mem.write32(kKernelAddr + 4 * i, words[i]);
   auto *wf = fx.dispatch(kKernelAddr);
   ASSERT_NE(wf, nullptr);
-  wf->set_status_raw(wf->status_raw() | (1u << 19)); // STATUS.PERF_EN
+  wf->set_status_raw(wf->status_raw() | amdgpu::Wavefront::kStatusPerfEnableMask |
+                     amdgpu::Wavefront::kStatusTraceEnableMask);
   wf->set_m0(0x456789ab);
   wf->set_ttmp(0, 0x12345678);
   fx.cu->write_sgpr(wf->sgpr_alloc().base, 0xffffffff);
