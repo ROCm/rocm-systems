@@ -22,12 +22,15 @@ THE SOFTWARE.
 
 #include <gtest/gtest.h>
 #include <netdb.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/prctl.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -111,22 +114,47 @@ TEST(rdctstReadOnly, TestRdciStats) {
 // rdctst's standalone tests connect to localhost:50051 (functional/rdci_*.cc).
 static const char kRdcdPort[] = "50051";
 
-// Whether something accepts connections on localhost:50051.
-static bool rdcdPortInUse() {
+// Errors that leave an address unused: nothing listens there, or the host cannot use the address
+// (as ::1 on a host without IPv6).
+static bool addressUnused(int error) {
+  return error == ECONNREFUSED || error == EAFNOSUPPORT || error == EPROTONOSUPPORT ||
+         error == EADDRNOTAVAIL || error == ENETUNREACH || error == EHOSTUNREACH;
+}
+
+// Whether something accepts connections on localhost:50051: 1 yes, 0 no, -1 unknown (no answer,
+// or another error). Each connection gets a second: a listener whose accept queue is full does
+// not answer, and a blocking connect() would wait for about two minutes.
+static int rdcdPortInUse() {
   struct addrinfo hints = {};
   hints.ai_family = AF_UNSPEC;
   hints.ai_socktype = SOCK_STREAM;
   struct addrinfo* addresses = nullptr;
   if (getaddrinfo("localhost", kRdcdPort, &hints, &addresses) != 0) {
-    return false;
+    return -1;
   }
-  bool in_use = false;
-  for (struct addrinfo* a = addresses; a != nullptr && !in_use; a = a->ai_next) {
-    int fd = socket(a->ai_family, a->ai_socktype, a->ai_protocol);
+  int in_use = 0;
+  for (struct addrinfo* a = addresses; a != nullptr && in_use != 1; a = a->ai_next) {
+    int fd = socket(a->ai_family, a->ai_socktype | SOCK_NONBLOCK, a->ai_protocol);
     if (fd < 0) {
+      if (!addressUnused(errno)) {
+        in_use = -1;
+      }
       continue;
     }
-    in_use = connect(fd, a->ai_addr, a->ai_addrlen) == 0;
+    int error = connect(fd, a->ai_addr, a->ai_addrlen) == 0 ? 0 : errno;
+    if (error == EINPROGRESS) {
+      struct pollfd connecting = {fd, POLLOUT, 0};
+      socklen_t length = sizeof(error);
+      if (poll(&connecting, 1, 1000) != 1 ||
+          getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0) {
+        error = -1;  // no answer
+      }
+    }
+    if (error == 0) {
+      in_use = 1;
+    } else if (!addressUnused(error)) {
+      in_use = -1;
+    }
     close(fd);
   }
   freeaddrinfo(addresses);
@@ -160,9 +188,15 @@ static int stopRDCD(pid_t pid) {
 // Starts rdcd and waits until it accepts connections on localhost:50051. Returns its pid, or
 // -1. Another server on that port is left alone: rdctst fails instead.
 static pid_t startRDCD(const std::string& rdcd_path, char* envp[]) {
-  if (rdcdPortInUse()) {
+  const int in_use = rdcdPortInUse();
+  if (in_use > 0) {
     std::cout << "localhost:" << kRdcdPort << " is in use. Stop the server there, or test it"
               << " with --start_rdcd= (no path)." << std::endl;
+    return -1;
+  }
+  if (in_use < 0) {
+    std::cout << "localhost:" << kRdcdPort << " does not answer. Free the port and run again."
+              << std::endl;
     return -1;
   }
   const char* rdcd_cl[] = {rdcd_path.c_str(), "-u", nullptr};
@@ -184,14 +218,15 @@ static pid_t startRDCD(const std::string& rdcd_path, char* envp[]) {
   }
 
   // Give rdcd up to 30 seconds to listen.
-  for (int i = 0; i < 300; ++i) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (std::chrono::steady_clock::now() < deadline) {
     int status = 0;
     if (waitpid(pid, &status, WNOHANG) == pid) {
       std::cout << "rdcd exited at start with " << (WIFEXITED(status) ? "status " : "signal ")
                 << (WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status)) << std::endl;
       return -1;
     }
-    if (rdcdPortInUse()) {
+    if (rdcdPortInUse() == 1) {
       return pid;
     }
     usleep(100 * 1000);

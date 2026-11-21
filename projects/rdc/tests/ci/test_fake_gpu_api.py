@@ -174,3 +174,43 @@ def test_rdctst_does_not_start_rdcd_on_a_busy_port(tools):
             pytest.fail("rdctst hung (killed)")
     assert r.returncode != 0, "rdctst passed without an rdcd of its own"
     assert f"localhost:{RDCTST_PORT} is in use" in r.stdout, r.stdout[-3000:]
+
+
+def test_rdctst_does_not_wait_on_a_port_that_does_not_answer(tools):
+    # A listener that does not accept, with its accept queue full: the kernel drops further
+    # connection requests, and a blocking connect() waits for minutes.
+    rdctst = _rdctst()
+    rdcd, _, fake = tools
+    env = dict(os.environ, LD_PRELOAD=fake, RDC_FAKE_GPUS=str(NUM_GPUS))
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as other:
+        other.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        other.bind(("127.0.0.1", RDCTST_PORT))
+        other.listen(0)
+        queued = []
+        try:
+            # Fill the queue: connections until one is not taken within a second.
+            for _ in range(8):
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                queued.append(s)
+                s.settimeout(1)
+                try:
+                    s.connect(("127.0.0.1", RDCTST_PORT))
+                except socket.timeout:
+                    break
+            else:
+                pytest.skip("the listener's queue did not fill")
+            try:
+                r = subprocess.run(
+                    [rdctst, "-b", f"--start_rdcd={rdcd}"],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=30 * FACTOR,
+                )
+            except subprocess.TimeoutExpired:
+                pytest.fail("rdctst waited on the port (killed)")
+        finally:
+            for s in queued:
+                s.close()
+    assert r.returncode != 0, "rdctst passed without an rdcd of its own"
+    assert f"localhost:{RDCTST_PORT} does not answer" in r.stdout, r.stdout[-3000:]
