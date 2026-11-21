@@ -24,7 +24,9 @@ THE SOFTWARE.
 #ifndef COMMON_RDC_UTILS_H_
 #define COMMON_RDC_UTILS_H_
 
+#include <cstdint>
 #include <string>
+#include <vector>
 
 namespace amd {
 namespace rdc {
@@ -47,6 +49,22 @@ int ReadFile(const char* path, std::string* retStr, bool chop_newline = false);
 
 bool IsNumber(const std::string& s);
 bool IsIP(const std::string& s);
+
+// A GPU index's socket, and its partition there; -1 when the socket is not partitioned.
+// RDC's partition ID g<socket>.<partition> names it.
+struct GpuPartition {
+  uint32_t socket;
+  int32_t partition;
+};
+
+// RDC lists GPU indexes socket by socket, a partitioned socket's partitions in order, and
+// reports no index's socket. `counts` holds rdc_get_num_partition() for each GPU index: its
+// socket's partition count, 1 for a socket in SPX mode, UINT16_MAX for a GPU that cannot be
+// partitioned. An index whose count n is above 1 starts a socket that takes the indexes after
+// it while they report the same n, up to n of them, the k-th being partition k; any other
+// index is a socket of its own. A socket that lists fewer indexes than its count, followed by
+// a socket with the same count, reads as one socket.
+std::vector<GpuPartition> GpuPartitions(const std::vector<uint16_t>& counts);
 
 }  // namespace rdc
 }  // namespace amd

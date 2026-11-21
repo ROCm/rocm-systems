@@ -219,12 +219,13 @@ void RdciGroupSubSystem::process() {
         }
 
         if (!is_json_output()) {
-          std::cout << group_id_list[i] << "\t" << group_info.group_name << "\t\t";
+          std::cout << group_id_list[i] << "\t" << rdc_escape_text(group_info.group_name, false)
+                    << "\t\t";
         } else {
           json_group_ids += "{\"group_id\": \"";
           json_group_ids += std::to_string(group_id_list[i]);
           json_group_ids += "\", \"group_name\": \"";
-          json_group_ids += group_info.group_name;
+          json_group_ids += rdc_escape_text(group_info.group_name, true);
           json_group_ids += "\", \"gpu_indexes\": [";
         }
         for (uint32_t j = 0; j < group_info.count; j++) {
@@ -290,9 +291,10 @@ void RdciGroupSubSystem::process() {
       result = rdc_group_gpu_get_info(rdc_handle_, group_id_, &group_info);
       if (result == RDC_ST_OK) {
         if (is_json_output()) {
-          std::cout << "\"group_name\": \"" << group_info.group_name << "\", \"gpu_indexes\": [";
+          std::cout << "\"group_name\": \"" << rdc_escape_text(group_info.group_name, true)
+                    << "\", \"gpu_indexes\": [";
         } else {
-          std::cout << "Group name: " << group_info.group_name << std::endl;
+          std::cout << "Group name: " << rdc_escape_text(group_info.group_name, false) << std::endl;
           std::cout << "Gpu indexes: ";
         }
         for (uint32_t i = 0; i < group_info.count; i++) {
