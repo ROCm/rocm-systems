@@ -17,6 +17,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
     - Works with every ROCm installation layout, not only `/opt/rocm`: legacy system packages, TheRock system packages (`/opt/rocm/core-X.Y`), TheRock Python packages, tarballs, and custom prefixes. The inspected root, how it was found, and the installation type are reported, and remediation commands match the installation type.
 - rocJPEG API tracing for `rocJpegDecodeAsync`, `rocJpegDecodeSync`, `rocJpegDecodeBatchedAsync`, `rocJpegDecodeBatchedSync`, and `rocJpegGetDecoderCaps`. The rocJPEG dispatch table the SDK expects is now step version 3.
   - New `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeSync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedAsync`, `ROCPROFILER_ROCJPEG_API_ID_rocJpegDecodeBatchedSync`, and `ROCPROFILER_ROCJPEG_API_ID_rocJpegGetDecoderCaps` operation IDs, and matching entries in `rocprofiler_rocjpeg_api_args_t`.
+- PC sampling with rocpd output now snapshots code objects that exist only in process memory (for example, modules loaded with `hipModuleLoadData` from hiprtc or other JIT compilers) to `<output-prefix>_code_objects/` when they are loaded, and records each copy as `snapshot_uri` in `rocpd_info_code_object.extdata`. rocpd decodes samples in these code objects lazily from the snapshots after the process exits, so `--complete-isa-decode` is no longer needed for them. Code objects with a `file://` URI are not copied.
 
 **API:**
 
