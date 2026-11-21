@@ -434,3 +434,34 @@ TEST(FpLdexpF16Cdna, Qualification) {
     }
   }
 }
+
+// CDNA inherits a Compatibility model without claiming empirical qualification.
+TEST(FpLdexpCdna, Qualification) {
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
+      for (bool fp64 : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << cpu << "/" << semantics << "/" << fp64);
+        rocjitsu::arith::test::Registers<6, 64> r{};
+        r.v[0][0] = fp64 ? 0x12345678U : 0x7f800123U;
+        r.v[1][0] = 0x7ff00000U;
+        r.v[4][0] = r.v[5][0] = 0xdeadbeefU;
+        uint32_t status = 0x80;
+        const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                                 ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                             : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                                 ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+                                 : RJ_ARITH_SUCCESS;
+        const uint64_t flags = cpu | semantics;
+        const int result =
+            fp64 ? rj_arith_v_ldexp_f64_w64_gfx942(flags, 1, 0, r.v + 4, r.v, r.v + 2, &status)
+                 : rj_arith_v_ldexp_f32_w64_gfx942(flags, 1, 0, r.v + 4, r.v, r.v + 2, &status);
+        EXPECT_EQ(result, expected);
+        EXPECT_EQ(status, 0x80U);
+        if (expected != RJ_ARITH_SUCCESS) {
+          EXPECT_EQ(r.v[4][0], 0xdeadbeefU);
+          EXPECT_EQ(r.v[5][0], 0xdeadbeefU);
+        }
+      }
+    }
+  }
+}

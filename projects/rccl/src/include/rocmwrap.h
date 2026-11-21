@@ -117,6 +117,16 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
 #define CUPFN(symbol) pfn_##symbol
 #endif
 
+// For calls whose failure is an expected answer ("is this a cuMem allocation?").
+// Unlike the CUDA driver API, every failed HIP call is recorded as the thread's
+// last error, so a tolerated failure would surface in the application's next
+// hipGetLastError() (PyTorch reports it from an unrelated allocation or kernel).
+static inline hipError_t rcclHipProbe(hipError_t err) {
+  if (err != hipSuccess) (void)hipGetLastError();
+  return err;
+}
+#define CUPROBE(call) rcclHipProbe(CUPFN(call))
+
 // Call sites go through pfn_##cmd so the (optional, weakly-linked)
 // hsa_amd_portable_export_dmabuf stays gated by its function pointer and is not
 // referenced as a symbol in every consumer TU. hsa_status_string is a required
@@ -172,6 +182,7 @@ typedef hsa_status_t (*PFN_hsa_amd_portable_export_dmabuf)(const void* ptr, size
     hipError_t err = cmd; \
     if (err != hipSuccess) { \
       INFO(NCCL_ALL, "%s:%d HIP failure '%s'", __FILE__, __LINE__, hipGetErrorString(err)); \
+      (void)hipGetLastError(); /* clear sticky HIP error state */ \
     } \
   } while (false)
 
