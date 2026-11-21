@@ -2,7 +2,7 @@
  *
  * SPDX-License-Identifier: MIT
  *
- * OSS7.0 SDMA packet structures (CDNA4 / MI350X and later).
+ * OSS7.0 SDMA packet structures (MI400-series and later; not gfx942 or gfx950).
  *
  * Struct definitions derived from the field macros in sdma-packet.h
  * (auto-generated from OSS_70-sDMA_MAS.md).  Each struct mirrors
@@ -122,7 +122,7 @@ static_assert(sizeof(SDMA_PKT_COPY_LINEAR_PHY_MI4) == 8 * sizeof(unsigned int),
  * Linear Copy with Wait / Signal -- 19 DWORDs
  *
  * Combines copy + poll-wait + atomic-signal into a single packet,
- * replacing the MI300X two-packet COPY_LINEAR + ATOMIC chain.
+ * replacing the MI300X / MI350X two-packet COPY_LINEAR + ATOMIC chain.
  * --------------------------------------------------------------- */
 typedef struct SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4_TAG {
   /* DW 0 */
