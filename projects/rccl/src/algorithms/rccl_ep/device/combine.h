@@ -192,7 +192,6 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
                                              float* __restrict__ out_w) { // [ntok, num_topk] or nullptr
   const int warp = get_warp_idx(), nwarps = get_num_warps(), lane = get_lane_idx();
   const int stride = nwarps * gridDim.x;
-  const int epr = cfg.experts_per_rank();
   const int K = cfg.num_topk;
 
   // One wave per token, so gridDim.x * nwarps waves chase num_tokens, and this
@@ -202,19 +201,17 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
   // case; python/rccl_ep_capi.hip records what that costs when tokens are few.
   for (int t = blockIdx.x * nwarps + warp; t < num_tokens; t += stride) {
     // Decide once per token which slots carry a value, rather than re-deriving
-    // it for every element of hidden.
+    // it for every element of hidden. owner_of bounds the id on both sides:
+    // e / epr reaches num_ranks for an out-of-range id, and slot() would then
+    // index a whole rank-region past the end of the window.
+    int owner[kMaxTopk];
     bool take[kMaxTopk];
+    for (int k = 0; k < K; ++k) owner[k] = owner_of(cfg, topk_idx[(size_t)t * K + k]);
     for (int k = 0; k < K; ++k) {
-      const int e = topk_idx[(size_t)t * K + k];
-      // Upper bound as well as lower: owner = e / epr reaches num_ranks for an
-      // out-of-range id, and slot() would then index a whole rank-region past
-      // the end of the window.
-      take[k] = (e >= 0 && e < cfg.num_experts);
+      take[k] = owner[k] >= 0;
       if (take[k] && grouped) {
-        const int owner = e / epr;
         for (int k2 = k + 1; k2 < K; ++k2) {
-          const int e2 = topk_idx[(size_t)t * K + k2];
-          if (e2 >= 0 && e2 / epr == owner) {
+          if (owner[k2] == owner[k]) {
             take[k] = false;
             break;
           }
@@ -231,8 +228,7 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
     int nrow = 0;
     for (int k = 0; k < K; ++k) {
       if (!take[k]) continue;
-      const int owner = topk_idx[(size_t)t * K + k] / epr;
-      const size_t slot = EpWindowLayout::slot(cfg, owner, t);
+      const size_t slot = EpWindowLayout::slot(cfg, owner[k], t);
       // Must mirror the sender's layout: one row per slot when grouped, one
       // per (slot, k) when reading the expanded layout.
       row[nrow++] = (int32_t)(grouped ? slot : (slot * K + k));
@@ -245,11 +241,10 @@ __global__ void combine_reduce_epilogue_impl(EpConfig cfg, WindowView self,
 
     if (out_w) {
       for (int k = lane; k < K; k += kWarpSize) {
-        const int e = topk_idx[(size_t)t * K + k];
-        // Any owner of this token has the full weight row; -1 slots were never
-        // sent anywhere, so their weights are written as zero.
-        const int owner = (e >= 0) ? (e / epr) : -1;
-        out_w[(size_t)t * K + k] = (owner >= 0) ? self.cw()[EpWindowLayout::slot(cfg, owner, t) * K + k] : 0.f;
+        // Any owner of this token has the full weight row; a -1 or out-of-range slot was
+        // never sent anywhere, so its weight is written as zero.
+        const int o = owner_of(cfg, topk_idx[(size_t)t * K + k]);
+        out_w[(size_t)t * K + k] = (o >= 0) ? self.cw()[EpWindowLayout::slot(cfg, o, t) * K + k] : 0.f;
       }
     }
   }
