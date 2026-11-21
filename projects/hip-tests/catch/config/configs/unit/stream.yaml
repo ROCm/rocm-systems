@@ -397,6 +397,21 @@ stream:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux"
     tags: [properties, P1]
+  StreamCUMask_Enforcement_HalfMask:
+    <<: *level_default
+    tags: [cumask, enforcement, P1]
+  StreamCUMask_Enforcement_DisjointHalves:
+    <<: *level_default
+    tags: [cumask, enforcement, P1]
+  StreamCUMask_Enforcement_QuarterMask:
+    <<: *level_default
+    tags: [cumask, enforcement, P1]
+  StreamCUMask_Enforcement_NoLeak:
+    <<: *level_default
+    tags: [cumask, enforcement, P1]
+  StreamCUMask_Enforcement_PerThreadAudit:
+    <<: *level_default
+    tags: [cumask, enforcement, P1]
   Unit_hipStreamAddCallback_MultipleThreads:
     <<: *level_default
     tags: [callback, P1]
