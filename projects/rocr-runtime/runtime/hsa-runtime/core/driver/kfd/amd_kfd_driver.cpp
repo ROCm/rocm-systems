@@ -350,14 +350,20 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
         ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
     // A system request larger than a fragment block is never recycled: it gets
     // a block of its own, rounded up to a block multiple, that is discarded on
-    // free. Give it a dedicated BO of the requested size instead. Local memory
-    // keeps its block-multiple sizing.
+    // free. Give it a dedicated allocation of the requested size instead, as
+    // with the fragment allocator disabled. That allocation takes the caller's
+    // flags: a restricted request is CPU-only until
+    // hsa_amd_agents_allow_access, where a fragment block is mapped to all
+    // GPUs when the block is created. Local memory keeps its block-multiple
+    // sizing.
     useSubAlloc &= !(m_region.IsSystem() && size > m_region.fragment_block_size());
 
     if (useSubAlloc) {
       // recycled is true when mem may hold data from a previously freed
-      // fragment or a cached block. A new block is a dedicated BO of
-      // kernel-zeroed pages; clearing it only faults those pages in.
+      // fragment or a cached block. A new block is a dedicated allocation, and
+      // like every dedicated system allocation its pages come zeroed from the
+      // OS (an anonymous mapping or a new kernel BO); clearing it would only
+      // fault those pages in.
       bool recycled = false;
       mem = m_region.fragment_alloc(size, &recycled);
 
