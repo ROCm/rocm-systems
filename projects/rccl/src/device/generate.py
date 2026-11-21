@@ -786,7 +786,9 @@ for fn in primary_funcs:
       "__launch_bounds__(NCCL_MAX_NTHREADS, 1)\n"
       "__global__ void ncclDevKernel_{sym}_Specialized(\n"
       "    ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {{\n"
-      "  ncclShmemPerWarp[0].x = 0;\n"
+      # Touch only ncclShmem here: under ASAN the sw-LDS layout lists direct accesses
+      # first, and the linked devfunc must match the Generic kernels' [ncclShmem, ncclShmemPerWarp].
+      "  ncclShmem.aborted = 0;\n"
       "  {func_name}();\n"
       "}}\n"
       .format(sym=sym, coll=fn.coll, redop_cxx=redop_to_cxx[fn.redop],
