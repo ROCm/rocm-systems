@@ -180,6 +180,33 @@ __global__ void kernelOneBitMaskCall(PutRecord* records) {
                               /*required=*/cuda::thread_scope_device, /*given=*/cuda::thread_scope_device);
 }
 
+// Fixed-backend put, taken only when the signal/counter helpers accept a non-ALL mask (NCCL 2.32.6, NVIDIA/nccl#2436).
+template <typename Gin>
+NCCL_DEVICE_INLINE auto putOnFixedBackend(Gin const& net, ncclDevComm const& comm, ncclWindow_t dstWin,
+                                          ncclWindow_t srcWin, PutArgs const& args, int)
+    -> decltype((void)::ncclGin_getSignalDescriptor(net, ncclGin_SignalInc{}),
+                (void)::ncclGin_getCounterId(net, ncclGin_CounterInc{}), bool()) {
+  net.put(ncclTeamWorld(comm), args.peer, dstWin, args.dstOff, srcWin, args.srcOff, args.bytes,
+          ncclGin_SignalInc{args.signalId}, ncclGin_CounterInc{args.counterId}, ncclCoopThread{}, ncclGin_None{},
+          args.given, args.required, args.optFlags);
+  return true;
+}
+// Before the fix the helpers took ncclGin const&, so ncclGin_BackendOne<backend>::put did not compile.
+template <typename Gin>
+NCCL_DEVICE_INLINE bool putOnFixedBackend(Gin const&, ncclDevComm const&, ncclWindow_t, ncclWindow_t, PutArgs const&,
+                                          long) {
+  return false;
+}
+
+__global__ void kernelFixedBackendPut(ncclDevComm comm, ncclWindow_t dstWin, ncclWindow_t srcWin, PutArgs args,
+                                      int* compiled) {
+  if (threadIdx.x != 0 || blockIdx.x != 0) {
+    return;
+  }
+  ncclGin_BackendOne<NCCL_NET_DEVICE_GIN_EFA_GDA> net(comm, 0);
+  *compiled = putOnFixedBackend(net, comm, dstWin, srcWin, args, 0) ? 1 : 0;
+}
+
 class GinBackendMaskDispatchTest : public DeviceTestBase {
 protected:
   static constexpr uintptr_t kDstToken = 0xD57000;
@@ -396,6 +423,21 @@ TEST_F(GinBackendMaskDispatchTest, OneBitMaskDispatchesToItsBackend) {
   syncAndCheck();
   ASSERT_FALSE(HasFatalFailure());
   expectOnlyCalled(d_records_.copyTo(), kEfaSlot);
+}
+
+// ncclGin_BackendOne::put with a signal and a counter resolves both through the mask-templated helpers.
+TEST_F(GinBackendMaskDispatchTest, FixedBackendPutWithSignalAndCounter) {
+  DeviceBuffer<int> d_compiled{1};
+  ASSERT_NO_FATAL_FAILURE(d_compiled.zero());
+  const PutArgs args = defaultArgs();
+  kernelFixedBackendPut<<<1, 1>>>(makeComm(NCCL_NET_DEVICE_GIN_EFA_GDA), d_dstWin_.ptr, d_srcWin_.ptr, args,
+                                  d_compiled.ptr);
+  syncAndCheck();
+  ASSERT_FALSE(HasFatalFailure());
+  ASSERT_EQ(d_compiled.copyTo()[0], 1)
+      << "ncclGin_getSignalDescriptor/ncclGin_getCounterId reject ncclGin_BackendOne, so its put cannot compile";
+  expectForwarded(d_records_.copyTo(), kEfaSlot, args, ncclGinSignalInc, /*signalOpArg=*/1, args.required,
+                  /*strongSignals=*/true);
 }
 
 // ginConnectionStride 2 maps world rank 3 to gin rank 3 / 2 = 1 through idivFast32.
