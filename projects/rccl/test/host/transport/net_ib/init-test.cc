@@ -431,6 +431,30 @@ TEST_F(NetIbInitMicrotest, AutoAssignRailPlane_NoRailPolicyLeavesExplicitIdsUnch
   EXPECT_EQ(ncclIbDevs[1].planeId, NCCL_NET_ID_UNDEF);
 }
 
+// NCCL 2.32.6 (458ad23): ncclIbAutoAssignRailPlane takes its CX9 rails from ncclIbCx9RailId, two sockets with two
+// rails each.
+TEST_F(NetIbInitMicrotest, Cx9RailId_EachPolicyMapsDevicesToItsSocketLayout) {
+  const int alt8[] = {0, 1, 0, 1, 2, 3, 2, 3};
+  const int block8[] = {0, 0, 1, 1, 2, 2, 3, 3};
+  const int flip8[] = {0, 1, 1, 0, 2, 3, 3, 2};
+  for (int d = 0; d < 8; d++) {
+    EXPECT_EQ(ncclIbCx9RailId(NCCL_IB_RAIL_POLICY_CX9_ALT, d, 8), alt8[d]) << "dev " << d;
+    EXPECT_EQ(ncclIbCx9RailId(NCCL_IB_RAIL_POLICY_CX9_BLOCK, d, 8), block8[d]) << "dev " << d;
+    EXPECT_EQ(ncclIbCx9RailId(NCCL_IB_RAIL_POLICY_CX9_FLIP, d, 8), flip8[d]) << "dev " << d;
+  }
+  // Sixteen devices: the flipped layout folds each socket into [0 0 1 1 | 1 1 0 0].
+  const int flip16[] = {0, 0, 1, 1, 1, 1, 0, 0, 2, 2, 3, 3, 3, 3, 2, 2};
+  for (int d = 0; d < 16; d++) {
+    EXPECT_EQ(ncclIbCx9RailId(NCCL_IB_RAIL_POLICY_CX9_FLIP, d, 16), flip16[d]) << "dev " << d;
+  }
+}
+
+TEST_F(NetIbInitMicrotest, Cx9RailId_CountNotPositiveMultipleOfEightIsUndefined) {
+  for (int nDevs : {0, -8, 4, 12}) {
+    EXPECT_EQ(ncclIbCx9RailId(NCCL_IB_RAIL_POLICY_CX9_FLIP, 0, nDevs), NCCL_NET_ID_UNDEF) << "nDevs " << nDevs;
+  }
+}
+
 TEST_F(NetIbInitMicrotest, MakeVDevice_ZeroDevicesIsRejected) {
   ncclNetVDeviceProps_t props{};
   int dev = -1;
