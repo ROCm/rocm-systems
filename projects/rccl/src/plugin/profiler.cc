@@ -21,6 +21,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <condition_variable>
@@ -2295,6 +2296,81 @@ ncclResult_t ncclProfilerCallback(void** eHandle, int type, void* pHandle, int64
     profilerRecordNet(*eHandle, ncclProfilerNetPluginUpdate, &args);
     profilerStopNet(eHandle);
   }
+  return ncclSuccess;
+}
+
+// Addon Collective start event
+ncclResult_t ncclProfilerStartAddonEvent(struct ncclInfo* info, bool isGraphCaptured,
+                                         struct ncclProfilerEventRef* groupEventHandle,
+                                         struct ncclProfilerEventRef* collEventHandle) {
+  memset(groupEventHandle, 0, sizeof(*groupEventHandle));
+  memset(collEventHandle, 0, sizeof(*collEventHandle));
+
+  uint64_t seqNumber = std::numeric_limits<uint64_t>::max();
+  // info->coll can be ncclFuncAlltoAll = 8, comm->seqNumber has length NCCL_NUM_FUNCTIONS = 5
+  if (info->coll < NCCL_NUM_FUNCTIONS) {
+    // Same logic for incrementing comm->seqNumber as in ncclProfilerStartTaskEvents.
+    // When Addon Collectives support generation of KernelCh events and properly handle graph capture,
+    // change the below condition to:
+    //
+    // !isGraphCaptured || (COMPILER_EXPECT(ncclProfiler != NULL, 0) &&
+    //                      (profilerLive(groupEventHandle) ||
+    //                       profilerLive(&ncclProfilerApiState.collApiEventHandle)) &&
+    //                      (ncclProfilerApiState.eActivationMask & ncclProfileKernelCh))))
+    if (!isGraphCaptured)
+      seqNumber = COMPILER_ATOMIC_FETCH_ADD(&info->comm->seqNumber[info->coll], 1ULL, std::memory_order_relaxed);
+  }
+
+  if (COMPILER_EXPECT(ncclProfiler != NULL, 0)) {
+    if (ncclProfilerApiState.eActivationMask & profilerEventGate(ncclProfileGroup)) {
+      ncclProfilerEventDescr_t eDescr = {0};
+      eDescr.type = ncclProfileGroup;
+      profilerStart(info->comm->profilerContext, groupEventHandle, &eDescr, nullptr, nullptr);
+    }
+    if (ncclProfilerApiState.eActivationMask & profilerEventGate(ncclProfileColl)) {
+      ncclProfilerEventDescr_t eDescr = {0};
+      eDescr.type = ncclProfileColl;
+      eDescr.rank = info->comm->rank;
+      eDescr.coll.seqNumber = seqNumber;
+      eDescr.coll.func = ncclFuncToString(info->coll);
+      eDescr.coll.sendBuff = info->sendbuff;
+      eDescr.coll.recvBuff = info->recvbuff;
+      eDescr.coll.count = info->count;
+      eDescr.coll.root = info->root;
+      eDescr.coll.datatype = ncclDatatypeToString(info->datatype);
+      // nChannels field is used by plugins as number of KernelCh events to wait for.
+      // Must be 0 until Addon Collectives generate KernelCh events as well.
+      // See also Example profiler plugin.
+      eDescr.coll.nChannels = 0;
+      // Addon Collectives determine launch topology internally in an ad-hoc manner.
+      // Set nWarps field to 0 until this can be determined in an algorithm-independent manner.
+      eDescr.coll.nWarps = 0;
+
+      // Default to NCCL_ALGO_UNDEF when decision invalid or rcclGetAlgoName fails.
+      if (!info->decisionValid || rcclGetAlgoName(info->decision.algo, &eDescr.coll.algo) != ncclSuccess)
+        eDescr.coll.algo = ncclAlgoToString(NCCL_ALGO_UNDEF);
+      // Default to NCCL_PROTO_UNDEF when decision invalid or rcclGetProtocolName fails.
+      if (!info->decisionValid || rcclGetProtocolName(info->decision.protocol, &eDescr.coll.proto) != ncclSuccess)
+        eDescr.coll.proto = ncclProtoToString(NCCL_PROTO_UNDEF);
+
+      // kernelVariant field only relevant for Symmetric Collectives (isSymColl = true).
+      eDescr.coll.kernelVariant = nullptr;
+      // Will need to be changed if Symmetric Collectives ever use rcclAddonLaunch.
+      eDescr.coll.isSymColl = false;
+      eDescr.coll.userTag = info->collConfig.userProfilerTag;
+      profilerStart(info->comm->profilerContext, collEventHandle, &eDescr,
+                    &ncclProfilerApiState.collApiEventHandle, groupEventHandle);
+    }
+  }
+  return ncclSuccess;
+}
+
+// Addon Collective stop event
+ncclResult_t ncclProfilerStopAddonEvent(struct ncclProfilerEventRef* groupEventHandle,
+                                        struct ncclProfilerEventRef* collEventHandle) {
+  // Stop Coll event before Group event, to maintain correct nesting.
+  profilerStop(collEventHandle);
+  profilerStop(groupEventHandle);
   return ncclSuccess;
 }
 
