@@ -2123,6 +2123,16 @@
           "test_filter": "NonBlocking.SingleCalls"
         },
         {
+          "name": "NonBlocking.InvalidArgumentLeavesCommUsable",
+          "description": "NonBlocking comm stays usable after a call returns ncclInvalidArgument",
+          "test_filter": "NonBlocking.InvalidArgumentLeavesCommUsable"
+        },
+        {
+          "name": "NonBlocking.SingleRankLifecycle",
+          "description": "NonBlocking single-rank comm init, AllReduce, finalize and destroy",
+          "test_filter": "NonBlocking.SingleRankLifecycle"
+        },
+        {
           "name": "Standalone.SplitComms_RankCheck",
           "description": "Verify device assignment for each rank using ncclCommSplit API",
           "test_filter": "Standalone.SplitComms_RankCheck"
