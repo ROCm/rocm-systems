@@ -355,20 +355,19 @@ bool MesEngine::bind_process_address_space(Queue &queue,
         fault_sink.report_vm_fault(process_id, address, access);
       };
     }
+    const amdgpu::AddressSpaceHandle handle = gpu_vm_.register_unrouted_gfx12_address_space(
+        queue.process_id, queue.page_table_base, physical_memory, std::move(fault_reporter));
+    if (!handle)
+      return false;
     existing_address_space =
         address_spaces_
             .emplace(queue.process_id,
-                     AddressSpace{.handle = {},
+                     AddressSpace{.handle = handle,
                                   .page_table_base = queue.page_table_base,
                                   .process_context_address = queue.process_context_address,
                                   .vm_fault_subscription = std::move(fault_subscription)})
             .first;
     created_address_space = true;
-    queue.address_space = gpu_vm_.register_unrouted_gfx12_address_space(
-        queue.process_id, queue.page_table_base, physical_memory, std::move(fault_reporter));
-    if (!queue.address_space)
-      return false;
-    existing_address_space->second.handle = queue.address_space;
   } else {
     AddressSpace &address_space = existing_address_space->second;
     if (address_space.process_context_address != 0 && queue.process_context_address != 0 &&
@@ -525,10 +524,9 @@ bool MesEngine::register_sdma_queue(Queue &queue) {
 }
 
 void MesEngine::rollback_created_address_space(const Queue &queue, bool created_address_space) {
-  if (!created_address_space)
+  if (!created_address_space || !queue.address_space)
     return;
-  if (queue.address_space)
-    (void)gpu_vm_.unregister_address_space(queue.address_space);
+  (void)gpu_vm_.unregister_address_space(queue.address_space);
   address_spaces_.erase(queue.process_id);
 }
 
@@ -547,7 +545,7 @@ void MesEngine::release_unused_address_space(uint32_t process_id) {
   }
 }
 
-VmAccessOutcome MesEngine::commit_queue(Queue queue) {
+VmAccessOutcome MesEngine::commit_queue(Queue queue, bool created_address_space) {
   util::Logger::cp([&](auto &os) {
     os << std::format("{}: map queue kind={} ring={:#x} rptr={:#x} wptr={:#x} pt={:#x} "
                       "dwords={} doorbell={:#x} active={} aql={}",
@@ -560,6 +558,9 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue) {
   // configuration. Replacing that queue would either strand the journal or let
   // it acknowledge work against a different queue generation.
   if (pending_mes_frames_.contains(queue.doorbell_offset)) {
+    if (queue.queue_handle)
+      (void)queue_registry_.unregister_queue(queue.queue_handle, QueueCloseMode::ForceCancel);
+    rollback_created_address_space(queue, created_address_space);
     return VmAccessOutcome::Unavailable;
   }
   const std::vector<Queue>::iterator existing =
@@ -581,6 +582,9 @@ VmAccessOutcome MesEngine::commit_queue(Queue queue) {
   if (replaced.queue_handle)
     detached = queue_registry_.unregister_queue(replaced.queue_handle);
   if (!detached) {
+    if (queue.queue_handle)
+      (void)queue_registry_.unregister_queue(queue.queue_handle, QueueCloseMode::ForceCancel);
+    rollback_created_address_space(queue, created_address_space);
     return detached.status == QueueCloseStatus::Busy ? VmAccessOutcome::Unavailable
                                                      : VmAccessOutcome::Faulted;
   }
@@ -673,12 +677,6 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
     // firmware would assign one.
     mapped.process_id = dword(frame, 1);
     bool created_address_space = false;
-    const auto rollback_queue = [this, &created_address_space](Queue *queue) {
-      if (queue->queue_handle)
-        (void)queue_registry_.unregister_queue(queue->queue_handle, QueueCloseMode::ForceCancel);
-      rollback_created_address_space(*queue, created_address_space);
-    };
-    std::unique_ptr<Queue, decltype(rollback_queue)> queue_rollback(&mapped, rollback_queue);
     std::shared_ptr<PhysicalMemoryAccess> physical_memory;
     if (mapped.kind == QueueKind::Compute || mapped.kind == QueueKind::Sdma) {
       physical_memory = context.make_physical_memory();
@@ -697,6 +695,7 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
         mapped.ring_dwords = ring_dwords;
       if (!bind_process_address_space(mapped, std::move(physical_memory), created_address_space) ||
           !register_sdma_queue(mapped)) {
+        rollback_created_address_space(mapped, created_address_space);
         util::Logger::warn(std::format("{}: cannot attach SDMA queue at doorbell {:#x}",
                                        diagnostic_name_, mapped.doorbell_offset));
         return amdgpu::VmAccessOutcome::Faulted;
@@ -705,19 +704,19 @@ amdgpu::VmAccessOutcome MesEngine::execute_mes_semantic(std::span<const std::byt
     if (mapped.kind == QueueKind::Compute) {
       const bool registered = mapped.aql ? register_aql_queue(mapped) : register_pm4_queue(mapped);
       if (!registered) {
+        rollback_created_address_space(mapped, created_address_space);
         util::Logger::warn(std::format("{}: cannot attach {} queue at doorbell {:#x}",
                                        diagnostic_name_, mapped.aql ? "AQL" : "PM4",
                                        mapped.doorbell_offset));
         return amdgpu::VmAccessOutcome::Faulted;
       }
     }
-    const amdgpu::VmAccessOutcome committed = commit_queue(mapped);
+    const amdgpu::VmAccessOutcome committed = commit_queue(mapped, created_address_space);
     if (committed != amdgpu::VmAccessOutcome::Complete) {
       util::Logger::warn(std::format("{}: cannot commit queue at doorbell {:#x}", diagnostic_name_,
                                      mapped.doorbell_offset));
       return committed;
     }
-    (void)queue_rollback.release();
   } else if (opcode == kMesApiRemoveQueue) {
     const uint64_t doorbell_offset =
         static_cast<uint64_t>(dword(frame, kRemoveQueueDoorbellDword)) * sizeof(uint32_t);
@@ -909,15 +908,7 @@ MesDoorbellDisposition MesEngine::process_mes_queue(Queue queue, uint64_t write_
     if (!inserted)
       return MesDoorbellDisposition::Faulted;
 
-    // An unexpected exception must not leave a semantic-phase retry journal.
-    const auto erase_semantic_frame = [this,
-                                       doorbell_offset = queue.doorbell_offset](PendingMesFrame *) {
-      pending_mes_frames_.erase(doorbell_offset);
-    };
-    std::unique_ptr<PendingMesFrame, decltype(erase_semantic_frame)> semantic_rollback(
-        &pending_it->second, erase_semantic_frame);
     const amdgpu::VmAccessOutcome semantic = execute_mes_semantic(frame, opcode, context, *access);
-    (void)semantic_rollback.release();
     if (semantic == amdgpu::VmAccessOutcome::Unavailable) {
       // Retryable semantic dependencies either precede any state change (for
       // example, an unavailable ADD_QUEUE MQD) or preserve the prior queue
