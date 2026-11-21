@@ -1,27 +1,9 @@
-from amdisa.codegen.execute.rj_arith_scalar import GFX1250_CONVERSION_NAMES
-from amdisa.codegen.execute.rj_arith_scalar import GFX1250_FMA_NAMES
-from amdisa.codegen.execute.rj_arith_scalar import GFX1250_BINARY_NAMES
-
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
 from types import SimpleNamespace
 from amdisa.codegen.execute import ExecuteContext
-
-
-def context(arch, name, dst, src):
-    return ExecuteContext(
-        inst=SimpleNamespace(name=name),
-        sem=None,
-        profile=None,
-        arch_name=arch,
-        dst_ops=dst,
-        src_ops=src,
-        enc_name="",
-        is_vop3=False,
-        has_abs=False,
-    )
 
 
 import pytest
@@ -38,8 +20,23 @@ from amdisa.codegen.execute.rj_arith_scalar import (
     FLOAT_ROUNDING,
     IMMEDIATE,
     SCALAR,
+    WORD_INTEGER_NAMES,
     gen_scalar,
 )
+
+
+def context(arch, name, dst, src):
+    return ExecuteContext(
+        inst=SimpleNamespace(name=name),
+        sem=None,
+        profile=None,
+        arch_name=arch,
+        dst_ops=dst,
+        src_ops=src,
+        enc_name="",
+        is_vop3=False,
+        has_abs=False,
+    )
 
 
 @pytest.mark.parametrize('name', sorted(IMMEDIATE))
@@ -67,7 +64,10 @@ def test_bitset_reads_full_destination_and_word_index_without_scc(name, bits):
             'registers.write_scalar'
         )
         assert 'scc' not in body
-    assert gen_scalar(context('rdna3_5', name, ['dst'], ['index'])) is None
+    for arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'):
+        assert (gen_scalar(context(arch, name, ['dst'], ['index'])) is None) == (
+            bits == 64
+        )
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -160,11 +160,19 @@ def test_guest_mode_updates_are_functional_state_independent_of_exec(name):
         assert 'wf.exec()' not in body
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5']
+)
 @pytest.mark.parametrize('name', sorted(SCALAR))
 def test_cdna_integer_shapes_match_existing_bindings(arch, name):
     shape = SCALAR[name]
     source = [f'input{i}' for i in range(len(shape.input_bits))]
+    if (
+        arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+        and name not in WORD_INTEGER_NAMES
+    ):
+        assert gen_scalar(context(arch, name, ['dst'], source)) is None
+        return
     assert gen_scalar(context(arch, name, ['dst'], source)) == gen_scalar(
         context('rdna3', name, ['dst'], source)
     )

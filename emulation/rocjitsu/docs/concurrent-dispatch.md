@@ -78,7 +78,7 @@ MI210 and CDNA3 also enable dispatch workers, based on the integer smoke study
 below. Multi-GPU presets default to E=1/D=1 for RCCL. Explicit D=0 opts into
 granules that divide each budget's remaining slots among the per-GPU pools;
 positive D overrides also remain available. Mirage uses the same defaults and
-derives the multi-GPU granules from single-GPU tables embedded in the RocJITsu
+derives the multi-GPU granules from single-GPU tables embedded in the rocjitsu
 backend. Those derived granules convert helper slots to dispatch workers, so
 gfx950 derives from a total budget of 32 and gfx1250 from 48, while desktop
 and CDNA3 use 24. The hardware agent model contains no host tuning. Clocked

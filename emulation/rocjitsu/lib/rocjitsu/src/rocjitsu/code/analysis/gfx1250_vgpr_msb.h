@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
 
 #include <cstdint>
@@ -23,7 +24,7 @@ class Instruction;
 /// Pass the concrete target's setreg capability: gfx1250 clobbers banks on any
 /// MODE write; without that fixup only writes intersecting MODE[19:12] do so.
 /// Missing HWREG operands are conservatively treated as bank-changing.
-[[nodiscard]] bool may_change_vgpr_msb(const Instruction &instruction, rj_code_arch_t arch,
+[[nodiscard]] bool may_change_vgpr_msb(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                        bool setreg_vgpr_msb_fixup = true);
 
 /// @brief Resolve CDNA5 encoded VGPR operands to their 256-register bank.

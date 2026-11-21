@@ -11,6 +11,7 @@
 /// bottom of this file are what CMake registers.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa.h>
@@ -58,13 +59,13 @@ namespace {
 using test::kernel_path;
 
 // probe_fixture is null throughout: the inline-nop path calls no probe.
-constexpr DbiTargetParams kCdna2Params{ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A,
+constexpr DbiTargetParams kCdna2Params{rocjitsu::IsaFamily::Cdna2, ROCJITSU_CODE_TARGET_GFX90A,
                                        "vector_add_gfx90a", nullptr, "gfx90a"};
 // gfx950 reuses the default-arch vector_add build (tests/kernels/CMakeLists.txt
 // compiles it for gfx950 already), so this target needs no fixture of its own.
-constexpr DbiTargetParams kCdna4Params{ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950,
+constexpr DbiTargetParams kCdna4Params{rocjitsu::IsaFamily::Cdna4, ROCJITSU_CODE_TARGET_GFX950,
                                        "vector_add", nullptr, "gfx950"};
-constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201,
+constexpr DbiTargetParams kRdna4Params{rocjitsu::IsaFamily::Rdna4, ROCJITSU_CODE_TARGET_GFX1201,
                                        "vector_add_gfx1201", nullptr, "gfx1201"};
 
 } // namespace

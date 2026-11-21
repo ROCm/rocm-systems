@@ -242,6 +242,11 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
     size_t dropped = 0;     // dropped from a full stream and not logged yet
     bool stop = false;      // UnRegisterPolicy or shutdown ends the stream
     bool shutdown = false;  // shutdown ended it: the client learns that rdcd stops
+    // The stream's call. Set before the stream is listed in policy_streams_; valid while it is
+    // listed, since the handler takes policy_mutex_ to unlist it before it returns.
+    ::grpc::ServerContext* context = nullptr;
+    bool writing = false;    // the handler is in Write(), or about to be
+    bool cancelled = false;  // a stop cancelled the call to end that Write()
   };
   static void stop_policy_stream(PolicyStream* stream);
   // Removes a stream that ended; the last stream of a group drops its library registration.

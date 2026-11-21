@@ -11,6 +11,7 @@ set(TOOL_HEADERS
     execution_profile.hpp
     graph_stack.hpp
     helper.hpp
+    kernel_dispatch_record.hpp
     kernel_filter_range.hpp
     kernel_iteration_filter.hpp
     stream_stack.hpp)

@@ -310,6 +310,39 @@ impl DrmRegisteredHost {
         }
     }
 
+    #[allow(unsafe_code)]
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.owner
+            .kfd()
+            .check_process()
+            .map_err(|source| super::native_error("diagnostic host backing", source))?;
+        if self.freeing
+            || self.reservation.is_none()
+            || self
+                .mappings
+                .iter()
+                .any(|mapping| mapping.uncertain || mapping.phase != MappingPhase::Mapped)
+        {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "diagnostic backing has retired or is uncertain",
+            ));
+        }
+        let info = self.cached_info();
+        // SAFETY: This borrow retains the host mapping and excludes native
+        // cleanup. Registered callers retain their originally borrowed pages.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                info.device_address,
+                info.host_address,
+                info.size,
+            )
+        }
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         self.owner.check()?;
         if self.freeing
