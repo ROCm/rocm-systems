@@ -9,9 +9,15 @@ application run, restoring device memory between executions so every pass sees i
 
 | Approach | Scope | Memory handling | Cost |
 |---|---|---|---|
-| Application replay (multiple `--pmc` groups) | whole application, re-run per group | none needed; each run is a fresh process | `O(N ×` app runtime`)` |
+| Application replay | whole application, re-run per group | none needed; each run is a fresh process | `O(N ×` app runtime`)` |
 | **Kernel replay** | one dispatch, re-executed in place | device memory snapshot and restore between passes | `O(N ×` kernel time `+ N ×` snap/restore`)` |
-| Counter group rotation | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
+| Counter group rotation (`pmc_groups` / `pmc_group_interval` in an input file) | amortized across dispatches | none; different dispatches sample different groups | `O(1 ×` app runtime`)` |
+
+Only the first two collect every group on every dispatch, so only those two are comparable on the
+data they produce. Multiple CLI `--pmc` groups without kernel replay use application replay by
+default, running the application once per group. Counter group rotation is configured separately
+through input-file `pmc_groups` and `pmc_group_interval`; it is cheaper because it collects less.
+See [Benchmarking](kernel_replay_benchmarking.md).
 
 Kernel replay is **experimental**. The public header lives under
 `rocprofiler-sdk/experimental/`. Both the API and any later command-line flag are expected to
@@ -73,6 +79,9 @@ same domain for timing, PC sampling, or thread trace.
   per-dispatch snapshot cost model, the range the regression tests actually cover, the specific
   performance problems visible in the implementation, and how the cost behaves as device capacity
   outpaces host-link bandwidth across accelerator generations.
+- **[Benchmarking](kernel_replay_benchmarking.md)** — how to measure replay against application
+  replay and against no replay at all, what the benchmark suite records about a run, what it still
+  cannot express, and how the dispatches-per-range axis prepares for range replay.
 - **[Test coverage](kernel_replay_testing.md)** — what replay is tested for at each level, which
   checks need a GPU and which deliberately do not, the known gaps, and where a new test belongs.
 - **[Downstream tools](kernel_replay_downstream_tools.md)** — what it would take for
