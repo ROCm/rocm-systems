@@ -39,12 +39,27 @@
 
 #include "gfx11_mimg_test_common.h"
 
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <format>
 #include <fstream>
+#include <functional>
+#include <initializer_list>
+#include <ios>
 #include <iterator>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 namespace {
 constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
@@ -2570,7 +2585,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
   }
 }
 
-TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
+TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationSharesLoadCompletionOrder) {
   using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
@@ -2603,9 +2618,8 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       step_until_halted(*sim.engine, *sim.cu());
       ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
       EXPECT_EQ(sim.snapshot->snapshots().front().vgpr(3, 0), 0x12345678u);
-      // Invalidation contributes to LOADcnt even with zero EXEC, but does not
-      // share the load's completion order. Only a zero wait proves it ready.
-      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold != 0 ? 1u : 0u);
+      // Invalidation takes an ordered LOADcnt slot even with zero EXEC.
+      EXPECT_EQ(sim.cu()->memory_wait_diagnostic_count(), threshold > 1 ? 1u : 0u);
     }
   }
 }
