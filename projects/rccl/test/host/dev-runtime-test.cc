@@ -481,6 +481,20 @@ TEST_F(DevrInitOnceTest, SymmetricExplicitStride_UsesConfiguredValue) {
   EXPECT_EQ(comm->devrState.bigSize, size_t(1) << 33);  // already 4GB-aligned
 }
 
+// Branch: WIN_STRIDE set below -1. computeBigSize (NCCL 2.32.6) tests the stride
+// as a signed value, so any non-positive stride sizes from the largest peer. The
+// old size_t test (-bigSize <= 1) took only 0 and -1 there; -2 kept 2^64-2 and
+// the 4GB alignUp wrapped it to 0, leaving the symmetric VA space unsized.
+TEST_F(DevrInitOnceTest, SymmetricNegativeStride_SizesFromLargestPeer) {
+  comm->symmetricSupport = 1;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "WIN_STRIDE" ? -2 : deftVal;
+  });
+
+  ASSERT_EQ(ncclDevrInitOnce(comm), ncclSuccess);
+  EXPECT_EQ(comm->devrState.bigSize, size_t(1) << 32);  // 4MB aligned up to 4GB
+}
+
 // Branch: the granularity query fails, so CUCHECKGOTO unwinds via
 // fail_lsaRankList and the error propagates.
 TEST_F(DevrInitOnceTest, GranularityQueryFails_ReturnsError) {
