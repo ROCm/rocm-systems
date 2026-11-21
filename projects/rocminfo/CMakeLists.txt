@@ -57,6 +57,13 @@ option(BUILD_SHARED_LIBS "Build using shared libraries" ON)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
 ## Include common cmake modules
 include(utils)
+## Code coverage flag
+option(ENABLE_CODE_COVERAGE "Enable code coverage" OFF)
+if(ENABLE_CODE_COVERAGE)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "ENABLE_CODE_COVERAGE requires Clang (found ${CMAKE_CXX_COMPILER_ID})")
+  endif()
+endif()
 
 #
 # Process input variables
@@ -195,6 +202,14 @@ if(WIN32)
 endif()
 
 target_compile_options(${ROCMINFO_EXE} PRIVATE ${ROCMINFO_CXX_FLAGS})
+## Code coverage
+if(ENABLE_CODE_COVERAGE)
+  target_compile_options(${ROCMINFO_EXE} PRIVATE
+    -fprofile-instr-generate
+    -fcoverage-mapping)
+  target_link_options(${ROCMINFO_EXE} PRIVATE
+    -fprofile-instr-generate)
+endif()
 
 ###########################
 # Install directives
