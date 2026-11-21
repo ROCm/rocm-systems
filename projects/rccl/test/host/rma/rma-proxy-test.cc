@@ -468,4 +468,42 @@ TEST_F(RmaProxyAllocGraphTest, ForceStrongOrderingPreservedOnBothGdrArms) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// NCCL 2.32.6 host RMA rail connections: with NCCL_CROSS_NIC=0 init.cc sets
+// rmaBaseStride to the ranks per host, the network is connected per rail, and a
+// context addresses world ranks at ctxStride = rmaBaseStride * rankStride only.
+// 8 ranks, 2 per host, rank 5: rail {1,3,5,7} (rail peers 0..3, this rank is 2);
+// a user context at rankStride 2 reaches world ranks 1 and 5 only.
+// ---------------------------------------------------------------------------
+class RmaProxyRailTest : public RmaProxyAllocGraphTest {};
+
+TEST_F(RmaProxyRailTest, ContextMapsWorldRanksToRailPeersAtItsStride) {
+    comm_->nRanks              = 8;
+    comm_->rank                = 5;
+    comm_->rmaBaseStride       = 2;
+    comm_->rmaBaseStride_rcp32 = idivRcp32(2u);
+
+    void* out = nullptr;
+    ASSERT_EQ(ncclSuccess,
+              ncclRmaProxyCreateContext(comm_.get(), &rmaNet_.collH, /*rankStride=*/2, props_, 0, &out));
+    ctx_ = static_cast<ncclRmaProxyCtx*>(out);
+    EXPECT_EQ(4, ctx_->ctxStride);
+
+    // ConnectOnce hands connect() the railmates' handles in this order.
+    EXPECT_EQ(1, ncclRmaProxyPeerToWorld(comm_.get(), 0));
+    EXPECT_EQ(3, ncclRmaProxyPeerToWorld(comm_.get(), 1));
+    EXPECT_EQ(7, ncclRmaProxyPeerToWorld(comm_.get(), 3));
+
+    // iput/iputSignal take the rail peer, not the world rank.
+    int peer = -1;
+    EXPECT_EQ(ncclSuccess, ncclRmaProxyWorldToPeer(ctx_, 1, &peer));
+    EXPECT_EQ(0, peer);
+    EXPECT_EQ(ncclSuccess, ncclRmaProxyWorldToPeer(ctx_, 5, &peer));
+    EXPECT_EQ(2, peer);
+    // On the rail but another context's; off the rail; outside the comm.
+    EXPECT_EQ(ncclInvalidArgument, ncclRmaProxyWorldToPeer(ctx_, 3, &peer));
+    EXPECT_EQ(ncclInvalidArgument, ncclRmaProxyWorldToPeer(ctx_, 2, &peer));
+    EXPECT_EQ(ncclInvalidArgument, ncclRmaProxyWorldToPeer(ctx_, 9, &peer));
+}
+
 }  // namespace
