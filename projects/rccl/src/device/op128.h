@@ -385,6 +385,8 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
   !defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) && __has_builtin(__builtin_amdgcn_raw_buffer_store_b128) && \
   __has_builtin(__builtin_amdgcn_make_buffer_rsrc)
 #define RCCL_SIMPLE_BUFFER_STORE 1
+// Device-only block: uniform.h defines __device__ to empty when it is missing, which a host pass must not see.
+#include "uniform.h"
 // cpol of the buffer stores: SCOPE_SYS (scope field at bit 3), the scope the DWORDX4 store builtin gives.
 #define RCCL_BUFFER_CPOL_SCOPE_SYS (3 << 3)
 
@@ -396,10 +398,9 @@ struct WaveStore16 {
 // Base = the first active lane's address, OOB checking off. True when every active lane sits less than one warp of
 // packs above it (the lane layout of a Simple hunk); otherwise the caller keeps the global stores.
 __device__ __forceinline__ bool waveStore16Begin(uintptr_t addr, WaveStore16& w) {
-  uint32_t lo = __builtin_amdgcn_readfirstlane((uint32_t)addr);
-  uint32_t hi = __builtin_amdgcn_readfirstlane((uint32_t)(addr >> 32));
-  uintptr_t off = addr - (((uintptr_t)hi << 32) | lo);
-  w.rsrc = __builtin_amdgcn_make_buffer_rsrc((void*)(((uintptr_t)hi << 32) | lo), 0, -1LL, 0);
+  uintptr_t base = wave::uniform(static_cast<uint64_t>(addr));
+  uintptr_t off = addr - base;
+  w.rsrc = __builtin_amdgcn_make_buffer_rsrc(reinterpret_cast<void*>(base), 0, -1LL, 0);
   // The mask changes nothing once the check below passed; it lets the compiler fold ioff into the instruction offset.
   w.voff = (uint32_t)off & (WARP_SIZE * 16 - 1);
   return !__any(off >= WARP_SIZE * 16);
