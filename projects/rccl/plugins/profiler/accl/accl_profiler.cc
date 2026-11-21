@@ -843,9 +843,15 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     // acclShouldFinalize() at coll-stop and free the slot while the proxy
     // thread is still delivering KernelCh events into it — RCCL fires coll-stop
     // immediately after ncclProxyStart(), not after the collective completes.
+    //
+    // FIXME: Remove when Addon collectives gain KernelCh event support.
+    // RCCL Addon collectives (DDA, GIN-SDMA) do not support KernelCh events and report nChannels=0, nWarps=0.
+    // So if both nChannels=0 and nWarps=0, this is an Addon collective and the reported 0 is real.
+    // Otherwise, promote reported 0 to ACCL_MAX_CHANNELS as above.
+    bool isAddonCollective = (eDescr->coll.nChannels == 0 && eDescr->coll.nWarps == 0);
     coll->nChannelsRaw = eDescr->coll.nChannels;
-    coll->nChannels = eDescr->coll.nChannels ? eDescr->coll.nChannels
-                                             : ACCL_MAX_CHANNELS;
+    coll->nChannels = (eDescr->coll.nChannels || isAddonCollective) ? eDescr->coll.nChannels
+                                                                    : ACCL_MAX_CHANNELS;
     coll->msgSizeBytes = msgSize;
     coll->tsCollStartUs = acclGetTimeUs();
     coll->commCtx = ctx;
