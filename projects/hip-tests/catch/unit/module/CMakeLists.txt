@@ -484,6 +484,12 @@ if(UNIX)
   target_link_libraries(managedForkAfterRegister_exe ${GPGPU_LINKER_LIBRARIES})
   add_dependencies(build_tests managedForkAfterRegister_exe)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS managedForkAfterRegister_exe)
+
+  add_executable(managedVarAfterDeviceReset_exe EXCLUDE_FROM_ALL managedVarAfterDeviceReset_exe.cc)
+  set_source_files_properties(managedVarAfterDeviceReset_exe.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(managedVarAfterDeviceReset_exe ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(build_tests managedVarAfterDeviceReset_exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS managedVarAfterDeviceReset_exe)
 endif()
 
 # Common Tests - Test independent of all platforms
@@ -498,6 +504,7 @@ set(TEST_SRC
 )
 if(UNIX)
   list(APPEND TEST_SRC managedForkAfterRegister.cc)
+  list(APPEND TEST_SRC managedVarAfterDeviceReset.cc)
 endif()
 set(AMD_TEST_SRC
     hipExtLaunchKernelGGL.cc

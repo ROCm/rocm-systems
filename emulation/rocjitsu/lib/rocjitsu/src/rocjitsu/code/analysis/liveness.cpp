@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/liveness.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/exec_state.h"
@@ -10,6 +11,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/isa/target_registry.h"
 
@@ -72,6 +74,8 @@ void dfs_reverse_post_order(const BasicBlock &start,
   // they can never be unconditional kills.
   if (du.has_predicated_def)
     return {};
+  if (du.conditional_vgpr_def)
+    kills.erase(*du.conditional_vgpr_def);
   // EXEC-masked vector defs preserve inactive lanes' old values, so they are
   // kills only where EXEC is provably full (every lane overwritten). Where the
   // EXEC state is unknown we stay conservative and do not kill.
@@ -84,63 +88,91 @@ void dfs_reverse_post_order(const BasicBlock &start,
 
 // The 32-bit word at offset in text, or nullopt if it runs past the end.
 [[nodiscard]] std::optional<uint32_t> text_word_at(std::span<const uint8_t> text, uint64_t offset) {
-  if (text.empty() || offset + sizeof(uint32_t) > text.size())
+  if (offset > text.size() || text.size() - offset < sizeof(uint32_t))
     return std::nullopt;
   uint32_t word = 0;
   std::memcpy(&word, text.data() + offset, sizeof(word));
   return word;
 }
 
+[[nodiscard]] bool is_sgpr_movrel(const Instruction &inst) {
+  return (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION)) != 0;
+}
+
 // True if inst may reach VGPRs through M0-relative or GPR-index addressing,
 // which explicit operands do not show.
 [[nodiscard]] bool may_access_vgprs_indirectly(const Instruction &inst,
-                                               std::span<const uint8_t> text, rj_code_arch_t arch) {
-  const std::string_view mnemonic = inst.mnemonic();
-  // TODO: Move indirect-access properties into decoded instruction metadata so
-  // future ISA variants cannot bypass this completeness gate. The scalar
-  // s_movrel* family displaces an SGPR index through M0 the same way and has no
-  // equivalent gate here; consumers needing one call
-  // accesses_sgprs_indirectly_via_movrel().
-  if (mnemonic.starts_with("v_movrel") || mnemonic.starts_with("v_swaprel")) {
+                                               std::span<const uint8_t> text,
+                                               rocjitsu::IsaFamily arch) {
+  if ((inst.flags() & (RELATIVE_VGPR_SOURCE | RELATIVE_VGPR_DESTINATION)) != 0) {
     return true;
   }
-  if (!isa_properties(arch).mode_has_gpr_idx_en)
-    return false;
-  if (mnemonic == "s_set_gpr_idx_on")
-    return true;
+  return may_enable_gpr_indexing(inst, text, arch);
+}
 
-  // GPR indexing can also be enabled by writing MODE.GPR_IDX_EN through a
-  // generic S_SETREG form. Dynamic writes covering bit 27 fail closed; immediate
-  // writes can stay eligible when their decoded literal proves the bit is clear.
-  const bool is_dynamic_setreg = mnemonic == "s_setreg_b32";
-  const bool is_immediate_setreg = mnemonic == "s_setreg_imm32_b32";
-  if (!is_dynamic_setreg && !is_immediate_setreg) {
-    return false;
-  }
+} // namespace
+
+namespace {
+
+// nullopt means the instruction leaves this MODE bit unchanged; true includes
+// writes whose source cannot be proved clear from the supplied bytes.
+std::optional<bool> mode_bit_write(const Instruction &inst, std::span<const uint8_t> text,
+                                   uint16_t bit, uint64_t offset) {
+  const amdgpu::Operation operation = inst.amdgpu_operation();
+  if (operation != amdgpu::Operation::S_SETREG_B32 &&
+      operation != amdgpu::Operation::S_SETREG_IMM32_B32)
+    return std::nullopt;
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr)
     return true;
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  const uint16_t id = hwreg & 0x3fu;
-  const uint16_t begin = (hwreg >> 6) & 0x1fu;
-  const uint16_t width = static_cast<uint16_t>(((hwreg >> 11) & 0x1fu) + 1u);
-  constexpr uint16_t kModeHwreg = 1;
-  constexpr uint16_t kGprIdxEnableBit = 27;
-  if (id != kModeHwreg || begin > kGprIdxEnableBit ||
-      static_cast<uint32_t>(begin) + width <= kGprIdxEnableBit) {
-    return false;
-  }
-
-  if (is_dynamic_setreg)
+  if (!amdgpu::hwreg_slice_overlaps_mode_bit(hwreg, bit))
+    return std::nullopt;
+  if (operation == amdgpu::Operation::S_SETREG_B32 || inst.size() < 8 || offset > text.size() ||
+      text.size() - offset < 8)
     return true;
-
-  const auto literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
-  if (!literal || inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
+  const std::optional<uint32_t> literal = text_word_at(text, offset + sizeof(uint32_t));
+  if (!literal)
     return true;
-  return ((*literal >> (kGprIdxEnableBit - begin)) & 1u) != 0;
+  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  return ((*literal >> (bit - slice.begin)) & 1u) != 0;
 }
 
 } // namespace
+
+bool may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text,
+                             rocjitsu::IsaFamily arch, std::optional<uint64_t> instruction_offset) {
+  if (!isa_properties(arch).mode_has_gpr_idx_en)
+    return false;
+  if (inst.amdgpu_operation() == amdgpu::Operation::S_SET_GPR_IDX_ON)
+    return true;
+  return mode_bit_write(inst, text, 27, instruction_offset.value_or(inst.src_loc()))
+      .value_or(false);
+}
+
+bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text,
+                      rocjitsu::IsaFamily arch, std::optional<uint64_t> instruction_offset) {
+  if (!arch_is_cdna_4_or_lower(arch))
+    return false;
+  if (inst.amdgpu_operation() == amdgpu::Operation::S_SETVSKIP) {
+    const Operand *source = inst.src_operand(0);
+    const Operand *selector = inst.src_operand(1);
+    if (source == nullptr || selector == nullptr)
+      return true;
+    const std::optional<uint64_t> value = source->const_value();
+    if (!value)
+      return true;
+    const uint64_t source_value = *value;
+    if (source_value == 0)
+      return false;
+    const std::optional<uint64_t> bit = selector->const_value();
+    if (!bit)
+      return true;
+    return ((source_value >> (*bit & 31u)) & 1u) != 0;
+  }
+  return mode_bit_write(inst, text, 28, instruction_offset.value_or(inst.src_loc()))
+      .value_or(false);
+}
 
 LivenessAnalysis::LivenessAnalysis(UnavailableTag) : available_(false) {}
 
@@ -205,7 +237,7 @@ bool accesses_sgprs_indirectly_via_movrel(KernelBlockScope blocks) {
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
-      if (inst.mnemonic().starts_with("s_movrel"))
+      if (is_sgpr_movrel(inst))
         return true;
     }
   }
@@ -245,16 +277,16 @@ LivenessAnalysis::LivenessAnalysis(KernelBlockScope blocks, uint8_t wave_size,
   deferred_restrict_live_before_to_instructions_ = options.restrict_live_before_to_instructions;
 
   const KernelBlockScope deferred_scope(deferred_blocks_);
-  if (options.arch == ROCJITSU_CODE_ARCH_CDNA5 && options.entry_block != nullptr) {
+  if (options.arch == rocjitsu::IsaFamily::Cdna5 && options.entry_block != nullptr) {
     const IsaTargetRegistry &registry = default_isa_target_registry();
     const IsaTargetDescriptor *architecture = registry.find(options.arch);
     const IsaTargetDescriptor *target_architecture = registry.find(options.target);
-    const IsaGpuTargetDescription *target =
-        target_architecture != nullptr && target_architecture->architecture_id == options.arch
-            ? registry.find_gpu_target(options.target)
+    const IsaTargetBinding *target =
+        target_architecture != nullptr && target_architecture->family == options.arch
+            ? registry.find_target(options.target)
             : nullptr;
     if (target == nullptr && architecture != nullptr)
-      target = registry.find_default_gpu_target(*architecture);
+      target = registry.find_default_target(*architecture);
     gfx1250_vgpr_msb_ = std::make_unique<Gfx1250VgprMsbAnalysis>(
         deferred_scope, options.entry_block, deferred_extra_edges_, options.text,
         options.additional_entry_blocks,
@@ -285,11 +317,13 @@ Result LivenessAnalysis::ensure_analyzed() const {
 
 void LivenessAnalysis::collect_global_register_usage(KernelBlockScope blocks,
                                                      std::span<const uint8_t> text,
-                                                     rj_code_arch_t arch) {
+                                                     rocjitsu::IsaFamily arch) {
   for (BasicBlock *block : blocks) {
     if (block == nullptr)
       continue;
     for (const Instruction &inst : block->instructions()) {
+      if (is_sgpr_movrel(inst))
+        global_sgpr_usage_is_complete_ = false;
       if (may_access_vgprs_indirectly(inst, text, arch))
         global_vgpr_usage_is_complete_ = false;
 
@@ -494,6 +528,21 @@ FailureOr<bool> LivenessAnalysis::global_vgpr_usage_is_complete() const {
   if (require_available().failed())
     return Result::failure();
   return global_vgpr_usage_is_complete_;
+}
+
+FailureOr<bool> LivenessAnalysis::global_sgpr_usage_is_complete() const {
+  if (require_available().failed())
+    return Result::failure();
+  return global_sgpr_usage_is_complete_;
+}
+
+FailureOr<std::optional<uint16_t>>
+LivenessAnalysis::find_globally_unused_sgpr_pair(const Instruction *inst) const {
+  if (require_available().failed())
+    return Result::failure();
+  if (!global_sgpr_usage_is_complete_ || !inst || !scoped_blocks_.contains(inst->parent()))
+    return std::optional<uint16_t>{};
+  return rocjitsu::find_free_sgpr_pair(globally_used_registers_, REGISTER_SET_ALLOCATABLE_SGPRS);
 }
 
 FailureOr<std::optional<uint16_t>>

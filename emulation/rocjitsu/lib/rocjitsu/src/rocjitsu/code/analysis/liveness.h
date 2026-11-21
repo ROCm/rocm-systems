@@ -15,6 +15,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
@@ -33,6 +34,23 @@ class BasicBlock;
 class ExecMaskAnalysis;
 class Gfx1250VgprMsbAnalysis;
 class Instruction;
+
+/// @brief Whether an instruction may enable displaced VGPR addressing.
+/// @details Returns false for unrelated instructions or a MODE write proven to
+/// clear GPR_IDX_EN, and true for an enabling or unknown write. Missing required
+/// operands or literal bytes return true. Text is the entire .text section;
+/// instruction_offset is its byte offset, defaulting to inst.src_loc(). Direct
+/// decoder callers must supply the offset when src_loc() does not describe text.
+[[nodiscard]] bool
+may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text,
+                        rocjitsu::IsaFamily arch,
+                        std::optional<uint64_t> instruction_offset = std::nullopt);
+
+/// @brief Whether an instruction may enable vector-instruction suppression.
+/// @details The result and .text offset convention match may_enable_gpr_indexing.
+[[nodiscard]] bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text,
+                                    rocjitsu::IsaFamily arch,
+                                    std::optional<uint64_t> instruction_offset = std::nullopt);
 
 /// @brief The basic blocks reachable from one kernel entry.
 using KernelBlockScope = std::span<BasicBlock *const>;
@@ -72,7 +90,7 @@ struct LivenessAnalysisOptions {
   /// @details INVALID preserves the legacy ISA-independent behavior. DBT sets
   /// this to gfx1250 together with entry_block so VGPR_MSB state can resolve
   /// encoded vector operands to physical VGPRs.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   /// @brief Concrete decoding target whose shared-instruction behavior applies.
   ///
@@ -180,10 +198,10 @@ struct LivenessAnalysisOptions {
 
 /// @brief Whether any instruction in @p blocks is an `s_movrel*` form.
 ///
-/// @details M0 displaces the encoded SGPR index at runtime, so the operand names
-/// one register and the hardware accesses another. Neither
-/// @ref explicit_ordinary_sgpr_bound nor LivenessAnalysis models that, so a
-/// caller relying on either for SGPR usage must reject a scope where this holds.
+/// @details M0 displaces the encoded SGPR index at runtime. LivenessAnalysis
+/// detects these instructions and marks global SGPR usage incomplete because
+/// the physical register depends on M0. Callers using
+/// @ref explicit_ordinary_sgpr_bound must check for these instructions separately.
 ///
 /// Matches by prefix: that covers the load, the store (`s_movreld_*`) and the
 /// RDNA `s_movrelsd_2_b32` pair form. Any other scalar indirection would need
@@ -295,6 +313,22 @@ public:
   /// VGPR ranges must fail closed when this query returns false.
   FailureOr<bool> global_vgpr_usage_is_complete() const;
 
+  /// @brief Whether explicit operands cover SGPR usage in the decoded scope.
+  /// @returns Failure if analysis is unavailable, or false if an `s_movrel*`
+  /// instruction can redirect an SGPR access through M0. A whole-kernel
+  /// conclusion requires a scope that includes all reachable callees.
+  FailureOr<bool> global_sgpr_usage_is_complete() const;
+
+  /// @brief Find an even ordinary SGPR pair unused throughout the decoded scope.
+  /// @details The scope must include reachable callees. The search spans
+  /// REGISTER_SET_ALLOCATABLE_SGPRS. Callers using a pair beyond the current
+  /// kernel descriptor allocation must grow it with require_sgprs(). The query
+  /// does not reserve the pair. Repeated queries may return the same registers.
+  /// @returns Failure if analysis is unavailable. A successful empty result
+  /// means SGPR usage is incomplete, @p inst is outside the scope (or null),
+  /// or no pair is free.
+  FailureOr<std::optional<uint16_t>> find_globally_unused_sgpr_pair(const Instruction *inst) const;
+
   /// @brief Find a VGPR tuple that no instruction in the kernel reads or writes.
   ///
   /// @details This query is cheaper and stronger than point liveness: the
@@ -360,7 +394,7 @@ private:
 
   /// @brief Collect whole-kernel register use without running backward dataflow.
   void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text,
-                                     rj_code_arch_t arch);
+                                     rocjitsu::IsaFamily arch);
 
   void analyze(KernelBlockScope blocks, bool restrict_live_before_to_instructions,
                std::span<const Instruction *const> live_before_instructions,
@@ -370,6 +404,7 @@ private:
   mutable bool analyzed_ = false;
   bool exec_masked_defs_kill_ = false;
   bool global_vgpr_usage_is_complete_ = true;
+  bool global_sgpr_usage_is_complete_ = true;
   uint16_t min_free_vgpr_ = 0;
   uint16_t max_free_vgpr_ = 0;
   uint8_t wave_size_ = 0;

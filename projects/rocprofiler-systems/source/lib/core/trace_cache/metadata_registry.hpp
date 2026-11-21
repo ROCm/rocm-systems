@@ -130,24 +130,6 @@ format_link_track_name(std::string_view base_name, size_t link)
     return fmt::format("{} [Link {}]", base_name, link);
 }
 
-template <typename Category>
-inline std::string
-annotate_with_nic(const std::string& nic, std::optional<int> first_section = std::nullopt,
-                  std::optional<int> second_section = std::nullopt)
-{
-    std::stringstream ss;
-    ss << std::string(tim::trait::name<Category>::value) + " [" + nic + "]";
-    if(first_section)
-    {
-        ss << "_" << std::to_string(*first_section);
-    }
-    if(second_section)
-    {
-        ss << "_" << std::to_string(*second_section);
-    }
-    return ss.str();
-}
-
 struct track
 {
     std::string           track_name;  // < Unique
@@ -322,8 +304,6 @@ struct metadata_registry
     get_code_object_list() const;
     std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol_list() const;
-    std::optional<rocprofiler_callback_tracing_code_object_load_data_t> get_code_object(
-        std::uint64_t code_object_id) const;
     std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol(std::uint64_t kernel_id) const;
 

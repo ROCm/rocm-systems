@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import OverviewView from '../../src/components/views/OverviewView.jsx';
 import { expect, test } from 'vitest';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
@@ -44,7 +44,7 @@ test('undated runs keep benchmark-set membership available outside the chronolog
   for (const run of source.runs) run.provenance.rocjitsu.rocjitsu_commit_timestamp = null;
   const { data } = adaptPublishedDashboardData(source);
   const filters = { targets: data.targets, suites: data.suites, modes: data.modes };
-  const html = renderToStaticMarkup(createElement(OverviewView, { data, viewModel: selectOverviewProjection(data, filters), state: { filters } }));
+  const html = renderToStaticMarkup(themed(OverviewView, { data, viewModel: selectOverviewProjection(data, filters), state: { filters } }));
   expect(html).toContain('fictional-old');
   expect(html).toContain('fictional-current');
 });

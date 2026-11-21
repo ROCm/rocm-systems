@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "execution_fuzz_core.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "embedded_schema.h"
 #include "generated_kernel.h"
@@ -46,6 +47,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/gws_device.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
@@ -74,23 +76,23 @@ constexpr uint64_t kDataBase = 0x20000;
 
 struct TargetInfo {
   std::string_view name;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   rj_code_target_id_t id;
 };
 
 constexpr std::array<TargetInfo, static_cast<size_t>(FuzzTarget::Count)> kTargets{{
-    {"gfx908", ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_TARGET_INVALID},
-    {"gfx90a", ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_TARGET_GFX90A},
-    {"gfx942", ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_TARGET_GFX942},
-    {"gfx950", ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_TARGET_GFX950},
-    {"gfx1010", ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_TARGET_INVALID},
-    {"gfx1030", ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_TARGET_INVALID},
-    {"gfx1100", ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_TARGET_INVALID},
-    {"gfx1151", ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_TARGET_INVALID},
-    {"gfx1200", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1200},
-    {"gfx1201", ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_TARGET_GFX1201},
-    {"gfx1250", ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1250},
-    {"gfx1251", ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_TARGET_GFX1251},
+    {"gfx908", rocjitsu::IsaFamily::Cdna1, ROCJITSU_CODE_TARGET_GFX908},
+    {"gfx90a", rocjitsu::IsaFamily::Cdna2, ROCJITSU_CODE_TARGET_GFX90A},
+    {"gfx942", rocjitsu::IsaFamily::Cdna3, ROCJITSU_CODE_TARGET_GFX942},
+    {"gfx950", rocjitsu::IsaFamily::Cdna4, ROCJITSU_CODE_TARGET_GFX950},
+    {"gfx1010", rocjitsu::IsaFamily::Rdna1, ROCJITSU_CODE_TARGET_GFX1010},
+    {"gfx1030", rocjitsu::IsaFamily::Rdna2, ROCJITSU_CODE_TARGET_GFX1030},
+    {"gfx1100", rocjitsu::IsaFamily::Rdna3, ROCJITSU_CODE_TARGET_GFX1100},
+    {"gfx1150", rocjitsu::IsaFamily::Rdna3_5, ROCJITSU_CODE_TARGET_GFX1150},
+    {"gfx1200", rocjitsu::IsaFamily::Rdna4, ROCJITSU_CODE_TARGET_GFX1200},
+    {"gfx1201", rocjitsu::IsaFamily::Rdna4, ROCJITSU_CODE_TARGET_GFX1201},
+    {"gfx1250", rocjitsu::IsaFamily::Cdna5, ROCJITSU_CODE_TARGET_GFX1250},
+    {"gfx1251", rocjitsu::IsaFamily::Cdna5, ROCJITSU_CODE_TARGET_GFX1251},
 }};
 
 const TargetInfo &target_info(FuzzTarget target) {
@@ -157,13 +159,9 @@ std::string fuzz_config(FuzzTarget target, bool check_waits) {
   const TargetInfo &info = target_info(target);
   std::string json = R"({"num_threads":1,"async_helper_threads":0,"vm":{"arch":")";
   json += config::arch_to_string(info.arch);
-  json += '"';
-  if (info.id != ROCJITSU_CODE_TARGET_INVALID) {
-    json += R"(,"target":")";
-    json += info.name;
-    json += '"';
-  }
-  json += R"(},"wait_checking":")";
+  json += R"(","target":")";
+  json += info.name;
+  json += R"("},"wait_checking":")";
   json += check_waits ? "all" : "off";
   json +=
       R"(","topology":{"root":{"name":"soc","type":"soc","children":[{"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[{"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},{"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit","config":[{"key":"num_wf_slots","value":"1"},{"key":"sgprs_per_wf","value":"128"},{"key":"vgprs_per_wf","value":")";
@@ -208,9 +206,7 @@ std::vector<std::vector<uint8_t>> make_instruction_seeds(FuzzTarget target,
                                                          const Encodings &encodings) {
   std::vector<std::vector<uint8_t>> result;
   const TargetInfo &info = target_info(target);
-  auto decoder = info.id == ROCJITSU_CODE_TARGET_INVALID
-                     ? Decoder::create(default_isa_target_registry(), info.arch)
-                     : Decoder::create(default_isa_target_registry(), info.id);
+  const std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), info.id);
   if (!decoder)
     throw std::logic_error(std::format("{} decoder is unavailable", info.name));
   for (const auto &encoding : encodings) {
@@ -247,7 +243,7 @@ const std::vector<std::vector<uint8_t>> &instruction_seeds(FuzzTarget target) {
           make_instruction_seeds(FuzzTarget::Gfx1010, rdna1::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx1030, rdna2::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx1100, rdna3::test_data::ENCODINGS),
-          make_instruction_seeds(FuzzTarget::Gfx1151, rdna3_5::test_data::ENCODINGS),
+          make_instruction_seeds(FuzzTarget::Gfx1150, rdna3_5::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx1200, rdna4::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx1201, rdna4::test_data::ENCODINGS),
           make_instruction_seeds(FuzzTarget::Gfx1250, cdna5::test_data::ENCODINGS),
@@ -256,34 +252,34 @@ const std::vector<std::vector<uint8_t>> &instruction_seeds(FuzzTarget target) {
   return seeds[static_cast<size_t>(target)];
 }
 
+} // namespace
+
 uint32_t terminating_instruction(FuzzTarget target) {
   switch (target_info(target).arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return cdna1::build_sopp(cdna1::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return cdna2::build_sopp(cdna2::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_sopp(cdna3::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_sopp(cdna4::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return rdna1::build_sopp(rdna1::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return rdna2::build_sopp(rdna2::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return rdna3::build_sopp(rdna3::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_sopp(rdna4::kSEndpgmSopp)[0];
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return cdna5::build_sopp(cdna5::kSEndpgmSopp)[0];
   default:
     throw std::logic_error("execution fuzz target has no terminating instruction");
   }
 }
-
-} // namespace
 
 std::optional<FuzzTarget> parse_target(std::string_view name) {
   for (size_t index = 0; index < kTargets.size(); ++index)
@@ -294,24 +290,20 @@ std::optional<FuzzTarget> parse_target(std::string_view name) {
 
 std::string_view target_name(FuzzTarget target) { return target_info(target).name; }
 
-rj_code_arch_t target_arch(FuzzTarget target) { return target_info(target).arch; }
+rocjitsu::IsaFamily target_arch(FuzzTarget target) { return target_info(target).arch; }
+
+rj_code_target_id_t target_id(FuzzTarget target) { return target_info(target).id; }
 
 bool targets_cover_amdgpu_execution_registry() {
   for (const IsaTargetDescriptor &descriptor : default_isa_target_registry().targets()) {
     if (!descriptor.supports_execution)
       continue;
-    if (descriptor.architecture_id == ROCJITSU_CODE_ARCH_RV32I ||
-        descriptor.architecture_id == ROCJITSU_CODE_ARCH_RV64I)
+    if (descriptor.family == rocjitsu::IsaFamily::Rv32i ||
+        descriptor.family == rocjitsu::IsaFamily::Rv64i)
       continue;
-    if (descriptor.gpu_targets.empty()) {
-      const bool covered = std::ranges::any_of(kTargets, [&](const TargetInfo &target) {
-        return target.arch == descriptor.architecture_id;
-      });
-      if (!covered)
-        return false;
-      continue;
-    }
-    for (const IsaGpuTargetDescription &gpu : descriptor.gpu_targets) {
+    if (descriptor.bindings.empty())
+      return false;
+    for (const IsaTargetBinding &gpu : descriptor.bindings) {
       if (!gpu.capabilities.execution_implemented)
         continue;
       const bool covered = std::ranges::any_of(
@@ -329,18 +321,34 @@ std::optional<FuzzTarget> indexed_target(uint8_t index) {
   return static_cast<FuzzTarget>(index);
 }
 
+std::vector<uint8_t> terminated_program(std::span<const uint8_t> instructions, FuzzTarget target) {
+  const std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), target_id(target));
+  if (!decoder)
+    throw std::logic_error("execution fuzz target has no decoder");
+  const std::size_t max_words = decoder->max_instruction_words();
+  std::vector<uint8_t> code(instructions.begin(), instructions.end());
+  while (code.size() % sizeof(uint32_t) != 0)
+    code.push_back(0);
+  // A trailing partial instruction can consume up to max_words - 1 words
+  // before reaching the next instruction boundary.
+  const uint32_t end = terminating_instruction(target);
+  for (std::size_t word = 0; word < max_words; ++word)
+    for (unsigned byte = 0; byte < sizeof(end); ++byte)
+      code.push_back(static_cast<uint8_t>(end >> (8 * byte)));
+  // The last terminator still needs a full CU instruction fetch.
+  const std::size_t padding_bytes =
+      std::max(max_words * sizeof(uint32_t), amdgpu::InstructionCache::kFetchBytes - sizeof(end));
+  code.resize(code.size() + padding_bytes);
+  return code;
+}
+
 namespace {
 RunStats run_input_once(
     std::span<const uint8_t> input, std::span<const uint8_t> instructions,
     FuzzTarget resolved_target,
     const std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> &async_resources) {
-  std::vector<uint8_t> code(instructions.begin(), instructions.end());
-  while (code.size() % sizeof(uint32_t) != 0)
-    code.push_back(0);
-  const uint32_t end = terminating_instruction(resolved_target);
-  for (unsigned byte = 0; byte < 4; ++byte)
-    code.push_back(static_cast<uint8_t>(end >> (8 * byte)));
-  code.resize(code.size() + 16);
+  const std::vector<uint8_t> code = terminated_program(instructions, resolved_target);
 
   // Keep a mapped data island near the program. Address-bearing initial state
   // points into this region while other registers retain high-entropy values.
@@ -546,14 +554,15 @@ std::vector<uint8_t> random_input(uint64_t seed, size_t size, std::optional<Fuzz
   const uint64_t mode_seed = seed;
   const FuzzTarget resolved_target =
       target.value_or(static_cast<FuzzTarget>(static_cast<uint8_t>(seed) % kTargets.size()));
-  constexpr std::array first_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  constexpr std::array second_wmma =
-      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p,
-                         {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
+  // Alternate migrated issuer-only FP8 and still helper-eligible FP4 pairs.
+  const auto opcode =
+      (seed & 16) ? cdna5::kVWmmaF3232x16x128F4Vop3p : cdna5::kVWmmaF3216x16x128Fp8Fp8Vop3p;
+  const std::array first_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
+  const std::array second_wmma = cdna5::build_vop3p(
+      opcode, {.vdst = 96, .src0 = 256, .src1 = 288, .src2 = 352, .opsel_hi = 3});
   constexpr size_t wmma_prefix_size = (first_wmma.size() + second_wmma.size()) * sizeof(uint32_t);
-  const bool async_wmma_bias = target_info(resolved_target).arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+  const bool async_wmma_bias = target_info(resolved_target).arch == rocjitsu::IsaFamily::Cdna5 &&
                                (seed & 15) == 1 && size - cursor >= wmma_prefix_size;
   // Vary the generator and EXEC mode across seed rounds. Auto target selection
   // shares seed bits with the raw-byte predicate, and the WMMA prefix requires

@@ -73,15 +73,27 @@ Every test case has its own entry. Currently supported options are:
 - unsupported : Permanently skip the case on the listed targets, where the platform, architecture, or backend cannot support it
 `disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
 Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
-non-empty `targets` list **must** carry a non-empty `reason`, and that reason **must**
-cite a real Jira reference from a known project key (**AIRUNTIME, ROCM, SWDEV, EXSWHTEC,
-AIRADSW**), e.g. `AIRUNTIME-2892`; both are enforced by `check_config.py` in CI. The known
+non-empty `targets` list **must** carry a non-empty `reason`. A `disabled` reason **must**
+also cite a real Jira reference from a known project key (**AIRUNTIME, ROCM, SWDEV, EXSWHTEC,
+AIRADSW**), e.g. `AIRUNTIME-2892`; an `unsupported` reason needs no Jira key. Both rules are
+enforced by `check_config.py` in CI. The known
 project keys are an allowlist; add a new one by editing the `JIRA_PROJECTS` tuple in
 `check_config.py`. The bare flat-list form (`disabled: [amd_wsl]`) is no longer accepted for a
 non-empty skip. An empty section (`targets: []`) is a no-op and needs no reason. If a
 skip has not yet been triaged, lead the reason with the tracking ticket, e.g.
 `AIRUNTIME-2744 - needs to be re-triaged`.
-The group name is automatically added as a tag for every case.
+Besides the per-platform, per-architecture and `asan` targets, a field may name a group:
+- `all` : every build (only for disabled). Use it to switch a case off everywhere for a while.
+  'all' is not permitted to be used with unsupported, just remove the test; `check_config.py`
+  rejects it.
+- `amd` : `amd_linux`, `amd_windows` and `amd_wsl`
+- `nvidia` : `nvidia_linux` and `nvidia_windows`
+
+`amd` and `nvidia` are valid in both fields. The targets in a field are additive: the case is
+skipped wherever any of them applies, so adding `all` to an existing list disables the case
+everywhere and the existing targets can stay. The `reason` and Jira rules above apply unchanged.
+
+The config group name (e.g. `atomics`) is automatically added as a tag for every case.
 Changing the configuration file will retrigger the build, so we have an up to date configuration every time.
 
 Example:
@@ -96,15 +108,29 @@ unit:
         reason: "SWDEV-435667: fails randomly in stress test"
       unsupported:
         targets: [gfx900]
-        reason: requires a hardware feature not present on this architecture
+        reason: "requires a hardware feature not present on this architecture"
 ```
-will be generated (on an AMD linux machine) as:
+will be generated (on an AMD Linux build for gfx942) as:
 ```cpp
-#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu][level_2][atomics]"
+#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu][level_2][comprehensive][full][atomics][gfx942][exclude_amd_wsl][exclude_gfx900]"
 ```
-and on an AMD WSL machine as (skipping the test):
+and on an AMD Linux build for gfx900 as (skipping the test):
 ```cpp
-#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[.]"
+#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu][level_2][comprehensive][full][atomics][disabled][gfx900][exclude_amd_wsl][exclude_gfx900]"
+```
+WSL runs the Linux build, so its macro is identical; ctest discovery on WSL disables the case
+through its `[exclude_amd_wsl]` label instead.
+
+Adding `all` to the `disabled` targets:
+```yaml
+      disabled:
+        targets: [amd_wsl, all]
+        reason: "SWDEV-435667: fails randomly in stress test"
+```
+skips the case on every build, and the group expands into the label of every target it covers
+(on gfx942):
+```cpp
+#define Unit_atomicExch_system_Positive_Peer_GPUs "Unit_atomicExch_system_Positive_Peer_GPUs", "[multigpu][level_2][comprehensive][full][atomics][disabled][gfx942][exclude_amd_wsl][exclude_all][exclude_amd][exclude_amd_linux][exclude_amd_windows][exclude_nvidia][exclude_nvidia_linux][exclude_nvidia_windows][exclude_gfx900]"
 ```
 and this macro is expanded in the actual test case definition
 ```cpp
@@ -200,13 +226,16 @@ Categories do not carry exclusions. A test case declares its own in the
 [Configuration](#configuration) for the list and `{targets, reason}` forms),
 where a target may name the platform and OS (`amd_linux`, `amd_windows`,
 `nvidia_linux`, `nvidia_windows`, `amd_wsl`), the exact architecture the build
-targets (`<arch>`), the two combined (`linux_<arch>`, `windows_<arch>`), or
-`asan`. `test_categories.yaml` lists every accepted spelling in full.
+targets (`<arch>`), the two combined (`linux_<arch>`, `windows_<arch>`),
+`asan`, or a group (`all`, `amd`, `nvidia`). `test_categories.yaml` lists every
+accepted spelling in full.
 
 A matching target in either field tags the case `[disabled]` and registers it
 `DISABLED TRUE` in ctest. Every target also produces an `[exclude_<entry>]` label whether or not it
-matched this build, so a runner can filter on one directly —
-`ctest -L standard -LE exclude_amd_wsl`.
+matched this build, and a group also produces the label of every target it covers, so a runner
+can filter on one directly: `ctest -L standard -LE '^exclude_amd_wsl$'` or
+`ctest -L standard -LE '^exclude_all$'`. Anchor the pattern, since ctest labels are regular
+expressions and an unanchored `exclude_amd` also matches `exclude_amd_linux`.
 
 ### Writing level-aware tests with `isQuickLevel()`
 

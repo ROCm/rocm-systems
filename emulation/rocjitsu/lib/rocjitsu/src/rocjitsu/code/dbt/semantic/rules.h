@@ -7,6 +7,8 @@
 #pragma once
 
 #include "rocjitsu/code/dbt/translation_rule.h"
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <span>
 
@@ -14,6 +16,10 @@ namespace rocjitsu {
 
 /// @brief CDNA4 source rules for the RDNA4 target.
 [[nodiscard]] std::span<const TranslationRule> semantic_expand_rules_cdna4_to_rdna4();
+
+/// @brief CDNA4 VOP2 reverse shifts with different encoding or DPP routing on RDNA.
+[[nodiscard]] std::span<const RegisteredInstructionRewrite>
+cdna4_reverse_shift_rules_for_rdna(rocjitsu::IsaFamily host_arch);
 
 /// @brief CDNA4 source rules for the CDNA3 target.
 [[nodiscard]] std::span<const TranslationRule> semantic_expand_rules_cdna4_to_cdna3();

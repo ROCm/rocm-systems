@@ -19,8 +19,12 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
-from memory_chart.loader import Layouts
-from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
+from memory_chart.loader import LAYOUT_VERSION, Layouts
+from pc_sampling import (
+    per_kernel_isa_export,
+    per_source_line_export,
+    source_snapshot_analysis,
+)
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
 from rocprof_compute_analyze.analysis_db import (
@@ -32,10 +36,6 @@ from rocprof_compute_analyze.analysis_db import (
 from utils import analysis_orm as orm
 from utils import schema
 from utils.file_io import create_df_kernel_top_stats
-from utils.metrics.noise_clamper import (
-    clear_noise_clamp_warnings,
-    get_noise_clamp_warnings,
-)
 
 ISA_WORKLOAD_NAME = "vector_copy"
 ISA_WORKLOAD_SUB_NAME = "run"
@@ -80,6 +80,7 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
     return SimpleNamespace(
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
         _pmc_df_per_workload={workload_path: pmc_df},
+        _pass_tables_per_workload={workload_path: {}},
         _arch_configs={"gfx90a": arch_config},
         get_args=lambda: SimpleNamespace(),
     )
@@ -247,6 +248,23 @@ def run_analysis_with_existing_database(analyzer):
             )
         )
         analyzer.run_analysis()
+
+
+def query_instruction_sample_states(session):
+    """Query the sample states of instruction lines, leaving out source lines."""
+    return session.query(orm.PCSampleState).filter(
+        orm.PCSampleState.instruction_uuid.is_not(None)
+    )
+
+
+def query_instruction_stall_reasons(session):
+    """Query the stall-reason counts of instruction lines, leaving out source lines."""
+    return (
+        session
+        .query(orm.PCSampleStallReason)
+        .join(orm.PCSampleStallReason.pc_sample_state)
+        .filter(orm.PCSampleState.instruction_uuid.is_not(None))
+    )
 
 
 def run_analysis_with_materialized_views(analyzer):
@@ -616,16 +634,12 @@ def test_calc_builtin_vars_processes_per_xcd_first():
         return_value="MI300",
     ):
         with patch(
-            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
-            with patch(
-                "utils.utils_counter_defs.get_build_in_vars",
-                return_value=mock_builtin_vars,
-            ):
-                db_analysis.calc_builtin_vars(
-                    pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
-                )
+            db_analysis.calc_builtin_vars(
+                pmc_df, sys_info, {"PER_XCD_VAR", "DERIVED_VAR"}
+            )
 
     # Verify PER_XCD var was computed
     assert sys_info["PER_XCD_VAR"] == 20
@@ -652,16 +666,12 @@ def test_calc_builtin_vars_with_dataframe_expressions():
         return_value="MI300",
     ):
         with patch(
-            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
-            with patch(
-                "utils.utils_counter_defs.get_build_in_vars",
-                return_value=mock_builtin_vars,
-            ):
-                db_analysis.calc_builtin_vars(
-                    pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
-                )
+            db_analysis.calc_builtin_vars(
+                pmc_df, sys_info, {"TOTAL_COUNT", "SCALED_TOTAL"}
+            )
 
     assert sys_info["TOTAL_COUNT"] == 60
     assert sys_info["SCALED_TOTAL"] == 120
@@ -675,7 +685,7 @@ def test_calc_builtin_vars_uses_gfx1250_gui_active_sum():
     db_analysis.calc_builtin_vars(
         pmc_df,
         sys_info,
-        ["$GRBM_GUI_ACTIVE_PER_XCD"],
+        {"GRBM_GUI_ACTIVE_PER_XCD"},
     )
 
     pd.testing.assert_series_equal(
@@ -707,9 +717,7 @@ def test_calc_dataframe_expressions_applies_evaluate_to_rows():
         ],
     })
 
-    with patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ):
+    with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
         result = db_analysis.calc_dataframe_expressions(pmc_df, sys_info, expression_df)
 
     assert isinstance(result, pd.Series)
@@ -742,20 +750,77 @@ def test_calc_dataframe_expressions_with_builtin_vars():
         return_value="MI300",
     ):
         with patch(
-            "rocprof_compute_analyze.analysis_db.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value=mock_builtin_vars,
         ):
-            with patch(
-                "utils.utils_counter_defs.get_build_in_vars",
-                return_value=mock_builtin_vars,
-            ):
-                result = db_analysis.calc_dataframe_expressions(
-                    pmc_df, sys_info, expression_df
-                )
+            result = db_analysis.calc_dataframe_expressions(
+                pmc_df, sys_info, expression_df
+            )
 
     assert result.iloc[0] == 51
     # None from evaluate becomes NaN in pandas Series
     assert pd.isna(result.iloc[1])
+
+
+def test_calc_dataframe_expressions_reads_each_row_from_its_pass():
+    """A row whose counters share a pass reads that pass; others read pmc_df."""
+    pmc_df = pd.DataFrame({"SQ_WAVES": [1, 1], "SQ_BUSY_CYCLES": [1, 1]})
+    pass_tables = [
+        pd.DataFrame({"SQ_WAVES": [2, 2]}),
+        pd.DataFrame({"SQ_WAVES": [3, 3], "SQ_BUSY_CYCLES": [6, 6]}),
+    ]
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.2", "1.3"],
+        "value_name": ["Value", "Value", "Value"],
+        "value": [
+            "to_sum(raw_pmc_df['SQ_WAVES'])",
+            "to_sum(raw_pmc_df['SQ_BUSY_CYCLES']) / to_sum(raw_pmc_df['SQ_WAVES'])",
+            "to_sum(raw_pmc_df['SQ_WAVES']) + to_sum(raw_pmc_df['TA_BUSY'])",
+        ],
+    })
+
+    with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
+        result = db_analysis.calc_dataframe_expressions(
+            pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables
+        )
+
+    assert result.iloc[0] == 4
+    assert result.iloc[1] == 2
+    assert pd.isna(result.iloc[2])
+
+
+def test_calc_dataframe_expressions_reads_each_collectable_from_its_own_pass():
+    """A row that reads only collectables takes each one from the pass that
+    holds its counters, not from pmc_df."""
+    pmc_df = pd.DataFrame({"SQ_WAVES": [100, 200], "SQ_BUSY_CYCLES": [100, 200]})
+    pass_tables = [
+        pd.DataFrame({"SQ_WAVES": [1, 2]}),
+        pd.DataFrame({"SQ_BUSY_CYCLES": [10, 20]}),
+    ]
+    collectables = {
+        "a": "SUM(SQ_WAVES)",
+        "b": "SUM(SQ_BUSY_CYCLES)",
+        "a_per_dispatch": "SQ_WAVES",
+        "b_per_dispatch": "SQ_BUSY_CYCLES",
+    }
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.1", "1.1"],
+        "value_name": ["Value", "Min"],
+        "value": [
+            "ammolite__a + ammolite__b",
+            "to_min(ammolite__a_per_dispatch + ammolite__b_per_dispatch)",
+        ],
+    })
+
+    with patch(
+        "utils.utils_counter_defs.Collectables.of_arch", return_value=collectables
+    ):
+        result = db_analysis.calc_dataframe_expressions(
+            pmc_df, {"gpu_arch": "gfx942"}, expression_df, pass_tables=pass_tables
+        )
+
+    assert result.iloc[0] == 3 + 30
+    assert result.iloc[1] == 1 + 10
 
 
 def test_calc_dataframe_expressions_empty_returns_assignable_series():
@@ -791,7 +856,6 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
             "Min": [" 5 "],
             "Max": [" 20 "],
             "Unit": ["Work items"],
-            "Description": ["Grid size desc"],
         },
         index=pd.Index(["7.1.0"], name="Metric_ID"),
     )
@@ -809,6 +873,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
             "data source": [
                 {"metric_table": {"id": 701, "title": "Wavefront Launch Stats"}}
             ],
+            "metrics_description": {"Grid Size": "Grid size desc"},
         }
     }
 
@@ -827,11 +892,12 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(info["name"]) == ["Grid Size"]
     assert list(info["table_name"]) == ["Wavefront"]
     assert list(info["sub_table_name"]) == ["Wavefront Launch Stats"]
+    assert list(info["description"]) == ["Grid size desc"]
     assert not bool(info["pct_of_peak"].iloc[0])
 
     exprs = expressions[workload_path]
     assert list(exprs.columns) == ["metric_id", "value_name", "value"]
-    # Metric/Unit/Description are non-expression columns, so only Avg/Min/Max
+    # Metric/Unit are non-expression columns, so only Avg/Min/Max
     # expand into expression rows, stripped and in dataframe-column order.
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]
@@ -854,9 +920,10 @@ def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 
-    pmc_df_per_workload = analyzer.calc_pmc_df_data()
+    pmc_df_per_workload, pass_tables_per_workload = analyzer.calc_pmc_df_data()
 
     assert pmc_df_per_workload[str(tmp_path)]["SQ_WAVES"].tolist() == [4]
+    assert list(pass_tables_per_workload[str(tmp_path)]) == ["pmc_perf_0"]
 
 
 def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
@@ -865,7 +932,7 @@ def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 
-    assert analyzer.calc_pmc_df_data() == {}
+    assert analyzer.calc_pmc_df_data() == ({}, {})
 
 
 def test_calc_metrics_data_exports_qualified_per_channel_names():
@@ -975,110 +1042,6 @@ def test_filter_dispatch_frame_bounds_kernel_ids_by_the_filtered_frame():
 
     with pytest.raises(SystemExit):
         filter_dispatch_frame(make_repeated_dispatch_frame(), None, [1], ["1"])
-
-
-# =============================================================================
-# Noise-clamp warning + summary tests
-# =============================================================================
-
-
-def test_calc_expressions_noise_clamp():
-    """Variance warnings fire only at workload level, summary once per workload.
-
-    - evaluate(emit_variance_warnings=True) emits the per-metric warning when
-      to_noise_clamp advances the global counter; the False kwarg stays silent.
-    - calc_expressions emits exactly one variance warning per workload
-      (kernel-level pass is silent) and calls print_noise_clamp_summary once.
-    """
-    workload_path = "/fake/workload"
-    noise_clamp_expression = (
-        "to_noise_clamp(to_min(raw_pmc_df['DIFF']), to_max(raw_pmc_df['REF']))"
-    )
-    # Two distinct kernels so groupby yields two kernel-level evaluate calls
-    # in addition to one workload-level call. Without the kwarg gate the
-    # unguarded code would emit three warnings; with the gate, exactly one.
-    pmc_df = pd.DataFrame({
-        "Kernel_Name": ["kernel_a", "kernel_b"],
-        "DIFF": [-100.0, -100.0],
-        "REF": [1000.0, 1000.0],
-    })
-    expression_template = pd.DataFrame({
-        "metric_id": ["1.1"],
-        "value_name": ["clamped"],
-        "value": [noise_clamp_expression],
-    })
-    sys_info_df = pd.DataFrame([{"placeholder": 1, "gpu_arch": "gfx942"}])
-
-    analyzer = db_analysis(MagicMock(), {})
-    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
-    analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
-    analyzer._metrics_info_data_per_workload = {}
-    analyzer._roofline_ceilings_per_workload = {workload_path: {}}
-    analyzer._runs = {workload_path: MagicMock(sys_info=sys_info_df)}
-    analyzer._arch_configs = MagicMock()
-
-    # Direct evaluate kwarg behavior.
-    clear_noise_clamp_warnings()
-    with patch(
-        "rocprof_compute_analyze.analysis_db.console_warning"
-    ) as console_warning_mock:
-        db_analysis.evaluate(
-            "direct_test",
-            noise_clamp_expression,
-            pmc_df,
-            {},
-            emit_variance_warnings=True,
-        )
-        variance_warning_calls = [
-            warning_call
-            for warning_call in console_warning_mock.call_args_list
-            if "Variance corrected for metric: direct_test" in warning_call.args[0]
-        ]
-        assert len(variance_warning_calls) == 1
-        assert get_noise_clamp_warnings()["count"] >= 1
-
-    clear_noise_clamp_warnings()
-    with patch(
-        "rocprof_compute_analyze.analysis_db.console_warning"
-    ) as console_warning_mock:
-        db_analysis.evaluate(
-            "direct_test_off",
-            noise_clamp_expression,
-            pmc_df,
-            {},
-            emit_variance_warnings=False,
-        )
-        assert get_noise_clamp_warnings()["count"] >= 1
-        variance_warning_calls = [
-            warning_call
-            for warning_call in console_warning_mock.call_args_list
-            if "Variance corrected for metric:" in warning_call.args[0]
-        ]
-        assert variance_warning_calls == []
-
-    # calc_expressions per-workload bracket.
-    clear_noise_clamp_warnings()
-    with patch(
-        "rocprof_compute_analyze.analysis_db.get_build_in_vars", return_value={}
-    ):
-        with patch(
-            "rocprof_compute_analyze.analysis_db.console_warning"
-        ) as console_warning_mock:
-            with patch(
-                "rocprof_compute_analyze.analysis_db.print_noise_clamp_summary"
-            ) as print_noise_clamp_summary_mock:
-                with patch.object(db_analysis, "validate_dual_issue_metrics"):
-                    analyzer.calc_expressions()
-
-    variance_warning_calls = [
-        warning_call
-        for warning_call in console_warning_mock.call_args_list
-        if "Variance corrected for metric:" in warning_call.args[0]
-    ]
-    assert len(variance_warning_calls) == 1
-    assert "1.1 - clamped" in variance_warning_calls[0].args[0]
-    print_noise_clamp_summary_mock.assert_called_once()
-    assert get_noise_clamp_warnings()["count"] >= 1
 
 
 # =============================================================================
@@ -1709,8 +1672,8 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
         )
         assert instruction_line.kernel_symbol.code_object_store.code_object_id == 5
 
-    sample_states = db_session.query(orm.PCSampleState).all()
-    stall_reasons = db_session.query(orm.PCSampleStallReason).all()
+    sample_states = query_instruction_sample_states(db_session).all()
+    stall_reasons = query_instruction_stall_reasons(db_session).all()
     instruction_samples = db_session.query(orm.InstructionSample).all()
     assert len(sample_states) == 2
     assert {state.total_count for state in sample_states} == {1, 2}
@@ -1742,12 +1705,15 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
                 ON kernel_symbol.code_object_uuid = code_object.code_object_uuid
             WHERE code_object.code_object_uuid IS NULL
         """,
-        "sample_state_to_instruction_line": """
+        "sample_state_to_instruction_or_source_line": """
             SELECT COUNT(*)
             FROM compute_pc_sample_state AS sample_state
             LEFT JOIN compute_instruction_line AS instruction_line
                 ON sample_state.instruction_uuid = instruction_line.instruction_uuid
+            LEFT JOIN compute_source_line AS source_line
+                ON sample_state.source_line_uuid = source_line.source_line_uuid
             WHERE instruction_line.instruction_uuid IS NULL
+                AND source_line.source_line_uuid IS NULL
         """,
         "stall_reason_to_state_and_lookup": """
             SELECT COUNT(*)
@@ -1784,26 +1750,17 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
         db_session
         .execute(
             text(
-                "SELECT pid, kernel_uuid, kernel_name, count "
-                "FROM compute_pc_sampling_summary_view ORDER BY pid"
+                "SELECT kernel_uuid, kernel_name, count "
+                "FROM compute_pc_sampling_summary_view"
             )
         )
         .mappings()
         .all()
     )
-    assert [row["kernel_name"] for row in pc_sampling_rows] == [
-        "vecCopy",
-        "vecCopy",
-    ]
-    # Both rows name the same kernel; pid is what keeps them apart.
-    assert len({row["kernel_uuid"] for row in pc_sampling_rows}) == 1
-    pc_sampling_mapping = {row["pid"]: row["count"] for row in pc_sampling_rows}
-    expected_pc_sampling_mapping = {
-        line.kernel_symbol.code_object_store.pid: line.pc_sample_state.total_count
-        for line in instruction_lines
-    }
-    assert pc_sampling_mapping == expected_pc_sampling_mapping
-    assert sum(pc_sampling_mapping.values()) == 3
+    # Both processes ran the same kernel, so the summary has one row that sums
+    # their samples.
+    assert [row["kernel_name"] for row in pc_sampling_rows] == ["vecCopy"]
+    assert [row["count"] for row in pc_sampling_rows] == [3]
 
     kernel_rows = (
         db_session
@@ -1826,10 +1783,10 @@ def test_run_analysis_materialized_views_keep_pc_sampling_origins(
     }
 
 
-def test_run_analysis_exports_process_scoped_pc_sampling_csv(
+def test_run_analysis_exports_per_kernel_pc_sampling_csv(
     tmp_path,
 ):
-    """Export one PC sampling CSV row per process, resolvable in kernel.csv."""
+    """Export one PC sampling CSV row per kernel, resolvable in kernel.csv."""
     try:
         orm.Database.init(":memory:")
         database_session = orm.Database.get_session()
@@ -1845,11 +1802,11 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
         run_analysis_with_materialized_views(analyzer)
 
         expected_pc_sampling_mapping = {
-            pid: count
-            for pid, count in database_session.execute(
+            kernel_uuid: count
+            for kernel_uuid, count in database_session.execute(
                 text(
-                    "SELECT pid, count "
-                    "FROM compute_pc_sampling_summary_view ORDER BY pid"
+                    "SELECT kernel_uuid, count "
+                    "FROM compute_pc_sampling_summary_view ORDER BY kernel_uuid"
                 )
             )
         }
@@ -1872,16 +1829,15 @@ def test_run_analysis_exports_process_scoped_pc_sampling_csv(
 
         pc_sampling_frame = pd.read_csv(csv_directory / "pc_sampling_summary.csv")
         kernel_frame = pd.read_csv(csv_directory / "kernel.csv")
-        assert "pid" in pc_sampling_frame.columns
-        assert "code_object_id" in pc_sampling_frame.columns
         assert "pid" not in kernel_frame.columns
-        assert list(pc_sampling_frame["kernel_name"]) == ["vecCopy", "vecCopy"]
+        assert list(pc_sampling_frame["kernel_name"]) == ["vecCopy"]
         assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
 
         pc_sampling_csv_mapping = {
-            row.pid: row.count for row in pc_sampling_frame.itertuples(index=False)
+            row.kernel_uuid: row.count
+            for row in pc_sampling_frame.itertuples(index=False)
         }
-        assert pc_sampling_csv_mapping == {42: 1, 99: 2}
+        assert list(pc_sampling_csv_mapping.values()) == [3]
         assert pc_sampling_csv_mapping == expected_pc_sampling_mapping
 
         kernel_csv_mapping = {
@@ -2037,13 +1993,13 @@ def test_run_analysis_keeps_mixed_counter_and_pc_sampling_ownership(
     assert aggregate_kernel.metric_values
     assert aggregate_kernel.roofline_data_points
 
-    sample_states = db_session.query(orm.PCSampleState).all()
+    sample_states = query_instruction_sample_states(db_session).all()
     assert len(sample_states) == 2
     assert all(
         state.instruction_line.kernel_symbol.kernel_uuid == aggregate_kernel.kernel_uuid
         for state in sample_states
     )
-    assert db_session.query(orm.PCSampleStallReason).count() == 2
+    assert query_instruction_stall_reasons(db_session).count() == 2
     assert db_session.query(orm.InstructionSample).count() == 2
     assert db_session.query(orm.InstructionLine).count() == 4
 
@@ -2077,8 +2033,8 @@ def test_run_analysis_does_not_register_filtered_pc_sampling_symbols(
     assert sampled_line.kernel_symbol.code_object_store.pid == 42
     assert sampled_line.kernel_symbol.kernel_uuid == dispatch.kernel_uuid
     assert sampled_line.pc_sample_state.total_count == 1
-    assert db_session.query(orm.PCSampleState).count() == 1
-    assert db_session.query(orm.PCSampleStallReason).count() == 1
+    assert query_instruction_sample_states(db_session).count() == 1
+    assert query_instruction_stall_reasons(db_session).count() == 1
     assert db_session.query(orm.InstructionSample).count() == 1
 
 
@@ -2216,6 +2172,10 @@ def read_exported_source_files(result_path):
         exported_path: contents
         for exported_path, contents in exported_files.items()
         if source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME in exported_path.parts
+        # The per-source-line files beside each copy have their own test.
+        and not exported_path.name.endswith(
+            per_source_line_export.SOURCE_LINE_FILE_SUFFIX
+        )
     }
 
 
@@ -2441,7 +2401,7 @@ def test_run_analysis_records_line_past_end_of_source_file(db_session, tmp_path)
 
 
 def test_run_analysis_links_frames_innermost_first(db_session, tmp_path):
-    """An inline stack is stored in order and rebuilt by the summary view."""
+    """An inline stack is stored in order and rebuilt by the ISA export."""
     workload_path = tmp_path / "workload"
     tool_data_records = make_source_workload_tool_data_records(
         workload_path,
@@ -2476,12 +2436,12 @@ def test_run_analysis_links_frames_innermost_first(db_session, tmp_path):
         (2, "/home/u/app/vcopy.cpp", 1),
     ]
 
+    workload = db_session.query(orm.Workload).one()
     rebuilt_sources = {
-        offset: source
-        for offset, source in db_session.execute(
-            text(
-                "SELECT offset, source FROM compute_pc_sampling_summary_view "
-                "ORDER BY offset"
+        row.offset: row.source
+        for row in db_session.execute(
+            orm.Database._per_kernel_isa_statement(
+                workload_id=workload.workload_id, stall_reasons=[]
             )
         )
     }
@@ -3025,10 +2985,10 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
     retained_line = lines[0]
     assert retained_line.kernel_symbol.kernel is kernel_objs["vecCopy"]
 
-    retained_sample_state = db_session.query(orm.PCSampleState).one()
+    retained_sample_state = query_instruction_sample_states(db_session).one()
     assert retained_line.pc_sample_state is retained_sample_state
 
-    stall_reason_count = db_session.query(orm.PCSampleStallReason).one()
+    stall_reason_count = query_instruction_stall_reasons(db_session).one()
     assert stall_reason_count.pc_sample_state is retained_sample_state
     assert retained_sample_state.stall_reasons == [stall_reason_count]
     assert stall_reason_count.stall_reason_lookup.text == "WAITCNT"
@@ -3059,16 +3019,58 @@ def test_run_analysis_keeps_sampled_row_without_a_comment(db_session, tmp_path):
     assert [
         source_file.file_path for source_file in db_session.query(orm.SourceFile)
     ] == ["/home/u/app/vcopy.cpp"]
+    workload = db_session.query(orm.Workload).one()
     rebuilt_sources = {
-        offset: source
-        for offset, source in db_session.execute(
-            text(
-                "SELECT offset, source FROM compute_pc_sampling_summary_view "
-                "ORDER BY offset"
+        row.offset: row.source
+        for row in db_session.execute(
+            orm.Database._per_kernel_isa_statement(
+                workload_id=workload.workload_id, stall_reasons=[]
             )
         )
     }
     assert rebuilt_sources == {0x10: "/home/u/app/vcopy.cpp:1", 0x20: None}
+
+
+def test_run_analysis_aggregates_each_source_line_over_all_processes(
+    db_session, tmp_path
+):
+    """Each source line aggregates the instructions of all processes.
+
+    An instruction counts once toward each distinct source line of its inline
+    stack, even if a one-line lambda puts a source line twice in that stack.
+    """
+    workload_path = tmp_path / "workload"
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/s/a.cpp": "int first;\nint second;\n"},
+        ["/s/a.cpp:1 -> /s/a.cpp:2", "/s/a.cpp:2 -> /s/a.cpp:2"],
+    )
+    second_process_tool_data = copy.deepcopy(tool_data_records[0])
+    second_process_tool_data["metadata"]["pid"] = 43
+    analyzer = make_pc_sampling_database_analyzer({
+        str(workload_path): [*tool_data_records, second_process_tool_data]
+    })
+
+    run_analysis_with_materialized_views(analyzer)
+
+    line_states = {
+        sample_state.source_line.line_number: (
+            sample_state.total_count,
+            sample_state.issue_count,
+            sample_state.stall_count,
+            {
+                stall_reason.stall_reason_lookup.text: stall_reason.count
+                for stall_reason in sample_state.stall_reasons
+            },
+        )
+        for sample_state in db_session.query(orm.PCSampleState).filter(
+            orm.PCSampleState.source_line_uuid.is_not(None)
+        )
+    }
+    assert line_states == {
+        1: (2, 0, 2, {"WAITCNT": 2}),
+        2: (4, 2, 2, {"WAITCNT": 2}),
+    }
 
 
 def make_csv_run_analyzer(tmp_path, tool_data_per_workload, **filters):
@@ -3177,7 +3179,7 @@ def test_run_analysis_isa_file_carries_the_kernels_sampled_lines(
         "Instruction line",
         "Instruction type",
         "Total count",
-        "Active count",
+        "Issue count",
         "Stall count",
         "Wave occupancy percent",
         "Active thread percent",
@@ -3299,6 +3301,81 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
     assert rows[0][4:7] == ["1", "", ""]
 
 
+def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
+    """The per-source-line file sits beside the source copy and has ISA references.
+
+    The instruction without a source line number goes to the unattributable
+    row, which comes first.
+    """
+    workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/s/a.cpp": "int first;\nint second;\nint third;\n"},
+        ["/s/a.cpp:1", "/s/a.cpp:?"],
+    )
+    # Both offsets belong to one kernel, so both ISA references point into the
+    # ISA file of that kernel.
+    tool_data = tool_data_records[0]
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
+    analyzer, result_path = make_csv_run_analyzer(
+        tmp_path, {str(workload_path): tool_data_records}
+    )
+    run_source_export_analysis(analyzer)
+
+    source_directory = (
+        result_path
+        / per_kernel_isa_export.PER_KERNEL_DIRECTORY_NAME
+        / ISA_WORKLOAD_NAME
+        / ISA_WORKLOAD_SUB_NAME
+        / source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME
+        / "s"
+    )
+    assert sorted(path.name for path in source_directory.iterdir()) == [
+        "a.cpp",
+        "a.cpp_pc_sampling.csv",
+    ]
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    isa_file = (
+        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        "/isa_code_object_id_5_pid_42.csv"
+    )
+    with (source_directory / "a.cpp_pc_sampling.csv").open(
+        newline="", encoding="utf-8"
+    ) as source_line_file:
+        header, *rows = list(csv.reader(source_line_file))
+
+    assert header == [
+        "Source line number",
+        "Source line",
+        "Total count",
+        "Issue count",
+        "Stall count",
+        "Wave occupancy percent",
+        "Active thread percent",
+        "Stall WAITCNT",
+        "ISA references",
+    ]
+    assert rows == [
+        ["", "Unattributable instructions", "1", "", "", "", "", "", f"{isa_file}:2"],
+        [
+            "1",
+            "int first;",
+            "1",
+            "0",
+            "1",
+            "",
+            "",
+            "1",
+            f"{isa_file}:1",
+        ],
+        ["2", "int second;", "", "", "", "", "", "", ""],
+        ["3", "int third;", "", "", "", "", "", "", ""],
+    ]
+
+
 def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     """-k keeps one kernel's rows, and no code object left with nothing in it."""
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
@@ -3330,9 +3407,8 @@ def test_run_analysis_kernel_filter_reaches_a_sampling_only_workload(tmp_path):
     kernel_frame = pd.read_csv(result_path / "kernel.csv")
     assert list(kernel_frame["kernel_name"]) == ["vecCopy"]
     summary_frame = pd.read_csv(result_path / "pc_sampling_summary.csv")
-    assert list(summary_frame["offset"]) == [0x10]
+    assert list(summary_frame["kernel_name"]) == ["vecCopy"]
     # The second code object held only the kernel the filter dropped.
-    assert set(summary_frame["code_object_id"]) == {5}
     assert per_kernel_isa_paths(result_path) == [
         f"vector_copy/run/{kernel_frame['short_name'].iloc[0]}"
         f"_uuid_{kernel_frame['kernel_uuid'].iloc[0]}"
@@ -3528,7 +3604,7 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
     evaluated_row_counts = []
 
-    def evaluate_roofline_metric(name, value, kernel_pmc_df, sys_info):
+    def evaluate_roofline_metric(name, value, kernel_pmc_df, sys_info, **_options):
         evaluated_row_counts.append(len(kernel_pmc_df))
         return 42.0
 
@@ -3567,19 +3643,53 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
     assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
 
 
+@pytest.mark.parametrize(
+    "device_memory_metric", ["AI HBM", "AI VRAM"], ids=["hbm", "vram"]
+)
+def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
+    monkeypatch, device_memory_metric
+):
+    """The column keeps its hbm_cache_data name. MI architectures fill it from
+    AI HBM, and gfx1201, which has no HBM, fills it from AI VRAM."""
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel"],
+        "Start_Timestamp": [0],
+        "End_Timestamp": [10],
+    })
+    roofline_df = pd.DataFrame({
+        "Metric": ["Performance (GFLOPs)", device_memory_metric],
+        "Value": ["expr_performance", "expr_device_memory"],
+    })
+    workload_path = "/mock/workload/path"
+    analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
+    values = {"expr_performance": 5.0, "expr_device_memory": 7.0}
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
+        lambda name, value, kernel_pmc_df, sys_info: values[value],
+    )
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_db.console_debug", lambda msg: None
+    )
+
+    df = db_analysis.calc_roofline_data(analyzer)[workload_path]
+
+    assert df["hbm_cache_data"].iloc[0] == 7.0
+    assert df["total_flops"].iloc[0] == 5.0
+
+
 # =============================================================================
 # Memory chart layout (Workload.memory_chart_layout_extdata)
 # =============================================================================
 
 
-def test_run_analysis_stores_the_memory_chart_layout_file_unchanged(
+def test_run_analysis_stores_the_memory_chart_layout_file_with_its_version(
     db_session, tmp_path
 ):
     workload = run_memory_chart_workload(tmp_path, "gfx942")
     layout_file = Layouts.for_arch("gfx942").path
-    assert workload.memory_chart_layout_extdata == json.loads(
-        layout_file.read_text(encoding="utf-8")
-    )
+    expected = json.loads(layout_file.read_text(encoding="utf-8"))
+    expected["version"] = LAYOUT_VERSION
+    assert workload.memory_chart_layout_extdata == expected
 
 
 def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_path):

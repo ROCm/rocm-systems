@@ -5,8 +5,8 @@
 // flags and dispatches decoded operands to scalar or SIMD accumulation,
 // preserving the instruction's stage-by-stage saturation or wraparound.
 
-#include "common/internal.h"
-#include "rj_arith/rj_arith.h"
+#include "common/validation.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/swmmac_integer_impl.h"
 
 #include <stdint.h>

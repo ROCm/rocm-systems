@@ -5,10 +5,28 @@
 ### Added
 
 * Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory.
+* MD and LVM software RAID arrays running pass-through personalities whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
+* Added the `HIPFILE_DEVICE_STREAM_POOL_SIZE` environment variable, which sets the number of streams in the per-GPU pool that fallback I/O uses for its device copies. The default is 4; setting it to 0 selects the default.
 
 ### Changed
 
+* Fallback I/O operations now perform their device copies on a pool of per-GPU non-blocking streams instead of the default stream, so they no longer serialize against other work on the GPU's default (null) stream.
+* hipFile now requires CMake 3.25.2 or later, instead of 3.21, to build hipFile, its Python bindings, and the installed examples. Earlier versions couldn't fetch GoogleTest or rocm-cmake, and before 3.22.1, `find_library()` couldn't find system libraries when building with amdclang. Some distributions ship an older CMake, such as Ubuntu 22.04 (3.22.1) and Debian 12 (3.25.1); install a newer one there, for example with `pip install cmake` or from Kitware's APT repository.
+* When a failed fastpath I/O is completed by the compatibility path, `hipFileRead()` and `hipFileWrite()` now clear the HIP Runtime's last error.
+* The CMake cache variable that selects the include-what-you-use executable when building with `HIPFILE_USE_IWYU` is now `HIPFILE_IWYU_EXE` instead of `IWYU_EXE`. If you set `IWYU_EXE`, set `HIPFILE_IWYU_EXE` instead.
+* Building with `HIPFILE_USE_IWYU` no longer runs include-what-you-use on a GoogleTest that the build downloads, so its suggestions now cover only hipFile's own code. Neither include-what-you-use nor clang-tidy runs on a downloaded GoogleTest when set directly through the `CMAKE_C_INCLUDE_WHAT_YOU_USE`, `CMAKE_CXX_INCLUDE_WHAT_YOU_USE`, or `CMAKE_CXX_CLANG_TIDY` cache variables, either.
+* After a fastpath I/O fails with `ENOTTY` because the amdgpu kernel driver doesn't support AIS, hipFile now disables the fastpath for the rest of the process, and later I/O goes straight to the fallback path. Previously, every I/O tried the fastpath first, failed with `ENOTTY`, and was then retried on the fallback path. `ais-stats` now counts I/O submitted after the fastpath is disabled under "Fastpath Rejections". If the fallback path is disabled with `HIPFILE_ALLOW_COMPAT_MODE=false`, later `hipFileRead()` and `hipFileWrite()` calls will return `-hipFileInternalError` instead of `-1` with `errno` set to `ENOTTY`.
+
 ### Fixed
+
+* `hipFileRead()`, `hipFileWrite()`, and the asynchronous and batch I/O APIs now fall back to the compatibility path when the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). Previously, they failed with `ENOTTY` ("Inappropriate ioctl for device") or an unrelated error code.
+* `hipFileRead()` and `hipFileWrite()` now return `-hipFileHipDriverError` when a HIP Runtime call fails. Use `hipGetLastError()` or `hipPeekAtLastError()` to retrieve the `hipError_t`. Previously, they returned the negated `hipError_t` (for example, `-999` for `hipErrorUnknown`), which isn't a documented return value.
+* `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
+* Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
+* `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.
+* Configuring hipFile with `HIPFILE_CXX_STANDARD=26` and a CMake older than 3.30, which C++26 requires, now fails with an error that names `HIPFILE_CXX_STANDARD` and the CMake version needed. Previously, the error only said that CMake didn't know the `cxx_std_26` compiler feature.
+* Building hipFile with GCC 15 or later no longer warns about every line indented with spaces. The build now uses `-Wleading-whitespace=spaces`, which warns about tabs in indentation, instead of `-Wleading-whitespace=tabs`.
+* Optimized builds now correctly enable `_FORTIFY_SOURCE=3` for hipFile when compiling with `-O2`, `-O3`, or `-Os` (i.e., the `Release`, `RelWithDebInfo`, and `MinSizeRel` build types). This applies when using Clang, or GCC 12 or later. Previously, the build checked the wrong CMake variable to detect the build type's optimization level, so `_FORTIFY_SOURCE` only activated when `-O2`, `-O3`, or `-Os` appeared directly in `CMAKE_CXX_FLAGS`.  This also meant multi-config generators (e.g., Ninja Multi-Config) were never handled. The check now runs per-configuration, covering all standard optimized build types and multi-config generators. With Clang and glibc 2.40 or later, fortified builds turn off `-Wused-but-marked-unused`, which glibc's fortified `printf`-family functions trigger.
 
 ### Removed
 
@@ -21,7 +39,6 @@
 
 ### Added
 
-* MD and LVM software RAID arrays running pass-through personalities whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
 * `hipFileGetStatsL3()` now populates the `uuid` field of each `hipFilePerGpuStats` entry with the raw 16-byte GPU UUID, zero-filled when the device cannot report one.
 * Added a batch API example, `batch-roundtrip`.
 * Added reference documentation for the Stats API.
@@ -35,12 +52,10 @@
 
 ### Fixed
 
+* On Windows Subsystem for Linux (WSL2), hipFile now sends all I/O to the fallback backend, since the fastpath is not yet implemented on WSL.
 * Asynchronous fastpath operations now fail over to the fallback backend on `ENODEV` or `EREMOTEIO`, matching the synchronous and batch paths.
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
-* `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.
-* Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
-* `hipfile.h` now includes `<time.h>`, which declares the `struct timespec` used by `hipFileBatchIOGetStatus()`. Previously, C code that included `<time.h>` after `hipfile.h` got an incompatible pointer type error or warning when passing a `struct timespec *` to `hipFileBatchIOGetStatus()`.
 
 ### Removed
 

@@ -9,9 +9,9 @@ zero-valued GWS INIT, so arbitrary streams begin from defined GWS state.
 An input has three parts:
 
 - Byte zero selects `gfx908`, `gfx90a`, `gfx942`, `gfx950`, `gfx1010`,
-  `gfx1030`, `gfx1100`, `gfx1151`, `gfx1200`, `gfx1201`, `gfx1250`, or
-  `gfx1251`. Their stable selector values are 0 through 11. Other values do no
-  work.
+  `gfx1030`, `gfx1100`, `gfx1150`, `gfx1200`, `gfx1201`, `gfx1250`, or
+  `gfx1251`. Their selector values are 0 through 11. Each selects a concrete
+  registry binding. Other values do no work.
 - Byte one selects asynchronous execution, concurrent issuers, and full EXEC.
   Bit `0x10` enables runtime memory-wait diagnostics, including XCNT on CDNA5.
   Bit `0x20` selects the cache-backed memory path for the same bounded mapping.
@@ -117,22 +117,26 @@ targets in parallel.
 ## ThreadSanitizer concurrency campaign
 
 `--threads N` executes independent wavefront/CU inputs concurrently inside one
-process. All harness threads share the asynchronous matrix helper pool, so a
-TSan build observes both concurrent simulator construction/execution and CDNA5
-WMMA publication, helper execution, completion, and teardown. A successful run
-reports a nonzero `async_executed` count. If the process terminates early, each
-`thread-N` output directory retains its current input and numeric seed.
+process. The current matrix handlers execute on issuers, so this campaign covers
+concurrent simulator construction, issuer execution, and teardown. Successful runs
+have no TSan reports and zero async-capable, async-enabled, and offloaded inputs.
+The threaded test below checks that issuer-only policy.
+
+Helper publication and completion are not covered while no handler is eligible.
+If an eligible handler is reintroduced, enable helpers and require nonzero
+`async_executed` before claiming helper-path coverage. After an early termination,
+each `thread-N` directory retains its current input and numeric seed.
 
 ```sh
 cmake -S . -B build-execution-tsan -GNinja -DRJ_ENABLE_TSAN=ON
 ninja -C build-execution-tsan rj_execution_fuzz rj_execution_fuzz_test
 ctest --test-dir build-execution-tsan -j4 \
-  -R '^ExecutionFuzzInputTest.ThreadedInputsShareAsyncWmmaHelpers$' --output-on-failure
+  -R '^ExecutionFuzzInputTest.ThreadedInputsKeepMigratedWmmaOnIssuers$' --output-on-failure
 
 TSAN_OPTIONS=halt_on_error=1 python3 fuzz/execution/run_campaign.py \
   --binary build-execution-tsan/fuzz/execution/rj_execution_fuzz \
   --output execution-tsan --duration 3600 --workers 8 \
-  --threads-per-worker 8 --async-helpers 4 --target gfx1250
+  --threads-per-worker 8 --async off --async-helpers 0 --target gfx1250
 ```
 
 ## AFL++

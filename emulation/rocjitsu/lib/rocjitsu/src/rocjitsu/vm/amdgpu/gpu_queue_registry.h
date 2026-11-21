@@ -23,7 +23,6 @@
 namespace rocjitsu::amdgpu {
 
 class GpuVm;
-class GpuQueueRegistryTestAccess;
 
 enum class QueueType : uint8_t { Compute, Sdma };
 
@@ -53,6 +52,8 @@ enum class QueueReconfigureStatus : uint8_t {
 enum class QueueCloseMode : uint8_t {
   /// Preserve committed state that still needs externally visible publication.
   Graceful,
+  /// Stop unfinished execution after committed publication state is clear.
+  Preempt,
   /// Cancel all retained execution state during reset or frontend teardown.
   ForceCancel,
 };
@@ -111,6 +112,7 @@ struct QueueIdentity {
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink{};
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
   uint32_t queue_id = 0;
 };
 
@@ -163,6 +165,12 @@ public:
     return QueuePrepareCloseStatus::Ready;
   }
 
+  /// @brief Prepare explicit queue preemption without losing committed publication.
+  /// @details Bindings without preemption support retain graceful close behavior.
+  [[nodiscard]] virtual QueuePrepareCloseStatus prepare_preempt_close() noexcept {
+    return prepare_close();
+  }
+
   /// @brief Apply a queue configuration update and report its status.
   [[nodiscard]] virtual QueueReconfigureStatus
   reconfigure(const QueueReconfigureRequest &request) = 0;
@@ -188,7 +196,8 @@ class QueueBindingFactory {
 public:
   virtual ~QueueBindingFactory() = default;
 
-  /// @brief Create a fully attached binding or leave no processor state behind.
+  /// @brief Create a fully attached binding or reject without leaving processor state.
+  /// @details Factories must not throw and must undo partial attachment on rejection.
   [[nodiscard]] virtual QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) = 0;
 };
@@ -206,8 +215,12 @@ struct QueueRegistrationRequest {
   std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
   QueueAbi abi = QueueAbi::Generic;
   uint64_t queue_descriptor_address = 0;
+  /// GPU virtual address of the runtime queue exception status word.
   uint64_t exception_status_address = 0;
+  /// Runtime event ID for software queue exceptions.
   uint32_t exception_event_id = 0;
+  /// Software exception route, independent of packet mailbox interrupts.
+  InterruptSink exception_event_sink{};
   uint32_t engine_id = 0;
   bool xcd_fanout = false;
   QueueType type = QueueType::Compute;
@@ -221,6 +234,9 @@ public:
   explicit GpuQueueRegistry(GpuVm &gpu_vm) : gpu_vm_(gpu_vm) {}
   ~GpuQueueRegistry();
 
+  /// @brief Register a queue or return an empty handle on rejection.
+  /// @details If admission closes after a factory returns a bound queue, destroy
+  /// that binding before releasing its VM retention so cleanup can access the VM.
   [[nodiscard]] QueueHandle register_queue(const QueueRegistrationRequest &request);
   [[nodiscard]] QueueReconfigureResult reconfigure_queue(QueueHandle handle,
                                                          QueueReconfigureRequest request);
@@ -239,8 +255,6 @@ public:
   [[nodiscard]] bool accepting_registrations_for_test() const;
 
 private:
-  friend class GpuQueueRegistryTestAccess;
-
   enum class QueueState : uint8_t { Open, Closing, Dead };
 
   class QueueRecord {
@@ -338,7 +352,6 @@ private:
   uint32_t active_closes_ = 0;
   bool admission_open_ = true;
   bool close_all_in_progress_ = false;
-  bool fail_next_registry_allocation_ = false;
 };
 
 } // namespace rocjitsu::amdgpu

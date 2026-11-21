@@ -8,6 +8,7 @@
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -50,14 +51,14 @@ inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 6;
 /// @details Excludes the CDNA special-register tail, then clamps to
 /// REGISTER_SET_ALLOCATABLE_SGPRS. Zero when the allocation is no larger than
 /// the tail.
-[[nodiscard]] uint32_t ordinary_sgpr_bound(rj_code_arch_t arch, uint32_t kernel_sgpr_count);
+[[nodiscard]] uint32_t ordinary_sgpr_bound(rocjitsu::IsaFamily arch, uint32_t kernel_sgpr_count);
 
 /// @brief Wavefront size (32 or 64) the launch hardware interprets for @p desc.
 ///
 /// @details CDNA is Wave64; gfx1250 is Wave32-only; RDNA opts into Wave32 via the
 /// descriptor's ENABLE_WAVEFRONT_SIZE32 (a clear bit means Wave64). Shared by DBT
 /// resource accounting and DBI descriptor decoding.
-[[nodiscard]] uint8_t kernel_wavefront_size(rj_code_arch_t arch,
+[[nodiscard]] uint8_t kernel_wavefront_size(rocjitsu::IsaFamily arch,
                                             const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief AMDHSA descriptor encoding granule for GRANULATED_WORKITEM_VGPR_COUNT.
@@ -66,33 +67,34 @@ inline constexpr uint32_t kCdnaSpecialSgprTailReserve = 6;
 /// (granulated + 1) * granule), not the physical VGPR allocation block. CDNA1 uses
 /// 4, other CDNA 8, gfx1250 16, and RDNA is wave-size dependent: 8 for Wave32, 4
 /// for Wave64. Shared by DBT resource accounting and DBI descriptor decoding.
-[[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rj_code_arch_t arch,
+[[nodiscard]] uint32_t descriptor_vgpr_granularity_for_wavefront(rocjitsu::IsaFamily arch,
                                                                  uint32_t wavefront_size);
 
 /// @brief Decode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
 [[nodiscard]] uint32_t
-kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
+kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily arch,
                                   const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief Encode COMPUTE_PGM_RSRC2.USER_SGPR_COUNT using the layout for @p arch.
-void set_kernel_descriptor_user_sgpr_count(rj_code_arch_t arch,
+void set_kernel_descriptor_user_sgpr_count(rocjitsu::IsaFamily arch,
                                            rocjitsu::amdhsa::kernel_descriptor_t &desc,
                                            uint32_t user_sgpr_count);
 
-/// @brief USER_SGPR_COUNT plus the dense system SGPRs the hardware initializes
-///        immediately after the user block: enabled workgroup IDs, then
-///        WORKGROUP_INFO. A disabled field consumes no SGPR.
+/// @brief USER_SGPR_COUNT plus the enabled system SGPRs in launch order.
+///        RDNA4/CDNA5 supply workgroup IDs in TTMPs, placing WORKGROUP_INFO
+///        directly after the user block. On other targets WORKGROUP_INFO
+///        follows the enabled workgroup-ID SGPRs. The private-segment wave
+///        offset is last on targets that append it.
 ///
 /// @details One past the last SGPR the launch ABI writes, so DBT uses it as the
 /// range to repair when it inserts a kernarg pointer into the user block, and
 /// DBI as a floor below which it must not place framework storage.
 ///
-/// @warning ENABLE_PRIVATE_SEGMENT is deliberately absent. On CDNA3/CDNA4 it
-/// initializes architected FLAT_SCRATCH rather than appending an ordinary system
-/// SGPR. That is not established for the older targets this is reachable from,
-/// so on CDNA1/CDNA2 the result may understate the block by two.
+/// ENABLE_PRIVATE_SEGMENT appends one wave-offset SGPR on absolute
+/// flat-scratch targets (CDNA1/CDNA2 and RDNA1/RDNA2). Architected-flat-scratch
+/// targets initialize FLAT_SCRATCH without appending an ordinary SGPR.
 [[nodiscard]] uint32_t
-kernel_descriptor_initial_sgpr_count(rj_code_arch_t arch,
+kernel_descriptor_initial_sgpr_count(rocjitsu::IsaFamily arch,
                                      const rocjitsu::amdhsa::kernel_descriptor_t &desc);
 
 /// @brief Does @p desc request a kernarg segment pointer in its user SGPRs?

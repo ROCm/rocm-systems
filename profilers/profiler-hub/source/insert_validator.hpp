@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "profiler-hub/writer_types.hpp"
+#include "profiler-hub/cpp/writer_types.hpp"
 
 #include "entity_registry.hpp"
 

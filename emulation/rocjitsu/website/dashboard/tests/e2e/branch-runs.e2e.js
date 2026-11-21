@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectRunPicker, unavailableAttempt } from './helpers/runPicker.js';
 import { setFixtureConfigurations } from '../fixtures/configurationScope.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 import { benchmarkData } from '../fixtures/publishedData.js';
@@ -26,16 +27,16 @@ test('published branch search and PR filters preserve exact selection through em
     await expect(branchButton(page, '01')).toBeVisible();
   }
   await branchButton(page, '01').press('Enter');
-  await expect(page.getByTestId('candidate-selected-identity')).toContainText('fictional-branch-01');
-  await expect(page.getByTestId('branch-reference-reason')).toContainText('Exact develop base');
-  await expect(page.getByTestId('reference-selected-identity')).toContainText('fictional-develop-20');
+  await expectRunPicker(page, 'candidate', 'fictional-branch-01');
+  await expect(page.getByTestId('branch-reference-reason')).toHaveCount(0);
+  await expectRunPicker(page, 'reference', 'fictional-develop-20');
   await search.fill('no-such-published-branch');
   await expect(list).toContainText('No matching branches');
   const hint = await list.getByText('Try another branch, PR or SHA.').boundingBox();
   const reset = await list.getByRole('button', { name: 'Clear filters' }).boundingBox();
   expect(reset.y).toBeGreaterThanOrEqual(hint.y + hint.height);
   expect(Math.abs(reset.x - hint.x)).toBeLessThan(1);
-  await expect(page.getByTestId('candidate-selected-identity')).toContainText('fictional-branch-01');
+  await expectRunPicker(page, 'candidate', 'fictional-branch-01');
   await list.getByRole('button', { name: 'Clear filters' }).click();
   await page.getByRole('combobox', { name: 'Pull request', exact: true }).click();
   await page.getByRole('option', { name: 'With PR', exact: true }).click();
@@ -51,8 +52,8 @@ test('published branch search and PR filters preserve exact selection through em
 test('branch matrix, diagnostics, manual reference and full comparison share one exact pair and scope', async ({ page }) => {
   await openDashboard(page, '/?view=branch&targets=&suites=&modes=');
   await branchButton(page, '02').click();
-  await expect(page.getByTestId('branch-reference-reason')).toContainText('Latest develop execution completed before this candidate');
-  await expect(page.getByTestId('reference-selected-identity')).toContainText('fictional-develop-21');
+  await expect(page.getByTestId('branch-reference-reason')).toHaveCount(0);
+  await expectRunPicker(page, 'reference', 'fictional-develop-21');
   const missing = page.getByTestId('branch-config-gfx1250-default');
   await expect(missing).toHaveAttribute('data-comparison-state', 'unavailable');
   await missing.press('Enter');
@@ -72,7 +73,7 @@ test('branch matrix, diagnostics, manual reference and full comparison share one
   await expect(page.getByTestId('branch-exclusions')).toContainText('Not in this catalog');
   expect(new URL(page.url()).searchParams.get('manual')).toBe('1');
   await page.getByRole('button', { name: 'Restore automatic base' }).click();
-  await expect(page.getByTestId('reference-selected-identity')).toContainText('fictional-develop-20');
+  await expectRunPicker(page, 'reference', 'fictional-develop-20');
   await page.getByTestId('branch-config-gfx950-default').click();
   await expect(page.getByTestId('branch-selected-configuration')).toHaveText('gfx950default');
   await results(page).getByRole('combobox', { name: 'Suites', exact: true }).click();
@@ -88,9 +89,9 @@ test('branch matrix, diagnostics, manual reference and full comparison share one
   await expect(results(page)).toContainText('No benchmarks in the selected suites or search');
   await page.getByRole('searchbox', { name: 'Search benchmarks' }).fill('');
   await page.getByRole('button', { name: 'Open full comparison ↗' }).click();
-  await expect(page.getByRole('tab', { name: 'Run Comparison' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-branch-01');
-  await expect(page.getByTestId('baseline-run-selected-identity')).toContainText('fictional-develop-20');
+  await expect(page.getByRole('tab', { name: 'Run comparison' })).toHaveAttribute('aria-selected', 'true');
+  await expectRunPicker(page, 'candidate-run', 'fictional-branch-01');
+  await expectRunPicker(page, 'baseline-run', 'fictional-develop-20');
   const params = new URL(page.url()).searchParams;
   expect(params.getAll('compareTargets')).toEqual(['gfx950']);
   expect(params.getAll('compareModes')).toEqual(['default']);
@@ -102,11 +103,11 @@ test('branch matrix, diagnostics, manual reference and full comparison share one
   await expect(page.getByTestId('metadata-row-auxiliary.sdk').getByRole('cell').nth(0)).toHaveText('test-b');
   await expect(page.getByTestId('metadata-row-auxiliary.sdk').getByRole('cell').nth(1)).toHaveText('test-branch');
   await page.goBack();
-  await expect(page.getByRole('tab', { name: 'Branch Runs' })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByTestId('candidate-selected-identity')).toContainText('fictional-branch-01');
+  await expect(page.getByRole('tab', { name: 'Branch runs' })).toHaveAttribute('aria-selected', 'true');
+  await expectRunPicker(page, 'candidate', 'fictional-branch-01');
   await expect(page.getByTestId('branch-config-gfx950-default')).toHaveAttribute('aria-pressed', 'true');
   await page.goForward();
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-branch-01');
+  await expectRunPicker(page, 'candidate-run', 'fictional-branch-01');
 });
 
 test('branch layout stays within the document at normal 1280px and CSS zoom 2 at 1440px (not native browser zoom)', async ({ page }) => {
@@ -126,16 +127,16 @@ test('branch layout stays within the document at normal 1280px and CSS zoom 2 at
 
 test('missing published identities stay inspectable instead of being replaced by defaults', async ({ page }) => {
   await openDashboard(page, '/?view=branch&branch=fictional/optimization-01&run=fictional-branch-01&reference=fictional-missing&manual=1&target=gfx950&mode=default&detail=1');
-  await expect(page.getByTestId('reference-selected-identity')).toContainText('fictional-missing');
+  await expectRunPicker(page, 'reference', unavailableAttempt('fictional-missing'));
   await expect(page.getByTestId('branch-reference-reason')).toContainText('Saved reference attempt is unavailable');
   await expect(page.getByTestId('branch-open-comparison')).toBeDisabled();
   await page.reload();
-  await expect(page.getByTestId('reference-selected-identity')).toContainText('fictional-missing');
+  await expectRunPicker(page, 'reference', unavailableAttempt('fictional-missing'));
   expect(new URL(page.url()).searchParams.get('reference')).toBe('fictional-missing');
   await page.goto('/?view=compare&compareCandidate=fictional-branch-01&compareBaseline=fictional-missing');
   await expect(page.getByText(/Selected baseline is unavailable · fictional-missing/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Swap', exact: true })).toBeDisabled();
-  await expect(page.getByTestId('candidate-run-selected-identity')).toContainText('fictional-branch-01');
+  await expectRunPicker(page, 'candidate-run', 'fictional-branch-01');
 });
 
 function otherTargetPublication(onlyOther = false) {
@@ -152,7 +153,7 @@ function otherTargetPublication(onlyOther = false) {
 test('entering Branch Runs exposes all published architectures and third-target clicks round-trip through history', async ({ page }) => {
   await installPublication(page, { publication: otherTargetPublication() });
   await openDashboard(page);
-  await page.getByRole('tab', { name: 'Branch Runs', exact: true }).click();
+  await page.getByRole('tab', { name: 'Branch runs', exact: true }).click();
   for (const target of ['gfx1201', 'gfx1250', 'gfx950']) for (const mode of ['single', 'default']) {
     await expect(page.getByTestId(`branch-config-${target}-${mode}`)).toBeVisible();
   }
