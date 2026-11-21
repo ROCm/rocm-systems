@@ -59,6 +59,12 @@ public:
     void  deallocate(void* ptr);
     bool  is_device_pointer(const void* ptr) const;
 
+    /// Signal slots are carved from shared host pages and recycled; the pages stay
+    /// mapped until the pool is destroyed. Unmapping flushes the TLB on every XCC,
+    /// which can hang the GPU while thread trace is active.
+    amd_signal_t* allocate_signal();
+    void          deallocate_signal(amd_signal_t* signal);
+
     uint32_t gpu_id() const;
     uint32_t gfx_target_version() const;
     uint32_t cwsr_size() const;
