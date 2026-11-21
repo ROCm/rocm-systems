@@ -861,11 +861,17 @@ class SetValueCommands:
             self.helpers.check_required_groups()
             self.group_check_printed = True
 
+        # Retain PTL failures across recursive GPU calls, not across commands.
+        if not multiple_devices:
+            self._ptl_exit_code = 0
+
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(
             args, self.logger, self.set_gpu
         )
         if handled_multiple_gpus:
+            if self._ptl_exit_code:
+                sys.exit(self._ptl_exit_code)
             return  # This function is recursive
 
         args.gpu = device_handle
@@ -1518,6 +1524,9 @@ class SetValueCommands:
                     )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
+                    self._ptl_exit_code = self._ptl_exit_code or abs(e.get_error_code()) or 1
+                    if not multiple_devices:
+                        sys.exit(self._ptl_exit_code)
                     return
                 self.logger.store_output(args.gpu, "ptlstatus", result)
                 self.logger.print_output()
