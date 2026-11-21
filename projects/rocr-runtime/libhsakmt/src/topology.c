@@ -1222,7 +1222,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 		else if (strcmp(prop_name, "max_slots_scratch_cu") == 0)
 			props->MaxSlotsScratchCU = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "fw_version") == 0)
-			props->uCodeEngineVersions.uCodeCompute = (uint32_t)prop_val & 0xfff;
+			props->uCodeEngineVersions.uCodeCompute = (uint32_t)prop_val & 0xffff;
 		else if (strcmp(prop_name, "vendor_id") == 0)
 			props->VendorId = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "device_id") == 0)

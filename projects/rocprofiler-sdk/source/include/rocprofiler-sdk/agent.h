@@ -29,20 +29,34 @@
 
 #include <stdint.h>
 
-// Historical layout of rocprofiler_agent_v0_t::fw_version. hsakmt no longer
-// publishes this type; the agent field stays so existing offsets and readers
-// of uCode/Major/Minor/Stepping do not move.
+// rocprofiler_agent_v0_t::fw_version keeps the historical HSA_ENGINE_ID layout.
+// A hsakmt that defines HSAKMT_HAS_SPLIT_GFXIP no longer publishes that type,
+// so define it here. An older installed hsakmt still publishes it and has no
+// HSA_GFXIP_VERSION, so define that instead.
+#if defined(HSAKMT_HAS_SPLIT_GFXIP)
 typedef union
 {
     HSAuint32 Value;
     struct
     {
         unsigned int uCode    : 10;  // ucode packet processor version
-        unsigned int Major    :  6;  // GFXIP Major engine version
-        unsigned int Minor    :  8;  // GFXIP Minor engine version
-        unsigned int Stepping :  8;  // GFXIP Stepping info
+        unsigned int Major    : 6;   // GFXIP Major engine version
+        unsigned int Minor    : 8;   // GFXIP Minor engine version
+        unsigned int Stepping : 8;   // GFXIP Stepping info
     } ui32;
 } HSA_ENGINE_ID;
+#else
+typedef union
+{
+    HSAuint32 Value;
+    struct
+    {
+        unsigned int Major    : 8;  // GFXIP Major engine version
+        unsigned int Minor    : 8;  // GFXIP Minor engine version
+        unsigned int Stepping : 8;  // GFXIP Stepping info
+    } ui32;
+} HSA_GFXIP_VERSION;
+#endif
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -199,8 +213,8 @@ typedef struct rocprofiler_agent_v0_t
                                          ///< boost capabilities
     HSA_ENGINE_VERSION sdma_fw_version;  ///< GPU only. SDMA and compute microcode
     HSA_ENGINE_ID      fw_version;       ///< GPU only. Legacy 10-bit compute microcode
-    HSA_CAPABILITY     capability;        ///< GPU only
-    uint32_t           cu_per_engine;     ///< computed
+    HSA_CAPABILITY     capability;       ///< GPU only
+    uint32_t           cu_per_engine;    ///< computed
     uint32_t           max_waves_per_cu;  ///< computed
     uint32_t           family_id;         ///< Family code
     uint32_t workgroup_max_size;  ///< GPU only. Maximum total number of work-items in a work-group.

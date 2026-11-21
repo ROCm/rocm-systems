@@ -173,14 +173,21 @@ typedef union
     }ui32;
 } HSA_GFXIP_VERSION;
 
+// Set when this header stores GFXIP in HSA_GFXIP_VERSION and the compute
+// microcode in HSA_ENGINE_VERSION.uCodeCompute. Released headers that still
+// pack both into HSA_ENGINE_ID do not define it.
+#define HSAKMT_HAS_SPLIT_GFXIP 1
+
 typedef union
 {
     HSAuint32 Value;
     struct
     {
         unsigned int uCodeSDMA: 10; // ucode version SDMA engine
-        unsigned int uCodeCompute : 12; // ucode version Compute engine
-        unsigned int Reserved : 10; // Reserved, must be 0
+        // KFD stores mec_fw_version in a uint16_t. gfx9 uses bit 15
+        // (for example 459 + 32768 and 0x817a), so 12 bits is not enough.
+        unsigned int uCodeCompute : 16; // ucode version Compute engine
+        unsigned int Reserved : 6; // Reserved, must be 0
     };
 } HSA_ENGINE_VERSION;
 
