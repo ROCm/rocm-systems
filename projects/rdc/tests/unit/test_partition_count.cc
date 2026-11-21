@@ -153,7 +153,7 @@ TEST_F(PartitionCountTest, SpxGpuHasOnePartition) {
 
   rdc_field_value value;
   EXPECT_EQ(fetch(0, &value), RDC_ST_OK);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(value.status, RDC_ST_OK);
   EXPECT_EQ(value.type, INTEGER);
   EXPECT_EQ(value.value.l_int, 1);
 }
@@ -201,7 +201,7 @@ TEST_F(PartitionCountTest, NotAvailableWhenProfileQueryFails) {
   rdc_field_value value;
   EXPECT_EQ(fetch(0, &value), RDC_ST_SMI_ERROR);
   EXPECT_EQ(value.field_id, RDC_FI_GPU_PARTITION_COUNT);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_UNKNOWN_ERROR);
+  EXPECT_EQ(value.status, RDC_ST_UNKNOWN_ERROR);
 }
 
 // The count is read from the GPU's first processor, which must be partition 0.
@@ -212,5 +212,5 @@ TEST_F(PartitionCountTest, NotAvailableWhenFirstProcessorIsNotPartitionZero) {
 
   rdc_field_value value;
   EXPECT_EQ(fetch(0, &value), RDC_ST_SMI_ERROR);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_UNEXPECTED_DATA);
+  EXPECT_EQ(value.status, RDC_ST_UNKNOWN_ERROR);
 }

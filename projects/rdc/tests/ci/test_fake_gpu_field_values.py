@@ -8,6 +8,7 @@ test_fake_gpu.py (same environment variables and helpers).
 import os
 import re
 import subprocess
+import sys
 
 import pytest
 
@@ -19,6 +20,8 @@ from test_fake_gpu import (  # noqa: F401 (tools is a fixture)
     REQUIRE,
     Rdcd,
     _dmon_rows,
+    _first_file,
+    _missing,
     golden,
     tools,
 )
@@ -113,3 +116,50 @@ def test_partition_past_the_partition_count_has_no_clock(tools, tmp_path):
     finally:
         code = d.stop()
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+# rdc_instance_profile_get() through rdcd, from a client that fills the profile with
+# 0x5A first: the profile names the resource it describes.
+_PROFILE = r"""
+import ctypes, sys
+lib = ctypes.CDLL(sys.argv[1])
+class Profile(ctypes.Structure):
+    _fields_ = [("resource_type", ctypes.c_int), ("partition_resource", ctypes.c_uint32),
+                ("num_partitions_share_resource", ctypes.c_uint32)]
+def call(name, *args):
+    status = getattr(lib, name)(*args)
+    if status != 0:
+        sys.exit(f"{name} returned {status}")
+call("rdc_init", ctypes.c_uint64(0))
+handle = ctypes.c_void_p()
+call("rdc_connect", sys.argv[2].encode(), ctypes.byref(handle), None, None, None)
+for resource in (0, 2):  # RDC_ACCELERATOR_XCC, RDC_ACCELERATOR_DECODER
+    profile = Profile(0x5A5A5A5A, 0, 0)
+    call("rdc_instance_profile_get", handle, ctypes.c_uint32(0), ctypes.c_int(resource),
+         ctypes.byref(profile))
+    print(resource, profile.resource_type, profile.partition_resource)
+call("rdc_disconnect", handle)
+call("rdc_shutdown")
+"""
+
+
+def test_instance_profile_names_its_resource(tools, tmp_path):
+    bootstrap = _first_file(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
+    if bootstrap is None:
+        _missing("librdc_bootstrap.so")
+    d = Rdcd(tools, tmp_path, gpus=1, RDC_FAKE_PARTITIONS=2).start()
+    try:
+        r = subprocess.run(
+            [sys.executable, "-c", _PROFILE, bootstrap, f"127.0.0.1:{d.port}"],
+            env=d.rdci_env,
+            capture_output=True,
+            text=True,
+            timeout=60 * FACTOR,
+        )
+    finally:
+        code = d.stop()
+    assert r.returncode == 0, f"client exited {r.returncode}\n{r.stdout}{r.stderr[-3000:]}"
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+    rows = [list(map(int, line.split())) for line in r.stdout.splitlines()]
+    assert [(asked, named) for asked, named, _ in rows] == [(0, 0), (2, 2)], r.stdout
+    assert all(resources > 0 for _, _, resources in rows), r.stdout

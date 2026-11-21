@@ -107,7 +107,7 @@ class MemoryBandwidthTest : public ::testing::Test {
                             rdc_field_value* value) {
     rdc_field_value first;
     EXPECT_EQ(fetch(&first), RDC_ST_SMI_ERROR);
-    EXPECT_EQ(first.status, AMDSMI_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(first.status, RDC_ST_NOT_SUPPORTED);
     g_gpu.metrics.firmware_timestamp = firmware_ms * kFirmwareMs;
     g_gpu.metrics.mem_activity_acc = mem_activity_acc;
     return fetch(value);
@@ -172,14 +172,14 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(amdsmi_processor_handle processor_handl
 TEST_F(MemoryBandwidthTest, ReportsTheAccumulatorRate) {
   rdc_field_value value;
   EXPECT_EQ(fetch_second(2000, 1000 + 25 * 1000, &value), RDC_ST_OK);  // 25% for 1 s
-  EXPECT_EQ(value.status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(value.status, RDC_ST_OK);
   EXPECT_EQ(value.value.l_int, 500);
 }
 
 TEST_F(MemoryBandwidthTest, ReportsZeroWithoutMemoryTraffic) {
   rdc_field_value value;
   EXPECT_EQ(fetch_second(2000, 1000, &value), RDC_ST_OK);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(value.status, RDC_ST_OK);
   EXPECT_EQ(value.value.l_int, 0);
 }
 
@@ -188,26 +188,26 @@ TEST_F(MemoryBandwidthTest, ReportsTheInstantaneousActivity) {
   g_gpu.metrics.average_umc_activity = 40;
   rdc_field_value value;
   EXPECT_EQ(fetch(&value), RDC_ST_OK);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(value.status, RDC_ST_OK);
   EXPECT_EQ(value.value.l_int, 800);  // 40% of 2000
 }
 
 TEST_F(MemoryBandwidthTest, NotAvailableWhenFirmwareTimeStalls) {
   rdc_field_value value;
   EXPECT_EQ(fetch_second(1000, 1000, &value), RDC_ST_SMI_ERROR);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
 }
 
 TEST_F(MemoryBandwidthTest, NotAvailableWhenFirmwareTimeGoesBack) {
   rdc_field_value value;
   EXPECT_EQ(fetch_second(900, 2000, &value), RDC_ST_SMI_ERROR);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
 }
 
 TEST_F(MemoryBandwidthTest, NotAvailableWhenTheAccumulatorGoesBack) {
   rdc_field_value value;
   EXPECT_EQ(fetch_second(2000, 0, &value), RDC_ST_SMI_ERROR);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
 }
 
 // The ECC getters look the GPU up again after fetch_smi_field() did. A GPU that is no longer
@@ -250,5 +250,5 @@ TEST_F(EccLookupTest, AGpuThatIsNoLongerListedReadsNotFound) {
 TEST_F(MemoryBandwidthTest, NotAvailableWhenSamplesAreMoreThanAMinuteApart) {
   rdc_field_value value;
   EXPECT_EQ(fetch_second(1000 + 61000, 1000 + 61000 * 10, &value), RDC_ST_SMI_ERROR);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(value.status, RDC_ST_NOT_SUPPORTED);
 }
