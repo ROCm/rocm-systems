@@ -1141,6 +1141,7 @@ if(BUILD_TESTS)
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
       PatForcedMPITests.cpp
+      DirectAllGatherProfilerMPITests.cpp
       BootstrapTlsMPITests.cpp
       BootstrapStrayPeerMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
@@ -1224,7 +1225,8 @@ if(BUILD_TESTS)
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
 
-    # Recorder profiler plugin for ProfilerKernelChMPITests and PatForcedMPITests. Unlike
+    # Recorder profiler plugin for ProfilerKernelChMPITests, PatForcedMPITests and
+    # DirectAllGatherProfilerMPITests. Unlike
     # rccl-test-profiler-stub it is a working profiler: it records what RCCL
     # delivers so the test can check it. It builds against the standalone headers
     # an external plugin ships with rather than RCCL's own, and it lands and

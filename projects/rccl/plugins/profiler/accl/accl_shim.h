@@ -44,6 +44,8 @@ enum {
   ncclProfileProxyCtrl      = (1 << 5),
   ncclProfileKernelCh       = (1 << 6),
   ncclProfileNetPlugin      = (1 << 7),
+  ncclProfileCollApi        = (1 << 9),
+  ncclProfileP2pApi         = (1 << 10),
 };
 
 #include "profiler/profiler_v5.h"

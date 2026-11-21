@@ -101,17 +101,8 @@ static int acclMkdirRecursive(const char* path) {
   return 0;
 }
 
-// Forward declarations for cross-referenced pool functions
-static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op);
-
-static void acclFreeCollProxyOps(struct acclCommContext* ctx,
-                                 struct acclCollInfo* coll) {
-  for (int i = 0; i < coll->nProxyOps; i++) {
-    int idx = coll->proxyOpIndices[i];
-    if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
-      acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
-    }
-  }
+static inline void acclPoolTake(int* inUse, int* highWater) {
+  if (++*inUse > *highWater) *highWater = *inUse;
 }
 
 // ============================================================================
@@ -140,6 +131,14 @@ static void acclCtxUnref(struct acclCommContext* ctx) {
   pthread_mutex_destroy(&ctx->collPoolMutex);
   pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
   pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
+  // Including graph-captured calls, which are never released on their own: a
+  // replay after the communicator is gone is already a use-after-free in RCCL.
+  for (struct acclFanoutCall* call = ctx->fanoutAll; call;) {
+    struct acclFanoutCall* next = call->nextAll;
+    free(call);
+    call = next;
+  }
+  pthread_mutex_destroy(&ctx->apiMutex);
   free(ctx);
 }
 
@@ -156,10 +155,13 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
       const size_t muOff = offsetof(struct acclCollInfo, mutex);
       const size_t muEnd = muOff + sizeof(slot->mutex);
       pthread_mutex_lock(&slot->mutex);
+      uint64_t gen = slot->generation;
       memset(slot, 0, muOff);
       memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
+      slot->generation = gen + 1;
       pthread_mutex_unlock(&slot->mutex);
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+      acclPoolTake(&ctx->collPoolInUse, &ctx->collPoolHighWater);
       pthread_mutex_unlock(&ctx->collPoolMutex);
       return &ctx->collPool[i];
     }
@@ -186,6 +188,7 @@ static void acclFreeColl(struct acclCommContext* ctx, struct acclCollInfo* coll)
   int idx = (int)(coll - ctx->collPool);
   if (idx >= 0 && idx < ACCL_COLL_POOL_SIZE) {
     ctx->collPoolUsed[idx] = 0;
+    ctx->collPoolInUse--;
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
   acclCtxUnref(ctx);
@@ -222,6 +225,7 @@ static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
       // rejected at stop rather than charged to this one.
       slot->generation = gen + 1;
       pthread_mutex_unlock(&slot->mutex);
+      acclPoolTake(&ctx->proxyOpPoolInUse, &ctx->proxyOpPoolHighWater);
       pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
       return slot;
     }
@@ -240,6 +244,7 @@ static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo*
   int idx = (int)(op - ctx->proxyOpPool);
   if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
     ctx->proxyOpPoolUsed[idx] = 0;
+    ctx->proxyOpPoolInUse--;
   }
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
   acclCtxUnref(ctx);
@@ -252,6 +257,7 @@ static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx)
       ctx->proxyStepPoolUsed[i] = 1;
       __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
       memset(&ctx->proxyStepPool[i], 0, sizeof(ctx->proxyStepPool[i]));
+      acclPoolTake(&ctx->proxyStepPoolInUse, &ctx->proxyStepPoolHighWater);
       pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
       return &ctx->proxyStepPool[i];
     }
@@ -268,6 +274,7 @@ static void acclFreeProxyStep(struct acclCommContext* ctx, struct acclProxyStepI
   int idx = (int)(step - ctx->proxyStepPool);
   if (idx >= 0 && idx < ACCL_PROXY_STEP_POOL_SIZE) {
     ctx->proxyStepPoolUsed[idx] = 0;
+    ctx->proxyStepPoolInUse--;
   }
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
   acclCtxUnref(ctx);
@@ -485,50 +492,31 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
       ? (double)(coll->tsCollStopUs - coll->tsCollStartUs) : 0;
   }
 
+  // A fan-out launch's descriptor carries no channel count of its own; report
+  // the distinct channels its tasks ran on.
+  if (coll->isFanout) rec.nChannels = (uint16_t)nKernelEvents;
+
   // Each component is averaged over the op class that can produce it, not over
   // every proxy op: send ops only pass through SendGPUWait/SendPeerWait/SendWait
   // and recv ops only through RecvWait/RecvFlushWait/RecvGPUWait, so dividing a
   // one-sided total by nProxyOps scales it by that class's share of the mix. On
   // a ring (one send + one recv op per channel) these are per-channel costs --
-  // the same scale as gpu_kernel_avg_us.
-  double sendGpuWait = 0, sendPeerWait = 0, sendNetwork = 0;
-  double recvFlush = 0, recvGpuWait = 0, recvNetwork = 0;
-  int nSend = 0, nRecv = 0;
-
-  for (int i = 0; i < coll->nProxyOps; i++) {
-    int opIdx = coll->proxyOpIndices[i];
-    if (opIdx < 0 || opIdx >= ACCL_PROXY_OP_POOL_SIZE) continue;
-    struct acclProxyOpInfo* op = &ctx->proxyOpPool[opIdx];
-    // Under op->mutex: a step of this op can still be stopping and adding to
-    // these accumulators, and that path writes them under the same lock.
-    pthread_mutex_lock(&op->mutex);
-    if (op->isSend) {
-      nSend++;
-      sendGpuWait += (double)op->totalGpuWaitUs;
-      sendPeerWait += (double)op->totalPeerWaitUs;
-      sendNetwork += (double)op->totalNetworkUs;
-    } else {
-      nRecv++;
-      recvFlush += (double)op->totalFlushUs;
-      recvGpuWait += (double)op->totalGpuRecvWaitUs;
-      recvNetwork += (double)op->totalNetworkUs;
-    }
-    pthread_mutex_unlock(&op->mutex);
-  }
+  // the same scale as gpu_kernel_avg_us. No lock: the caller won the finalize
+  // claim, after which no op stop folds into this coll.
+  int nSend = coll->nSendOps, nRecv = coll->nRecvOps;
 
   // A zero denominator only happens when the class has no ops at all, in which
   // case its numerator is zero too, so reporting 0 states the truth rather than
   // papering over a division; the guard exists only to avoid 0/0.
-  double meanSendNet = nSend > 0 ? sendNetwork / nSend : 0;
-  double meanRecvNet = nRecv > 0 ? recvNetwork / nRecv : 0;
+  double meanSendNet = nSend > 0 ? (double)coll->sendNetworkUs / nSend : 0;
+  double meanRecvNet = nRecv > 0 ? (double)coll->recvNetworkUs / nRecv : 0;
 
-  int nOps = coll->nProxyOps;
-  rec.proxyGpuWaitUs = nSend > 0 ? sendGpuWait / nSend : 0;
+  rec.proxyGpuWaitUs = nSend > 0 ? (double)coll->sendGpuWaitUs / nSend : 0;
   rec.proxyNetworkUs = meanSendNet + meanRecvNet;
-  rec.proxyPeerWaitUs = nSend > 0 ? sendPeerWait / nSend : 0;
-  rec.proxyFlushUs = nRecv > 0 ? recvFlush / nRecv : 0;
-  rec.proxyGpuRecvWaitUs = nRecv > 0 ? recvGpuWait / nRecv : 0;
-  rec.nProxyOps = nOps;
+  rec.proxyPeerWaitUs = nSend > 0 ? (double)coll->sendPeerWaitUs / nSend : 0;
+  rec.proxyFlushUs = nRecv > 0 ? (double)coll->recvFlushUs / nRecv : 0;
+  rec.proxyGpuRecvWaitUs = nRecv > 0 ? (double)coll->recvGpuWaitUs / nRecv : 0;
+  rec.nProxyOps = nSend + nRecv;
   rec.nSendOps = nSend;
   rec.nRecvOps = nRecv;
 
@@ -540,7 +528,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
 static inline int acclShouldFinalize(struct acclCollInfo* coll) {
   if (coll->finalized) return 0;
   if (!coll->collStopped) return 0;
-  if (coll->nKernelChCompleted < coll->nChannels) return 0;
+  if (coll->nKernelChCompleted < coll->nKernelChExpected) return 0;
   if (coll->nProxyOpsCompleted < coll->nProxyOpsStarted) return 0;
   coll->finalized = 1;
   return 1;
@@ -549,8 +537,80 @@ static inline int acclShouldFinalize(struct acclCollInfo* coll) {
 static void acclFinalizeAndFree(struct acclCommContext* ctx,
                                 struct acclCollInfo* coll) {
   acclFinalizeCollective(coll);
-  acclFreeCollProxyOps(ctx, coll);
   acclFreeColl(ctx, coll);
+}
+
+// ============================================================================
+// Fan-out calls (collectives RCCL lowers to per-peer Send/Recv tasks)
+// ============================================================================
+
+static __thread struct acclCollApiStub tlsCollApi;
+
+// Under ctx->apiMutex.
+static struct acclFanoutCall* acclAllocFanoutCall(struct acclCommContext* ctx) {
+  struct acclFanoutCall* call = ctx->fanoutFree;
+  if (call) {
+    ctx->fanoutFree = call->nextFree;
+  } else {
+    call = (struct acclFanoutCall*)calloc(1, sizeof(*call));
+    if (!call) return NULL;
+    call->nextAll = ctx->fanoutAll;
+    ctx->fanoutAll = call;
+  }
+  struct acclFanoutCall* all = call->nextAll;
+  memset(call, 0, sizeof(*call));
+  call->nextAll = all;
+  call->type = ncclProfileP2pApi;
+  return call;
+}
+
+// Under ctx->apiMutex.
+static void acclFanoutCallUnref(struct acclCommContext* ctx, struct acclFanoutCall* call) {
+  if (--call->refCount > 0) return;
+  call->nextFree = ctx->fanoutFree;
+  ctx->fanoutFree = call;
+}
+
+// Join the launch this call's tasks are being started into, or open a new one.
+// A call's tasks can span plans, and a captured call restarts them on every
+// replay; RCCL starts all of a plan's tasks before it stops any, so the launch
+// is still open exactly when none of its tasks has stopped yet.
+static struct acclCollInfo* acclJoinFanoutLaunch(struct acclCommContext* ctx,
+                                                 struct acclFanoutCall* call,
+                                                 uint8_t nChannels) {
+  pthread_mutex_lock(&ctx->apiMutex);
+  struct acclCollInfo* coll = call->openLaunch;
+  if (coll) {
+    pthread_mutex_lock(&coll->mutex);
+    int open = coll->generation == call->openLaunchGen && coll->nTasksStopped == 0;
+    if (open) {
+      coll->nTasksStarted++;
+      coll->nKernelChExpected += nChannels;
+    }
+    pthread_mutex_unlock(&coll->mutex);
+    if (!open) coll = NULL;
+  }
+  if (!coll) {
+    coll = acclAllocColl(ctx);
+    if (coll) {
+      coll->type = ncclProfileColl;
+      coll->isFanout = 1;
+      coll->func = call->func;
+      coll->algo = "P2P";
+      coll->proto = "";
+      coll->seqNumber = call->seqNumber;
+      coll->msgSizeBytes = (size_t)acclDatatypeSize(call->datatype) * call->count;
+      coll->nTasksStarted = 1;
+      coll->nKernelChExpected = nChannels;
+      coll->tsCollStartUs = acclGetTimeUs();
+      coll->commCtx = ctx;
+      call->openLaunchGen = coll->generation;
+    }
+    call->openLaunch = coll;
+  }
+  if (!call->graphCaptured) acclFanoutCallUnref(ctx, call);
+  pthread_mutex_unlock(&ctx->apiMutex);
+  return coll;
 }
 
 // ============================================================================
@@ -602,6 +662,7 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   pthread_mutex_init(&ctx->collPoolMutex, NULL);
   pthread_mutex_init(&ctx->proxyOpPoolMutex, NULL);
   pthread_mutex_init(&ctx->proxyStepPoolMutex, NULL);
+  pthread_mutex_init(&ctx->apiMutex, NULL);
 
   // Open output file (write mode — fresh file per init to avoid stale data)
   const char* outDir = getenv("ACCL_PROFILER_OUTPUT_DIR");
@@ -642,8 +703,11 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   }
 
   *context = ctx;
+  // CollApi, P2pApi and P2p tie the Send/Recv tasks of a collective RCCL lowered
+  // to P2P (AlltoAll, Gather, Scatter, Direct AllGather) back to that call.
   *eActivationMask = ncclProfileColl | ncclProfileKernelCh
-                   | ncclProfileProxyOp | ncclProfileProxyStep;
+                   | ncclProfileProxyOp | ncclProfileProxyStep
+                   | ncclProfileCollApi | ncclProfileP2pApi | ncclProfileP2p;
 
   ACCL_INFO("ACCL Profiler: init rank=%d nRanks=%d nNodes=%d "
             "output=%s minSize=%zu",
@@ -683,18 +747,17 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       // its kernel-channel events. Count it so the loss is visible; no record is
       // emitted for it.
       ctx->leakedCollectives++;
-      acclFreeCollProxyOps(ctx, coll);
       ctx->collPoolUsed[i] = 0;
+      ctx->collPoolInUse--;
       __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
     }
   }
   pthread_mutex_unlock(&ctx->collPoolMutex);
 
   // Count, but deliberately do NOT release, proxy ops and steps still held at
-  // finalize. Three classes never reach acclFreeProxyOp/acclFreeProxyStep on
-  // their own: an op with no coll parent, an op whose stop never arrives
-  // (coll->proxyOpIndices is filled at op STOP, so the coll drain above cannot
-  // see it), and any unstopped step.
+  // finalize: an op or step whose stop never arrived. Every other op and step
+  // is released at its own stop, so nothing here belongs to a coll the drain
+  // above already handled.
   //
   // Draining them would be a use-after-free. Unlike the profiler thread's work
   // queue, which ncclProfilerThreadDestroy quiesces and purges by context
@@ -710,16 +773,22 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   // retained for the life of the process. The cost is bounded: one
   // acclCommContext per affected communicator, and the output file is closed
   // below regardless, so no descriptor is held.
+  pthread_mutex_lock(&ctx->collPoolMutex);
+  int collHighWater = ctx->collPoolHighWater;
+  pthread_mutex_unlock(&ctx->collPoolMutex);
+
   pthread_mutex_lock(&ctx->proxyOpPoolMutex);
   for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
     if (ctx->proxyOpPoolUsed[i]) ctx->outstandingProxyOps++;
   }
+  int opHighWater = ctx->proxyOpPoolHighWater;
   pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
 
   pthread_mutex_lock(&ctx->proxyStepPoolMutex);
   for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
     if (ctx->proxyStepPoolUsed[i]) ctx->outstandingProxySteps++;
   }
+  int stepHighWater = ctx->proxyStepPoolHighWater;
   pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
 
   // Write the drop summary while the output file is still open, under the lock
@@ -732,7 +801,6 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     // "the process died before finalize".
     uint64_t dOps   = __atomic_load_n(&ctx->droppedProxyOps, __ATOMIC_SEQ_CST);
     uint64_t dSteps = __atomic_load_n(&ctx->droppedProxySteps, __ATOMIC_SEQ_CST);
-    uint64_t oOps   = __atomic_load_n(&ctx->overflowProxyOps, __ATOMIC_SEQ_CST);
     uint64_t sSteps = __atomic_load_n(&ctx->staleProxySteps, __ATOMIC_SEQ_CST);
     // Complete only if nothing was lost anywhere. Proxy loss understates the
     // decomposition with no marker on the affected records, and ferror() is the
@@ -741,7 +809,7 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
     int writeError = ferror(ctx->outputFile) != 0;
     int complete = (ctx->droppedCollectives == 0 && ctx->leakedCollectives == 0 &&
                     ctx->inflightCollectives == 0 &&
-                    dOps == 0 && dSteps == 0 && oOps == 0 && sSteps == 0 &&
+                    dOps == 0 && dSteps == 0 && sSteps == 0 &&
                     ctx->outstandingProxyOps == 0 &&
                     ctx->outstandingProxySteps == 0 &&
                     !writeError);
@@ -749,35 +817,35 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       "{\"summary\":{\"dropped_collectives\":%lu,\"leaked_collectives\":%lu,"
       "\"inflight_collectives\":%lu,"
       "\"dropped_proxy_ops\":%lu,\"dropped_proxy_steps\":%lu,"
-      "\"overflow_proxy_ops\":%lu,\"stale_proxy_steps\":%lu,"
+      "\"stale_proxy_steps\":%lu,"
       "\"outstanding_proxy_ops\":%lu,\"outstanding_proxy_steps\":%lu,"
       "\"write_error\":%s,"
       "\"coll_pool_size\":%d,\"proxy_op_pool_size\":%d,\"proxy_step_pool_size\":%d,"
-      "\"max_proxy_ops_per_coll\":%d,\"complete\":%s}}\n",
+      "\"coll_pool_high_water\":%d,\"proxy_op_pool_high_water\":%d,"
+      "\"proxy_step_pool_high_water\":%d,\"complete\":%s}}\n",
       (unsigned long)ctx->droppedCollectives,
       (unsigned long)ctx->leakedCollectives,
       (unsigned long)ctx->inflightCollectives,
-      (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
+      (unsigned long)dOps, (unsigned long)dSteps,
       (unsigned long)sSteps,
       (unsigned long)ctx->outstandingProxyOps,
       (unsigned long)ctx->outstandingProxySteps,
       writeError ? "true" : "false",
       ACCL_COLL_POOL_SIZE, ACCL_PROXY_OP_POOL_SIZE, ACCL_PROXY_STEP_POOL_SIZE,
-      ACCL_MAX_PROXY_OPS, complete ? "true" : "false");
+      collHighWater, opHighWater, stepHighWater,
+      complete ? "true" : "false");
     fflush(ctx->outputFile);
     if (!complete) {
       ACCL_WARN("ACCL Profiler: rank=%d output INCOMPLETE: %lu collectives dropped "
                 "(coll pool exhausted), %lu slots leaked (teardown-skipped kernel "
                 "events), %lu collectives in flight at finalize (record may be "
                 "missing), %lu proxy ops dropped, %lu proxy steps dropped, %lu proxy "
-                "ops discarded (more than %d on one collective), %lu proxy steps "
-                "stale (parent slot reissued), %lu proxy ops and %lu proxy steps "
+                "steps stale (parent slot reissued), %lu proxy ops and %lu proxy steps "
                 "still outstanding, write_error=%d",
                 ctx->rank, (unsigned long)ctx->droppedCollectives,
                 (unsigned long)ctx->leakedCollectives,
                 (unsigned long)ctx->inflightCollectives,
-                (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)oOps,
-                ACCL_MAX_PROXY_OPS, (unsigned long)sSteps,
+                (unsigned long)dOps, (unsigned long)dSteps, (unsigned long)sSteps,
                 (unsigned long)ctx->outstandingProxyOps,
                 (unsigned long)ctx->outstandingProxySteps, writeError);
     }
@@ -846,6 +914,7 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     coll->nChannelsRaw = eDescr->coll.nChannels;
     coll->nChannels = eDescr->coll.nChannels ? eDescr->coll.nChannels
                                              : ACCL_MAX_CHANNELS;
+    coll->nKernelChExpected = coll->nChannels;
     coll->msgSizeBytes = msgSize;
     coll->tsCollStartUs = acclGetTimeUs();
     coll->commCtx = ctx;
@@ -874,11 +943,17 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
 
     pthread_mutex_lock(&coll->mutex);
     struct acclKernelChInfo* kch = &coll->kernelCh[chId];
-    kch->type = ncclProfileKernelCh;
-    kch->parentObj = coll;
-    kch->channelId = chId;
-    kch->startGpuClk = eDescr->kernelCh.pTimer;
-    kch->tsStartUs = acclGetTimeUs();
+    uint64_t pTimer = eDescr->kernelCh.pTimer;
+    if (kch->tsStartUs == 0) {
+      kch->type = ncclProfileKernelCh;
+      kch->parentObj = coll;
+      kch->channelId = chId;
+      kch->startGpuClk = pTimer;
+      kch->tsStartUs = acclGetTimeUs();
+    } else if (pTimer != 0 && (kch->startGpuClk == 0 || pTimer < kch->startGpuClk)) {
+      // Another task of a fan-out launch on this channel: widen the span.
+      kch->startGpuClk = pTimer;
+    }
     coll->nKernelChStarted++;
     pthread_mutex_unlock(&coll->mutex);
 
@@ -947,6 +1022,77 @@ __hidden ncclResult_t acclPluginStartEvent(void* context, void** eHandle,
     return ncclSuccess;
   }
 
+  if (eDescr->type == ncclProfileCollApi) {
+    // Every collective call reports one. The stub records it so a P2pApi event
+    // starting inside can attach to it; nothing is allocated unless one does.
+    struct acclCollApiStub* stub = &tlsCollApi;
+    // A call that failed between its CollApi start and stop never sent the
+    // stop, so drop what that bracket still holds before reusing the stub.
+    if (stub->open && stub->call) {
+      struct acclCommContext* prev = (struct acclCommContext*)stub->ctx;
+      pthread_mutex_lock(&prev->apiMutex);
+      acclFanoutCallUnref(prev, stub->call);
+      pthread_mutex_unlock(&prev->apiMutex);
+    }
+    stub->type = ncclProfileCollApi;
+    stub->ctx = ctx;
+    stub->open = 1;
+    stub->func = eDescr->collApi.func;
+    stub->datatype = eDescr->collApi.datatype;
+    stub->count = eDescr->collApi.count;
+    stub->graphCaptured = eDescr->collApi.graphCaptured;
+    stub->call = NULL;
+    *eHandle = stub;
+    return ncclSuccess;
+  }
+
+  if (eDescr->type == ncclProfileP2pApi) {
+    // Only a Send/Recv posted inside an open CollApi bracket is part of a
+    // fanned-out collective; a user's own Send/Recv stays unprofiled.
+    struct acclCollApiStub* stub = &tlsCollApi;
+    if (!stub->open || stub->ctx != ctx ||
+        (size_t)acclDatatypeSize(stub->datatype) * stub->count < ctx->minMsgSize) {
+      *eHandle = NULL;
+      return ncclSuccess;
+    }
+    pthread_mutex_lock(&ctx->apiMutex);
+    struct acclFanoutCall* call = stub->call;
+    if (!call) {
+      call = acclAllocFanoutCall(ctx);
+      if (call) {
+        call->func = stub->func;
+        call->datatype = stub->datatype;
+        call->count = stub->count;
+        call->graphCaptured = stub->graphCaptured;
+        call->seqNumber = ctx->fanoutSeq++;
+        call->refCount = 1;  // the bracket's; released at CollApi stop
+        stub->call = call;
+      } else {
+        // Its tasks will arrive with no parent and no record will be written.
+        pthread_mutex_lock(&ctx->collPoolMutex);
+        ctx->droppedCollectives++;
+        pthread_mutex_unlock(&ctx->collPoolMutex);
+        stub->open = 0;
+      }
+    }
+    if (call) call->refCount++;  // this task's; released when its P2p event starts
+    pthread_mutex_unlock(&ctx->apiMutex);
+    *eHandle = call;
+    return ncclSuccess;
+  }
+
+  if (eDescr->type == ncclProfileP2p) {
+    void* parent = eDescr->parentObj;
+    if (!parent || *(uint64_t*)parent != ncclProfileP2pApi) {
+      *eHandle = NULL;
+      return ncclSuccess;
+    }
+    // With KernelCh enabled RCCL reports p2p.nChannels as the number of KernelCh
+    // events this task will post, which is what completion has to count.
+    *eHandle = acclJoinFanoutLaunch(ctx, (struct acclFanoutCall*)parent, eDescr->p2p.nChannels);
+    return ncclSuccess;
+  }
+
   *eHandle = NULL;
   return ncclSuccess;
 }
@@ -956,16 +1102,42 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
 
   uint64_t type = *(uint64_t*)eHandle;
 
+  if (type == ncclProfileCollApi) {
+    // Close the bracket. Its reference on the fan-out call was what kept the
+    // call alive while its tasks were still being posted.
+    struct acclCollApiStub* stub = (struct acclCollApiStub*)eHandle;
+    if (stub->open && stub->call) {
+      struct acclCommContext* ctx = (struct acclCommContext*)stub->ctx;
+      pthread_mutex_lock(&ctx->apiMutex);
+      acclFanoutCallUnref(ctx, stub->call);
+      pthread_mutex_unlock(&ctx->apiMutex);
+    }
+    stub->open = 0;
+    stub->call = NULL;
+    return ncclSuccess;
+  }
+
+  if (type == ncclProfileP2pApi) {
+    // The task's reference lives until its P2p event starts, not until here.
+    return ncclSuccess;
+  }
+
   if (type == ncclProfileColl) {
+    // Also the P2p stop of every task of a fan-out launch, which shares the slot.
     struct acclCollInfo* coll = (struct acclCollInfo*)eHandle;
     struct acclCommContext* ctx = (struct acclCommContext*)coll->commCtx;
-    coll->tsCollStopUs = acclGetTimeUs();
+    uint64_t now = acclGetTimeUs();
 
     pthread_mutex_lock(&coll->mutex);
     if (coll->finalized) {
       pthread_mutex_unlock(&coll->mutex);
       return ncclSuccess;
     }
+    if (coll->isFanout && ++coll->nTasksStopped < coll->nTasksStarted) {
+      pthread_mutex_unlock(&coll->mutex);
+      return ncclSuccess;
+    }
+    coll->tsCollStopUs = now;
     coll->collStopped = 1;
     int shouldFinalize = acclShouldFinalize(coll);
     pthread_mutex_unlock(&coll->mutex);
@@ -1009,19 +1181,28 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
         acclFreeProxyOp(ctx, op);
         return ncclSuccess;
       }
-      int opIdx = (int)(op - ctx->proxyOpPool);
-      if (coll->nProxyOps < ACCL_MAX_PROXY_OPS) {
-        coll->proxyOpIndices[coll->nProxyOps] = opIdx;
-        coll->nProxyOps++;
+      // Fold the op into its collective now and release the slot below, rather
+      // than holding it until the collective finalizes: that waits on KernelCh
+      // stops, which can arrive tens of ms late, and the op pool filled with
+      // finished ops while it did. RCCL stops every step of an op before the op
+      // (net.cc), so nothing more will be charged to these totals.
+      pthread_mutex_lock(&op->mutex);
+      if (op->isSend) {
+        coll->nSendOps++;
+        coll->sendGpuWaitUs += op->totalGpuWaitUs;
+        coll->sendPeerWaitUs += op->totalPeerWaitUs;
+        coll->sendNetworkUs += op->totalNetworkUs;
       } else {
-        // The op completed normally; the collective simply has no room to record
-        // it, so its timing is lost and the decomposition understates the total.
-        __atomic_add_fetch(&ctx->overflowProxyOps, 1, __ATOMIC_SEQ_CST);
-        acclFreeProxyOp(ctx, op);
+        coll->nRecvOps++;
+        coll->recvFlushUs += op->totalFlushUs;
+        coll->recvGpuWaitUs += op->totalGpuRecvWaitUs;
+        coll->recvNetworkUs += op->totalNetworkUs;
       }
+      pthread_mutex_unlock(&op->mutex);
       coll->nProxyOpsCompleted++;
       int shouldFinalize = acclShouldFinalize(coll);
       pthread_mutex_unlock(&coll->mutex);
+      acclFreeProxyOp(ctx, op);
       if (shouldFinalize) {
         acclFinalizeAndFree(ctx, coll);
       }
@@ -1080,8 +1261,12 @@ __hidden ncclResult_t acclPluginRecordEventState(void* eHandle,
 
   if (type == ncclProfileKernelCh && (int)eState == (int)ncclProfilerKernelChStop) {
     struct acclKernelChInfo* kch = (struct acclKernelChInfo*)eHandle;
-    if (eStateArgs) {
-      kch->stopGpuClk = eStateArgs->kernelCh.pTimer;
+    struct acclCollInfo* coll = (struct acclCollInfo*)kch->parentObj;
+    if (eStateArgs && coll) {
+      // Latest wins: on a fan-out launch several events share this channel slot.
+      pthread_mutex_lock(&coll->mutex);
+      if (eStateArgs->kernelCh.pTimer > kch->stopGpuClk) kch->stopGpuClk = eStateArgs->kernelCh.pTimer;
+      pthread_mutex_unlock(&coll->mutex);
     }
     return ncclSuccess;
   }

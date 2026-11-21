@@ -5,7 +5,8 @@
  ************************************************************************/
 
 // Profiler plugin that records Coll, P2p, KernelCh and KernelPhase events for
-// ProfilerKernelChMPITests and PatForcedMPITests. It builds against the standalone
+// ProfilerKernelChMPITests, PatForcedMPITests and DirectAllGatherProfilerMPITests.
+// It builds against the standalone
 // headers an external plugin ships with (plugins/profiler/example/nccl), so it sees
 // the same ABI an out-of-tree plugin would.
 //
@@ -129,8 +130,20 @@ ncclResult_t recorderStartEvent(void* context, void** eHandle, ncclProfilerEvent
       *eHandle = r;
       break;
     }
-    case ncclProfileP2p: {
+    case ncclProfileCollApi:
+    case ncclProfileP2pApi: {
+      // RCCL starts these whenever task events are on, so record them only when
+      // asked: with no handle back, a P2p event keeps a null parent as before.
+      if (!(activationMask() & eDescr->type)) break;
       Record* r = newRecord(eDescr->type, ctx, nullptr);
+      const bool isColl = eDescr->type == ncclProfileCollApi;
+      copyField(r->view.func, isColl ? eDescr->collApi.func : eDescr->p2pApi.func);
+      r->view.count = isColl ? eDescr->collApi.count : eDescr->p2pApi.count;
+      *eHandle = r;
+      break;
+    }
+    case ncclProfileP2p: {
+      Record* r = newRecord(eDescr->type, ctx, eDescr->parentObj);
       copyField(r->view.func, eDescr->p2p.func);
       r->view.count = eDescr->p2p.count;
       r->view.nChannels = eDescr->p2p.nChannels;
@@ -174,6 +187,7 @@ ncclResult_t recorderStopEvent(void* eHandle) {
   }
   ++r->view.stopEvents;
   r->view.stopTid = (long)syscall(SYS_gettid);
+  r->view.stopOrder = gOrder++;
   return ncclSuccess;
 }
 
