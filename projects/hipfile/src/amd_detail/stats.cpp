@@ -319,7 +319,7 @@ namespace reportUtil {
 static void
 generateReportHistogramV1(
     std::ostream &stream, const StatsV1 *stats, size_t gpuId, const char *name, const char *op,
-    std::function<void(std::ostream &, PerGpuStatsV1::ConstHistograms, size_t bucket)> printFn)
+    const std::function<void(std::ostream &, PerGpuStatsV1::ConstHistograms, size_t bucket)> &printFn)
 {
     if (stats == nullptr) {
         return;
@@ -387,8 +387,13 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
             }
             stream << "Total " << reportUtil::toString(backend) << ' ' << reportUtil::toString(ioType)
                    << " Size (B): " << totalBytes << '\n';
+            // Bandwidth divides by wall-clock busy time (union of overlapping IO
+            // intervals), not summed per-IO latency, so concurrent IO is not
+            // understated. Latency (below) keeps using the summed durations.
+            const BusyWindow *busy{stats->busyByBackendType(backend, ioType)};
+            uint64_t          busyUs{busy != nullptr ? busy->sample(StatsIoTracker::nowUs()) : 0};
             stream << "Average " << reportUtil::toString(backend) << ' ' << reportUtil::toString(ioType)
-                   << " Bandwidth (GiB/s): " << reportUtil::bandwidthGiBs(totalBytes, totalTimeUs) << '\n';
+                   << " Bandwidth (GiB/s): " << reportUtil::bandwidthGiBs(totalBytes, busyUs) << '\n';
             stream << "Average " << reportUtil::toString(backend) << ' ' << reportUtil::toString(ioType)
                    << " Latency (us): " << reportUtil::latencyUs(totalTimeUs, totalCount) << '\n';
             stream << "Total " << reportUtil::toString(backend) << ' ' << reportUtil::toString(ioType)
@@ -466,13 +471,96 @@ StatsClient::generateReportV1(std::ostream &stream, const StatsV1 *stats)
     }
 }
 
-void
-StatsIoTracker::complete(uint64_t bytes) const noexcept
+uint64_t
+StatsIoTracker::nowUs() noexcept
 {
-    auto endTime{std::chrono::steady_clock::now()};
+    // Use time_since_epoch() (boot time on Linux) rather than a process-local
+    // epoch so timestamps written by the library process and read by the ais-stats
+    // process are on the same time base, keeping sample()'s active-tail correct.
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now().time_since_epoch())
+                                     .count()) &
+           BusyWindow::TimestampMask;
+}
+
+StatsIoTracker::StatsIoTracker(IoType ioType, StatsBackend backend, int deviceId) noexcept
+    : m_ioType(ioType), m_backend(backend), m_startTime{std::chrono::steady_clock::now()},
+      m_deviceId{deviceId}, m_aligned{true},
+      m_windowOpen{Context<StatsCollection>::get()->beginIo(ioType, backend, deviceId, nowUs())}
+{
+}
+
+StatsIoTracker::~StatsIoTracker()
+{
+    if (m_windowOpen) {
+        Context<StatsCollection>::get()->endIo(m_ioType, m_backend, m_deviceId, nowUs());
+    }
+}
+
+void
+StatsIoTracker::complete(uint64_t bytes) noexcept
+{
+    // Capture both timestamps before the window updates so contended CAS loops
+    // in endIo() do not inflate the reported latency.
+    uint64_t endUs{nowUs()};
+    auto     endTime{std::chrono::steady_clock::now()};
+    // Close the busy-time window at IO completion, not at destructor time, so
+    // a scheduler delay between IO return and stack unwind does not inflate the
+    // busy-time windows of concurrent IOs that start after this IO ends.
+    if (m_windowOpen) {
+        Context<StatsCollection>::get()->endIo(m_ioType, m_backend, m_deviceId, endUs);
+        m_windowOpen = false;
+    }
     auto duration{std::chrono::duration_cast<std::chrono::microseconds>(endTime - m_startTime)};
     Context<StatsCollection>::get()->addIo(m_ioType, m_backend, bytes,
                                            static_cast<uint64_t>(duration.count()), m_aligned, m_deviceId);
+}
+
+bool
+StatsCollection::beginIo(IoType ioType, StatsBackend backend, int deviceId, uint64_t nowUs) const noexcept
+{
+    Stats *stats{Context<IStatsServer>::get()->getStats()};
+    if (stats == nullptr || stats->getLevel() < StatsLevel::Basic) {
+        return false;
+    }
+    size_t device{static_cast<size_t>(deviceId)};
+    // Mirror addIo(): if the device+backend combination would discard bytes,
+    // don't open windows that inflate the busy-time denominator with no matching
+    // bytes in the numerator.
+    if (stats->getPerGpuStats(device, backend) == nullptr) {
+        return false;
+    }
+    if (auto *window{stats->busyByType(ioType)}) {
+        window->transition(1, nowUs);
+    }
+    if (auto *window{stats->busyByGpuType(device, ioType)}) {
+        window->transition(1, nowUs);
+    }
+    if (auto *window{stats->busyByBackendType(backend, ioType)}) {
+        window->transition(1, nowUs);
+    }
+    return true;
+}
+
+void
+StatsCollection::endIo(IoType ioType, StatsBackend backend, int deviceId, uint64_t nowUs) const noexcept
+{
+    // No level check: beginIo() returned true, so the windows were opened and must
+    // be closed even if the stats level has since changed, or active counts leak.
+    Stats *stats{Context<IStatsServer>::get()->getStats()};
+    if (stats == nullptr) {
+        return;
+    }
+    size_t device{static_cast<size_t>(deviceId)};
+    if (auto *window{stats->busyByType(ioType)}) {
+        window->transition(-1, nowUs);
+    }
+    if (auto *window{stats->busyByGpuType(device, ioType)}) {
+        window->transition(-1, nowUs);
+    }
+    if (auto *window{stats->busyByBackendType(backend, ioType)}) {
+        window->transition(-1, nowUs);
+    }
 }
 
 void
