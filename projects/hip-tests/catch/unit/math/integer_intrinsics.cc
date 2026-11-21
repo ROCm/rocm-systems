@@ -736,7 +736,8 @@ HIP_TEST_CASE(Unit_Device___usad_Sanity_Positive) {
                          x3));
 }
 
-__global__ void __byte_perm(unsigned int* y, unsigned int x1, unsigned int x2, unsigned int s) {
+__global__ void __byte_perm_kernel(unsigned int* y, unsigned int x1, unsigned int x2,
+                                   unsigned int s) {
   y[0] = __byte_perm(x1, x2, s);
 }
 
@@ -767,9 +768,105 @@ HIP_TEST_CASE(Unit_Device___byte_perm_Sanity_Positive) {
 
   unsigned int s = (s3 << 12) | (s2 << 8) | (s1 << 4) | s0;
 
-  __byte_perm<<<1, 1>>>(y.ptr(), x1, x2, s);
+  __byte_perm_kernel<<<1, 1>>>(y.ptr(), x1, x2, s);
   HIP_CHECK(hipDeviceSynchronize());
 
   unsigned int expected = (bytes[s3] << 24) | (bytes[s2] << 16) | (bytes[s1] << 8) | bytes[s0];
   REQUIRE(y.ptr()[0] == expected);
+}
+
+/*
+ * Host reference model for `__byte_perm(x, y, s)`.
+ *
+ * byte_perm_ref is written as an independent function rather than a copy of
+ * the device implementation, so that it provides a independent reference and
+ * doesn't reinforce any bugs in the existing implementation.
+ */
+static unsigned int byte_perm_ref(unsigned int x, unsigned int y, unsigned int s) {
+  const unsigned char in[8] = {
+      static_cast<unsigned char>(x),       static_cast<unsigned char>(x >> 8),
+      static_cast<unsigned char>(x >> 16), static_cast<unsigned char>(x >> 24),
+      static_cast<unsigned char>(y),       static_cast<unsigned char>(y >> 8),
+      static_cast<unsigned char>(y >> 16), static_cast<unsigned char>(y >> 24)};
+  unsigned int result = 0;
+  for (unsigned int i = 0; i < 4; ++i)
+    result |= static_cast<unsigned int>(in[(s >> (4 * i)) & 0x07u]) << (8 * i);
+  return result;
+}
+
+// Every selector value that can affect the result fits in 16 bits.
+constexpr unsigned int kBytePermSelectorSpace = 1u << 16;
+constexpr unsigned int kBytePermBlockSize = 256;
+
+// Byte permute operand pairs
+static const unsigned int kBytePermOperands[][2] = {
+    {0x03020100u, 0x07060504u},  // all bytes MSB-clear, all distinct
+    {0xBBAA9988u, 0xFFEEDDCCu},  // all bytes MSB-set, all distinct
+    {0x00000000u, 0xFFFFFFFFu}, {0xFFFFFFFFu, 0x00000000u},
+    {0xDEADBEEFu, 0xDEADBEEFu},  // x == y
+    {0x12345678u, 0x9ABCDEF0u}};
+
+__global__ void __byte_perm_sweep_kernel(unsigned int* out, unsigned int x1, unsigned int x2,
+                                         unsigned int selector_or) {
+  const unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  out[i] = __byte_perm(x1, x2, i | selector_or);
+}
+
+// Runs the full selector sweep and compares against the reference model. `selector_or` is
+// OR-ed into the selector but must not change the result.
+static void CheckBytePermSweep(unsigned int x1, unsigned int x2, unsigned int selector_or) {
+  LinearAllocGuard<unsigned int> out(LinearAllocs::hipMallocManaged,
+                                     kBytePermSelectorSpace * sizeof(unsigned int));
+
+  __byte_perm_sweep_kernel<<<kBytePermSelectorSpace / kBytePermBlockSize, kBytePermBlockSize>>>(
+      out.ptr(), x1, x2, selector_or);
+  HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
+
+  // Counts mismatches and emits a message for the first case
+  unsigned int mismatches = 0;
+  unsigned int first_s = 0, first_got = 0, first_expected = 0;
+  for (unsigned int s = 0; s < kBytePermSelectorSpace; ++s) {
+    const unsigned int expected = byte_perm_ref(x1, x2, s);
+    if (out.ptr()[s] != expected) {
+      if (mismatches == 0) {
+        first_s = s | selector_or;
+        first_got = out.ptr()[s];
+        first_expected = expected;
+      }
+      ++mismatches;
+    }
+  }
+
+  INFO("x1 = 0x" << std::hex << x1 << ", x2 = 0x" << x2);
+  INFO("first mismatch: s = 0x" << std::hex << first_s << ", got 0x" << first_got
+                                << ", expected 0x" << first_expected);
+  INFO(std::dec << mismatches << " of " << kBytePermSelectorSpace << " selectors mismatched");
+  REQUIRE(mismatches == 0);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Sweeps the entire 16-bit selector space of `__byte_perm(x,y,s)` against a host
+ *      reference model, for operand pairs spanning MSB-clear bytes, MSB-set bytes, the
+ *      all-zero and all-ones extremes, and x == y.
+ *    - Covers selector nibbles 8-15, whose bit 3 must be ignored; repeated selection of a
+ *      single source byte; and permutations in which any output byte may draw from either
+ *      operand.
+ *    - Repeats the sweep with bits [31:16] of the selector set, which must not change the
+ *      result.
+ *
+ * Test source
+ * ------------------------
+ *    - unit/math/integer_intrinsics.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+HIP_TEST_CASE(Unit_Device___byte_perm_Exhaustive_Positive) {
+  const int pair = GENERATE(0, 1, 2, 3, 4, 5);
+  // Bits [31:16] of the selector are ignored, so OR-ing them in must leave the sweep unchanged.
+  const unsigned int selector_or = GENERATE(0x00000000u, 0xABCD0000u, 0xFFFF0000u);
+  CheckBytePermSweep(kBytePermOperands[pair][0], kBytePermOperands[pair][1], selector_or);
 }
