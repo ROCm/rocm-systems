@@ -581,6 +581,8 @@ public:
 
   private:
     std::shared_ptr<KfdProcess> process_;
+    // Match the lock order of KFD allocation and grant updates.
+    std::unique_lock<std::mutex> alloc_lock_;
     KfdProcess::PageTableTransaction transaction_;
   };
 

@@ -4965,7 +4965,49 @@ if(RJ_ENABLE_HIP_TESTS)
         )
 
         # --- RCCL collective test ---
-        if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        # Split TheRock wheels can install the RCCL host library without its GPU
+        # code. In that case the first collective fails even though HIP and RCCL
+        # initialization succeed. Check the SDK's default archive locations when
+        # the library refers to those archives and the caller has not supplied
+        # an explicit search path.
+        set(RJ_RCCL_HAS_GFX950_DEVICE_CODE TRUE)
+        if(
+            RCCL_LIB
+            AND RJ_HIP_RUNTIME_SUPPORTS_GFX950
+            AND "$ENV{ROCM_KPACK_PATH}" STREQUAL ""
+            AND "$ENV{ROCM_KPACK_PATH_PREFIX}" STREQUAL ""
+        )
+            file(
+                STRINGS "${RCCL_LIB}"
+                _rj_rccl_archive_ref
+                LIMIT_COUNT 1
+                REGEX "rccl_lib_@GFXARCH@[.]kpack"
+            )
+            if(_rj_rccl_archive_ref)
+                get_filename_component(_rj_rccl_lib_dir "${RCCL_LIB}" DIRECTORY)
+                file(
+                    GLOB _rj_rccl_archives
+                    LIST_DIRECTORIES false
+                    "${_rj_rccl_lib_dir}/../.kpack/rccl_lib_*.kpack"
+                    "${_rj_rccl_lib_dir}/.kpack/rccl_lib_*.kpack"
+                )
+                list(
+                    FILTER _rj_rccl_archives
+                    INCLUDE
+                    REGEX
+                        "/rccl_lib_(gfx950|gfx9-4-generic)(:sramecc[+])?(:xnack-)?[.]kpack$"
+                )
+                if(NOT _rj_rccl_archives)
+                    set(RJ_RCCL_HAS_GFX950_DEVICE_CODE FALSE)
+                endif()
+            endif()
+        endif()
+
+        if(
+            RCCL_LIB
+            AND RJ_HIP_RUNTIME_SUPPORTS_GFX950
+            AND RJ_RCCL_HAS_GFX950_DEVICE_CODE
+        )
             rj_add_hip_test(
                 hip_rccl_test
                 ARCH gfx950
@@ -4996,10 +5038,15 @@ if(RJ_ENABLE_HIP_TESTS)
                 )
             endforeach()
             message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
-        elseif(RCCL_LIB)
+        elseif(RCCL_LIB AND NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             message(
                 STATUS
                 "RCCL collective test disabled (libamdhip64 does not advertise gfx950 support)"
+            )
+        elseif(RCCL_LIB)
+            message(
+                STATUS
+                "RCCL collective test disabled (install the gfx950 device package for this SDK)"
             )
         else()
             message(STATUS "RCCL collective test disabled (librccl not found)")
