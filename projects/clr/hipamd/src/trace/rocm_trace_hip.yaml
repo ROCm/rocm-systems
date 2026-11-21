@@ -1,0 +1,579 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# rocm_hip TraceLogging probes: the configuration of shared/rocm-trace/scripts/rocm_trace_gen.py
+# for the HIP dispatch tables. Every table entry is traced; this file lists only what the C types
+# cannot say. After editing it, or when hip_api_trace.hpp changes, regenerate hip_trace_probes.h
+# and .cpp in this directory (see README.md here) and commit them with the change.
+#
+# Outputs (out) are the parameters the public headers document as [out] or [in,out]
+# (hip_runtime_api.h and the other public headers), recorded on exit after the call succeeds.
+# The CLR owners review this list: an entry belongs here only if the implementation writes it on
+# every success path. Documented outputs the generator cannot record are listed at the end, with
+# the reason.
+#
+# strings: char-pointer outputs and results recorded as text (const char* inputs always are).
+# uncapped: kernel names, recorded whole; other strings are capped at ROCM_TRACE_STRING_CAP bytes.
+# HIP has no ALLOC keyword entries: allocations are traced through the HSA calls nested in them
+# (memory-tracing design, MEM-HLD-03).
+
+version: 1
+provider: rocm_hip
+output_name: hip_trace_probes
+includes:
+- hip/hip_runtime.h
+- hip/hip_deprecated.h
+- hip/amd_detail/amd_hip_gl_interop.h
+- hip/amd_detail/hip_api_trace.hpp
+tables:
+- name: HipDispatchTable
+  size_member: size
+- name: HipCompilerDispatchTable
+  size_member: size
+success:
+  hipError_t: hipSuccess
+defaults:
+  level: information
+capture_level: rocm_hip_trace_capture
+
+apis:
+  __hipPopCallConfiguration:
+    out: [blockDim, gridDim, sharedMem, stream]
+  __hipRegisterFunction:
+    # Both are the kernel's mangled name; deviceFunction is declared char* (not const) but is
+    # text. Kernel names are recorded whole (RC-GEN-8).
+    strings: [deviceFunction]
+    uncapped: [deviceFunction, deviceName]
+  hipApiName:
+    strings: [result]
+  hipArray3DCreate:
+    out: [array]
+  hipArray3DGetDescriptor:
+    out: [pArrayDescriptor]
+  hipArrayCreate:
+    out: [pHandle]
+  hipArrayGetDescriptor:
+    out: [pArrayDescriptor]
+  hipArrayGetInfo:
+    out: [desc, extent, flags]
+  hipCreateSurfaceObject:
+    out: [pSurfObject]
+  hipCreateTextureObject:
+    out: [pTexObject]
+  hipCtxCreate:
+    out: [ctx]
+  hipCtxGetApiVersion:
+    out: [apiVersion]
+  hipCtxGetCacheConfig:
+    out: [cacheConfig]
+  hipCtxGetCurrent:
+    out: [ctx]
+  hipCtxGetDevice:
+    out: [device]
+  hipCtxGetFlags:
+    out: [flags]
+  hipCtxGetSharedMemConfig:
+    out: [pConfig]
+  hipCtxPopCurrent:
+    out: [ctx]
+  hipDevResourceGenerateDesc:
+    out: [phDesc]
+  hipDevSmResourceSplit:
+    out: [arg_result]
+  hipDevSmResourceSplitByCount:
+    out: [arg_result]
+  hipDeviceCanAccessPeer:
+    out: [canAccessPeer]
+  hipDeviceComputeCapability:
+    out: [major, minor]
+  hipDeviceGet:
+    out: [device]
+  hipDeviceGetAttribute:
+    out: [pi]
+  hipDeviceGetByPCIBusId:
+    out: [device]
+  hipDeviceGetCacheConfig:
+    out: [cacheConfig]
+  hipDeviceGetDefaultMemPool:
+    out: [mem_pool]
+  hipDeviceGetDevResource:
+    out: [resource]
+  hipDeviceGetExecutionCtx:
+    out: [ctx]
+  hipDeviceGetLimit:
+    out: [pValue]
+  hipDeviceGetLuid:
+    out: [deviceNodeMask]
+  hipDeviceGetMemPool:
+    out: [mem_pool]
+  hipDeviceGetName:
+    out: [name]
+    strings: [name]
+  hipDeviceGetP2PAttribute:
+    out: [value]
+  hipDeviceGetPCIBusId:
+    out: [pciBusId]
+    strings: [pciBusId]
+  hipDeviceGetSharedMemConfig:
+    out: [pConfig]
+  hipDeviceGetStreamPriorityRange:
+    out: [greatestPriority, leastPriority]
+  hipDeviceGetTexture1DLinearMaxWidth:
+    out: [max_width]
+  hipDeviceGetUuid:
+    out: [uuid]
+  hipDevicePrimaryCtxGetState:
+    out: [active, flags]
+  hipDevicePrimaryCtxRetain:
+    out: [pctx]
+  hipDeviceTotalMem:
+    out: [bytes]
+  hipDriverGetVersion:
+    out: [driverVersion]
+  hipDrvGetErrorName:
+    out: [errorString]
+  hipDrvGetErrorString:
+    out: [errorString]
+  hipDrvGraphAddMemFreeNode:
+    out: [phGraphNode]
+  hipDrvGraphAddMemcpyNode:
+    out: [phGraphNode]
+  hipDrvGraphAddMemsetNode:
+    out: [phGraphNode]
+  hipDrvGraphMemcpyNodeGetParams:
+    out: [nodeParams]
+  hipDrvGraphMemcpyNodeSetParams:
+    out: [nodeParams]
+  hipDrvPointerGetAttributes:
+    out: [data]
+  hipEventCreate:
+    out: [event]
+  hipEventCreateWithFlags:
+    out: [event]
+  hipEventElapsedTime:
+    out: [ms]
+  hipExecutionCtxGetDevResource:
+    out: [resource]
+  hipExecutionCtxGetDevice:
+    out: [device]
+  hipExecutionCtxGetId:
+    out: [ctxId]
+  hipExecutionCtxStreamCreate:
+    out: [stream]
+  hipExtGetLinkTypeAndHopCount:
+    out: [hopcount, linktype]
+  hipExtMallocWithFlags:
+    out: [ptr]
+  hipExtStreamCreateWithCUMask:
+    out: [stream]
+  hipExtStreamGetCUMask:
+    out: [cuMask]
+  hipExternalMemoryGetMappedBuffer:
+    out: [devPtr]
+  hipExternalMemoryGetMappedMipmappedArray:
+    out: [mipmap]
+  hipFuncGetAttribute:
+    out: [value]
+  hipFuncGetAttributes:
+    out: [attr]
+  hipGLGetDevices:
+    out: [pHipDeviceCount, pHipDevices]
+  hipGetDevice:
+    out: [deviceId]
+  hipGetDeviceCount:
+    out: [count]
+  hipGetDeviceFlags:
+    out: [flags]
+  hipGetDriverEntryPoint:
+    out: [driverStatus, funcPtr]
+  hipGetErrorName:
+    strings: [result]
+  hipGetErrorString:
+    strings: [result]
+  hipGetFuncBySymbol:
+    out: [functionPtr]
+  hipGetMipmappedArrayLevel:
+    out: [levelArray]
+  hipGetProcAddress:
+    out: [pfn, symbolStatus]
+  hipGetSymbolAddress:
+    out: [devPtr]
+  hipGetSymbolSize:
+    out: [size]
+  hipGetTextureObjectResourceViewDesc:
+    out: [pResViewDesc]
+  hipGetTextureObjectTextureDesc:
+    out: [pTexDesc]
+  hipGetTextureReference:
+    out: [texref]
+  hipGraphAddBatchMemOpNode:
+    out: [phGraphNode]
+  hipGraphAddChildGraphNode:
+    out: [pGraphNode]
+  hipGraphAddEmptyNode:
+    out: [pGraphNode]
+  hipGraphAddEventRecordNode:
+    out: [pGraphNode]
+  hipGraphAddEventWaitNode:
+    out: [pGraphNode]
+  hipGraphAddExternalSemaphoresSignalNode:
+    out: [pGraphNode]
+  hipGraphAddExternalSemaphoresWaitNode:
+    out: [pGraphNode]
+  hipGraphAddHostNode:
+    out: [pGraphNode]
+  hipGraphAddKernelNode:
+    out: [pGraphNode]
+  hipGraphAddMemAllocNode:
+    out: [pGraphNode, pNodeParams]
+  hipGraphAddMemFreeNode:
+    out: [pGraphNode]
+  hipGraphAddMemcpyNode:
+    out: [pGraphNode]
+  hipGraphAddMemcpyNode1D:
+    out: [pGraphNode]
+  hipGraphAddMemcpyNodeFromSymbol:
+    out: [pGraphNode]
+  hipGraphAddMemcpyNodeToSymbol:
+    out: [pGraphNode]
+  hipGraphAddMemsetNode:
+    out: [pGraphNode]
+  hipGraphAddNode:
+    out: [pGraphNode]
+  hipGraphChildGraphNodeGetGraph:
+    out: [pGraph]
+  hipGraphClone:
+    out: [pGraphClone]
+  hipGraphCreate:
+    out: [pGraph]
+  hipGraphEventRecordNodeGetEvent:
+    out: [event_out]
+  hipGraphEventWaitNodeGetEvent:
+    out: [event_out]
+  hipGraphExecGetFlags:
+    out: [flags]
+  hipGraphExternalSemaphoresSignalNodeGetParams:
+    out: [params_out]
+  hipGraphExternalSemaphoresWaitNodeGetParams:
+    out: [params_out]
+  hipGraphGetEdges:
+    out: [from, numEdges, to]
+  hipGraphGetNodes:
+    out: [nodes, numNodes]
+  hipGraphGetRootNodes:
+    out: [pNumRootNodes, pRootNodes]
+  hipGraphHostNodeGetParams:
+    out: [pNodeParams]
+  hipGraphInstantiate:
+    out: [pErrorNode, pGraphExec]
+  hipGraphInstantiateWithFlags:
+    out: [pGraphExec]
+  hipGraphInstantiateWithParams:
+    out: [pGraphExec]
+  hipGraphKernelNodeGetParams:
+    out: [pNodeParams]
+  hipGraphMemAllocNodeGetParams:
+    out: [pNodeParams]
+  hipGraphMemcpyNodeGetParams:
+    out: [pNodeParams]
+  hipGraphMemsetNodeGetParams:
+    out: [pNodeParams]
+  hipGraphNodeFindInClone:
+    out: [pNode]
+  hipGraphNodeGetDependencies:
+    out: [pDependencies, pNumDependencies]
+  hipGraphNodeGetDependentNodes:
+    out: [pDependentNodes, pNumDependentNodes]
+  hipGraphNodeGetEnabled:
+    out: [isEnabled]
+  hipGraphNodeGetType:
+    out: [pType]
+  hipGraphicsGLRegisterBuffer:
+    out: [resource]
+  hipGraphicsGLRegisterImage:
+    out: [resource]
+  hipGraphicsResourceGetMappedPointer:
+    out: [devPtr, size]
+  hipGraphicsSubResourceGetMappedArray:
+    out: [array]
+  hipGreenCtxCreate:
+    out: [ctx]
+  hipHostAlloc:
+    out: [ptr]
+  hipHostGetDevicePointer:
+    out: [devPtr]
+  hipHostGetFlags:
+    out: [flagsPtr]
+  hipHostMalloc:
+    out: [ptr]
+  hipImportExternalMemory:
+    out: [extMem_out]
+  hipImportExternalSemaphore:
+    out: [extSem_out]
+  hipIpcGetEventHandle:
+    out: [handle]
+  hipIpcOpenEventHandle:
+    out: [event]
+  hipKernelGetAttribute:
+    out: [pi]
+  hipKernelGetFunction:
+    out: [pFunc]
+  hipKernelGetLibrary:
+    out: [library]
+  hipKernelGetName:
+    out: [name]
+  hipKernelGetParamInfo:
+    out: [paramOffset, paramSize]
+  hipKernelNameRef:
+    strings: [result]
+    uncapped: [result]
+  hipKernelNameRefByPtr:
+    strings: [result]
+    uncapped: [result]
+  hipLibraryEnumerateKernels:
+    out: [kernels]
+  hipLibraryGetGlobal:
+    out: [bytes, dptr]
+  hipLibraryGetKernel:
+    out: [pKernel]
+    uncapped: [name]
+  hipLibraryGetKernelCount:
+    out: [count]
+  hipLibraryGetManaged:
+    out: [bytes, dptr]
+  hipLibraryGetModule:
+    out: [pMod]
+  hipLibraryLoadData:
+    out: [library]
+  hipLibraryLoadFromFile:
+    out: [library]
+  hipLinkComplete:
+    out: [hipBinOut, sizeOut]
+  hipLinkCreate:
+    out: [stateOut]
+  hipMalloc:
+    out: [ptr]
+  hipMalloc3D:
+    out: [pitchedDevPtr]
+  hipMalloc3DArray:
+    out: [array]
+  hipMallocArray:
+    out: [array]
+  hipMallocAsync:
+    out: [dev_ptr]
+  hipMallocFromPoolAsync:
+    out: [dev_ptr]
+  hipMallocHost:
+    out: [ptr]
+  hipMallocManaged:
+    out: [dev_ptr]
+  hipMallocMipmappedArray:
+    out: [mipmappedArray]
+  hipMallocPitch:
+    out: [pitch, ptr]
+  hipMemAddressReserve:
+    out: [ptr]
+  hipMemAllocHost:
+    out: [ptr]
+  hipMemAllocPitch:
+    out: [dptr, pitch]
+  hipMemCreate:
+    out: [handle]
+  hipMemGetAccess:
+    out: [flags]
+  hipMemGetAddressRange:
+    out: [pbase, psize]
+  hipMemGetAllocationGranularity:
+    out: [granularity]
+  hipMemGetAllocationPropertiesFromHandle:
+    out: [prop]
+  hipMemGetDefaultMemPool:
+    out: [memPool]
+  hipMemGetInfo:
+    out: [free, total]
+  hipMemImportFromShareableHandle:
+    out: [handle]
+  hipMemPoolCreate:
+    out: [mem_pool]
+  hipMemPoolExportPointer:
+    out: [export_data]
+  hipMemPoolGetAccess:
+    out: [flags]
+  hipMemPoolImportFromShareableHandle:
+    out: [mem_pool]
+  hipMemPoolImportPointer:
+    out: [dev_ptr]
+  hipMemPtrGetInfo:
+    out: [size]
+  hipMemRangeGetAttributes:
+    out: [data]
+  hipMemRetainAllocationHandle:
+    out: [handle]
+  hipMemcpyBatchAsync:
+    out: [dsts]
+  hipMipmappedArrayCreate:
+    out: [pHandle]
+  hipMipmappedArrayDestroy:
+    out: [hMipmappedArray]
+  hipMipmappedArrayGetLevel:
+    out: [hMipMappedArray]
+  hipMipmappedArrayGetMemoryRequirements:
+    out: [memoryRequirements]
+  hipModuleEnumerateFunctions:
+    out: [functions]
+  hipModuleGetFunction:
+    out: [function]
+    uncapped: [kname]
+  hipModuleGetFunctionCount:
+    out: [count]
+  hipModuleGetGlobal:
+    out: [bytes, dptr]
+  hipModuleGetTexRef:
+    out: [texRef]
+  hipModuleLoad:
+    out: [module]
+  hipModuleLoadData:
+    out: [module]
+  hipModuleLoadDataEx:
+    out: [module]
+  hipModuleLoadFatBinary:
+    out: [module]
+  hipModuleOccupancyMaxActiveBlocksPerMultiprocessor:
+    out: [numBlocks]
+  hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:
+    out: [numBlocks]
+  hipModuleOccupancyMaxPotentialBlockSize:
+    out: [blockSize, gridSize]
+  hipModuleOccupancyMaxPotentialBlockSizeWithFlags:
+    out: [blockSize, gridSize]
+  hipOccupancyAvailableDynamicSMemPerBlock:
+    out: [dynamicSmemSize]
+  hipOccupancyMaxActiveBlocksPerMultiprocessor:
+    out: [numBlocks]
+  hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags:
+    out: [numBlocks]
+  hipOccupancyMaxActiveClusters:
+    out: [numClusters]
+  hipOccupancyMaxPotentialBlockSize:
+    out: [blockSize, gridSize]
+  hipOccupancyMaxPotentialClusterSize:
+    out: [clusterSize]
+  hipPointerGetAttributes:
+    out: [attributes]
+  hipRuntimeGetVersion:
+    out: [runtimeVersion]
+  hipStreamCreate:
+    out: [stream]
+  hipStreamCreateWithFlags:
+    out: [stream]
+  hipStreamCreateWithPriority:
+    out: [stream]
+  hipStreamEndCapture:
+    out: [pGraph]
+  hipStreamGetCaptureInfo:
+    out: [pCaptureStatus, pId]
+  hipStreamGetCaptureInfo_v2:
+    out: [captureStatus_out, dependencies_out, graph_out, id_out, numDependencies_out]
+  hipStreamGetDevResource:
+    out: [resource]
+  hipStreamGetDevice:
+    out: [device]
+  hipStreamGetFlags:
+    out: [flags]
+  hipStreamGetPriority:
+    out: [priority]
+  hipStreamIsCapturing:
+    out: [pCaptureStatus]
+  hipTexObjectCreate:
+    out: [pTexObject]
+  hipTexObjectGetResourceViewDesc:
+    out: [pResViewDesc]
+  hipTexObjectGetTextureDesc:
+    out: [pTexDesc]
+  hipTexRefGetAddress:
+    out: [dev_ptr]
+  hipTexRefGetAddressMode:
+    out: [pam]
+  hipTexRefGetBorderColor:
+    out: [pBorderColor]
+  hipTexRefGetFilterMode:
+    out: [pfm]
+  hipTexRefGetFlags:
+    out: [pFlags]
+  hipTexRefGetFormat:
+    out: [pFormat, pNumChannels]
+  hipTexRefGetMaxAnisotropy:
+    out: [pmaxAnsio]
+  hipTexRefGetMipMappedArray:
+    out: [pArray]
+  hipTexRefGetMipmapFilterMode:
+    out: [pfm]
+  hipTexRefGetMipmapLevelBias:
+    out: [pbias]
+  hipTexRefGetMipmapLevelClamp:
+    out: [pmaxMipmapLevelClamp, pminMipmapLevelClamp]
+  hipTexRefSetAddress:
+    out: [ByteOffset]
+  hipUserObjectCreate:
+    out: [object_out]
+
+# Documented as outputs, not recorded as outputs (the pointer is recorded on enter):
+#   hipDeviceGetGraphMemAttribute.value: is not a pointer to a complete type
+#   hipDeviceGetLuid.luid: 8 bytes of binary LUID, not text
+#   hipExecutionCtxRecordEvent.event: points to a type with no field mapping: struct 'ihipEvent_t' (incomplete, or nested too deeply)
+#   hipGetChannelDesc.array: points to a type with no field mapping: struct 'const hipArray' (incomplete, or nested too deeply)
+#   hipGetTextureObjectResourceDesc.pResDesc: points to a type with no field mapping: struct 'hipResourceDesc' (an unnamed nested union)
+#   hipGraphInstantiate.bufferSize: is not a pointer to a complete type
+#   hipGraphInstantiate.pLogBuffer: not written on every success path; may be shorter than the string cap
+#   hipGraphKernelNodeCopyAttributes.hDst: points to a type with no field mapping: struct 'hipGraphNode' (incomplete, or nested too deeply)
+#   hipGraphMemFreeNodeGetParams.dev_ptr: is not a pointer to a complete type
+#   hipHostRegister.hostPtr: is not a pointer to a complete type
+#   hipMemExportToShareableHandle.shareableHandle: is not a pointer to a complete type
+#   hipMemGetHandleForAddressRange.handle: is not a pointer to a complete type
+#   hipMemPoolExportToShareableHandle.shared_handle: is not a pointer to a complete type
+#   hipMemRangeGetAttribute.data: is not a pointer to a complete type
+#   hipMemcpy.dst: is not a pointer to a complete type
+#   hipMemcpy2D.dst: is not a pointer to a complete type
+#   hipMemcpy2DArrayToArray.dst: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpy2DAsync.dst: is not a pointer to a complete type
+#   hipMemcpy2DFromArray.dst: is not a pointer to a complete type
+#   hipMemcpy2DFromArrayAsync.dst: is not a pointer to a complete type
+#   hipMemcpy2DToArray.dst: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpy2DToArrayAsync.dst: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpyAsync.dst: is not a pointer to a complete type
+#   hipMemcpyAtoA.dstArray: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpyAtoD.dstDevice: is not a pointer to a complete type
+#   hipMemcpyAtoH.dst: is not a pointer to a complete type
+#   hipMemcpyAtoHAsync.dstHost: is not a pointer to a complete type
+#   hipMemcpyDtoA.dstArray: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpyDtoD.dst: is not a pointer to a complete type
+#   hipMemcpyDtoDAsync.dst: is not a pointer to a complete type
+#   hipMemcpyDtoH.dst: is not a pointer to a complete type
+#   hipMemcpyDtoHAsync.dst: is not a pointer to a complete type
+#   hipMemcpyFromArray.dst: is not a pointer to a complete type
+#   hipMemcpyFromSymbol.dst: is not a pointer to a complete type
+#   hipMemcpyFromSymbolAsync.dst: is not a pointer to a complete type
+#   hipMemcpyHtoA.dstArray: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpyHtoAAsync.dstArray: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpyHtoD.dst: is not a pointer to a complete type
+#   hipMemcpyHtoDAsync.dst: is not a pointer to a complete type
+#   hipMemcpyPeer.dst: is not a pointer to a complete type
+#   hipMemcpyPeerAsync.dst: is not a pointer to a complete type
+#   hipMemcpyToArray.dst: points to a type with no field mapping: struct 'hipArray' (incomplete, or nested too deeply)
+#   hipMemcpyToSymbol.symbol: is not a pointer to a complete type
+#   hipMemcpyToSymbolAsync.symbol: is not a pointer to a complete type
+#   hipMemcpyWithStream.dst: is not a pointer to a complete type
+#   hipMemset.dst: is not a pointer to a complete type
+#   hipMemset2D.dst: is not a pointer to a complete type
+#   hipMemsetAsync.dst: is not a pointer to a complete type
+#   hipMemsetD16.dest: is not a pointer to a complete type
+#   hipMemsetD16Async.dest: is not a pointer to a complete type
+#   hipMemsetD32.dest: is not a pointer to a complete type
+#   hipMemsetD32Async.dst: is not a pointer to a complete type
+#   hipMemsetD8.dest: is not a pointer to a complete type
+#   hipMemsetD8Async.dest: is not a pointer to a complete type
+#   hipMipmappedArrayGetLevel.level: is not a pointer to a complete type
+#   hipPointerGetAttribute.data: is not a pointer to a complete type
+#   hipTexObjectGetResourceDesc.pResDesc: points to a type with no field mapping: struct 'HIP_RESOURCE_DESC' (an unnamed nested union)
+#   hipTexRefSetMaxAnisotropy.maxAniso: is not a pointer to a complete type

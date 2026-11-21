@@ -209,6 +209,13 @@ add_subdirectory(hiprtc)
 # HRR in-tree capture layer
 add_subdirectory(hrr)
 
+# rocm_hip API events: TraceLogging probes in the dispatch tables (trace/README.md). Off until
+# the TraceLogging and liblttng-ust packaging for Linux builds is settled.
+option(HIP_ENABLE_ROCM_TRACE "Build the rocm_hip TraceLogging API probes into amdhip64" OFF)
+if(HIP_ENABLE_ROCM_TRACE)
+  add_subdirectory(trace)
+endif()
+
 #############################
 # Profiling API support
 #############################
