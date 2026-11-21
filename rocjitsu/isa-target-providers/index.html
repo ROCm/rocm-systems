@@ -1738,28 +1738,31 @@ GPU metadata, and decoder factory are all static:</p>
 
 <span class="kr">inline</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="n">IsaTargetDescriptor</span><span class="w"> </span><span class="n">kTargetDescriptor</span><span class="p">{</span>
 <span class="w">    </span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"vendor-next"</span><span class="p">,</span>
-<span class="w">    </span><span class="p">.</span><span class="n">architecture_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ROCJITSU_CODE_ARCH_VENDOR_NEXT</span><span class="p">,</span>
-<span class="w">    </span><span class="p">.</span><span class="n">gpu_targets</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kGpuTargets</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">family</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IsaFamily</span><span class="o">::</span><span class="n">VendorNext</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">bindings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kGpuTargets</span><span class="p">,</span>
 <span class="w">    </span><span class="p">.</span><span class="n">decoder_factory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">create_target_decoder</span><span class="p">,</span>
 <span class="w">    </span><span class="p">.</span><span class="n">supports_execution</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span>
 <span class="p">};</span>
 </code></pre></div>
 <p>The canonical string ID and aliases identify the target within the selected
-registry. The optional architecture and GPU bindings connect it to rocjitsu's
-closed public enums, offload-bundle processor names, and ELF machine values.</p>
+registry. The internal family selects shared implementation traits. Concrete bindings
+connect canonical names to the public target enum and, when applicable,
+offload-bundle processor names and AMDGPU ELF machine values. An ELF machine
+value of zero means that the binding has no AMDGPU code-object identity, as
+for RV64I; code-object lookups skip these bindings.</p>
 <p>One ISA family may bind multiple concrete targets to a variant-aware decoder
 factory. Each binding carries immutable instruction-feature, target-behavior,
 and execution capabilities, and the descriptor names an explicit
 architecture-only default:</p>
 <div class="highlight"><pre><span></span><code><span class="n">std</span><span class="o">::</span><span class="n">unique_ptr</span><span class="o">&lt;</span><span class="n">rocjitsu</span><span class="o">::</span><span class="n">Decoder</span><span class="o">&gt;</span>
-<span class="n">create_variant_decoder</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">IsaGpuTargetDescription</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gpu_target</span><span class="p">);</span>
+<span class="n">create_variant_decoder</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">IsaTargetBinding</span><span class="w"> </span><span class="o">&amp;</span><span class="n">gpu_target</span><span class="p">);</span>
 
 <span class="kr">inline</span><span class="w"> </span><span class="k">constexpr</span><span class="w"> </span><span class="n">IsaTargetDescriptor</span><span class="w"> </span><span class="n">kTargetDescriptor</span><span class="p">{</span>
 <span class="w">    </span><span class="p">.</span><span class="n">id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"vendor-family"</span><span class="p">,</span>
 <span class="w">    </span><span class="p">.</span><span class="n">aliases</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kTargetAliases</span><span class="p">,</span>
-<span class="w">    </span><span class="p">.</span><span class="n">architecture_id</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ROCJITSU_CODE_ARCH_VENDOR_FAMILY</span><span class="p">,</span>
-<span class="w">    </span><span class="p">.</span><span class="n">gpu_targets</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kGpuTargets</span><span class="p">,</span>
-<span class="w">    </span><span class="p">.</span><span class="n">default_gpu_target</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ROCJITSU_CODE_TARGET_VENDOR_BASE</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">family</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IsaFamily</span><span class="o">::</span><span class="n">VendorFamily</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">bindings</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">kGpuTargets</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">default_target</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ROCJITSU_CODE_TARGET_VENDOR_BASE</span><span class="p">,</span>
 <span class="w">    </span><span class="p">.</span><span class="n">decoder_factory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">create_target_decoder</span><span class="p">,</span>
 <span class="w">    </span><span class="p">.</span><span class="n">variant_decoder_factory</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">create_variant_decoder</span><span class="p">,</span>
 <span class="w">    </span><span class="p">.</span><span class="n">supports_execution</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">true</span><span class="p">,</span>
@@ -1815,7 +1818,7 @@ static constructors and <code>--whole-archive</code>. Removing a provider remove
 registry's direct dependency on its implementation.</p>
 <p>Exactly one registry composition may be linked into an executable or shared
 object because it defines that image's <code>default_isa_target_registry()</code> and
-enum-based decoder entry point.</p>
+decoder entry points.</p>
 <h2 id="querying-support">Querying support<a class="headerlink" href="#querying-support" title="Permanent link">&para;</a></h2>
 <p>The default registry is the C++ source of truth for the targets present in one
 linked image:</p>
@@ -1832,8 +1835,8 @@ linked image:</p>
 <p><code>targets()</code> enumerates descriptors in the provider order passed to
 <code>rj_add_isa_target_registry()</code>. Built-in provider lists preserve the order in
 which their CMake subdirectories register them. <code>find()</code> accepts a canonical
-ID, alias, integrated architecture enum, or integrated GPU target. Use
-<code>find_gpu_target()</code> when target-level capability or identity is required;
+ID, alias, internal ISA family, or public concrete target. Use
+<code>find_target()</code> when target-level capability or identity is required;
 family-level <code>supports_execution</code> does not imply that every concrete binding
 implements execution.</p>
 <p>Generated instruction-feature masks answer whether a concrete target may use
@@ -1885,8 +1888,9 @@ linked.</p>
 <ol>
 <li>Add the target description and provider source to the ISA implementation
    target.</li>
-<li>Add public architecture or GPU enum entries only when the public enum or
-   code-object APIs must address the target.</li>
+<li>Add a public target enum entry when the public enum or code-object APIs
+   must address the target. Extend the private ISA family only when a new
+   shared implementation is required.</li>
 <li>Select the provider in each executable or shared object that should contain
    it.</li>
 <li>Follow the existing <code>\NPI</code> markers for the remaining closed-world
