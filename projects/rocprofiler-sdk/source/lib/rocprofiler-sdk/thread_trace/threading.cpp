@@ -28,6 +28,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/shared_trace_resources.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -103,7 +104,7 @@ consumer_loop(
     auto& shared      = *parameters.shared;
     auto& slot        = shared.buffers[parameters.slot_index];
     auto& stopping    = shared.stopping;
-    auto  agent_id    = shared.queue->agent_id;
+    auto  agent_id    = CHECK_NOTNULL(shared.resources.get())->agent_id();
     auto  userdata    = parameters.userdata;
     auto  callback_fn = parameters.callback_fn;
 
@@ -160,10 +161,11 @@ producer_loop(
     CHECK_NOTNULL(parameters.copy_data_fn);
     CHECK_NOTNULL(parameters.submit_signal);
 
-    auto& queue       = *CHECK_NOTNULL(parameters.shared->queue);
+    auto& resources   = *CHECK_NOTNULL(parameters.shared->resources.get());
+    auto& queue       = resources.queue();
     auto& worker_flag = *CHECK_NOTNULL(parameters.producer_running);
 
-    const size_t buffer_size = queue.buffer_size;
+    const size_t buffer_size = parameters.active_buffer_size;
     auto&        buffers     = parameters.shared->buffers;
     const size_t num_buffers = parameters.shared->num_buffers;
     const auto   sqtt_bandwidth =
@@ -247,7 +249,9 @@ producer_loop(
         buffer.cv.notify_one();
     };
 
-    auto stop_trace = [&]() {
+    // An early exit is safe for reuse only after the last START has been stopped.
+    bool trace_may_be_running = true;
+    auto stop_trace           = [&]() {
         ROCP_INFO << "Stopping the trace";
         if(!att_queue_submit(
                queue, &parameters.control_packet->after_krn_pkt.at(0), &submit_signal))
@@ -257,6 +261,7 @@ producer_loop(
             return false;
         }
         signal_wait(submit_signal);
+        trace_may_be_running = false;
         return true;
     };
 
@@ -335,6 +340,7 @@ producer_loop(
     buffers_requiring_swap.reserve(buffer_packets.size());
 
     auto finish = common::scope_destructor{[&] {
+        if(trace_may_be_running) resources.disable_unretired_trace();
         // Wake consumers on every exit; they drain filled slots before returning.
         parameters.shared->stopping.store(true);
         for(size_t i = 0; i < num_buffers; i++)
@@ -525,6 +531,7 @@ producer_loop(
             iterate_trace();
             send_header();
 
+            trace_may_be_running = true;
             if(!parameters.restart_trace(parameters.control_packet)) return;
             any_full = false;
             // Read each restarted engine's clock after the next query or final stop.

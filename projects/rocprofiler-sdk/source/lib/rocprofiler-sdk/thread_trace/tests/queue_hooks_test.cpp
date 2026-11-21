@@ -169,29 +169,31 @@ TEST(ThreadTraceQueueHooks, StopContextInFlightCompletionRoutesViaHookPath)
     hsa::HookTestFakeQueue  fq(*att_agent, {.handle = 901});
     hsa::rocprofiler_packet pkt{};
     context::correlation_id corr_id{};
-    corr_id.internal = 42;
-    auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
-
-    hsa::inst_pkt_t inst_pkt;
-    bool            is_serialized = false;
+    corr_id.internal            = 42;
+    auto packet_data            = hsa::packet_data_t{};
+    packet_data.user_data.value = corr_id.internal;
+    auto& inst_pkt              = packet_data.instrumentation_packets;
     thread_trace::kernel_dispatch_phase_enter_hook(
-        fq, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
+        fq, pkt, 1, 1, &packet_data.user_data, {}, &corr_id, inst_pkt, packet_data.is_serialized);
 
     ASSERT_FALSE(inst_pkt.empty())
         << "kernel_dispatch_phase_enter_hook must inject ATT control packet";
     EXPECT_GE(tracer.pending_post_moves(), 1);
+    EXPECT_TRUE(packet_data.is_serialized);
 
     ASSERT_EQ(rocprofiler_stop_context(ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_FALSE(thread_trace::is_any_active());
+    const auto agent_id   = att_agent->get_rocp_agent()->id;
+    auto*      controller = hsa::get_queue_controller();
+    EXPECT_TRUE(controller->is_serialization_enabled(agent_id));
 
     auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
-    auto packet_data      = hsa::packet_data_t{};
-    packet_data.user_data = user_data;
-
     thread_trace::kernel_dispatch_phase_exit_hook(fq, pkt, sess, packet_data, inst_pkt, {});
 
     EXPECT_EQ(tracer.pending_post_moves(), 0)
         << "post_move_data must drain via kernel_dispatch_phase_exit_hook after stop_context";
+    inst_pkt.clear();
+    EXPECT_FALSE(controller->is_serialization_enabled(agent_id));
 
     registration::set_init_status(1);
     registration::finalize();
@@ -216,12 +218,11 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
 
     struct context_data
     {
-        rocprofiler_context_id_t                ctx       = {};
-        thread_trace::DispatchThreadTracer*     tracer    = nullptr;
-        std::unique_ptr<hsa::HookTestFakeQueue> queue     = {};
-        hsa::rocprofiler_packet                 pkt       = {};
-        rocprofiler_user_data_t                 user_data = {};
-        hsa::inst_pkt_t                         inst_pkt  = {};
+        rocprofiler_context_id_t                ctx      = {};
+        thread_trace::DispatchThreadTracer*     tracer   = nullptr;
+        std::unique_ptr<hsa::HookTestFakeQueue> queue    = {};
+        hsa::rocprofiler_packet                 pkt      = {};
+        hsa::packet_data_t                      dispatch = {};
     };
 
     auto make_context = [&](uint64_t queue_id) {
@@ -245,20 +246,19 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
 
         data.queue = std::make_unique<hsa::HookTestFakeQueue>(
             *att_agent, rocprofiler_queue_id_t{.handle = queue_id});
-        auto corr_id       = context::correlation_id{};
-        corr_id.internal   = static_cast<int64_t>(queue_id);
-        data.user_data     = rocprofiler_user_data_t{.value = corr_id.internal};
-        bool is_serialized = false;
+        auto corr_id                  = context::correlation_id{};
+        corr_id.internal              = static_cast<int64_t>(queue_id);
+        data.dispatch.user_data.value = corr_id.internal;
         thread_trace::kernel_dispatch_phase_enter_hook(*data.queue,
                                                        data.pkt,
                                                        1,
                                                        1,
-                                                       &data.user_data,
+                                                       &data.dispatch.user_data,
                                                        {},
                                                        &corr_id,
-                                                       data.inst_pkt,
-                                                       is_serialized);
-        EXPECT_FALSE(data.inst_pkt.empty());
+                                                       data.dispatch.instrumentation_packets,
+                                                       data.dispatch.is_serialized);
+        EXPECT_FALSE(data.dispatch.instrumentation_packets.empty());
 
         return data;
     };
@@ -271,11 +271,12 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
 
     auto sess_a = std::make_shared<hsa::queue_info_session_t>(
         hsa::queue_info_session_t{.queue = *ctx_a.queue});
-    auto packet_data_a      = hsa::packet_data_t{};
-    packet_data_a.user_data = ctx_a.user_data;
-
-    thread_trace::kernel_dispatch_phase_exit_hook(
-        *ctx_a.queue, ctx_a.pkt, sess_a, packet_data_a, ctx_a.inst_pkt, {});
+    thread_trace::kernel_dispatch_phase_exit_hook(*ctx_a.queue,
+                                                  ctx_a.pkt,
+                                                  sess_a,
+                                                  ctx_a.dispatch,
+                                                  ctx_a.dispatch.instrumentation_packets,
+                                                  {});
 
     EXPECT_EQ(ctx_a.tracer->pending_post_moves(), 0);
     EXPECT_EQ(ctx_b.tracer->pending_post_moves(), 1);
@@ -284,10 +285,12 @@ TEST(ThreadTraceQueueHooks, CompletionRoutingStaysWithTheProducingTracer)
 
     auto sess_b = std::make_shared<hsa::queue_info_session_t>(
         hsa::queue_info_session_t{.queue = *ctx_b.queue});
-    auto packet_data_b      = hsa::packet_data_t{};
-    packet_data_b.user_data = ctx_b.user_data;
-    thread_trace::kernel_dispatch_phase_exit_hook(
-        *ctx_b.queue, ctx_b.pkt, sess_b, packet_data_b, ctx_b.inst_pkt, {});
+    thread_trace::kernel_dispatch_phase_exit_hook(*ctx_b.queue,
+                                                  ctx_b.pkt,
+                                                  sess_b,
+                                                  ctx_b.dispatch,
+                                                  ctx_b.dispatch.instrumentation_packets,
+                                                  {});
     EXPECT_EQ(ctx_b.tracer->pending_post_moves(), 0);
 
     registration::set_init_status(1);
@@ -335,13 +338,12 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     hsa::HookTestFakeQueue  fq(*att_agent, {.handle = 902});
     hsa::rocprofiler_packet pkt{};
     context::correlation_id corr_id{};
-    corr_id.internal = 43;
-    auto user_data   = rocprofiler_user_data_t{.value = corr_id.internal};
-
-    hsa::inst_pkt_t inst_pkt;
-    bool            is_serialized = false;
+    corr_id.internal            = 43;
+    auto packet_data            = hsa::packet_data_t{};
+    packet_data.user_data.value = corr_id.internal;
+    auto& inst_pkt              = packet_data.instrumentation_packets;
     thread_trace::kernel_dispatch_phase_enter_hook(
-        fq, pkt, 1, 1, &user_data, {}, &corr_id, inst_pkt, is_serialized);
+        fq, pkt, 1, 1, &packet_data.user_data, {}, &corr_id, inst_pkt, packet_data.is_serialized);
 
     ASSERT_FALSE(inst_pkt.empty())
         << "kernel_dispatch_phase_enter_hook must inject ATT control packet";
@@ -352,24 +354,40 @@ TEST(ThreadTraceQueueHooks, CompletionAfterResourceDeinitStillDrains)
     // Tear down the agent map with the dispatch still outstanding.
     tracer.resource_deinit();
     EXPECT_TRUE(tracer.get_agents().empty());
+    auto late_ctx = rocprofiler_context_id_t{};
+    ASSERT_EQ(rocprofiler_create_context(&late_ctx), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_configure_device_thread_trace_service(
+                  late_ctx,
+                  att_agent->get_rocp_agent()->id,
+                  nullptr,
+                  0,
+                  [](rocprofiler_thread_trace_shader_data_t, rocprofiler_user_data_t) {},
+                  {}),
+              ROCPROFILER_STATUS_SUCCESS);
+    auto* late = context::get_mutable_registered_context(late_ctx);
+    ASSERT_TRUE(late && late->device_thread_trace);
+    late->device_thread_trace->resource_init();
+    ASSERT_FALSE(late->device_thread_trace->get_agents().empty());
+    EXPECT_EQ(rocprofiler_start_context(late_ctx), ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
+    int active = -1;
+    ASSERT_EQ(rocprofiler_context_is_active(late_ctx, &active), ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_EQ(active, 0);
 
     auto sess = std::make_shared<hsa::queue_info_session_t>(hsa::queue_info_session_t{.queue = fq});
-    auto packet_data      = hsa::packet_data_t{};
-    packet_data.user_data = user_data;
-
     thread_trace::kernel_dispatch_phase_exit_hook(fq, pkt, sess, packet_data, inst_pkt, {});
 
     EXPECT_EQ(tracer.pending_post_moves(), 0)
         << "a completion racing resource_deinit() must still drain post_move_data";
+    ASSERT_EQ(rocprofiler_start_context(late_ctx), ROCPROFILER_STATUS_SUCCESS);
+    ASSERT_EQ(rocprofiler_stop_context(late_ctx), ROCPROFILER_STATUS_SUCCESS);
 
     registration::set_init_status(1);
     registration::finalize();
     context::pop_client(1);
 }
 
-// stop_context() clears enabled before it drops the serialization reference, so a dispatch that
-// reaches pre_kernel_call() in between must keep the SERIALIZE_ALL request, like any untraced
-// dispatch. This asserts the request a disabled tracer returns.
+// A dispatch that reaches a stopping tracer must keep the SERIALIZE_ALL request, like any
+// untraced dispatch. This asserts the request a disabled tracer returns.
 TEST(ThreadTraceQueueHooks, StoppingContextKeepsSerializeAllRequest)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);

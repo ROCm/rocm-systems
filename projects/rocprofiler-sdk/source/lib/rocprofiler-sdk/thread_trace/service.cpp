@@ -176,8 +176,7 @@ rocprofiler_configure_dispatch_thread_trace_service(
     // Multi-buffer mode not supported in dispatch mode
     if(pack.num_buffers > 1) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    ctx->dispatch_thread_trace->add_agent(agent_id, pack);
-    return ROCPROFILER_STATUS_SUCCESS;
+    return ctx->dispatch_thread_trace->add_agent(agent_id, std::move(pack));
 }
 
 rocprofiler_status_t
@@ -221,7 +220,6 @@ rocprofiler_configure_device_thread_trace_service(
         if(!aqlprofile_dl || !aqlprofile_dl->valid()) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     }
 
-    ctx->device_thread_trace->add_agent(agent_id, pack);
-    return ROCPROFILER_STATUS_SUCCESS;
+    return ctx->device_thread_trace->add_agent(agent_id, std::move(pack));
 }
 }
