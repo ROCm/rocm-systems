@@ -61,7 +61,62 @@ __device__ inline void inner_gemm(uint32_t sub_m_start,
                                   const _Float16* __restrict__ b,
                                   _Float16* __restrict__ d)
 {
-#if !__has_builtin(__builtin_amdgcn_wmma_f32_16x16x32_f16)
+    if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_wmma_f32_16x16x32_f16)) {
+        Floatx8 frag_acc = {};
+
+        const uint32_t major_wave = __builtin_amdgcn_readfirstlane(threadIdx.x / kWaveSize);
+        const uint32_t minor_wave = threadIdx.y;
+
+        const uint32_t wave_row = major_wave * kWmmaM + sub_m_start;
+        const uint32_t wave_col = minor_wave * kWmmaN + sub_n_start;
+
+        const bool full_block =
+            (sub_m_start + kBlockM <= m) && (sub_n_start + kBlockN <= n) && (k >= kBlockK);
+
+        if (!full_block) {
+            return;
+        }
+
+        const uint32_t k_tiles = k / kBlockK;
+        uint32_t k_iter        = 0;
+
+        Float16x16 reg_a = {};
+        Float16x16 reg_b = {};
+
+        load_row_major(reg_a, wave_row, 0, k, a);
+        load_row_major(reg_b, wave_col, 0, k, b);
+
+        if (k_tiles > 1) {
+            do {
+                const uint32_t next_k = (k_iter + 1) * kBlockK;
+
+                Float16x16 next_a = {};
+                Float16x16 next_b = {};
+
+                load_row_major(next_a, wave_row, next_k, k, a);
+                load_row_major(next_b, wave_col, next_k, k, b);
+
+                __builtin_amdgcn_sched_barrier(0);
+                frag_acc = __builtin_amdgcn_wmma_f32_16x16x32_f16(
+                    0, reg_b, 0, reg_a, 0, frag_acc, 0, 0);
+                __builtin_amdgcn_sched_barrier(0);
+
+                reg_a = next_a;
+                reg_b = next_b;
+                ++k_iter;
+            } while (k_iter < (k_tiles - 1));
+        }
+
+        frag_acc = __builtin_amdgcn_wmma_f32_16x16x32_f16(0, reg_b, 0, reg_a, 0, frag_acc, 0, 0);
+
+        Float16x8 frag_d = {};
+        for (int i = 0; i < 8; ++i) {
+            frag_d[i] = static_cast<_Float16>(frag_acc[i]);
+        }
+
+        write_output(frag_d, wave_row, wave_col, n, d);
+        return;
+    }
     (void)sub_m_start;
     (void)sub_n_start;
     (void)m;
@@ -72,62 +127,6 @@ __device__ inline void inner_gemm(uint32_t sub_m_start,
     if (threadIdx.x == 0 && blockIdx.x == 0 && blockIdx.y == 0) {
         d[0] = _Float16(0);
     }
-    return;
-#else
-    Floatx8 frag_acc = {};
-
-    const uint32_t major_wave = __builtin_amdgcn_readfirstlane(threadIdx.x / kWaveSize);
-    const uint32_t minor_wave = threadIdx.y;
-
-    const uint32_t wave_row = major_wave * kWmmaM + sub_m_start;
-    const uint32_t wave_col = minor_wave * kWmmaN + sub_n_start;
-
-    const bool full_block =
-        (sub_m_start + kBlockM <= m) && (sub_n_start + kBlockN <= n) && (k >= kBlockK);
-
-    if (!full_block) {
-        return;
-    }
-
-    const uint32_t k_tiles = k / kBlockK;
-    uint32_t k_iter        = 0;
-
-    Float16x16 reg_a = {};
-    Float16x16 reg_b = {};
-
-    load_row_major(reg_a, wave_row, 0, k, a);
-    load_row_major(reg_b, wave_col, 0, k, b);
-
-    if (k_tiles > 1) {
-        do {
-            const uint32_t next_k = (k_iter + 1) * kBlockK;
-
-            Float16x16 next_a = {};
-            Float16x16 next_b = {};
-
-            load_row_major(next_a, wave_row, next_k, k, a);
-            load_row_major(next_b, wave_col, next_k, k, b);
-
-            __builtin_amdgcn_sched_barrier(0);
-            frag_acc = __builtin_amdgcn_wmma_f32_16x16x32_f16(
-                0, reg_b, 0, reg_a, 0, frag_acc, 0, 0);
-            __builtin_amdgcn_sched_barrier(0);
-
-            reg_a = next_a;
-            reg_b = next_b;
-            ++k_iter;
-        } while (k_iter < (k_tiles - 1));
-    }
-
-    frag_acc = __builtin_amdgcn_wmma_f32_16x16x32_f16(0, reg_b, 0, reg_a, 0, frag_acc, 0, 0);
-
-    Float16x8 frag_d = {};
-    for (int i = 0; i < 8; ++i) {
-        frag_d[i] = static_cast<_Float16>(frag_acc[i]);
-    }
-
-    write_output(frag_d, wave_row, wave_col, n, d);
-#endif
 }
 
 __attribute__((amdgpu_flat_work_group_size(1, kFlatWorkgroupSize)))
