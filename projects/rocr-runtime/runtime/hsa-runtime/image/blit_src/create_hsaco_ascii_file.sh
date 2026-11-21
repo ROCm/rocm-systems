@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/bin/sh
+set -e
 ################################################################################
 ##
 ## The University of Illinois/NCSA
@@ -63,8 +64,8 @@ EOF
 
 for file in ocl_blit_object*
 do
-    xxd -i $file
-    echo -e '\n'
+    xxd -i "$file"
+    printf '\n\n'
 done
 
 cat <<EOF
