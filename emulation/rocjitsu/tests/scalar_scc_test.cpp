@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -105,7 +106,7 @@ std::optional<EncodingWords> gfx1250_encoding(std::string_view mnemonic) {
 
 class ScalarSccProfile {
 public:
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   std::string_view name;
   EncodingLookup find_encoding;
   WrexecDialect wrexec_dialect;
@@ -113,16 +114,16 @@ public:
 };
 
 const std::array<ScalarSccProfile, 10> kScalarSccProfiles{{
-    {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna1_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna2_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna3_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna4_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_encoding, WrexecDialect::Andn, true},
-    {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna2_encoding, WrexecDialect::Andn, true},
-    {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Cdna1, "cdna1", cdna1_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna2, "cdna2", cdna2_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna3, "cdna3", cdna3_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna4, "cdna4", cdna4_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Rdna1, "rdna1", rdna1_encoding, WrexecDialect::Andn, true},
+    {rocjitsu::IsaFamily::Rdna2, "rdna2", rdna2_encoding, WrexecDialect::Andn, true},
+    {rocjitsu::IsaFamily::Rdna3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Rdna3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Rdna4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Cdna5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
 }};
 
 EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view mnemonic) {
@@ -248,9 +249,104 @@ public:
   amdgpu::Wavefront *wf = nullptr;
 };
 
+TEST(ScalarSccTest, Gfx10SubvectorLoopUsesOnlyExecAndItsScratchSgpr) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2)
+      continue;
+    ScalarSccFixture f(profile, "subvector", 64);
+    ASSERT_TRUE(f.ready());
+    // GFX10: s_subvector_loop_begin s2, +4 and s_subvector_loop_end s2, -3.
+    const auto begin =
+        f.decode(encode_sopk(profile, "s_subvector_loop_begin", 2, 4), "s_subvector_loop_begin");
+    const auto end =
+        f.decode(encode_sopk(profile, "s_subvector_loop_end", 2, 0xfffd), "s_subvector_loop_end");
+    ASSERT_TRUE(begin && end);
+    EXPECT_EQ(begin->branch_offset_bytes(), 16);
+    EXPECT_EQ(end->branch_offset_bytes(), -12);
+    EXPECT_NE(begin->flags() & COND_BRANCH, 0u);
+    EXPECT_NE(end->flags() & COND_BRANCH, 0u);
+    const RegisterRef scratch{RegClass::SGPR, 2, 1};
+    EXPECT_EQ(InstDefUse(*begin, 64).uses.contains(scratch),
+              profile.arch == rocjitsu::IsaFamily::Rdna1);
+    EXPECT_TRUE(InstDefUse(*end, 64).uses.contains(scratch));
+    EXPECT_EQ(begin->disassemble(), "s_subvector_loop_begin s2, 4");
+    const auto execute = [&](Instruction &inst, uint64_t pc) {
+      f.wf->pc = pc;
+      EXPECT_TRUE(f.cu->execute_instruction(&inst, *f.wf).succeeded());
+      return f.wf->pc + inst.size();
+    };
+
+    const auto temp = f.sgpr_base() + 2;
+    f.cu->write_sgpr(temp, 0xdeadbeef);
+    f.wf->write_exec(0);
+    EXPECT_EQ(execute(*begin, 0x1000), 0x1014u);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 0xdeadbeefu);
+
+    constexpr uint64_t mask = 0x0000000b00000005ull;
+    f.wf->write_exec(mask);
+    EXPECT_EQ(execute(*begin, 0x1000), 0x1004u);
+    EXPECT_EQ(f.wf->exec_raw(), 5u);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 11u);
+    EXPECT_EQ(execute(*end, 0x100c), 0x1004u);
+    EXPECT_EQ(f.wf->exec_raw(), 11ull << 32);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 5u);
+    EXPECT_EQ(execute(*end, 0x100c), 0x1010u);
+    EXPECT_EQ(f.wf->exec_raw(), mask);
+
+    auto andexec =
+        f.decode(encode_sop1(profile, "s_and_saveexec_b32", 2, 128), "s_and_saveexec_b32");
+    ASSERT_TRUE(andexec);
+    EXPECT_EQ(execute(*andexec, 0x1010), 0x1014u);
+    EXPECT_EQ(f.wf->exec_raw(), 11ull << 32);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 5u);
+    EXPECT_FALSE(f.wf->read_scc());
+  }
+}
+
+TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
+  using amdgpu::WaitCounterKind;
+  using amdgpu::WaitCounterPolicy;
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2)
+      continue;
+    ScalarSccFixture f(profile, "wait_register");
+    ASSERT_TRUE(f.ready());
+    const auto dynamic = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/0, /*simm16=*/1),
+                                  "s_waitcnt_vmcnt");
+    const auto immediate = f.decode(
+        encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/125, /*simm16=*/0x40), "s_waitcnt_vmcnt");
+    ASSERT_TRUE(dynamic && immediate);
+    const auto unknown = WaitCounterPolicy::explicit_wait_fields(*dynamic, profile.arch);
+    ASSERT_TRUE(unknown.succeeded());
+    // Without the executing wave's SGPR, a static checker cannot prove a threshold.
+    EXPECT_FALSE(unknown.value());
+    const auto zero = WaitCounterPolicy::explicit_wait_fields(*immediate, profile.arch);
+    ASSERT_TRUE(zero.succeeded() && zero.value());
+    const auto load = static_cast<size_t>(WaitCounterKind::Load);
+    EXPECT_EQ((*zero.value())[load], 0u);
+    // Adding SIMM16 to the SGPR wraps at the counter width: (63 + 1) & 0x3f == 0.
+    f.cu->write_sgpr(f.sgpr_base(), 63);
+    f.wf->wait_counters().vmcnt = 1;
+    ASSERT_TRUE(f.cu->execute_instruction(dynamic.get(), *f.wf).succeeded());
+    const auto resolved = WaitCounterPolicy::executed_wait_fields(
+        *dynamic, profile.arch, f.wf->wait_target().gfx10_wait_fields());
+    ASSERT_TRUE(resolved.succeeded() && resolved.value());
+    EXPECT_EQ((*resolved.value())[load], 0u);
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::WAITCNT);
+    f.wf->wait_counters().vmcnt = 0;
+    f.wf->set_state(amdgpu::WfState::RUNNING);
+    f.wf->wait_for({.expcnt = 0});
+    f.wf->wait_counters().expcnt = 1;
+    EXPECT_TRUE(f.cu->execute_instruction(immediate.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().expcnt = 0;
+  }
+}
+
 TEST(ScalarSccTest, Rdna2HwregsUseTheExecutingWavesState) {
   const auto profile =
-      std::ranges::find(kScalarSccProfiles, ROCJITSU_CODE_ARCH_RDNA2, &ScalarSccProfile::arch);
+      std::ranges::find(kScalarSccProfiles, rocjitsu::IsaFamily::Rdna2, &ScalarSccProfile::arch);
   ASSERT_NE(profile, kScalarSccProfiles.end());
   ScalarSccFixture f(*profile, "hwreg");
   ASSERT_TRUE(f.ready());
@@ -335,7 +431,7 @@ TEST(ScalarSccTest, CdnaForkConsumesOneSharedLiteralWord) {
       {0x9480ffffu, 0, 0x100, 0x100},     // One literal shared by both sources.
   };
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch > ROCJITSU_CODE_ARCH_CDNA4)
+    if (profile.arch > rocjitsu::IsaFamily::Cdna4)
       continue;
     SCOPED_TRACE(profile.name);
     ScalarSccFixture f(profile, "fork_literal");
@@ -356,6 +452,25 @@ TEST(ScalarSccTest, CdnaForkConsumesOneSharedLiteralWord) {
   }
 }
 
+TEST(ScalarSccTest, Cdna1ConditionalDebugBranchesReadBothStatusFlags) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "debug_branches");
+  ASSERT_TRUE(f.ready());
+  constexpr std::array names{"s_cbranch_cdbgsys", "s_cbranch_cdbguser", "s_cbranch_cdbgsys_or_user",
+                             "s_cbranch_cdbgsys_and_user"};
+  for (unsigned flags = 0; flags < 4; ++flags) {
+    f.wf->set_status_raw(flags << 20);
+    const std::array expected{bool(flags & 2), bool(flags & 1), flags != 0, flags == 3};
+    for (unsigned i = 0; i < names.size(); ++i) {
+      auto branch = f.decode({0xbf970002u + (i << 16), 0}, names[i]);
+      ASSERT_TRUE(branch);
+      EXPECT_TRUE(branch->writes_pc());
+      f.wf->pc = 0x100;
+      ASSERT_TRUE(f.cu->execute_instruction(branch.get(), *f.wf).succeeded());
+      EXPECT_EQ(f.wf->pc + branch->size(), expected[i] ? 0x10cu : 0x104u);
+    }
+  }
+}
+
 TEST(ScalarSccTest, Cdna1RestrictsShaderWritesToTrapTemporaryPairs) {
   ScalarSccFixture f(kScalarSccProfiles.front(), "trap_temporaries");
   ASSERT_TRUE(f.ready());
@@ -370,7 +485,7 @@ TEST(ScalarSccTest, Cdna1RestrictsShaderWritesToTrapTemporaryPairs) {
   ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
   EXPECT_EQ(f.wf->ttmp(0), 1u);
   EXPECT_EQ(f.wf->ttmp(1), 0u);
-  auto rfe = f.decode({0xbe801f00u, 0}, "s_rfe_b64"); // s[0:1]
+  auto rfe = f.decode({0x95800200u, 0}, "s_rfe_restore_b64"); // s[0:1], s2
   ASSERT_TRUE(rfe);
   f.cu->write_sgpr(f.sgpr_base(), 0x100);
   f.cu->write_sgpr(f.sgpr_base() + 1, 0);
@@ -444,6 +559,24 @@ TEST(ScalarSccTest, Cdna1TrapRetiresImplicitMemoryWaitOnlyOnHandlerEntry) {
     EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 9), 123u);
     EXPECT_EQ(f.cu->memory_wait_diagnostic_count(), install_handler ? 0u : 1u);
   }
+}
+
+TEST(ScalarSccTest, Cdna1ShaderHaltStopsNextInstruction) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "shader_halt");
+  ASSERT_TRUE(f.ready());
+  f.cu->set_functional_quantum(1);
+  f.wf->pc = 0x1000;
+  f.gpu_mem.write32(0x1000, 0xbf8f0003u); // s_setprio 3
+  f.gpu_mem.write32(0x1004, 0xbf8d0001u); // s_sethalt 1
+  f.gpu_mem.write32(0x1008, 0xb004007bu); // s_movk_i32 s4,123
+  f.cu->step();
+  EXPECT_EQ((f.wf->status_raw() >> 3) & 3u, 3u);
+  f.cu->step();
+  EXPECT_TRUE(f.wf->debug_halted());
+  EXPECT_TRUE(f.wf->status_halt());
+  f.cu->step();
+  EXPECT_EQ(f.wf->pc, 0x1008u);
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 0u);
 }
 
 class WrexecPair {
@@ -601,7 +734,7 @@ TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
       continue;
     SCOPED_TRACE(profile.name);
     // The CDNA5 ISA exposes these B32 operations on wave32.
-    const uint32_t wave_size = profile.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+    const uint32_t wave_size = profile.arch == rocjitsu::IsaFamily::Cdna5 ? 32 : 64;
     ScalarSccFixture fixture(profile, "b32_exec", wave_size);
     ASSERT_TRUE(fixture.ready());
     const char *wrexec = profile.wrexec_dialect == WrexecDialect::Andn ? "s_andn1_wrexec_b32"
@@ -619,6 +752,29 @@ TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
       EXPECT_EQ(fixture.cu->read_sgpr(fixture.sgpr_base() + 4),
                 mnemonic == "s_and_saveexec_b32" ? 15u : 0u);
     }
+  }
+}
+
+TEST(ScalarSccTest, Gfx10WaitUsesTheRegisterAndForgetsEarlierCounterLimits) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2)
+      continue;
+    ScalarSccFixture f(profile, "gfx10_wait");
+    ASSERT_TRUE(f.ready());
+    auto vm = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/4, /*simm16=*/2),
+                       "s_waitcnt_vmcnt");
+    auto ds = f.decode(encode_sopk(profile, "s_waitcnt_lgkmcnt", /*sdst=*/4, /*simm16=*/1),
+                       "s_waitcnt_lgkmcnt");
+    ASSERT_NE(vm, nullptr);
+    ASSERT_NE(ds, nullptr);
+    f.cu->write_sgpr(f.sgpr_base() + 4, 63);
+    ASSERT_TRUE(f.cu->execute_instruction(vm.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().vmcnt, 1u);
+    f.wf->wait_counters().vmcnt = 2;
+    ASSERT_TRUE(f.cu->execute_instruction(ds.get(), *f.wf).succeeded());
+    EXPECT_EQ(f.wf->wait_target().lgkmcnt, 0u);
+    EXPECT_EQ(f.wf->state(), amdgpu::WfState::RUNNING);
+    f.wf->wait_counters().vmcnt = 0;
   }
 }
 

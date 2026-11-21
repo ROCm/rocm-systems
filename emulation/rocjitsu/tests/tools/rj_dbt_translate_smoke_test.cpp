@@ -8,6 +8,7 @@
 #include "dbt_translate_cli.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -44,8 +45,8 @@ std::filesystem::path g_pretranslate_tool;
 rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput>
 capture_gfx1251_targets(const rocjitsu::tools::TranslateOptions &options) {
   EXPECT_EQ(options.input_target, ROCJITSU_CODE_TARGET_GFX1251);
-  EXPECT_EQ(options.guest_arch, ROCJITSU_CODE_ARCH_CDNA5);
-  EXPECT_EQ(options.host_arch, ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(options.guest_arch, rocjitsu::IsaFamily::Cdna5);
+  EXPECT_EQ(options.host_arch, rocjitsu::IsaFamily::Cdna5);
   EXPECT_EQ(options.target_mach, rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251);
   EXPECT_EQ(options.input_revision, rocjitsu::ProcessorRevision::Unspecified);
   EXPECT_EQ(options.output_revision, rocjitsu::ProcessorRevision::Unspecified);
@@ -762,9 +763,9 @@ TEST(RjDbtTranslate, AcceptsGfx1251WithoutGfx1250Revisions) {
 TEST(RjDbtTranslate, RejectsGfx1250RevisionOptionsForGfx1251) {
   rocjitsu::tools::TranslateOptions options;
   options.input_target = ROCJITSU_CODE_TARGET_GFX1251;
-  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.guest_arch = rocjitsu::IsaFamily::Cdna5;
   options.target_mach = rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1251;
-  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.host_arch = rocjitsu::IsaFamily::Cdna5;
   options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
 
   auto error = rocjitsu::tools::translation_request_error(options);
@@ -781,8 +782,8 @@ TEST(RjDbtTranslate, RejectsGfx1250RevisionOptionsForGfx1251) {
 TEST(RjDbtTranslate, AppliesGfx1250RevisionContractToDefaultCdna5OutputMachine) {
   rocjitsu::tools::TranslateOptions options;
   options.input_target = ROCJITSU_CODE_TARGET_GFX1251;
-  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
-  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.guest_arch = rocjitsu::IsaFamily::Cdna5;
+  options.host_arch = rocjitsu::IsaFamily::Cdna5;
   options.target_mach = 0;
 
   const auto error = rocjitsu::tools::translation_request_error(options);
@@ -1065,8 +1066,8 @@ TEST(RjDbtTranslate, RejectsInvalidRewriteDischargeOptionCombinations) {
   ASSERT_TRUE(error.has_value());
   EXPECT_EQ(*error, "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation");
 
-  options.guest_arch = ROCJITSU_CODE_ARCH_CDNA5;
-  options.host_arch = ROCJITSU_CODE_ARCH_CDNA5;
+  options.guest_arch = rocjitsu::IsaFamily::Cdna5;
+  options.host_arch = rocjitsu::IsaFamily::Cdna5;
   options.input_target = ROCJITSU_CODE_TARGET_GFX1250;
   options.target_mach = rocjitsu::EF_AMDGPU_MACH_AMDGCN_GFX1250;
   options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;

@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -89,7 +90,7 @@ protected:
   rocjitsu::amdgpu::Xcd xcd_{"xcd"};
   rocjitsu::amdgpu::CommandProcessor hidden_command_processor_{"hidden-cp"};
   rocjitsu::amdgpu::Xcd hidden_xcd_{"hidden-xcd"};
-  rocjitsu::SoC soc_{"soc", &memory_, ROCJITSU_CODE_ARCH_CDNA5};
+  rocjitsu::SoC soc_{"soc", &memory_, rocjitsu::IsaFamily::Cdna5};
   rocjitsu::GpuPciDevice device_{"gpu", configured_spec(), &trace_, &soc_};
 
   [[nodiscard]] uint32_t read_register(rocjitsu::MmioRegister reg) {
@@ -1178,13 +1179,13 @@ TEST(GpuDevicePeerReadProbe, ConstructorReplacesPreexistingCuHandlersAndPreserve
   CommandProcessor cp("pci-peer-probe-cp");
   Xcd xcd("pci-peer-probe-xcd");
   std::unique_ptr<ComputeUnitCore> cu;
-  SoC soc("pci-peer-probe-soc", &memory, ROCJITSU_CODE_ARCH_CDNA5);
+  SoC soc("pci-peer-probe-soc", &memory, rocjitsu::IsaFamily::Cdna5);
   xcd.set_command_processor(&cp);
   ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
   cp.set_gpu_vm(&soc.gpu_vm());
 
   ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.arch = rocjitsu::IsaFamily::Cdna5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 128;
   config.vgprs_per_wf = 32;

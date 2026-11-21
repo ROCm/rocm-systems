@@ -12,6 +12,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -70,7 +71,7 @@ public:
   static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu,
                                                    std::unique_ptr<Instruction> inst,
                                                    amdgpu::Wavefront &wf) {
-    return cu.route_memory_inst(std::move(inst), wf);
+    return cu.route_memory_inst(inst, wf);
   }
 };
 
@@ -174,6 +175,14 @@ public:
     set_data(std::move(state));
   }
 
+  TestMemoryInstruction(std::unique_ptr<DynamicInstState> state, std::string_view mnemonic,
+                        amdgpu::Operation operation, amdgpu::MemoryAddressing addressing,
+                        amdgpu::MemoryKind kind)
+      : TestMemoryInstruction(std::move(state), mnemonic) {
+    set_amdgpu_operation(operation);
+    set_amdgpu_memory(addressing, kind);
+  }
+
 private:
   // These tests inject memory state directly. A valid nop encoding lets race
   // reports decode the synthetic instruction without depending on code memory.
@@ -191,7 +200,7 @@ prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wa
   }
   const auto dst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base);
   std::array<uint32_t, 3> words{};
-  if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (cu.arch() == rocjitsu::IsaFamily::Cdna5) {
     words = cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = dst, .vaddr = 0});
   } else {
     const auto encoded = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
@@ -243,6 +252,9 @@ struct HookEvent {
     READ_SGPR,
     WRITE_SGPR,
     BARRIER_RESOLVED,
+    BARRIER_SIGNALED,
+    BARRIER_ROUND_COMPLETED,
+    BARRIER_WAIT_PASSED,
     INIT,
     SHUTDOWN,
     KIND_COUNT,
@@ -273,6 +285,7 @@ struct HookEvent {
   uint32_t cluster_size_y = 0;
   uint32_t cluster_size_z = 0;
   BarrierKind barrier_kind = BarrierKind::Workgroup;
+  BarrierRound barrier_round;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -302,6 +315,7 @@ struct CapturedAccess {
   uint64_t architectural_exec_lane_mask = 0;
   uint64_t valid_lane_mask = 0;
   uint64_t request_lane_mask = 0;
+  std::optional<uint64_t> ordered_count_result_lane_mask;
   uint64_t inactive_lane_mask = 0;
   uint64_t unknown_lane_mask = 0;
   uint64_t scratch_lane_mask = 0;
@@ -318,6 +332,10 @@ struct CapturedAccess {
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::vector<uint32_t> lds_source_addresses;
+  std::optional<amdgpu::LdsAllocationRange> lds_allocation;
+  uint64_t ds_suppressed_lanes = 0;
+  uint64_t ds2_suppressed_lanes = 0;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
 
@@ -385,6 +403,7 @@ public:
     captured.architectural_exec_lane_mask = access.architectural_exec_lane_mask;
     captured.valid_lane_mask = access.valid_lane_mask;
     captured.request_lane_mask = access.request_lane_mask;
+    captured.ordered_count_result_lane_mask = access.ordered_count_result_lane_mask;
     captured.inactive_lane_mask = access.inactive_lane_mask();
     captured.unknown_lane_mask = access.unknown_lane_mask();
     captured.scratch_lane_mask = access.scratch_lane_mask;
@@ -406,6 +425,11 @@ public:
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    captured.lds_source_addresses.assign(access.lds_source_addresses.begin(),
+                                         access.lds_source_addresses.end());
+    captured.lds_allocation = access.lds_allocation;
+    captured.ds_suppressed_lanes = access.ds_suppressed_lanes;
+    captured.ds2_suppressed_lanes = access.ds2_suppressed_lanes;
     accesses.push_back(std::move(captured));
   }
 
@@ -583,6 +607,36 @@ public:
     e.barrier_kind = kind;
     events.push_back(e);
   }
+
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_SIGNALED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> wfs,
+                                     std::span<amdgpu::Wavefront *> /*armed*/,
+                                     const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_ROUND_COMPLETED};
+    if (!wfs.empty()) {
+      e.dispatch_id = wfs[0]->dispatch_id();
+      e.wg_id = wfs[0]->wg_id();
+    }
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_WAIT_PASSED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
+    events.push_back(e);
+  }
 };
 
 inline std::vector<HookEvent> vgpr_read_events(const OrderingPlugin &plugin) {
@@ -754,8 +808,8 @@ struct PluginFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
-    if (cu()->arch() == ROCJITSU_CODE_ARCH_CDNA2 || cu()->arch() == ROCJITSU_CODE_ARCH_CDNA3 ||
-        cu()->arch() == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (cu()->arch() == rocjitsu::IsaFamily::Cdna2 || cu()->arch() == rocjitsu::IsaFamily::Cdna3 ||
+        cu()->arch() == rocjitsu::IsaFamily::Cdna4) {
       // These kernels use the 256-register allocation for ordinary VGPRs.
       RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
     }

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -31,13 +32,13 @@ TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
   const IsaTargetDescriptor *provider = registry.find(ROCJITSU_CODE_TARGET_GFX1100);
   ASSERT_NE(provider, nullptr);
   EXPECT_EQ(provider, registry.find("gfx1100"));
-  EXPECT_EQ(provider->architecture_id, ROCJITSU_CODE_ARCH_RDNA3);
+  EXPECT_EQ(provider->family, rocjitsu::IsaFamily::Rdna3);
   EXPECT_FALSE(provider->supports_execution);
 
-  const IsaGpuTargetDescription *binding = registry.find_gpu_target(ROCJITSU_CODE_TARGET_GFX1100);
+  const IsaTargetBinding *binding = registry.find_target(ROCJITSU_CODE_TARGET_GFX1100);
   ASSERT_NE(binding, nullptr);
-  EXPECT_EQ(binding, registry.find_gpu_target_by_code_object_id("gfx1100"));
-  EXPECT_EQ(binding, registry.find_gpu_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX1100));
+  EXPECT_EQ(binding, registry.find_target_by_code_object_id("gfx1100"));
+  EXPECT_EQ(binding, registry.find_target_by_elf_machine(EF_AMDGPU_MACH_AMDGCN_GFX1100));
   EXPECT_EQ(binding->gfx_target_version, 110000u);
   EXPECT_FALSE(binding->capabilities.execution_implemented);
 
@@ -73,7 +74,7 @@ TEST(ConSanInput, TruncatedImageAndWrongSelectedTargetHaveDistinctErrors) {
   EXPECT_TRUE(build_input_program({},
                                   TargetProfile{.id = 1150,
                                                 .name = "gfx1150",
-                                                .arch = ROCJITSU_CODE_ARCH_INVALID,
+                                                .arch = rocjitsu::IsaFamily::Invalid,
                                                 .public_id = ROCJITSU_CODE_TARGET_INVALID,
                                                 .elf_machine = 0,
                                                 .default_wave_size = 0,
@@ -130,7 +131,7 @@ protected:
 
   void expect_value_operand(const InputProgram &program, const NativeLdsAccess &access,
                             uint16_t expected) {
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
     ASSERT_NE(decoder, nullptr);
     std::array<uint32_t, 2> words{};
     ASSERT_LE(program.text_file_offset + access.original_offset + sizeof(words),
@@ -206,7 +207,7 @@ TEST_F(ConSanInputFixture, InconsistentTypedProfilesCannotBypassTargetAdmission)
   invalid.fill(kTarget);
   invalid[0].id = 1150;
   invalid[1].name = "gfx1201";
-  invalid[2].arch = ROCJITSU_CODE_ARCH_INVALID;
+  invalid[2].arch = rocjitsu::IsaFamily::Invalid;
   invalid[3].public_id = ROCJITSU_CODE_TARGET_GFX1201;
   invalid[4].elf_machine ^= 1;
   invalid[5].default_wave_size = 0;
@@ -252,11 +253,14 @@ TEST_F(ConSanInputFixture, CollisionAndSingleLaneShareOnePhysicalStoreSite) {
   }
 }
 
-TEST_F(ConSanInputFixture, BarrierAndWideAccessCannotBecomeNoSyncFacts) {
+TEST_F(ConSanInputFixture, BarrierAndExcludedAccessCannotBecomeNoSyncFacts) {
   EXPECT_TRUE(inspect(load("barrier")).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
   EXPECT_TRUE(error_.text_offset.has_value());
-  EXPECT_TRUE(inspect(load("wide")).failed());
+  const std::vector<uint8_t> excluded =
+      test::read_fixture(test::target_fixture_path({"gfx1100", 32}, "width-excluded-b8"));
+  ASSERT_FALSE(excluded.empty());
+  EXPECT_TRUE(inspect(excluded).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
   EXPECT_TRUE(error_.text_offset.has_value());
 }
@@ -271,7 +275,7 @@ TEST_F(ConSanInputFixture, GenericContextBootstrapUsesOwnedRegistersAndWrapperOf
   EXPECT_EQ(plan.storage.entry_temp_base, plan.storage.persistent_base + 2);
   EXPECT_EQ(plan.prologue.payload_byte_offset, 24u);
   EXPECT_EQ(plan.prologue.original_kernarg_pointer_offset, 16u);
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
   ASSERT_NE(decoder, nullptr);
   std::vector<std::string_view> names;
   for (size_t offset = 0; offset < plan.prologue.words.size();) {
@@ -332,7 +336,7 @@ TEST_F(ConSanInputFixture, PrivateFrameAndMissingKernargCannotUseBootstrap) {
 TEST_F(ConSanInputFixture, BackedgeFailsClosed) {
   // Replace the original entry with an unconditional self-loop. No GPU executes
   // this input; it tests the production preparation admission gate.
-  constexpr util::FailureOr<uint32_t> branch = build_s_branch(-1, ROCJITSU_CODE_ARCH_RDNA3);
+  constexpr util::FailureOr<uint32_t> branch = build_s_branch(-1, rocjitsu::IsaFamily::Rdna3);
   static_assert(branch.succeeded());
   put_word(text_offset_, branch.value());
   EXPECT_TRUE(inspect(image_).failed());
