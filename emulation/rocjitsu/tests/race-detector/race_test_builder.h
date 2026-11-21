@@ -28,13 +28,15 @@ namespace rocjitsu::plugins::race_detector {
 
 class RaceTestBuilder {
 public:
+  // Enable LDS WAW by default here so core tests exercise all race checks.
   RaceTestBuilder(
       int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0),
-      CounterCapacities counterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4))
+      CounterCapacities counterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+      bool checkLdsWaw = true)
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
         numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },
-        counterCapacities, /*ldsSizeBytes=*/64 * 1024);
+        counterCapacities, /*ldsSizeBytes=*/64 * 1024, checkLdsWaw);
     for (int w = 0; w < numWaves; ++w) {
       waves_.push_back(&detector_->getWaveRaceState(w));
     }
@@ -95,7 +97,7 @@ public:
     ASSERT_TRUE(
         waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT).succeeded());
     ldsAddrs.resize(waveSize_, 0);
-    // Validate each active lane's write against outstanding reads, as the plugin does.
+    // Validate each active lane's write against outstanding LDS accesses, as the plugin does.
     for (int lane = 0; lane < waveSize_; ++lane)
       if (exec & (1ULL << lane))
         detector_->validateWrite(static_cast<int>(ldsAddrs[lane]), WaveId{wave}, lane, bytesPerLane,
@@ -108,7 +110,7 @@ public:
   }
 
   /// Register a tensor DMA load into LDS (tracked by tensorcnt). The load
-  /// writes every range; it is validated against outstanding LDS reads.
+  /// writes every range; it is validated against outstanding LDS reads and writes.
   void tensorLoadToLds(int wave, std::vector<LdsByteRange> ranges) {
     tensorTransfer(wave, MemoryEventType::GLOBAL_TO_LDS, ranges);
   }
@@ -227,7 +229,7 @@ public:
     waves_[wave]->dispatch(wait);
   }
 
-  /// Register an LDS write and validate against outstanding reads.
+  /// Register an LDS write and validate against outstanding reads and writes.
   void ldsWrite(int wave, int lane, int addr, int bytes,
                 MemoryOrderClass memoryOrder = MemoryOrderClass::LDS,
                 amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::LGKMCNT,

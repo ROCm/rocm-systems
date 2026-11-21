@@ -62,9 +62,10 @@ class RaceDetector {
 public:
   /// ldsSizeBytes is the CU backing capacity, independent of workgroup
   /// allocation metadata and the lazily materialized byte count.
+  /// checkLdsWaw controls only LDS write-after-write reporting.
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
                std::function<void(RaceViolation)> raceHandler, CounterCapacities,
-               size_t ldsSizeBytes);
+               size_t ldsSizeBytes, bool checkLdsWaw = false);
 
   /// Allocate an event using the counter and ordering implied by its type.
   EventId allocateEventId(WaveId wave, InstructionSnapshot instruction, MemoryEventType type,
@@ -107,18 +108,18 @@ public:
   /// and other counter obligations may still be active.
   void retireLdsIntervals(EventId);
 
-  /// Check for RAW hazards: no outstanding LDS writes overlap the range.
-  /// Same-wave operations are ordered only when both belong to the same
-  /// non-UNORDERED completion class.
+  /// @brief Check for RAW hazards against outstanding LDS writes.
+  /// @details Same-wave accesses are ordered when the earlier LDS access has
+  /// completed or both accesses share a non-UNORDERED LDS access class.
+  /// Pass UNORDERED when only counter completion is ordered, not the LDS access.
   void validateRead(int addr, WaveId, int lane, int nBytes,
                     MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                     uint8_t atomicBytes = 0) const;
 
-  /// Check for WAR hazards: no outstanding LDS reads overlap the range.
-  /// Same-wave operations are ordered only when both belong to the same
-  /// non-UNORDERED completion class.
-  /// TODO(newling): WAW detection (write vs outstanding writes) is not
-  /// implemented.
+  /// @brief Check one LDS range for WAR and WAW hazards.
+  /// @details Uses the same LDS access ordering as validateRead.
+  /// If checkLdsWaw is enabled at construction, WAW is reported at the write,
+  /// independent of values or later reads.
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
                      uint8_t atomicBytes = 0) const;
@@ -203,6 +204,17 @@ public:
   static constexpr int kMaxWaves = 64;
 
 private:
+  friend class RaceDetectorPlugin;
+
+  // The plugin checks every written range for WAR before starting WAW checks,
+  // so a WAW cannot hide a WAR when only one conflict is reported per instruction.
+  void validateWriteAfterRead(int addr, WaveId, int lane, int nBytes,
+                              MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                              uint8_t atomicBytes = 0) const;
+  void validateWriteAfterWrite(int addr, WaveId, int lane, int nBytes,
+                               MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS,
+                               uint8_t atomicBytes = 0) const;
+
   void indexLdsIntervals(EventId event);
 
   /// A slot for one round. Closed slots keep their storage for reuse, since a
@@ -280,6 +292,9 @@ private:
   static bool hasPotentialLdsConflict(int addr, int nBytes,
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
+  void reportUnorderedOverlaps(bool pendingWrites, int addr, WaveId wave, int lane, int nBytes,
+                               bool isWrite, MemoryOrderClass currentMemoryOrder,
+                               uint8_t atomicBytes) const;
 
   /// Events that read LDS as a source operand, scanned whole during write
   /// validation: they are few, and stay here until they retire.
@@ -289,7 +304,7 @@ private:
   };
   std::vector<Src2Event> src2Events;
 
-  /// LDS write events whose LDS access is in flight (for scanning during read
+  /// LDS write events whose LDS access is in flight (for scanning during read and write
   /// validation). Once the access completes the event is in its wave's
   /// history instead, in the order of the barrier epochs that release it.
   std::vector<EventId> ldsWriteEvents;
@@ -314,6 +329,7 @@ private:
   std::vector<LdsChunkCounts> byteReadCounts;
 
   size_t ldsSizeBytes_;
+  bool checkLdsWaw_;
   EventRegistry events_;
 
   Dim3d workgroupId;

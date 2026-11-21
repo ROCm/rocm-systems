@@ -261,6 +261,28 @@ races. Some examples:
    the same address without an intervening `s_barrier`. The read may see stale
    data because the write may not have completed from the reader's perspective.
 
+## LDS write-after-write reporting
+
+LDS write-after-write checking is off by default because the current check
+does not compare stored values. It reports unordered overlapping writes even
+when both write identical bytes, so their order does not change the value
+left in LDS. We intend to add value-aware filtering for this case in a
+follow-up.
+
+When enabled, an instruction that writes bytes also written by an unordered
+memory instruction is reported at the later write, even if no later
+instruction reads those bytes. The check uses the existing LDS ordering,
+wait and barrier rules, including the exemption for matching LDS atomics.
+Enable LDS write-after-write checking with:
+
+```json
+{ "require_all_plugins": true, "plugins": { "race": { "lds_waw": true } } }
+```
+
+LDS read-after-write and write-after-read checks and register race checks
+remain enabled regardless of this option. The detector continues tracking
+LDS writes for those checks.
+
 ## What this plugin detects
 
 - **VGPR races**: a vector register is read or overwritten by an instruction
@@ -304,8 +326,8 @@ races. Some examples:
   the same wave that touch the same LDS byte, in either order, until
   `s_wait_tensorcnt` or a full `tensorcnt` retires the earlier one. Two stores
   of the same tile only read it, which is safe; two loads over the same bytes
-  are an LDS write/write conflict, which the detector does not check (see
-  Limitations). Each instruction is registered when it issues, as other memory
+  are an LDS write/write conflict, reported under the same rule when `lds_waw`
+  is enabled. Each instruction is registered when it issues, as other memory
   instructions are, so an instruction that moves no data still occupies its
   `tensorcnt` slot, and a transfer that waits for memory is pending from the
   moment it issues.
@@ -633,9 +655,10 @@ The plugin keeps track, for all registers and LDS memory bytes, of which memory
 operations are in flight. When an instruction in the emulator accesses an LDS
 byte, there is a check to see what memory events are still in flight that
 read/write that byte, from the perspective of the accessing thread. In this way,
-RAW (read-after-write) and WAR (write-after-read) hazards can be detected.
-For VGPRs and scalar registers, the detector also flags WAW when an instruction
-write can be clobbered by a pending asynchronous load. The detector also reports
+RAW (read-after-write), WAR (write-after-read) and WAW (write-after-write)
+hazards can be detected. For VGPRs and scalar registers, the detector also flags
+WAW when an instruction write can be clobbered by a pending asynchronous load.
+The detector also reports
 WAW between scalar loads targeting the same SGPR or TTMP.
 
 On architectures where scalar-memory and data-share operations use a combined
@@ -794,7 +817,15 @@ this source tree. The original
 - **Limited WAW detection**: VGPR WAW covers instruction writes and
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
-  destinations. LDS WAW is not currently reported.
+  destinations. When enabled, LDS WAW is reported under the rules for LDS
+  reads: an earlier write of another wave must be waited for and followed by
+  a barrier, and an earlier write of the same wave must be waited for or share
+  a class that orders LDS accesses with the later write. Completion-counter
+  ordering alone does not establish that order: gfx1250 async loads can write
+  LDS out of order even though they decrement `asynccnt` in order (CDNA5 ISA
+  10.8). Overlapping lanes within a single instruction are not checked against
+  each other. See LDS write-after-write reporting above for the reporting
+  policy and the `lds_waw` option.
 
 - **Embedded waits**: the race detector applies the VINTERP EXPCNT threshold before
   checking its VGPR sources on GFX11, GFX11.5 and GFX12. A threshold of 7 leaves

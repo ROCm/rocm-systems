@@ -18,8 +18,10 @@ namespace rocjitsu::plugins::race_detector {
 
 RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
                            std::function<void(RaceViolation)> raceHandler,
-                           CounterCapacities counterCapacities, size_t ldsSizeBytes)
-    : ldsSizeBytes_(ldsSizeBytes), workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
+                           CounterCapacities counterCapacities, size_t ldsSizeBytes,
+                           bool checkLdsWaw)
+    : ldsSizeBytes_(ldsSizeBytes), checkLdsWaw_(checkLdsWaw), workgroupId(workgroupId),
+      raceHandler(std::move(raceHandler)) {
   // Barrier rounds keep a bit per wave. A workgroup has at most 1024
   // work-items (CDNA5 ISA 2.2), so at most 32 waves of 32 lanes.
   if (nWaves > kMaxWaves)
@@ -372,68 +374,73 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
                                 MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
-  if (!hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder)) {
-    return;
-  }
-
-  const auto check = [&](EventId eventId) {
-    if (!events_.writesLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
-      return;
-    // Report a byte both accesses touch, not the start of this access.
-    if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler(
-          {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
-    }
-  };
-  for (EventId eventId : ldsWriteEvents) {
-    // Operations in the same non-UNORDERED class complete in issue order.
-    if (wave == events_.waveId(eventId) &&
-        (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                                events_.ldsOrder(eventId) == currentMemoryOrder)))
-      continue;
-    check(eventId);
-  }
-  forEachUnacquiredLdsEvent(wave, addr, addr + nBytes, check);
+  if (hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder))
+    reportUnorderedOverlaps(/*pendingWrites=*/true, addr, wave, lane, nBytes, /*isWrite=*/false,
+                            currentMemoryOrder, atomicBytes);
 }
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
                                  MemoryOrderClass currentMemoryOrder, uint8_t atomicBytes) const {
+  validateWriteAfterRead(addr, wave, lane, nBytes, currentMemoryOrder, atomicBytes);
+  validateWriteAfterWrite(addr, wave, lane, nBytes, currentMemoryOrder, atomicBytes);
+}
+
+void RaceDetector::validateWriteAfterRead(int addr, WaveId wave, int lane, int nBytes,
+                                          MemoryOrderClass currentMemoryOrder,
+                                          uint8_t atomicBytes) const {
   if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
     return;
-  if (!hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
-    return;
-  }
-
-  for (const auto &source : src2Events) {
-    const auto id = source.id;
-    if (events_.waveId(id) == wave) {
-      if (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
-                                            events_.ldsOrder(id) == currentMemoryOrder))
+  if (hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
+    for (const auto &source : src2Events) {
+      const auto id = source.id;
+      if (events_.waveId(id) == wave) {
+        if (events_.ldsAccessComplete(id) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
+                                              events_.ldsOrder(id) == currentMemoryOrder))
+          continue;
+      } else if (ordered(wave, id)) {
         continue;
-    } else if (ordered(wave, id)) {
-      continue;
+      }
+      if (const auto byte = source.sourceReads.firstOverlap(addr, addr + nBytes)) {
+        RaceViolation violation{
+            RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, id};
+        violation.conflictsWithSrc2Read = true;
+        raceHandler(violation);
+      }
     }
-    if (const auto byte = source.sourceReads.firstOverlap(addr, addr + nBytes)) {
-      RaceViolation violation{
-          RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, id};
-      violation.conflictsWithSrc2Read = true;
-      raceHandler(violation);
-    }
+    reportUnorderedOverlaps(/*pendingWrites=*/false, addr, wave, lane, nBytes, /*isWrite=*/true,
+                            currentMemoryOrder, atomicBytes);
   }
+}
+
+void RaceDetector::validateWriteAfterWrite(int addr, WaveId wave, int lane, int nBytes,
+                                           MemoryOrderClass currentMemoryOrder,
+                                           uint8_t atomicBytes) const {
+  if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
+    return;
+  if (checkLdsWaw_ &&
+      hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder))
+    reportUnorderedOverlaps(/*pendingWrites=*/true, addr, wave, lane, nBytes, /*isWrite=*/true,
+                            currentMemoryOrder, atomicBytes);
+}
+
+void RaceDetector::reportUnorderedOverlaps(bool pendingWrites, int addr, WaveId wave, int lane,
+                                           int nBytes, bool isWrite,
+                                           MemoryOrderClass currentMemoryOrder,
+                                           uint8_t atomicBytes) const {
   const auto check = [&](EventId eventId) {
-    if (!events_.readsLds(eventId) || events_.atomicLdsElementMatches(eventId, atomicBytes))
+    if (!(pendingWrites ? events_.writesLds(eventId) : events_.readsLds(eventId)) ||
+        events_.atomicLdsElementMatches(eventId, atomicBytes))
       return;
     // Report a byte both accesses touch, not the start of this access.
     if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes)) {
-      raceHandler({RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
+      raceHandler(
+          {RaceViolation::Space::LDS, *byte, wave.value, lane, isWrite, workgroupId, eventId});
     }
   };
-  for (EventId eventId : ldsReadEvents) {
-    // The LDS bytes are safe only when the two operations share a proven
-    // FIFO completion class, or an explicit wait completed the older event.
-    // The read's destination VGPR remains independently protected by its
-    // wait-counter obligations. This WAR check does not cover LDS
-    // write/write ordering, which is not currently checked.
+  const std::vector<EventId> &pending = pendingWrites ? ldsWriteEvents : ldsReadEvents;
+  for (EventId eventId : pending) {
+    // Matching non-UNORDERED classes order same-wave LDS accesses. Completed
+    // accesses of other waves remain visible in their unacquired histories.
     if (wave == events_.waveId(eventId) &&
         (events_.ldsAccessComplete(eventId) || (currentMemoryOrder != MemoryOrderClass::UNORDERED &&
                                                 events_.ldsOrder(eventId) == currentMemoryOrder)))
@@ -445,10 +452,15 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
 
 bool RaceDetector::mayConflict(const IntervalSet &accessed, WaveId wave, bool isWrite,
                                MemoryOrderClass currentMemoryOrder) const {
-  const std::vector<LdsChunkCounts> &counts = isWrite ? byteReadCounts : byteWriteCounts;
+  // A write conflicts with pending reads and, through the write-after-write
+  // check in validateWrite, with pending writes.
   return std::ranges::any_of(accessed, [&](const Interval &interval) {
-    return hasPotentialLdsConflict(interval.start, interval.end - interval.start, counts, wave,
-                                   currentMemoryOrder);
+    const int bytes = interval.end - interval.start;
+    return ((!isWrite || checkLdsWaw_) &&
+            hasPotentialLdsConflict(interval.start, bytes, byteWriteCounts, wave,
+                                    currentMemoryOrder)) ||
+           (isWrite && hasPotentialLdsConflict(interval.start, bytes, byteReadCounts, wave,
+                                               currentMemoryOrder));
   });
 }
 

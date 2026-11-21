@@ -12,4 +12,6 @@
 
 ROCJITSU_DEFINE_PLUGIN(rocjitsu::plugins::race_detector::RaceDetectorPlugin, "race",
                        R"({"trace_context":{"type":"number","default":128,
-                       "description":"Instruction context before elision (2-256); waits, barriers and control flow are retained."}})")
+                       "description":"Instruction context before elision (2-256); waits, barriers and control flow are retained."},
+                       "lds_waw":{"type":"boolean","default":false,
+                       "description":"Report unordered overlapping LDS writes, regardless of stored values or later reads."}})")

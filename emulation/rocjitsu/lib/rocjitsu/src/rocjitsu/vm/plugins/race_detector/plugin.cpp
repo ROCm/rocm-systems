@@ -644,6 +644,12 @@ RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json) : ExecutionPlugi
   const flexbuffers::Reference root = flexbuffers::GetRoot(builder.GetBuffer());
   if (!root.IsMap())
     throw std::invalid_argument("Race plugin configuration must be an object");
+  const flexbuffers::Reference lds_waw = root.AsMap()["lds_waw"];
+  if (!lds_waw.IsNull()) {
+    if (!lds_waw.IsBool())
+      throw std::invalid_argument("Race plugin 'lds_waw' must be a boolean");
+    lds_waw_ = lds_waw.AsBool();
+  }
   const flexbuffers::Reference context = root.AsMap()["trace_context"];
   if (context.IsNull())
     return;
@@ -785,7 +791,7 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                            : physical_sgpr_count),
       Dim3d(static_cast<int>(wg_id)), std::move(handler),
       counterCapacitiesForArch(wavefronts.front()->cu().arch()),
-      wavefronts.front()->lds().size_bytes());
+      wavefronts.front()->lds().size_bytes(), lds_waw_);
 
   auto &det = *detectors_[key];
   for (uint32_t w = 0; w < num_waves; ++w) {
@@ -872,10 +878,14 @@ void RaceDetectorPlugin::onAmdgpuMixedFlatLdsAccess(const Instruction &, amdgpu:
         detector.validateRead(access.address, wave, access.lane, access.bytes, pending.order,
                               access.atomic_bytes);
       if (writes)
-        detector.validateWrite(access.address, wave, access.lane, access.bytes, pending.order,
-                               access.atomic_bytes);
+        detector.validateWriteAfterRead(access.address, wave, access.lane, access.bytes,
+                                        pending.order, access.atomic_bytes);
     }
   }
+  if (writes && lds_waw_)
+    for (const auto &access : pending.lanes)
+      detector.validateWriteAfterWrite(access.address, wave, access.lane, access.bytes,
+                                       pending.order, access.atomic_bytes);
   detector.attachLdsIntervals(pending.event, std::move(pending.intervals));
   s->mixed_lds.reset();
 }
@@ -1232,8 +1242,21 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
             detector->validateRead(address, waveId, static_cast<int>(lane), bytes, ldsOrder,
                                    atomicBytes);
           if (checkWrites)
-            detector->validateWrite(address, waveId, static_cast<int>(lane), bytes, ldsOrder,
-                                    atomicBytes);
+            detector->validateWriteAfterRead(address, waveId, static_cast<int>(lane), bytes,
+                                             ldsOrder, atomicBytes);
+        }
+      }
+    }
+    // Finish WAR checks for the whole instruction before WAW can claim its PC.
+    if (checkWrites && lds_waw_) {
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+        for (size_t set = 0; set < numAddressSets; ++set) {
+          const int bytes = static_cast<int>(laneBytes[set][lane]);
+          if (bytes == 0)
+            continue;
+          const int address = static_cast<int>(addressSets[set][lane]);
+          detector->validateWriteAfterWrite(address, waveId, static_cast<int>(lane), bytes,
+                                            ldsOrder, atomicWidth(address, bytes));
         }
       }
     }
@@ -1295,11 +1318,16 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         }
       }
       uint32_t ldsAddrs[64];
+      // Async loads can write LDS out of order even though they decrement
+      // ASYNCcnt in order (CDNA5 ISA 10.8). Keep the event's completion class
+      // for partial waits, but do not use it to order these writes.
+      const auto ldsWriteOrder =
+          memoryOrder == MemoryOrderClass::ASYNC_LOAD ? MemoryOrderClass::UNORDERED : memoryOrder;
       const uint64_t validLaneMask = amdgpu::lds_destination_write_mask(d, wf.cu().arch());
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
-        // Check each written lane against pending LDS reads, such as a tensor
+        // Check each written lane against pending LDS accesses, such as a tensor
         // store's source or a DS read, as the DS write path does. That includes
         // the wave's own pending DS reads: the ISA does not establish that a
         // direct-to-LDS write waits for them, so as a conservative rule the
@@ -1308,8 +1336,20 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
           continue;
         const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
         if (bytes != 0)
-          detector->validateWrite(static_cast<int>(ldsAddrs[lane]), waveId, static_cast<int>(lane),
-                                  static_cast<int>(bytes), memoryOrder);
+          detector->validateWriteAfterRead(static_cast<int>(ldsAddrs[lane]), waveId,
+                                           static_cast<int>(lane), static_cast<int>(bytes),
+                                           ldsWriteOrder);
+      }
+      if (lds_waw_) {
+        for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+          if (!(validLaneMask & (1ULL << lane)))
+            continue;
+          const auto bytes = detector->ldsBytesInRange(ldsAddrs[lane], perLaneBytes, perLaneBytes);
+          if (bytes != 0)
+            detector->validateWriteAfterWrite(static_cast<int>(ldsAddrs[lane]), waveId,
+                                              static_cast<int>(lane), static_cast<int>(bytes),
+                                              ldsWriteOrder);
+        }
       }
       if (obligations.empty())
         return;
@@ -1448,15 +1488,20 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   std::vector<LdsByteRange> ranges;
   ranges.reserve(issue.lds_ranges.size());
   for (const auto &range : issue.lds_ranges) {
-    ranges.push_back({.address = range.address, .bytes = range.bytes});
-    const auto bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
+    const uint64_t bytes = detector->ldsBytesInRange(range.address, range.bytes, kByteGranularity);
     if (bytes == 0)
       continue;
+    ranges.push_back({.address = range.address, .bytes = static_cast<uint32_t>(bytes)});
     const int addr = static_cast<int>(range.address);
     if (issue.is_load)
-      detector->validateWrite(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
+      detector->validateWriteAfterRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
     else
       detector->validateRead(addr, waveId, -1, static_cast<int>(bytes), ldsAccessOrder);
+  }
+  if (issue.is_load && lds_waw_) {
+    for (const auto &range : ranges)
+      detector->validateWriteAfterWrite(static_cast<int>(range.address), waveId, -1,
+                                        static_cast<int>(range.bytes), ldsAccessOrder);
   }
 
   // TENSORcnt counts each tensor instruction (CDNA5 ISA 10.11.1), so one that

@@ -146,7 +146,8 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuMemoryCancellationObserver {
 public:
   /// @param config_json Plugin JSON with an optional integer trace_context in
-  ///        [2, kTraceHistorySize]. Null or empty uses the default context.
+  ///        [2, kTraceHistorySize] and boolean lds_waw (default false).
+  ///        Null or empty uses the defaults.
   /// @throws std::invalid_argument for malformed configuration.
   explicit RaceDetectorPlugin(const char *config_json = nullptr);
   ~RaceDetectorPlugin() override;
@@ -220,6 +221,7 @@ public:
 
 private:
   size_t trace_context_ = kDefaultTraceContext;
+  bool lds_waw_ = false;
 
   struct WorkgroupKey {
     uint32_t dispatch_id;

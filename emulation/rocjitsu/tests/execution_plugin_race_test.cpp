@@ -62,6 +62,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -589,7 +590,7 @@ protected:
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
-    auto race_plugin = std::make_unique<RaceDetectorPlugin>();
+    auto race_plugin = std::make_unique<RaceDetectorPlugin>(R"({"lds_waw":true})");
     plugin = race_plugin.get();
     ASSERT_TRUE(fixture.plugin_group_->add(std::move(race_plugin)));
     fixture.soc->set_plugin_group(fixture.plugin_group_);
@@ -892,6 +893,202 @@ TEST_F(TensorDmaRaceTest, TransferIsCheckedAgainstPendingLdsAccesses) {
   EXPECT_NE(report.find("wave=0 lane=-1"), std::string::npos) << report;
 }
 
+// A DS write over bytes another wave has written is checked even though no read
+// is pending, and is ordered only by that wave's wait and a barrier.
+TEST_F(TensorDmaRaceTest, DsWriteOverAnotherWavesWriteRacesUntilWaitAndBarrier) {
+  EXPECT_FALSE(ds_write(0, 4));
+  EXPECT_TRUE(ds_write(1, 4));
+  wait_dscnt(0);
+  wait_dscnt(1);
+  barrier();
+  EXPECT_FALSE(ds_write(0, 4));
+}
+
+TEST_F(TensorDmaRaceTest, LdsWawPreservesThePendingReadDiagnostic) {
+  ASSERT_FALSE(ds_write(0, 4));
+  ASSERT_FALSE(ds_read(0, 4));
+  const size_t previous = sink->str().size();
+  ASSERT_TRUE(ds_write(1, 4));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)"), std::string::npos) << report;
+}
+
+enum class LdsWriter { DsStore, AsyncLoad, MixedFlatStore };
+
+class LdsWarPriorityTest : public TensorDmaRaceTest,
+                           public ::testing::WithParamInterface<LdsWriter> {};
+
+TEST_P(LdsWarPriorityTest, PendingReadOnLaterLaneTakesPriority) {
+  ComputeUnitCore &cu = *fixture.cu();
+  Wavefront &wave = *waves[1];
+  const uint32_t lds_base = cu.allocate_lds(256);
+  wave.set_lds_base(lds_base);
+  wave.set_lds_size(256);
+  ASSERT_FALSE(ds_write(0, lds_base));
+  ASSERT_FALSE(ds_read(0, lds_base + 4));
+
+  const bool mixed = GetParam() == LdsWriter::MixedFlatStore;
+  constexpr uint64_t kSharedBase = uint64_t{1} << 48;
+  cu.set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+  wave.set_exec(mixed ? 7 : 3);
+  const uint32_t vgprs = wave.vgpr_alloc().base;
+  for (uint32_t lane = 0; lane < 3; ++lane) {
+    const uint64_t address = mixed && lane < 2 ? kSharedBase + lane * 4
+                             : mixed           ? 0x10000
+                                               : lane * 4;
+    cu.write_vgpr(vgprs, lane, static_cast<uint32_t>(address));
+    cu.write_vgpr(vgprs + 1, lane, static_cast<uint32_t>(address >> 32));
+    cu.write_vgpr(vgprs + 2, lane, lane * 4); // Async load LDS destinations.
+    cu.write_vgpr(vgprs + 3, lane, 7);
+  }
+  cu.write_sgpr(wave.sgpr_alloc().base, 0x10000);
+  cu.write_sgpr(wave.sgpr_alloc().base + 1, 0);
+  const std::array store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 0, .data0 = 3});
+  const std::array load = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                               {.saddr = 0, .vdst = 2, .vaddr = 0});
+  const std::array flat = cdna5::build_vflat(cdna5::kFlatStoreB32Vflat,
+                                             {.saddr = kModernNullSelector, .vsrc = 3, .vaddr = 0});
+  const std::span<const uint32_t> words = mixed ? std::span<const uint32_t>(flat)
+                                          : GetParam() == LdsWriter::AsyncLoad
+                                              ? std::span<const uint32_t>(load)
+                                              : std::span<const uint32_t>(store);
+  DecodeResult instruction = decoder->decode_window(words);
+  ASSERT_TRUE(instruction.succeeded());
+  wave.pc = 0x2000;
+  const size_t previous = sink->str().size();
+  fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction.value(), wave);
+  ASSERT_TRUE(cu.execute_instruction(instruction.value().get(), wave).succeeded());
+  ASSERT_EQ(
+      test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction.value()), wave),
+      VmAccessOutcome::Complete);
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+  EXPECT_NE(report.find("reg=" + std::to_string(lds_base + 4) + " wave=1 lane=1"),
+            std::string::npos)
+      << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)"), std::string::npos) << report;
+}
+
+INSTANTIATE_TEST_SUITE_P(LdsWrites, LdsWarPriorityTest,
+                         ::testing::Values(LdsWriter::DsStore, LdsWriter::AsyncLoad,
+                                           LdsWriter::MixedFlatStore));
+
+TEST_F(TensorDmaRaceTest, LdsWawPreservesTheReadDiagnosticAcrossTensorRanges) {
+  ASSERT_FALSE(ds_write(0, 0));
+  ASSERT_FALSE(ds_read(0, 8));
+  const size_t previous = sink->str().size();
+  ASSERT_TRUE(tensor_load(1, {{.address = 0, .bytes = 4}, {.address = 8, .bytes = 4}}));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+  EXPECT_NE(report.find("reg=8 wave=1 lane=-1"), std::string::npos) << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)"), std::string::npos) << report;
+}
+
+TEST(RaceDetectorPluginTest, LdsWawOptionControlsOnlyLdsWriteWriteReports) {
+  struct Config {
+    const char *json;
+    bool enabled;
+  };
+  constexpr Config configs[] = {{nullptr, false},
+                                {"", false},
+                                {"{}", false},
+                                {R"({"trace_context":2})", false},
+                                {R"({"lds_waw":true})", true},
+                                {R"({"lds_waw":false})", false},
+                                {R"({"lds_waw":false,"trace_context":2})", false}};
+  for (const Config config : configs) {
+    for (uint32_t later_value : {7u, 8u}) {
+      SCOPED_TRACE(config.json ? config.json : "default");
+      SCOPED_TRACE(later_value);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/2, "cdna4"));
+      PluginSinkConfig sinks;
+      StringSink &sink = sinks.emplace<StringSink>();
+      fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+      ASSERT_TRUE(fixture.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(config.json)));
+      fixture.soc->set_plugin_group(fixture.plugin_group_);
+      fixture.plugin_group_->onInit();
+      auto &cu = *fixture.cu();
+      std::array waves{cu.dispatch_wf(0, 0x1000, 104, 256), cu.dispatch_wf(0, 0x2000, 104, 256)};
+      const uint32_t lds_base = cu.allocate_lds(256);
+      for (Wavefront *wave : waves) {
+        ASSERT_NE(wave, nullptr);
+        wave->set_exec(1);
+        wave->set_lds_base(lds_base);
+        wave->set_lds_size(256);
+      }
+      fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+      ASSERT_NE(decoder, nullptr);
+      std::string report;
+      auto ds = [&](int wave_index, uint32_t offset, std::optional<uint32_t> value) {
+        Wavefront &wave = *waves[wave_index];
+        wave.pc += 16;
+        cu.write_vgpr(wave.vgpr_alloc().base, 0, offset);
+        if (value)
+          cu.write_vgpr(wave.vgpr_alloc().base + 1, 0, *value);
+        const auto words = value ? cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 0, .data0 = 1})
+                                 : cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        const size_t previous = sink.str().size();
+        fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction.value(),
+                                                                wave);
+        ASSERT_TRUE(cu.execute_instruction(instruction.value().get(), wave).succeeded());
+        ASSERT_EQ(test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction.value()),
+                                                                 wave),
+                  VmAccessOutcome::Complete);
+        report = sink.str().substr(previous);
+      };
+
+      ASSERT_NO_FATAL_FAILURE(ds(0, 0, 7u));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(1, 0, later_value));
+      // Check before any read, including when both instructions store 7.
+      EXPECT_EQ(report.find("write-after-write (WAW)") != std::string::npos, config.enabled)
+          << report;
+      EXPECT_EQ(report.find("RACE ") != std::string::npos, config.enabled) << report;
+
+      // Use fresh instructions and addresses so PC deduplication cannot hide
+      // one hazard after reporting another.
+      ASSERT_NO_FATAL_FAILURE(ds(0, 4, 7u));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(1, 4, std::nullopt));
+      EXPECT_NE(report.find("read-after-write (RAW)"), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(0, 8, std::nullopt));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      ASSERT_NO_FATAL_FAILURE(ds(1, 8, 7u));
+      EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
+
+      ASSERT_NO_FATAL_FAILURE(execute_wait(*fixture.plugin_group_, *waves[0],
+                                           legacy_wait_word(ROCJITSU_CODE_ARCH_CDNA4, 63, 0)));
+      ASSERT_NO_FATAL_FAILURE(ds(0, 12, std::nullopt));
+      ASSERT_EQ(report.find("RACE "), std::string::npos) << report;
+      waves[0]->pc += 16;
+      ASSERT_NO_FATAL_FAILURE(record_register_probe(*fixture.plugin_group_, *waves[0]));
+      const size_t previous = sink.str().size();
+      fixture.plugin_group_->onAmdgpuWriteVgprLanes(waves[0], waves[0]->vgpr_alloc().base + 8, 1,
+                                                    0xf);
+      report = sink.str().substr(previous);
+      EXPECT_NE(report.find("type=VGPR"), std::string::npos) << report;
+      EXPECT_NE(report.find("write-after-write (WAW)"), std::string::npos) << report;
+    }
+  }
+}
+
+TEST(RaceDetectorPluginTest, RejectsNonBooleanLdsWawOption) {
+  for (const char *config : {R"({"lds_waw":0})", R"({"lds_waw":"false"})"}) {
+    SCOPED_TRACE(config);
+    try {
+      RaceDetectorPlugin plugin(config);
+      FAIL() << "Expected invalid lds_waw configuration to be rejected";
+    } catch (const std::invalid_argument &error) {
+      EXPECT_STREQ(error.what(), "Race plugin 'lds_waw' must be a boolean");
+    }
+  }
+}
+
 TEST_F(TensorDmaRaceTest, StoreIsCheckedAgainstAPendingDsWrite) {
   // DS writes and tensor transfers complete independently, so the store may
   // read the bytes before the earlier write lands.
@@ -1081,6 +1278,55 @@ TEST_F(TensorDmaRaceTest, AsyncStoreAfterAsynccntIsSafe) {
 TEST_F(TensorDmaRaceTest, AsyncLoadOverAPendingAsyncStoreSourceRaces) {
   EXPECT_FALSE(async_store(0, 4));
   EXPECT_TRUE(async_load(0, 4));
+}
+
+class AsyncLoadWawTest : public TensorDmaRaceTest, public ::testing::WithParamInterface<int> {};
+
+// CDNA5 ISA 10.8 permits the LDS writes to occur out of order, although ASYNCcnt
+// decrements in order. Only a wait that completes the first load orders this pair.
+TEST_P(AsyncLoadWawTest, DecodedLoadsToTheSameLdsDword) {
+  auto &cu = *fixture.cu();
+  auto &wave = *waves[0];
+  const uint32_t lds_base = cu.allocate_lds(256);
+  wave.set_lds_base(lds_base);
+  wave.set_lds_size(256);
+  const uint32_t sgprs = wave.sgpr_alloc().base;
+  cu.write_sgpr(sgprs, 0x10000u);
+  cu.write_sgpr(sgprs + 1, 0);
+  const uint32_t vgprs = wave.vgpr_alloc().base;
+  cu.write_vgpr(vgprs + 1, 0, 0); // v1: both loads' LDS destination.
+  const auto words = cdna5::build_vglobal(cdna5::kGlobalLoadAsyncToLdsB32Vglobal,
+                                          {.saddr = 0, .vdst = 1, .vaddr = 0});
+  auto load = [&](uint32_t global_offset) {
+    cu.write_vgpr(vgprs, 0, global_offset);
+    auto instruction = decoder->decode_window(words);
+    ASSERT_TRUE(instruction.succeeded());
+    wave.pc += 16;
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(wave.pc, *instruction.value(), wave);
+    ASSERT_TRUE(cu.execute_instruction(instruction.value().get(), wave).succeeded());
+    test::ComputeUnitTestAccess::route_memory_inst(cu, std::move(instruction.value()), wave);
+  };
+
+  ASSERT_NO_FATAL_FAILURE(load(0));
+  ASSERT_EQ(sink->str().find("RACE "), std::string::npos) << sink->str();
+  if (GetParam() >= 0) {
+    ASSERT_NO_FATAL_FAILURE(wait_asynccnt(0, GetParam()));
+  }
+  const size_t previous = sink->str().size();
+  ASSERT_NO_FATAL_FAILURE(load(4));
+  const std::string report = sink->str().substr(previous);
+  EXPECT_EQ(report.find("RACE ") != std::string::npos, GetParam() != 0) << report;
+  EXPECT_EQ(report.find("write-after-write (WAW)") != std::string::npos, GetParam() != 0) << report;
+}
+
+INSTANTIATE_TEST_SUITE_P(WaitThresholds, AsyncLoadWawTest, ::testing::Values(-1, 0, 1));
+
+TEST_F(TensorDmaRaceTest, AsyncLoadWawPartialWaitCompletesOnlyTheOlderLoad) {
+  ASSERT_FALSE(async_load(0, 0));
+  ASSERT_FALSE(async_load(0, 64));
+  wait_asynccnt(0, 1);
+  EXPECT_FALSE(async_load(0, 0));
+  EXPECT_TRUE(async_load(0, 64));
 }
 
 TEST_F(TensorDmaRaceTest, AsyncStoresOfOneSourceDoNotRace) {
@@ -11995,7 +12241,8 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
       PluginSinkConfig sinks;
       auto &sink = sinks.emplace<StringSink>();
       f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
-      ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+      ASSERT_TRUE(
+          f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(R"({"lds_waw":true})")));
       f.soc->set_plugin_group(f.plugin_group_);
       f.plugin_group_->onInit();
       auto *cu = f.cu();
@@ -12128,6 +12375,10 @@ TEST(RaceDetectorPluginTest, Gfx10FlatLdsBytesAndReturnedRegistersHaveIndependen
     };
     ASSERT_NO_FATAL_FAILURE(check(Op::FlatAdd, Op::DsAdd, Wait::None, true));
     ASSERT_NO_FATAL_FAILURE(check(Op::DsAdd, Op::FlatAdd, Wait::None, true));
+    // Matching atomics remain exempt after completion, while their LDS history
+    // is still visible to the other wave without a barrier.
+    ASSERT_NO_FATAL_FAILURE(check(Op::FlatAdd, Op::DsAdd, Wait::Both, true));
+    ASSERT_NO_FATAL_FAILURE(check(Op::DsAdd, Op::FlatAdd, Wait::Both, true));
     // A 64-bit atomic at byte zero overlaps the DWORD at byte four without
     // denoting the same atomic element.
     ASSERT_NO_FATAL_FAILURE(check(Op::FlatAdd, Op::DsAdd64, Wait::None, true));
