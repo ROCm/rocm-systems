@@ -10,12 +10,16 @@
 
 #include <array>
 #include <chrono>
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <future>
 #include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
 
 #include "IbVerbsWorld.h"
 #include "ScopedHook.h"
@@ -66,6 +70,22 @@ void* TestIbAsyncThreadMain(void*) { return nullptr; }
 #undef realpath
 #undef ncclIbDmaBufSupport
 #undef ncclIbGdrSupport
+
+// The std::thread overload is a weak no-op in nccl_fakes.cc. This copy runs on the discovering thread right after
+// each async-event thread starts, so it can record which device that thread's ncclIbDevs slot holds at that moment.
+static std::vector<std::string>* g_asyncThreadDevsAtStart = nullptr;
+void ncclSetThreadName(std::thread&, const char* fmt, ...) {
+  char name[64];
+  va_list ap;
+  va_start(ap, fmt);
+  std::vsnprintf(name, sizeof(name), fmt, ap);
+  va_end(ap);
+  int slot = -1;
+  if (g_asyncThreadDevsAtStart && std::sscanf(name, "NCCL IbAsync %d", &slot) == 1 && slot >= 0 &&
+      slot < MAX_IB_DEVS) {
+    g_asyncThreadDevsAtStart->push_back(ncclIbDevs[slot].devName);
+  }
+}
 
 namespace {
 
@@ -829,3 +849,40 @@ TEST_F(NetIbInitMicrotest, SetNetAttr_IsNoOpSuccess) {
 }
 
 }  // namespace
+
+// Each async-event thread keeps its ncclIbDevs slot for life, so the slot must already hold its post-sort device when
+// the thread starts; otherwise it handles one NIC's async events against another's context, port and name.
+// mlx5_0 enumerates first but sits on the higher PCI bus, so NCCL_IB_DEVICE_PCI_ORDER swaps the two slots.
+static void ExpectAsyncThreadsStartOnFinalDevices(int64_t pciOrder, const char* firstAfterInit) {
+  IbVerbsWorld world;
+  world.AddHca("mlx5_0");
+  world.AddHca("mlx5_1");
+  ScopedHook path(g_testRealpath, [](const char* devicePath, char*) {
+    return strdup(std::strstr(devicePath, "mlx5_0") ? "/sys/devices/pci0000:80/0000:81:00.0"
+                                                    : "/sys/devices/pci0000:00/0000:01:00.0");
+  });
+  ScopedHook params(g_loadParam, [pciOrder](const char* name, int64_t fallback) {
+    return std::strcmp(name, "IB_DEVICE_PCI_ORDER") == 0 ? pciOrder : fallback;
+  });
+  ScopedHook gid(g_ncclIbGidInfoQuery, [](ibv_context*, uint8_t, ibv_port_attr* attr, ncclIbGidInfo* info) {
+    info->link_layer = attr->link_layer;
+    return ncclSuccess;
+  });
+  std::vector<std::string> atStart;
+  g_asyncThreadDevsAtStart = &atStart;
+  ncclResult_t res = ncclIbInitDevices(nullptr, nullptr);
+  g_asyncThreadDevsAtStart = nullptr;
+
+  ASSERT_EQ(res, ncclSuccess);
+  ASSERT_EQ(ncclNIbDevs, 2);
+  EXPECT_STREQ(ncclIbDevs[0].devName, firstAfterInit);
+  EXPECT_EQ(atStart, (std::vector<std::string>{ncclIbDevs[0].devName, ncclIbDevs[1].devName}));
+}
+
+TEST_F(NetIbInitMicrotest, InitDevices_PciOrderSort_AsyncThreadsStartOnTheSortedDevices) {
+  ExpectAsyncThreadsStartOnFinalDevices(1, "mlx5_1");
+}
+
+TEST_F(NetIbInitMicrotest, InitDevices_NoPciOrderSort_AsyncThreadsStartOnTheDiscoveredDevices) {
+  ExpectAsyncThreadsStartOnFinalDevices(0, "mlx5_0");
+}
