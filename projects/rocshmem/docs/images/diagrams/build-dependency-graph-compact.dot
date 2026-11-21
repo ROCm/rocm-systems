@@ -105,7 +105,8 @@ SERIAL, single-threaded", style="rounded,filled", fillcolor="#ffd8a8", color=red
   hsaco_lld -> hsaco_target;
   hsaco_target -> project_dep_hack [color=red, penwidth=2];
   subgraph cluster_examples {
-    label="examples -- depend on librocshmem.a only (NOT gated by HSACO chain)";
+    label="examples -- depend on librocshmem.a only
+(NOT gated by HSACO chain)";
     fillcolor="#f8f9fa"; style=filled; fontsize=10;
   examples_link [label="11 targets (examples/*)", style="rounded,filled", fillcolor="#ffa8a8"];
   t_examples_link [label="1315.8s
@@ -115,7 +116,8 @@ cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fil
   }
   host_archive -> examples_link;
   subgraph cluster_consumers {
-    label="independent links -- depend on librocshmem.a only (NOT gated by HSACO chain)";
+    label="independent links -- depend on librocshmem.a only
+(NOT gated by HSACO chain)";
     fillcolor="#f8f9fa"; style=filled; fontsize=10;
   other_links [label="3 targets (tools/unit-tests/
 rocprofiler-register)", style="rounded,filled", fillcolor="#ffa8a8"];

@@ -267,6 +267,28 @@ def group_window(edges, include, exclude):
     return min(starts), max(ends), len(starts), sum(e - s for s, e in zip(starts, ends))
 
 
+def group_members(edges, include, exclude):
+    """Like group_window, but returns the individual (output, duration_s)
+    pairs sorted slowest-first -- for listing every target in a group inside
+    one node label instead of just the aggregate.
+    """
+    members = [(out, (e - s) / 1000.0) for out, (s, e) in edges.items()
+               if include.search(out) and not (exclude and exclude.search(out))]
+    members.sort(key=lambda m: -m[1])
+    return members
+
+
+def short_target_name(out):
+    """Strips the common group-path prefix off a ninja output so individual
+    targets can be labeled by just their own name (keeping any subdirectory
+    that distinguishes them, e.g. examples/LL_MoE/ll_moe -> LL_MoE/ll_moe).
+    """
+    for prefix in ("examples/", "tools/", "tests/unit_tests/", "tests/rocprofiler_register/"):
+        if out.startswith(prefix):
+            return out[len(prefix):]
+    return os.path.basename(out)
+
+
 def detect_hsaco_gate(build_ninja_path):
     """Figures out, from build.ninja itself, which target
     add_dependencies(${PROJECT_NAME}, device_bitcode_tester_hsacos) actually
@@ -539,6 +561,39 @@ def extract_ninja_commands(build_ninja_path, wanted_outputs):
     return commands
 
 
+def extract_ninja_inputs(build_ninja_path, wanted_outputs):
+    """Maps each of `wanted_outputs` to its explicit source input(s), read
+    straight off the `build <out...>: RULE <in...> [| implicit] [|| order-only]`
+    line -- the actual source file(s) ninja thinks that output is built from,
+    so the dependency graph can show which sources feed each node (and where
+    the same source feeds more than one node, e.g. a dual host+device compile).
+    """
+    inputs = {}
+    remaining = set(wanted_outputs)
+    if not remaining or not os.path.exists(build_ninja_path):
+        return inputs
+    with open(build_ninja_path) as f:
+        for line in f:
+            if not line.startswith("build "):
+                continue
+            content = line[len("build "):].rstrip("\n")
+            outputs_part, sep, rest = content.partition(":")
+            if not sep:
+                continue
+            outs = {tok for tok in outputs_part.split() if tok != "|"}
+            hit = outs & remaining
+            if not hit:
+                continue
+            rest = rest.strip().split(" || ", 1)[0].split(" | ", 1)[0]
+            tokens = rest.split()[1:]  # drop the rule name, keep explicit inputs
+            for out in hit:
+                inputs[out] = tokens
+            remaining -= hit
+            if not remaining:
+                break
+    return inputs
+
+
 def simplify_command(cmd):
     """Turns a raw ninja COMMAND (leading `cd <dir> &&`, absolute paths,
     possibly dozens of same-extension inputs) into a short, readable,
@@ -696,6 +751,47 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             counts = collections.Counter(classify_component(out) for out in host_outs)
             host_component_breakdown = ", ".join(f"{g}:{c}" for g, c in counts.most_common())
 
+    # Source-file traceability: which .cpp/.hip actually feeds each parallel-compile
+    # group, and where the *same* source feeds more than one group (e.g. a source
+    # compiled once to device bitcode and once to a host object isn't a bug -- it's
+    # how -fgpu-rdc dual host+device compilation works -- but it's exactly the kind
+    # of thing that's invisible without seeing the source lists side by side).
+    source_groups = {}
+    if build_ninja_path:
+        group_outs = {
+            "bc_sources": {out for out in edges if TIMELINE_GROUP_PATTERNS[0][1].search(out)},
+            "host_sources": {out for out in edges if TIMELINE_GROUP_PATTERNS[1][1].search(out)},
+            "functest_sources": {out for out in edges if TIMELINE_GROUP_PATTERNS[4][1].search(out)},
+        }
+        all_outs = set().union(*group_outs.values())
+        src_inputs = extract_ninja_inputs(build_ninja_path, all_outs)
+
+        def sources_of(group):
+            names = set()
+            for out in group_outs[group]:
+                for inp in src_inputs.get(out, []):
+                    names.add(os.path.basename(inp))
+            return names
+
+        source_groups = {name: sources_of(name) for name in group_outs}
+
+    def shared_sources_note(group_name):
+        """"shares N files with <other group>" for every other group that overlaps --
+        the signal that a source is intentionally dual-compiled (or, if that's
+        unexpected, worth a second look).
+        """
+        mine = source_groups.get(group_name)
+        if not mine:
+            return None
+        notes = []
+        for other, files in source_groups.items():
+            if other == group_name:
+                continue
+            shared = mine & files
+            if shared:
+                notes.append(f"shares {len(shared)} file(s) with {other}")
+        return "; ".join(notes) if notes else None
+
     def dur(name):
         s, e, _ = milestones[name]
         return (e - s) / 1000.0
@@ -709,6 +805,8 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
     ex_group = group_window(edges, TIMELINE_GROUP_PATTERNS[2][1], TIMELINE_GROUP_PATTERNS[2][2])
     other_group = group_window(edges, TIMELINE_GROUP_PATTERNS[3][1], TIMELINE_GROUP_PATTERNS[3][2])
     ft_group = group_window(edges, TIMELINE_GROUP_PATTERNS[4][1], TIMELINE_GROUP_PATTERNS[4][2])
+    ex_members = group_members(edges, TIMELINE_GROUP_PATTERNS[2][1], TIMELINE_GROUP_PATTERNS[2][2])
+    other_members = group_members(edges, TIMELINE_GROUP_PATTERNS[3][1], TIMELINE_GROUP_PATTERNS[3][2])
 
     gated_note = (
         f"gates: {', '.join(gate_info['gated_targets'])}" if gate_info and gate_info["gated_targets"]
@@ -750,7 +848,13 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
 
         # device bitcode
         if bc_group and "bc_opt" in milestones:
-            lines.append(_node("bc_sources", f"BITCODE_SOURCES ({bc_group[2]} files)",
+            bc_sources_label = f"BITCODE_SOURCES ({bc_group[2]} files)"
+            if not compact and source_groups.get("bc_sources"):
+                bc_sources_label += "\n" + ", ".join(sorted(source_groups["bc_sources"]))
+            note = shared_sources_note("bc_sources")
+            if not compact and note:
+                bc_sources_label += f"\n({note})"
+            lines.append(_node("bc_sources", bc_sources_label,
                                 "#cfe2ff", style="rounded,filled,dashed"))
             lines.append(_node("bc_compile", "clang++ per-source bitcode compile"
                                 if compact else
@@ -786,6 +890,9 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             host_label = f"{n} host/device TU compiles\nparallel"
             if not compact and host_component_breakdown:
                 host_label += f"\n{host_component_breakdown}"
+            note = shared_sources_note("host_sources")
+            if not compact and note:
+                host_label += f"\n({note})"
             lines.append(_node("host_sources", host_label, "#b2f2bb"))
             lines.append(_circle("host_sources", f"{cpu/1000:.1f}s\ncpu-sum", width=0.6))
             lines.append(_node("host_archive", "librocshmem.a (-fgpu-rdc PUBLIC)", "#e9ecef",
@@ -840,9 +947,12 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             s0, e0, n, cpu = ex_group
             lines.append(f"  subgraph cluster_examples {{\n"
                           f'    label="examples -- depend on librocshmem.a only'
-                          f'{" (NOT gated by HSACO chain)" if not gates_library else ""}";\n'
+                          f'{"\n(NOT gated by HSACO chain)" if not gates_library else ""}";\n'
                           f'    fillcolor="#f8f9fa"; style=filled; fontsize={fs};\n')
-            lines.append(_node("examples_link", f"{n} targets (examples/*)", "#ffa8a8"))
+            ex_label = f"{n} targets (examples/*)"
+            if not compact:
+                ex_label += "\n" + "\n".join(f"{short_target_name(o)}: {d:.1f}s" for o, d in ex_members)
+            lines.append(_node("examples_link", ex_label, "#ffa8a8"))
             lines.append(_circle("examples_link", f"{cpu/1000:.1f}s\ncpu total", color="red", width=0.7))
             lines.append("  }\n")
             if "host_archive" in [n for n in ["host_archive"] if host_group]:
@@ -853,10 +963,12 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
             s0, e0, n, cpu = other_group
             lines.append(f"  subgraph cluster_consumers {{\n"
                           f'    label="independent links -- depend on librocshmem.a only'
-                          f'{" (NOT gated by HSACO chain)" if not gates_library else ""}";\n'
+                          f'{"\n(NOT gated by HSACO chain)" if not gates_library else ""}";\n'
                           f'    fillcolor="#f8f9fa"; style=filled; fontsize={fs};\n')
-            lines.append(_node("other_links", f"{n} targets (tools/unit-tests/\nrocprofiler-register)",
-                                "#ffa8a8"))
+            other_label = "{} targets (tools/unit-tests/\nrocprofiler-register)".format(n)
+            if not compact:
+                other_label += "\n" + "\n".join(f"{short_target_name(o)}: {d:.1f}s" for o, d in other_members)
+            lines.append(_node("other_links", other_label, "#ffa8a8"))
             lines.append(_circle("other_links", f"{cpu/1000:.1f}s\ncpu total", color="red", width=0.7))
             lines.append("  }\n")
             if "host_archive" in [n for n in ["host_archive"] if host_group]:
@@ -880,8 +992,11 @@ def generate_dot_graphs(edges, milestones, gate_info, examples_built, unit_tests
                           f'    style="filled,dashed"; fillcolor="#fff5f5"; color=red; fontsize={fs};\n')
             if ft_group:
                 s0, e0, n, cpu = ft_group
-                lines.append(_node("functest_sources", f"{n} functional-test source compiles\nparallel",
-                                    "#b2f2bb"))
+                functest_label = f"{n} functional-test source compiles\nparallel"
+                note = shared_sources_note("functest_sources")
+                if not compact and note:
+                    functest_label += f"\n({note})"
+                lines.append(_node("functest_sources", functest_label, "#b2f2bb"))
                 longest = max((e - s) for out, (s, e) in edges.items()
                               if TIMELINE_GROUP_PATTERNS[4][1].search(out)) / 1000.0
                 lines.append(_circle("functest_sources", f"{cpu/1000:.1f}s cpu\nlongest {longest:.1f}s", width=0.7))
