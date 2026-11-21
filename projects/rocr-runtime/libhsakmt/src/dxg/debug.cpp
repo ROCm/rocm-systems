@@ -110,6 +110,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnable(void *rDebug, bool setupTtmp) {
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisable(void) {
+  /* An enable inherited across fork() belongs to the parent, so a forked child
+   * has nothing to disable. Without pthread_atfork, CHECK_DXG_OPEN() in the
+   * probe below would not yet know about the fork and would walk the parent's
+   * WDDMDevices.
+   */
+  {
+    std::lock_guard<std::recursive_mutex> lck(dxg_runtime->hsakmt_mutex);
+    if (is_forked_child()) return HSAKMT_STATUS_SUCCESS;
+  }
+
   HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupport();
 
   if (result)

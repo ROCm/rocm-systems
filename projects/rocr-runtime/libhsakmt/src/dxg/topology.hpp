@@ -34,6 +34,13 @@ struct _topology_props {
    * release triggers touches g_system, g_props and wdevices_ as well.
    */
   std::atomic<uint32_t> snapshot_refs_{0};
+  /* References a forked child inherited rather than took, moved out of
+   * snapshot_refs_ when the fork is noticed. hsaKmtReleaseSystemProperties()
+   * gives these back first, for the reason hsaKmtCloseKFD() does the same with
+   * inherited opens. Guarded by hsakmt_mutex, except in the fork child handler
+   * where only one thread exists.
+   */
+  uint32_t inherited_snapshot_refs_ = 0;
   uint32_t wdevice_num_ = 0;
   uint32_t num_sysfs_nodes = 0;
   uint32_t numa_node_count_ = 0;
