@@ -101,6 +101,7 @@ test_categories:
       - "RcclEpWaveTest.*"
       - "RcclEpLayoutTest.*"
       - "DeviceApi.RejectedCreate*"
+      - "DeviceApiFlow.*"
       - "GinDeviceTest.*"
     exclude_windows:
       - "*"
