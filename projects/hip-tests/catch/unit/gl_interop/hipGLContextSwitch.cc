@@ -59,12 +59,13 @@ constexpr size_t kLargeBufferSize = 4096 * sizeof(float);  // For tests needing 
  * @brief Process-wide pool of persistent GLUT windows for the context-switch tests.
  *
  * These tests deliberately use multiple distinct windows/contexts (that is what a context switch
- * is), but creating and destroying a fresh window per GLUTWindow accumulates native window handles
- * in freeglut and eventually hangs the window manager (seen on Linux) — the same accumulation that
- * made the common header switch to a single persistent shared window. So windows here are created
- * once, kept alive for the whole process, and recycled (acquire/release a slot) across tests. At
- * most a handful are ever live simultaneously (4, for the Patterns / RapidMultiContextSwitching
- * tests), so the pool never exceeds a few windows regardless of how many tests run.
+ * is), but creating and destroying a fresh window per GLTestContext accumulates native window
+ * handles in freeglut and eventually hangs the window manager (seen on Linux) — the same
+ * accumulation that made the common header switch to a single persistent shared window. So windows
+ * here are created once, kept alive for the whole process, and recycled (acquire/release a slot)
+ * across tests. At most a handful are ever live simultaneously (4, for the Patterns /
+ * RapidMultiContextSwitching tests), so the pool never exceeds a few windows regardless of how many
+ * tests run.
  *
  * Tests run serially (Catch2 is single-threaded here), so no synchronization is needed.
  */
@@ -101,31 +102,37 @@ inline GlutWindowPool& glutWindowPool() {
 }
 
 /**
- * @brief RAII handle to a pooled GLUT window with its own GL context.
+ * @brief GL context selected by GL_CONTEXT_TYPE, with an independent identity.
  *
- * Borrows a persistent window from glutWindowPool() on construction and returns it on destruction
- * WITHOUT destroying the underlying window (see GlutWindowPool for why). Concurrently-live handles
- * always map to distinct pool windows, so their id()s differ — the property the switch tests check.
- * All handles MUST share the single process-wide glutInit() via EnsureGlutInitialized(); a second
- * glutInit() raises an "illegal glutInit() reinitialization attempt" error and can hang the run.
+ * EGL contexts own independent pbuffers on a shared display. GLUT contexts borrow persistent
+ * windows from glutWindowPool() and return them without destroying the underlying windows.
+ * Simultaneously live handles always identify distinct contexts, as required by the switch tests.
  */
-class GLUTWindow {
+class GLTestContext {
  public:
-  GLUTWindow() {
-    EnsureGlutInitialized();
-    if (glut_init_failed) {
-      HIP_SKIP_TEST("GLUT Init Failed");
+  GLTestContext() {
+    const auto type = GetGLContextType();
+#ifdef USE_EGL
+    if (type == GLContextType::Egl) {
+      egl_context_ = std::make_unique<EGLContextScopeGuard>();
+    } else
+#endif
+    {
+      REQUIRE(type == GLContextType::Glut);
+      EnsureGlutInitialized();
+      slot_ = glutWindowPool().acquire();
+      window_id_ = glutWindowPool().id(slot_);
+      REQUIRE(window_id_ > 0);
     }
-    slot_ = glutWindowPool().acquire();
-    window_id_ = glutWindowPool().id(slot_);
-    REQUIRE(window_id_ > 0);
 
 #ifdef USE_GLEW
     makeCurrent();
     GLenum err = glewInit();
     if (err != GLEW_OK) {
       fprintf(stderr, "GLEW init failed: %s\n", glewGetErrorString(err));
-      glutWindowPool().release(slot_);
+      if (slot_ >= 0) {
+        glutWindowPool().release(slot_);
+      }
       slot_ = -1;
       window_id_ = 0;
       HIP_SKIP_TEST(HipTest::SkipReason::kGlewInitFailed);
@@ -133,21 +140,40 @@ class GLUTWindow {
 #endif
   }
 
-  ~GLUTWindow() {
+  ~GLTestContext() {
     if (slot_ >= 0) {
       glutWindowPool().release(slot_);
     }
   }
 
-  void makeCurrent() { glutSetWindow(window_id_); }
-  int id() const { return window_id_; }
+  void makeCurrent() {
+#ifdef USE_EGL
+    if (egl_context_) {
+      egl_context_->makeCurrent();
+      return;
+    }
+#endif
+    glutSetWindow(window_id_);
+  }
 
-  GLUTWindow(const GLUTWindow&) = delete;
-  GLUTWindow& operator=(const GLUTWindow&) = delete;
-  GLUTWindow(GLUTWindow&&) = delete;
-  GLUTWindow& operator=(GLUTWindow&&) = delete;
+  std::uintptr_t id() const {
+#ifdef USE_EGL
+    if (egl_context_) {
+      return egl_context_->id();
+    }
+#endif
+    return window_id_;
+  }
+
+  GLTestContext(const GLTestContext&) = delete;
+  GLTestContext& operator=(const GLTestContext&) = delete;
+  GLTestContext(GLTestContext&&) = delete;
+  GLTestContext& operator=(GLTestContext&&) = delete;
 
  private:
+#ifdef USE_EGL
+  std::unique_ptr<EGLContextScopeGuard> egl_context_;
+#endif
   int slot_ = -1;
   int window_id_ = 0;
 };
@@ -302,10 +328,10 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    }
 
    // Create first GL context
-   GLUTWindow window1;
+   GLTestContext window1;
    window1.makeCurrent();
 
-   INFO("Created first GL context (window " << window1.id() << ")");
+   INFO("Created first GL context (id " << window1.id() << ")");
    REQUIRE(verifyGLDeviceEnumeration());
 
    // Perform interop operations with first context
@@ -315,10 +341,10 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    INFO("First context: Mapped buffer at " << result1.devicePtr << ", size " << result1.size);
 
    // Create second GL context and switch
-   GLUTWindow window2;
+   GLTestContext window2;
    window2.makeCurrent();
 
-   INFO("Created second GL context (window " << window2.id() << ")");
+   INFO("Created second GL context (id " << window2.id() << ")");
    REQUIRE(window1.id() != window2.id());
 
    // Verify interop re-initialization for second context
@@ -345,43 +371,43 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    }
 
    // Create two contexts
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
-  // Use context 1: create and use buffer (standard size from common header)
-  window1.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
+   // Use context 1: create and use buffer (standard size from common header)
+   window1.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
 
-  GLBufferObject buffer1;
-  hipGraphicsResource* resource1 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
-  REQUIRE(resource1 != nullptr);
+   GLBufferObject buffer1;
+   hipGraphicsResource* resource1 = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
+   REQUIRE(resource1 != nullptr);
 
-  // Switch to context 2: create another buffer (larger size)
-  window2.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
+   // Switch to context 2: create another buffer (larger size)
+   window2.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
 
-  GLBufferWithData buffer2(kLargeBufferSize);
-  hipGraphicsResource* resource2 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
-  REQUIRE(resource2 != nullptr);
+   GLBufferWithData buffer2(kLargeBufferSize);
+   hipGraphicsResource* resource2 = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
+   REQUIRE(resource2 != nullptr);
 
-  // Verify sizes match expectations
-  HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
-  void* devPtr2 = nullptr;
-  size_t size2 = 0;
-  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, resource2));
-  REQUIRE(size2 == kLargeBufferSize);
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
+   // Verify sizes match expectations
+   HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
+   void* devPtr2 = nullptr;
+   size_t size2 = 0;
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr2, &size2, resource2));
+   REQUIRE(size2 == kLargeBufferSize);
+   HIP_CHECK(hipGraphicsUnmapResources(1, &resource2, 0));
 
-  // Switch back to context 1: verify original resource
-  window1.makeCurrent();
-  HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0));
-  void* devPtr1 = nullptr;
-  size_t size1 = 0;
-  HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, resource1));
-  REQUIRE(size1 == GLBufferObject::kSize);
-  HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0));
+   // Switch back to context 1: verify original resource
+   window1.makeCurrent();
+   HIP_CHECK(hipGraphicsMapResources(1, &resource1, 0));
+   void* devPtr1 = nullptr;
+   size_t size1 = 0;
+   HIP_CHECK(hipGraphicsResourceGetMappedPointer(&devPtr1, &size1, resource1));
+   REQUIRE(size1 == GLBufferObject::kSize);
+   HIP_CHECK(hipGraphicsUnmapResources(1, &resource1, 0));
 
    // Cleanup
    window1.makeCurrent();
@@ -405,8 +431,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
    REQUIRE(window1.id() != window2.id());
 
    for (int iter = 0; iter < kDefaultIterations; ++iter) {
@@ -439,9 +465,9 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
-   GLUTWindow window3;
+   GLTestContext window1;
+   GLTestContext window2;
+   GLTestContext window3;
 
    // Rapid switching between 3 contexts
    for (int iter = 0; iter < kRapidSwitchIterations; ++iter) {
@@ -469,11 +495,11 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   std::vector<std::unique_ptr<GLUTWindow>> windows;
+   std::vector<std::unique_ptr<GLTestContext>> windows;
    constexpr int kNumContexts = 4;
 
    for (int i = 0; i < kNumContexts; ++i) {
-     windows.push_back(std::make_unique<GLUTWindow>());
+     windows.push_back(std::make_unique<GLTestContext>());
    }
 
    SECTION("Sequential pattern: 0-1-2-3-0-1-2-3...") {
@@ -534,7 +560,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
    }
 
    // First context - explicit initialization
-   GLUTWindow window1;
+   GLTestContext window1;
    window1.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
 
@@ -546,7 +572,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
   HIP_CHECK(hipGraphicsUnregisterResource(resource1));
 
   // Second context - NO explicit hipGLGetDevices call
-  GLUTWindow window2;
+  GLTestContext window2;
   window2.makeCurrent();
 
   INFO("Attempting to register buffer with second context without calling hipGLGetDevices");
@@ -581,8 +607,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    // Initialize with context 1
    window1.makeCurrent();
@@ -648,7 +674,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window;
+   GLTestContext window;
    window.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
 
@@ -728,8 +754,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
    window1.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
 
@@ -773,11 +799,11 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   std::vector<std::unique_ptr<GLUTWindow>> windows;
+   std::vector<std::unique_ptr<GLTestContext>> windows;
    constexpr int kNumContexts = 4;
 
    for (int i = 0; i < kNumContexts; ++i) {
-     windows.push_back(std::make_unique<GLUTWindow>());
+     windows.push_back(std::make_unique<GLTestContext>());
    }
 
    // Initialize first context
@@ -819,7 +845,7 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window;
+   GLTestContext window;
    window.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
 
@@ -844,8 +870,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    // Context A -> B -> A -> B -> A
    for (int cycle = 0; cycle < kDefaultIterations; ++cycle) {
@@ -880,26 +906,26 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
-  // Create buffer in context 1
-  window1.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
-  GLBufferObject buffer1;
+   // Create buffer in context 1
+   window1.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
+   GLBufferObject buffer1;
 
-  // Register buffer from context 1
-  hipGraphicsResource* resource1 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
+   // Register buffer from context 1
+   hipGraphicsResource* resource1 = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource1, buffer1, hipGraphicsRegisterFlagsNone));
 
-  // Create buffer in context 2
-  window2.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
-  GLBufferObject buffer2;
+   // Create buffer in context 2
+   window2.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
+   GLBufferObject buffer2;
 
-  // Register buffer from context 2
-  hipGraphicsResource* resource2 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
+   // Register buffer from context 2
+   hipGraphicsResource* resource2 = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterBuffer(&resource2, buffer2, hipGraphicsRegisterFlagsNone));
 
    // Use context 2's resource
    HIP_CHECK(hipGraphicsMapResources(1, &resource2, 0));
@@ -936,8 +962,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    // Test data
    constexpr size_t kFloatCount = 256;
@@ -1005,8 +1031,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    constexpr size_t kFloatCount = 128;
    constexpr float kValue1 = 1.0f;
@@ -1085,34 +1111,34 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
-  // Context 1: register and use a texture
-  window1.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
+   // Context 1: register and use a texture
+   window1.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
 
-  GLImageObject texture1;
-  hipGraphicsResource* texResource1 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterImage(&texResource1, texture1, GL_TEXTURE_2D,
-                                       hipGraphicsRegisterFlagsNone));
-  REQUIRE(texResource1 != nullptr);
+   GLImageObject texture1;
+   hipGraphicsResource* texResource1 = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterImage(&texResource1, texture1, GL_TEXTURE_2D,
+                                        hipGraphicsRegisterFlagsNone));
+   REQUIRE(texResource1 != nullptr);
 
-  HIP_CHECK(hipGraphicsMapResources(1, &texResource1, 0));
-  hipArray_t array1 = nullptr;
-  HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array1, texResource1, 0, 0));
-  REQUIRE(array1 != nullptr);
-  HIP_CHECK(hipGraphicsUnmapResources(1, &texResource1, 0));
+   HIP_CHECK(hipGraphicsMapResources(1, &texResource1, 0));
+   hipArray_t array1 = nullptr;
+   HIP_CHECK(hipGraphicsSubResourceGetMappedArray(&array1, texResource1, 0, 0));
+   REQUIRE(array1 != nullptr);
+   HIP_CHECK(hipGraphicsUnmapResources(1, &texResource1, 0));
 
-  // Context 2: register another texture
-  window2.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
+   // Context 2: register another texture
+   window2.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
 
-  GLImageObject texture2;
-  hipGraphicsResource* texResource2 = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterImage(&texResource2, texture2, GL_TEXTURE_2D,
-                                       hipGraphicsRegisterFlagsNone));
-  REQUIRE(texResource2 != nullptr);
+   GLImageObject texture2;
+   hipGraphicsResource* texResource2 = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterImage(&texResource2, texture2, GL_TEXTURE_2D,
+                                        hipGraphicsRegisterFlagsNone));
+   REQUIRE(texResource2 != nullptr);
 
    HIP_CHECK(hipGraphicsMapResources(1, &texResource2, 0));
    hipArray_t array2 = nullptr;
@@ -1136,25 +1162,25 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
-  // Context 1: buffer
-  window1.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
+   // Context 1: buffer
+   window1.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
 
-  GLBufferObject buffer1;
-  hipGraphicsResource* bufResource = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterBuffer(&bufResource, buffer1, hipGraphicsRegisterFlagsNone));
+   GLBufferObject buffer1;
+   hipGraphicsResource* bufResource = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterBuffer(&bufResource, buffer1, hipGraphicsRegisterFlagsNone));
 
-  // Context 2: texture
-  window2.makeCurrent();
-  REQUIRE(verifyGLDeviceEnumeration());
+   // Context 2: texture
+   window2.makeCurrent();
+   REQUIRE(verifyGLDeviceEnumeration());
 
-  GLImageObject texture2;
-  hipGraphicsResource* texResource = nullptr;
-  HIP_CHECK(hipGraphicsGLRegisterImage(&texResource, texture2, GL_TEXTURE_2D,
-                                       hipGraphicsRegisterFlagsNone));
+   GLImageObject texture2;
+   hipGraphicsResource* texResource = nullptr;
+   HIP_CHECK(hipGraphicsGLRegisterImage(&texResource, texture2, GL_TEXTURE_2D,
+                                        hipGraphicsRegisterFlagsNone));
 
    // Use texture in context 2
    HIP_CHECK(hipGraphicsMapResources(1, &texResource, 0));
@@ -1193,8 +1219,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    window1.makeCurrent();
    REQUIRE(verifyGLDeviceEnumeration());
@@ -1248,8 +1274,8 @@ BufferInteropResult performBufferInteropCycle(unsigned int flags = hipGraphicsRe
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    constexpr int kNumStreams = 4;
    std::array<hipStream_t, kNumStreams> streams;
@@ -1310,10 +1336,10 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
   }
 
   constexpr int kNumContexts = 3;
-  std::vector<std::unique_ptr<GLUTWindow>> windows;
+  std::vector<std::unique_ptr<GLTestContext>> windows;
 
   for (int i = 0; i < kNumContexts; ++i) {
-    windows.push_back(std::make_unique<GLUTWindow>());
+    windows.push_back(std::make_unique<GLTestContext>());
   }
 
   // High-frequency switching with full buffer interop operations
@@ -1341,8 +1367,8 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    constexpr int kBuffersPerContext = 10;
 
@@ -1412,9 +1438,9 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
-   GLUTWindow window3;
+   GLTestContext window1;
+   GLTestContext window2;
+   GLTestContext window3;
 
    constexpr int kTotalOperations = 100;
    int successCount = 0;
@@ -1422,7 +1448,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
    auto startTime = std::chrono::steady_clock::now();
 
    for (int iter = 0; iter < kTotalOperations; ++iter) {
-     GLUTWindow* currentWindow = nullptr;
+     GLTestContext* currentWindow = nullptr;
      switch (iter % 3) {
        case 0: currentWindow = &window1; break;
        case 1: currentWindow = &window2; break;
@@ -1459,8 +1485,8 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    std::array<unsigned int, 3> flags = {
      hipGraphicsRegisterFlagsNone,
@@ -1509,7 +1535,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
 
    // Create and use first context
    {
-     GLUTWindow window1;
+     GLTestContext window1;
      window1.makeCurrent();
      REQUIRE(verifyGLDeviceEnumeration());
      auto result = performBufferInteropCycle();
@@ -1518,7 +1544,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
 
    // Create new context after first one is gone
    {
-     GLUTWindow window2;
+     GLTestContext window2;
      window2.makeCurrent();
      // Should detect context change and re-setup
      REQUIRE(verifyGLDeviceEnumeration());
@@ -1540,7 +1566,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
    for (int cycle = 0; cycle < kDefaultIterations; ++cycle) {
      INFO("Cycle " << cycle + 1 << " of " << kDefaultIterations);
 
-     GLUTWindow window;
+     GLTestContext window;
      window.makeCurrent();
      REQUIRE(verifyGLDeviceEnumeration());
      auto result = performBufferInteropCycle();
@@ -1563,8 +1589,8 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
    }
 
    const int device_count = HipTest::getDeviceCount();
-   GLUTWindow window1;
-   GLUTWindow window2;
+   GLTestContext window1;
+   GLTestContext window2;
 
    auto testDeviceList = [&](hipGLDeviceList listType, const char* name) {
      INFO("Testing device list type: " << name);
@@ -1599,7 +1625,7 @@ HIP_TEST_CASE(Unit_hipGL_ContextSwitch_HighFrequencyStress) {
      HIP_SKIP_TEST(HipTest::SkipReason::kTextureImageUnsupported);
    }
 
-   GLUTWindow window;
+   GLTestContext window;
    window.makeCurrent();
 
    // First operation - should trigger initialization
