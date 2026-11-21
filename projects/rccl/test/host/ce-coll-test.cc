@@ -1001,4 +1001,74 @@ INSTANTIATE_TEST_SUITE_P(LaunchPaths, CeAlltoAllvSyncMicrotest,
                                            LaunchPath::kLegacyNullStream, LaunchPath::kGraphCapture),
                          LaunchPathName);
 
+// Hierarchical CE AllGather/AlltoAll rail on the internal RMA contexts (NCCL 2.32.6 multi-ctx RMA fix): whole peers
+// go to contexts at full chunk width, at any size and under graph capture, capped at the rail peer count.
+class HierCollMultiCtxMicrotest : public ::testing::Test {
+ protected:
+  static constexpr int kProvisionedCtx = 4;  // NCCL_NUM_RMA_INT_CTX_DEFAULT
+  static constexpr size_t kSmall = 64 * 1024;  // below the 4 MiB gate the direct paths used to apply
+  ncclRmaProxyState state_{};
+  std::function<int64_t(const char*, int64_t)> param_ = ParamOverride({});
+  ScopedHook<int64_t(const char*, int64_t)> params_{
+      g_loadParam, [this](const char* env, int64_t deftVal) { return param_(env, deftVal); }};
+
+  void SetUp() override { state_.numIntCtx = kProvisionedCtx; }
+};
+
+TEST_F(HierCollMultiCtxMicrotest, NumCtx_SmallTransferUsesOneContextPerRailPeerUpToProvisioned) {
+  EXPECT_EQ(3, ncclHierCollNumCtx(&state_, kSmall, /*nPeers=*/3));  // 4-node AllGather
+  EXPECT_EQ(kProvisionedCtx, ncclHierCollNumCtx(&state_, kSmall, /*nPeers=*/12));  // 4x4 AlltoAll
+  EXPECT_EQ(1, ncclHierCollNumCtx(&state_, kSmall, /*nPeers=*/1));
+  // NCCL_RMA_MULTI_CTX_THRESHOLD stays available as an opt-in gate.
+  param_ = ParamOverride({{"RMA_MULTI_CTX_THRESHOLD", 1024 * 1024}});
+  EXPECT_EQ(1, ncclHierCollNumCtx(&state_, kSmall, /*nPeers=*/12));
+  EXPECT_EQ(kProvisionedCtx, ncclHierCollNumCtx(&state_, 2 * 1024 * 1024, /*nPeers=*/12));
+}
+
+TEST_F(HierCollMultiCtxMicrotest, A2aChunkCtx_WholePeersSpreadAcrossContextsAndBothEndsAgree) {
+  // 2 nodes x 4 local ranks: rank 0's rail peers are ranks 4..7, one full-width chunk each.
+  const int kLocalRanks = 4, kNRanks = 8;
+  const size_t perPeerBytes = kSmall;
+  const int numCtx = ncclHierCollNumCtx(&state_, perPeerBytes, kLocalRanks);
+  ASSERT_EQ(kProvisionedCtx, numCtx);
+  ncclHierChunkPlan plan{};
+  ASSERT_EQ(ncclSuccess, ncclHierCollBuildChunk(perPeerBytes, kLocalRanks, ncclHierCollChunkWidth(perPeerBytes, 1),
+                                                &plan));
+  ASSERT_EQ(kLocalRanks, plan.chunkStart[kLocalRanks]);  // not narrowed to one chunk per context
+
+  std::vector<int> ctxUse(numCtx, 0);
+  for (int p = 0; p < kLocalRanks; p++) {
+    const int peer = kLocalRanks + p;
+    for (int c = plan.chunkStart[p]; c < plan.chunkStart[p + 1]; c++) {
+      const int k = ncclHierCollA2aChunkCtx(0, peer, c, plan.chunkStart[p], numCtx);
+      ASSERT_GE(k, 0);
+      ASSERT_LT(k, numCtx);
+      ctxUse[k]++;
+    }
+  }
+  for (int k = 0; k < numCtx; k++) EXPECT_EQ(1, ctxUse[k]) << "context " << k;
+
+  // Sender and receiver of a chunk must name the same context, or a signal is awaited where it is never raised.
+  for (int a = 0; a < kNRanks; a++) {
+    for (int b = 0; b < kNRanks; b++) {
+      EXPECT_EQ(ncclHierCollA2aChunkCtx(a, b, 0, 0, numCtx), ncclHierCollA2aChunkCtx(b, a, 0, 0, numCtx))
+          << a << "<->" << b;
+    }
+  }
+  ncclHierCollFreeChunkPlan(&plan);
+}
+
+TEST_F(HierCollMultiCtxMicrotest, AllGatherChunkCtx_WholePeersSpreadAcrossContexts) {
+  // 4 nodes: three rail peers, one full-width chunk each, on three distinct contexts.
+  const int nRemoteNodes = 3;
+  const int numCtx = ncclHierCollNumCtx(&state_, kSmall, nRemoteNodes);
+  ASSERT_EQ(nRemoteNodes, numCtx);
+  ncclHierChunkPlan plan{};
+  ASSERT_EQ(ncclSuccess, ncclHierCollBuildChunk(kSmall, nRemoteNodes, ncclHierCollChunkWidth(kSmall, 1), &plan));
+  std::vector<int> ctxUse(numCtx, 0);
+  for (int c = 0; c < plan.chunkStart[nRemoteNodes]; c++) ctxUse[ncclHierCollChunkCtx(c, numCtx)]++;
+  for (int k = 0; k < numCtx; k++) EXPECT_EQ(1, ctxUse[k]) << "context " << k;
+  ncclHierCollFreeChunkPlan(&plan);
+}
+
 }  // namespace
