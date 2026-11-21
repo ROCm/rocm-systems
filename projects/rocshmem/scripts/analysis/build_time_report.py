@@ -14,7 +14,9 @@
 #   - a per-component time budget + slowest-edges table (text)
 #   - a -ftime-trace phase/template-instantiation summary (text), if the
 #     build was configured with -DROCSHMEM_BUILD_TIME_TRACE=ON
-#   - a Gantt-style build-timeline.svg
+#   - an interactive build-timeline.json (Chrome Trace Event Format -- open
+#     at https://ui.perfetto.dev or chrome://tracing), one slice per ninja
+#     edge with flow arrows for real producer/consumer dependencies
 #   - build-dependency-graph.dot / build-dependency-graph-compact.dot,
 #     rendered to .svg (and .png, if --png is passed)
 #   - a single build-time-analysis.md report stitching all of the above
@@ -323,12 +325,15 @@ def detect_unit_tests_built(edges):
 
 
 # ============================================================================
-# §4. Gantt-style timeline SVG (was build_timeline_svg.py)
+# §4. Chrome Trace Event Format export (interactive build-timeline.json,
+#     replaces the old static Gantt build-timeline.svg). Open in
+#     https://ui.perfetto.dev or chrome://tracing. Every ninja edge gets its
+#     own slice (not hand-picked groups), so genuine zoom/pan makes
+#     sub-second serial ops just as inspectable as multi-minute parallel
+#     phases, and flow arrows connect each edge to the edges that consume
+#     its output -- drawn straight from build.ninja's explicit
+#     `build <out>: RULE <in...>` inputs, not inferred from timing overlap.
 # ============================================================================
-
-
-def esc(s):
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def read_stage_timings(timing_log):
@@ -358,173 +363,85 @@ def read_stage_timings(timing_log):
     return configure_s, install_s
 
 
-def build_timeline_rows(edges, milestones, wall_start):
-    def ms(name):
-        s, e, _ = milestones[name]
-        return (s - wall_start) / 1000.0, (e - wall_start) / 1000.0
+def _assign_lanes(items):
+    """Greedy interval scheduling: gives each (key, start, end) the lowest
+    lane index whose previous occupant has already finished, so edges that
+    really overlap in time land on separate Perfetto track rows instead of
+    all stacking onto one.
+    """
+    import heapq
 
-    rows = []
-
-    bc_group = group_window(edges, TIMELINE_GROUP_PATTERNS[0][1], TIMELINE_GROUP_PATTERNS[0][2])
-    bc_segs = []
-    if bc_group:
-        s0, e0, n, _ = bc_group
-        bc_segs.append(((s0 - wall_start) / 1000.0, (e0 - wall_start) / 1000.0,
-                         f"{n} per-source .bc compiles (parallel)", "#b2f2bb"))
-    if "bc_unopt_link" in milestones:
-        s, e = ms("bc_unopt_link")
-        bc_segs.append((s, e, f"llvm-link unopt.bc ({e - s:.1f}s)", "#ffd8a8"))
-    if "bc_opt" in milestones:
-        s, e = ms("bc_opt")
-        bc_segs.append((s, e, f"opt -O3 librocshmem_device.bc -- SERIAL ({e - s:.1f}s)", "#ffd8a8"))
-    if bc_segs:
-        rows.append(("device bitcode library", bc_segs))
-
-    host_group = group_window(edges, TIMELINE_GROUP_PATTERNS[1][1], TIMELINE_GROUP_PATTERNS[1][2])
-    if host_group:
-        s0, e0, n, cpu = host_group
-        rows.append(("library host/device TUs", [
-            ((s0 - wall_start) / 1000.0, (e0 - wall_start) / 1000.0,
-             f"{n} TU compiles (parallel, {cpu/1000:.1f}s cpu-sum)", "#b2f2bb"),
-        ]))
-
-    if "host_archive" in milestones:
-        s, e = ms("host_archive")
-        rows.append(("librocshmem.a", [(s, max(e, s + 0.3), "archive ready", "#e9ecef")]))
-
-    ex_group = group_window(edges, TIMELINE_GROUP_PATTERNS[2][1], TIMELINE_GROUP_PATTERNS[2][2])
-    if ex_group:
-        s0, e0, n, cpu = ex_group
-        rows.append((f"examples x{n} (links)", [
-            ((s0 - wall_start) / 1000.0, (e0 - wall_start) / 1000.0,
-             f"-fgpu-rdc whole-program links ({cpu/1000:.1f}s cpu total)", "#ffa8a8"),
-        ]))
-
-    other_group = group_window(edges, TIMELINE_GROUP_PATTERNS[3][1], TIMELINE_GROUP_PATTERNS[3][2])
-    if other_group:
-        s0, e0, n, _ = other_group
-        rows.append((f"other links (tools/unit-tests/\nrocprofiler-register, {n} targets)", [
-            ((s0 - wall_start) / 1000.0, (e0 - wall_start) / 1000.0,
-             f"{n} independent links", "#ffa8a8"),
-        ]))
-
-    hsaco_segs = []
-    for name, color, label_fmt in [
-        ("kernel_compile", "#b2f2bb", "kernel.bc compile"),
-        ("kernel_unopt_link", "#ffd8a8", "llvm-link kernel+library"),
-        ("kernel_opt", "#ffd8a8", "opt -O3 merged bc -- SERIAL"),
-        ("kernel_codegen", "#e03131", "clang -x ir codegen -- SERIAL"),
-        ("hsaco_lld", "#ffd8a8", "ld.lld HSACO link"),
-    ]:
-        if name in milestones:
-            s, e = ms(name)
-            hsaco_segs.append((s, e, f"{label_fmt} ({e - s:.1f}s)", color))
-    if hsaco_segs:
-        rows.append(("device_bitcode_tester\nHSACO chain (SERIAL)", hsaco_segs))
-
-    ft_group = group_window(edges, TIMELINE_GROUP_PATTERNS[4][1], TIMELINE_GROUP_PATTERNS[4][2])
-    ft_segs = []
-    if ft_group:
-        s0, e0, n, cpu = ft_group
-        ft_segs.append(((s0 - wall_start) / 1000.0, (e0 - wall_start) / 1000.0,
-                         f"{n} source compiles, parallel ({cpu/1000:.1f}s cpu)", "#b2f2bb"))
-    if "functest_link" in milestones:
-        s, e = ms("functest_link")
-        ft_segs.append((s, e, f"final -fgpu-rdc whole-program link -- SERIAL ({e - s:.1f}s)", "#ffa8a8"))
-    if ft_segs:
-        rows.append(("rocshmem_functional_tests\n(gated by HSACO chain)", ft_segs))
-
-    return rows
+    lanes = []  # heap of (free_at, lane_idx)
+    assignment = {}
+    for key, start, end in sorted(items, key=lambda it: it[1]):
+        if lanes and lanes[0][0] <= start:
+            _free_at, lane_idx = heapq.heappop(lanes)
+        else:
+            lane_idx = len(lanes)
+        assignment[key] = lane_idx
+        heapq.heappush(lanes, (end, lane_idx))
+    return assignment
 
 
-def build_critical_path(milestones, wall_start):
-    order = ["bc_unopt_link", "bc_opt", "kernel_compile", "kernel_unopt_link",
-             "kernel_opt", "kernel_codegen", "hsaco_lld", "functest_link"]
-    path = []
-    for name in order:
-        if name not in milestones:
-            continue
-        s, e, _ = milestones[name]
-        path.append(((s - wall_start) / 1000.0, (e - wall_start) / 1000.0))
-    return path
+def write_chrome_trace(edges, build_ninja_path, configure_s, install_s, wall_start, wall_end, out_path):
+    """Emits one Chrome Trace Event Format JSON covering every ninja edge
+    (one 'X' slice each, grouped into per-component process tracks via
+    classify_component, packed into parallel-safe lanes via _assign_lanes),
+    plus 's'/'f' flow events linking each edge to the edges whose explicit
+    inputs (from build.ninja, via extract_ninja_inputs) it feeds -- real
+    producer/consumer arrows, not an inferred ordering from timing overlap.
+    Load the result at https://ui.perfetto.dev or chrome://tracing.
+    """
+    pid_of = {out: classify_component(out) for out in edges}
+    pid_names = sorted(set(pid_of.values()))
+    pid_index = {name: i + 1 for i, name in enumerate(pid_names)}  # pid 0 = build stages
 
+    tid_of = {}
+    for group in pid_names:
+        members = [(out, s, e) for out, (s, e) in edges.items() if pid_of[out] == group]
+        tid_of.update(_assign_lanes(members))
 
-def render_timeline_svg(rows, critical_path, wall_total, title, subtitle, configure_s, install_s, out_path):
-    margin_l, margin_r, margin_t, margin_b = 300, 40, 70, 50
-    row_h, row_gap, plot_w = 46, 14, 1500
-    total = wall_total + max(configure_s, 0)
+    inputs_map = extract_ninja_inputs(build_ninja_path, list(edges.keys()))
 
-    def x(t):
-        return margin_l + (t + configure_s) / total * plot_w
+    def ts_us(ms):
+        return int(configure_s * 1e6 + (ms - wall_start) * 1000)
 
-    height = margin_t + len(rows) * (row_h + row_gap) + margin_b + 90
-    width = margin_l + plot_w + margin_r
-
-    svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-           f'font-family="Helvetica,Arial,sans-serif">',
-           f'<rect x="0" y="0" width="{width}" height="{height}" fill="white"/>',
-           f'<text x="{width/2}" y="28" font-size="18" font-weight="bold" '
-           f'text-anchor="middle">{esc(title)}</text>',
-           f'<text x="{width/2}" y="48" font-size="11" fill="#555" '
-           f'text-anchor="middle">{esc(subtitle)}</text>']
-
-    axis_top, axis_bot = margin_t, margin_t + len(rows) * (row_h + row_gap)
-    t = 0
-    step = max(60, round(wall_total / 12 / 60) * 60 or 60)
-    while t <= wall_total + 1:
-        gx = x(t)
-        svg.append(f'<line x1="{gx:.1f}" y1="{axis_top-5}" x2="{gx:.1f}" y2="{axis_bot+5}" '
-                    f'stroke="#e9ecef" stroke-width="1"/>')
-        svg.append(f'<text x="{gx:.1f}" y="{axis_bot+20}" font-size="10" fill="#555" '
-                    f'text-anchor="middle">{t:.0f}s</text>')
-        t += step
-
-    bx = x(0)
-    svg.append(f'<line x1="{bx:.1f}" y1="{axis_top-5}" x2="{bx:.1f}" y2="{axis_bot+5}" '
-                f'stroke="#868e96" stroke-width="1.5" stroke-dasharray="3,3"/>')
-    svg.append(f'<text x="{bx:.1f}" y="{axis_top-10}" font-size="10" fill="#495057" '
-                f'text-anchor="middle" font-weight="bold">build start (t=0)</text>')
+    events = [{"ph": "M", "pid": 0, "name": "process_name", "args": {"name": "build stages"}}]
+    for name in pid_names:
+        events.append({"ph": "M", "pid": pid_index[name], "name": "process_name", "args": {"name": name}})
 
     if configure_s > 0:
-        svg.append(f'<rect x="{margin_l}" y="{axis_top-5}" width="{max(bx-margin_l,1):.1f}" '
-                    f'height="{axis_bot-axis_top+10}" fill="#cfe2ff" opacity="0.25"/>')
+        events.append({"ph": "X", "pid": 0, "tid": 0, "name": "configure",
+                        "ts": 0, "dur": int(configure_s * 1e6), "cat": "stage"})
 
-    y = margin_t
-    for label, segs in rows:
-        lines = label.split("\n")
-        ly = y + row_h/2 - (len(lines)-1)*6
-        for i, line in enumerate(lines):
-            svg.append(f'<text x="{margin_l-12}" y="{ly+i*13:.1f}" font-size="11" '
-                        f'text-anchor="end" fill="#212529">{esc(line)}</text>')
-        svg.append(f'<rect x="{margin_l}" y="{y}" width="{plot_w}" height="{row_h}" '
-                    f'fill="#fafafa" stroke="#e9ecef"/>')
-        for (s, e, seg_label, color) in segs:
-            sx, ex = x(s), x(e)
-            w = max(ex - sx, 1.0)
-            svg.append(f'<rect x="{sx:.1f}" y="{y+6}" width="{w:.1f}" height="{row_h-12}" rx="3" '
-                        f'fill="{color}" stroke="#495057" stroke-width="0.6"/>')
-            if w > 40:
-                svg.append(f'<text x="{sx+4:.1f}" y="{y+row_h/2+4:.1f}" font-size="9" '
-                            f'fill="#1a1a1a">{esc(seg_label)}</text>')
-            else:
-                short = seg_label.split("(")[0].strip()
-                svg.append(f'<text x="{sx:.1f}" y="{y-3}" font-size="8" fill="#495057">{esc(short)}</text>')
-        y += row_h + row_gap
+    for out, (s, e) in edges.items():
+        pid, tid = pid_index[pid_of[out]], tid_of[out]
+        events.append({
+            "ph": "X", "pid": pid, "tid": tid, "name": out,
+            "ts": ts_us(s), "dur": max(int((e - s) * 1000), 0),
+            "cat": pid_of[out],
+            "args": {"output": out, "duration_s": round((e - s) / 1000.0, 3)},
+        })
 
-    if critical_path:
-        cp_y = axis_bot + 34
-        svg.append(f'<text x="{margin_l-12}" y="{cp_y+4}" font-size="11" text-anchor="end" '
-                    f'fill="#e03131" font-weight="bold">critical path</text>')
-        for (s, e) in critical_path:
-            sx, ex = x(s), x(e)
-            svg.append(f'<rect x="{sx:.1f}" y="{cp_y-8}" width="{max(ex-sx,1):.1f}" height="16" '
-                        f'fill="#e03131" opacity="0.85"/>')
-        svg.append(f'<rect x="{margin_l}" y="{cp_y-8}" width="{plot_w}" height="16" '
-                    f'fill="none" stroke="#e9ecef"/>')
+    if install_s > 0:
+        events.append({"ph": "X", "pid": 0, "tid": 1, "name": "install",
+                        "ts": ts_us(wall_end), "dur": int(install_s * 1e6), "cat": "stage"})
 
-    svg.append("</svg>")
+    flow_id = 0
+    for out, in_tokens in inputs_map.items():
+        pid, tid, cs = pid_index[pid_of[out]], tid_of[out], ts_us(edges[out][0])
+        for inp in in_tokens:
+            if inp not in edges or inp == out:
+                continue
+            p_pid, p_tid = pid_index[pid_of[inp]], tid_of[inp]
+            flow_id += 1
+            events.append({"ph": "s", "id": flow_id, "pid": p_pid, "tid": p_tid,
+                            "ts": ts_us(edges[inp][1]), "cat": "dep", "name": "feeds"})
+            events.append({"ph": "f", "bp": "e", "id": flow_id, "pid": pid, "tid": tid,
+                            "ts": cs, "cat": "dep", "name": "feeds"})
+
     with open(out_path, "w") as f:
-        f.write("\n".join(svg))
+        json.dump({"traceEvents": events, "displayTimeUnit": "ms"}, f)
 
 
 # ============================================================================
@@ -1152,8 +1069,30 @@ def write_markdown_report(path, component_rows, slow_rows, wall_start, wall_end,
     lines.append("")
     lines.append(f"`{docs_rel_dir}/` has the Graphviz dependency graph "
                   "(`build-dependency-graph.dot`, full compiler-flag detail; "
-                  "`build-dependency-graph-compact.dot`, trimmed) and a Gantt-style "
-                  "`build-timeline.svg`, all regenerated by this script from this run's data.")
+                  "`build-dependency-graph-compact.dot`, trimmed) and an interactive "
+                  "`build-timeline.json` (Chrome Trace Event Format), all regenerated by "
+                  "this script from this run's data. The trace has one slice per ninja "
+                  "edge, grouped into per-component tracks, with flow arrows connecting "
+                  "each edge to the edges that consume its output -- zoom in freely, "
+                  "sub-second serial steps are just as inspectable as multi-minute "
+                  "parallel phases.")
+    lines.append("")
+    lines.append("View it by dragging the file onto "
+                  "[ui.perfetto.dev](https://ui.perfetto.dev) or `chrome://tracing`, or "
+                  f"deep-link straight to it (`ui.perfetto.dev`'s `?url=` needs CORS -- a "
+                  f"plain `file://` link won't work) by serving `{docs_rel_dir}/` with "
+                  "CORS enabled:")
+    lines.append("")
+    lines.append("```bash")
+    lines.append(f"cd {docs_rel_dir} && python3 -c \"")
+    lines.append("import http.server, socketserver")
+    lines.append("class H(http.server.SimpleHTTPRequestHandler):")
+    lines.append("    def end_headers(self):")
+    lines.append("        self.send_header('Access-Control-Allow-Origin', '*'); super().end_headers()")
+    lines.append("socketserver.TCPServer(('127.0.0.1', 9001), H).serve_forever()\"")
+    lines.append("# then open:")
+    lines.append("# https://ui.perfetto.dev/#!/?url=http://127.0.0.1:9001/build-timeline.json")
+    lines.append("```")
     lines.append("")
 
     with open(path, "w") as f:
@@ -1170,7 +1109,7 @@ def main():
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build-dir", default="build", help="build directory")
     ap.add_argument("--output-dir", default="docs/images/diagrams",
-                     help="where to write the .dot/.svg/.png/timeline files")
+                     help="where to write the .dot/.svg/.png/timeline.json files")
     ap.add_argument("--report", default="build-time-analysis.md",
                      help="path to write the combined markdown report")
     ap.add_argument("--top", type=int, default=30, help="rows to show per text table")
@@ -1178,8 +1117,8 @@ def main():
     ap.add_argument("--no-report", action="store_true", help="skip writing the markdown report")
     ap.add_argument("--summary-only", action="store_true",
                      help="print only the per-component/slowest-edges text (what the old "
-                          "ninja_build_timing.py did) and exit -- no ftime-trace, timeline, "
-                          "dot graphs, or markdown report. Meant for a build script's "
+                          "ninja_build_timing.py did) and exit -- no ftime-trace, trace "
+                          "JSON, dot graphs, or markdown report. Meant for a build script's "
                           "post-build hook, run every build, not just on-demand analysis.")
     args = ap.parse_args()
 
@@ -1223,17 +1162,19 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    rows = build_timeline_rows(edges, milestones, wall_start)
-    critical_path = build_critical_path(milestones, wall_start)
-    if install_s > 0:
-        wall_total = (wall_end - wall_start) / 1000.0
-        rows.append(("install", [(wall_total, wall_total + install_s,
-                                   f"cmake --install ({install_s:.2f}s)", "#e9ecef")]))
-    timeline_path = os.path.join(args.output_dir, "build-timeline.svg")
-    subtitle = f"wall time {build_s:.1f}s over {len(edges)} edges -- {ninja_log}"
-    render_timeline_svg(rows, critical_path, build_s + (install_s if install_s > 0 else 0),
-                         "Build timeline", subtitle, configure_s, install_s, timeline_path)
+    timeline_path = os.path.join(args.output_dir, "build-timeline.json")
+    write_chrome_trace(edges, build_ninja, configure_s, install_s, wall_start, wall_end, timeline_path)
     print(f"\nwrote {timeline_path}")
+    print("  view it: drag the file onto https://ui.perfetto.dev, or chrome://tracing")
+    print("  or deep-link straight to it (ui.perfetto.dev's ?url= needs CORS, a plain")
+    print("  file:// link won't work) -- from the output dir:")
+    print(f"    cd {os.path.abspath(args.output_dir)} && python3 -c \"")
+    print("import http.server, socketserver")
+    print("class H(http.server.SimpleHTTPRequestHandler):")
+    print("    def end_headers(self):")
+    print("        self.send_header('Access-Control-Allow-Origin', '*'); super().end_headers()")
+    print("socketserver.TCPServer(('127.0.0.1', 9001), H).serve_forever()\"")
+    print("  then open: https://ui.perfetto.dev/#!/?url=http://127.0.0.1:9001/build-timeline.json")
 
     dot_full = os.path.join(args.output_dir, "build-dependency-graph.dot")
     dot_compact = os.path.join(args.output_dir, "build-dependency-graph-compact.dot")
