@@ -1226,6 +1226,64 @@ TEST_F(GinHostProxyProgressMicrotest, QueueIndicesWrapAroundTheQueue) {
   EXPECT_EQ(6u, Ctx()->hostGpuCtx[0].sis[0]);
 }
 
+// Device code from GFD version 3 on writes only the first eight qwords (64 bytes) of its 128-byte slot. The proxy
+// must take such a GFD without waiting for the tail; if it hangs on it, the tail is filled in to let it go.
+TEST_F(GinHostProxyProgressMicrotest, CompactGfd_IsConsumedWithoutTheUnusedTail) {
+  constexpr int kCompactVersion = 3, kCompactQwords = 8;
+  ncclGinProxyGfd_t g = PutGfd(0, 64);
+  g.qword[ncclGinProxyGfdHeader].header.version = kCompactVersion;
+  ncclGinProxyGfd_t* slot = Slot(0, 1, 0);
+  for (int k = 0; k < kCompactQwords; k++) slot->qword[k].raw = g.qword[k].raw | 1;
+  std::atomic<bool> returned{false};
+  ncclResult_t res = ncclInternalError;
+  std::thread proxy([&] {
+    res = Progress();
+    returned.store(true, std::memory_order_release);
+  });
+  for (int ms = 0; ms < 5000 && !returned.load(std::memory_order_acquire); ms++) usleep(1000);
+  const bool tookCompactGfd = returned.load(std::memory_order_acquire);
+  for (int k = kCompactQwords; !tookCompactGfd && k < ncclGinProxyGfdQwords; k++) {
+    __atomic_store_n(&slot->qword[k].raw, g.qword[k].raw | 1, __ATOMIC_RELEASE);
+  }
+  proxy.join();
+  EXPECT_TRUE(tookCompactGfd) << "the proxy waited for qwords a version-3 GFD never writes";
+  EXPECT_EQ(ncclSuccess, res);
+  ASSERT_EQ(1u, rma_.ops.size());
+  EXPECT_EQ(0x20u, rma_.ops[0].dstOff);
+  for (int k = 0; k < kCompactQwords; k++) EXPECT_EQ(0u, slot->qword[k].raw) << k;
+}
+
+// The GPU keeps a cached copy of each peer's ci beside its producer index, in the same device allocation.
+TEST_F(GinHostProxyContextMicrotest, Create_PisHoldsAProducerIndexAndACachedCiPerRank) {
+  ASSERT_EQ(ncclSuccess, Create(Config(3, /*nContexts=*/1)));
+  ASSERT_LT(3u, g_mem.calls.size());
+  EXPECT_EQ("cudaCalloc", g_mem.calls[3].kind);  // pis, after counters, signals and signal offsets
+  EXPECT_EQ(2 * 2 * sizeof(uint32_t), g_mem.calls[3].bytes) << "two indices for each of the two ranks";
+}
+
+// Issued requests live in a pool sized by what the plugin allows outstanding, not by the GPU queue, and each one
+// owns an inline staging slot: with a 4-deep queue the inline MR still has NCCL_NET_MAX_REQUESTS (32) per rank.
+TEST_F(GinHostProxyProgressMicrotest, RequestPool_InlineStagingIsSizedByOutstandingRequests) {
+  ASSERT_EQ(4u, Ctx()->hostGpuCtx[0].queueSize);
+  ASSERT_EQ(3u, rma_.regs.size());  // signals, then one inline staging buffer per context
+  for (int c = 0; c < 2; c++) EXPECT_EQ(32 * 2 * sizeof(uint64_t), rma_.regs[1 + c].size) << c;
+}
+
+// Completion polling walks the active requests in the order they were issued, across peers, instead of sweeping
+// every peer's queue from rank 0 up.
+TEST_F(GinHostProxyProgressMicrotest, RequestPool_CompletionsAreTestedInIssueOrder) {
+  Post(0, 1, PutGfd(0, 8));
+  ASSERT_EQ(ncclSuccess, Progress());
+  Post(0, 0, PutGfd(0, 8));
+  ASSERT_EQ(ncclSuccess, Progress());
+  ASSERT_EQ(2u, rma_.ops.size());
+  EXPECT_EQ(1u, rma_.ops[0].rank);
+  EXPECT_EQ(0u, rma_.ops[1].rank);
+  rma_.tested.clear();
+  ASSERT_EQ(ncclSuccess, Progress());
+  EXPECT_EQ((std::vector<void*>{rma_.ops[0].request, rma_.ops[1].request}), rma_.tested);
+}
+
 // Requests are aggregated only while the peer's next GFD is already queued and the batch isn't over.
 TEST_F(GinHostProxyProgressMicrotest, PollBatch_AggregatesAllButTheLastOfABatch) {
   for (int i = 0; i < 3; i++) Post(0, 0, PutGfd(0, 8));
