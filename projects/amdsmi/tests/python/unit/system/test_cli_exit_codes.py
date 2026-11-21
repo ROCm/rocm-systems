@@ -249,7 +249,12 @@ class TestAmdSmiCliExitCodes(unittest.TestCase):
             f"sys.path.insert(0, {cli_dir!r})\n"
             "import amdsmi_init\n"
         )
-        result = subprocess.run([sys.executable, "-c", child], capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-c", child],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+        )
         self.assertEqual(
             result.returncode,
             int(self.ExitCode.IMPORT_ERROR),
@@ -1714,6 +1719,16 @@ def _build_set_specs(set_value):
             "amdsmi_get_ampp_profiles": _raise_not_supported,
         }
 
+    def power_stabilization_configure(cmd, mode):
+        PowerStabilizationConfigureArgs = collections.namedtuple(
+            "power_stabilization_configure_args", ["tokens", "file_path"]
+        )
+        arg = PowerStabilizationConfigureArgs(
+            [(ai.AmdSmiPowerStabilizationParamId.ENABLE, 1)], None
+        )
+        setfn = _raise_not_supported if mode == "fail" else _noop
+        return arg, {"amdsmi_set_power_stabilization_param": setfn}
+
     return {
         "fan": fan,
         "perf_level": perf_level,
@@ -1733,6 +1748,7 @@ def _build_set_specs(set_value):
         "compute_partition_mem_alloc_mode": compute_partition_mem_alloc_mode,
         "ampp_activate": ampp_activate,
         "ampp_configure": ampp_configure,
+        "power_stabilization_configure": power_stabilization_configure,
     }
 
 

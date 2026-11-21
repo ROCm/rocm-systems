@@ -22,7 +22,8 @@
 #ifdef NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER
 #error "nccl_device/host.h leaked in: its include guard was renamed, update the #define above"
 #endif
-#include "util.h"
+// [RCCL] util.h moved to src/ upstream; this file stays at the bindings/ir root.
+#include "src/util.h"
 #include <new>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -117,7 +118,7 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInit(
     ncclTeam team,
     ncclGinBarrierHandle handle,
     uint32_t index) {
-    ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(coop, reinterpret_cast<ncclGin const&>(*net), team, handle, index);
+    ::new (&(session->bar)) ncclGinBarrierSession<ncclCoopAny>(coop, static_cast<ncclGin const&>(*net), team, handle, index);
 }
 
 NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclGinBarrierSessionInitAllContexts(
@@ -154,7 +155,7 @@ NCCL_IR_EXTERN_C NCCL_DEVICE_INLINE void ncclBarrierSessionInit(
     ncclGinBarrierHandle const outerBarHandle,
     uint32_t index,
     bool multimem, ncclMultimemHandle const innerMmHandle) {
-    ::new (&(session->bar)) ncclBarrierSession<ncclCoopAny>(coop, innerTeam, outerTeam, reinterpret_cast<ncclGin const&>(*net),
+    ::new (&(session->bar)) ncclBarrierSession<ncclCoopAny>(coop, innerTeam, outerTeam, static_cast<ncclGin const&>(*net),
            innerBarHandle, outerBarHandle, index, multimem, innerMmHandle);
 }
 

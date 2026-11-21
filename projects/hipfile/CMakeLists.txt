@@ -58,6 +58,16 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipFileDeprecatedAISOptions.cmake")
 set(HIPFILE_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
 set_property(CACHE HIPFILE_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
 
+# The cxx_std_26 compile feature, which the hipfile_add_* helpers ask for,
+# only works from CMake 3.30 on, with both GCC and Clang. Older versions
+# fail with an error about the feature that doesn't mention
+# HIPFILE_CXX_STANDARD, so check here and say what's needed.
+if(HIPFILE_CXX_STANDARD STREQUAL "26" AND CMAKE_VERSION VERSION_LESS 3.30)
+    message(FATAL_ERROR
+        "HIPFILE_CXX_STANDARD=26 needs CMake 3.30 or later, but this is "
+        "CMake ${CMAKE_VERSION}")
+endif()
+
 # Set the list of build types for ccmake/CMake GUI
 #
 # This turns the build type box into a multi-select so you don't have to

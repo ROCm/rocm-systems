@@ -101,7 +101,7 @@ class TestJulia(RocprofsysTest):
             "ROCPROFSYS_TIME_OUTPUT": "OFF",
             "ROCPROFSYS_USE_PID": "OFF",
             "ROCPROFSYS_ROCM_DOMAINS": "hip_api,hsa_api,kernel_dispatch,memory_copy",
-            "ROCPROFSYS_TIMEMORY_COMPONENTS": "wall_clock,trip_count,peak_rss",
+            "ROCPROFSYS_TIMEMORY_COMPONENTS": "trip_count,peak_rss",
             "ROCPROFSYS_COUT_OUTPUT": "ON",
             "LD_LIBRARY_PATH": ":".join(filter(None, paths)),
         }

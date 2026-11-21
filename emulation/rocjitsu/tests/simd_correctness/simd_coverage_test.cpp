@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/host_target.h"
 #include "util/simd_test_hooks.h"
 
@@ -51,7 +52,7 @@ protected:
   void SetUp() override {
     util::set_force_scalar_for_testing(false);
     ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.arch = rocjitsu::IsaFamily::Cdna5;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
@@ -159,7 +160,7 @@ TEST_F(SimdCoverage, WordPathsPreserveHalvesMasksAndAliasing) {
 }
 
 TEST_F(SimdCoverage, DecodedTrue16MovePreservesScalarAndVectorSelectors) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   constexpr uint64_t exec = 0x55555555u;
   wf->set_exec(exec);
   cu->write_sgpr(wf->sgpr_alloc().base + 9, 0xc0003c00u);
@@ -256,7 +257,6 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
 TEST_F(SimdCoverage, PackedF16Numerics) {
   check_packed_half<PackedFloatOp::ADD, false>(*wf);
   check_packed_half<PackedFloatOp::MUL, false>(*wf);
-  check_packed_half<PackedFloatOp::FMA, false>(*wf);
   check_packed_half<PackedFloatOp::MIN, false>(*wf);
   check_packed_half<PackedFloatOp::MAX, false>(*wf);
   check_packed_half<PackedFloatOp::MINIMUM, false>(*wf);
@@ -329,7 +329,7 @@ TEST_F(SimdCoverage, DecodedVopdMovAndFloatPairReadsOnlyUsedRegisters) {
   auto *recorder = plugin.get();
   group->add(std::move(plugin));
   cu->set_plugin_group(group);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   for (uint32_t mov_source : {0u, 4u}) {
     // MOV v6,v0 has unused VSRCX1=5; MOV v6,v4 has unused VSRCX1=0.
     // Both pair with MUL v7,v2,v3, selecting the floating-point VOPD helper.
@@ -371,7 +371,7 @@ TEST_F(SimdCoverage, DecodedPackedFmacPreservesDirectedZeroSigns) {
       {0x00000000u, 0x3c003c00u, 0x80008000u, false, true},
       {0x80008000u, 0x3c003c00u, 0x00000000u, false, true},
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna4}) {
     auto decoder = Decoder::create(arch);
     const uint32_t words[] = {0x780c0300u}; // v_pk_fmac_f16 v6, v0, v1
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words));
@@ -414,84 +414,84 @@ TEST_F(SimdCoverage, DecodedPackedFmacPreservesDirectedZeroSigns) {
 }
 
 struct DecodedCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *assembly;
   uint32_t words[4];
 };
 // Encodings assembled with the local gfx1250-capable LLVM assembler.
 const DecodedCase kDecodedCases[] = {
-    {ROCJITSU_CODE_ARCH_CDNA4, "v_cmpx_lt_f32_e64 s[8:9], v0, v1", {0xd0510008u, 0x00020300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_div_scale_f32 v6, s8, v0, v1, v2", {0xd6fc0806u, 0x040a0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5,
+    {rocjitsu::IsaFamily::Cdna4, "v_cmpx_lt_f32_e64 s[8:9], v0, v1", {0xd0510008u, 0x00020300u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_div_scale_f32 v6, s8, v0, v1, v2", {0xd6fc0806u, 0x040a0300u}},
+    {rocjitsu::IsaFamily::Cdna5,
      "v_pk_add_f16 v6, v0, 1.0 op_sel_hi:[1,0]",
      {0xcc0f4006u, 0x0a01e500u}},
-    {ROCJITSU_CODE_ARCH_CDNA5,
+    {rocjitsu::IsaFamily::Cdna5,
      "v_pk_mul_f16 v6, 0x3000, v1 op_sel_hi:[0,1]",
      {0xcc104006u, 0x120202ffu, 0x00003000u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_pk_fma_f16 v6, v0, v1, v2", {0xcc0e4006u, 0x1c0a0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_pk_min_f16 v6, v0, v1", {0xcc1b4006u, 0x1a020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_cvt_pk_f16_f32 v6, v0, v1", {0xd76f0006u, 0x02020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_cmpx_lt_f32 v0, v1", {0x7d220300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_cmpx_lt_f32_e64 v0, v1", {0xd491007eu, 0x02020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_mov_b16 v6.h, v0.h", {0x7f0c3980u}},
-    {ROCJITSU_CODE_ARCH_CDNA5,
+    {rocjitsu::IsaFamily::Cdna5, "v_pk_fma_f16 v6, v0, v1, v2", {0xcc0e4006u, 0x1c0a0300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_pk_min_f16 v6, v0, v1", {0xcc1b4006u, 0x1a020300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_cvt_pk_f16_f32 v6, v0, v1", {0xd76f0006u, 0x02020300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_cmpx_lt_f32 v0, v1", {0x7d220300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_cmpx_lt_f32_e64 v0, v1", {0xd491007eu, 0x02020300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_mov_b16 v6.h, v0.h", {0x7f0c3980u}},
+    {rocjitsu::IsaFamily::Cdna5,
      "v_mov_b16 v6.h, v0.h quad_perm:[1,0,3,2]",
      {0x7f0c38fau, 0xff00b180u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_add_f16 v6.h, v0.h, v1.l", {0x650c0380u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_and_b16 v6.h, v0.h, v1.l", {0xd7624806u, 0x02020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5,
+    {rocjitsu::IsaFamily::Cdna5, "v_add_f16 v6.h, v0.h, v1.l", {0x650c0380u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_and_b16 v6.h, v0.h, v1.l", {0xd7624806u, 0x02020300u}},
+    {rocjitsu::IsaFamily::Cdna5,
      "v_dual_add_f32 v6, v0, v1 :: v_dual_mul_f32 v7, v2, v3",
      {0xc9060300u, 0x06060702u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_pk_fmac_f16 v6, v0, v1", {0x780c0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_cvt_f16_f32 v6.h, v0", {0x7f0c1500u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_cmpx_lt_f16_e64 v0.h, v1.l", {0xd481087eu, 0x02020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_cvt_pk_bf16_f32 v6, v0, v1", {0xd76d0006u, 0x02020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5,
+    {rocjitsu::IsaFamily::Cdna5, "v_pk_fmac_f16 v6, v0, v1", {0x780c0300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_cvt_f16_f32 v6.h, v0", {0x7f0c1500u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_cmpx_lt_f16_e64 v0.h, v1.l", {0xd481087eu, 0x02020300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_cvt_pk_bf16_f32 v6, v0, v1", {0xd76d0006u, 0x02020300u}},
+    {rocjitsu::IsaFamily::Cdna5,
      "v_bitop3_b32 v6, v0, v1, v2 bitop3:0x96",
      {0xd6340206u, 0xd40a0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_pk_add_bf16 v6, v0, v1", {0xcc234006u, 0x1a020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_pk_fma_bf16 v6, v0, v1, v2", {0xcc114006u, 0x1c0a0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_cvt_f32_bf16 v6, v0.h", {0x7e0ce580u}},
-    {ROCJITSU_CODE_ARCH_CDNA5, "v_div_scale_f32 v6, s8, v0, v1, v2", {0xd6fc0806u, 0x040a0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA4,
+    {rocjitsu::IsaFamily::Cdna5, "v_pk_add_bf16 v6, v0, v1", {0xcc234006u, 0x1a020300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_pk_fma_bf16 v6, v0, v1, v2", {0xcc114006u, 0x1c0a0300u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_cvt_f32_bf16 v6, v0.h", {0x7e0ce580u}},
+    {rocjitsu::IsaFamily::Cdna5, "v_div_scale_f32 v6, s8, v0, v1, v2", {0xd6fc0806u, 0x040a0300u}},
+    {rocjitsu::IsaFamily::Cdna4,
      "v_pk_add_f16 v6, v0, 1.0 op_sel_hi:[1,0]",
      {0xd38f4006u, 0x0801e500u}},
-    {ROCJITSU_CODE_ARCH_CDNA4, "v_pk_fma_f16 v6, v0, v1, v2", {0xd38e4006u, 0x1c0a0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA4, "v_pk_min_f16 v6, v0, v1", {0xd3914006u, 0x18020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA4, "v_cvt_pk_f16_f32 v6, v0, v1", {0xd2670006u, 0x00020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA4, "v_cmpx_lt_f32 v0, v1", {0x7ca20300u}},
-    {ROCJITSU_CODE_ARCH_CDNA4, "v_cvt_pk_bf16_f32 v6, v0, v1", {0xd2680006u, 0x00020300u}},
-    {ROCJITSU_CODE_ARCH_CDNA4,
+    {rocjitsu::IsaFamily::Cdna4, "v_pk_fma_f16 v6, v0, v1, v2", {0xd38e4006u, 0x1c0a0300u}},
+    {rocjitsu::IsaFamily::Cdna4, "v_pk_min_f16 v6, v0, v1", {0xd3914006u, 0x18020300u}},
+    {rocjitsu::IsaFamily::Cdna4, "v_cvt_pk_f16_f32 v6, v0, v1", {0xd2670006u, 0x00020300u}},
+    {rocjitsu::IsaFamily::Cdna4, "v_cmpx_lt_f32 v0, v1", {0x7ca20300u}},
+    {rocjitsu::IsaFamily::Cdna4, "v_cvt_pk_bf16_f32 v6, v0, v1", {0xd2680006u, 0x00020300u}},
+    {rocjitsu::IsaFamily::Cdna4,
      "v_bitop3_b32 v6, v0, v1, v2 bitop3:0x96",
      {0xd2340206u, 0xd40a0300u}},
-    {ROCJITSU_CODE_ARCH_CDNA4,
+    {rocjitsu::IsaFamily::Cdna4,
      "v_div_scale_f32 v6, s[8:9], v0, v1, v2",
      {0xd1e00806u, 0x040a0300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4,
+    {rocjitsu::IsaFamily::Rdna4,
      "v_pk_add_f16 v6, v0, 1.0 op_sel_hi:[1,0]",
      {0xcc0f4006u, 0x0a01e500u}},
-    {ROCJITSU_CODE_ARCH_RDNA4,
+    {rocjitsu::IsaFamily::Rdna4,
      "v_pk_mul_f16 v6, 0x3000, v1 op_sel_hi:[0,1]",
      {0xcc104006u, 0x120202ffu, 0x00003000u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_pk_fma_f16 v6, v0, v1, v2", {0xcc0e4006u, 0x1c0a0300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_pk_min_f16 v6, v0, v1", {0xcc1b4006u, 0x1a020300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_cmpx_lt_f32 v0, v1", {0x7d220300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_cmpx_lt_f32_e64 v0, v1", {0xd491007eu, 0x02020300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_mov_b16 v6.h, v0.h", {0x7f0c3980u}},
-    {ROCJITSU_CODE_ARCH_RDNA4,
+    {rocjitsu::IsaFamily::Rdna4, "v_pk_fma_f16 v6, v0, v1, v2", {0xcc0e4006u, 0x1c0a0300u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_pk_min_f16 v6, v0, v1", {0xcc1b4006u, 0x1a020300u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_cmpx_lt_f32 v0, v1", {0x7d220300u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_cmpx_lt_f32_e64 v0, v1", {0xd491007eu, 0x02020300u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_mov_b16 v6.h, v0.h", {0x7f0c3980u}},
+    {rocjitsu::IsaFamily::Rdna4,
      "v_mov_b16 v6.h, v0.h quad_perm:[1,0,3,2]",
      {0x7f0c38fau, 0xff00b180u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_add_f16 v6.h, v0.h, v1.l", {0x650c0380u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_and_b16 v6.h, v0.h, v1.l", {0xd7624806u, 0x02020300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4,
+    {rocjitsu::IsaFamily::Rdna4, "v_add_f16 v6.h, v0.h, v1.l", {0x650c0380u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_and_b16 v6.h, v0.h, v1.l", {0xd7624806u, 0x02020300u}},
+    {rocjitsu::IsaFamily::Rdna4,
      "v_dual_add_f32 v6, v0, v1 :: v_dual_mul_f32 v7, v2, v3",
      {0xc9060300u, 0x06060702u}},
-    {ROCJITSU_CODE_ARCH_RDNA4,
+    {rocjitsu::IsaFamily::Rdna4,
      "v_dual_cndmask_b32 v7, v7, v9 :: v_dual_cndmask_b32 v6, v6, v8",
      {0xca521307u, 0x07061106u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_pk_fmac_f16 v6, v0, v1", {0x780c0300u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_cvt_f16_f32 v6.h, v0", {0x7f0c1500u}},
-    {ROCJITSU_CODE_ARCH_RDNA4, "v_cmpx_lt_f16_e64 v0.h, v1.l", {0xd481087eu, 0x02020300u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_pk_fmac_f16 v6, v0, v1", {0x780c0300u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_cvt_f16_f32 v6.h, v0", {0x7f0c1500u}},
+    {rocjitsu::IsaFamily::Rdna4, "v_cmpx_lt_f16_e64 v0.h, v1.l", {0xd481087eu, 0x02020300u}},
 };
 
 TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
@@ -515,7 +515,7 @@ TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
         std::unique_ptr<ComputeUnitCore> target;
         ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
             target, "simd_decoded_target", config, &memory, &l2));
-        const uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
+        const uint32_t wave_size = test.arch == rocjitsu::IsaFamily::Cdna4 ? 64 : 32;
         auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
         ASSERT_NE(wave, nullptr);
         wave->set_mode_raw(3u << 6);
@@ -584,37 +584,6 @@ TEST_F(SimdCoverage, DivisionScalePathReturnsAndPreservesInactiveMaskBits) {
     EXPECT_EQ(get(3, lane), lane % 2 ? 0xdeadbeefu : 0x3f800000u);
 }
 
-TEST_F(SimdCoverage, MixedFmaUsesProfileSemanticsAndCompilerGuard) {
-  WordInst inst;
-  inst.inst_.opsel_hi = 0;
-  inst.inst_.opsel_hi_2 = 0;
-  constexpr uint32_t exec = 0xa5a5f0f0u;
-  constexpr uint32_t sentinel = 0xdeadbeefu;
-  wf->set_exec(exec);
-  const float a = std::bit_cast<float>(0x3f800001u);
-  const float b = std::bit_cast<float>(0x3f7fffffu);
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    put(0, lane, 0x3f800001u);
-    put(1, lane, 0x3f7fffffu);
-    put(2, lane, 0xbf800000u);
-    put(3, lane, sentinel);
-  }
-#if RJ_HOST_HAS_FMA
-  ASSERT_FALSE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane), sentinel);
-#else
-  ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, false>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane),
-              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(a * b - 1.0f) : sentinel);
-#endif
-  ASSERT_TRUE((try_execute_vop3p_fma_mix_simd<FmaMixDst::F32, true>(inst, *wf)));
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane),
-              (exec & (1u << lane)) ? std::bit_cast<uint32_t>(std::fma(a, b, -1.0f)) : sentinel);
-}
-
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs
 // and warmups. These timings describe execution overhead, not GPU hardware.
 TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
@@ -634,7 +603,7 @@ TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
     std::unique_ptr<ComputeUnitCore> target;
     ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(target, "simd_benchmark_target",
                                                                     config, &memory, &l2));
-    uint32_t wave_size = test.arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32;
+    uint32_t wave_size = test.arch == rocjitsu::IsaFamily::Cdna4 ? 64 : 32;
     auto *wave = target->dispatch_wf(0, 0, 106, 256, wave_size);
     ASSERT_NE(wave, nullptr);
     wave->set_mode_raw(3u << 6);

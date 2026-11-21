@@ -173,9 +173,6 @@ get_setting_value(const std::string& _name)
 //
 //      User-configurable settings
 //
-std::string
-get_config_file();
-
 state::process::Mode
 get_mode();
 
@@ -196,12 +193,6 @@ get_debug() ROCPROFSYS_HOT;
 
 bool
 get_debug_sampling() ROCPROFSYS_HOT;
-
-bool
-get_debug_tid() ROCPROFSYS_HOT;
-
-bool
-get_debug_pid() ROCPROFSYS_HOT;
 
 int
 get_verbose_env() ROCPROFSYS_HOT;
@@ -228,9 +219,6 @@ bool&
 get_use_process_sampling() ROCPROFSYS_HOT;
 
 bool&
-get_cpu_freq_enabled();
-
-bool&
 get_use_pid();
 
 bool&
@@ -241,9 +229,6 @@ get_use_ucx();
 
 bool&
 get_use_shmem();
-
-bool
-get_use_kokkosp();
 
 bool
 get_use_kokkosp_kernel_logger();
@@ -283,9 +268,6 @@ get_perfetto_fill_policy();
 
 bool
 get_perfetto_annotations() ROCPROFSYS_HOT;
-
-std::uint64_t
-get_thread_pool_size();
 
 std::string&
 get_perfetto_backend();
@@ -360,12 +342,6 @@ get_gpu_perf_counters();
 std::vector<std::string>
 get_rocm_counter_events();
 
-std::string
-get_sampling_ainics();
-
-bool
-get_ainic_supported();
-
 bool
 get_trace_thread_locks();
 
@@ -386,6 +362,15 @@ get_use_tmp_files();
 
 int
 get_kill_delay();
+
+[[nodiscard]] std::optional<std::uint64_t>
+get_mpi_rank_from_env();
+
+[[nodiscard]] std::optional<std::uint64_t>
+get_mpi_world_size_from_env();
+
+[[nodiscard]] std::string
+get_output_process_suffix();
 
 namespace output_filtering
 {
@@ -414,6 +399,9 @@ get_database_absolute_path(std::string_view database_name, std::string_view tag)
 void
 reset_database_path_memo();
 
+void
+refresh_output_format_settings();
+
 std::string
 get_output_absolute_path(std::string_view basename, std::string_view extension,
                          std::string_view tag, std::string_view dir);
@@ -430,7 +418,7 @@ get_use_rocpd() ROCPROFSYS_HOT;
 bool&
 get_use_unified_memory_profiling() ROCPROFSYS_HOT;
 
-bool&
+bool
 get_use_perfetto() ROCPROFSYS_HOT;
 
 struct tmp_file
@@ -474,9 +462,6 @@ get_causal_fixed_speedup();
 
 std::string
 get_causal_output_filename();
-
-void
-print_output_summary();
 
 std::vector<std::string>
 get_causal_binary_scope();

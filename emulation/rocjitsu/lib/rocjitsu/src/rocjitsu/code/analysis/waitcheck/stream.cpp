@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/stream.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/analysis/waitcheck/state.h"
@@ -16,9 +17,12 @@ namespace rocjitsu {
 namespace {
 using namespace waitcheck_detail;
 using Ops = WaitcheckStateOps;
+using amdgpu::MemoryAddressing;
+using amdgpu::MemoryKind;
+using amdgpu::Operation;
 
-bool has_committed_generations(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+bool has_committed_generations(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
 }
 
 std::optional<RegisterRef> first_intersection(const RegisterSet &a, const RegisterSet &b) {
@@ -49,26 +53,28 @@ struct RegisterEffects {
 };
 
 // SVE controls scratch vector addressing; an enabled register index of zero is v0.
-bool scratch_vector_address_enabled(const Instruction &inst, rj_code_arch_t arch) {
+bool scratch_vector_address_enabled(const Instruction &inst, rocjitsu::IsaFamily arch) {
   // Only successfully decoded scratch instructions reach this private helper.
   const uint32_t *words = inst.raw_encoding();
   assert(words && inst.size() >= static_cast<int>(2 * sizeof(uint32_t)));
   constexpr uint32_t kCdnaScratchSveBit = 1u << 13;
   constexpr uint32_t kRdna3ScratchSveBit = 1u << 23;
   constexpr uint32_t kGfx12ScratchSveBit = 1u << 17;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4)
+  if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4)
     return (words[0] & kCdnaScratchSveBit) != 0;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     return (words[1] & kRdna3ScratchSveBit) != 0;
-  assert(arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5);
+  assert(arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5);
   return (words[1] & kGfx12ScratchSveBit) != 0;
 }
 
-RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, uint32_t wave_size) {
+RegisterEffects register_effects(const Instruction &inst, rocjitsu::IsaFamily arch,
+                                 uint32_t wave_size) {
   RegisterEffects effects;
-  const auto name = inst.mnemonic();
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   const bool scalar_address = [&] {
-    if (!name.starts_with("global_") && !name.starts_with("scratch_"))
+    if ((addressing != MemoryAddressing::Global && addressing != MemoryAddressing::Scratch) ||
+        (inst.flags() & SMEM))
       return false;
     for (int i = 1; i < inst.num_src_operands(); ++i) {
       if (!inst.tracks_explicit_source(i))
@@ -101,7 +107,8 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
     auto ref = WaitcheckTarget::register_operand(*op, arch);
     if (!ref)
       continue;
-    if (i == 0 && name.starts_with("scratch_") && !scratch_vector_address_enabled(inst, arch))
+    if (i == 0 && addressing == MemoryAddressing::Scratch && !(inst.flags() & SMEM) &&
+        !scratch_vector_address_enabled(inst, arch))
       continue;
     if (i == 0 && scalar_address && ref->cls == RegClass::VGPR)
       ref->width = 1;
@@ -115,7 +122,7 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
 
 std::optional<std::string_view> deferred_reason(const Instruction &inst,
                                                 std::span<const ClassifiedEvent> events) {
-  const auto name = inst.mnemonic();
+  const Operation operation = inst.amdgpu_operation();
   // RegisterSet deliberately omits trap temporaries. Stop before silently
   // dropping either a pending result or one of its consumers.
   for (int i = 0; i < inst.num_src_operands() + inst.num_dst_operands(); ++i) {
@@ -131,24 +138,43 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
       return "trap-temporary registers are not tracked";
     // Selector-encoded VCC, FLAT_SCRATCH and XNACK_MASK destinations are
     // not all represented by the ordinary-register operand projection.
-    if (destination && inst.is_memory_op() && name.starts_with("s_") && !op->is_fieldless() &&
-        op->size_bits() > 0 && !ref)
+    if (destination && inst.is_memory_op() && (inst.flags() & (SALU | SMEM)) &&
+        !op->is_fieldless() && op->size_bits() > 0 && !ref)
       return "scalar-memory destination is not represented by register tracking";
   }
   if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst))
     return "control flow requires CFG analysis";
-  if (name == "s_set_vgpr_msb" || name.starts_with("s_setreg") ||
-      name.starts_with("s_set_gpr_idx") || name == "s_setvskip" ||
-      name.starts_with("s_waitcnt_depctr") || name == "s_wait_alu") {
+  switch (operation) {
+  case Operation::S_SET_VGPR_MSB:
+  case Operation::S_SETREG_B32:
+  case Operation::S_SETREG_IMM32_B32:
+  case Operation::S_SET_GPR_IDX_IDX:
+  case Operation::S_SET_GPR_IDX_ON:
+  case Operation::S_SET_GPR_IDX_OFF:
+  case Operation::S_SET_GPR_IDX_MODE:
+  case Operation::S_SETVSKIP:
+  case Operation::S_WAITCNT_DEPCTR:
+  case Operation::S_WAIT_ALU:
     // Dependency waits themselves are handled by the transfer layer, below.
     if (!inst.is_waitcnt())
       return "scheduling or register-mode state is not analyzed";
+    break;
+  default:
+    break;
   }
-  if (name.starts_with("v_movrel") || name.starts_with("v_swaprel") || name.starts_with("s_movrel"))
+  if (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION | RELATIVE_VGPR_SOURCE |
+                      RELATIVE_VGPR_DESTINATION))
     return "relative-register operands are not analyzed";
-  if (name.find("_d16") != std::string_view::npos || name.starts_with("v_dual_"))
+  if (inst.has_d16_memory_data() || inst.amdgpu_secondary_operation() != Operation::Unknown)
     return "partial-register or dual-issue semantics are not analyzed";
-  if (name.starts_with("image_") || name.find("atomic") != std::string_view::npos)
+  const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
+  // Ordinary DS read-modify-write operations use the same operand tracking as
+  // DS loads/stores. Barrier atomics have separate ordering semantics.
+  const bool ds = addressing == MemoryAddressing::Lds || addressing == MemoryAddressing::Gds;
+  if (addressing == MemoryAddressing::Image ||
+      (inst.amdgpu_memory_kind() == MemoryKind::Atomic && !ds) ||
+      operation == Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64 ||
+      operation == Operation::DS_ATOMIC_BARRIER_ARRIVE_RTN_B64)
     return "image and atomic operand semantics are not analyzed";
   for (const auto &event : events) {
     if (event.check_counter_parity_order)
@@ -161,15 +187,15 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
     return "barrier ordering is not analyzed";
   if (inst.is_memory_op() && events.empty())
     return "memory instruction has no event policy";
-  if (name.starts_with("s_") && events.empty() && !inst.is_waitcnt() &&
-      !is_program_path_terminator(inst) && name != "s_nop" && name != "s_delay_alu" &&
-      inst.num_src_operands() == 0 && inst.num_dst_operands() == 0)
+  if ((inst.flags() & (SALU | SMEM)) && events.empty() && !inst.is_waitcnt() &&
+      !is_program_path_terminator(inst) && operation != Operation::S_NOP &&
+      operation != Operation::S_DELAY_ALU && inst.num_src_operands() == 0 &&
+      inst.num_dst_operands() == 0)
     return "unmodeled scalar control instruction";
   return std::nullopt;
 }
 
-RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffects &effects,
-                                const Instruction &inst) {
+RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffects &effects) {
   switch (event.registers) {
   case TrackedRegisterSource::None:
     return {};
@@ -179,24 +205,12 @@ RegisterSet registers_for_event(const ClassifiedEvent &event, const RegisterEffe
     return effects.uses;
   case TrackedRegisterSource::VectorUses:
     return vector_registers(effects.uses);
-  case TrackedRegisterSource::StoreDataUses: {
-    const auto name = inst.mnemonic();
-    const int index = name.starts_with("buffer_") || name.starts_with("tbuffer_") ? 0 : 1;
-    RegisterSet regs;
-    if (inst.tracks_explicit_source(index)) {
-      if (const auto *op = inst.src_operand(index)) {
-        if (auto ref = op->to_register_ref())
-          regs.expand(*ref);
-      }
-    }
-    return regs;
-  }
   }
   return {};
 }
 
 bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> current,
-                 rj_code_arch_t arch) {
+                 rocjitsu::IsaFamily arch) {
   if (amdgpu::has_ordered_lds_direct_writeback(arch) && event.counter == WaitCounterKind::Exp &&
       event.kind == WaitEventKind::LdsDirect) {
     return std::ranges::any_of(current, [](const auto &other) {
@@ -228,7 +242,8 @@ bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> cur
 
 class StreamAnalyzer {
 public:
-  StreamAnalyzer(rj_code_arch_t arch, WaitcheckStreamOptions options, WaitcheckStreamReport &report)
+  StreamAnalyzer(rocjitsu::IsaFamily arch, WaitcheckStreamOptions options,
+                 WaitcheckStreamReport &report)
       : arch_(arch), options_(options), report_(report) {
     state_.expert_scheduling.enabled = options.expert_scheduling;
   }
@@ -252,7 +267,7 @@ public:
     RegisterSet async_defs;
     for (const auto &event : events) {
       if (event.registers == TrackedRegisterSource::Defs)
-        async_defs |= registers_for_event(event, effects, inst);
+        async_defs |= registers_for_event(event, effects);
       if (add_event(event, effects, inst, offset).failed())
         return util::Result::failure();
     }
@@ -261,7 +276,7 @@ public:
   }
 
 private:
-  rj_code_arch_t arch_;
+  rocjitsu::IsaFamily arch_;
   WaitcheckStreamOptions options_;
   PendingState state_;
   RegisterSet local_ready_;
@@ -307,7 +322,7 @@ private:
     PendingEvent event;
     event.counter = classification.counter;
     event.kind = classification.kind;
-    event.regs = registers_for_event(classification, effects, inst);
+    event.regs = registers_for_event(classification, effects);
     event.produces_regs = has_committed_generations(arch_) &&
                           classification.registers == TrackedRegisterSource::Defs &&
                           event.regs == vector_registers(event.regs);
@@ -401,18 +416,18 @@ private:
 };
 
 util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> words,
-                                                      rj_code_arch_t arch, Decoder &decoder,
+                                                      rocjitsu::IsaFamily arch, Decoder &decoder,
                                                       WaitcheckStreamOptions options,
                                                       const util::DiagnosticEmitter &emit_error) {
   // Runtime diagnostics share the counter model but also support older GPUs.
   // Keep stream analysis limited to its independently qualified architectures.
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Cdna5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
     break;
   default:
     return emit_error.emit() << "unsupported waitcheck architecture";
@@ -468,11 +483,11 @@ analyze_waitcheck_stream(std::span<const uint32_t> words, const IsaTargetRegistr
   auto decoder = Decoder::create(registry, target);
   if (!decoder)
     return emit_error.emit() << "missing waitcheck ISA decoder";
-  return analyze_stream(words, descriptor->architecture_id, *decoder, options, emit_error);
+  return analyze_stream(words, descriptor->family, *decoder, options, emit_error);
 }
 
 util::FailureOr<WaitcheckStreamReport>
-analyze_waitcheck_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
+analyze_waitcheck_stream(std::span<const uint32_t> words, rocjitsu::IsaFamily arch,
                          WaitcheckStreamOptions options,
                          const util::DiagnosticEmitter &emit_error) {
   auto decoder = Decoder::create(arch);

@@ -147,12 +147,12 @@ uint64_t SignalHintsTest::TimeoutTicks(uint64_t milliseconds) const {
 void SignalHintsTest::ValueBinary(void) {
   if (Skip()) return;
   PrintSubtestHeader("VALUE_BINARY");
-  const hsa_amd_memory_pool_t device_pool = rocrtst::FindExtendedFineGrainedPool(*gpu_device1());
+  const hsa_amd_memory_pool_t device_pool = rocrtst::FindSignalCapablePool(*gpu_device1());
   const bool has_device_pool = device_pool.handle != 0;
 
   for (const bool device_memory : {false, true}) {
     if (device_memory && !has_device_pool) {
-      resultList_.push_back("    VALUE_BINARY in device memory: no extended fine-grained pool");
+      resultList_.push_back("    VALUE_BINARY in device memory: no signal-capable device pool");
       continue;
     }
     const char* memory_name = device_memory ? "device" : "host";

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/checked_text_edits.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -118,7 +119,7 @@ Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint
     if (decoded.failed() || decoded.value()->size() == 0)
       return reject(error, TextEditErrorCode::InvalidInstruction,
                     "replacement contains an invalid or truncated instruction", offset);
-    if (decoded.value()->mnemonic() == "s_clause")
+    if (decoded.value()->amdgpu_operation() == amdgpu::Operation::S_CLAUSE)
       return reject(error, TextEditErrorCode::Clause, "replacement may not introduce a clause",
                     offset);
     cursor += decoded.value()->size() / sizeof(uint32_t);
@@ -128,7 +129,7 @@ Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint
 
 } // namespace
 
-CheckedTextEdits::CheckedTextEdits(const AmdGpuCodeObject &source, rj_code_arch_t architecture,
+CheckedTextEdits::CheckedTextEdits(const AmdGpuCodeObject &source, rocjitsu::IsaFamily architecture,
                                    Decoder &decoder, const InstructionBoundaries &boundaries,
                                    const CodeObjectPatcher &patcher,
                                    std::span<const uint64_t> kernel_entries)
@@ -186,8 +187,10 @@ Result CheckedTextEdits::apply(std::span<const CheckedTextEdit> edits,
                                         text.size() / sizeof(uint32_t));
   size_t cursor = 0;
   size_t boundary_index = 0;
+  const TextAlignmentGaps alignment_gaps(source_, architecture_);
   while (cursor < words.size()) {
-    if (is_text_padding_word(architecture_, words[cursor])) {
+    if (is_text_padding_word(architecture_, words[cursor]) ||
+        (words[cursor] == 0 && alignment_gaps.contains(cursor * sizeof(uint32_t)))) {
       ++cursor;
       continue;
     }

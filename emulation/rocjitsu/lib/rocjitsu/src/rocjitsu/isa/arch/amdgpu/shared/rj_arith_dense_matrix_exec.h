@@ -5,7 +5,8 @@
 // then publish whole-register results. Accumulator-bank resolution stays in the handler.
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dot_packed16.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"

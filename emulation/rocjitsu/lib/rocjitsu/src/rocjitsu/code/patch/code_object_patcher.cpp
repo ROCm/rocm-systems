@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -162,38 +163,38 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return text_index;
 }
 
-[[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+[[nodiscard]] bool target_supports_wave32(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
-[[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+[[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
-[[nodiscard]] bool target_uses_wgp_mode(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
+[[nodiscard]] bool target_uses_wgp_mode(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4;
 }
 
-[[nodiscard]] bool target_uses_gfx90a_accum_offset(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA4;
+[[nodiscard]] bool target_uses_gfx90a_accum_offset(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+         arch == rocjitsu::IsaFamily::Cdna4;
 }
 
-[[nodiscard]] bool target_clears_rsrc1_mode_bits(rj_code_arch_t arch) {
+[[nodiscard]] bool target_clears_rsrc1_mode_bits(rocjitsu::IsaFamily arch) {
   // DX10_CLAMP and IEEE_MODE are deprecated on GFX12. Preserve them for GFX10
   // and GFX11 targets where they still affect floating-point behavior.
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
-[[nodiscard]] uint32_t target_default_inst_pref_size(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-                 arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5
+[[nodiscard]] uint32_t target_default_inst_pref_size(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+                 arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5
              ? 2
              : 0;
 }
@@ -400,7 +401,7 @@ bool has_dynamic_write_within_text(std::span<const uint8_t> image, const Elf64_E
 /// kernel body may use, which the caller must surface as a failed translation.
 [[nodiscard]] bool apply_kernel_descriptor_resource_translation(KD &desc,
                                                                 const KdTranslation &translation,
-                                                                rj_code_arch_t target_arch) {
+                                                                rocjitsu::IsaFamily target_arch) {
   RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                      translation.target_vgpr_granulated);
   RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
@@ -1760,7 +1761,7 @@ bool CodeObjectPatcher::patch_kernel_resources(const KernelDescriptorInfo &kerne
 }
 
 bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation &translation,
-                                                            rj_code_arch_t target_arch) {
+                                                            rocjitsu::IsaFamily target_arch) {
   auto desc = read_kernel_descriptor(image_, translation.descriptor_file_offset);
   if (!desc)
     return false;
@@ -1778,7 +1779,8 @@ bool CodeObjectPatcher::apply_kernel_descriptor_translation(const KdTranslation 
 
 std::optional<std::vector<AppendedSidecarDescriptor>>
 CodeObjectPatcher::append_sidecar_descriptor_translations(
-    std::span<const KdTranslation> translations, rj_code_arch_t target_arch, uint64_t alignment) {
+    std::span<const KdTranslation> translations, rocjitsu::IsaFamily target_arch,
+    uint64_t alignment) {
   if (translations.empty())
     return std::vector<AppendedSidecarDescriptor>{};
   if (alignment == 0 || (alignment & (alignment - 1)) != 0)

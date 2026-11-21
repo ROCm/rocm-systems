@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
+#include "rocjitsu/vm/amdgpu/gpu_vm_transfer_batch.h"
 #include "rocjitsu/vm/amdgpu/vm_local_grants.h"
 
 #include "util/log.h"
@@ -153,16 +154,7 @@ namespace {
 
 std::atomic<uint64_t> next_vm_instance_id{1};
 
-struct VmAccessBatchSnapshot {
-  const GpuVm *vm = nullptr;
-  uint64_t vm_instance = 0;
-  AddressSpaceHandle handle;
-  GpuVmAccess access;
-  bool routed = false;
-};
-
 thread_local uint32_t vm_access_batch_depth = 0;
-thread_local std::deque<VmAccessBatchSnapshot> vm_access_batch_snapshots;
 
 constexpr uint64_t kGfx12PteValid = uint64_t{1} << 0;
 constexpr uint64_t kGfx12PteSystem = uint64_t{1} << 1;
@@ -389,17 +381,53 @@ VmTransferStep AddressSpaceTranslator::write_step(PhysicalMemoryAccess &memory, 
   return transfer_translated_span(*this, memory, address, bytes, VmAccessKind::Write);
 }
 
-GpuVmAccessBatchGuard::GpuVmAccessBatchGuard() {
-  if (vm_access_batch_depth++ == 0) {
-    vm_access_batch_snapshots.clear();
+class GpuVmAccessBatchGuard::Cache {
+public:
+  struct Snapshot {
+    // VM identity used only for comparison, never dereferenced by lookup.
+    const GpuVm *vm = nullptr;
+    // Distinguishes VM lifetimes that reuse the same host storage.
+    uint64_t vm_instance = 0;
+    // Address-space identity, including spaces outside VMID routing.
+    AddressSpaceHandle handle;
+    // Retained immutable access state for this execution batch.
+    GpuVmAccess access;
+    // Whether this snapshot was captured through the VM's VMID routing.
+    bool routed = false;
+  };
+
+  // Stable storage for snapshots borrowed within the outer execution batch.
+  std::deque<Snapshot> snapshots;
+};
+
+GpuVmAccessBatchGuard::ScopedCache::ScopedCache()
+    : previous_(std::exchange(scoped_cache_, &cache_)) {}
+
+GpuVmAccessBatchGuard::ScopedCache::~ScopedCache() { scoped_cache_ = previous_; }
+
+GpuVmAccessBatchGuard::Cache &GpuVmAccessBatchGuard::thread_cache() {
+  if (scoped_cache_) {
+    if (!*scoped_cache_)
+      *scoped_cache_ = std::make_unique<Cache>();
+    return **scoped_cache_;
   }
+  thread_local std::unique_ptr<Cache> cache;
+  if (!cache)
+    cache = std::make_unique<Cache>();
+  return *cache;
+}
+
+GpuVmAccessBatchGuard::GpuVmAccessBatchGuard() {
+  if (vm_access_batch_depth == 0)
+    thread_cache().snapshots.clear();
+  ++vm_access_batch_depth;
 }
 
 GpuVmAccessBatchGuard::~GpuVmAccessBatchGuard() {
   assert(vm_access_batch_depth != 0);
   if (--vm_access_batch_depth != 0)
     return;
-  vm_access_batch_snapshots.clear();
+  thread_cache().snapshots.clear();
 }
 
 bool GpuVmAccessBatchGuard::active() { return vm_access_batch_depth != 0; }
@@ -408,27 +436,29 @@ const GpuVmAccess *GpuVmAccessBatchGuard::find_snapshot(const GpuVm *vm,
                                                         AddressSpaceHandle handle) {
   if (vm_access_batch_depth == 0)
     return nullptr;
-  const auto entry = std::ranges::find_if(vm_access_batch_snapshots, [&](const auto &candidate) {
+  auto &snapshots = thread_cache().snapshots;
+  const auto entry = std::ranges::find_if(snapshots, [&](const auto &candidate) {
     return candidate.vm == vm && candidate.vm_instance == vm->instance_id_ &&
            candidate.handle == handle && candidate.access.is_current();
   });
-  return entry != vm_access_batch_snapshots.end() ? &entry->access : nullptr;
+  return entry != snapshots.end() ? &entry->access : nullptr;
 }
 
 const GpuVmAccess *GpuVmAccessBatchGuard::find_snapshot_vmid(const GpuVm *vm, uint32_t vmid) {
   if (vm_access_batch_depth == 0)
     return nullptr;
-  const auto entry = std::ranges::find_if(vm_access_batch_snapshots, [&](const auto &candidate) {
+  auto &snapshots = thread_cache().snapshots;
+  const auto entry = std::ranges::find_if(snapshots, [&](const auto &candidate) {
     return candidate.vm == vm && candidate.vm_instance == vm->instance_id_ && candidate.routed &&
            candidate.access.info().vmid == vmid && candidate.access.is_current();
   });
-  return entry != vm_access_batch_snapshots.end() ? &entry->access : nullptr;
+  return entry != snapshots.end() ? &entry->access : nullptr;
 }
 
 void GpuVmAccessBatchGuard::retain_snapshot(const GpuVm *vm, AddressSpaceHandle handle,
                                             const GpuVmAccess &access, bool routed) {
   if (vm_access_batch_depth != 0)
-    vm_access_batch_snapshots.push_back({vm, vm->instance_id_, handle, access, routed});
+    thread_cache().snapshots.push_back({vm, vm->instance_id_, handle, access, routed});
 }
 
 GpuVmBindingLease::GpuVmBindingLease(GpuVmBindingLease &&other) noexcept
@@ -1036,12 +1066,21 @@ template <typename Span>
 VmAccessOutcome GpuVmAccess::transfer_tokenized(
     uint64_t address, Span bytes, std::size_t &completed_bytes, VmTransferToken &token,
     VmAccessKind access, bool allow_deferred, const VmTransferMaintenance &maintenance,
-    const VmTransferIngress &ingress, const VmPrivateUcGttCopySource &copy_source) const {
+    const VmTransferIngress &ingress, const VmPrivateUcGttCopySource &copy_source,
+    GpuVmTransferBatch *batch) const {
+  const auto release_batch = [&] {
+    if (batch)
+      batch->release();
+  };
+  // A carried token may poll, reconcile revocation or cancel on any exit.
+  if (token.pending())
+    release_batch();
   if (access == VmAccessKind::Execute || completed_bytes > bytes.size()) {
     token.cancel();
     return VmAccessOutcome::Malformed;
   }
   if (bytes.size() != 0 && bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address) {
+    release_batch();
     report_terminal_fault(address, access, VmAccessOutcome::Malformed);
     token.cancel();
     return VmAccessOutcome::Malformed;
@@ -1109,10 +1148,17 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
                                              : VmAccessOutcome::Unavailable;
     }
 
-    MemoryIngressAdmission pt_admitted = admit_pt_rewalk();
-    if (pt_admitted.outcome != VmAccessOutcome::Complete)
-      return pt_admitted.outcome;
-    const MemoryPtEpoch admitted_epoch = pt_admitted.permit.pt_epoch();
+    MemoryIngressAdmission pt_admitted;
+    if (batch) {
+      if (const auto outcome = batch->acquire(); outcome != VmAccessOutcome::Complete)
+        return outcome;
+    } else {
+      pt_admitted = admit_pt_rewalk();
+      if (pt_admitted.outcome != VmAccessOutcome::Complete)
+        return pt_admitted.outcome;
+    }
+    const MemoryPtEpoch admitted_epoch =
+        batch ? batch->pt_permit_.pt_epoch() : pt_admitted.permit.pt_epoch();
     const std::optional<MemoryPtEpoch> token_epoch =
         admitted_epoch ? std::optional<MemoryPtEpoch>{admitted_epoch} : std::nullopt;
     std::optional<VmTransferToken> prepared;
@@ -1177,7 +1223,9 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
           auto acquired = maintenance();
           if (acquired.failed())
             return VmAccessOutcome::Faulted;
-          cache_lease.emplace(std::move(acquired.value()));
+          if (acquired.value().outcome == CacheMaintenanceOutcome::Retry)
+            return VmAccessOutcome::Unavailable;
+          cache_lease.emplace(std::move(acquired.value().lease));
         }
         if (!prepared) {
           std::shared_lock state_lock(access_state_->mutex);
@@ -1209,6 +1257,8 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
     // acquires its own permit before its entered effect and validation rewalk.
     pt_admitted.permit.reset();
     if (prepared) {
+      // Prepared operations can cancel in their destructor, including malformed requests.
+      release_batch();
       if (!allow_deferred)
         return VmAccessOutcome::Malformed;
       if (!prepared->pending() || prepared->operation_->read_result_.empty() ||
@@ -1224,6 +1274,7 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
       continue;
     }
     if (step.outcome != VmAccessOutcome::Complete) {
+      release_batch();
       if (step.report_translation_fault && step.outcome != VmAccessOutcome::Unavailable &&
           step.outcome != VmAccessOutcome::Revoked)
         report_terminal_fault(address + completed_bytes, access, step.outcome);
@@ -1234,6 +1285,39 @@ VmAccessOutcome GpuVmAccess::transfer_tokenized(
     completed_bytes += step.completed_bytes;
   }
   return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome GpuVmTransferBatch::acquire() {
+  if (!boundary_) {
+    auto admitted = access_.admit_pt_rewalk();
+    if (admitted.outcome != VmAccessOutcome::Complete)
+      return admitted.outcome;
+    pt_permit_ = std::move(admitted.permit);
+    boundary_.emplace(coherence_.acquire_atomic_boundary());
+  }
+  return boundary_->outcome();
+}
+
+void GpuVmTransferBatch::release() {
+  boundary_.reset();
+  pt_permit_.reset();
+}
+
+template <typename Byte>
+VmAccessOutcome GpuVmTransferBatch::transfer(uint64_t address, std::span<Byte> bytes) {
+  constexpr auto kind = std::is_const_v<Byte> ? VmAccessKind::Write : VmAccessKind::Read;
+  const auto outcome = access_.transfer_tokenized(address, bytes, completed_bytes_, token_, kind,
+                                                  true, {}, {}, {}, this);
+  if (outcome == VmAccessOutcome::Complete)
+    completed_bytes_ = 0;
+  return outcome;
+}
+
+VmAccessOutcome GpuVmTransferBatch::read(uint64_t address, std::span<std::byte> bytes) {
+  return transfer(address, bytes);
+}
+VmAccessOutcome GpuVmTransferBatch::write(uint64_t address, std::span<const std::byte> bytes) {
+  return transfer(address, bytes);
 }
 
 VmAccessOutcome GpuVmAccess::read(uint64_t address, std::span<std::byte> bytes,
@@ -2226,7 +2310,7 @@ const GpuVmAccess *GpuVm::borrow_snapshot(AddressSpaceHandle handle) const {
   if (const std::optional<GpuVmAccess> access = snapshot(handle)) {
     GpuVmAccessBatchGuard::retain_snapshot(this, handle, *access, false);
     // A concurrent revocation makes this access retryable, not an absent binding.
-    return &vm_access_batch_snapshots.back().access;
+    return &GpuVmAccessBatchGuard::thread_cache().snapshots.back().access;
   }
   return nullptr;
 }
@@ -2239,7 +2323,7 @@ const GpuVmAccess *GpuVm::borrow_snapshot_vmid(uint32_t vmid) const {
     GpuVmAccessBatchGuard::retain_snapshot(this, access->cache_namespace().address_space, *access,
                                            true);
     // A concurrent revocation makes this access retryable, not an absent binding.
-    return &vm_access_batch_snapshots.back().access;
+    return &GpuVmAccessBatchGuard::thread_cache().snapshots.back().access;
   }
   return nullptr;
 }

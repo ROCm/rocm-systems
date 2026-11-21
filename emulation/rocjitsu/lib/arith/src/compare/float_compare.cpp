@@ -38,10 +38,53 @@ template <int Bits> int validate_compare(uint64_t flags, uint64_t mode) {
   return RJ_ARITH_SUCCESS;
 }
 
+// Accumulate across Wave64 halves before applying the inherited wave-wide
+// Compatibility switch: signaling comparisons report only when some active
+// selected operand is nonfinite.
+struct CompatibilityStatus {
+  uint32_t causes = 0;
+  bool nonfinite = false;
+};
+
+// Read one operand's selected IEEE encoding, independently of source modifiers.
+template <int Bits>
+uint64_t compare_input(const uint32_t *const *source, int lane, uint64_t mode, uint32_t high) {
+  uint64_t bits = source[0][lane];
+  if constexpr (Bits == 64) {
+    bits |= uint64_t(source[1][lane]) << 32;
+  }
+  if constexpr (Bits == 16) {
+    bits = (bits >> (mode & high ? 16 : 0)) & 65535;
+  }
+  return bits;
+}
+
+// Preserve the bridge's inherited signaling policy without changing numerical SIMD dispatch.
+template <int Bits>
+void classify_compatibility(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                            const uint32_t *const *a, const uint32_t *const *b,
+                            CompatibilityStatus &status) {
+  constexpr uint64_t magnitude = (1ULL << (Bits - 1)) - 1;
+  constexpr uint64_t infinity = Bits == 16   ? 0x7c00
+                                : Bits == 32 ? 0x7f800000
+                                             : 0x7ff0000000000000ULL;
+  for (int lane = 0; lane < 32; ++lane) {
+    if (!(exec_mask & (1U << lane))) {
+      continue;
+    }
+    const uint64_t x = compare_input<Bits>(a, lane, mode, RJ_ARITH_ALU_HIGH_A);
+    const uint64_t y = compare_input<Bits>(b, lane, mode, RJ_ARITH_ALU_HIGH_B);
+    status.nonfinite |= (x & magnitude) >= infinity || (y & magnitude) >= infinity;
+    status.causes |= rocjitsu::arith::float_compare_exceptions<Bits>(
+        x, y, flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, true);
+  }
+}
+
 // Evaluate prevalidated floating-point controls for one Wave32 or half of a Wave64.
 template <int Bits, unsigned Predicate>
 int evaluate_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *d,
-                    const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user) {
+                    const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user,
+                    CompatibilityStatus *compatibility_status = nullptr) {
   if (!exec_mask) {
     *d = 0;
     return RJ_ARITH_SUCCESS;
@@ -56,8 +99,11 @@ int evaluate_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t 
         exec_mask = rocjitsu::arith::dpp16_source(flags, exec_mask, mode, permuted, a[0]);
       }
       return evaluate_wave32<Bits, Predicate>(flags, exec_mask, uint32_t(mode), d, &source, b,
-                                              excp_flag_user);
+                                              excp_flag_user, compatibility_status);
     }
+  }
+  if (compatibility_status) {
+    classify_compatibility<Bits>(flags, exec_mask, mode, a, b, *compatibility_status);
   }
   bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   const bool report = rocjitsu::arith::reports_fp_status(flags);
@@ -84,15 +130,8 @@ int evaluate_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t 
 #pragma clang loop vectorize(disable)
 #endif
   for (int lane = 0; lane < 32; ++lane) {
-    uint64_t av = a[0][lane], bv = b[0][lane];
-    if constexpr (Bits == 64) {
-      av |= uint64_t(a[1][lane]) << 32;
-      bv |= uint64_t(b[1][lane]) << 32;
-    }
-    if constexpr (Bits == 16) {
-      av = (av >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) & 65535;
-      bv = (bv >> (mode & RJ_ARITH_ALU_HIGH_B ? 16 : 0)) & 65535;
-    }
+    uint64_t av = compare_input<Bits>(a, lane, mode, RJ_ARITH_ALU_HIGH_A);
+    uint64_t bv = compare_input<Bits>(b, lane, mode, RJ_ARITH_ALU_HIGH_B);
     if (report) {
       exceptions |= rocjitsu::arith::float_compare_exceptions<Bits>(av, bv, flush,
                                                                     mode & RJ_ARITH_ALU_CLAMP) *
@@ -142,10 +181,20 @@ int evaluate_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t 
 template <int Bits, unsigned Predicate>
 int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *d,
                    const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = validate_compare<Bits>(flags, mode)) {
     return error;
   }
-  return evaluate_wave32<Bits, Predicate>(flags, exec_mask, mode, d, a, b, excp_flag_user);
+  CompatibilityStatus status;
+  const int error = evaluate_wave32<Bits, Predicate>(
+      flags, exec_mask, mode, d, a, b, excp_flag_user,
+      compatibility && (mode & RJ_ARITH_ALU_CLAMP) ? &status : nullptr);
+  if (!error && status.nonfinite) {
+    *excp_flag_user |= status.causes;
+  }
+  return error;
 }
 
 // Evaluate ordered/unordered FP predicates for Wave64. Reject invalid controls before changing
@@ -153,6 +202,11 @@ int compare_wave32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *
 template <int Bits, unsigned Predicate>
 int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *d,
                    const uint32_t *const *a, const uint32_t *const *b, uint32_t *excp_flag_user) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  const bool compatibility_reporting = compatibility && (mode & RJ_ARITH_ALU_CLAMP);
+  CompatibilityStatus compatibility_status;
   uint32_t masks[2] = {}, exceptions = 0;
 
   // Validate before source accesses or writes. Stage both halves so result or
@@ -161,6 +215,31 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
     return error;
   }
   const bool report = rocjitsu::arith::reports_fp_status(flags);
+  // Numeric-only waves share one dispatch and one set of SIMD control masks.
+  // DPP and status reporting retain their existing staged half-wave handling.
+#if defined(RJ_ARITH_HAVE_X86_64_V4) || defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (exec_mask && !report && !compatibility_reporting && !(mode >> 32)) {
+    const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      const uint64_t result = rocjitsu::arith::float_compare_x86_64_v4<Bits, Predicate, uint64_t>(
+                                  uint32_t(mode), flush, a, b) &
+                              exec_mask;
+      __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      const uint64_t result = rocjitsu::arith::float_compare_x86_64_v3<Bits, Predicate, uint64_t>(
+                                  uint32_t(mode), flush, a, b) &
+                              exec_mask;
+      __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+  }
+#endif
   if (exec_mask) {
     for (int half = 0; half < 2; ++half) {
       uint64_t half_instruction_flags = mode;
@@ -177,7 +256,8 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
       }
       if (int error = evaluate_wave32<Bits, Predicate>(
               flags, uint32_t(exec_mask >> (half * 32)), half_instruction_flags, masks + half,
-              source_a, source_b, report ? &exceptions : nullptr)) {
+              source_a, source_b, report ? &exceptions : nullptr,
+              compatibility_reporting ? &compatibility_status : nullptr)) {
         return error;
       }
     }
@@ -189,6 +269,8 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
   __builtin_memcpy(static_cast<void *>(d), &result, sizeof result);
   if (report) {
     *excp_flag_user |= exceptions;
+  } else if (compatibility_status.nonfinite) {
+    *excp_flag_user |= compatibility_status.causes;
   }
   return RJ_ARITH_SUCCESS;
 }
@@ -201,11 +283,6 @@ int compare_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint64_t *
 int rj_arith_v_cmp_lt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -216,11 +293,6 @@ int rj_arith_v_cmp_lt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_eq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -231,11 +303,6 @@ int rj_arith_v_cmp_eq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_le_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -246,11 +313,6 @@ int rj_arith_v_cmp_le_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_gt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -261,11 +323,6 @@ int rj_arith_v_cmp_gt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_lg_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -276,11 +333,6 @@ int rj_arith_v_cmp_lg_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_ge_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -291,11 +343,6 @@ int rj_arith_v_cmp_ge_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_o_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -306,11 +353,6 @@ int rj_arith_v_cmp_o_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_cmp_u_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -321,11 +363,6 @@ int rj_arith_v_cmp_u_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_cmp_nge_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -336,11 +373,6 @@ int rj_arith_v_cmp_nge_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nlg_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -351,11 +383,6 @@ int rj_arith_v_cmp_nlg_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_ngt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -366,11 +393,6 @@ int rj_arith_v_cmp_ngt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nle_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -381,11 +403,6 @@ int rj_arith_v_cmp_nle_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_neq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -396,11 +413,6 @@ int rj_arith_v_cmp_neq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nlt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -411,11 +423,6 @@ int rj_arith_v_cmp_nlt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_lt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -426,11 +433,6 @@ int rj_arith_v_cmpx_lt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_eq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -441,11 +443,6 @@ int rj_arith_v_cmpx_eq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_le_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -456,11 +453,6 @@ int rj_arith_v_cmpx_le_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_gt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -471,11 +463,6 @@ int rj_arith_v_cmpx_gt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_lg_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -486,11 +473,6 @@ int rj_arith_v_cmpx_lg_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_ge_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -501,11 +483,6 @@ int rj_arith_v_cmpx_ge_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_o_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -516,11 +493,6 @@ int rj_arith_v_cmpx_o_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmpx_u_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -532,11 +504,6 @@ int rj_arith_v_cmpx_nge_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -548,11 +515,6 @@ int rj_arith_v_cmpx_nlg_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -564,11 +526,6 @@ int rj_arith_v_cmpx_ngt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -580,11 +537,6 @@ int rj_arith_v_cmpx_nle_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -596,11 +548,6 @@ int rj_arith_v_cmpx_neq_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -612,11 +559,6 @@ int rj_arith_v_cmpx_nlt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<16, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -627,11 +569,6 @@ int rj_arith_v_cmpx_nlt_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cmp_lt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -642,11 +579,6 @@ int rj_arith_v_cmp_lt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_eq_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -657,11 +589,6 @@ int rj_arith_v_cmp_eq_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_le_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -672,11 +599,6 @@ int rj_arith_v_cmp_le_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_gt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -687,11 +609,6 @@ int rj_arith_v_cmp_gt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_lg_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -702,11 +619,6 @@ int rj_arith_v_cmp_lg_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_ge_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -717,11 +629,6 @@ int rj_arith_v_cmp_ge_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_o_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -732,11 +639,6 @@ int rj_arith_v_cmp_o_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_cmp_u_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -747,11 +649,6 @@ int rj_arith_v_cmp_u_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_cmp_nge_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -762,11 +659,6 @@ int rj_arith_v_cmp_nge_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nlg_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -777,11 +669,6 @@ int rj_arith_v_cmp_nlg_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_ngt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -792,11 +679,6 @@ int rj_arith_v_cmp_ngt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nle_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -807,11 +689,6 @@ int rj_arith_v_cmp_nle_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_neq_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -822,11 +699,6 @@ int rj_arith_v_cmp_neq_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nlt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -837,11 +709,6 @@ int rj_arith_v_cmp_nlt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_lt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -852,11 +719,6 @@ int rj_arith_v_cmpx_lt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_eq_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -867,11 +729,6 @@ int rj_arith_v_cmpx_eq_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_le_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -882,11 +739,6 @@ int rj_arith_v_cmpx_le_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_gt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -897,11 +749,6 @@ int rj_arith_v_cmpx_gt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_lg_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -912,11 +759,6 @@ int rj_arith_v_cmpx_lg_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_ge_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -927,11 +769,6 @@ int rj_arith_v_cmpx_ge_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_o_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -942,11 +779,6 @@ int rj_arith_v_cmpx_o_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmpx_u_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -958,11 +790,6 @@ int rj_arith_v_cmpx_nge_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -974,11 +801,6 @@ int rj_arith_v_cmpx_nlg_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -990,11 +812,6 @@ int rj_arith_v_cmpx_ngt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -1006,11 +823,6 @@ int rj_arith_v_cmpx_nle_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1022,11 +834,6 @@ int rj_arith_v_cmpx_neq_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1038,11 +845,6 @@ int rj_arith_v_cmpx_nlt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<32, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1053,11 +855,6 @@ int rj_arith_v_cmpx_nlt_f32_w32_gfx12(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cmp_lt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -1068,11 +865,6 @@ int rj_arith_v_cmp_lt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_eq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -1083,11 +875,6 @@ int rj_arith_v_cmp_eq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_le_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1098,11 +885,6 @@ int rj_arith_v_cmp_le_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_gt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1113,11 +895,6 @@ int rj_arith_v_cmp_gt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_lg_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -1128,11 +905,6 @@ int rj_arith_v_cmp_lg_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_ge_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1143,11 +915,6 @@ int rj_arith_v_cmp_ge_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmp_o_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1158,11 +925,6 @@ int rj_arith_v_cmp_o_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_cmp_u_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                    uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1173,11 +935,6 @@ int rj_arith_v_cmp_u_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t 
 int rj_arith_v_cmp_nge_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1188,11 +945,6 @@ int rj_arith_v_cmp_nge_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nlg_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1203,11 +955,6 @@ int rj_arith_v_cmp_nlg_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_ngt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -1218,11 +965,6 @@ int rj_arith_v_cmp_ngt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nle_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1233,11 +975,6 @@ int rj_arith_v_cmp_nle_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_neq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1248,11 +985,6 @@ int rj_arith_v_cmp_neq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmp_nlt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1263,11 +995,6 @@ int rj_arith_v_cmp_nlt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_lt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -1278,11 +1005,6 @@ int rj_arith_v_cmpx_lt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_eq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -1293,11 +1015,6 @@ int rj_arith_v_cmpx_eq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_le_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1308,11 +1025,6 @@ int rj_arith_v_cmpx_le_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_gt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1323,11 +1035,6 @@ int rj_arith_v_cmpx_gt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_lg_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -1338,11 +1045,6 @@ int rj_arith_v_cmpx_lg_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_ge_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1353,11 +1055,6 @@ int rj_arith_v_cmpx_ge_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cmpx_o_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1368,11 +1065,6 @@ int rj_arith_v_cmpx_o_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t
 int rj_arith_v_cmpx_u_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                     uint32_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1384,11 +1076,6 @@ int rj_arith_v_cmpx_nge_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1400,11 +1087,6 @@ int rj_arith_v_cmpx_nlg_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1416,11 +1098,6 @@ int rj_arith_v_cmpx_ngt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -1432,11 +1109,6 @@ int rj_arith_v_cmpx_nle_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1448,11 +1120,6 @@ int rj_arith_v_cmpx_neq_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1464,11 +1131,6 @@ int rj_arith_v_cmpx_nlt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave32<64, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1479,11 +1141,6 @@ int rj_arith_v_cmpx_nlt_f64_w32_gfx12(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cmp_lt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -1494,11 +1151,6 @@ int rj_arith_v_cmp_lt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_eq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -1509,11 +1161,6 @@ int rj_arith_v_cmp_eq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_le_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1524,11 +1171,6 @@ int rj_arith_v_cmp_le_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_gt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1539,11 +1181,6 @@ int rj_arith_v_cmp_gt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_lg_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -1554,11 +1191,6 @@ int rj_arith_v_cmp_lg_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_ge_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1569,11 +1201,6 @@ int rj_arith_v_cmp_ge_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_o_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1584,11 +1211,6 @@ int rj_arith_v_cmp_o_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_cmp_u_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1599,11 +1221,6 @@ int rj_arith_v_cmp_u_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_cmp_nge_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1614,11 +1231,6 @@ int rj_arith_v_cmp_nge_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nlg_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1629,11 +1241,6 @@ int rj_arith_v_cmp_nlg_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_ngt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -1644,11 +1251,6 @@ int rj_arith_v_cmp_ngt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nle_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1659,11 +1261,6 @@ int rj_arith_v_cmp_nle_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_neq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1674,11 +1271,6 @@ int rj_arith_v_cmp_neq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nlt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1689,11 +1281,6 @@ int rj_arith_v_cmp_nlt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_lt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -1704,11 +1291,6 @@ int rj_arith_v_cmpx_lt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_eq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -1719,11 +1301,6 @@ int rj_arith_v_cmpx_eq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_le_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1734,11 +1311,6 @@ int rj_arith_v_cmpx_le_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_gt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1749,11 +1321,6 @@ int rj_arith_v_cmpx_gt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_lg_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -1764,11 +1331,6 @@ int rj_arith_v_cmpx_lg_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_ge_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1779,11 +1341,6 @@ int rj_arith_v_cmpx_ge_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_o_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1794,11 +1351,6 @@ int rj_arith_v_cmpx_o_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmpx_u_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1810,11 +1362,6 @@ int rj_arith_v_cmpx_nge_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1826,11 +1373,6 @@ int rj_arith_v_cmpx_nlg_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1842,11 +1384,6 @@ int rj_arith_v_cmpx_ngt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -1858,11 +1395,6 @@ int rj_arith_v_cmpx_nle_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1874,11 +1406,6 @@ int rj_arith_v_cmpx_neq_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1890,11 +1417,6 @@ int rj_arith_v_cmpx_nlt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<16, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1905,11 +1427,6 @@ int rj_arith_v_cmpx_nlt_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cmp_lt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -1920,11 +1437,6 @@ int rj_arith_v_cmp_lt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_eq_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -1935,11 +1447,6 @@ int rj_arith_v_cmp_eq_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_le_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -1950,11 +1457,6 @@ int rj_arith_v_cmp_le_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_gt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -1965,11 +1467,6 @@ int rj_arith_v_cmp_gt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_lg_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -1980,11 +1477,6 @@ int rj_arith_v_cmp_lg_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_ge_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -1995,11 +1487,6 @@ int rj_arith_v_cmp_ge_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_o_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2010,11 +1497,6 @@ int rj_arith_v_cmp_o_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_cmp_u_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -2025,11 +1507,6 @@ int rj_arith_v_cmp_u_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_cmp_nge_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2040,11 +1517,6 @@ int rj_arith_v_cmp_nge_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nlg_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2055,11 +1527,6 @@ int rj_arith_v_cmp_nlg_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_ngt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -2070,11 +1537,6 @@ int rj_arith_v_cmp_ngt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nle_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2085,11 +1547,6 @@ int rj_arith_v_cmp_nle_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_neq_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2100,11 +1557,6 @@ int rj_arith_v_cmp_neq_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nlt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2115,11 +1567,6 @@ int rj_arith_v_cmp_nlt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_lt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -2130,11 +1577,6 @@ int rj_arith_v_cmpx_lt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_eq_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -2145,11 +1587,6 @@ int rj_arith_v_cmpx_eq_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_le_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -2160,11 +1597,6 @@ int rj_arith_v_cmpx_le_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_gt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2175,11 +1607,6 @@ int rj_arith_v_cmpx_gt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_lg_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -2190,11 +1617,6 @@ int rj_arith_v_cmpx_lg_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_ge_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2205,11 +1627,6 @@ int rj_arith_v_cmpx_ge_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_o_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2220,11 +1637,6 @@ int rj_arith_v_cmpx_o_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmpx_u_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -2236,11 +1648,6 @@ int rj_arith_v_cmpx_nge_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2252,11 +1659,6 @@ int rj_arith_v_cmpx_nlg_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2268,11 +1670,6 @@ int rj_arith_v_cmpx_ngt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -2284,11 +1681,6 @@ int rj_arith_v_cmpx_nle_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2300,11 +1692,6 @@ int rj_arith_v_cmpx_neq_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2316,11 +1703,6 @@ int rj_arith_v_cmpx_nlt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<32, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2331,11 +1713,6 @@ int rj_arith_v_cmpx_nlt_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cmp_lt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -2346,11 +1723,6 @@ int rj_arith_v_cmp_lt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_eq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -2361,11 +1733,6 @@ int rj_arith_v_cmp_eq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_le_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -2376,11 +1743,6 @@ int rj_arith_v_cmp_le_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_gt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2391,11 +1753,6 @@ int rj_arith_v_cmp_gt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_lg_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -2406,11 +1763,6 @@ int rj_arith_v_cmp_lg_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_ge_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2421,11 +1773,6 @@ int rj_arith_v_cmp_ge_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmp_o_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2436,11 +1783,6 @@ int rj_arith_v_cmp_o_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_cmp_u_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                    uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                    uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -2451,11 +1793,6 @@ int rj_arith_v_cmp_u_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t 
 int rj_arith_v_cmp_nge_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2466,11 +1803,6 @@ int rj_arith_v_cmp_nge_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nlg_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2481,11 +1813,6 @@ int rj_arith_v_cmp_nlg_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_ngt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -2496,11 +1823,6 @@ int rj_arith_v_cmp_ngt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nle_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2511,11 +1833,6 @@ int rj_arith_v_cmp_nle_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_neq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2526,11 +1843,6 @@ int rj_arith_v_cmp_neq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmp_nlt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2541,11 +1853,6 @@ int rj_arith_v_cmp_nlt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_lt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareLess>(flags, exec_mask, instruction_flags, d, a,
                                                           b, excp_flag_user);
 }
@@ -2556,11 +1863,6 @@ int rj_arith_v_cmpx_lt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_eq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareEqual>(flags, exec_mask, instruction_flags, d,
                                                            a, b, excp_flag_user);
 }
@@ -2571,11 +1873,6 @@ int rj_arith_v_cmpx_eq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_le_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareLessEqual>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -2586,11 +1883,6 @@ int rj_arith_v_cmpx_le_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_gt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareGreater>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2601,11 +1893,6 @@ int rj_arith_v_cmpx_gt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_lg_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotEqual>(flags, exec_mask, instruction_flags,
                                                               d, a, b, excp_flag_user);
 }
@@ -2616,11 +1903,6 @@ int rj_arith_v_cmpx_lg_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_ge_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint64_t *d, const uint32_t *const *a,
                                      const uint32_t *const *b, uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2631,11 +1913,6 @@ int rj_arith_v_cmpx_ge_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cmpx_o_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareOrdered>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
@@ -2646,11 +1923,6 @@ int rj_arith_v_cmpx_o_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t
 int rj_arith_v_cmpx_u_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                     uint64_t *d, const uint32_t *const *a, const uint32_t *const *b,
                                     uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareUnordered>(flags, exec_mask, instruction_flags,
                                                                d, a, b, excp_flag_user);
 }
@@ -2662,11 +1934,6 @@ int rj_arith_v_cmpx_nge_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotGreaterEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2678,11 +1945,6 @@ int rj_arith_v_cmpx_nlg_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotLessGreater>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2694,11 +1956,6 @@ int rj_arith_v_cmpx_ngt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotGreater>(flags, exec_mask, instruction_flags,
                                                                 d, a, b, excp_flag_user);
 }
@@ -2710,11 +1967,6 @@ int rj_arith_v_cmpx_nle_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotLessEqual>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2726,11 +1978,6 @@ int rj_arith_v_cmpx_neq_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotEqualUnordered>(
       flags, exec_mask, instruction_flags, d, a, b, excp_flag_user);
 }
@@ -2742,11 +1989,6 @@ int rj_arith_v_cmpx_nlt_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint64_t *d,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user) {
-  flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
-  if (int error = rocjitsu::arith::validate_semantics(flags)) {
-    return error;
-  }
   return compare_wave64<64, rocjitsu::arith::CompareNotLess>(flags, exec_mask, instruction_flags, d,
                                                              a, b, excp_flag_user);
 }
