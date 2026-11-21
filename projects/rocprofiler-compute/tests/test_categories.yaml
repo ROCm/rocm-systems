@@ -12,6 +12,14 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_utils_common
@@ -70,8 +78,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "quick"
       - "pre-commit"
@@ -96,6 +122,14 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -170,8 +204,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "standard"
       - "pr"
@@ -204,6 +256,14 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -278,8 +338,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "comprehensive"
       - "nightly"
@@ -312,6 +390,14 @@ test_categories:
       - test_utils_counter_defs
       - test_metric_library_loader
       - test_metric_library_sync
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_schema_visualizer
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -386,8 +472,26 @@ test_categories:
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     rocprofiler_compute_ci_exclude:
       - test_profile_live_attach_detach
+      - test_counter_grouping_inspector
+      - test_format_yaml
+      - test_generate_metric_health_report
+      - test_instruction_pipeline_generator
+      - test_memory_chart_layout_format
+      - test_memory_chart_preview
+      - test_metric_library_sync
+      - test_schema_visualizer
+      - test_validate_metric_library
     labels:
       - "full"
       - "weekly"
