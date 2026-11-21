@@ -238,9 +238,6 @@ rtc:
     disabled:
       targets: [amd_windows, asan]
       reason: "AIRUNTIME-2410 - Rock window failures on gfx1151 and asan failures; needs to be re-triaged on asan. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
-  Unit_RTC_BUNDLE_FROM_FILE:
-    <<: *level_default
-    tags: [link]
   Unit_hiprtc_fp4_simple:
     <<: *level_default
     tags: [compile]
