@@ -1,0 +1,1 @@
+* On gfx1250, the DDA LL128 `ncclAllGather` now stages its wire slices in LDS and sends them to the peers with async LDS stores once a block pushes at least 80 KiB of payload. Only wave32 blocks of 512 threads stage. `RCCL_DDA_LL128_AG_ASYNC_WIRE_MIN_BYTES` sets the threshold, and `0` turns staging off.

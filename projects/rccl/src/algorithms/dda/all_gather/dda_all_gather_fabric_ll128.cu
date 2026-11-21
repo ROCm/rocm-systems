@@ -7,30 +7,35 @@
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 
-#include "algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h"
-#include "checks.h"
-#include "comm.h"
-#include "debug.h"
-#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
-#include "rccl_common.h"
+#include <cstddef>
+#include <cstdint>
+#include <utility>
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
-#include <cstddef>
-#include <cstdint>
-#include <utility>
+#include "algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
+#include "checks.h"
+#include "comm.h"
+#include "debug.h"
+#include "rccl_common.h"
 
 // Block size when neither a valid RCCL_DDA_LL128_AG_THREADS nor the arch table sets one.
 constexpr unsigned kDdaLL128AGDefaultThreads = 512;
 
 RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
+// Staged phase 1 from this many pushed payload bytes per block, perRankBytes * nPeers / blocks; 0 or negative: off.
+// Cached, so every rank agrees. Only gfx1250 wave32 blocks of kDdaLL128AGStageThreads stage.
+RCCL_PARAM(DdaLL128AGAsyncWireMinBytes, "DDA_LL128_AG_ASYNC_WIRE_MIN_BYTES", 80 * 1024);
 
 namespace {
 
 using dda::common::ddaBankSize;
 using dda::common::ddaLL128AgSlotWords;
 using dda::common::ddaLL128Slices;
+using dda::common::ddaLL128StageBytes;
+using dda::common::kDdaLL128AGStageThreads;
 using dda::common::kDdaLL128DataBytesPerSlice;
 using dda::common::kDdaLL128Warp;
 using dda::common::kDdaLL128WireWordsPerSlice;
@@ -62,6 +67,25 @@ unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t
     blocksPerPeer = cap;
   }
   return blocksPerPeer < 1 ? 1u : (unsigned)blocksPerPeer;
+}
+
+// LDS a block gets without raising its limit; the staged windows must fit it.
+constexpr size_t kDdaDefaultLdsBytes = 64 * 1024;
+static_assert(ddaLL128StageBytes(kDdaLL128AGStageThreads) <= kDdaDefaultLdsBytes, "staged windows exceed the LDS");
+
+// Payload bytes one block of `grid` pushes in phase 1: perRankBytes to each of nPeers peers, over every block.
+size_t ddaLL128AGBytesPerBlock(size_t perRankBytes, int nPeers, const dim3& grid) {
+  return perRankBytes * (size_t)nPeers / ((size_t)grid.x * grid.y);
+}
+
+// Whether a launch takes the staged phase 1. Every input matches on all ranks of a DDA comm, so every rank agrees.
+// The 80 KiB default was measured on SPX; DPX picks 256-thread blocks below 32 MiB, which keep the unstaged kernels.
+bool ddaLL128AGUseAsyncWire(const ncclComm* comm, size_t bytesPerBlock, unsigned threads) {
+  const int64_t minBytes = rcclParamDdaLL128AGAsyncWireMinBytes();
+  if (minBytes <= 0 || bytesPerBlock < (size_t)minBytes) {
+    return false;
+  }
+  return dda::common::ddaLL128StagedWireOk(comm->archName, comm->WarpSize) && threads == kDdaLL128AGStageThreads;
 }
 
 // Single source of the launch geometry: grid.x = one column per remote peer,
@@ -99,14 +123,33 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
 
-  INFO(NCCL_COLL,
-       "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-       "(warp-per-slice, bpp=%u, slotWords=%zu)",
-       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer,
-       ddaLL128AgSlotWords(bankSize, nRanks));
+  const size_t bytesPerBlock = ddaLL128AGBytesPerBlock(perRankBytes, nRanks - 1, grid);
+  const bool asyncWire = ddaLL128AGUseAsyncWire(comm, bytesPerBlock, block.x);
+  if (!asyncWire) {
+    INFO(NCCL_COLL,
+         "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
+         "(warp-per-slice, bpp=%u, slotWords=%zu)",
+         nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer, ddaLL128AgSlotWords(bankSize, nRanks));
+  }
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+  if (asyncWire) {
+    // Same grid, block and arguments; the staged phase 1 adds the windows' LDS and the peers a fill goes to.
+    const int pushPeers = dda::common::kDdaLL128AGStagePushPeers;
+    const size_t lds = ddaLL128StageBytes(block.x);
+    INFO(NCCL_COLL,
+         "DDA fabric AllGather LL128 async wire: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
+         "bytesPerBlock=%zu pushPeers=%d groups=%d lds=%zu",
+         nRanks, perRankBytes, slices, grid.x, grid.y, block.x, bytesPerBlock, pushPeers,
+         dda::common::ddaLL128AGStageGroups(nRanks - 1, pushPeers), lds);
+    hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL128Staged<T>), grid, block, lds, stream,
+                          /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff),
+                          static_cast<const T*>(sendbuff), perRankBytes, comm->rank, nRanks, epochDev, epochLen,
+                          slices, bankSize, params, pushPeers);
+    CUDACHECK(cudaGetLastError());
+    return ncclSuccess;
+  }
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:
