@@ -669,6 +669,38 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     current_.slotEpochs[(dstRank - activeComm_->rank + nRanks) % nRanks] = activeComm_->ceColl.ceSeqNum;
   }
 
+  // The caller's stream: the legacy null stream on that arm, a created stream otherwise.
+  hipStream_t LaunchStream() const {
+    return GetParam() == LaunchPath::kLegacyNullStream ? nullptr : reinterpret_cast<hipStream_t>(0x5717);
+  }
+
+  // One rank of an nRanks LSA team with UC sync flags, set up for this launch path.
+  std::unique_ptr<ncclComm> MakeRankComm(int rank, int nRanks, uint32_t freq, std::vector<int>& lsaRankList,
+                                         std::vector<uint32_t>& syncFlags, ncclDevrWindow* syncWin) const {
+    const LaunchPath path = GetParam();
+    auto comm = std::make_unique<ncclComm>();
+    comm->rank = rank;
+    comm->nRanks = nRanks;
+    comm->devrState.lsaTeamSize = nRanks;
+    comm->devrState.lsaTeamSelf = rank;
+    comm->devrState.lsaTeamRankList = lsaRankList.data();
+    comm->symkState.hasLsaMultimem = false;
+    comm->planner.capturingGraph.graphId = path == LaunchPath::kGraphCapture ? kCaptureGraphId : ULLONG_MAX;
+    comm->ceColl.intraBatchSyncFreq = freq;
+    comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
+    comm->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(syncFlags.data());
+    comm->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(syncFlags.data() + nRanks);
+    comm->ceColl.ceSyncWin = syncWin;
+    if (path == LaunchPath::kMultiStream) {
+      comm->ceColl.nCopyStreams = RCCL_CE_NUM_COPY_STREAMS;
+      for (int s = 0; s < RCCL_CE_NUM_COPY_STREAMS; ++s) {
+        comm->ceColl.copyStreams[s] = reinterpret_cast<hipStream_t>(kCopyStreamBase + s);
+        comm->ceColl.copyEvents[s] = reinterpret_cast<hipEvent_t>(0x7000 + s);
+      }
+    }
+    return comm;
+  }
+
   // Runs ncclCeAlltoAllv once per simulated rank; every rank sees the same gathered size matrix, as in production.
   std::vector<RankRun> Run(const SizeMatrix& send, uint32_t freq, ncclResult_t expected = ncclSuccess) {
     const int nRanks = static_cast<int>(send.size());
@@ -686,30 +718,10 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
     ncclDevrWindow recvWin = {};
     recvWin.userPtr = reinterpret_cast<void*>(kRecvBase);
 
-    const LaunchPath path = GetParam();
-    hipStream_t stream = path == LaunchPath::kLegacyNullStream ? nullptr : reinterpret_cast<hipStream_t>(0x5717);
+    const hipStream_t stream = LaunchStream();
     std::vector<RankRun> runs;
     for (int rank = 0; rank < nRanks; ++rank) {
-      auto comm = std::make_unique<ncclComm>();
-      comm->rank = rank;
-      comm->nRanks = nRanks;
-      comm->devrState.lsaTeamSize = nRanks;
-      comm->devrState.lsaTeamSelf = rank;
-      comm->devrState.lsaTeamRankList = lsaRankList.data();
-      comm->symkState.hasLsaMultimem = false;
-      comm->planner.capturingGraph.graphId = path == LaunchPath::kGraphCapture ? kCaptureGraphId : ULLONG_MAX;
-      comm->ceColl.intraBatchSyncFreq = freq;
-      comm->ceColl.intraBatchSyncMsgThreshold = CE_COLL_INTRA_BATCH_SYNC_MSG_THRESHOLD;
-      comm->ceColl.baseUCSymReadyPtr = reinterpret_cast<uint8_t*>(syncFlags.data());
-      comm->ceColl.baseUCSymComplPtr = reinterpret_cast<uint8_t*>(syncFlags.data() + nRanks);
-      comm->ceColl.ceSyncWin = &syncWin;
-      if (path == LaunchPath::kMultiStream) {
-        comm->ceColl.nCopyStreams = RCCL_CE_NUM_COPY_STREAMS;
-        for (int s = 0; s < RCCL_CE_NUM_COPY_STREAMS; ++s) {
-          comm->ceColl.copyStreams[s] = reinterpret_cast<hipStream_t>(kCopyStreamBase + s);
-          comm->ceColl.copyEvents[s] = reinterpret_cast<hipEvent_t>(0x7000 + s);
-        }
-      }
+      std::unique_ptr<ncclComm> comm = MakeRankComm(rank, nRanks, freq, lsaRankList, syncFlags, &syncWin);
 
       ncclCeCollArgs args = {};
       args.func = ncclFuncAlltoAllv;
@@ -806,6 +818,44 @@ class CeAlltoAllvSyncMicrotest : public ::testing::TestWithParam<LaunchPath> {
   int failSyncCall_ = 0;     // 1-based hipStreamBatchMemOp call on each rank that fails; 0 never fails
   std::function<void(std::vector<size_t>&)> corruptGathered_;  // edits the gathered matrix before any rank runs
 };
+
+// Peers wait for equal ceSeqNum: 16 ops at freq 8 is one barrier on every stream kind, two only under capture.
+TEST_P(CeAlltoAllvSyncMicrotest, LaunchBatchOps16OpsFreq8_BarrierCountDoesNotDependOnStreamKind) {
+  constexpr int kRanks = 16;
+  constexpr int kOps = 16;
+  std::vector<int> lsaRankList(kRanks);
+  for (int r = 0; r < kRanks; ++r) {
+    lsaRankList[r] = r;
+  }
+  std::vector<uint32_t> syncFlags(2 * kRanks, 0);
+  ncclDevrWindow syncWin = {};
+  syncWin.userPtr = syncFlags.data();
+  std::unique_ptr<ncclComm> comm = MakeRankComm(/*rank=*/0, kRanks, /*freq=*/8, lsaRankList, syncFlags, &syncWin);
+
+  ncclCeBatchOpsParams params = {};
+  ASSERT_EQ(ncclSuccess, ncclCeInitBatchOpsParams(&params, kOps));
+  for (int i = 0; i < kOps; ++i) {
+    params.dsts[i] = reinterpret_cast<void*>(kPeerWindowBase + i * kPeerWindowStride);
+    params.srcs[i] = reinterpret_cast<void*>(kSendBase + i * 64 * kMiB);
+    params.sizes[i] = 64 * kMiB;
+  }
+  params.numOps = kOps;
+  params.intraBatchSync = true;
+
+  ncclCeCollArgs args = {};
+  args.func = ncclFuncAllGather;
+  current_ = RankRun{};
+  current_.slotEpochs.assign(kRanks, 0);
+  activeComm_ = comm.get();
+  EXPECT_EQ(ncclSuccess, ncclCeLaunchBatchOps(comm.get(), &params, LaunchStream(), &args));
+  activeComm_ = nullptr;
+  ncclCeFreeBatchOpsParams(&params);
+
+  EXPECT_EQ(static_cast<size_t>(kOps), current_.copies);
+  const size_t expectedBatchCopies = GetParam() == LaunchPath::kBatchAsync ? kOps : 0;
+  EXPECT_EQ(expectedBatchCopies, current_.batchCopies) << "the arm must reach the copy API it is named for";
+  EXPECT_EQ(GetParam() == LaunchPath::kGraphCapture ? 2u : 1u, comm->ceColl.ceSeqNum);
+}
 
 TEST_P(CeAlltoAllvSyncMicrotest, Sparse16Ranks_EqualTotalsAt512MiB_EveryRankIssuesSameBarrierCount) {
   const int kNRanks = 16;
