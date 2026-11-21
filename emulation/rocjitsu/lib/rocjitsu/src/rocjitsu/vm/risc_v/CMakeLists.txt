@@ -5,3 +5,4 @@ rj_add_object_library(rocjitsu_vm_risc_v
     hart.cpp
     hart_state.cpp
 )
+target_link_libraries(rocjitsu_vm_risc_v PUBLIC rocjitsu_execution_plugin_group)

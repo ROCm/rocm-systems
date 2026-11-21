@@ -121,10 +121,20 @@ option(
     "Recover invalid host memory accesses using SIGSEGV and SIGBUS handlers"
     ON
 )
-# GNU-unique symbols make glibc retain a DSO after dlclose. All objects in
-# an unloadable explicit library, including its static dependencies, must use
-# ordinary C++ symbol binding instead.
-if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+option(
+    ROCJITSU_BUILD_EMBED_LIBRARY
+    "Build a separate Linux C API library without interposition or host signal handlers"
+    OFF
+)
+if(ROCJITSU_BUILD_EMBED_LIBRARY AND NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(
+        FATAL_ERROR
+        "ROCJITSU_BUILD_EMBED_LIBRARY is supported only on Linux"
+    )
+endif()
+# Linux simulator objects and their static dependencies also form an unloadable
+# embedding library. GNU-unique bindings make glibc retain the image at dlclose.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,GNU>:-fno-gnu-unique>)
 endif()
 option(
@@ -378,13 +388,6 @@ set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
 
-if(NOT ROCJITSU_ENABLE_INTERPOSER)
-    add_compile_definitions(RJ_DISABLE_INTERPOSER)
-endif()
-if(NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
-    add_compile_definitions(RJ_DISABLE_HOST_FAULT_RECOVERY)
-endif()
-
 include(rj_flatbuffers)
 
 # Set include paths before adding subdirectories so all targets can find them.
@@ -419,9 +422,9 @@ add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
-# Main shared library and the non-installed test interposer assemble the same
-# simulator objects. Only the latter compiles the interposer's test hooks.
-function(rj_configure_shared_interposer target)
+# All simulator images share the instruction models. The final target selects
+# its host-policy objects and whether to compile the Linux interposer.
+function(rj_configure_shared_library target with_interposer)
     target_sources(${target} PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>)
     target_link_libraries(
         ${target}
@@ -455,7 +458,7 @@ function(rj_configure_shared_interposer target)
     )
 
     # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ROCJITSU_ENABLE_INTERPOSER)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND with_interposer)
         target_sources(
             ${target}
             PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
@@ -473,15 +476,34 @@ endfunction()
 
 add_library(rocjitsu_shared SHARED)
 set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
-rj_configure_shared_interposer(rocjitsu_shared)
+rj_configure_shared_library(rocjitsu_shared ${ROCJITSU_ENABLE_INTERPOSER})
+
+if(ROCJITSU_BUILD_EMBED_LIBRARY)
+    add_library(rocjitsu_embed SHARED)
+    set_property(TARGET rocjitsu_embed PROPERTY RJ_EMBED_LIBRARY ON)
+    rj_configure_shared_library(rocjitsu_embed OFF)
+    install(
+        TARGETS rocjitsu_embed
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT rocjitsu-embed
+    )
+endif()
 
 if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_library(rocjitsu_test_interposer SHARED)
-    rj_configure_shared_interposer(rocjitsu_test_interposer)
+    rj_configure_shared_library(rocjitsu_test_interposer ${ROCJITSU_ENABLE_INTERPOSER})
     target_compile_definitions(
         rocjitsu_test_interposer
         PRIVATE RJ_INTERPOSER_TEST_HOOKS
     )
+endif()
+
+# Front ends and tests compile against the configured default simulator. This
+# directory also owns the interposer translation units on the shared targets.
+if(NOT ROCJITSU_ENABLE_INTERPOSER)
+    add_compile_definitions(RJ_DISABLE_INTERPOSER)
+endif()
+if(NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_definitions(RJ_DISABLE_HOST_FAULT_RECOVERY)
 endif()
 
 # Developer and test workflow tools.

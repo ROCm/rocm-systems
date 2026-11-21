@@ -465,6 +465,22 @@ TEST(VmEmbeddingApi, ConcurrentLocalCreationAndSharedMappingInitializeLibc) {
   }
 }
 
+TEST(VmEmbeddingApi, LeavesLibcEntryPointsInTheirHostLibraries) {
+  std::unique_ptr<void, int (*)(void *)> library(dlopen(RJ_VM_API_LIBRARY, RTLD_NOW | RTLD_LOCAL),
+                                                 dlclose);
+  ASSERT_NE(library, nullptr) << dlerror();
+  Dl_info simulator{};
+  ASSERT_NE(dladdr(dlsym(library.get(), "rj_vm_create_from_string"), &simulator), 0);
+  // dlsym can also return symbols from a dependency such as libc. Only a
+  // definition in the simulator itself would interpose on the host entry point.
+  for (const char *name : {"open", "close", "ioctl", "mmap", "munmap"}) {
+    SCOPED_TRACE(name);
+    Dl_info provider{};
+    ASSERT_NE(dladdr(dlsym(library.get(), name), &provider), 0);
+    EXPECT_NE(provider.dli_fbase, simulator.dli_fbase);
+  }
+}
+
 TEST(VmEmbeddingApi, UnloadsAfterExplicitLifecycleWithoutChangingHostActions) {
   exercise_lifecycle(Lifecycle::CreateDestroy);
 }

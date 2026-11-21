@@ -36,6 +36,53 @@ endfunction()
 function(rj_add_object_library name)
     add_library(${name} OBJECT ${ARGN})
     _rj_configure_object_library(${name} util simdojo_headers)
+    target_compile_definitions(${name} PRIVATE RJ_SHARED_SIMULATOR_OBJECT)
+endfunction()
+
+# Compile sources whose inline memory accesses or process-lifetime state depend
+# on the host policy. Each final consumer gets exactly one set of these objects.
+# All other simulator objects are shared, including the instruction models.
+function(rj_add_host_policy_sources owner)
+    set(_variants ${owner}_host)
+    if(ROCJITSU_BUILD_EMBED_LIBRARY)
+        list(APPEND _variants ${owner}_embed)
+    endif()
+    get_property(_deps TARGET ${owner} PROPERTY MANUALLY_ADDED_DEPENDENCIES)
+    foreach(_variant IN LISTS _variants)
+        add_library(${_variant} OBJECT ${ARGN})
+        _rj_configure_object_library(${_variant} util simdojo_headers)
+        target_include_directories(
+            ${_variant}
+            PRIVATE "$<TARGET_PROPERTY:${owner},INCLUDE_DIRECTORIES>"
+        )
+        target_link_libraries(
+            ${_variant}
+            PRIVATE "$<TARGET_PROPERTY:${owner},LINK_LIBRARIES>"
+        )
+        if(_deps)
+            add_dependencies(${_variant} ${_deps})
+        endif()
+    endforeach()
+    if(NOT ROCJITSU_ENABLE_INTERPOSER)
+        target_compile_definitions(${owner}_host PRIVATE RJ_DISABLE_INTERPOSER)
+    endif()
+    if(NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+        target_compile_definitions(
+            ${owner}_host
+            PRIVATE RJ_DISABLE_HOST_FAULT_RECOVERY
+        )
+    endif()
+    set(_objects $<TARGET_OBJECTS:${owner}_host>)
+    if(ROCJITSU_BUILD_EMBED_LIBRARY)
+        target_compile_definitions(
+            ${owner}_embed
+            PRIVATE RJ_DISABLE_INTERPOSER RJ_DISABLE_HOST_FAULT_RECOVERY
+        )
+        set(_objects
+            "$<IF:$<BOOL:$<TARGET_PROPERTY:RJ_EMBED_LIBRARY>>,$<TARGET_OBJECTS:${owner}_embed>,${_objects}>"
+        )
+    endif()
+    target_link_libraries(${owner} INTERFACE "${_objects}")
 endfunction()
 
 # Compile <sources> of <object-lib> without vptr checks as object library

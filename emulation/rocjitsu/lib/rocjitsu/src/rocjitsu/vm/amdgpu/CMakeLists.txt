@@ -29,7 +29,6 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     gpu_memory_access.cpp
     gpu_queue_registry.cpp
     gpu_vm.cpp
-    legacy_address_space.cpp
     gws_device.cpp
     hwreg.cpp
     image_addressing.cpp
@@ -55,7 +54,11 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     xcd.cpp
 )
 
-target_link_libraries(rocjitsu_vm_amdgpu PUBLIC rj_arith)
+target_link_libraries(
+    rocjitsu_vm_amdgpu
+    PUBLIC rj_arith rocjitsu_execution_plugin_group
+)
+rj_add_host_policy_sources(rocjitsu_vm_amdgpu legacy_address_space.cpp)
 
 # Share ISA wait decoding with the offline checker, without its dataflow state.
 # Final VM consumers need the objects; transitive object-library linking alone

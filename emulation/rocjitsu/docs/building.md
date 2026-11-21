@@ -38,14 +38,30 @@ configuration. Keep that header tree at a matching revision.
 | `RJ_SANITIZER_RUNTIME` | `AUTO` | Select `AUTO`, `SHARED`, or `STATIC` sanitizer runtime linkage |
 | `ROCJITSU_ENABLE_INTERPOSER` | `ON` | Include the Linux LD_PRELOAD interposer in librocjitsu |
 | `RJ_ENABLE_HOST_FAULT_RECOVERY` | `ON` | Recover host memory faults with SIGSEGV/SIGBUS handlers |
+| `ROCJITSU_BUILD_EMBED_LIBRARY` | `OFF` | Build the separate Linux C API embedding library |
 | `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support; requires CMake 3.28+ and Linux 6.1+ UAPI headers |
 
 ### Explicit C API embedding
 
-Applications that manage rocjitsu through its C API can build without the
-preload interposer and without installing host signal handlers:
+Linux applications that manage rocjitsu through its C API can load
+`librocjitsu_embed.so`. This library omits the preload interposer and host
+signal handlers, and shares the compiled instruction models with `librocjitsu.so`.
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DROCJITSU_BUILD_EMBED_LIBRARY=ON
+cmake --build build --target rocjitsu_embed
+cmake --install build --prefix /path/to/prefix --component rocjitsu-embed
+```
+
+The component installs `lib/librocjitsu_embed.so` and its private
+`libexec/rocjitsu-embed/rocjitsu-memory` helper using the configured GNU
+install directories. Move them together. Both libraries use the same public
+`rocjitsu/` headers.
+
+To configure the regular `librocjitsu.so` for explicit embedding, disable both
+options on the original target.
 
 ```bash
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -53,12 +69,12 @@ cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build build --target rocjitsu_shared
 ```
 
-The host loads `librocjitsu`, creates VMs through the C API, and retains the
+The host loads the library, creates VMs through the C API, and retains the
 library through their lifetimes. For in-process KFD commands, create the VM
 with `RJ_VM_MODE_LOCAL`; this initializes the topology and opens the driver
 without requiring the interposer. `RJ_VM_MODE_DEFAULT` is for standalone
-simulation and does not initialize that driver or topology. GCC builds disable
-GNU-unique symbols in this configuration so that `dlclose` can unload the
+simulation and does not initialize that driver or topology. Linux GCC builds disable
+GNU-unique symbols so that `dlclose` can unload the
 library. Before destroying a VM, the host requests exit and
 joins any thread calling `rj_vm_run`. It destroys every VM before closing the
 library. Excluding the interposer also gives the default execution-plugin group

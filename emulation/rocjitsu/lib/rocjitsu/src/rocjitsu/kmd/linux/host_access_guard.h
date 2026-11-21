@@ -7,6 +7,11 @@
 /// @file host_access_guard.h
 /// @brief Turns a host fault taken inside an emulated access into a refusal.
 
+// These inline operations differ between the simulator and embedding images.
+#ifdef RJ_SHARED_SIMULATOR_OBJECT
+#error "Compile host access guard users with rj_add_host_policy_sources"
+#endif
+
 #include <csetjmp>
 #include <csignal>
 #include <mutex>
