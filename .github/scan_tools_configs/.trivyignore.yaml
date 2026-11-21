@@ -1,0 +1,19 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+#
+# Reference: https://trivy.dev/latest/docs/configuration/filtering/#trivyignoreyaml
+#
+# Path-scoped trivy suppressions. The security baseline reads this file in
+# preference to the .trivyignore beside it. For a local scan, pass it
+# explicitly:
+#   trivy fs --config .github/scan_tools_configs/trivy.yml \
+#     --ignorefile .github/scan_tools_configs/.trivyignore.yaml .
+
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - "emulation/Dockerfile"
+      - "emulation/mirage/tests/corpus/Dockerfile"
+    statement: >-
+      Build/development images that inherit the runtime user from their
+      base image.
