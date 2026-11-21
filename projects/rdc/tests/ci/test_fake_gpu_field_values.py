@@ -8,6 +8,7 @@ test_fake_gpu.py (same environment variables and helpers).
 import os
 import re
 import subprocess
+import threading
 
 import pytest
 
@@ -87,7 +88,11 @@ def test_partition_past_the_partition_count_has_no_clock(tools, tmp_path):
         with subprocess.Popen(
             cmd, env=d.rdci_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         ) as p:
+            # The loop below reads to the end of rdci's output. A watchdog kills a
+            # stalled rdci, which ends it; the wait then returns -9.
+            watchdog = threading.Timer(60 * FACTOR, p.kill)
             try:
+                watchdog.start()
                 for line in p.stdout:
                     if failed_at is None and d.armed.exists():
                         if any(api == profile and failed for api, _, failed in d.calls()):
@@ -98,6 +103,7 @@ def test_partition_past_the_partition_count_has_no_clock(tools, tmp_path):
                         d.arm()  # after the first sample
                 assert p.wait(timeout=30 * FACTOR) == 0, "".join(lines)
             finally:
+                watchdog.cancel()
                 p.kill()
         out = "".join(lines)
         d.check_alive("rdci dmon")
