@@ -10,6 +10,12 @@ set(CMAKE_INCLUDE_SYSTEM_FLAG_RCCLDEV "-isystem")
 set(CMAKE_RCCLDEV_COMPILE_OBJECT
   "<CMAKE_RCCLDEV_COMPILER> --compile <DEFINES> <INCLUDES> <FLAGS> -o <OBJECT> <SOURCE>")
 
+# Header dependencies: CMake does not scan custom languages, so the driver
+# writes a depfile (see -MD in tools/rccl-device-compile).
+set(CMAKE_DEPFILE_FLAGS_RCCLDEV "-MD -MT <DEP_TARGET> -MF <DEP_FILE>")
+set(CMAKE_RCCLDEV_DEPFILE_FORMAT gcc)
+set(CMAKE_RCCLDEV_DEPENDS_USE_COMPILER TRUE)
+
 # Link rule: objects -> shared module (device.elf)
 # <LINK_FLAGS> carries target_link_options (e.g. --dispatcher=..., --arch=...).
 # <OBJECTS> is the list of compiled object files.

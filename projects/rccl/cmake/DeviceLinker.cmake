@@ -545,7 +545,10 @@ foreach(DL_GPU_TARGET ${DL_GPU_TARGETS})
       -std=c++17
       -o ${ARCH_DEVICE_ELF}
       @${_link_rsp}
-    DEPENDS ${_dev_target} ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
+    # Naming an OBJECT library here only orders the build; the object files must
+    # be listed too, or rebuilt kernels never reach device.elf.
+    DEPENDS ${_dev_target} $<TARGET_OBJECTS:${_dev_target}>
+            ${HIPIFY_DIR}/src/device/common.cu.cpp ${_rocshmem_link_depends}
     COMMENT "DL [${DL_GPU_TARGET}] link: device.elf"
     VERBATIM
     COMMAND_EXPAND_LISTS
