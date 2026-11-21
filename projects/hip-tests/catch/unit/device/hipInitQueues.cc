@@ -22,11 +22,11 @@
 /**
  * Test Description
  * ------------------------
- *  - In a fresh process, initialize HIP and query every device, then count the hardware queues the
- *    process created. The child intercepts libc's ioctl() and counts the KFD create-queue
- *    requests; init must run in a process of its own to be observed.
+ *  - In a fresh process, initialize HIP and query every device, then count the hardware queues
+ *    the process still holds. The child intercepts libc's ioctl() and tracks successful KFD
+ *    create/destroy requests by queue ID; init must run in its own process to be observed.
  *    -# After init and device queries
- *      - Expected output: no queue
+ *      - Expected output: no retained queue; temporary startup queues may already be destroyed
  *  - A queue created at init on every GPU costs each HIP process a doorbell, a runlist slot and
  *    VRAM on all GPUs, used or not (ROCM-34268: hipErrorInvalidValue under 64-way fork on MI350X
  *    CPX; ROCM-34585: out of VRAM on MI325X; ROCM-34588: oversubscribed hardware scheduler with
@@ -48,7 +48,7 @@ HIP_TEST_CASE(Unit_hipInit_Positive_NoQueuesAtInit) {
   REQUIRE(status == 0);
 
   // Only the child's report; stderr, also captured for the INFO above, may hold other "a=b" text.
-  const std::set<std::string> keys = {"init_queues", "used_queues"};
+  const std::set<std::string> keys = {"init_queues", "used_queues", "tracking_errors"};
   std::map<std::string, int> result;
   std::istringstream tokens(output);
   std::string token;
@@ -61,8 +61,9 @@ HIP_TEST_CASE(Unit_hipInit_Positive_NoQueuesAtInit) {
     if (!value.empty() && *end == '\0') result[token.substr(0, eq)] = static_cast<int>(number);
   }
   REQUIRE(result.size() == keys.size());
-  // The kernel creates a queue; if none was seen, the interception is broken and 0 at init would
-  // prove nothing.
+  REQUIRE(result["tracking_errors"] == 0);
+  // Require a new creation after init: temporary startup activity cannot establish that the
+  // interception still observes the kernel's execution queue.
   REQUIRE(result["used_queues"] > 0);
   REQUIRE(result["init_queues"] == 0);
 }
