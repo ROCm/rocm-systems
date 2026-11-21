@@ -82,6 +82,41 @@ typedef uint32_t rj_code_binary_inst_t;
 /// by this API.
 typedef struct rj_code_inst_t rj_code_inst_t;
 
+/// @brief Destroy a caller-owned standalone decoded instruction.
+///
+/// @details This instruction type is not reference counted; destruction frees
+/// the object immediately. Only mutable instructions returned by
+/// rj_code_decoder_decode may be passed to this function. Const instructions
+/// returned by basic-block accessors are borrowed and remain owned by their
+/// list.
+/// @param[in] inst Caller-owned instruction to destroy (may be NULL).
+RJ_API_EXPORT void rj_code_inst_destroy(rj_code_inst_t *inst);
+
+/// @brief Get the mnemonic string for an instruction.
+/// @param[in] inst Instruction to query.
+/// @returns Null-terminated mnemonic string. The pointer is valid for the lifetime of the
+/// instruction.
+RJ_API_EXPORT const char *rj_code_inst_mnemonic(const rj_code_inst_t *inst);
+
+/// @brief Get the size of an instruction in bytes.
+/// @param[in] inst Instruction to query.
+/// @returns Size in bytes.
+RJ_API_EXPORT uint32_t rj_code_inst_size(const rj_code_inst_t *inst);
+
+/// @brief Disassemble an instruction into a string buffer.
+/// @param[in] inst Instruction to disassemble.
+/// @param[out] buf Output buffer for the disassembly string.
+/// @param[in] buf_size Size of the output buffer in bytes.
+/// @returns ROCJITSU_STATUS_SUCCESS on success.
+RJ_API_EXPORT rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf,
+                                                   uint32_t buf_size);
+
+/// @brief Get the next instruction in the same basic block.
+/// @param[in] inst Current instruction.
+/// @returns Pointer to the next instruction, or NULL if at the end of the block
+/// or if @p inst is a standalone instruction returned by rj_code_decoder_decode.
+RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst);
+
 /// @brief Opaque handle to a decoder object.
 typedef struct rj_code_decoder_t rj_code_decoder_t;
 
@@ -143,15 +178,26 @@ RJ_API_EXPORT rj_status_t rj_code_decoder_decode(rj_code_decoder_t *decoder,
                                                  const rj_code_binary_inst_t *binary_inst,
                                                  rj_code_inst_t **inst);
 
-/// @brief Destroy a caller-owned standalone decoded instruction.
+/// @brief Opaque handle to a code object (single AMD GPU HSA device ELF).
+typedef struct rj_code_object_t rj_code_object_t;
+
+/// @brief Increment a code object's reference count.
+/// @param[in] obj Code object handle (may be NULL, in which case this is a no-op).
+RJ_API_EXPORT void rj_code_object_retain(rj_code_object_t *obj);
+
+/// @brief Decrement a code object's reference count.
 ///
-/// @details This instruction type is not reference counted; destruction frees
-/// the object immediately. Only mutable instructions returned by
-/// rj_code_decoder_decode may be passed to this function. Const instructions
-/// returned by basic-block accessors are borrowed and remain owned by their
-/// list.
-/// @param[in] inst Caller-owned instruction to destroy (may be NULL).
-RJ_API_EXPORT void rj_code_inst_destroy(rj_code_inst_t *inst);
+/// @details If the code object has been destroyed and the reference count reaches 0,
+/// the backing memory is freed.
+/// @param[in] obj Code object handle (may be NULL, in which case this is a no-op).
+RJ_API_EXPORT void rj_code_object_release(rj_code_object_t *obj);
+
+/// @brief Mark a code object for destruction.
+///
+/// @details If the reference count is already 0, frees immediately. Otherwise,
+/// the code object is freed when the last release drops the reference count to 0.
+/// @param[in] obj Code object to destroy (may be NULL).
+RJ_API_EXPORT void rj_code_object_destroy(rj_code_object_t *obj);
 
 /// @brief Opaque handle to an executable (x86 HIP fat binary or standalone device ELF).
 typedef struct rj_code_executable_t rj_code_executable_t;
@@ -190,9 +236,6 @@ RJ_API_EXPORT void rj_code_executable_destroy(rj_code_executable_t *exec);
 RJ_API_EXPORT uint32_t rj_code_executable_num_code_objects(const rj_code_executable_t *exec,
                                                            rj_code_target_id_t target);
 
-/// @brief Opaque handle to a code object (single AMD GPU HSA device ELF).
-typedef struct rj_code_object_t rj_code_object_t;
-
 /// @brief Get a code object from an executable.
 /// @details Allocates a new handle and retains it (refcount = 1). Caller must call
 /// rj_code_object_destroy() then rj_code_object_release() when done.
@@ -206,24 +249,6 @@ RJ_API_EXPORT rj_status_t rj_code_executable_get_code_object(const rj_code_execu
                                                              rj_code_target_id_t target,
                                                              uint32_t index,
                                                              rj_code_object_t **obj);
-
-/// @brief Increment a code object's reference count.
-/// @param[in] obj Code object handle (may be NULL, in which case this is a no-op).
-RJ_API_EXPORT void rj_code_object_retain(rj_code_object_t *obj);
-
-/// @brief Decrement a code object's reference count.
-///
-/// @details If the code object has been destroyed and the reference count reaches 0,
-/// the backing memory is freed.
-/// @param[in] obj Code object handle (may be NULL, in which case this is a no-op).
-RJ_API_EXPORT void rj_code_object_release(rj_code_object_t *obj);
-
-/// @brief Mark a code object for destruction.
-///
-/// @details If the reference count is already 0, frees immediately. Otherwise,
-/// the code object is freed when the last release drops the reference count to 0.
-/// @param[in] obj Code object to destroy (may be NULL).
-RJ_API_EXPORT void rj_code_object_destroy(rj_code_object_t *obj);
 
 /// @brief Opaque handle to a list of decoded instructions.
 typedef struct rj_code_inst_list_t rj_code_inst_list_t;
@@ -261,11 +286,50 @@ RJ_API_EXPORT void rj_code_inst_list_release(rj_code_inst_list_t *inst_list);
 /// @param[in] inst_list Instruction list to destroy (may be NULL).
 RJ_API_EXPORT void rj_code_inst_list_destroy(rj_code_inst_list_t *inst_list);
 
-/// @brief Opaque handle to a list of basic blocks.
-typedef struct rj_code_basic_block_list_t rj_code_basic_block_list_t;
-
 /// @brief Opaque handle to a single basic block.
 typedef struct rj_code_basic_block_t rj_code_basic_block_t;
+
+/// @brief Increment a basic block's reference count.
+/// @param[in] block Basic block handle (may be NULL, in which case this is a no-op).
+RJ_API_EXPORT void rj_code_basic_block_retain(rj_code_basic_block_t *block);
+
+/// @brief Decrement a basic block's reference count.
+///
+/// @details If the block has been destroyed and the reference count reaches 0,
+/// the backing memory is freed.
+/// @param[in] block Basic block handle (may be NULL, in which case this is a no-op).
+RJ_API_EXPORT void rj_code_basic_block_release(rj_code_basic_block_t *block);
+
+/// @brief Mark a basic block for destruction.
+///
+/// @details If the reference count is already 0, frees immediately. Otherwise,
+/// the block is freed when the last release drops the reference count to 0.
+/// @param[in] block Basic block to destroy (may be NULL).
+RJ_API_EXPORT void rj_code_basic_block_destroy(rj_code_basic_block_t *block);
+
+/// @brief Return the byte offset of the basic block's first instruction within the .text section.
+/// @param[in] block Basic block to query.
+/// @returns Byte offset from the start of the .text section.
+RJ_API_EXPORT uint64_t rj_code_basic_block_start_offset(const rj_code_basic_block_t *block);
+
+/// @brief Return the total size of the basic block in bytes.
+/// @param[in] block Basic block to query.
+/// @returns Size in bytes.
+RJ_API_EXPORT uint32_t rj_code_basic_block_size(const rj_code_basic_block_t *block);
+
+/// @brief Return the number of instructions in the basic block.
+/// @param[in] block Basic block to query.
+/// @returns Number of instructions.
+RJ_API_EXPORT uint32_t rj_code_basic_block_num_instructions(const rj_code_basic_block_t *block);
+
+/// @brief Get the first instruction in a basic block.
+/// @param[in] block Basic block to query.
+/// @returns Pointer to the first instruction, or NULL if the block is empty.
+RJ_API_EXPORT const rj_code_inst_t *
+rj_code_basic_block_first_inst(const rj_code_basic_block_t *block);
+
+/// @brief Opaque handle to a list of basic blocks.
+typedef struct rj_code_basic_block_list_t rj_code_basic_block_list_t;
 
 /// @brief Create a list of basic blocks from a code object's .text sections.
 /// @param[in] obj Code object to analyze.
@@ -316,70 +380,6 @@ RJ_API_EXPORT uint32_t rj_code_basic_block_list_size(const rj_code_basic_block_l
 RJ_API_EXPORT rj_status_t rj_code_basic_block_list_get(const rj_code_basic_block_list_t *list,
                                                        uint32_t index,
                                                        rj_code_basic_block_t **block);
-
-/// @brief Increment a basic block's reference count.
-/// @param[in] block Basic block handle (may be NULL, in which case this is a no-op).
-RJ_API_EXPORT void rj_code_basic_block_retain(rj_code_basic_block_t *block);
-
-/// @brief Decrement a basic block's reference count.
-///
-/// @details If the block has been destroyed and the reference count reaches 0,
-/// the backing memory is freed.
-/// @param[in] block Basic block handle (may be NULL, in which case this is a no-op).
-RJ_API_EXPORT void rj_code_basic_block_release(rj_code_basic_block_t *block);
-
-/// @brief Mark a basic block for destruction.
-///
-/// @details If the reference count is already 0, frees immediately. Otherwise,
-/// the block is freed when the last release drops the reference count to 0.
-/// @param[in] block Basic block to destroy (may be NULL).
-RJ_API_EXPORT void rj_code_basic_block_destroy(rj_code_basic_block_t *block);
-
-/// @brief Return the byte offset of the basic block's first instruction within the .text section.
-/// @param[in] block Basic block to query.
-/// @returns Byte offset from the start of the .text section.
-RJ_API_EXPORT uint64_t rj_code_basic_block_start_offset(const rj_code_basic_block_t *block);
-
-/// @brief Return the total size of the basic block in bytes.
-/// @param[in] block Basic block to query.
-/// @returns Size in bytes.
-RJ_API_EXPORT uint32_t rj_code_basic_block_size(const rj_code_basic_block_t *block);
-
-/// @brief Return the number of instructions in the basic block.
-/// @param[in] block Basic block to query.
-/// @returns Number of instructions.
-RJ_API_EXPORT uint32_t rj_code_basic_block_num_instructions(const rj_code_basic_block_t *block);
-
-/// @brief Get the mnemonic string for an instruction.
-/// @param[in] inst Instruction to query.
-/// @returns Null-terminated mnemonic string. The pointer is valid for the lifetime of the
-/// instruction.
-RJ_API_EXPORT const char *rj_code_inst_mnemonic(const rj_code_inst_t *inst);
-
-/// @brief Get the size of an instruction in bytes.
-/// @param[in] inst Instruction to query.
-/// @returns Size in bytes.
-RJ_API_EXPORT uint32_t rj_code_inst_size(const rj_code_inst_t *inst);
-
-/// @brief Disassemble an instruction into a string buffer.
-/// @param[in] inst Instruction to disassemble.
-/// @param[out] buf Output buffer for the disassembly string.
-/// @param[in] buf_size Size of the output buffer in bytes.
-/// @returns ROCJITSU_STATUS_SUCCESS on success.
-RJ_API_EXPORT rj_status_t rj_code_inst_disassemble(const rj_code_inst_t *inst, char *buf,
-                                                   uint32_t buf_size);
-
-/// @brief Get the first instruction in a basic block.
-/// @param[in] block Basic block to query.
-/// @returns Pointer to the first instruction, or NULL if the block is empty.
-RJ_API_EXPORT const rj_code_inst_t *
-rj_code_basic_block_first_inst(const rj_code_basic_block_t *block);
-
-/// @brief Get the next instruction in the same basic block.
-/// @param[in] inst Current instruction.
-/// @returns Pointer to the next instruction, or NULL if at the end of the block
-/// or if @p inst is a standalone instruction returned by rj_code_decoder_decode.
-RJ_API_EXPORT const rj_code_inst_t *rj_code_inst_next(const rj_code_inst_t *inst);
 
 /// @}
 
