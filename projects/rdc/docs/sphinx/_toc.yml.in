@@ -17,6 +17,14 @@ subtrees:
   - file: how-to/using_RDC_features
   - file: how-to/integration
 
+- caption: Conceptual
+  entries:
+  - file: Conceptual/components
+
+- caption: Reference
+  entries:
+  - file: reference/glossary
+
 - caption: API reference
   entries:
   - file: reference/api_intro

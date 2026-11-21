@@ -22,7 +22,7 @@ This library is the central piece, which interacts with different modules and pr
 RDC daemon (``rdcd``)
 ---------------------
 
-The ``rdcd`` daemon records telemetry information from GPUs. It also provides an interface to RDC command-line tool (``rdci``) running locally or remotely. It relies on the above RDC Library for all the core features.
+The ``rdcd`` daemon records telemetry information from GPUs and CPUs. It also provides an interface to RDC command-line tool (``rdci``) running locally or remotely. It relies on the above RDC Library for all the core features.
 
 RDC command-line tool (``rdci``)
 --------------------------------
@@ -32,4 +32,4 @@ A command-line tool to invoke all the features of the RDC tool. This CLI can be 
 AMDSMI library
 --------------
 
-A stateless system management library that provides low-level interfaces to access GPU information
+A stateless system management library that provides low-level interfaces to access GPU and CPU information.

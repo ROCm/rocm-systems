@@ -8,7 +8,7 @@
 Third party integration
 **************************
 
-This section lists available third-party plugins for the RDC tool such as Prometheus, Grafana, and Reliability, Availability and Serviceability (RAS).
+This topic lists available third-party plugins for the RDC tool such as Prometheus, Grafana, and Reliability, Availability and Serviceability (RAS).
 
 Python bindings
 ================
@@ -24,8 +24,9 @@ The RDC tool provides a generic Python class ``RdcReader``, which simplifies tel
 
 Here is a sample program to monitor the power and GPU utilization using the ``RdcReader``:
 
-.. code-block:: shell
+.. code-block:: python
 
+    import time
     from RdcReader import RdcReader
     from RdcUtil import RdcUtil
     from rdc_bootstrap import *
@@ -44,8 +45,8 @@ Here is a sample program to monitor the power and GPU utilization using the ``Rd
 
     if __name__ == '__main__':
         reader = SimpleRdcReader()
-    while True:
-          time.sleep(1)
+        while True:
+            time.sleep(1)
             reader.process()
 
 In the sample program,
@@ -478,34 +479,7 @@ To set up Consul client, follow these steps:
 Reliability, Availability, and Serviceability plugin
 =====================================================
 
-The Reliability, Availability, and Serviceability plugin (RAS) plugin helps to monitor and count ECC (Error-Correcting Code) errors. The following sections provide information on integrating RAS with RDC.
-
-RAS plugin installation
-------------------------
-
-With the RAS feature enabled in the graphic card, you can use RDC to monitor RAS errors.
-
-Prerequisite
-^^^^^^^^^^^^^
-
-- Ensure that the GPU supports RAS.
-
-  .. note::
-
-    The RAS library is installed as part of the RDC installation. No additional configuration is required for RDC.
-
-- RDC installation dynamically loads the RAS library ``librdc_ras.so``. The configuration files required by the RAS library are installed in the ``sp3`` and ``config`` folders.
-
-  .. code-block:: shell
-
-    % ls /opt/rocm-4.2.0/rdc/lib
-    ... librdc_ras.so ...
-    ... sp3 ... config ...
-
-RAS integration
-----------------
-
-RAS exposes a list of ECC correctable and uncorrectable errors for different IP blocks and helps to troubleshoot issues.
+Reliability, Availability, and Serviceability (RAS) helps you monitor and count ECC (Error-Correcting Code) errors for different IP blocks. RDC exposes RAS errors as standard RDC fields, available on any GPU that supports RAS, with no additional plugin installation required.
 
 **Example:**
 

@@ -12,6 +12,10 @@ The following pseudocode shows how RDC API can be directly used to record GPU st
 
 For more information on Job stats, see :ref:`Job stats <job-stats>`.
 
+.. note::
+
+  For brevity, this pseudocode does not check the ``result`` returned by each call. In production code, check ``result`` against ``RDC_ST_OK`` after every RDC API call.
+
 .. code-block:: shell
 
     //Initialize the RDC
@@ -28,12 +32,12 @@ For more information on Job stats, see :ref:`Job stats <job-stats>`.
 
     //Now we can use the same API for both standalone and embedded
     //(1) create group
-    rdc_gpu_group_t groupId;
-    result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY, "MyGroup1", &groupId);
+    rdc_gpu_group_t group_id;
+    result = rdc_group_gpu_create(rdc_handle, RDC_GROUP_EMPTY, "MyGroup1", &group_id);
 
     //(2) Add the GPUs to the group
-    result = rdc_group_gpu_add(rdc_handle, groupId, 0); //Add GPU 0
-    result = rdc_group_gpu_add(rdc_handle, groupId, 1); //Add GPU 1
+    result = rdc_group_gpu_add(rdc_handle, group_id, 0); //Add GPU 0
+    result = rdc_group_gpu_add(rdc_handle, group_id, 1); //Add GPU 1
 
     //(3) start the recording the Slurm job 123. Set the sample frequency to once per second
     result = rdc_job_start_stats(rdc_handle, group_id,
@@ -57,6 +61,6 @@ For more information on Job stats, see :ref:`Job stats <job-stats>`.
     //(5) Get the stats
     rdc_job_info_t job_info;
     result = rdc_job_get_stats(rdc_handle, "123", &job_info);
-    std::cout<<"Average Memory Utilization: " <<job_info.summary.memoryUtilization.average <<std::endl;
+    std::cout<<"Average Memory Utilization: " <<job_info.summary.memory_utilization.average <<std::endl;
 
     //The cleanup and shutdown ....
