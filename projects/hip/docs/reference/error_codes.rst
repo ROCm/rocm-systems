@@ -485,8 +485,13 @@ Kernel and Launch Errors
 
   hipErrorInvalidValue
 
-    Error returned when a grid dimension check finds any input global work size
-    dimension is zero, or a shared memory size check finds the size exceeds the size limit. 
+    Returned when a kernel launch configuration is rejected by launch parameter validation.
+    Common scenarios include:
+
+    * A launch needing more workgroups in any dimension than ``hipDeviceProp_t.maxGridSize`` allows
+    * Block or cluster dimensions outside the representable range
+    * Cluster dimensions that do not divide the grid evenly
+    * A shared memory size exceeding the device limit
 
   hipErrorInvalidDeviceFunction
 
@@ -504,12 +509,13 @@ Kernel and Launch Errors
     Invalid configuration argument. This error occurs when the configuration specified for a kernel launch
     or other configurable operation contains invalid parameters. Common scenarios include:
 
+    * Grid or block dimensions that are zero
     * Block dimensions exceeding hardware limits (too many threads per block)
-    * Grid dimensions that are invalid (zero size or exceeding limits)
     * Invalid shared memory configuration
-    * Incompatible combination of launch parameters
-    * Block dimensions that don't match kernel requirements
     * Attempting to use more resources per block than available on the device
+
+    Configurations rejected by launch parameter validation return :term:`hipErrorInvalidValue`
+    instead.
 
     This error typically requires adjusting kernel launch parameters to stay within the limits of the target
     device. Device properties and specific hardware constraints can be queried using :cpp:func:`hipGetDeviceProperties()`.

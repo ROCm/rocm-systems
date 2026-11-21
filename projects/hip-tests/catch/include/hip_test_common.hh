@@ -63,6 +63,15 @@ inline bool isQuickLevel() {
 #define HIP_TEST_ATOMIC_BACKWARD_COMPAT_MEMORY
 #endif
 
+// Expected error for a launch configuration rejected by parameter validation.
+// AMD reports hipErrorInvalidValue, as does NVIDIA from CUDA 13.0 onward. CUDA 12.x
+// reported cudaErrorInvalidConfiguration from the runtime launch APIs.
+#if HT_NVIDIA && defined(CUDART_VERSION) && CUDART_VERSION < 13000
+constexpr hipError_t kHipErrorInvalidLaunchConfig = hipErrorInvalidConfiguration;
+#else
+constexpr hipError_t kHipErrorInvalidLaunchConfig = hipErrorInvalidValue;
+#endif
+
 #ifdef TEST_CLOCK_CYCLE
 #define clock_function() clock64()
 #else

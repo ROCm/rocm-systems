@@ -136,11 +136,12 @@ hipError_t ihipGraphAddKernelNode(
   amd::HIPLaunchParams launch_params(pNodeParams->gridDim.x, pNodeParams->gridDim.y,
                                      pNodeParams->gridDim.z, pNodeParams->blockDim.x,
                                      pNodeParams->blockDim.y, pNodeParams->blockDim.z,
-                                     pNodeParams->sharedMemBytes, *device, globalWorkSizeX_remainder,
+                                     pNodeParams->sharedMemBytes,
+                                     device->info().maxGridDim_, globalWorkSizeX_remainder,
                                      globalWorkSizeY_remainder, globalWorkSizeZ_remainder,
                                      clusterDim.x, clusterDim.y, clusterDim.z);
   if (!launch_params.IsValidConfig()) {
-    return hipErrorInvalidConfiguration;
+    return hipErrorInvalidValue;
   }
   hipError_t status = ihipLaunchKernel_validate(func, launch_params, pNodeParams->kernelParams,
                                                 pNodeParams->extra, deviceId, coopKernel);

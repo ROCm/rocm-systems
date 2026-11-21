@@ -107,10 +107,7 @@ HIP_TEST_CASE(Unit_hipDrvLaunchKernelEx_NegTsts) {
   invalidConfig.attrs = &invalidAttr;
   invalidConfig.numAttrs = 1;
 
-  hipError_t err = hipErrorInvalidConfiguration;
-#if HT_NVIDIA
-  err = hipErrorInvalidValue;
-#endif
+  hipError_t err = hipErrorInvalidValue;
   SECTION("Invalid Kernel config") {
     HIP_CHECK_ERROR(hipDrvLaunchKernelEx(&invalidConfig, function, kernelParams, NULL), err);
   }
