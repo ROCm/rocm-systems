@@ -290,6 +290,7 @@ if(BUILD_TESTS)
     AllToAllVTests.cpp
     AsymmetricVisibilityTests.cpp
     BroadcastTests.cpp
+    CollConfigApiTests.cpp
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
     DiagnosticsTests.cpp

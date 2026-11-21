@@ -103,6 +103,7 @@ test_categories:
       - "ReduceScatter.*"
       - "SendRecv.*"
       - "GroupCall.*"
+      - "CollConfigApiTests.*"
       - "NonBlocking.*"
       - "Standalone.*"
       - "Fp8Validation.*"
