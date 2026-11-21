@@ -140,6 +140,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed Go bindings build, linking and GPU monitoring**.
+  - Restored builds and linking without CPU-management support, prevented crashes in GPU queries and discovery, and enabled shutdown of GPU-only sessions. Systems with more than 24 GPUs retain the first 24 and report the limit.
+
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 
