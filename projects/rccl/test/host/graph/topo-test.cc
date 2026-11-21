@@ -1829,6 +1829,44 @@ TEST_F(TopoProcessNetMicrotest, ProcessNet_InconsistentRailIsInvalidUsage) {
   EXPECT_TRUE(Logged("Inconsistent rail/plane for net a0: existing 7/"));
 }
 
+// NCCL 2.32.6 (0608f81e, a26f3d4a): a CollNet plugin and the net plugin both stamp the two-port NIC a0/a1. When
+// the second plugin reports the same port for both devices, a port-derived plane disagreed with the first
+// plugin's and init failed with "Inconsistent rail/plane"; the plane is now a1's index among its NIC's nets.
+TEST_F(TopoProcessNetMicrotest, ProcessNet_SecondPluginWithOtherPortsKeepsThePlane) {
+  Devs({"a0", "a1"});
+  g_netDevs[1].port = 2;
+  info_.net = false;
+  info_.coll = true;
+  ASSERT_EQ(ncclSuccess, Process());
+  std::string plane = Attr(Net("a1"), "plane");
+
+  g_netDevs[1].port = 1;  // the second plugin numbers its ports differently
+  info_.net = true;
+  info_.coll = false;
+  EXPECT_EQ(ncclSuccess, Process());
+
+  EXPECT_FALSE(Logged("Inconsistent rail/plane"));
+  EXPECT_EQ(plane, Attr(Net("a1"), "plane"));
+  EXPECT_NE(Attr(Net("a0"), "plane"), Attr(Net("a1"), "plane"));
+}
+
+// Control: the same two plugins reporting the same ports import consistently on every tree.
+TEST_F(TopoProcessNetMicrotest, ProcessNet_SecondPluginWithSamePortsKeepsThePlane) {
+  Devs({"a0", "a1"});
+  g_netDevs[1].port = 2;
+  info_.net = false;
+  info_.coll = true;
+  ASSERT_EQ(ncclSuccess, Process());
+  std::string plane = Attr(Net("a1"), "plane");
+
+  info_.net = true;
+  info_.coll = false;
+  EXPECT_EQ(ncclSuccess, Process());
+
+  EXPECT_FALSE(Logged("Inconsistent rail/plane"));
+  EXPECT_EQ(plane, Attr(Net("a1"), "plane"));
+}
+
 TEST_F(TopoProcessNetMicrotest, ProcessNet_CollPluginMarksCollAndKeepsNetUnlessSet) {
   Devs({"a0", "b0"});
   info_.net = false;
