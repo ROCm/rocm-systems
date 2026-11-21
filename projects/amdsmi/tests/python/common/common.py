@@ -32,40 +32,6 @@ import sys
 import time
 import types
 import unittest
-from unittest import mock
-
-
-def cli_search_order(start_dir):
-    """Return source-tree and installed CLI directories to search."""
-    candidates = [parent / "amdsmi_cli" for parent in pathlib.Path(start_dir).resolve().parents]
-    candidates.append(pathlib.Path(amdsmi_path).resolve().parent.parent / "libexec" / "amdsmi_cli")
-    return [str(candidate) for candidate in candidates]
-
-
-def find_cli_dir(*candidates):
-    """Return the first candidate containing the CLI logger and subcommands."""
-    for candidate in candidates:
-        candidate = os.fspath(candidate)
-        if os.path.isfile(os.path.join(candidate, "amdsmi_logger.py")) and os.path.isdir(
-            os.path.join(candidate, "subcommands")
-        ):
-            return candidate
-    return ""
-
-
-def fake_module(name, **attributes):
-    """Create a module stub with the supplied attributes."""
-    module = types.ModuleType(name)
-    for attribute, value in attributes.items():
-        setattr(module, attribute, value)
-    return module
-
-
-def stub_modules(test_case, modules):
-    """Temporarily install module stubs for a test class."""
-    patcher = mock.patch.dict(sys.modules, modules)
-    patcher.start()
-    test_case.addClassCleanup(patcher.stop)
 
 
 def _print_path_remediation(script, file):
@@ -188,15 +154,18 @@ def amdsmi_interface_path(start_file: str) -> pathlib.Path:
     """Return the ``amdsmi_interface.py`` source for tests that parse it as text.
 
     A checkout carries it in ``py-interface/``; an install ships it inside the ``amdsmi``
-    package under ``share/amd_smi`` and has no ``py-interface`` directory. Priority follows
-    ``cli_search_order()``: a pinned install wins, otherwise the checkout does.
+    package under ``share/amd_smi`` and has no ``py-interface`` directory. The start dirs come
+    from ``cli_search_order()``, so install-vs-source is decided in that one place: a pinned
+    install wins, otherwise the checkout does. Each start dir and its parents are checked for
+    either layout, because the depth differs between a checkout and an install.
     """
-    checkout = [
-        parent / "py-interface" / "amdsmi_interface.py"
-        for parent in pathlib.Path(start_file).resolve().parents
-    ]
-    installed = [pathlib.Path(amdsmi_path) / "amdsmi" / "amdsmi_interface.py"]
-    candidates = installed + checkout if amdsmi_path_is_explicit else checkout + installed
+    source_dir = str(pathlib.Path(start_file).resolve().parent)
+    candidates = []
+    for start in cli_search_order(source_dir):
+        start_path = pathlib.Path(os.path.abspath(start))
+        for directory in (start_path, *start_path.parents):
+            candidates.append(directory / "py-interface" / "amdsmi_interface.py")
+            candidates.append(directory / "amdsmi" / "amdsmi_interface.py")
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -838,8 +807,10 @@ def run_test_dir(subdir, title, top_level_dir):
     if k_pattern and sys.version_info < (3, 7):
         suite = _filter_suite(
             suite,
-            lambda test_id: test_id.startswith("unittest.loader.")
-            or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*"),
+            lambda test_id: (
+                test_id.startswith("unittest.loader.")
+                or fnmatch.fnmatchcase(test_id, f"*{k_pattern}*")
+            ),
         )
 
     # -x/--exclude drops any test whose id contains the substring (the inverse of
