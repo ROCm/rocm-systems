@@ -79,7 +79,7 @@ os.makedirs(LOGDIR, exist_ok=True)
 
 # CPU smoke module: accepts NotImplementedError or NCCLError depending on
 # which RCCL symbols are present in the loaded librccl.so.
-CPU_SMOKE_TESTS = ("tests/test_rocm_extensions.py",)
+CPU_SMOKE_TESTS = ("tests/test_rocm_extensions.py", "tests/test_gin_custom_peers.py")
 
 # Optional GPU-backed modules; each self-skips without enough HIP devices.
 GPU_SMOKE_TESTS = ("tests/test_shim_surface.py", "tests/test_group_window.py")
