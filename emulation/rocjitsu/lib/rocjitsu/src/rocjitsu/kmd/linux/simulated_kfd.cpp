@@ -7814,25 +7814,38 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
             amdgpu::SdmaPacketCallbacks callbacks;
             callbacks.timestamp = [arch] { return amdgpu::gpu_timestamp(arch); };
             callbacks.acquire_cache_maintenance =
-                [ingress_access, cache_coherence, gpu_id,
-                 resolve_writeback](amdgpu::SdmaCacheOperation operation) {
-                  const std::shared_ptr<CuIngressAccess> access = ingress_access.lock();
-                  if (!access)
-                    throw util::Exception(std::string_view("KFD SDMA cache owner is gone"));
-                  {
-                    std::lock_guard lock(access->mutex);
-                    if (!access->driver)
-                      throw util::Exception(std::string_view("KFD SDMA cache owner is gone"));
-                  }
-                  // Resolution reenters CuIngressAccess after dropping all cache
-                  // locks. Never hold its mutex across group acquisition.
-                  const std::array domains{amdgpu::DeviceCacheDomain{cache_coherence, gpu_id}};
-                  auto leases = amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
-                      domains, operation, resolve_writeback);
-                  if (leases.size() != domains.size())
-                    throw util::Exception(std::string_view("KFD SDMA cache lease is missing"));
-                  return std::move(leases.front());
-                };
+                [ingress_access, cache_coherence, gpu_id, context,
+                 resolve_writeback](amdgpu::SdmaCacheOperation operation)
+                -> util::FailureOr<amdgpu::CacheMaintenanceResult> {
+              auto report = [context](std::string_view message) {
+                util::Logger::warn(
+                    std::format("SDMA{} queue {}:{} stopped after cache maintenance failure: {}",
+                                context.engine_id, context.process_id, context.queue_id, message));
+              };
+              const util::DiagnosticEmitter emit_error(report);
+              const std::shared_ptr<CuIngressAccess> access = ingress_access.lock();
+              if (!access)
+                return emit_error.emit() << "KFD SDMA cache owner is gone";
+              {
+                std::lock_guard lock(access->mutex);
+                if (!access->driver)
+                  return emit_error.emit() << "KFD SDMA cache owner is gone";
+              }
+              // Resolution reenters CuIngressAccess after dropping all cache
+              // locks. Never hold its mutex across group acquisition.
+              const std::array domains{amdgpu::DeviceCacheDomain{cache_coherence, gpu_id}};
+              auto leases = amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+                  domains, operation, resolve_writeback, emit_error);
+              if (leases.failed())
+                return util::Result::failure();
+              if (leases.value().outcome == amdgpu::CacheMaintenanceOutcome::Retry)
+                return amdgpu::CacheMaintenanceResult{.outcome =
+                                                          amdgpu::CacheMaintenanceOutcome::Retry};
+              if (leases.value().leases.size() != domains.size())
+                throw util::Exception(std::string_view("KFD SDMA cache lease is missing"));
+              return amdgpu::CacheMaintenanceResult{.lease =
+                                                        std::move(leases.value().leases.front())};
+            };
             callbacks.admit_memory_ingress = [ingress_access, gpu_id,
                                               process_id = context.process_id](
                                                  const amdgpu::GpuVmAccess &expected,

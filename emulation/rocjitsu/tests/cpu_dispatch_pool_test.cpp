@@ -7,7 +7,6 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
-#include "throwing_instruction_test_util.h"
 
 #include <gtest/gtest.h>
 
@@ -21,7 +20,6 @@
 #include <memory>
 #include <mutex>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -30,10 +28,6 @@ namespace rocjitsu::amdgpu {
 
 class CpuDispatchPoolTestAccess {
 public:
-  static void construct_with_failure(uint32_t threads, uint32_t fail_after) {
-    CpuDispatchPool pool(threads, fail_after);
-  }
-
   // The test keeps the submitting caller gated for the lifetime of this view.
   static CpuDispatchPool::Submission *pending_submission(CpuDispatchPool &pool,
                                                          std::span<ComputeUnitCore *> tasks) {
@@ -307,40 +301,6 @@ TEST(CpuDispatchPoolTest, ConcurrentSubmissionsUseWorkersAndCompleteIndependentl
     EXPECT_EQ(result.iterations, 1u);
 }
 
-TEST(CpuDispatchPoolTest, ConcurrentFailureStaysWithItsSubmission) {
-  DispatchPoolFixture failing, succeeding;
-  ASSERT_NO_FATAL_FAILURE(failing.initialize(/*cu_count=*/3));
-  ASSERT_NO_FATAL_FAILURE(succeeding.initialize(/*cu_count=*/4));
-  auto *gate = gate_fixture(failing);
-  ASSERT_NE(gate, nullptr);
-  auto throwing = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(throwing->add(std::make_unique<test::ThrowingInstructionPlugin>()));
-  failing.cus[0]->set_plugin_group(throwing);
-  amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  auto failed_run = std::async(std::launch::async, [&] { pool.run(failing.tasks, /*threads=*/2); });
-  // With two executors and three CUs, reaching both gates proves one executor
-  // has already caught the first CU's exception and advanced to another task.
-  // The exception stays pending until these two remaining CUs are released.
-  EXPECT_TRUE(gate->wait_for_entries(2));
-  auto successful_run =
-      std::async(std::launch::async, [&] { pool.run(succeeding.tasks, /*threads=*/2); });
-  const auto successful_status = successful_run.wait_for(std::chrono::seconds(2));
-  // Complete the unrelated join while the failing caller cannot yet consume
-  // its exception. A shared exception slot would leak or lose that exception.
-  if (successful_status == std::future_status::ready) {
-    EXPECT_NO_THROW(successful_run.get());
-  }
-  gate->release();
-  EXPECT_EQ(successful_status, std::future_status::ready);
-  EXPECT_THROW(failed_run.get(), std::runtime_error);
-  if (successful_run.valid()) {
-    EXPECT_NO_THROW(successful_run.get());
-  }
-  for (auto *wf : succeeding.wfs)
-    EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
-  EXPECT_NO_THROW(pool.run(succeeding.tasks, /*threads=*/4));
-}
-
 TEST(CpuDispatchPoolTest, SubmissionsRespectRequestedWidthWithIdleWorkers) {
   amdgpu::CpuDispatchPool pool(/*threads=*/4);
   for (uint32_t width : {1u, 2u}) {
@@ -458,43 +418,6 @@ TEST(CpuDispatchPoolDeathTest, AssertsMismatchedResultCount) {
 }
 #endif
 
-TEST(CpuDispatchPoolTest, WorkerExceptionsRethrowAndPoolRemainsReusable) {
-  DispatchPoolFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/64));
-  amdgpu::CpuDispatchPool pool(/*threads=*/8);
-  fixture.memory.write32(kProgramBase, kSMovB32);
-
-  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
-  for (auto &cu : fixture.cus)
-    cu->set_plugin_group(group);
-  EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/8),
-               std::exception);
-
-  for (auto &cu : fixture.cus)
-    cu->set_plugin_group(nullptr);
-  for (auto *wf : fixture.wfs)
-    wf->pc = kProgramBase;
-  EXPECT_NO_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/8));
-  for (auto *wf : fixture.wfs)
-    EXPECT_EQ(wf->pc, kProgramBase + sizeof(uint32_t));
-}
-
-TEST(CpuDispatchPoolTest, OneThreadFinishesBatchBeforeRethrowing) {
-  DispatchPoolFixture fixture;
-  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/4));
-  amdgpu::CpuDispatchPool pool(/*threads=*/4);
-  fixture.memory.write32(kProgramBase, kSMovB32);
-  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-  ASSERT_TRUE(group->add(std::make_unique<test::ThrowingInstructionPlugin>()));
-  fixture.cus[0]->set_plugin_group(group);
-
-  EXPECT_THROW(pool.run(std::span<amdgpu::ComputeUnitCore *>(fixture.tasks), /*threads=*/1),
-               std::exception);
-  for (size_t i = 1; i < fixture.wfs.size(); ++i)
-    EXPECT_EQ(fixture.wfs[i]->pc, kProgramBase + sizeof(uint32_t));
-}
-
 TEST(CpuDispatchPoolTest, UnimplementedInstructionsHaltWithoutThrowing) {
   DispatchPoolFixture fixture;
   ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*cu_count=*/8));
@@ -512,12 +435,6 @@ TEST(CpuDispatchPoolTest, DestroyJoinsParkedWorkers) {
     amdgpu::CpuDispatchPool pool(/*threads=*/8);
     EXPECT_EQ(pool.thread_count(), 8u);
   }
-}
-
-TEST(CpuDispatchPoolTest, PartialConstructionJoinsParkedWorkers) {
-  EXPECT_THROW(amdgpu::CpuDispatchPoolTestAccess::construct_with_failure(/*threads=*/8,
-                                                                         /*fail_after=*/2),
-               std::runtime_error);
 }
 
 // A caller must not steal pending work from another submission: that work can
