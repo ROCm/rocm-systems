@@ -311,6 +311,17 @@ if(ROCPROFSYS_BUILD_DEVELOPER)
     if(ROCPROFSYS_BUILD_NUMBER GREATER 2)
         add_target_flag_if_avail(rocprofiler-systems-compile-options "-gsplit-dwarf")
     endif()
+    # GCC 15 reports false-positive -Wmaybe-uninitialized for std::variant returns
+    # through std::function (trace_cache/type_registry.hpp); keep it as a warning
+    if(
+        CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+        AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15
+    )
+        add_target_flag_if_avail(
+            rocprofiler-systems-compile-options
+            "-Wno-error=maybe-uninitialized"
+        )
+    endif()
 endif()
 
 if(ROCPROFSYS_BUILD_LINKER)
