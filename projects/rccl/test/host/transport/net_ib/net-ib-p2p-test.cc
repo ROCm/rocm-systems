@@ -599,6 +599,43 @@ TEST_F(NetIbP2pMicrotest, MultiSend_RequestRotationSelectsOwningActiveQp) {
   EXPECT_EQ(send.verbs.posted[0].sge.length, send.data.size());
 }
 
+// NCCL 2.32.6 (net/IB: fix request ID wraparound): under ID matching the sender's immediate must name the receive
+// slot the request was posted to, id % NET_IB_MAX_REQUESTS, also once the 64-bit request ID passes UINT32_MAX.
+// Reducing the ID modulo UINT32_MAX moved the slot there, so the completion landed on the wrong receive and hung.
+TEST_F(NetIbP2pMicrotest, MultiSend_ByIdImmediateKeepsReceiveSlotAcrossUint32Wrap) {
+  const uint64_t ids[] = {33, UINT32_MAX - 1ull, UINT32_MAX, 1ull << 32, (1ull << 32) + 5, 3ull * UINT32_MAX};
+  for (uint64_t id : ids) {
+    SCOPED_TRACE(testing::Message() << "request id " << id);
+    TwoQpSendComm send(41, 42, /*bytes=*/64);
+    send.comm.base.recvMatchingScheme = BY_ID;
+    send.request.id = id;
+
+    ASSERT_EQ(ncclIbMultiSend(&send.comm, 0), ncclSuccess);
+    ASSERT_FALSE(send.verbs.posted.empty());
+    int immediates = 0;
+    for (const auto& wr : send.verbs.posted) {
+      if (wr.opcode != IBV_WR_RDMA_WRITE_WITH_IMM) continue;
+      ++immediates;
+      EXPECT_EQ(be32toh(wr.immData), static_cast<uint32_t>(id));
+
+      // The receiver posted this request to slot id % NET_IB_MAX_REQUESTS; its completion must find it there.
+      const int slot = static_cast<int>(id % NET_IB_MAX_REQUESTS);
+      ncclIbRecvComm recv{};
+      recv.base.isSend = false;
+      recv.base.recvMatchingScheme = BY_ID;
+      for (int i = 0; i < NET_IB_MAX_REQUESTS; ++i) recv.recvReqs[i] = &recv.base.reqs[i];
+      ibv_wc completion{};
+      completion.status = IBV_WC_SUCCESS;
+      completion.opcode = IBV_WC_RECV_RDMA_WITH_IMM;
+      completion.imm_data = wr.immData;
+      ncclIbRequest* request = nullptr;
+      ASSERT_EQ(ncclIbRequestRetrieveFromCompletion(&recv.base, &completion, &request), ncclSuccess);
+      EXPECT_EQ(request, &recv.base.reqs[slot]);
+    }
+    EXPECT_GT(immediates, 0);
+  }
+}
+
 TEST_F(NetIbP2pMicrotest, Isend_MatchedReceivePublishesClampedRequestAndAdvancesFifo) {
   IbVerbsScene verbs("mlx5_0", 41);
   ncclIbSendComm comm{};
