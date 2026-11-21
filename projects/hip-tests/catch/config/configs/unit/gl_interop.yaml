@@ -5,6 +5,10 @@ gl_interop:
     disabled:
       targets: [amd_wsl]
       reason: "AIRUNTIME-2744 - SWDEV-439004: fails randomly in CQE staging; needs to be re-triaged"
+  # Compiled only for Linux AMD builds; runs when GLUT is selected.
+  Unit_hipGLGetDevices_Positive_GLXAfterNoCurrentContext: *level_default
+  # Compiled only for Linux AMD builds with EGL support.
+  Unit_hipGLGetDevices_Positive_EGLAfterNoCurrentContext: *level_default
   Unit_hipGLGetDevices_Positive_Parameters:
     <<: *level_default
     disabled:

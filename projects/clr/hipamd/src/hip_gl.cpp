@@ -32,11 +32,7 @@ static void* getCurrentGLContext(amd::GLFunctions* glenv) {
   if (glenv == nullptr) {
     return nullptr;
   }
-#ifdef _WIN32
-  return glenv->wglGetCurrentContext_();
-#else
-  return glenv->glXGetCurrentContext_();
-#endif
+  return glenv->currentContext();
 }
 
 // Helper to get current GL display/DC using existing glenv, returns nullptr if glenv doesn't exist.
@@ -44,11 +40,7 @@ static void* getCurrentGLDisplay(amd::GLFunctions* glenv) {
   if (glenv == nullptr) {
     return nullptr;
   }
-#ifdef _WIN32
-  return glenv->wglGetCurrentDC_();
-#else
-  return glenv->glXGetCurrentDisplay_();
-#endif
+  return glenv->currentDisplay();
 }
 
 // Sets up GL context association with amd context.
@@ -64,6 +56,27 @@ static bool setupGLInterop() {
   // For context switch (glenv exists), explicitly pass the new context values.
   void* currentGLContext = getCurrentGLContext(glenv);
   void* currentGLDisplay = getCurrentGLDisplay(glenv);
+#ifndef _WIN32
+  bool isEGL = glenv != nullptr && glenv->isEGL();
+  if (currentGLContext == nullptr) {
+    isEGL = false;
+    // EGL and GLX keep independent current contexts. Discover an EGL context
+    // before allowing Context::create to use its legacy GLX fallback.
+    void* eglLibrary = amd::Os::loadLibrary("libEGL.so.1");
+    if (eglLibrary != nullptr) {
+      auto getContext = reinterpret_cast<amd::PFN_eglGetCurrentContext>(
+          dlsym(eglLibrary, "eglGetCurrentContext"));
+      auto getDisplay = reinterpret_cast<amd::PFN_eglGetCurrentDisplay>(
+          dlsym(eglLibrary, "eglGetCurrentDisplay"));
+      if (getContext != nullptr && getDisplay != nullptr) {
+        currentGLContext = getContext();
+        currentGLDisplay = getDisplay();
+        isEGL = currentGLContext != nullptr && currentGLDisplay != nullptr;
+      }
+      amd::Os::unloadLibrary(eglLibrary);
+    }
+  }
+#endif
 
   cl_context_properties properties[] = {CL_CONTEXT_PLATFORM,
                                         (cl_context_properties)AMD_PLATFORM,
@@ -73,7 +86,7 @@ static bool setupGLInterop() {
                                         ROCCLR_HIP_WGL_HDC_KHR,
                                         (cl_context_properties)currentGLDisplay,
 #else
-                                        ROCCLR_HIP_GLX_DISPLAY_KHR,
+                                        isEGL ? CL_EGL_DISPLAY_KHR : ROCCLR_HIP_GLX_DISPLAY_KHR,
                                         (cl_context_properties)currentGLDisplay,
 #endif
                                         0};
@@ -101,63 +114,38 @@ class GLInteropGuard {
  public:
   GLInteropGuard() : valid_(false) {
     amd::Context* amdContext = hip::getCurrentDevice()->asContext();
-    amd::GLFunctions* glenv = amdContext->glenv();
 
     // Fast path: shared lock for parallel access when context is stable
     std::shared_lock<std::shared_mutex> readLock(amd::glInteropRWMutex);
+    amd::GLFunctions* glenv = amdContext->glenv();
 
-    // If glenv doesn't exist, we need first-time setup
-    if (glenv == nullptr) {
-      readLock.unlock();
-      std::unique_lock<std::shared_mutex> writeLock(amd::glInteropRWMutex);
-
-      // Double-check after acquiring write lock
-      glenv = amdContext->glenv();
-      if (glenv == nullptr) {
-        if (!setupGLInterop()) {
-          return;
-        }
-        glenv = amdContext->glenv();
-        if (glenv == nullptr) {
-          return;
-        }
-        amd::associatedGLContext = getCurrentGLContext(glenv);
-      }
-
-      exclusiveLock_ = std::move(writeLock);
-      valid_ = true;
-      return;
-    }
-
-    // glenv exists, check if context has changed
     void* currentGLContext = getCurrentGLContext(glenv);
-    if (currentGLContext == nullptr) {
-      return;
-    }
-
-    if (amd::associatedGLContext == currentGLContext) {
+    if (currentGLContext != nullptr && amd::associatedGLContext == currentGLContext) {
       sharedLock_ = std::move(readLock);
       valid_ = true;
       return;
     }
 
-    // Slow path: context switch detected, need exclusive lock for re-association
     readLock.unlock();
     std::unique_lock<std::shared_mutex> writeLock(amd::glInteropRWMutex);
-
-    // Re-read context under exclusive lock (another thread may have completed setup)
+    // Recheck after the lock transition: another operation may have completed
+    // association. A missing context also needs discovery because the caller
+    // may have switched between EGL and GLX.
     glenv = amdContext->glenv();
-    void* verifiedContext = getCurrentGLContext(glenv);
-    if (verifiedContext == nullptr) {
-      return;
-    }
-
-    // Double-check pattern: context may have been set up during lock gap
-    if (amd::associatedGLContext != verifiedContext) {
+    currentGLContext = getCurrentGLContext(glenv);
+    if (currentGLContext == nullptr || amd::associatedGLContext != currentGLContext) {
+      // Setup can replace the stored context/display even when association fails.
+      // Invalidate the fast path until the complete association succeeds again.
+      amd::associatedGLContext = nullptr;
       if (!setupGLInterop()) {
         return;
       }
-      amd::associatedGLContext = verifiedContext;
+      glenv = amdContext->glenv();
+      currentGLContext = getCurrentGLContext(glenv);
+      if (currentGLContext == nullptr) {
+        return;
+      }
+      amd::associatedGLContext = currentGLContext;
     }
 
     exclusiveLock_ = std::move(writeLock);
@@ -263,13 +251,11 @@ hipError_t hipGLGetDevices(unsigned int* pHipDeviceCount, int* pHipDevices,
   }
   amd::GLFunctions* glenv = hip::getCurrentDevice()->asContext()->glenv();
   if (glenv != nullptr) {
-#ifdef _WIN32
-    info.hCtx_ = glenv->wglGetCurrentContext_();
-#else
-    info.hCtx_ = glenv->glXGetCurrentContext_();
-#endif
+    info.hCtx_ = getCurrentGLContext(glenv);
     hip::getCurrentDevice()->asContext()->setInfo(info);
-    glenv->update(reinterpret_cast<intptr_t>(info.hCtx_));
+    if (!glenv->update(reinterpret_cast<intptr_t>(info.hCtx_))) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
   }
   *pHipDeviceCount = 0;
   if (deviceList != hipGLDeviceListCurrentFrame && deviceList != hipGLDeviceListAll) {

@@ -117,7 +117,9 @@ void amd::ImageGL::initDeviceMemory() {
 
 #define GLPREFIX(rtype, fcn, dclargs)                                                              \
   if (!(fcn##_ = (PFN_##fcn)GETPROCADDRESS(libHandle_, #fcn))) {                                   \
-    if (!(fcn##_ = (PFN_##fcn)GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>(#fcn)))) ++missed_;   \
+    if (!GetProcAddress_ ||                                                                        \
+        !(fcn##_ = (PFN_##fcn)GetProcAddress_(reinterpret_cast<FCN_STR_TYPE>(#fcn))))              \
+      ++missed_;                                                                                   \
   }
 
 amd::GLFunctions::SetIntEnv::SetIntEnv(GLFunctions* env) : env_(env) {
@@ -144,6 +146,8 @@ amd::GLFunctions::GLFunctions(HMODULE h, bool isEGL)
       eglDisplay_(EGL_NO_DISPLAY),
       eglOriginalContext_(EGL_NO_CONTEXT),
       isEGL_(isEGL),
+      eglGetCurrentContext_(nullptr),
+      eglGetCurrentDisplay_(nullptr),
 #ifdef _WIN32
       hOrigGLRC_(0),
       hDC_(0),
@@ -173,6 +177,10 @@ amd::GLFunctions::GLFunctions(HMODULE h, bool isEGL)
 
   if (isEGL_) {
     GetProcAddress_ = (PFN_xxxGetProcAddress)GETPROCADDRESS(h, "eglGetProcAddress");
+    eglGetCurrentContext_ = (PFN_eglGetCurrentContext)GETPROCADDRESS(h, "eglGetCurrentContext");
+    VERIFY_POINTER(eglGetCurrentContext_)
+    eglGetCurrentDisplay_ = (PFN_eglGetCurrentDisplay)GETPROCADDRESS(h, "eglGetCurrentDisplay");
+    VERIFY_POINTER(eglGetCurrentDisplay_)
   } else {
     GetProcAddress_ = (PFN_xxxGetProcAddress)GETPROCADDRESS(h, API_GETPROCADDR);
   }
@@ -249,8 +257,33 @@ amd::GLFunctions::~GLFunctions() {
   }
 #endif  //!_WIN32
 }
+void* amd::GLFunctions::currentContext() const {
+  if (isEGL_) {
+    return eglGetCurrentContext_ ? eglGetCurrentContext_() : nullptr;
+  }
+#ifdef _WIN32
+  return wglGetCurrentContext_ ? wglGetCurrentContext_() : nullptr;
+#else
+  return glXGetCurrentContext_ ? glXGetCurrentContext_() : nullptr;
+#endif
+}
+
+void* amd::GLFunctions::currentDisplay() const {
+  if (isEGL_) {
+    return eglGetCurrentDisplay_ ? eglGetCurrentDisplay_() : nullptr;
+  }
+#ifdef _WIN32
+  return wglGetCurrentDC_ ? wglGetCurrentDC_() : nullptr;
+#else
+  return glXGetCurrentDisplay_ ? glXGetCurrentDisplay_() : nullptr;
+#endif
+}
+
 // in case of HIP GL interop we want to make sure we have the updated context
 bool amd::GLFunctions::update(intptr_t hglrc) {
+  if (isEGL_) {
+    return init(reinterpret_cast<intptr_t>(currentDisplay()), hglrc);
+  }
 #ifdef _WIN32
   DWORD err;
   if (hOrigGLRC_ == (HGLRC)hglrc) {
@@ -305,6 +338,9 @@ void amd::GLFunctions::WaitCurrentGlContext(const amd::Context::Info& info) cons
 
 bool amd::GLFunctions::init(intptr_t hdc, intptr_t hglrc) {
   if (isEGL_) {
+    if (missed_ || !hdc || !hglrc) {
+      return false;
+    }
     eglDisplay_ = (EGLDisplay)hdc;
     eglOriginalContext_ = (EGLContext)hglrc;
     return true;
