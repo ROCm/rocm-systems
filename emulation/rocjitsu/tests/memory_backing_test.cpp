@@ -4,6 +4,7 @@
 /// @file memory_backing_test.cpp
 /// @brief Tests memory backing and its helper in isolated processes.
 
+#include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/memory_keeper.h"
@@ -2429,6 +2430,49 @@ int enter_test_namespace(int flags) {
   if (!error)
     error = write_namespace_map("/proc/self/gid_map", "0 " + std::to_string(gid) + " 1\n");
   return error;
+}
+
+void check_inode_zero_shared_aliases() {
+  const int error = enter_test_namespace(CLONE_NEWIPC);
+  if (error == EPERM || error == EACCES || error == EINVAL || error == ENOSPC)
+    _exit(kPrerequisiteSkipExitCode);
+  ASSERT_EQ(error, 0) << strerror(error);
+
+  rocjitsu::test::ScopedHostMappingObservation observation(true);
+  void *first;
+  void *second;
+  {
+    const auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+    const int shmid = shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0600);
+    ASSERT_EQ(shmid, 0) << strerror(errno);
+    first = shmat(shmid, nullptr, 0);
+    second = shmat(shmid, nullptr, 0);
+    ASSERT_EQ(shmctl(shmid, IPC_RMID, nullptr), 0);
+  }
+  ASSERT_NE(first, MAP_FAILED);
+  ASSERT_NE(second, MAP_FAILED);
+  EXPECT_NE(first, second);
+  EXPECT_EQ(rocjitsu::amdgpu::LegacyAddressSpaceTestAccess::backing_atomic_mutex_for(first),
+            rocjitsu::amdgpu::LegacyAddressSpaceTestAccess::backing_atomic_mutex_for(second));
+  const auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+  EXPECT_EQ(shmdt(first), 0);
+  EXPECT_EQ(shmdt(second), 0);
+}
+
+TEST_F(MemoryBackingDeathTest, InodeZeroSystemVAliasesShareTransactionStripe) {
+  bool skipped = false;
+  const auto completed_or_skipped = [&skipped](int status) {
+    skipped = ::testing::ExitedWithCode(kPrerequisiteSkipExitCode)(status);
+    return skipped || ::testing::ExitedWithCode(0)(status);
+  };
+  ASSERT_EXIT(
+      {
+        check_inode_zero_shared_aliases();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      completed_or_skipped, "");
+  if (skipped)
+    GTEST_SKIP() << "IPC namespace creation is unavailable";
 }
 
 void check_file_export_across_ipc_namespaces() {
