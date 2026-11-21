@@ -47,6 +47,9 @@
 //   devices_fail  - init() succeeds but devices() reports an error, which is the
 //                   companion case where finalize() must still run.
 // Both new modes record via RCCL_NET_TEST_{INIT,FINALIZE}_FILE.
+//   rail_plane    - no failure: three devices reporting no rail or plane, a
+//                   dual-port NIC (two devices, one GUID) and a single-port one,
+//                   for NetPluginRailPlane (NCCL 2.32.3 default rail/plane IDs).
 //
 // RCCL_GIN_TEST_PLUGIN_MODE selects a failure to inject on the GIN/RMA stub:
 //   init_fail     - init() reports an error (finalize must not run).
@@ -84,7 +87,13 @@ enum PluginTestMode {
   kModeAssignFail,
   kModeInitFail,
   kModeDevicesFail,
+  kModeRailPlane,
 };
+
+// rail_plane devices. Each needs its own name: the topology finds a net node by name.
+static struct { char name[16]; uint64_t guid; int port; } kRailPlaneNets[] = {
+  {"RailPlane0", 0x1111, 1}, {"RailPlane1", 0x1111, 2}, {"RailPlane2", 0x2222, 1}};
+static constexpr int kNumRailPlaneNets = sizeof(kRailPlaneNets) / sizeof(kRailPlaneNets[0]);
 
 static void recordLine(const char* envVar) {
   const char* path = getenv(envVar);
@@ -110,6 +119,7 @@ static PluginTestMode testMode() {
   if (strcmp(mode, "assign_fail") == 0) return kModeAssignFail;
   if (strcmp(mode, "init_fail") == 0) return kModeInitFail;
   if (strcmp(mode, "devices_fail") == 0) return kModeDevicesFail;
+  if (strcmp(mode, "rail_plane") == 0) return kModeRailPlane;
   return kModeDefault;
 }
 
@@ -134,7 +144,7 @@ __hidden ncclResult_t pluginFinalize(void* ctx) {
 
 __hidden ncclResult_t pluginDevices(int* ndev) {
   if (testMode() == kModeDevicesFail) return ncclSystemError;
-  *ndev = 1;
+  *ndev = (testMode() == kModeRailPlane) ? kNumRailPlaneNets : 1;
   return ncclSuccess;
 }
 
@@ -164,6 +174,11 @@ __hidden ncclResult_t pluginGetProperties(int dev, ncclNetProperties_v12_t* prop
   props->maxMultiRequestSize = 1;
   props->railId = NCCL_NET_ID_UNDEF;
   props->planeId = NCCL_NET_ID_UNDEF;
+  if (testMode() == kModeRailPlane && dev >= 0 && dev < kNumRailPlaneNets) {
+    props->name = kRailPlaneNets[dev].name;
+    props->guid = kRailPlaneNets[dev].guid;
+    props->port = kRailPlaneNets[dev].port;
+  }
   return ncclSuccess;
 }
 
