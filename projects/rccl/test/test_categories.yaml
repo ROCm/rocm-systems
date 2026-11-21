@@ -122,6 +122,7 @@ test_categories:
       - "DdaAllReduceFabricLL128PeerPar.*"
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
+      - "ProfilerV8Timestamp.*"
       - "Diagnostics.*"
       - "HipProbe.*"
     exclude_windows:
