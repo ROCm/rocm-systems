@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace rocprofsys::utility
@@ -98,32 +99,13 @@ struct generate
         {
             using value_type = type::element_type;
 
-            if constexpr(use_placement_new_when_generating_unique_ptr<value_type>::value)
+            if constexpr(std::is_constructible<value_type, Args...>::value)
             {
-                // create a thread-local buffer for placement-new with proper alignment
-                alignas(value_type) static thread_local auto _buffer =
-                    std::array<char, sizeof(value_type)>{};
-                if constexpr(std::is_constructible<value_type, Args...>::value)
-                {
-                    return type{ new(_buffer.data())
-                                     value_type{ std::forward<Args>(_args)... } };
-                }
-                else
-                {
-                    return type{ new(_buffer.data())
-                                     value_type{ invoke(std::forward<Args>(_args))... } };
-                }
+                return type{ new value_type{ std::forward<Args>(_args)... } };
             }
             else
             {
-                if constexpr(std::is_constructible<value_type, Args...>::value)
-                {
-                    return type{ new value_type{ std::forward<Args>(_args)... } };
-                }
-                else
-                {
-                    return type{ new value_type{ invoke(std::forward<Args>(_args))... } };
-                }
+                return type{ new value_type{ invoke(std::forward<Args>(_args))... } };
             }
         }
         else
