@@ -27,8 +27,8 @@ query the library and need neither a GPU nor an `O_DIRECT` filesystem.
 ## Building
 
 Each example directory contains a ready-to-use `CMakeLists.txt` that finds the
-installed hipFile via `find_package`. To build a directory, configure and build
-it in place:
+installed hipFile via `find_package`. Building them requires CMake 3.25.2 or
+later. To build a directory, configure and build it in place:
 
 ```bash
 cd basics
