@@ -1844,6 +1844,7 @@ typedef struct {
 
 /**
  * @brief This structure contains information specific to a process.
+ * A value with all bits set is not available.
  */
 typedef struct {
   uint32_t process_id;    //!< Process ID

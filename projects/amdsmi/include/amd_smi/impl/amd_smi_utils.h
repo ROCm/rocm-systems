@@ -321,4 +321,52 @@ void init_asic_info_defaults(amdsmi_asic_info_t* info);
  */
 auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string;
 
+/**
+ *  @brief Parse one "drm-memory-<region>:" line of a DRM fdinfo file.
+ *
+ *  @details Documentation/gpu/drm-usage-stats.rst prints the value as "<n>"
+ *  (bytes), "<n> KiB" or "<n> MiB".
+ *
+ *  @param[in] line One fdinfo line.
+ *  @param[in] key The key with its colon, such as "drm-memory-vram:".
+ *  @param[out] bytes The value in bytes; unchanged unless this returns true.
+ *  @return Whether the line has that key and a value in a known unit.
+ */
+auto smi_amdgpu_parse_drm_memory(std::string_view line, std::string_view key, uint64_t* bytes)
+    -> bool;
+
+/**
+ *  @brief Add a process's DRM memory and engine usage on one GPU to @p info.
+ *
+ *  @details Reads every file of @p fdinfo_dir through the open directory, and
+ *  counts each DRM client on @p bdf once, however many of the files list it.
+ *  A file without a drm-client-id is matched by its pasid; one with neither
+ *  counts on its own.
+ *
+ *  @param[in] fdinfo_dir A /proc/<pid>/fdinfo directory.
+ *  @param[in] bdf The GPU's address as fdinfo prints it, such as "0000:03:00.0".
+ *  @param[in,out] info Gets the sums added to its memory_usage and engine_usage;
+ *  they may be partial when the status is not ::AMDSMI_STATUS_SUCCESS, or when
+ *  the process exits during the read.
+ *  @return ::AMDSMI_STATUS_SUCCESS; ::AMDSMI_STATUS_NOT_FOUND if the process
+ *  exited before its directory was opened; otherwise ::AMDSMI_STATUS_NO_PERM if
+ *  the caller may not read the directory or one of its files, or the status for
+ *  another error that keeps one of them from being opened or read. Files of fds
+ *  closed, or of a process that exits, during the read are skipped.
+ */
+auto smi_amdgpu_sum_drm_fdinfo(const std::string& fdinfo_dir, std::string_view bdf,
+                               amdsmi_proc_info_t* info) -> amdsmi_status_t;
+
+/**
+ *  @brief Whether a process's DRM fdinfo shows a client of the GPU at @p bdf.
+ *
+ *  @param[in] pid The process, read under amd::smi::test_hooks::ProcRoot().
+ *  @param[in] bdf The GPU's address as fdinfo prints it, such as "0000:03:00.0".
+ *  @return ::AMDSMI_STATUS_SUCCESS if one of its fdinfo files has that drm-pdev,
+ *  ::AMDSMI_STATUS_NOT_FOUND if none has or the process has exited, otherwise
+ *  ::AMDSMI_STATUS_NO_PERM if the caller may not read one of them, or the status
+ *  for another error that keeps one from being read.
+ */
+auto smi_amdgpu_fdinfo_shows_gpu(long pid, std::string_view bdf) -> amdsmi_status_t;
+
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_

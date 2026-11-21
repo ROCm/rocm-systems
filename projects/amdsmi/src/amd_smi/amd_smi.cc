@@ -5050,7 +5050,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_i
                                                     uint32_t* num_devices) {
   AMDSMI_CHECK_INIT();
 
-  if (dv_indices == nullptr || num_devices == nullptr) return AMDSMI_STATUS_INVAL;
+  if (num_devices == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef ENABLE_WSL_BACKEND
   if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
@@ -6251,7 +6251,11 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
 #endif
 
   // Get the list of compute processes running on the GPU
-  auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
+  amd::smi::GPUComputeProcessList_t compute_process_list;
+  status_code = gpu_device->amdgpu_get_compute_process_list(compute_process_list);
+  if (status_code != AMDSMI_STATUS_SUCCESS) {
+    return status_code;
+  }
 
   // If max_processes is 0, return the number of processes currently running
   // If compute_process_list is empty, return success with max_processes set to 0
@@ -6322,18 +6326,38 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
     return AMDSMI_STATUS_INVAL;
   }
 
-  // Collect processes from all GPUs, grouped by PID
+  // Collect processes from all GPUs, grouped by PID. Handles that are not GPUs
+  // are skipped. A GPU whose list cannot be read, such as one that processes kept
+  // starting on (AMDSMI_STATUS_RETRY), is left out rather than hiding the other
+  // GPUs' processes. The first such error is returned only if no GPU's list is
+  // read.
   std::map<uint32_t, amdsmi_proc_info_by_pid_t> pid_map;
-
+  auto first_error = AMDSMI_STATUS_SUCCESS;
+  bool any_read = false;
   for (uint32_t i = 0; i < num_processors; i++) {
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handles[i], &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS) continue;
-
-    uint32_t gpu_index = gpu_device->get_gpu_id();
-    auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
-    for (auto& [pid, proc_info] : compute_process_list)
-      merge_proc_into_pid_map(pid_map, gpu_index, proc_info);
+    if (get_gpu_device_from_handle(processor_handles[i], &gpu_device) != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    amd::smi::GPUComputeProcessList_t compute_process_list;
+    const amdsmi_status_t r = gpu_device->amdgpu_get_compute_process_list(compute_process_list);
+    if (r != AMDSMI_STATUS_SUCCESS) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | Leaving out GPU " << gpu_device->get_gpu_id() << ": "
+         << smi_amdgpu_get_status_string(r, false);
+      LOG_WARN(ss);
+      if (first_error == AMDSMI_STATUS_SUCCESS) {
+        first_error = r;
+      }
+      continue;
+    }
+    any_read = true;
+    for (const auto& [pid, proc_info] : compute_process_list) {
+      merge_proc_into_pid_map(pid_map, gpu_device->get_gpu_id(), proc_info);
+    }
+  }
+  if (!any_read && first_error != AMDSMI_STATUS_SUCCESS) {
+    return first_error;
   }
 
   uint32_t num_pids = static_cast<uint32_t>(pid_map.size());

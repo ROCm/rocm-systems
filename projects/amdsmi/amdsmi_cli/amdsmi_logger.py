@@ -224,6 +224,9 @@ class AMDSMILogger:
                             + "N/A".rjust(8)
                             + "\n"
                         )
+                    elif isinstance(process_dict["process_info"], str):
+                        # The error for a GPU whose process list could not be read
+                        table_values += process_dict["process_info"].rjust(17) + "\n"
                     else:
                         # Fix this herre
                         for process_key, process_value in process_dict["process_info"].items():

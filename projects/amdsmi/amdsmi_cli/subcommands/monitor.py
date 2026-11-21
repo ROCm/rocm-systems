@@ -789,15 +789,19 @@ class MonitorCommands:
         # PID-grouped aggregation rendered after the loop.
         if args.process and not getattr(self, "_monitor_suppress_process_collection", False):
             # Populate initial processes
+            list_error = None
             try:
                 process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError("Command requires elevation") from e
                 logging.debug(
                     "Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info()
                 )
-                raise e
+                # Show the error in this GPU's process row, keeping its other metrics
+                # and the other GPUs, and record it for the exit code. NO_PERM still
+                # aborts.
+                self.helpers.record_or_raise(e)
+                list_error = f"[{e.get_error_info(detailed=False)}] Unable to get the process list"
+                process_list = []
 
             try:
                 num_compute_units = amdsmi_interface.amdsmi_get_gpu_asic_info(args.gpu)[
@@ -892,7 +896,9 @@ class MonitorCommands:
 
             for index, process in enumerate(filtered_process_values):
                 if process["process_info"] == "N/A":
-                    filtered_process_values[index]["process_info"] = "No running processes detected"
+                    filtered_process_values[index]["process_info"] = (
+                        list_error or "No running processes detected"
+                    )
 
             # Build the process table's title and header
             self.logger.secondary_table_title = "PROCESS INFO"
@@ -1161,11 +1167,16 @@ class MonitorCommands:
         it via _write_via_logger_destination after the primary table.
         """
         handles = args.gpu if isinstance(args.gpu, list) else [args.gpu]
+        list_error = None
         try:
             pid_list = amdsmi_interface.amdsmi_get_gpu_process_list_by_pid(handles)
         except amdsmi_exception.AmdSmiLibraryException as e:
+            # It leaves out a GPU whose list fails, so its error is the whole
+            # table's: show it there and count it for the exit code.
             logging.debug("Failed to get process list by pid | %s", e.get_error_info())
-            return
+            self.helpers.record_or_raise(e)
+            list_error = f"[{e.get_error_info(detailed=False)}] Unable to get the process list"
+            pid_list = []
 
         # Unit string constants — hoisted out of the loop (style cleanup)
         memory_usage_unit_default = "B"
@@ -1227,7 +1238,9 @@ class MonitorCommands:
                 filtered.append({"gpu_index": gpu_entry["gpu_index"], "process_info": info})
 
         if not filtered:
-            filtered.append({"gpu_index": "N/A", "process_info": "No running processes detected"})
+            filtered.append(
+                {"gpu_index": "N/A", "process_info": list_error or "No running processes detected"}
+            )
 
         # JSON / CSV: push rows into the logger's multiple_device_output so they
         # flow through print_output() — never write a raw ASCII tail that would

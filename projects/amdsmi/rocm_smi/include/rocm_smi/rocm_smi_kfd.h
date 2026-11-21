@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -89,6 +90,42 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
 int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
                          std::unordered_set<uint64_t>* gpu_set);
 
+// Whether process pid still runs as a KFD process: KFD has a directory named
+// pid, which it removes when the process exits. In a PID namespace other than
+// the initial one, where KFD does not name processes by this namespace's PIDs,
+// whether this namespace's process pid runs with /dev/kfd open.
+bool KfdProcessExists(uint32_t pid);
+
+// Whether a GetProcessInfoForPID() error means that the process exited during
+// the read: KFD removes its files (ENODEV), then its directory (ESRCH, or any
+// error once the directory is gone). In a PID namespace other than the initial
+// one, ESRCH means that no process pid of that namespace has /dev/kfd open.
+bool KfdProcessExitedDuringRead(uint32_t pid, int err);
+
+// pid with every KFD statistic not available: all-ones in each field.
+rsmi_process_info_t MakeUnavailableProcessInfo(uint32_t pid);
+
+// The directory of KFD's per-process directories, /sys/class/kfd/kfd/proc.
+const char* KFDProcPathRoot();
+
+// Test-only hook to point KFDProcPathRoot() at a mock tree, whose directories
+// are named by this process's PIDs; nullptr restores the real one.
+void SetKFDProcPathRootForTesting(const char* path);
+
+// Test-only hook to read processes from a mock /proc tree (its devices file,
+// self/ns/pid and each <pid>/fd, <pid>/maps); nullptr restores /proc. Without a
+// self/ns/pid that names the initial PID namespace, the tree is read as from
+// another one. `path` is not copied: it and the tree must outlive the hook.
+void SetProcPathRootForTesting(const char* path);
+
+// Whether this process runs in a PID namespace other than the initial one, by
+// whose PIDs KFD names its process directories, as <proc root>/self/ns/pid says;
+// read once per process. In another, as in a container that does not share the
+// host's, such a directory can be another process's, so processes are read from
+// this namespace's /proc instead. A self/ns/pid that cannot be read counts as
+// another namespace.
+bool IsKfdPidNamespaced();
+
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_count);
 int ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string>* retVec);
 
@@ -102,6 +139,22 @@ int ReadKFDGpuId(uint32_t kfd_node_id, uint64_t* gpu_id);
 
 // Replaces the contents of *out with the KFD GPU ids for pid (clears first).
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);
+
+// A /proc/<pid>/maps line: the file offset it maps, and the device and inode
+// number of the file.
+struct MapsLine {
+  uint64_t offset = 0;
+  uint32_t dev_major = 0;
+  uint32_t dev_minor = 0;
+  uint64_t inode = 0;
+};
+
+// Parses a /proc/<pid>/maps line into `out`; false if it is not one.
+bool ParseMapsLine(std::string_view line, MapsLine* out);
+
+// The KFD id of the GPU whose queue doorbells KFD maps at mmap offset `offset`,
+// or 0 if the offset maps something else.
+uint64_t KfdDoorbellGpuId(uint64_t offset);
 
 }  // namespace amd::smi
 
