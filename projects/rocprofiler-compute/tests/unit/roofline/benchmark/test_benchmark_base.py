@@ -14,6 +14,8 @@ No GPU is required; the sources are plain strings built in the constructor.
 """
 
 import fcntl
+import shutil
+import subprocess
 from pathlib import Path
 from unittest import mock
 
@@ -59,6 +61,10 @@ MATRIX_SOURCE_ATTRS = {
     "I8": "matrix_i8_src",
 }
 PACKED_MATRIX_SOURCE_ATTR = "matrix_f8f6f4_src"
+
+HIPCC = shutil.which("hipcc")
+# hiprtc provides the HIP runtime declarations implicitly; hipcc needs them.
+HIP_RUNTIME_INCLUDE = "#include <hip/hip_runtime.h>\n"
 
 # flops_kernel_selector keys against the names used in Bench.tests.
 FLOPS_TEST_KEYS = {
@@ -112,6 +118,12 @@ def assert_source_defines(kernel_source, kernel_name, context):
 def runs_benchmark(bench, test_key):
     """Report whether run_benchmark() would launch this benchmark."""
     return test_key in bench.tests and test_key not in bench.unsupported_data_types
+
+
+def matrix_source(bench, matrix_type):
+    """Return the kernel source Bench_base.matrix_bench() compiles for a type."""
+    source_attr = MATRIX_SOURCE_ATTRS.get(matrix_type, PACKED_MATRIX_SOURCE_ATTR)
+    return getattr(bench, source_attr)
 
 
 # =============================================================================
@@ -190,12 +202,37 @@ def test_matrix_kernel_sources_define_selected_symbol(gpu_arch):
         test_key = f"{bench.MATRIX_OPS_TYPE}-{matrix_type}"
         if not runs_benchmark(bench, test_key):
             continue
-        source_attr = MATRIX_SOURCE_ATTRS.get(matrix_type, PACKED_MATRIX_SOURCE_ATTR)
         assert_source_defines(
-            getattr(bench, source_attr),
+            matrix_source(bench, matrix_type),
             kernel_name,
             f"{gpu_arch} {test_key}",
         )
+
+
+@pytest.mark.skipif(HIPCC is None, reason="hipcc not found")
+@pytest.mark.parametrize("gpu_arch", ROOFLINE_ARCHS)
+def test_matrix_kernel_sources_compile_for_their_architecture(gpu_arch, tmp_path):
+    """Matrix kernels pass their builtins the operand types the builtins declare.
+
+    hiprtc compiles these sources when the roofline runs, so a mismatch only
+    surfaces there; hipcc checks the same source for the architecture offline.
+    """
+    bench = BENCH_CLASSES[gpu_arch](0, dict(CACHE_SIZES), gpu_arch)
+
+    for matrix_type in bench.matrix_kernel_selector:
+        test_key = f"{bench.MATRIX_OPS_TYPE}-{matrix_type}"
+        if not runs_benchmark(bench, test_key):
+            continue
+        source = tmp_path / f"{matrix_type}.hip"
+        source.write_text(HIP_RUNTIME_INCLUDE + matrix_source(bench, matrix_type))
+        result = subprocess.run(
+            [HIPCC, f"--offload-arch={gpu_arch}", "--cuda-device-only", "-fsyntax-only"]
+            + [str(source)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"{gpu_arch} {test_key}: {result.stderr}"
 
 
 # =============================================================================
