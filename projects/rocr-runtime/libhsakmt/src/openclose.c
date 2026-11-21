@@ -183,6 +183,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 	char *error;
 	char *useSvmStr;
 	char *useUdmaBuf;
+	char *svmMigGranularity;
 
 	pthread_mutex_lock(&hsakmt_mutex);
 
@@ -235,6 +236,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFDCtx(HsaKFDContext **pCtx)
 		result = hsakmt_init_kfd_version();
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto kfd_version_failed;
+
+		/* check if svm granularity is set by env HSA_SVM_GRANULARITY */
+		svmMigGranularity = getenv("HSA_SVM_GRANULARITY");
+		if (svmMigGranularity) {
+			hsakmt_svm_granularity = hsakmt_safe_env_to_int(svmMigGranularity, -1);
+			if (hsakmt_svm_granularity < 0 || hsakmt_svm_granularity > 63) {
+				pr_warn("HSA_SVM_GRANULARITY invalid, ignoring\n");
+				hsakmt_svm_granularity = -1;
+			}
+		} else
+			pr_debug("svm granularity not enabled\n");
 
 		/* check if udmabuf is enabled by env HSA_USE_UDMABUF */
 		useUdmaBuf = getenv("HSA_USE_UDMABUF");
