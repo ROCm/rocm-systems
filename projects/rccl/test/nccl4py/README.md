@@ -33,6 +33,7 @@ It exercises:
 |--------|----------------|
 | (wheel artifact) | `cmake --build --target nccl4py` produced a `.whl` |
 | `test_rocm_extensions.py` | RCCL-only wrappers (`all_reduce_with_bias`, `all_to_all_v`) fail controlled |
+| `test_encryption.py` | `nccl.core.set_encryption()` reaches `ncclSetEncryption` (no GPU) |
 | `test_shim_surface.py` | HIP `cuda.core` shim (optional; self-skips without visible GPUs) |
 | `test_group_window.py` | `register_window()` inside `nccl.core.group()` returns a handle (2 GPUs; self-skips on fewer) |
 
