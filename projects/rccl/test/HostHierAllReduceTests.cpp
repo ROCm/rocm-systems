@@ -215,7 +215,11 @@ TEST(HostHierAllReduce, AutoWindowEdges)
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB - 1));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 2 * kMiB));
-    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 64 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 16 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 16 * kMiB + 1));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 32 * kMiB));
+    EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 64 * kMiB));
+    EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 64 * kMiB + 1));
     EXPECT_TRUE(rcclHostHierAllReduceAutoWindow(2, 8, 128 * kMiB));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 128 * kMiB + 1));
     EXPECT_FALSE(rcclHostHierAllReduceAutoWindow(2, 8, 512 * kMiB));
@@ -256,8 +260,9 @@ TEST(HostHierAllReduce, FusedWindowEdges)
     {
         EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 4 * kMiB - 1)) << nHosts << " hosts";
         EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 4 * kMiB)) << nHosts << " hosts";
-        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 128 * kMiB)) << nHosts << " hosts";
-        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 128 * kMiB + 1)) << nHosts << " hosts";
+        EXPECT_TRUE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 16 * kMiB)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 16 * kMiB + 1)) << nHosts << " hosts";
+        EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 8, 128 * kMiB)) << nHosts << " hosts";
         EXPECT_FALSE(rcclHostHierAllReduceFusedWindow(nHosts, 4, 16 * kMiB)) << nHosts << " hosts, 4 ranks each";
     }
     for(int nHosts : {4, 8})
@@ -353,15 +358,21 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                     << nHosts << " hosts of four ranks with the DPX table";
             }
             // The mock comm has no DDA fabric, so the fused kernel never runs on it.
-            for(size_t bytes : {4 * kMiB, 8 * kMiB - 64, 32 * kMiB, 128 * kMiB - 64})
+            for(size_t bytes : {4 * kMiB, 8 * kMiB - 64})
             {
                 EXPECT_FALSE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, no fused kernel";
                 EXPECT_FALSE(eligible(blockHosts(2, 8), bytes / 2, ncclBfloat16)) << bytes << " B bf16, no fused kernel";
                 EXPECT_TRUE(eligible(blockHosts(2, 8), bytes, ncclFloat8e4m3)) << bytes << " B fp8 on two hosts";
                 EXPECT_TRUE(eligible(blockHosts(4, 8), floats(bytes))) << bytes << " B on four hosts";
             }
-            for(size_t bytes : {2 * kMiB, 8 * kMiB, 16 * kMiB, 128 * kMiB})
-                EXPECT_TRUE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts";
+            for(size_t bytes : {32 * kMiB, 64 * kMiB})
+            {
+                EXPECT_FALSE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, outside the window";
+                EXPECT_FALSE(eligible(blockHosts(2, 8), bytes, ncclFloat8e4m3)) << bytes << " B fp8, outside the window";
+                EXPECT_TRUE(eligible(blockHosts(4, 8), floats(bytes))) << bytes << " B on four hosts";
+            }
+            for(size_t bytes : {2 * kMiB, 8 * kMiB, 16 * kMiB, 128 * kMiB - 64, 128 * kMiB})
+                EXPECT_TRUE(eligible(blockHosts(2, 8), floats(bytes))) << bytes << " B on two hosts, three collectives";
         })
         .withTimeout(std::chrono::seconds(30))
         .withNumGpus(0);

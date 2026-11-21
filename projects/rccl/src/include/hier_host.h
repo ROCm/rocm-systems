@@ -69,8 +69,8 @@ ncclResult_t rcclHostHierTeardown(struct ncclComm* comm);
 // MNNVL fp32 sum measurements with 8 ranks per host on 2, 4 and 8 hosts and with 4 ranks
 // per host on 4 and 8 hosts. The rcclHostHierAllReduceAutoType combinations gain at the
 // same sizes. False for unmeasured layouts. Auto mode also needs the SPX tuning table
-// for 4 ranks per host, and on two hosts the fused kernel between 2 and 8 and between 16
-// and 128 MiB for the types the kernel takes.
+// for 4 ranks per host, and on two hosts the fused kernel between 2 and 8 MiB for the
+// types the kernel takes.
 bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes);
 
 // Sizes, in bytes, at which the fused DDA kernel beat the three collectives in gfx1250 fp32, fp16 and bf16 sum

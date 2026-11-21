@@ -100,14 +100,14 @@ bool fusedKernelRuns(struct ncclComm* comm, const struct rcclHostLayout& layout,
   return ncclAllReduceDdaFabricHierEligible(comm, count, datatype, op, layout.nHosts, layout.ranksPerHost);
 }
 
-// The three collectives gained over the default path on two hosts with 8 ranks only at 1-2, 8-16 and 128-512 MiB in
-// fp32 sum; the auto window between those sizes needs the fused kernel. fp8, which the kernel does not take, gained
+// On two hosts with 8 ranks the three collectives gained over the default path at 2, 8-16 and 128 MiB in fp32 sum, but
+// not between 2 and 8 MiB, where the auto window needs the fused kernel. fp8, which the kernel does not take, gained
 // across the window on the three collectives.
 bool needsFusedKernel(const struct rcclHostLayout& layout, ncclDataType_t datatype, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
   if (layout.nHosts != 2 || layout.ranksPerHost != 8) return false;
   if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) return false;
-  return (bytes > 2 * MiB && bytes < 8 * MiB) || (bytes > 16 * MiB && bytes < 128 * MiB);
+  return bytes > 2 * MiB && bytes < 8 * MiB;
 }
 
 // Every rank of a comm reads the same table (rcclSetTuningPartition), so this matches on all of them.
@@ -278,7 +278,7 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes)
   if (ranksPerHost == 8) {
     switch (nHosts) {
     case 2:
-      return bytes >= 2 * MiB && bytes <= 128 * MiB;
+      return (bytes >= 2 * MiB && bytes <= 16 * MiB) || (bytes > 64 * MiB && bytes <= 128 * MiB);
     case 4:
       return bytes >= 2 * MiB && bytes <= 1024 * MiB;
     case 8:
@@ -302,7 +302,7 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, int ranksPerHost, size_t bytes)
 
 bool rcclHostHierAllReduceFusedWindow(int nHosts, int ranksPerHost, size_t bytes) {
   constexpr size_t MiB = size_t{1} << 20;
-  return ranksPerHost == 8 && nHosts <= 2 && bytes >= 4 * MiB && bytes <= 128 * MiB;
+  return ranksPerHost == 8 && nHosts <= 2 && bytes >= 4 * MiB && bytes <= 16 * MiB;
 }
 
 bool rcclHostHierAllReduceAutoType(int ranksPerHost, ncclDataType_t datatype, ncclRedOp_t op) {
