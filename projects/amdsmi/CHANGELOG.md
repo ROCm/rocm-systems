@@ -178,6 +178,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi list` and `amd-smi static` showing a placeholder UUID instead of `N/A` on WSL APUs without an ASIC serial**.  
   - Affects APUs such as Ryzen AI Max (Strix Halo) under WSL. `amdsmi_get_gpu_device_uuid()` now returns `AMDSMI_STATUS_NOT_SUPPORTED` in that case.
 
+- **Fixed `amdsmi_status_code_to_string()` returning `AMDSMI_STATUS_UNKNOWN_ERROR` for valid status codes**.  
+
 - **Fixed the `amdsmi` Python module from TheRock's `rocm-sdk-core` wheel failing outside `share/amd_smi`**.  
   - Copied into `site-packages`, the module could not find its library unless `torch` was imported first. It now loads the wheel's own library, never a system `libamd_smi.so` from another ROCm release.
 
