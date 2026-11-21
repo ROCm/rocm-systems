@@ -1316,8 +1316,27 @@ def execute_input(connection, cursor, args):
                         # loop over the rocprofv3 configurations
                         rocprofv3_args_config = job["rocprofv3"]
                         if isinstance(rocprofv3_args_config, (list, tuple)):
-                            rocprofv3_args_config = dict(
-                                [["", itr] for itr in rocprofv3_args_config]
+                            rocprofv3_args_config = dict()
+                            for itr in job["rocprofv3"]:
+                                if isinstance(itr, dict):
+                                    for k, v in itr.items():
+                                        rocprofv3_args_config[k] = v
+                                elif isinstance(itr, (list, tuple)):
+                                    _name = (
+                                        "_".join(
+                                            [iitr.lstrip().lstrip("-") for iitr in itr]
+                                        )
+                                        if isinstance(itr, (list, tuple))
+                                        else f"{itr}"
+                                    )
+                                    rocprofv3_args_config[_name] = itr
+                                else:
+                                    raise ValueError(
+                                        f"Unsupported rocprofv3 configuration item: {itr}"
+                                    )
+                        else:
+                            raise ValueError(
+                                f"Unsupported rocprofv3 configuration format (expected list or tuple): {rocprofv3_args_config}"
                             )
 
                         if args.shuffle or args.shuffle_rocprofv3:
