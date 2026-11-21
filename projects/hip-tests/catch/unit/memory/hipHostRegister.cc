@@ -38,9 +38,6 @@ template <typename T> __global__ void Inc(T* Ad) {
 }
 
 #if HT_AMD
-// Feature-gated AMDGCN builtins are guarded with __builtin_amdgcn_is_invocable:
-// on amdgcnspirv __has_builtin() is true for every AMDGCN builtin (the GPU is
-// only known at JIT time).
 
 __global__ void AtomicFAddKernelKernel(float* data, size_t n) {
   size_t i = blockDim.x * blockIdx.x + threadIdx.x;
