@@ -34,7 +34,16 @@ backends: IPC,RO,GDA", style="rounded,filled", fillcolor="#cfe2ff"];
   t_cmake_configure [label="8.79s", shape=circle, fixedsize=true, width=0.55, height=0.55, fontsize=8, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
   cmake_configure -> t_cmake_configure [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
   {rank=same; cmake_configure; t_cmake_configure;}
-  bc_sources [label="BITCODE_SOURCES (18 files)", style="rounded,filled,dashed", fillcolor="#cfe2ff"];
+  bc_sources [label="BITCODE_SOURCES (18 files)
+abql_block_mutex.cpp, backend_bc_device.cpp,
+backend_gda.cpp, backend_ipc.cpp, backend_ro.cpp,
+context_device.cpp, context_gda_device.cpp,
+context_gda_device_coll.cpp, context_ipc_device.cpp,
+context_ipc_device_coll.cpp, context_ro_device.cpp,
+ipc_policy.cpp, queue.cpp, rocshmem_gpu.cpp,
+rocshmem_tile_gpu.cpp, rocshmem_wrapper.cc, team.cpp,
+util.cpp
+(shares 17 file(s) with host_sources)", style="rounded,filled,dashed", fillcolor="#cfe2ff"];
   bc_compile [label="clang++ -x hip --cuda-device-only -O3 -fgpu-rdc
 -disable-llvm-passes (per-source .bc)", style="rounded,filled", fillcolor="#b2f2bb"];
   t_bc_compile [label="longest
@@ -64,7 +73,8 @@ parallel
 src/(top-level):18, src/gda:12, src/reverse_offload:6,
 src/ipc:5, src/memory:5, src/bootstrap:3,
 src/memfabric:2, src/containers:2, src/sync:1,
-src/host:1, src/sdma:1", style="rounded,filled", fillcolor="#b2f2bb"];
+src/host:1, src/sdma:1
+(shares 17 file(s) with bc_sources)", style="rounded,filled", fillcolor="#b2f2bb"];
   t_host_sources [label="140.9s
 cpu-sum", shape=circle, fixedsize=true, width=0.6, height=0.6, fontsize=8, fillcolor="#fff9db", color="#f08c00", penwidth=1.5];
   host_sources -> t_host_sources [style=dashed, arrowhead=none, color="#f08c00", constraint=false, weight=0];
@@ -135,9 +145,21 @@ t=420.9s -> 421.0s", style="rounded,filled", fillcolor="#ffd8a8", color="#f08c00
   hsaco_lld -> hsaco_target;
   hsaco_target -> project_dep_hack [color=red, penwidth=2];
   subgraph cluster_examples {
-    label="examples -- depend on librocshmem.a only (NOT gated by HSACO chain)";
+    label="examples -- depend on librocshmem.a only
+(NOT gated by HSACO chain)";
     fillcolor="#f8f9fa"; style=filled; fontsize=11;
-  examples_link [label="11 targets (examples/*)", style="rounded,filled", fillcolor="#ffa8a8"];
+  examples_link [label="11 targets (examples/*)
+rocshmem_user_mem_test: 120.7s
+rocshmem_alltoall_test: 120.3s
+tile_distributed_gemm: 120.2s
+rocshmem_user_mem_symm_test: 120.1s
+LL_MoE/ll_moe: 120.0s
+tile_halo_exchange: 119.8s
+rocshmem_init_attr_test: 119.8s
+rocshmem_broadcast_test: 119.7s
+rocshmem_allreduce_test: 118.7s
+rocshmem_put_signal_test: 118.6s
+rocshmem_getmem_test: 117.8s", style="rounded,filled", fillcolor="#ffa8a8"];
   t_examples_link [label="1315.8s
 cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fillcolor="#fff9db", color="red", penwidth=1.5];
   examples_link -> t_examples_link [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
@@ -145,10 +167,14 @@ cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fil
   }
   host_archive -> examples_link;
   subgraph cluster_consumers {
-    label="independent links -- depend on librocshmem.a only (NOT gated by HSACO chain)";
+    label="independent links -- depend on librocshmem.a only
+(NOT gated by HSACO chain)";
     fillcolor="#f8f9fa"; style=filled; fontsize=11;
   other_links [label="3 targets (tools/unit-tests/
-rocprofiler-register)", style="rounded,filled", fillcolor="#ffa8a8"];
+rocprofiler-register)
+rocshmem-rocprofiler-register-import-test: 119.0s
+rocshmem_unit_tests: 118.0s
+rocshmem_info: 117.1s", style="rounded,filled", fillcolor="#ffa8a8"];
   t_other_links [label="354.2s
 cpu total", shape=circle, fixedsize=true, width=0.7, height=0.7, fontsize=8, fillcolor="#fff9db", color="red", penwidth=1.5];
   other_links -> t_other_links [style=dashed, arrowhead=none, color="red", constraint=false, weight=0];
