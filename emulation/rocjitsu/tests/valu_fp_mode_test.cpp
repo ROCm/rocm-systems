@@ -55,12 +55,6 @@ constexpr SimdPathExpectation expect_simd_path(amdgpu::SimdFastPath path) {
 
 constexpr SimdPathExpectation expect_simd_fallback() { return {.checked = true}; }
 
-// Conversions with 64-bit lanes fall back to scalar where native 64-bit SIMD
-// masks are broken (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS).
-constexpr SimdPathExpectation expect_simd_path_64(amdgpu::SimdFastPath path) {
-  return RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS ? expect_simd_fallback() : expect_simd_path(path);
-}
-
 struct ArithmeticCase {
   ArithmeticCase(std::string name_, rocjitsu::IsaFamily arch_, std::array<uint32_t, 3> words_,
                  std::vector<std::pair<uint32_t, uint32_t>> sources_,
@@ -3534,8 +3528,8 @@ std::vector<ArithmeticCase> float_to_float_cases() {
                      simd});
   };
   const auto words = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
-  const auto from_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_F64_TO_B32);
-  const auto to_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_B32_TO_F64);
+  const SimdPathExpectation from_f64{}; // rj-arith dispatch is outside the legacy tracker.
+  const SimdPathExpectation to_f64{};
   // Modified VOP3 encodings take the same paths: the stage object carries the fields.
   const auto vop1 = [](uint16_t op) {
     return std::array<uint32_t, 2>{rdna4::build_vop1(op, {.src0 = 256, .vdst = 6})[0], 0u};
@@ -3924,8 +3918,8 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
     return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .omod = omod});
   };
   const auto f16 = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
-  const auto from_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_F64_TO_B32);
-  const auto to_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_B32_TO_F64);
+  const SimdPathExpectation from_f64{}; // rj-arith dispatch is outside the legacy tracker.
+  const SimdPathExpectation to_f64{};
   // RDNA2 F16 results take the VOP1 path. OMOD and CLAMP travel in the stage
   // object, so modified encodings take the same paths as unmodified ones.
   const auto rdna2_f16 = expect_simd_path(amdgpu::SimdFastPath::VOP1_UNARY);
@@ -5450,8 +5444,6 @@ SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool fo
 void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
                             bool uses_arith = false, amdgpu::ArithmeticPolicy policy = {}) {
   uses_arith = test.arith_host_contract || (uses_arith && uses_default_host_controls(test.arch));
-  // Migrated handlers assume default host controls; guest MODE remains unchanged.
-  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
@@ -5471,6 +5463,18 @@ void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd
   DecodeResult decoded = decoder->decode(test.words.data());
   ASSERT_FALSE(decoded.failed());
   std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+  auto mnemonic = instruction->mnemonic();
+  if (mnemonic.ends_with("_e32") || mnemonic.ends_with("_e64")) {
+    mnemonic.remove_suffix(4);
+  }
+  if (mnemonic.starts_with("v_cvt_") &&
+      (mnemonic.starts_with("v_cvt_f64_") || mnemonic.ends_with("_f64"))) {
+    // These conversions use rj-arith on every profile; other families remain legacy.
+    uses_arith = true;
+    simd = {};
+  }
+  // Migrated handlers assume default host controls; guest MODE remains unchanged.
+  const int host_rounding = uses_arith ? FE_TONEAREST : test.host_rounding;
   const uint32_t base = wave->vgpr_alloc().base;
   const uint64_t full_exec = wave->wf_size() == 64 ? ~uint64_t{0} : 0xffffffffu;
   for (uint64_t exec : {uint64_t{1}, full_exec}) {
@@ -6242,7 +6246,7 @@ INSTANTIATE_TEST_SUITE_P(MinmaxOutputModifiers, ValuMinmaxFpModeTest,
 
 class ValuConversionTest : public testing::TestWithParam<ArithmeticCase> {};
 
-// With SIMD enabled, each case asserts the fast path it takes, or that it has none.
+// Check both dispatch settings; legacy handlers also expose their tracked SIMD path.
 TEST_P(ValuConversionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
