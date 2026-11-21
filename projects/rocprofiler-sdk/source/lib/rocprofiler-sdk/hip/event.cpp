@@ -26,6 +26,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/static_tl_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -333,8 +334,13 @@ context_has_hip_event(const tracing::context_t* ctx)
 }
 
 // Waits claimed during the packet batch currently being processed on this thread. Always
-// emptied by bind_staged_waits or flush_staged_waits before the interceptor returns.
-thread_local pending_wait_array_t g_staged_waits = {};
+// emptied by bind_staged_waits or flush_staged_waits before the interceptor returns. Used inside
+// HIP's dispatch, so not a thread_local with a destructor (see common::static_tl_object::instance).
+auto&
+get_staged_waits()
+{
+    return common::static_tl_object<pending_wait_array_t>::instance();
+}
 
 // Waits attached to an in-flight submission, keyed by that submission's completion signal
 // handle. The handle is unique for the lifetime of the submission because a pooled signal
@@ -1255,7 +1261,7 @@ claim_deferred_wait(uint64_t dep_signal_handle)
     if(!has_pending_waits()) return;
 
     auto pw = consume_pending_wait(dep_signal_handle);
-    if(pw.corr_id_ref) g_staged_waits.emplace_back(std::move(pw));
+    if(pw.corr_id_ref) get_staged_waits().emplace_back(std::move(pw));
 }
 
 void
@@ -1285,10 +1291,11 @@ claim_deferred_waits(const hsa::rocprofiler_packet& pkt, uint32_t packet_type, b
 void
 bind_staged_waits(hsa_signal_t completion_signal)
 {
-    if(g_staged_waits.empty()) return;
+    auto& staged_waits = get_staged_waits();
+    if(staged_waits.empty()) return;
 
-    auto staged = std::move(g_staged_waits);
-    g_staged_waits.clear();
+    auto staged = std::move(staged_waits);
+    staged_waits.clear();
 
     get_bound_wait_map()->wlock([&](auto& map) {
         auto& dst = map[completion_signal.handle];
@@ -1301,7 +1308,7 @@ bind_staged_waits(hsa_signal_t completion_signal)
 std::optional<hsa::rocprofiler_packet>
 flush_staged_waits(hsa::Queue& queue, rocprofiler_timestamp_t enqueue_ts)
 {
-    if(g_staged_waits.empty()) return std::nullopt;
+    if(get_staged_waits().empty()) return std::nullopt;
 
     auto  pooled_sig = hsa_signal_t{.handle = 0};
     auto* pooled     = queue.create_signal(0, &pooled_sig, true);

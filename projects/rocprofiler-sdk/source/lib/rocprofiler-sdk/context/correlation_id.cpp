@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/static_tl_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -45,11 +46,12 @@ get_correlation_id_map()
     return _v;
 }
 
+// first used inside HIP/HSA calls and runtime callbacks, so not a thread_local with a destructor
 auto&
 get_latest_correlation_id_impl()
 {
-    static thread_local auto _v = common::container::small_vector<correlation_id*, 16>{};
-    return _v;
+    using data_type = common::container::small_vector<correlation_id*, 16>;
+    return common::static_tl_object<data_type>::instance();
 }
 
 uint64_t
