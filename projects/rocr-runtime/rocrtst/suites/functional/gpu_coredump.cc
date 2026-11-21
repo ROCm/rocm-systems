@@ -41,6 +41,43 @@ static const uint32_t kNumBufferElements = rocrtst::isEmuModeEnabled() ? 4 : 256
 // Convert core pattern to glob pattern, substituting known values
 // and using wildcards for unknowable values (timestamp, TID)
 namespace {
+// Sets an environment variable for the lifetime of the object and restores
+// the previous state on destruction, including the case where the variable
+// was not set before.
+//
+// These tests run in the same process as the rest of the suite, so a variable
+// left set here stays set for every test that runs afterwards. The tests
+// below already unset HSA_COREDUMP_PATTERN on each exit path for that reason;
+// this makes the same guarantee for variables whose scope spans early returns
+// and gtest fatal assertions.
+class ScopedEnvVar {
+ public:
+  ScopedEnvVar(const char* name, const char* value) : name_(name) {
+    const char* previous = getenv(name);
+    if (previous != nullptr) {
+      had_previous_ = true;
+      previous_ = previous;
+    }
+    setenv(name, value, 1);
+  }
+
+  ~ScopedEnvVar() {
+    if (had_previous_) {
+      setenv(name_, previous_.c_str(), 1);
+    } else {
+      unsetenv(name_);
+    }
+  }
+
+  ScopedEnvVar(const ScopedEnvVar&) = delete;
+  ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+ private:
+  const char* name_;
+  std::string previous_;
+  bool had_previous_ = false;
+};
+
 // True if any GPU is gfx11 minor<5. The parent has no HSA runtime, so read
 // gfx_target_version (major*10000 + minor*100 + step) from KFD topology sysfs.
 bool AnyGpuIsGfx11BelowMinor5() {
@@ -682,7 +719,7 @@ void GpuCoreDumpTest::TestDefaultPattern(void) {
   // Unset HSA_COREDUMP_PATTERN to use default
   unsetenv("HSA_COREDUMP_PATTERN");
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
-  setenv("HSA_COREDUMP_SHOW_PROGRESS", "1", 1);
+  ScopedEnvVar show_progress_guard("HSA_COREDUMP_SHOW_PROGRESS", "1");
 
   // Always direct coredump output to /tmp so the test works regardless
   // of kernel core_pattern configuration. The runtime warns and skips
@@ -735,7 +772,7 @@ void GpuCoreDumpTest::TestCustomPattern(void) {
 
   std::string pattern = test_dir_ + "/custom_gpu_core.%p";
   setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
-  setenv("HSA_COREDUMP_SHOW_PROGRESS", "1", 1);
+  ScopedEnvVar show_progress_guard("HSA_COREDUMP_SHOW_PROGRESS", "1");
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   pid_t child_pid = RunFaultingKernelInChild();
@@ -998,7 +1035,7 @@ void GpuCoreDumpTest::TestCoreDumpContentIntegrity(void) {
 
   std::string pattern = test_dir_ + "/integrity_test.%p";
   setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
-  setenv("HSA_COREDUMP_SHOW_PROGRESS", "1", 1);
+  ScopedEnvVar show_progress_guard("HSA_COREDUMP_SHOW_PROGRESS", "1");
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   pid_t child_pid = RunFaultingKernelInChild();
@@ -1267,7 +1304,7 @@ void GpuCoreDumpTest::TestPipePattern(void) {
   std::string pattern = "|sh -c \"cat > " + output_file + "\"";
 
   setenv("HSA_COREDUMP_PATTERN", pattern.c_str(), 1);
-  setenv("HSA_COREDUMP_SHOW_PROGRESS", "1", 1);
+  ScopedEnvVar show_progress_guard("HSA_COREDUMP_SHOW_PROGRESS", "1");
   unsetenv("HSA_DISABLE_COREDUMP_ON_EXCEPTION");
 
   pid_t child_pid = RunFaultingKernelInChild();
