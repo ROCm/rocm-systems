@@ -600,8 +600,7 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
         {
             case AQLPROFILE_INFO_BLOCK_ID:
             {
-                hsa_ven_amd_aqlprofile_id_query_t* query =
-                    reinterpret_cast<hsa_ven_amd_aqlprofile_id_query_t*>(value);
+                aqlprofile_id_query_t* query = reinterpret_cast<aqlprofile_id_query_t*>(value);
                 const uint32_t      block = pm4_factory->FindBlock(query->name);
                 const GpuBlockInfo* info  = pm4_factory->GetBlockInfo(block);
                 if(!info) return HSA_STATUS_ERROR;
@@ -612,6 +611,7 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
 
                 query->id             = block;
                 query->instance_count = attrib.get_num_instances();
+                query->event_id_max   = info->event_id_max;
             }
             break;
             case AQLPROFILE_INFO_BLOCK_COUNTERS:

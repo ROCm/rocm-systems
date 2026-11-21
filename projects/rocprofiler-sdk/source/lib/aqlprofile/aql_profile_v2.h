@@ -379,6 +379,29 @@ typedef struct
     uint32_t                      event_count;
 } aqlprofile_pmc_profile_t;
 
+// Block ID query result for AQLPROFILE_INFO_BLOCK_ID. V2-only type (not the HSA vendor
+// extension's hsa_ven_amd_aqlprofile_id_query_t): event_id_max is appended for V2
+// consumers so the legacy HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID path/ABI is untouched.
+typedef struct
+{
+    const char* name;           // [in] block name to query
+    uint32_t    id;             // [out] block id
+    uint32_t    instance_count; // [out] number of block instances
+    uint32_t    event_id_max;   // [out] maximum valid event/counter id for this block
+} aqlprofile_id_query_t;
+
+/* ABI lock: event_id_max was appended at the end; any intentional change MUST bump the
+ * V2 ABI version. */
+static_assert(offsetof(aqlprofile_id_query_t, event_id_max) ==
+                  sizeof(const char*) + 2 * sizeof(uint32_t),
+              "aqlprofile_id_query_t::event_id_max offset changed; "
+              "prior members were reordered or resized - this is a V2 ABI break");
+// name(8) + id/instance_count/event_id_max(12) + 4 bytes tail padding to keep the
+// struct's pointer-driven 8-byte alignment = 24 bytes on LP64.
+static_assert(sizeof(aqlprofile_id_query_t) == sizeof(const char*) + 4 * sizeof(uint32_t),
+              "aqlprofile_id_query_t total size changed; "
+              "padding or member layout drifted - this is a V2 ABI break");
+
 // Profile attributes
 typedef enum
 {
@@ -387,8 +410,8 @@ typedef enum
     AQLPROFILE_INFO_PMC_DATA            = 2,  // get_info returns PMC uint64_t value
                                               // in info_data object
     AQLPROFILE_INFO_BLOCK_COUNTERS = 4,       // get_info returns number of block counter
-    AQLPROFILE_INFO_BLOCK_ID       = 5,       // get_info returns block id, instances
-                                              // by name string using _id_query_t
+    AQLPROFILE_INFO_BLOCK_ID       = 5,       // get_info returns block id, instances,
+                                              // and max event id using aqlprofile_id_query_t
     AQLPROFILE_INFO_ENABLE_CMD = 6,           // get_info returns size/pointer for
                                               // counters enable command buffer
     AQLPROFILE_INFO_DISABLE_CMD = 7,          // get_info returns size/pointer for
