@@ -1597,8 +1597,10 @@ bool Image::createInteropImage() {
     return false;
   }
 
-  // Set mip level if GL object
-  if (glObj && !desc.setMipLevel(glObj->getGLMipLevel())) {
+  // Single-level OpenCL imports select one mip. HIP imports the full chain
+  // and creates level views later; preserve the producer's range for it.
+  if (glObj && imageDescriptor_.mipmap_levels <= 1 &&
+      !desc.setMipLevel(glObj->getGLMipLevel(), dev().isa().versionMajor())) {
     return false;
   }
 

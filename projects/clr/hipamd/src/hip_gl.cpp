@@ -548,7 +548,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       LogWarning("\"miplevel\" is not a valid mipmap level of the GL \"texture\" object");
       HIP_RETURN(hipErrorInvalidValue);
     }
-    miplevels = gliTexMaxLevel + 1;
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetTexLevelParameteriv_(target, miplevel, GL_TEXTURE_INTERNAL_FORMAT,
                                                   (GLint*)&glInternalFormat);
@@ -605,6 +604,30 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
       default:
         LogWarning("invalid \"target\" value");
         HIP_RETURN(hipErrorInvalidValue);
+    }
+
+    // MAX_LEVEL is a sampling limit (1000 by default), not an allocation
+    // count. Mutable textures can define just level zero with that default.
+    // Count the contiguous defined levels, bounded by the spatial dimensions.
+    GLint extent = gliTexWidth;
+    if (clType != CL_MEM_OBJECT_IMAGE1D_ARRAY) {
+      extent = std::max(extent, gliTexHeight);
+    }
+    if (clType == CL_MEM_OBJECT_IMAGE3D) {
+      extent = std::max(extent, gliTexDepth);
+    }
+    if (target != GL_TEXTURE_RECTANGLE_ARB && target != GL_TEXTURE_2D_MULTISAMPLE) {
+      for (GLint level = 1; (extent >>= 1) != 0 && level <= gliTexMaxLevel; ++level) {
+        GLint width = 0;
+        amdContext.glenv()->glGetTexLevelParameteriv_(target, level, GL_TEXTURE_WIDTH, &width);
+        if (amdContext.glenv()->glGetError_() != GL_NO_ERROR) {
+          HIP_RETURN(hipErrorInvalidValue);
+        }
+        if (width == 0) {
+          break;
+        }
+        ++miplevels;
+      }
     }
 
   } else {

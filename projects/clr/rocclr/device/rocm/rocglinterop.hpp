@@ -60,7 +60,15 @@ class image_metadata {
     return true;
   }
 
-  bool setMipLevel(uint32_t level) {
+  bool setMipLevel(uint32_t level, int32_t gfxipMajor) {
+    if (gfxipMajor >= 12) {
+      // Gfx12 moves BASE_LEVEL to WORD1 and widens both level fields.
+      constexpr uint32_t kLevelMask = 0x1f;
+      if (level > ((data->word3.u32_all >> 15) & kLevelMask)) return false;
+      data->word1.u32_all = (data->word1.u32_all & ~(kLevelMask << 25)) | (level << 25);
+      data->word3.u32_all = (data->word3.u32_all & ~(kLevelMask << 15)) | (level << 15);
+      return true;
+    }
     if (level > data->word3.bits.last_level) return false;
     data->word3.bits.base_level = level;
     data->word3.bits.last_level = level;
