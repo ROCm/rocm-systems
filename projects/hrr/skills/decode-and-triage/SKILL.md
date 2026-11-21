@@ -55,6 +55,7 @@ Outputs:
 - **`GPU`**: GPU ordinal for replay (Linux default: auto-pick; Windows default: `0`). It becomes `HIP_VISIBLE_DEVICES` for the replay, whose ordering is not `rocm-smi`'s.
 - **`HRR_DOCKER_IMAGE`**: Docker image for `--replay docker`, and makes `auto` choose Docker.
 - **`HRR_DOCKER_MOUNT_CLR=1`**: overlay the host CLR build into the Docker replay, for WIP dev work.
+- **`HIP_HRR_TRUSTED_KEY`**: public key file for the signature check. A Docker replay mounts it read-only and passes `--trusted-key`; an unreadable key refuses the run instead of replaying unchecked. Windows `--replay docker` refuses while it is set.
 - **`HRR_REPLAY_TIMEOUT`**: seconds before a replay that makes no progress is stopped and reported as `HANG` (default 1800, `0` disables).
 - **`HRR_TRIAGE_WORKDIR`**: output dir for findings and logs. Never the archive: a value inside it is refused. Default on Linux `$TMPDIR/hrr-triage-<uid>` created mode 0700 (`/tmp` when `TMPDIR` is inside the archive), or a `mktemp` directory when that one is not ours; on Windows the user's temp directory plus `hrr-triage`.
 - **`HRR_CONTINUE=1`**: proceed past a HIP/comgr version mismatch.
