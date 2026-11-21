@@ -153,6 +153,11 @@
           "name": "TDM_Reduce_Device",
           "description": "reduceCopy with the TDM reduce switch on and off against a host reference, including the TDM gate's decision, pre-op and post-op handling, and the fallback cases",
           "test_filter": "TdmReduceCopyTest.*:-TdmReduceCopyTest.BuildFlagMatchesExpectation"
+        },
+        {
+          "name": "TDM_Simple_Copy_Device",
+          "description": "reduceCopy's one-source copy with the TDM SIMPLE switch on and off, byte-checked at independent source and destination offsets, with two destinations, with concurrent teams that do not start at warp 0, and across sizes, including the TDM gate's decision",
+          "test_filter": "TdmSimpleCopyTest.*"
         }
       ]
     }
