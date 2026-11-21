@@ -53,7 +53,18 @@ if(NOT DEFINED Python_EXECUTABLE)
     set(Python_EXECUTABLE "${Python3_EXECUTABLE}")
   endif()
 endif()
-find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
+# setup.py turns this on for CPython >= 3.12, the first version nanobind can
+# target with the stable ABI, so one abi3 wheel serves all later versions.
+option(ROCSHMEM4PY_STABLE_ABI "Build against the CPython 3.12 stable ABI (abi3)" OFF)
+set(_ROCSHMEM4PY_PYTHON_COMPONENTS Interpreter Development.Module)
+if(ROCSHMEM4PY_STABLE_ABI)
+  if(CMAKE_VERSION VERSION_LESS 3.26)
+    message(FATAL_ERROR "rocshmem4py: ROCSHMEM4PY_STABLE_ABI needs CMake >= 3.26 "
+                        "for FindPython's Development.SABIModule component")
+  endif()
+  list(APPEND _ROCSHMEM4PY_PYTHON_COMPONENTS Development.SABIModule)
+endif()
+find_package(Python 3.11 COMPONENTS ${_ROCSHMEM4PY_PYTHON_COMPONENTS} REQUIRED)
 set(PYTHON_EXECUTABLE "${Python_EXECUTABLE}" CACHE FILEPATH "Python interpreter" FORCE)
 
 message(STATUS "Python_VERSION: ${Python_VERSION}")
@@ -227,20 +238,32 @@ endforeach()
 # Build Extension Module
 ###############################################################################
 
-nanobind_add_module(_rocshmem4py NB_STATIC src/rocshmem4py.cc)
+if(ROCSHMEM4PY_STABLE_ABI)
+  nanobind_add_module(_rocshmem4py NB_STATIC STABLE_ABI src/rocshmem4py.cc)
+  # nanobind silently falls back to a version-specific module when it cannot
+  # build abi3; setup.py has already tagged the wheel abi3, so stop here.
+  set(_NB_LIB nanobind-static-abi3)
+  if(NOT TARGET ${_NB_LIB})
+    message(FATAL_ERROR "rocshmem4py: nanobind did not build a stable-ABI module "
+                        "(needs CPython >= 3.12 without free threading)")
+  endif()
+else()
+  nanobind_add_module(_rocshmem4py NB_STATIC src/rocshmem4py.cc)
+  set(_NB_LIB nanobind-static)
+endif()
 # rocSHMEM bindings throw std::runtime_error (translated to RuntimeError)
 # and the team-config caster relies on RTTI.  nanobind defaults to
 # -fno-rtti/-fno-exceptions, so re-enable them here and undo any global
 # compile options that would otherwise disable exceptions on the static
-# nanobind helper library.
+# nanobind helper library (named nanobind-static-abi3 in stable-ABI builds).
 target_compile_options(_rocshmem4py PRIVATE -frtti -fexceptions)
-if(TARGET nanobind-static)
-  get_target_property(_NB_OPTS nanobind-static COMPILE_OPTIONS)
+if(TARGET ${_NB_LIB})
+  get_target_property(_NB_OPTS ${_NB_LIB} COMPILE_OPTIONS)
   if(_NB_OPTS)
     list(REMOVE_ITEM _NB_OPTS "-fno-rtti" "-fno-exceptions")
-    set_target_properties(nanobind-static PROPERTIES COMPILE_OPTIONS "${_NB_OPTS}")
+    set_target_properties(${_NB_LIB} PROPERTIES COMPILE_OPTIONS "${_NB_OPTS}")
   endif()
-  target_compile_options(nanobind-static PRIVATE -frtti -fexceptions)
+  target_compile_options(${_NB_LIB} PRIVATE -frtti -fexceptions)
 endif()
 
 set_target_properties(_rocshmem4py PROPERTIES
