@@ -77,8 +77,6 @@ public:
   void reset();
   /// @brief Cancel deferred packet work when its queue is force-closed.
   void cancel_in_flight() noexcept;
-  /// @brief Convert an escaped packet callback into durable terminal queue state.
-  void latch_callback_failure() noexcept;
 
   [[nodiscard]] bool in_flight() const;
   [[nodiscard]] bool publication_pending() const { return cursor_journal_.publication_pending(); }

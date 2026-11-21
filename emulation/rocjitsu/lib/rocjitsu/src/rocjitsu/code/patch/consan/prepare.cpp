@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/basic_block.h"
@@ -210,7 +211,7 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
   if (verify_artifact_images(artifact.manifest, original, artifact.image, &contract_error).failed())
     return reject(error, contract_error.message);
   const TargetProfile *target = target_profile(artifact.manifest.target);
-  const rj_code_arch_t arch = target->arch;
+  const rocjitsu::IsaFamily arch = target->arch;
   const FailureOr<InputProgram> program =
       build_input_program(original, *target, artifact.manifest.entry.name, error);
   if (program.failed())

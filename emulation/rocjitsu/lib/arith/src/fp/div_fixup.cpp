@@ -433,12 +433,8 @@ int rj_arith_v_div_fixup_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  [[maybe_unused]] uint32_t *trapsts) {
-  const bool active_omod = (instruction_flags & RJ_ARITH_ALU_OMOD_MASK) &&
-                           (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
-                           !(flags & RJ_ARITH_FP_IEEE_MODE);
   flags = rocjitsu::arith::resolve_compatibility(
-      flags,
-      active_omod ? RJ_ARITH_SEMANTICS_LOOSE : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -451,10 +447,8 @@ int rj_arith_v_div_fixup_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  if (active_omod &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
+  // RDNA3 applies OMOD only with outputs flushed and IEEE clear; W7900 captures match the shared
+  // model there (round, then scale, FP16_OVFL saturating the recovered overflow first).
   if (!(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (flags & RJ_ARITH_FP_IEEE_MODE)) {
     instruction_flags &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK);
   }
@@ -476,6 +470,6 @@ int rj_arith_v_div_fixup_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *trapsts) {
-  // Wave32 resolves Compatibility after guest MODE masks OMOD.
+  // Wave32 masks OMOD from the guest MODE before running each half.
   return run_wave64<16, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }

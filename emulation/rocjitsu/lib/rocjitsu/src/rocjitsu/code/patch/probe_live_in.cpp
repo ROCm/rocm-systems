@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/probe_live_in.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/exec_state.h" // complete type for the null ExecMaskAnalysis
@@ -53,7 +54,7 @@ std::string format_register_set(const RegisterSet &regs) {
 
 std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj,
                                                   const ResolvedProbeSymbol &sym,
-                                                  rj_code_arch_t arch, const ProbeAbi &abi,
+                                                  rocjitsu::IsaFamily arch, const ProbeAbi &abi,
                                                   uint8_t wave_size, std::string *error_out,
                                                   ProbeEntryState entry_state) {
   if (!is_valid_probe_abi(abi)) {
@@ -64,7 +65,7 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   // Resolving a gfx1250 vector operand needs a block where MODE.VGPR_MSB is
   // known zero (LivenessAnalysisOptions::entry_block). A trampoline anchor
   // carries no such guarantee and the call envelope sets no mode.
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5 && entry_state != ProbeEntryState::ZeroVgprBanks) {
+  if (arch == rocjitsu::IsaFamily::Cdna5 && entry_state != ProbeEntryState::ZeroVgprBanks) {
     report(error_out, "gfx1250 probe bodies are not analyzable: MODE.VGPR_MSB at the "
                       "instrumentation site is unknown, so encoded vector operands do not "
                       "identify physical VGPRs");

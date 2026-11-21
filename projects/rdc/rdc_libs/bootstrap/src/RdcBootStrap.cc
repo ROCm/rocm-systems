@@ -90,7 +90,13 @@ rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rd
     return status;
   }
 
-  *p_rdc_handle = static_cast<rdc_handle_t>(func_make_handler(op_mode));
+  // nullptr when the handler cannot start, for example when AMD SMI fails to initialize.
+  amd::rdc::RdcHandler* handler = func_make_handler(op_mode);
+  if (handler == nullptr) {
+    *p_rdc_handle = nullptr;
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
+  *p_rdc_handle = static_cast<rdc_handle_t>(handler);
 
   return RDC_ST_OK;
 }

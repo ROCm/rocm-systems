@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -301,11 +302,11 @@ TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles)
     ASSERT_TRUE(input.succeeded()) << error.message;
     ASSERT_TRUE(input.value().repeated);
     const AmdGpuCodeObject object(original.data(), original.size());
-    const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    const std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_TRUE(decoder);
     const std::array entries{input.value().kernel.entry_text_offset};
     const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
-        BasicBlock::build_reachable(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries);
+        BasicBlock::build_reachable(object, *decoder, rocjitsu::IsaFamily::Cdna5, entries);
     ASSERT_TRUE(blocks.succeeded());
     const Instruction *backedge = nullptr;
     for (const std::unique_ptr<BasicBlock> &block : blocks.value())
@@ -511,8 +512,8 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
   const FailureOr<InputProgram> input =
       build_input_program(original, *target_profile(mode.target), "lds_producer_consumer", error);
   ASSERT_TRUE(input.succeeded()) << error.message;
-  if (target->arch == ROCJITSU_CODE_ARCH_CDNA3 || target->arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-      target->arch == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (target->arch == rocjitsu::IsaFamily::Cdna3 || target->arch == rocjitsu::IsaFamily::Cdna4 ||
+      target->arch == rocjitsu::IsaFamily::Rdna3) {
     const uint64_t offset =
         input.value().text_file_offset + input.value().accesses[0].original_offset;
     std::vector<uint8_t> gds = original;
@@ -598,7 +599,7 @@ TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts
       ASSERT_TRUE(artifact.succeeded()) << error.message;
       const bool identity = std::string_view(fixture) == "native-2";
       const bool ttmp =
-          target.arch == ROCJITSU_CODE_ARCH_RDNA4 || target.arch == ROCJITSU_CODE_ARCH_CDNA5;
+          target.arch == rocjitsu::IsaFamily::Rdna4 || target.arch == rocjitsu::IsaFamily::Cdna5;
       const uint32_t selector = ttmp ? 117u : 15u;
       EXPECT_EQ(artifact.value().manifest.entry.workgroup_id_scalar,
                 identity ? selector : UINT32_MAX);

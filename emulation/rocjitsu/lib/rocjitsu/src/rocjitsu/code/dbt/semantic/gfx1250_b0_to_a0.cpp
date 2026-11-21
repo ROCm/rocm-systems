@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
@@ -36,7 +37,7 @@ namespace {
 
 // gfx1250 is Wave32-only.
 constexpr uint8_t kGfx1250WaveSize =
-    static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
+    static_cast<uint8_t>(isa_properties(rocjitsu::IsaFamily::Cdna5).wave_size_max);
 
 [[nodiscard]] bool always_residual(const Instruction &) { return true; }
 [[nodiscard]] bool scale16_residual(const Instruction &inst);
