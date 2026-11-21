@@ -17,7 +17,7 @@ import unittest
 from common.common import amdsmi_path, cli_search_order, find_cli_dir, load_cli_module, stub_modules
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
-# checkout wins. None -> setUpClass skips.
+# checkout wins. None -> setUpClass fails.
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 LOGGER_PATH = os.path.join(_CLI_DIR, "amdsmi_logger.py") if _CLI_DIR else None
 
@@ -58,7 +58,7 @@ class TestProcessTableFormat(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not LOGGER_PATH or not os.path.isfile(LOGGER_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI amdsmi_logger.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         stub_modules(cls, {"amdsmi_helpers": _fake_helpers()})

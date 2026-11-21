@@ -23,7 +23,7 @@ from common.common import cli_search_order, find_cli_dir
 
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 if not _CLI_DIR:
-    raise unittest.SkipTest("amd-smi CLI not found")
+    raise FileNotFoundError("amd-smi CLI not found")
 CLI = Path(_CLI_DIR)
 CUID = "12345678-1234-8234-9234-123456789abc"
 OTHER_CUID = "87654321-4321-8321-9321-cba987654321"
@@ -243,7 +243,7 @@ class TestCliCuidIdentity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not (CLI / "amdsmi_helpers.py").is_file():
-            raise unittest.SkipTest(f"amd-smi CLI not found at {CLI}")
+            raise FileNotFoundError(f"amd-smi CLI not found at {CLI}")
 
     @contextmanager
     def case(self, **params):
@@ -431,7 +431,7 @@ class TestCliNodeCuid(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not (CLI / "amdsmi_helpers.py").is_file():
-            raise unittest.SkipTest(f"amd-smi CLI not found at {CLI}")
+            raise FileNotFoundError(f"amd-smi CLI not found at {CLI}")
 
     @contextmanager
     def cli(self):

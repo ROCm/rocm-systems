@@ -52,16 +52,9 @@ def _load_source_interface():
             importlib.import_module(f"{_PKG}.amdsmi_interface_utils"),
             False,
         )
-    try:
-        from amdsmi import (
-            amdsmi_interface as installed_interface,
-            amdsmi_exception as installed_exception,
-            amdsmi_wrapper as installed_wrapper,
-            amdsmi_interface_utils as installed_utils,
-        )
-    except (ModuleNotFoundError, ImportError):
-        return None, None, None, None, False
-    return (installed_interface, installed_exception, installed_wrapper, installed_utils, True)
+    from amdsmi import amdsmi_exception, amdsmi_interface, amdsmi_interface_utils, amdsmi_wrapper
+
+    return (amdsmi_interface, amdsmi_exception, amdsmi_wrapper, amdsmi_interface_utils, True)
 
 
 (
@@ -77,11 +70,9 @@ def _load_source_interface():
 # fabricate it even on an installed build that predates this API and let the
 # patched tests pass without the feature present. Guard only the installed
 # fallback: a source checkout binds the symbol solely when libamd_smi.so is
-# built, so requiring it there would skip the tests on every source-only run.
-_fabric_symbol_missing = (
-    _loaded_from_install
-    and amdsmi_wrapper is not None
-    and not hasattr(amdsmi_wrapper, "amdsmi_get_fabric_cper_entries")
+# built, so requiring it there would fail every source-only run.
+_fabric_symbol_missing = _loaded_from_install and not hasattr(
+    amdsmi_wrapper, "amdsmi_get_fabric_cper_entries"
 )
 
 
@@ -99,10 +90,13 @@ def _set_out(ref, value):
     ref._obj.value = value
 
 
-@unittest.skipIf(amdsmi_interface is None, "amdsmi_interface not available")
-@unittest.skipIf(_fabric_symbol_missing, "installed amdsmi build predates the fabric CPER API")
 class TestFabricCperInterface(unittest.TestCase):
     """Test amdsmi_interface.amdsmi_get_fabric_cper_entries()"""
+
+    @classmethod
+    def setUpClass(cls):
+        if _fabric_symbol_missing:
+            raise AttributeError("installed amdsmi build predates the fabric CPER API")
 
     def setUp(self):
         self.processor_handle = amdsmi_wrapper.amdsmi_processor_handle(0x1234)

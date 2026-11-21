@@ -130,10 +130,10 @@ class TestDefaultDriverHeader(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI directory not found")
+            raise FileNotFoundError("amd-smi CLI directory not found")
         for relative_path in ("subcommands/default.py", "amdsmi_logger.py"):
             if not _cli_file(relative_path).is_file():
-                raise unittest.SkipTest(f"amd-smi CLI file not found: {_cli_file(relative_path)}")
+                raise FileNotFoundError(f"amd-smi CLI file not found: {_cli_file(relative_path)}")
 
     def test_default_payload_uses_driver_info(self) -> None:
         output = _run_default()

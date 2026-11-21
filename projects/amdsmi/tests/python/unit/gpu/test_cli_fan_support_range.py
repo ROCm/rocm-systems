@@ -89,7 +89,7 @@ class TestFanSupportRange(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
+            raise FileNotFoundError("amd-smi CLI source not found")
         stub_modules(cls, _fake_amdsmi())
 
         cls._path_added = _CLI_DIR not in sys.path

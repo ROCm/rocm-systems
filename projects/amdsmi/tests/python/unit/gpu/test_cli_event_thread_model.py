@@ -124,7 +124,7 @@ class TestOpenListeners(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
@@ -241,7 +241,7 @@ class TestEventThreadMessageParsing(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.exception_module = modules["amdsmi.amdsmi_exception"]
@@ -389,7 +389,7 @@ class TestEventSigtermHandler(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.event_module = _load_event_module()
@@ -409,7 +409,7 @@ class TestEventOrchestration(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.exception_module = modules["amdsmi.amdsmi_exception"]
@@ -562,9 +562,7 @@ class TestEventRealThreads(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
-        if not hasattr(signal, "SIGALRM"):
-            raise unittest.SkipTest("SIGALRM is POSIX-only; unavailable on this platform")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]
@@ -699,9 +697,9 @@ class TestEventOpenListenersRealRecordOrRaise(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
+            raise FileNotFoundError("amd-smi CLI source not found")
 
         modules = _build_fake_amdsmi()
         interface = modules["amdsmi.amdsmi_interface"]

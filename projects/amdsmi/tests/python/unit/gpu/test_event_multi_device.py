@@ -109,7 +109,7 @@ class TestEventMultiDeviceFanout(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not (LOGGER_PATH and EVENT_PATH):
-            raise unittest.SkipTest("CLI event/logger sources not found in source or install")
+            raise FileNotFoundError("CLI event/logger sources not found in source or install")
         stub_modules(
             cls,
             {

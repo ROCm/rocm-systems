@@ -97,7 +97,7 @@ class TestPowerCapNA(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not _CLI_DIR:
-            raise unittest.SkipTest("amd-smi CLI source not found")
+            raise FileNotFoundError("amd-smi CLI source not found")
         modules = _fake_amdsmi_modules()
         modules.update({name: None for name in ("amdsmi_helpers", "amdsmi_cli_exceptions", "BDF")})
         modules["amdsmi_init"] = fake_amdsmi_init(

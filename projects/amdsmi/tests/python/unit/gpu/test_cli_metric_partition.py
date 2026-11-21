@@ -37,7 +37,7 @@ from common.common import (
 )
 
 # Locate the CLI dir; cli_search_order() decides whether the install or this
-# checkout wins. None -> setUpClass skips.
+# checkout wins. None -> setUpClass fails.
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 METRIC_PATH = os.path.join(_CLI_DIR, "subcommands", "metric.py") if _CLI_DIR else None
 
@@ -281,7 +281,7 @@ class TestCliMetricPartitionClock(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()
@@ -482,7 +482,7 @@ class TestCliMetricPartitionVirtualOS(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not METRIC_PATH or not os.path.isfile(METRIC_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI metric.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi(

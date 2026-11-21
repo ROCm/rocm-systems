@@ -80,7 +80,7 @@ class _LoggerTestBase(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not LOGGER_PATH:
-            raise unittest.SkipTest("amdsmi_logger.py not found in source or install")
+            raise FileNotFoundError("amdsmi_logger.py not found in source or install")
         stub_modules(cls, _fake_helpers_modules())
         cls.module = _load_logger_module()
 

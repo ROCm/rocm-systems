@@ -115,7 +115,7 @@ class TestAmppValidators(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(_HELPERS_SRC):
-            raise unittest.SkipTest(f"amd-smi CLI amdsmi_helpers.py not found at {_HELPERS_SRC}")
+            raise FileNotFoundError(f"amd-smi CLI amdsmi_helpers.py not found at {_HELPERS_SRC}")
 
         stub_modules(cls, _build_fake_amdsmi_modules())
         path_added = _CLI_DIR not in sys.path

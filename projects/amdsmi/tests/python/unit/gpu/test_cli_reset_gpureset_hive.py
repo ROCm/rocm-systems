@@ -15,7 +15,7 @@ import unittest
 
 # ``common.common`` bootstraps the real amdsmi package at import time, which fails
 # on a stale or mismatched install. This suite fully stubs ``amdsmi``, so degrade
-# gracefully: without the harness there is no resolver and the suite skips.
+# gracefully: without the harness there is no resolver and the suite fails.
 try:
     from common.common import (
         amdsmi_path,
@@ -121,7 +121,7 @@ class TestResetGpuresetHiveGrouping(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not RESET_PATH or not os.path.isfile(RESET_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI reset.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()

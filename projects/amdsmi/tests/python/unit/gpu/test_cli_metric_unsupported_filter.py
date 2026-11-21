@@ -38,9 +38,8 @@ from common.common import amdsmi_path, cli_search_order, find_cli_dir, stub_modu
 CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 METRIC_PATH = os.path.join(CLI_DIR, "subcommands", "metric.py") if CLI_DIR else ""
 
-# Skip only when no CLI resolves; a resolved CLI missing metric.py fails on load.
-_RUNNABLE = bool(CLI_DIR)
-_SKIP_REASON = f"amd-smi CLI not found (looked in {amdsmi_path})"
+if not CLI_DIR:
+    raise FileNotFoundError(f"amd-smi CLI not found (looked in {amdsmi_path})")
 
 NA = "N/A"
 
@@ -401,7 +400,6 @@ def _key_paths(payload, prefix=""):
             yield from _key_paths(value, path)
 
 
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class _MetricGpuHarness(unittest.TestCase):
     """Runs ``metric_gpu`` against the stubs and hands back the stored payload."""
 
@@ -770,7 +768,6 @@ class _WatchHelpers(_FakeHelpers):
         return 1
 
 
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class TestWatchIterationsFilterIdentically(unittest.TestCase):
     """``amd-smi metric --watch`` must filter the same way on every sample.
 
@@ -842,7 +839,6 @@ class TestWatchIterationsFilterIdentically(unittest.TestCase):
         self.assertEqual(len(header_calls), 1)
 
 
-@unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class TestPerGpuSuppression(unittest.TestCase):
     """Two GPUs on different metrics versions each get their own suppression set."""
 

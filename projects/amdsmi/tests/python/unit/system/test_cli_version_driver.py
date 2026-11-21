@@ -102,7 +102,7 @@ class TestVersionDriverOutput(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if _VERSION_PATH is None or not _VERSION_PATH.is_file():
-            raise unittest.SkipTest(f"amd-smi CLI version.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI version.py not found (looked in {_CLI_DIR})")
 
     def test_json_reports_driver_version(self) -> None:
         output = _run_version()
@@ -171,7 +171,7 @@ class TestVersionWithoutFlags(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         if _VERSION_PATH is None or not _VERSION_PATH.is_file():
-            raise unittest.SkipTest(f"amd-smi CLI version.py not found (looked in {_CLI_DIR})")
+            raise FileNotFoundError(f"amd-smi CLI version.py not found (looked in {_CLI_DIR})")
 
     def test_cpu_row_is_shown_when_its_hardware_lacks_the_driver(self) -> None:
         output = _run_version_without_flags({"amdgpu"}, hsmp_devices=["AMDI0097:00"])

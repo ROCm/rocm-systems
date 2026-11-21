@@ -30,7 +30,7 @@ _MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "list_devices.py") if _CLI_
 _INTERFACE_PATH = amdsmi_interface_path(__file__)
 
 if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
-    raise unittest.SkipTest(
+    raise FileNotFoundError(
         f"amd-smi CLI list_devices.py not found (looked in {_CLI_DIR or amdsmi_path})"
     )
 

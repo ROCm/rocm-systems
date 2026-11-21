@@ -52,7 +52,7 @@ def find_esmi_sources() -> list:
         found = [parent / rel for rel in _ESMI_SOURCES if (parent / rel).is_file()]
         if found:
             return found
-    raise unittest.SkipTest("amdsmi.h not found in the source tree or the install prefix")
+    raise FileNotFoundError("amdsmi.h not found in the source tree or the install prefix")
 
 
 def wrapper_without(hidden: set) -> types.ModuleType:

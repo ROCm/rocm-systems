@@ -11,22 +11,15 @@ import importlib
 import sys
 import types
 import unittest
-from pathlib import Path
 from unittest import mock
 
-_HERE = Path(__file__).resolve()
+from common.common import amdsmi_interface_path
 
-
-def _find_py_interface():
-    """Return the checkout's py-interface directory, or None (installed test tree)."""
-    for directory in _HERE.parents:
-        candidate = directory / "py-interface"
-        if (candidate / "amdsmi_interface.py").is_file():
-            return candidate
-    return None
-
-
-_PY_INTERFACE = _find_py_interface()
+try:
+    # The checkout's py-interface/, or the installed amdsmi/ package, which holds the same files.
+    _PY_INTERFACE = amdsmi_interface_path(__file__).parent
+except FileNotFoundError:
+    _PY_INTERFACE = None
 _PACKAGE = "amdsmi_checkout"
 iface = None
 wrapper = None
@@ -47,9 +40,9 @@ if _PY_INTERFACE is not None:
 
 def setUpModule():
     if _PY_INTERFACE is None:
-        raise unittest.SkipTest("py-interface source not found (installed test tree)")
+        raise FileNotFoundError("amdsmi_interface.py not found in the checkout or the install")
     if _LOAD_ERROR is not None:
-        raise unittest.SkipTest(f"py-interface not importable: {_LOAD_ERROR}")
+        raise ImportError(f"py-interface not importable: {_LOAD_ERROR}")
 
 
 def tearDownModule():

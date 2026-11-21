@@ -248,7 +248,9 @@ Colors mirror GTest (green pass / yellow skip / red fail / cyan separator) and
 are automatically suppressed when output is not a TTY or when `NO_COLOR` is set.
 
 **Exit code** — the process exits `0` when every test passed (skips are OK) and
-`1` if any test failed or errored. This is what CI keys off of.
+`1` if any test failed or errored. This is what CI keys off of. `unit_tests.py` is
+stricter: unit tests need no hardware, so any skip there also exits `1`, and the
+`unit/` tests raise instead of skipping when a CLI file, header or library is missing.
 
 ```mermaid
 flowchart LR

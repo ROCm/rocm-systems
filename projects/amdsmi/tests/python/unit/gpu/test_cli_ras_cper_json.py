@@ -15,7 +15,7 @@ contract is verified without GPU hardware or the compiled package:
   human-readable ``WARNING`` text leaking into stdout
 
 The CLI is loaded from the source tree (not the installed copy) so the suite
-exercises the source CLI directly; it skips if that source file is absent.
+exercises the source CLI directly; it fails if that source file is absent.
 """
 
 import argparse
@@ -203,7 +203,7 @@ class TestCliRasCperJson(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not _RAS_SRC or not os.path.isfile(_RAS_SRC):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI ras.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
 

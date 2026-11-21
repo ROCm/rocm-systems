@@ -31,7 +31,7 @@ _NIC_TYPE_NAME = "AMD_NIC"
 _OVERLAP_TIMEOUT_SECONDS = 2
 
 if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
-    raise unittest.SkipTest(
+    raise FileNotFoundError(
         f"amd-smi CLI firmware.py not found (looked in {_CLI_DIR or amdsmi_path})"
     )
 

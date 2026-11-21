@@ -191,23 +191,23 @@ def generated_version_stub(version="0.0.0+source"):
 
 
 def load_cli_module(name, path, sys_path_dir=None):
-    """Import the CLI file at *path* as module *name*, or skip the test.
+    """Import the CLI file at *path* as module *name*.
 
-    Skipping is the point: the module-level ``*_PATH`` constants are None when
-    find_cli_dir() came up empty, and ``os.path.isfile(None)`` raises TypeError
-    rather than returning False, so an unguarded loader reports a hard error on
-    a machine that simply has no CLI installed.
+    Raises FileNotFoundError when there is no such file: the module-level ``*_PATH``
+    constants are None when find_cli_dir() came up empty, and ``os.path.isfile(None)``
+    raises TypeError rather than returning False. A missing CLI fails the test rather
+    than skipping it, because a skipped check never ran.
 
     Pass *sys_path_dir* when the loaded file imports its CLI siblings by bare
     name, so those resolve to the real modules.
     """
     if not path or not os.path.isfile(path):
-        raise unittest.SkipTest(f"amd-smi CLI file not available: {name} ({path})")
+        raise FileNotFoundError(f"amd-smi CLI file not available: {name} ({path})")
     if sys_path_dir and sys_path_dir not in sys.path:
         sys.path.insert(0, sys_path_dir)
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise unittest.SkipTest(f"amd-smi CLI file is not loadable: {name} ({path})")
+        raise ImportError(f"amd-smi CLI file is not loadable: {name} ({path})")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -839,7 +839,7 @@ def _filter_suite_exclude(suite, pattern):
     return _filter_suite(suite, lambda test_id: pattern not in test_id)
 
 
-def run_test_dir(subdir, title, top_level_dir):
+def run_test_dir(subdir, title, top_level_dir, fail_on_skip=False):
     """Discover and run every test under *top_level_dir*/*subdir*, then exit.
 
     Single implementation of the runner boilerplate shared by the three entry
@@ -848,6 +848,9 @@ def run_test_dir(subdir, title, top_level_dir):
     root-privilege check, the legend/title preamble, output buffering
     (``-b``/``--buffer``) and the GTest-style summary runner.  Never returns —
     always calls ``sys.exit()`` (0 on success, 1 on failure).
+
+    With *fail_on_skip*, a skipped test fails the run. The unit tests need no hardware, so
+    nothing in them has a legitimate reason to skip, and a skip means the check never ran.
     """
     argv = sys.argv
 
@@ -912,6 +915,16 @@ def run_test_dir(subdir, title, top_level_dir):
         buffer="-b" in argv or "--buffer" in argv,
     )
     result = runner.run(suite)
+    if fail_on_skip and result.skipped:
+        print(
+            f"\nFAILED: {len(result.skipped)} skipped test(s). A skip is a failure here because "
+            "these tests need no hardware, so a skip means something they need is missing "
+            "(the CLI, a header, the library) and the check did not run:",
+            file=sys.stderr,
+        )
+        for skipped_test, reason in result.skipped:
+            print(f"  {skipped_test.id()}\n      {reason}", file=sys.stderr)
+        sys.exit(1)
     sys.exit(0 if result.wasSuccessful() else 1)
 
 

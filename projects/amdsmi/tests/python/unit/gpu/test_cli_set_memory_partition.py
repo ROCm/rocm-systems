@@ -16,7 +16,7 @@ import unittest
 
 # ``common.common`` bootstraps the real amdsmi package at import time, which fails
 # on a stale or mismatched install. This suite fully stubs ``amdsmi``, so degrade
-# gracefully: without the harness there is no resolver and the suite skips.
+# gracefully: without the harness there is no resolver and the suite fails.
 try:
     from common.common import (
         amdsmi_path,
@@ -155,7 +155,7 @@ class TestSetMemoryPartitionMessage(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()

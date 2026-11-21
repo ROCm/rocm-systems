@@ -66,7 +66,7 @@ def find_header() -> Path:
         candidate = parent / _HEADER_REL
         if candidate.is_file():
             return candidate
-    raise unittest.SkipTest("amdsmi.h not found in the source tree or the install prefix")
+    raise FileNotFoundError("amdsmi.h not found in the source tree or the install prefix")
 
 
 class NestedCommentOpenersTest(unittest.TestCase):

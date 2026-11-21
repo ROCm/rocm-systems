@@ -140,7 +140,7 @@ def _build_fake_amdsmi(bdf_by_handle, get_cpu_links, get_link_metrics):
 class TestCliXgmiCpuColumns(unittest.TestCase):
     def _run_xgmi(self, handles, gpu_ids, bdf_by_handle, get_cpu_links, get_link_metrics):
         if not XGMI_PATH or not os.path.isfile(XGMI_PATH):
-            self.skipTest(f"amd-smi CLI xgmi.py not found (looked in {_CLI_DIR})")
+            self.fail(f"amd-smi CLI xgmi.py not found (looked in {_CLI_DIR})")
         modules = _build_fake_amdsmi(bdf_by_handle, get_cpu_links, get_link_metrics)
         stub_modules(type(self), modules)
         xgmi_module = load_cli_module("xgmi_under_test", XGMI_PATH, sys_path_dir=_CLI_DIR)

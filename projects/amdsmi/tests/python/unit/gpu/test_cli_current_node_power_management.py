@@ -159,7 +159,7 @@ class TestNodePowerManagementCurrentNodePower(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not os.path.isfile(NODE_PATH):
-            raise unittest.SkipTest(f"amd-smi CLI node.py not found at {NODE_PATH}")
+            raise FileNotFoundError(f"amd-smi CLI node.py not found at {NODE_PATH}")
         modules = _build_fake_modules()
         stub_modules(cls, modules)
         cls.interface = modules["amdsmi.amdsmi_interface"]

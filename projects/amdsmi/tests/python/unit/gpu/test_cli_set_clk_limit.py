@@ -19,7 +19,7 @@ import unittest
 # insert + ``import amdsmi`` + module-level ``build_type_lists()``), which fails
 # on a stale or mismatched install. This suite fully stubs ``amdsmi`` itself, so
 # degrade gracefully rather than erroring at import; without the harness there is
-# no resolver, and the suite skips with the reason below.
+# no resolver, and the suite fails with the reason below.
 try:
     from common.common import (
         amdsmi_path,
@@ -112,7 +112,7 @@ class TestSnapClkLimitToDpm(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()
@@ -284,7 +284,7 @@ class TestSetGpuClkLimitCallSite(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not SET_VALUE_PATH or not os.path.isfile(SET_VALUE_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI set_value.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         modules = _build_fake_amdsmi()

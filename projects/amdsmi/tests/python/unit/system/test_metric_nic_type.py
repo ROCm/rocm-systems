@@ -21,7 +21,7 @@ _CLI_DIR = find_cli_dir(*cli_search_order(str(Path(__file__).resolve().parent)))
 _MODULE_PATH = Path(_CLI_DIR) / "subcommands" / "metric.py" if _CLI_DIR else None
 
 if _MODULE_PATH is None or not _MODULE_PATH.is_file():
-    raise unittest.SkipTest(f"amd-smi CLI metric.py not found (looked in {_CLI_DIR})")
+    raise FileNotFoundError(f"amd-smi CLI metric.py not found (looked in {_CLI_DIR})")
 
 
 class _LibraryError(Exception):

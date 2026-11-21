@@ -46,7 +46,7 @@ except ImportError as _import_error:
 
 def setUpModule():
     if _PARSER_IMPORT_ERROR is not None:
-        raise unittest.SkipTest(f"amd-smi CLI parser unusable: {_PARSER_IMPORT_ERROR}")
+        raise ImportError(f"amd-smi CLI parser unusable: {_PARSER_IMPORT_ERROR}")
 
 
 def tearDownModule():

@@ -5,7 +5,7 @@
 """`amd-smi static --cuid` output shape and the CUID component binding.
 
 Reporting tests stub the C library and use the real CLI and logger across two
-GPUs. Binding tests load this tree's py-interface and skip only when
+GPUs. Binding tests load this tree's py-interface and fail when
 libamd_smi.so cannot be loaded.
 """
 
@@ -20,14 +20,23 @@ import unittest
 from contextlib import redirect_stdout
 from unittest import mock
 
-from common.common import cli_search_order, fake_module, find_cli_dir, load_cli_module, stub_modules
+from common.common import (
+    amdsmi_interface_path,
+    cli_search_order,
+    fake_module,
+    find_cli_dir,
+    load_cli_module,
+    stub_modules,
+)
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _CLI_DIR = find_cli_dir(*cli_search_order(_THIS_DIR))
 STATIC_PATH = os.path.join(_CLI_DIR, "subcommands", "static.py") if _CLI_DIR else None
-_SOURCE_PY_INTERFACE_DIR = os.path.normpath(
-    os.path.join(_THIS_DIR, "..", "..", "..", "..", "py-interface")
-)
+try:
+    # The checkout's py-interface/, or the installed amdsmi/ package, which holds the same files.
+    _SOURCE_PY_INTERFACE_DIR = str(amdsmi_interface_path(__file__).parent)
+except FileNotFoundError:
+    _SOURCE_PY_INTERFACE_DIR = None
 _PY_INTERFACE_PACKAGE = "amdsmi_py_interface_under_test"
 
 
@@ -83,8 +92,8 @@ class _BindingTestBase(unittest.TestCase):
         # installed amdsmi nor the stub the CLI classes register can stand in.
         # Loaded without the package __init__, which needs the generated
         # _version.py.
-        if not os.path.isfile(os.path.join(_SOURCE_PY_INTERFACE_DIR, "amdsmi_interface.py")):
-            raise unittest.SkipTest(f"no py-interface at {_SOURCE_PY_INTERFACE_DIR}")
+        if _SOURCE_PY_INTERFACE_DIR is None:
+            raise FileNotFoundError("amdsmi_interface.py not found in the checkout or the install")
         package = types.ModuleType(_PY_INTERFACE_PACKAGE)
         package.__path__ = [_SOURCE_PY_INTERFACE_DIR]
         sys.modules[_PY_INTERFACE_PACKAGE] = package
@@ -96,7 +105,7 @@ class _BindingTestBase(unittest.TestCase):
             raise
         if interface.amdsmi_wrapper._loaded_lib_path is None:
             cls._forget_package()
-            raise unittest.SkipTest("libamd_smi.so could not be loaded")
+            raise ImportError("libamd_smi.so could not be loaded")
         cls.interface = interface
         cls.parameter_exception = exception.AmdSmiParameterException
 

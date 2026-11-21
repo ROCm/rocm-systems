@@ -97,7 +97,7 @@ class TestListDevicesNicOutput(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not LIST_PATH or not os.path.isfile(LIST_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI list_devices.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         _stub_cli_imports(cls)
@@ -150,7 +150,7 @@ class TestStaticNicJson(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         if not STATIC_PATH or not os.path.isfile(STATIC_PATH):
-            raise unittest.SkipTest(
+            raise FileNotFoundError(
                 f"amd-smi CLI static.py not found (looked in {_CLI_DIR or amdsmi_path})"
             )
         _stub_cli_imports(cls)
