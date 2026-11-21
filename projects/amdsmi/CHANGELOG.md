@@ -140,6 +140,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed `amd-smi partition` showing a crash or a wrong partition ID when a GPU's profile query fails**.  
+  - With `--current`, a failure on the first GPU stopped the command with a Python error, and a failure on a later GPU showed the previous GPU's partition ID. With `--accelerator`, the failing GPU was shown as partition `0`. The failing GPU's row now shows `N/A` in both tables.
+
 - **Fixed `amd-smi reset --gpureset` resetting only the first GPU on UALink systems**.  
   - Each UALink GPU is now reset individually; GPUs in an XGMI hive are still reset once per hive.
 

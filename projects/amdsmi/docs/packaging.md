@@ -116,7 +116,8 @@ Legend: ✅ supported and tested · 🟡 supported, pick one recommended · ⛔ 
 
 | Path | `amd-smi` CLI | `import amdsmi` |
 | ---- | ------------- | --------------- |
-| deb/rpm | ✅ | ✅ |
+| System package (deb/rpm) | ✅ | ✅ |
+| TheRock native package (`amdrocm-amdsmi`) | ✅ | ✅ (with `PYTHONPATH` set) |
 | TheRock tarball | ✅ | ✅ (with `PYTHONPATH` set) |
 | ROCm pip | ✅ | ✅ (with `PYTHONPATH` set) |
 | ROCm pip in venv | ✅ | ✅ (with `PYTHONPATH` set) |
