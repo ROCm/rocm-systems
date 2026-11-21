@@ -66,6 +66,16 @@ typedef int (*rocprofiler_tool_attach_t)(rocprofiler_client_detach_t detach_func
 
 /**
  * @brief Prototype for the detach function where a tool can temporarily suspend operations.
+ *
+ * A detach ends an attach session: the client stays registered, ::rocprofiler_tool_attach_t is
+ * called again on the next attach, and the tool's ::rocprofiler_tool_finalize_t is called when
+ * rocprofiler finalizes (e.g. at process exit). A ::rocprofiler_client_finalize_t request for
+ * this client made while this function runs is ignored. If finalization begins (e.g. the process
+ * exits) while this function, or a ::rocprofiler_tool_attach_t, runs on another thread, it waits
+ * for the function to return, for up to 30 seconds, and then proceeds. Attach and detach
+ * requests made once
+ * finalization has begun fail with ::ROCPROFILER_STATUS_ERROR_FINALIZED.
+ *
  * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure in
  * ::rocprofiler_tool_configure_attach_result_t.
  */

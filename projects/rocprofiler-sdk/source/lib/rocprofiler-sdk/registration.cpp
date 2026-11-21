@@ -84,9 +84,12 @@
 
 #include <dlfcn.h>
 #include <link.h>
+#include <pthread.h>
 #include <unistd.h>
+#include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -94,6 +97,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -101,6 +105,7 @@
 #include <system_error>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 extern "C" {
@@ -735,6 +740,209 @@ get_registration_mutex()
     return _v;
 }
 
+// Thread that is running finalize(). A finalize() reached from inside it on the same thread (e.g.
+// a tool that calls exit() from its finalize callback) must return: std::call_once would wait for
+// itself.
+bool&
+get_thread_in_finalize()
+{
+    static thread_local bool _v = false;
+    return _v;
+}
+
+// Set once finalization has begun: by finalize(), or by process exit while an attach, detach or
+// client finalization is in progress. Attaches and detaches requested from then on are refused,
+// and client finalize requests wait for the finalization instead.
+std::atomic<bool>&
+get_finalize_requested()
+{
+    static auto _v = std::atomic<bool>{false};
+    return _v;
+}
+
+// Number of attach, detach and explicit client finalization operations in progress on any thread,
+// and on the calling thread. Finalization waits for the operations on other threads before it
+// tears rocprofiler-sdk and the tools down: no tool_attach, tool_detach or tool finalize callback
+// may be running underneath it.
+std::atomic<int64_t>&
+get_active_operations()
+{
+    static auto _v = std::atomic<int64_t>{0};
+    return _v;
+}
+
+int64_t&
+get_thread_active_operations()
+{
+    static thread_local int64_t _v = 0;
+    return _v;
+}
+
+// Upper bound on how long finalization waits for the operations in progress. If a tool callback
+// does not return in time, finalization proceeds with a warning (the behavior before operations
+// were waited for), so a stuck tool cannot hang process exit indefinitely. Once a wait has timed
+// out, later waits do not wait again: a stuck tool delays process exit once, not once per exit
+// handler registered by a past operation.
+constexpr auto active_operation_wait_limit = std::chrono::seconds{30};
+
+std::atomic<bool>&
+get_active_operation_wait_abandoned()
+{
+    static auto _v = std::atomic<bool>{false};
+    return _v;
+}
+
+// Marks that finalization has begun (see get_finalize_requested()) and waits for the operations in
+// progress on other threads. The flag is stored before the operation count is loaded, while
+// make_client_operation_scope() callers count their operation before they load the flag, so one of
+// the two sides always sees the other: an operation is either refused or waited for.
+void
+request_finalization(std::string_view _requester)
+{
+    get_finalize_requested().store(true, std::memory_order_seq_cst);
+
+    auto&      _active = get_active_operations();
+    const auto _own    = get_thread_active_operations();
+    if(_active.load(std::memory_order_seq_cst) <= _own) return;
+    if(get_active_operation_wait_abandoned().load(std::memory_order_acquire)) return;
+
+    ROCP_INFO << _requester << " is waiting for "
+              << (_active.load(std::memory_order_seq_cst) - _own)
+              << " in-progress attach/detach/finalize operation(s) on other threads";
+
+    const auto _deadline = std::chrono::steady_clock::now() + active_operation_wait_limit;
+    while(_active.load(std::memory_order_seq_cst) > _own)
+    {
+        if(std::chrono::steady_clock::now() >= _deadline)
+        {
+            get_active_operation_wait_abandoned().store(true, std::memory_order_release);
+            ROCP_WARNING << _requester << " is proceeding while a tool attach, detach or finalize "
+                         << "callback is still running after "
+                         << active_operation_wait_limit.count() << " seconds";
+            return;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+
+    ROCP_INFO << _requester << " resumed: in-progress operations completed";
+}
+
+// Exit handler registered when each operation starts. Exit handlers run in the reverse order of
+// their registration, so this one runs before the destructors of the static objects that existed
+// when the operation started. That includes the tool's, which were registered when the tool was
+// loaded: later than rocprofiler-sdk's own exit handler, and for a library loaded before main also
+// run by _dl_fini ahead of it. Without this handler, a process exit racing with a tool_detach on
+// another thread destroys the tool's static objects while tool_detach still uses them.
+void
+request_finalization_at_exit()
+{
+    request_finalization("process exit");
+}
+
+// Clients whose tool_detach or tool finalize callback is running, with the thread running it. A
+// finalize request for a client whose tool_detach is running is ignored from any thread: a detach
+// only ends an attach session, so the client stays registered for the next attach and is
+// finalized when rocprofiler-sdk finalizes. A finalize request for a client whose finalize
+// callback is running returns once that callback has completed, unless it is made from the thread
+// running it, in which case it is ignored.
+enum class client_callback_t
+{
+    detach,
+    finalize,
+};
+
+struct clients_in_callback_t
+{
+    struct entry_t
+    {
+        uint64_t          handle = 0;
+        pthread_t         thread = {};
+        client_callback_t kind   = client_callback_t::detach;
+    };
+
+    std::mutex           mutex   = {};
+    std::vector<entry_t> entries = {};
+};
+
+clients_in_callback_t&
+get_clients_in_callback()
+{
+    // intentionally leaked: used by callbacks that are still running during process exit
+    static auto* _v = new clients_in_callback_t{};
+    return *_v;
+}
+
+// Whether a callback of the given kind is running for the client: on the calling thread when
+// `_this_thread` is set, otherwise on any thread.
+bool
+is_client_in_callback(uint64_t _handle, client_callback_t _kind, bool _this_thread)
+{
+    const auto _self = pthread_self();
+    auto&      _v    = get_clients_in_callback();
+    auto       _lk   = std::unique_lock<std::mutex>{_v.mutex};
+    return std::any_of(_v.entries.begin(), _v.entries.end(), [&](const auto& _entry) {
+        return _entry.handle == _handle && _entry.kind == _kind &&
+               (!_this_thread || pthread_equal(_entry.thread, _self) != 0);
+    });
+}
+
+common::scope_destructor
+mark_client_in_callback(uint64_t _handle, client_callback_t _kind)
+{
+    const auto _thread = pthread_self();
+    {
+        auto& _v  = get_clients_in_callback();
+        auto  _lk = std::unique_lock<std::mutex>{_v.mutex};
+        _v.entries.push_back({_handle, _thread, _kind});
+    }
+    return common::scope_destructor{[_handle, _thread, _kind]() {
+        auto& _v  = get_clients_in_callback();
+        auto  _lk = std::unique_lock<std::mutex>{_v.mutex};
+        auto  _it = std::find_if(_v.entries.begin(), _v.entries.end(), [&](const auto& _entry) {
+            return _entry.handle == _handle && _entry.kind == _kind &&
+                   pthread_equal(_entry.thread, _thread) != 0;
+        });
+        if(_it != _v.entries.end()) _v.entries.erase(_it);
+    }};
+}
+
+// After fork(), only the thread that called fork() exists in the child: the operations and
+// callbacks of the other threads never complete there, and a mutex they held stays locked.
+void
+reset_client_operations_in_child()
+{
+    get_active_operations().store(get_thread_active_operations(), std::memory_order_seq_cst);
+
+    auto&      _v    = get_clients_in_callback();
+    const auto _self = pthread_self();
+    new(&_v.mutex) std::mutex{};
+    _v.entries.erase(std::remove_if(_v.entries.begin(),
+                                    _v.entries.end(),
+                                    [_self](const auto& _entry) {
+                                        return pthread_equal(_entry.thread, _self) == 0;
+                                    }),
+                     _v.entries.end());
+}
+
+// Counts an attach, detach or explicit client finalization operation on the calling thread for the
+// lifetime of the returned object. Inside finalize() nothing is counted: it already waited for the
+// operations on other threads before it runs the client finalizers. The fork handler for this
+// bookkeeping is registered when the library is loaded (init_client_operations_at_load).
+common::scope_destructor
+make_client_operation_scope()
+{
+    if(get_thread_in_finalize()) return common::scope_destructor{[]() {}};
+
+    get_active_operations().fetch_add(1, std::memory_order_seq_cst);
+    ++get_thread_active_operations();
+    std::atexit(&request_finalization_at_exit);
+
+    return common::scope_destructor{[]() {
+        --get_thread_active_operations();
+        get_active_operations().fetch_sub(1, std::memory_order_seq_cst);
+    }};
+}
+
 bool
 invoke_client_configure(std::optional<client_library>& itr)
 {
@@ -837,6 +1045,24 @@ invoke_client_initializer(std::optional<client_library>& itr)
     if(itr && itr->configure_result && itr->configure_result->initialize)
     {
         rocprofiler_client_finalize_t client_fini_func = [](rocprofiler_client_id_t _id) -> void {
+            // A detach only ends an attach session: a request for a client whose tool_detach is
+            // running is ignored, so the client stays registered for the next attach and is
+            // finalized when rocprofiler-sdk finalizes.
+            if(is_client_in_callback(_id.handle, client_callback_t::detach, false))
+            {
+                ROCP_INFO << "ignoring client finalization request (client_id=" << _id.handle
+                          << ") made while its tool_detach runs: the client stays registered";
+                return;
+            }
+
+            // a request from inside the client's own finalize callback is re-entrant
+            if(is_client_in_callback(_id.handle, client_callback_t::finalize, true))
+            {
+                ROCP_INFO << "ignoring re-entrant client finalization request (client_id="
+                          << _id.handle << ") made from its finalize callback";
+                return;
+            }
+
             // if there is only one client, just fully finalize
             if(get_clients()->size() == 1)
                 finalize();
@@ -904,6 +1130,15 @@ invoke_client_attaches()
     ROCP_INFO << "Calling tool_attach for all registered clients. # of clients: "
               << get_num_clients();
 
+    // count the operation before checking whether finalization has begun: see
+    // request_finalization()
+    auto _operation = make_client_operation_scope();
+    if(get_finalize_requested().load(std::memory_order_seq_cst))
+    {
+        ROCP_WARNING << "ignoring attach request: rocprofiler-sdk is finalizing";
+        return ROCPROFILER_STATUS_ERROR_FINALIZED;
+    }
+
     if(!get_clients())
     {
         ROCP_INFO << "No registered clients to attach";
@@ -925,6 +1160,12 @@ invoke_client_attaches()
                                                       _contexts.data(),
                                                       _contexts.size(),
                                                       itr->configure_attach_result->tool_data);
+
+            // Finalization may have begun while tool_attach ran. It waits for this attach, but
+            // only for a bounded time, after which it may have destroyed the clients: do not
+            // touch them.
+            if(get_finalize_requested().load(std::memory_order_seq_cst))
+                return ROCPROFILER_STATUS_ERROR_FINALIZED;
 
             ret              = ROCPROFILER_STATUS_SUCCESS;
             invoked_attaches = true;
@@ -962,6 +1203,16 @@ invoke_client_detaches()
     ROCP_INFO << "Calling tool_detach for all registered clients. # of clients: "
               << get_num_clients();
 
+    // count the operation before checking whether finalization has begun: see
+    // request_finalization()
+    auto _operation = make_client_operation_scope();
+    if(get_finalize_requested().load(std::memory_order_seq_cst))
+    {
+        ROCP_WARNING << "ignoring detach request: rocprofiler-sdk is finalizing, so its clients "
+                        "are finalized instead of detached";
+        return ROCPROFILER_STATUS_ERROR_FINALIZED;
+    }
+
     if(!get_clients())
     {
         ROCP_INFO << "No registered clients to detach";
@@ -973,7 +1224,9 @@ invoke_client_detaches()
     {
         if(itr && itr->configure_attach_result && itr->configure_attach_result->tool_detach)
         {
-            context::stop_client_contexts(itr->internal_client_id);
+            const auto _client_id = itr->internal_client_id;
+
+            context::stop_client_contexts(_client_id);
 
             hsa::async_copy_sync();
             hsa::queue_controller_sync();
@@ -982,13 +1235,21 @@ invoke_client_detaches()
             // may survive. On timeout this abandons+disables signal-less process-wide
             // (correct here -- the client is going away). No-op with the feature off.
             kfd::signal_less_fence_completions();
-            pc_sampling::service_sync(itr->internal_client_id);
+            pc_sampling::service_sync(_client_id);
 
-            auto _fini_status = get_fini_status();
-            if(_fini_status == 0) set_fini_status(-1);
-            itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
-            if(_fini_status == 0) set_fini_status(_fini_status);
-            context::deactivate_client_contexts(itr->internal_client_id);
+            {
+                auto _in_callback =
+                    mark_client_in_callback(_client_id.handle, client_callback_t::detach);
+                itr->configure_attach_result->tool_detach(itr->configure_attach_result->tool_data);
+            }
+
+            // Finalization may have begun while tool_detach ran. It waits for this detach, but
+            // only for a bounded time, after which it may have destroyed the clients: do not
+            // touch them. Finalization deactivates the client's contexts itself.
+            if(get_finalize_requested().load(std::memory_order_seq_cst))
+                return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
+            context::deactivate_client_contexts(_client_id);
 
             ret = ROCPROFILER_STATUS_SUCCESS;
         }
@@ -1012,6 +1273,18 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 {
     ROCP_INFO << __FUNCTION__ << "(client_id=" << client_id.handle << ")";
 
+    // count the operation before checking whether finalization has begun: see
+    // request_finalization(). Finalization finalizes every client, including this one, so a
+    // request made once it has begun waits for it instead.
+    auto _operation = make_client_operation_scope();
+    if(!get_thread_in_finalize() && get_finalize_requested().load(std::memory_order_seq_cst))
+    {
+        ROCP_INFO << "client finalization request (client_id=" << client_id.handle
+                  << ") waits for the finalization in progress";
+        finalize();
+        return;
+    }
+
     auto _lk = scoped_lock_t{get_registration_mutex()};
 
     if(!get_clients()) return;
@@ -1021,6 +1294,26 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
         if(itr && itr->internal_client_id.handle == client_id.handle &&
            itr->mutable_client_id.handle == client_id.handle)
         {
+            // The client's finalize callback is running on another thread, which set the
+            // function to nullptr. The callback runs without the registration mutex, so this
+            // request cannot wait for the mutex as it used to: it waits for the callback instead
+            // and returns once that has completed.
+            if(itr->configure_result && !itr->configure_result->finalize &&
+               is_client_in_callback(client_id.handle, client_callback_t::finalize, false) &&
+               !is_client_in_callback(client_id.handle, client_callback_t::finalize, true))
+            {
+                // finalize() only gets here after its bounded wait for the operation timed out:
+                // leave the client to the callback's thread rather than waiting again
+                if(get_thread_in_finalize()) return;
+
+                _lk.unlock();
+                ROCP_INFO << "client finalization request (client_id=" << client_id.handle
+                          << ") waits for the finalize callback running on another thread";
+                while(is_client_in_callback(client_id.handle, client_callback_t::finalize, false))
+                    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                return;
+            }
+
             context::stop_client_contexts(itr->internal_client_id);
             if(itr->configure_result && itr->configure_result->finalize)
             {
@@ -1034,6 +1327,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 // set to nullptr so finalize only gets called once
                 rocprofiler_tool_finalize_t _finalize_func = nullptr;
                 std::swap(_finalize_func, itr->configure_result->finalize);
+                auto* _tool_data = itr->configure_result->tool_data;
 
                 hsa::async_copy_sync();
                 hsa::queue_controller_sync();
@@ -1044,10 +1338,22 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 kfd::signal_less_fence_completions();
                 pc_sampling::service_sync(itr->internal_client_id);
 
-                auto _fini_status = get_fini_status();
-                if(_fini_status == 0) set_fini_status(-1);
-                _finalize_func(itr->configure_result->tool_data);
-                if(_fini_status == 0) set_fini_status(_fini_status);
+                // The callback runs without the registration mutex: a tool may finalize
+                // rocprofiler-sdk from inside it (e.g. by calling exit()), which finalizes the
+                // other clients through this function on the same thread.
+                {
+                    auto _in_callback =
+                        mark_client_in_callback(client_id.handle, client_callback_t::finalize);
+                    _lk.unlock();
+                    _finalize_func(_tool_data);
+                    _lk.lock();
+                }
+
+                // Finalization may have begun while the callback ran (see
+                // invoke_client_detaches()).
+                if(!get_thread_in_finalize() &&
+                   get_finalize_requested().load(std::memory_order_seq_cst))
+                    return;
             }
             context::deactivate_client_contexts(itr->internal_client_id);
             itr.reset();
@@ -1079,6 +1385,14 @@ init_logging()
 
 // ensure that logging is always initialized when library is loaded
 bool init_logging_at_load = (init_logging(), true);
+
+// Register the fork handler for the attach/detach bookkeeping, and construct the registry it uses,
+// when the library is loaded: doing so from inside the first operation could copy a half-registered
+// state into a child forked by another thread at that moment.
+bool init_client_operations_at_load =
+    (get_clients_in_callback(),
+     pthread_atfork(nullptr, nullptr, &reset_client_operations_in_child),
+     true);
 
 uint32_t
 get_client_offset()
@@ -1214,10 +1528,22 @@ finalize()
         return;
     }
 
-    static thread_local bool _finalizing = false;
-    if(_finalizing)
+    // A finalize() reached from inside finalize() on this thread, e.g. a tool calling exit() from
+    // its finalize callback, must return: std::call_once would wait for itself. Other threads fall
+    // through and wait for the finalization in progress.
+    if(get_thread_in_finalize())
     {
         ROCP_INFO << "ignoring re-entrant finalization request (value=" << get_fini_status() << ")";
+        return;
+    }
+
+    // Refuse attaches and detaches from now on, and let an attach, detach or client finalization in
+    // progress on another thread finish before rocprofiler-sdk is torn down under its tool
+    // callback.
+    request_finalization("finalization");
+    if(get_fini_status() > 0)
+    {
+        ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
         return;
     }
 
@@ -1225,9 +1551,9 @@ finalize()
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
-        auto finalizing_scope =
-            common::scope_destructor{[]() { _finalizing = false; }, []() { _finalizing = true; }};
-        auto num_clients = get_num_clients();
+        auto _in_finalize = common::scope_destructor{[]() { get_thread_in_finalize() = false; },
+                                                     []() { get_thread_in_finalize() = true; }};
+        auto num_clients  = get_num_clients();
         set_fini_status(-1);
 
         // Signal-less teardown steps 1-6, in the one order that strands no EOP-proven
