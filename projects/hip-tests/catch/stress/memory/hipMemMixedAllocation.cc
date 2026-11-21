@@ -57,9 +57,9 @@ void checkPattern(void* address, size_t size, unsigned char expected,
 }
 }  // namespace
 
-// This bounded test is safe for ordinary CI: it does not attempt to exhaust
-// system RAM. The oversized request checks an allocation error, not residency
-// exhaustion or a driver's behavior near the system commit limit.
+// This bounded stress test does not attempt to exhaust system RAM. The oversized
+// request checks argument rejection, not allocator/residency exhaustion or a
+// driver's behavior near the system commit limit.
 HIP_TEST_CASE(Stress_hipMemMixedAllocation_Recovery) {
   CTX_CREATE();
   HIP_CHECK(hipSetDevice(0));
@@ -84,6 +84,7 @@ HIP_TEST_CASE(Stress_hipMemMixedAllocation_Recovery) {
   access.location = prop.location;
   access.flags = hipMemAccessFlagsProtReadWrite;
   std::vector<unsigned char> readback(64 * 1024);
+  size_t released_bytes = 0;
   {
     // Touch all host pages while keeping up to 1 GiB of mixed GPU allocations.
     std::vector<unsigned char> host_ballast(size_t{256} << 20, 0x6d);
@@ -95,19 +96,27 @@ HIP_TEST_CASE(Stress_hipMemMixedAllocation_Recovery) {
       HIP_CHECK(hipMemAddressReserve(&allocation.address, kChunkSize, 0, nullptr, 0));
       const hipError_t create_result = hipMemCreate(&allocation.handle, kChunkSize, &prop, 0);
       INFO("hipMemCreate result: " << hipGetErrorName(create_result));
-      if (create_result == hipErrorOutOfMemory) break;
+      if (create_result == hipErrorOutOfMemory) {
+        (void)hipGetLastError();
+        break;
+      }
       HIP_CHECK(create_result);
       allocation.created = true;
       HIP_CHECK(hipMemMap(allocation.address, kChunkSize, 0, allocation.handle, 0));
       allocation.mapped = true;
       HIP_CHECK(hipMemSetAccess(allocation.address, kChunkSize, &access, 1));
       HIP_CHECK(hipMemset(allocation.address, static_cast<int>(pair + 1), kChunkSize));
+      released_bytes += kChunkSize;
 
       const hipError_t malloc_result = hipMalloc(&allocation.ordinary, kChunkSize);
       INFO("hipMalloc result: " << hipGetErrorName(malloc_result));
-      if (malloc_result == hipErrorOutOfMemory) break;
+      if (malloc_result == hipErrorOutOfMemory) {
+        (void)hipGetLastError();
+        break;
+      }
       HIP_CHECK(malloc_result);
       HIP_CHECK(hipMemset(allocation.ordinary, static_cast<int>(pair + 65), kChunkSize));
+      released_bytes += kChunkSize;
       ++completed;
     }
     HIP_CHECK(hipDeviceSynchronize());
@@ -120,6 +129,7 @@ HIP_TEST_CASE(Stress_hipMemMixedAllocation_Recovery) {
     const hipError_t rejected_result = hipMalloc(&rejected, std::numeric_limits<size_t>::max());
     if (rejected_result == hipSuccess) HIP_CHECK(hipFree(rejected));
     HIP_CHECK_ERROR(rejected_result, hipErrorOutOfMemory);
+    (void)hipGetLastError();
     for (size_t pair = 0; pair < kPairs; ++pair) {
       INFO("verify allocation pair " << pair);
       auto& allocation = allocations[pair];
@@ -136,12 +146,15 @@ HIP_TEST_CASE(Stress_hipMemMixedAllocation_Recovery) {
                         [](unsigned char value) { return value == 0x6d; }));
   }
 
-  // Both the GPU allocations and committed host ballast have been released.
+  // Reacquire all released GPU bytes, including any partially completed pair.
+  // The host ballast has also been released. This checks capacity recovery but
+  // is not a leak detector on a device with ample spare memory.
   MixedAllocation recovery;
-  HIP_CHECK(hipMalloc(&recovery.ordinary, readback.size()));
-  HIP_CHECK(hipMemset(recovery.ordinary, 0xa7, readback.size()));
+  HIP_CHECK(hipMalloc(&recovery.ordinary, released_bytes));
+  HIP_CHECK(hipMemset(recovery.ordinary, 0xa7, released_bytes));
   HIP_CHECK(hipDeviceSynchronize());
-  checkPattern(recovery.ordinary, readback.size(), 0xa7, readback);
+  checkPattern(recovery.ordinary, released_bytes, 0xa7, readback);
   recovery.release();
+  HIP_CHECK(hipGetLastError());
   CTX_DESTROY();
 }
