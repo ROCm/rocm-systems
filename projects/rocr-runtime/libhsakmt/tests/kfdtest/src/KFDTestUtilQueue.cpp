@@ -22,6 +22,7 @@
  */
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <vector>
 #include <list>
@@ -29,6 +30,8 @@
 #include "PM4Queue.hpp"
 #include "SDMAPacket.hpp"
 #include "PM4Packet.hpp"
+#include "Dispatch.hpp"
+#include "ShaderStore.hpp"
 #include "KFDTestUtil.hpp"
 #include "KFDTestUtilQueue.hpp"
 #include "KFDBaseComponentTest.hpp"
@@ -100,11 +103,15 @@ class AsyncMPSQ {
                 WARN() << "Unsupported queue type!" << std::endl;
         }
 
-        unsigned int TimePacketSize(void) {
+        /* Takes the node rather than reading m_queue->GetFamilyId(): this is
+         * called to size the queue, so it runs before CreateNewQueue().
+         */
+        unsigned int TimePacketSize(int node) {
             if (m_queueType == HSA_QUEUE_SDMA)
                 return SDMATimePacket(0).SizeInBytes();
             else if (m_queueType == HSA_QUEUE_COMPUTE)
-                return PM4ReleaseMemoryPacket(m_queue->GetFamilyId(), 0, 0, 0, 0, 0).SizeInBytes();
+                return PM4ReleaseMemoryPacket(
+                        g_baseTest->GetFamilyIdFromNodeId(node), 0, 0, 0, 0, 0).SizeInBytes();
             return 0;
         }
 
@@ -141,13 +148,18 @@ void AsyncMPSQ::Destroy(void) {
     /* Delete queue first.*/
     if (m_queue) {
         delete m_queue;
+        m_queue = NULL;
     }
 
-    if (m_buf)
+    if (m_buf) {
         delete m_buf;
+        m_buf = NULL;
+    }
 
-    if (m_event)
+    if (m_event) {
         HSAKMT_CALL(hsaKmtDestroyEvent, g_baseTest->m_hsakmt_current_ctx, m_event);
+        m_event = NULL;
+    }
 }
 
 void AsyncMPSQ::AllocTimeStampBuf(int packetCount) {
@@ -197,7 +209,7 @@ void AsyncMPSQ::PlacePacketOnNode(PacketList &packets, int node, TSPattern tsp =
     int i = -1;
     int packetSize = 0;
     /* Calculate the space to put all timestamp packet.*/
-    int timePacketSize = TimePacketSize() * m_ts_count;
+    int timePacketSize = TimePacketSize(node) * m_ts_count;
     /* Another one page space to put fence, trap, etc*/
     int extraPacketSize = PAGE_SIZE + timePacketSize;
 
@@ -324,27 +336,208 @@ class AsyncMPMQ {
 
 
 /*
- * SDMA queue helper functions.
+ * PM4 queue helper functions.
+ *
+ * A blit copy is a compute dispatch, so it reaches the queue as a single
+ * PM4IndirectBufPacket and slots into the timestamp scheme above unchanged.
+ * BuildIb() ends the IB with a ReleaseMem/WaitRegMem fence, so the CP does not
+ * retire the IB packet until the dispatch has actually finished - which is what
+ * makes the timestamp placed after it meaningful.
  */
 
-bool sort_SDMACopyParams(const SDMACopyParams &a1, const SDMACopyParams &a2) {
+/* One thread moves 16 bytes per iteration. See BlitCopyIsa. */
+#define BLIT_CHUNK_BYTES        16
+/* Threads per workgroup. Large enough to amortize workgroup launch, small
+ * enough that a partition with few CUs still gets several workgroups each.
+ */
+#define BLIT_WORKGROUP_SIZE     256
+/* Workgroups we aim to have resident per CU. One 256-thread group puts a
+ * single wave on each of the CU's four SIMDs, which sounds like too few until
+ * you look at what a wider grid does to the access pattern.
+ *
+ * The shader is grid-strided, so the stride is the whole grid: at four groups
+ * per CU on a 228-CU node that is a 3.7MB step, and every one of the resulting
+ * 3648 waves walks memory in strides that large. Nothing stays in an open DRAM
+ * row and the streams thrash each other. Measured on MI300A, going from four
+ * groups per CU to one takes a peer copy from 13.5 to 20 GB/s and a local one
+ * from 14.4 to 35 GB/s.
+ *
+ * Occupancy is not what covers the memory latency here - the unrolled loop is,
+ * by keeping four loads in flight per wave. See BlitCopyIsa.
+ */
+#define BLIT_WORKGROUPS_PER_CU  1
+/* Fallback for topologies that do not report a usable CU count. */
+#define BLIT_DEFAULT_CUS        16
+/* Enough for BlitCopyIsa's highest register, v39: 40 VGPRs on gfx9, 80 on
+ * gfx10+ in wave32. Costs no occupancy on CDNA, which allocates 512 VGPRs per
+ * SIMD and caps at 8 waves either way.
+ */
+#define BLIT_VGPR_GRANULES      9
+
+struct BlitGeometry {
+    unsigned int wgSize;
+    unsigned int log2WgSize;
+    unsigned int gridThreads;
+};
+
+/* Size the grid to the node rather than to a fixed number, so the geometry
+ * follows the partition: under DPX/QPX each logical node reports its own share
+ * of the CUs and gets a correspondingly smaller grid.
+ *
+ * Grid size is a pure performance knob. The shader is grid-strided, so any grid
+ * copies the whole buffer correctly; a bad one just costs GB/s.
+ */
+static BlitGeometry GetBlitGeometry(HSAuint32 node, HSAuint64 chunks) {
+    HsaNodeProperties props = {0};
+    BlitGeometry geo;
+    HSAuint64 useful;
+    unsigned int cus = BLIT_DEFAULT_CUS;
+
+    geo.wgSize = BLIT_WORKGROUP_SIZE;
+    for (geo.log2WgSize = 0; (1u << geo.log2WgSize) < geo.wgSize; geo.log2WgSize++)
+        {}
+    /* The shader derives the global id by shifting, so this has to be exact.*/
+    EXPECT_EQ(1u << geo.log2WgSize, geo.wgSize)
+        << "BLIT_WORKGROUP_SIZE must be a power of 2" << std::endl;
+
+    if (HSAKMT_CALL(hsaKmtGetNodeProperties, g_baseTest->m_hsakmt_current_ctx, node, &props)
+                == HSAKMT_STATUS_SUCCESS
+            && props.NumSIMDPerCU && props.NumFComputeCores)
+        cus = props.NumFComputeCores / props.NumSIMDPerCU;
+
+    geo.gridThreads = cus * BLIT_WORKGROUPS_PER_CU * geo.wgSize;
+
+    /* Launching threads with nothing to copy only costs launch time. Round up
+     * to keep the grid a whole number of workgroups.
+     */
+    useful = ALIGN_UP(chunks, geo.wgSize);
+    if (useful && useful < geo.gridThreads)
+        geo.gridThreads = useful;
+
+    return geo;
+}
+
+/* One blit copy: the arg buffers, the dispatch, and the IB it built.
+ *
+ * The IB cannot be replayed - BuildIb()'s fence works by having a ReleaseMem
+ * write 0xdeadbeef into a NOP payload dword inside the IB itself, so a second
+ * run would find the dword already set and skip the wait. Each placed packet
+ * therefore gets its own BlitCopy.
+ */
+class BlitCopy {
+    public:
+        BlitCopy(HSAuint32 node, void *dst, void *src, HSAuint64 size,
+                        const HsaMemoryBuffer &isaBuf)
+                :m_args(PAGE_SIZE, node), m_params(PAGE_SIZE, node), m_dispatch(isaBuf) {
+            HSAuint64 chunks = size / BLIT_CHUNK_BYTES;
+            void **args = m_args.As<void **>();
+            HSAuint32 *params = m_params.As<HSAuint32 *>();
+
+            EXPECT_EQ(0ULL, size % BLIT_CHUNK_BYTES)
+                << "Blit copy needs a size that is a multiple of "
+                << BLIT_CHUNK_BYTES << " bytes" << std::endl;
+            EXPECT_EQ(0ULL, (HSAuint64)src % BLIT_CHUNK_BYTES);
+            EXPECT_EQ(0ULL, (HSAuint64)dst % BLIT_CHUNK_BYTES);
+            /* The shader keeps its offsets in 32 bits. */
+            EXPECT_LT(size, 1ULL << 32)
+                << "Blit copy is limited to buffers under 4GB" << std::endl;
+
+            BlitGeometry geo = GetBlitGeometry(node, chunks);
+
+            args[0] = src;
+            args[1] = dst;
+
+            /* Precompute the loop geometry so the shader needs no division.
+             * Every thread runs the same itersPerThread, which keeps the main
+             * loop uniform; whatever does not divide evenly is left to the
+             * guarded remainder pass.
+             */
+            params[0] = chunks / geo.gridThreads;                   // itersPerThread
+            params[1] = geo.gridThreads * BLIT_CHUNK_BYTES;         // strideBytes
+            params[2] = chunks % geo.gridThreads;                   // remChunks
+            params[3] = params[0] * params[1];                      // remBaseByte
+            params[4] = geo.log2WgSize;
+
+            m_dispatch.SetArgs(args, params);
+            /* BlitCopyIsa reaches v39, past the 20 VGPRs a dispatch hands out
+             * by default. Its unrolled loop needs the registers: they are what
+             * lets it keep four loads in flight per wave instead of one.
+             */
+            m_dispatch.SetVgprGranules(BLIT_VGPR_GRANULES);
+            m_dispatch.SetWorkgroupSize(geo.wgSize, 1, 1);
+            /* SetDim() counts threads, not workgroups - DISPATCH_INITIATOR
+             * sets USE_THREAD_DIMENSIONS.
+             */
+            m_dispatch.SetDim(geo.gridThreads, 1, 1);
+
+            m_ib = m_dispatch.PrepareIb();
+        }
+
+        sharedPacket Packet(void) { return sharedPacket(new PM4IndirectBufPacket(m_ib)); }
+
+    private:
+        HsaMemoryBuffer m_args;
+        HsaMemoryBuffer m_params;
+        Dispatch m_dispatch;
+        IndirectBuffer *m_ib;
+};
+
+/* The shader text is the same for every copy on a node, so assemble it once.
+ * The cache is per call rather than static: the buffers are GPU mappings, and
+ * they must not outlive the KFD context the test opened them under.
+ */
+typedef std::map<HSAuint32, std::shared_ptr<HsaMemoryBuffer>> BlitIsaCache;
+
+static const HsaMemoryBuffer &GetBlitIsa(HSAuint32 node, BlitIsaCache &cache) {
+    BlitIsaCache::iterator it = cache.find(node);
+
+    if (it == cache.end()) {
+        std::shared_ptr<HsaMemoryBuffer> buf(new HsaMemoryBuffer(PAGE_SIZE, node, true, false, true));
+        Assembler *asmb = g_baseTest->GetAssemblerFromNodeId(node);
+
+        EXPECT_NE(asmb, nullptr) << "No assembler for node " << node << std::endl;
+        if (asmb)
+            EXPECT_SUCCESS(asmb->RunAssembleBuf(BlitCopyIsa, buf->As<char *>()));
+
+        it = cache.insert(std::make_pair(node, buf)).first;
+    }
+
+    return *it->second;
+}
+
+/*
+ * Copy queue helper functions, shared by both engines.
+ */
+
+bool sort_GpuCopyParams(const GpuCopyParams &a1, const GpuCopyParams &a2) {
     if (a1.node != a2.node)
         return a1.node < a2.node;
     return a1.group < a2.group;
 }
 
 /*
- * Copy from src to dst with corresponding sDMA.
+ * Copy from src to dst with the sDMA engines or a CU (blit) copy kernel.
  * It will try to merge copy on same node into one queue unless
- * caller forbid it by setting mashup to 0 and SDMACopyParams::group to different values.
+ * caller forbid it by setting mashup to 0 and GpuCopyParams::group to different values.
  * On condition of mashup is 1, it will re-sort array into mergeable state.
  * All mergeable copy will be placed together.
  * On condition os mashup is 0, it keeps array in original order.
  * It will merge nearby copy if they have same group and node anyway.
+ *
+ * Only packet construction depends on the engine. Queue placement, submission,
+ * waiting and reporting are shared.
  */
-void sdma_multicopy(std::vector<SDMACopyParams> &array, int mashup, TSPattern tsp) {
+void gpu_multicopy(std::vector<GpuCopyParams> &array, CopyEngine engine, int mashup, TSPattern tsp) {
     int i, packet_index = 0, queue_index = 0;
     PacketList packetList;
+    /* Declared before the dispatches so it outlives them: Dispatch keeps a
+     * reference to its ISA buffer.
+     */
+    BlitIsaCache isaCache;
+    /* The blit resources back the IBs the queues are still reading, so they
+     * have to stay alive until after Wait().
+     */
+    std::vector<std::shared_ptr<BlitCopy>> blits;
     AsyncMPMQ obj;
     std::vector<sharedAsyncMPSQ> handle;
 
@@ -352,11 +545,22 @@ void sdma_multicopy(std::vector<SDMACopyParams> &array, int mashup, TSPattern ts
      * We might change the order of array only here.
      */
     if (mashup)
-        std::sort(array.begin(), array.end(), sort_SDMACopyParams);
+        std::sort(array.begin(), array.end(), sort_GpuCopyParams);
 
     for (i = 0; i < array.size(); i++) {
-        sharedPacket packet(new
-                SDMACopyDataPacket(g_baseTest->GetFamilyIdFromNodeId(array[i].node), array[i].dst, array[i].src, array[i].size));
+        sharedPacket packet;
+
+        if (engine == COPY_BLIT) {
+            std::shared_ptr<BlitCopy> blit(new BlitCopy(array[i].node, array[i].dst, array[i].src,
+                        array[i].size, GetBlitIsa(array[i].node, isaCache)));
+            packet = blit->Packet();
+            blits.push_back(blit);
+        } else {
+            packet = sharedPacket(new SDMACopyDataPacket(
+                        g_baseTest->GetFamilyIdFromNodeId(array[i].node),
+                        array[i].dst, array[i].src, array[i].size));
+        }
+
         packetList.push_back(packet);
 
         /* We put the real queue_id in local handle[] to reduce some assignment.*/
@@ -393,7 +597,7 @@ void sdma_multicopy(std::vector<SDMACopyParams> &array, int mashup, TSPattern ts
 }
 
 static
-void sdma_multicopy_report(std::vector<SDMACopyParams> &array, HSAuint64 countPerGroup, std::stringstream *msg,
+void copy_report(std::vector<GpuCopyParams> &array, HSAuint64 countPerGroup, std::stringstream *msg,
                                 HSAuint64 &timeConsumptionMin, HSAuint64 &timeConsumptionMax,
                                 HSAuint64 &totalSizeMin, HSAuint64 &totalSizeMax) {
     HSAuint64 begin, end;
@@ -484,13 +688,18 @@ void sdma_multicopy_report(std::vector<SDMACopyParams> &array, HSAuint64 countPe
 }
 
 /*
- * Do copy with corresponding sDMA.
+ * Do copy with the requested engine and report the bandwidth achieved.
  */
 void
-sdma_multicopy(SDMACopyParams *copyArray, int arrayCount,
+gpu_multicopy(GpuCopyParams *copyArray, int arrayCount, CopyEngine engine,
                         HSAuint64 *minSpeed, HSAuint64 *maxSpeed, std::stringstream *msg) {
-    const HSAuint64 countPerGroup = minSpeed || maxSpeed ? 100 : 1;
-    std::vector<SDMACopyParams> array;
+    /* A blit copy costs an IB and an HsaEvent per repeat, where an SDMA copy is
+     * just a packet, so it repeats fewer times. Even 10 repeats of a 32MB copy
+     * per queue is already 320MB of traffic.
+     */
+    const HSAuint64 repeats = engine == COPY_BLIT ? 10 : 100;
+    const HSAuint64 countPerGroup = minSpeed || maxSpeed ? repeats : 1;
+    std::vector<GpuCopyParams> array;
     HSAuint64 totalSizeMin, totalSizeMax, timeConsumptionMin, timeConsumptionMax;
 
     for (int i = 0; i < arrayCount; i++) {
@@ -500,9 +709,9 @@ sdma_multicopy(SDMACopyParams *copyArray, int arrayCount,
             array.push_back(copyArray[i]);
     }
 
-    sdma_multicopy(array, 0, ALLTS);
+    gpu_multicopy(array, engine, 0, ALLTS);
 
-    sdma_multicopy_report(array, countPerGroup, msg,
+    copy_report(array, countPerGroup, msg,
             timeConsumptionMin, timeConsumptionMax,
             totalSizeMin, totalSizeMax);
 
@@ -512,8 +721,3 @@ sdma_multicopy(SDMACopyParams *copyArray, int arrayCount,
     if (maxSpeed)
         *maxSpeed = MB_PER_SEC(totalSizeMax, CounterToNanoSec(timeConsumptionMax));
 }
-
-/*
- * PM4 queue helper functions.
- */
-// TODO
