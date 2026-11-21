@@ -3376,8 +3376,11 @@ bool VirtualGPU::awaitCompletion(CommandBatch* cb, const amd::Event* waitingEven
       head->setStatus(CL_COMPLETE);
     } else if (head->status() == CL_RUNNING) {
       head->setStatus(CL_COMPLETE);
-    } else if ((head->status() != CL_COMPLETE) && (current != nullptr)) {
-      LogPrintfError("Unexpected command status - %d!", head->status());
+    } else if (head->status() != CL_COMPLETE) {
+      // A command terminated before it ran holds its resources until this point
+      if (!head->ReleaseDeferredResources() && (current != nullptr)) {
+        LogPrintfError("Unexpected command status - %d!", head->status());
+      }
     }
 
     // Check if it's a waiting command
@@ -3690,8 +3693,11 @@ bool VirtualGPU::profilingCollectResults(CommandBatch* cb, const amd::Event* wai
       first->setStatus(CL_COMPLETE, endTimeStamp);
     } else if (first->status() == CL_RUNNING) {
       first->setStatus(CL_COMPLETE, endTimeStamp);
-    } else if ((first->status() != CL_COMPLETE) && (current != nullptr)) {
-      LogPrintfError("Unexpected command status - %d!", first->status());
+    } else if (first->status() != CL_COMPLETE) {
+      // A command terminated before it ran holds its resources until this point
+      if (!first->ReleaseDeferredResources() && (current != nullptr)) {
+        LogPrintfError("Unexpected command status - %d!", first->status());
+      }
     }
 
     // Do we wait this event?
