@@ -418,6 +418,15 @@ memory:
   Unit_hipHostUnregister_Ptr_Different_Than_Specified_To_Register:
     <<: *level_default
     tags: [alloc, P1]
+  Unit_hipHostUnregister_InteriorPtr:
+    <<: *level_default
+    tags: [alloc, P1]
+  Unit_hipHostUnregister_DevicePtr:
+    <<: *level_default
+    tags: [alloc, P1]
+  Unit_hipHostUnregister_MultiGpuOverlappingDeviceVA:
+    <<: *level_default
+    tags: [alloc, multigpu, P1]
   Unit_hipHostUnregister_NotRegisteredPointer:
     <<: *level_default
     tags: [alloc, P1]
@@ -2354,6 +2363,9 @@ memory:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipFreeNegativeHost:
+    <<: *level_default
+    tags: [alloc, P1]
+  Unit_hipFreeNegativeHostRegisteredInteriorPtr:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipFreeNegativeArray:
