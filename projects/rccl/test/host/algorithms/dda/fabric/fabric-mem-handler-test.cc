@@ -475,6 +475,62 @@ TEST_F(FabricMemHandlerMicrotest, ExchangeMemPtrs_FailsAfterSomePeersMapped_Peer
 }
 
 // ---------------------------------------------------------------------------
+// ncclFabricAllRanksOk
+// ---------------------------------------------------------------------------
+
+class FabricMemHandlerAllRanksOkMicrotest : public FabricMemHandlerMicrotest {
+ protected:
+  // Peers publish `peerOk`; records what this rank published.
+  void PeersPublish(std::vector<int> peerOk) {
+    g_bootstrapAllGather = [this, peerOk](void* state, void* allData, int size) {
+      EXPECT_EQ(state, kBootstrap);
+      EXPECT_EQ(size, static_cast<int>(sizeof(int)));
+      auto* slots = static_cast<int*>(allData);
+      published_ = slots[kRank];
+      for (int r : PeerRanks()) slots[r] = peerOk[r];
+      return ncclSuccess;
+    };
+  }
+  int published_ = -1;
+};
+
+TEST_F(FabricMemHandlerAllRanksOkMicrotest, AllRanksOk_EveryRankOk_ReportsOk) {
+  PeersPublish({1, -1, 1, 1});
+  bool allOk = false;
+
+  ASSERT_EQ(ncclFabricAllRanksOk(kBootstrap, kRank, kNRanks, true, &allOk), ncclSuccess);
+
+  EXPECT_TRUE(allOk);
+  EXPECT_EQ(published_, 1);
+}
+
+TEST_F(FabricMemHandlerAllRanksOkMicrotest, AllRanksOk_OnePeerNotOk_ReportsNotOk) {
+  PeersPublish({1, -1, 1, 0});
+  bool allOk = true;
+
+  ASSERT_EQ(ncclFabricAllRanksOk(kBootstrap, kRank, kNRanks, true, &allOk), ncclSuccess);
+
+  EXPECT_FALSE(allOk);
+}
+
+TEST_F(FabricMemHandlerAllRanksOkMicrotest, AllRanksOk_LocalNotOk_PublishesZeroAndReportsNotOk) {
+  PeersPublish({1, -1, 1, 1});
+  bool allOk = true;
+
+  ASSERT_EQ(ncclFabricAllRanksOk(kBootstrap, kRank, kNRanks, false, &allOk), ncclSuccess);
+
+  EXPECT_FALSE(allOk);
+  EXPECT_EQ(published_, 0);
+}
+
+TEST_F(FabricMemHandlerAllRanksOkMicrotest, AllRanksOk_GatherFails_PropagatesError) {
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclRemoteError; };
+  bool allOk = false;
+
+  EXPECT_EQ(ncclFabricAllRanksOk(kBootstrap, kRank, kNRanks, true, &allOk), ncclRemoteError);
+}
+
+// ---------------------------------------------------------------------------
 // Destructor
 // ---------------------------------------------------------------------------
 

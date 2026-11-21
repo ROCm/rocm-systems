@@ -269,18 +269,38 @@ struct FailCase {
   std::function<std::function<void(const HipVmmLedger&)>()> install;
   int nRanks = kNRanks;
   int selfRank = kRank;
+  // Fails before the agreement: publishes 0 there and never reaches the exchange.
+  bool local = false;
 };
+
+bool IsAgreementGather(void*, void*, int size) { return size == static_cast<int>(sizeof(int)); }
+bool IsExchangeGather(void*, void*, int size) { return size != static_cast<int>(sizeof(int)); }
 
 class FabricGpuBarrierFailMicrotest : public FabricGpuBarrierMicrotest,
                                       public ::testing::WithParamInterface<FailCase> {};
 
 TEST_P(FabricGpuBarrierFailMicrotest, MallocAndInit_StepFails_ReturnsNullWithoutLeaking) {
   auto check = GetParam().install();
+  std::vector<int> agreed;
+  int exchanges = 0;
+  auto inner = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [&](void* state, void* allData, int size) {
+    if (IsAgreementGather(state, allData, size)) {
+      agreed.push_back(static_cast<int*>(allData)[GetParam().selfRank]);
+    } else {
+      ++exchanges;
+    }
+    return inner(state, allData, size);
+  });
 
   EXPECT_EQ(Init(GetParam().nRanks, GetParam().selfRank).first, nullptr);
 
   EXPECT_TRUE(LedgerClean());
   if (check) check(ledger_);
+  if (GetParam().local) {
+    EXPECT_EQ(agreed, std::vector<int>{0});
+    EXPECT_EQ(exchanges, 0);
+  }
 }
 
 constexpr size_t kTableBytes = kNRanks * sizeof(FlagType*);
@@ -292,7 +312,8 @@ INSTANTIATE_TEST_SUITE_P(
                  [] {
                    g_cuMemEnable = [] { return 0; };
                    return std::function<void(const HipVmmLedger&)>();
-                 }},
+                 },
+                 kNRanks, kRank, /*local=*/true},
         FailCase{"FlagBufferAllocation",
                  [] {
                    g_cuMemEnable = [] { return 0; };
@@ -301,21 +322,28 @@ INSTANTIATE_TEST_SUITE_P(
                    // The null-buffer guard returns before the zeroing.
                    return std::function<void(const HipVmmLedger&)>(
                        [](const HipVmmLedger& l) { EXPECT_TRUE(l.memsets.empty()); });
-                 }},
+                 },
+                 kNRanks, kRank, /*local=*/true},
         FailCase{"FlagBufferZeroing",
                  [] {
                    FailWhen(g_hipMemset, [](void*, int, size_t) { return true; }, hipErrorInvalidValue);
                    return std::function<void(const HipVmmLedger&)>();
+                 },
+                 kNRanks, kRank, /*local=*/true},
+        FailCase{"Agreement",
+                 [] {
+                   FailWhen(g_bootstrapAllGather, IsAgreementGather, ncclRemoteError);
+                   return std::function<void(const HipVmmLedger&)>();
                  }},
         FailCase{"Exchange",
                  [] {
-                   FailWhen(g_bootstrapAllGather, [](void*, void*, int) { return true; }, ncclRemoteError);
+                   FailWhen(g_bootstrapAllGather, IsExchangeGather, ncclRemoteError);
                    return std::function<void(const HipVmmLedger&)>();
                  }},
         // With no peers to look up afterwards, only the exchange's own result can stop it.
         FailCase{"SingleRankExchange",
                  [] {
-                   FailWhen(g_bootstrapAllGather, [](void*, void*, int) { return true; }, ncclRemoteError);
+                   FailWhen(g_bootstrapAllGather, IsExchangeGather, ncclRemoteError);
                    return std::function<void(const HipVmmLedger&)>();
                  },
                  1, 0},
@@ -349,6 +377,29 @@ INSTANTIATE_TEST_SUITE_P(
                    return std::function<void(const HipVmmLedger&)>();
                  }}),
     ParamName<FailCase>);
+
+TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_PeerNotOk_ReturnsNullWithoutExchanging) {
+  int otherGathers = 0;
+  int published = -1;
+  auto mirror = g_bootstrapAllGather;
+  ScopedHook gather(g_bootstrapAllGather, [&](void* state, void* allData, int size) {
+    ncclResult_t res = mirror(state, allData, size);
+    if (size == static_cast<int>(sizeof(int))) {
+      auto* slots = static_cast<int*>(allData);
+      published = slots[kRank];
+      slots[PeerRanks()[0]] = 0;
+    } else {
+      ++otherGathers;
+    }
+    return res;
+  });
+
+  EXPECT_EQ(Init().first, nullptr);
+
+  EXPECT_EQ(published, 1);
+  EXPECT_EQ(otherGathers, 0);
+  EXPECT_TRUE(LedgerClean());
+}
 
 TEST(HipVmmLedgerMicrotest, FreeOfUntrackedBuffer_IsRefused) {
   HipVmmLedger ledger;

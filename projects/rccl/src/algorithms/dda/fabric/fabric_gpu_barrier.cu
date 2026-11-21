@@ -31,28 +31,33 @@ FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* boo
     (2 * static_cast<size_t>(nRanks) * nBlocks + static_cast<size_t>(nBlocks)) * sizeof(FlagType);
 
   // This rank's flag buffer, shared with peers (VMM-backed when available).
+  // Ranks agree on these local steps before the exchange, so none enters it alone.
   auto selfFlagBuf = std::make_unique<DeviceBuffer>(flagBytes, /*useVmm=*/true, manager);
+  bool ok = true;
+  cudaError_t err = cudaSuccess;
   if (selfFlagBuf == nullptr || selfFlagBuf->get() == nullptr) {
     ERROR("FabricGpuBarrier::mallocAndInit: flag buffer allocation failed");
-    return {nullptr, FabricGpuBarrier{}};
-  }
-  cudaError_t err = cudaMemset(selfFlagBuf->get(), 0, flagBytes);
-  if (err != cudaSuccess) {
+    ok = false;
+  } else if ((err = cudaMemset(selfFlagBuf->get(), 0, flagBytes)) != cudaSuccess) {
     WARN("FabricGpuBarrier::mallocAndInit: cudaMemset failed (%s)", cudaGetErrorString(err));
-    return {nullptr, FabricGpuBarrier{}};
-  }
-
-  // Fabric handle export requires a VMM (cuMem) allocation. If DeviceBuffer fell
-  // back to a legacy allocation, the fabric path cannot proceed.
-  if (!selfFlagBuf->isVmm()) {
+    ok = false;
+  } else if (!selfFlagBuf->isVmm()) {
+    // Fabric handle export requires a VMM (cuMem) allocation. If DeviceBuffer fell
+    // back to a legacy allocation, the fabric path cannot proceed.
     WARN("FabricGpuBarrier::mallocAndInit: flag buffer is not VMM-backed; "
          "fabric handle exchange unavailable");
+    ok = false;
+  }
+
+  bool allOk = false;
+  ncclResult_t result = ncclFabricAllRanksOk(bootstrap, selfRank, nRanks, ok, &allOk);
+  if (result != ncclSuccess || !allOk) {
     return {nullptr, FabricGpuBarrier{}};
   }
 
   auto memHandler = std::make_unique<ncclFabricMemHandler>(bootstrap, selfRank, nRanks, manager);
 
-  ncclResult_t result = memHandler->addSelfDeviceMem(selfFlagBuf->get(), selfFlagBuf->vmmHandle(), flagBytes);
+  result = memHandler->addSelfDeviceMem(selfFlagBuf->get(), selfFlagBuf->vmmHandle(), flagBytes);
   if (result != ncclSuccess && result != ncclInProgress) {
     if (ncclDebugNoWarn == 0) {
       INFO(NCCL_ALL, "%s:%d -> %d", __FILE__, __LINE__, result);

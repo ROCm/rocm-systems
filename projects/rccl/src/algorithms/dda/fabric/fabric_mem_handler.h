@@ -16,6 +16,10 @@
 
 struct ncclMemManager;
 
+// Allgathers each rank's localOk; *allOk is true only if every rank passed localOk.
+// Ranks call it before a step a local failure would otherwise make them skip.
+ncclResult_t ncclFabricAllRanksOk(void* bootstrap, int rank, int nranks, bool localOk, bool* allOk);
+
 class ncclFabricMemHandler {
 public:
   ncclFabricMemHandler(void* bootstrap, int rank, int nranks, struct ncclMemManager* manager);
