@@ -2109,6 +2109,11 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "ProfilerBatchedBroadcast.CollEventKeepsApiParent",
+          "description": "A batched single-root broadcast keeps its profiler activation mask and CollApi parent when it becomes a Broadcast task",
+          "test_filter": "ProfilerBatchedBroadcast.CollEventKeepsApiParent"
         }
       ]
     },
