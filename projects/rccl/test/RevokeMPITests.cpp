@@ -618,6 +618,9 @@ bool ddaLLSubThresholdsAtDefault()
 /// True when RCCL_DDA_LL128_ONESHOT_THRESHOLD is at its default. rcclGetCollImplInfo
 /// reports the LL128 tier, not the variant, so a lowered value would silently run the
 /// two-shot kernel in the one-shot case.
+// The gfx1250 AllReduce LL tier stops at 1M; the LL two-shot cases restore 32 MiB to stay on LL.
+const std::vector<DdaEnvSetting> kAllReduceLLTier = {{"RCCL_DDA_LL_THRESHOLD", "33554432"}};
+
 bool ddaLL128OneShotThresholdAtDefault()
 {
     constexpr int64_t kDefaultLL128OneShot = int64_t(4) * 1024 * 1024;
@@ -768,7 +771,7 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlTwoShot)
     if(count == 0)
         GTEST_SKIP() << "Could not find a two-shot-aligned element count";
 
-    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, count, kDdaLL, NCCL_PROTO_LL, {}});
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, count, kDdaLL, NCCL_PROTO_LL, kAllReduceLLTier});
 }
 
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlOneShot)
@@ -787,8 +790,10 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLl128OneShot)
         "count is sized against the default RCCL_DDA_LL128_ONESHOT_THRESHOLD");
     if(!skipReason.empty())
         GTEST_SKIP() << skipReason;
-    runIncompleteDdaRevokeShrink(
-        *this, {ncclFuncAllReduce, kOneShotCount, kDdaLL128, NCCL_PROTO_LL128, kDisableAllReduceLL});
+    // kOneShotCount of f32, cut to the LL128 one-shot cap at this rank count, so the one-shot still takes it.
+    const size_t count = ll128OneShotBytes(kOneShotCount * sizeof(float), MPIEnvironment::world_size) / sizeof(float);
+    runIncompleteDdaRevokeShrink(*this,
+                                 {ncclFuncAllReduce, count, kDdaLL128, NCCL_PROTO_LL128, kDisableAllReduceLL});
 }
 
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLl128TwoShot)
@@ -1005,7 +1010,7 @@ TEST_F(AbortDdaMPITest, IncompleteCollective_DdaLlTwoShot)
     const size_t count = twoShotCountForRanks(MPIEnvironment::world_size);
     if(count == 0)
         GTEST_SKIP() << "Could not find a two-shot-aligned element count";
-    runIncompleteDdaAbort({ncclFuncAllReduce, count, kDdaLL, NCCL_PROTO_LL, {}});
+    runIncompleteDdaAbort({ncclFuncAllReduce, count, kDdaLL, NCCL_PROTO_LL, kAllReduceLLTier});
 }
 
 TEST_F(AbortDdaMPITest, IncompleteCollective_DdaAllGatherLl)
@@ -1028,6 +1033,15 @@ TEST_F(AbortDdaMPITest, IncompleteCollective_DdaBroadcastLl)
 {
     runIncompleteDdaAbort({ncclFuncBroadcast, 128, kDdaLL, NCCL_PROTO_LL,
                            {{"RCCL_DDA_BC", "1"}, {"RCCL_DDA_LL_THRESHOLD", "262144"}}});
+}
+
+// 128K floats = 512 KiB: above the LL cap, below the LL128 cap; root 0 launches, rank np-1 does not.
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaBroadcastLl128)
+{
+    runIncompleteDdaAbort({ncclFuncBroadcast, 131072, kDdaLL128, NCCL_PROTO_LL128,
+                           {{"RCCL_DDA_BC", "1"},
+                            {"RCCL_DDA_LL_THRESHOLD", "262144"},
+                            {"RCCL_DDA_LL128_THRESHOLD", "4194304"}}});
 }
 
 /** DDA IPC (gfx942/gfx950, one node, exactly 8 ranks): every collective waits in IpcGpuBarrier. */

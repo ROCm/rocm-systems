@@ -139,6 +139,8 @@ release(uint, GPU_MAX_COMMAND_BUFFERS, 8,                                     \
          "The maximum number of command buffers allocated per queue")         \
 release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
+release(uint, GPU_MAX_SDMA_QUEUES, 16,                                        \
+         "The maximum number of ABCE host SDMA queues per device")            \
 release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
         "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \
@@ -211,6 +213,10 @@ release(bool, AMD_CPU_AFFINITY, false,                                         \
         "Prefer GPU-local NUMA CPU affinity when the application has not set a CPU mask") \
 release(bool, ROC_USE_FGS_KERNARG, true,                                      \
         "Use fine grain kernel args segment for supported asics")             \
+release(bool, DEBUG_CLR_ENABLE_ABCE, false,                                   \
+        "Use ABCE Blit Manager for copy path")                                \
+release(bool, DEBUG_CLR_ABCE_DEVICE_RING, true,                               \
+        "Place ABCE SDMA rings in device memory on PCIe-attached GPUs")       \
 release(uint, ROC_P2P_SDMA_SIZE, 1024,                                        \
         "The minimum size in KB for P2P transfer with SDMA")                  \
 release(uint, ROC_AQL_QUEUE_SIZE, 16384,                                      \
@@ -221,6 +227,8 @@ release(uint, DEBUG_CLR_LIMIT_BLIT_WG, 16,                                    \
         "Limit the number of workgroups in blit operations")                  \
 release(bool, DEBUG_CLR_BLIT_KERNARG_OPT, false,                              \
         "Enable blit kernel arguments optimization")                          \
+release(bool, DEBUG_CLR_DISABLE_MEMOBJ_CACHE, false,                          \
+        "Disable the hipMemcpyBatchAsync memory-object range cache")          \
 release(bool, ROC_SKIP_KERNEL_ARG_COPY, false,                                \
         "If true, then runtime can skip kernel arg copy")                     \
 release(bool, GPU_STREAMOPS_CP_WAIT, false,                                   \

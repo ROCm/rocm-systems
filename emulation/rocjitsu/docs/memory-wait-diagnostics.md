@@ -109,17 +109,20 @@ instruction units, and exceptions.
 
 Finite counter capacity also proves completion. For example, admitting a 64th
 operation to a six-bit counter forces the oldest of 63 outstanding operations in
-one ordered class to complete. Admission is checked before the new instruction
-reads its registers. Counter-only operations count, but unordered younger operations
-cannot establish FIFO completion of an older result. This does not infer readiness
-of scalar-memory, GDS, or legacy CDNA FLAT results from backpressure.
+one ordered class to complete. The checker applies capacity constraints before reading source
+operands, including both counter domains for generic FLAT on RDNA1–4 and CDNA5.
+On CDNA1–4 it applies the generic FLAT constraints after resolving the requested
+domains. Counter-only operations count, but unordered younger operations
+cannot establish FIFO completion of an older result. RDNA1 and RDNA2 GDS returns form
+their own ordered LGKM class. Scalar-memory results, GDS results on other
+targets, and legacy CDNA FLAT results require a zero wait.
 
 Completion dependencies survive ordinary branches and CU scheduling; branches
 implicitly drain XCNT. State is reset when a wave slot is freed and is not serialized
 in checkpoints. The checker does not compare memory addresses or check overlapping
 LDS accesses, including accesses from lanes of the same wave. It does not validate
-store visibility, source lifetime beyond the qualified XCNT checks above, or
-communication between waves.
+store visibility or communication between waves. Source-lifetime checks cover
+the qualified XCNT cases above and the RDNA1 and RDNA2 GDS source VGPRs and EXEC.
 A warning describes a possible missing wait under
 delayed completion or replay even though eager execution already has a value. The
 feature does not model GPU latency.
@@ -161,8 +164,8 @@ VCC is wave state with separate low/high word identities. Unordered scalar memor
 results require a zero wait; they cannot be made ready by an unrelated partial wait.
 
 Exceptional instructions use shared addressing and lane-selection helpers before
-execution. Relative registers and permutations can require M0 or selector values;
-FLAT domain selection requires address values. Those control inputs are checked
+execution. Relative registers and permutations can require M0 or selector values.
+Resolving each FLAT lane's data route requires its address. Those control inputs are checked
 before being read for planning. Planning does not fire execution-plugin callbacks.
 The checks and producer registration precede execution lane loops and async MMA
 publication. Only the issuing thread accesses the scoreboard: register accessors,

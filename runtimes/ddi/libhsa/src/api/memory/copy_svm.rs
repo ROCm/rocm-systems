@@ -12,10 +12,11 @@ use std::thread;
 pub(crate) mod async_copy;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::copy_svm::*;
 use crate::memory::pointer::*;
 use crate::memory::*;
-use crate::runtime::{boundary, initialized_mut, lock, map_error};
+use crate::status::{boundary, map_error};
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -29,72 +30,11 @@ pub unsafe extern "C" fn hsa_memory_copy(
     size: usize,
 ) -> Status {
     boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        match memory_copy_has_work(dst, src, size) {
-            Ok(false) => return SUCCESS,
-            Ok(true) => {}
-            Err(status) => return status,
+        // SAFETY: The public caller retains both complete ranges through the copy.
+        match unsafe { crate::memory::copy(dst, src, size) } {
+            Ok(()) => SUCCESS,
+            Err(status) => status,
         }
-        let host_destination = host_copy_address(runtime, dst as usize, size, ACCESS_PERMISSION_WO);
-        let host_source = host_copy_address(runtime, src as usize, size, ACCESS_PERMISSION_RO);
-        if let (Ok(destination), Ok(source)) = (host_destination, host_source) {
-            // SAFETY: HSA requires both ranges to be valid for size bytes.
-            // ptr::copy tolerates overlap. The registry lock retains owned
-            // backing throughout this host copy.
-            unsafe { std::ptr::copy(source as *const u8, destination as *mut u8, size) };
-            fence(Ordering::SeqCst);
-            return SUCCESS;
-        }
-
-        let resolved = match resolve_sync_gpu_copy(
-            runtime,
-            dst as usize,
-            src as usize,
-            size,
-            host_destination,
-            host_source,
-        ) {
-            Ok(resolved) => resolved,
-            Err(status) => return status,
-        };
-        let Some(_inflight) = runtime.inflight.enter() else {
-            return OUT_OF_RESOURCES;
-        };
-        let mut retained = [None; 2];
-        for (slot, base) in retained.iter_mut().zip(resolved.borrowed_memory) {
-            if let Some(base) = base {
-                if let Err(status) = runtime.memory_state.retain_copy_borrow(base) {
-                    for base in retained.into_iter().flatten() {
-                        runtime.memory_state.release_copy_borrow(base);
-                    }
-                    return status;
-                }
-                *slot = Some(base);
-            }
-        }
-        let stop = runtime.operation_stop();
-        let health = runtime.health.clone();
-        drop(guard);
-
-        let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
-            Ok(SyncGpuCopyOutcome::Done) => (SUCCESS, false),
-            Ok(SyncGpuCopyOutcome::LoadedDestination { address, bytes }) => {
-                (write_loaded_copy_destination(address, &bytes), false)
-            }
-            Err(failure) => (failure.status, failure.operands_may_be_live),
-        };
-        if may_be_live {
-            health.quarantine();
-        }
-        release_async_resources(&[], &retained, may_be_live);
-        status
     })
 }
 
@@ -178,17 +118,17 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
         let Ok(native_count) = u64::try_from(count) else {
             return INVALID_ARGUMENT;
         };
-        let Some(_inflight) = runtime.inflight.enter() else {
+        let Some(_inflight) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         if let Err(status) = runtime.memory_state.retain_copy_borrow(base) {
             return status;
         }
-        let device = runtime.gpus[index].device.clone();
-        let compute =
-            !runtime.sdma_enabled || !device.gpu().is_ok_and(|gpu| gpu.supports_linear_copy());
-        let stop = runtime.operation_stop();
-        let health = runtime.health.clone();
+        let device = runtime.agents.gpus[index].device.clone();
+        let compute = !runtime.config.sdma_enabled
+            || !device.gpu().is_ok_and(|gpu| gpu.supports_linear_copy());
+        let stop = runtime.control.operation_stop();
+        let health = runtime.control.health.clone();
         drop(guard);
 
         let (status, may_be_live) = if compute {
@@ -390,9 +330,13 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
                 reservations.push(Some(base));
             }
         }
-        let stop = runtime.operation_stop();
-        let cleanup = match runtime.inherit_cleanup() {
+        let stop = runtime.control.operation_stop();
+        let cleanup = match runtime.control.inherit_cleanup() {
             Ok(cleanup) => cleanup,
+            Err(status) => return status,
+        };
+        let prefetch = match crate::memory::prefetch::prepare(runtime, address, size, location) {
+            Ok(prefetch) => prefetch,
             Err(status) => return status,
         };
         let mut pending = match PendingAsyncRetention::new(
@@ -408,29 +352,35 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
                 return status;
             }
         }
+        let operation = prefetch.operation();
         let worker_handles = pending.handles.clone();
         let dependency_len = dependency_slice.len();
         let worker = match thread::Builder::new()
             .name("rocddi-svm-prefetch".into())
             .spawn(move || {
-                let _lease = cleanup.map(crate::runtime::ApiLeaseScope::enter);
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    svm_prefetch_worker(
-                        service,
-                        stop,
-                        &worker_handles[..dependency_len],
-                        address,
-                        size,
-                        location,
-                    )
-                }));
-                release_async_resources(&[], &reservations, false);
-                finish_async_signal(completion, matches!(result, Ok(true)));
-                release_async_resources(&worker_handles, &[], false);
+                crate::admission::ApiLeaseScope::run_optional(cleanup, || {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        svm_prefetch_worker(
+                            service,
+                            stop,
+                            &worker_handles[..dependency_len],
+                            address,
+                            size,
+                            location,
+                        )
+                    }));
+                    crate::memory::prefetch::retire(operation);
+                    release_async_resources(&[], &reservations, false);
+                    finish_async_signal(completion, matches!(result, Ok(true)));
+                    release_async_resources(&worker_handles, &[], false);
+                })
             }) {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
         };
+        // Queries and worker retirement take the registry lock held here, so
+        // even an immediately completed worker cannot outrun publication.
+        pending.memory.pending_prefetches.publish(prefetch);
         pending.transfer_to_worker();
         pending.memory.workers.push(worker);
         SUCCESS

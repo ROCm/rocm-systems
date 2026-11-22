@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
 #include "rocjitsu/vm/graphics/image_address.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
+#include "rocjitsu/vm/plugins/race_detector/plugin.h"
 
 #include <gtest/gtest.h>
 
@@ -327,6 +328,236 @@ public:
     }
   }
 };
+
+class TrackedMemoryInstruction final : public Instruction {
+public:
+  explicit TrackedMemoryInstruction(uint32_t &destructions)
+      : Instruction("tracked_memory", nullptr), destructions_(destructions) {
+    flags_ |= MEMORY_OP;
+  }
+  ~TrackedMemoryInstruction() override { ++destructions_; }
+
+private:
+  uint32_t &destructions_;
+};
+
+class OwnershipTestPipeline final : public amdgpu::MemoryPipeline {
+public:
+  OwnershipTestPipeline() : MemoryPipeline(amdgpu::WaitCounterType::VMCNT) {}
+
+  amdgpu::VmAccessOutcome access = amdgpu::VmAccessOutcome::Complete;
+  amdgpu::MemoryAccessCompletion completion = amdgpu::MemoryAccessCompletion::Complete;
+  bool complete_inline = false;
+  uint32_t access_calls = 0;
+  uint32_t writeback_calls = 0;
+  uint8_t counters_at_writeback = 0;
+  std::function<void(amdgpu::Wavefront &)> before_completion;
+
+  void complete_pending() {
+    ASSERT_TRUE(pending_completion_);
+    amdgpu::MemoryAccessDeferredCompletion completion = std::move(pending_completion_);
+    completion();
+  }
+
+protected:
+  amdgpu::VmAccessOutcome initiate_access(Instruction &, amdgpu::Wavefront &) override {
+    ++access_calls;
+    return access;
+  }
+
+  amdgpu::MemoryAccessCompletion
+  complete_access(Instruction &, amdgpu::Wavefront &wave,
+                  amdgpu::MemoryAccessDeferredCompletion deferred_completion) override {
+    ++writeback_calls;
+    counters_at_writeback = wave.wait_counters().vmcnt;
+    if (before_completion)
+      before_completion(wave);
+    if (completion == amdgpu::MemoryAccessCompletion::Deferred) {
+      if (complete_inline)
+        deferred_completion();
+      else
+        pending_completion_ = std::move(deferred_completion);
+    }
+    return completion;
+  }
+
+private:
+  amdgpu::MemoryAccessDeferredCompletion pending_completion_;
+};
+
+TEST(GpuVmPipeline, SynchronousCompletionReturnsOwnerAfterWritebackAndCounterRelease) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  uint32_t destructions = 0;
+  std::unique_ptr<Instruction> instruction =
+      std::make_unique<TrackedMemoryInstruction>(destructions);
+  Instruction *original = instruction.get();
+  OwnershipTestPipeline pipeline;
+  constexpr uint32_t kDestination = 10;
+  const uint32_t destination = context.wf->sgpr_alloc().base + kDestination;
+  pipeline.before_completion = [&](amdgpu::Wavefront &wave) {
+    EXPECT_EQ(instruction, nullptr);
+    context.cu->write_sgpr(destination, pipeline.writeback_calls);
+    wave.set_state(amdgpu::WfState::VM_RETRY);
+  };
+
+  for (uint32_t issue = 1; issue <= 2; ++issue) {
+    ASSERT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction.get(), original);
+    EXPECT_EQ(context.cu->read_sgpr_storage(destination), issue);
+    EXPECT_EQ(pipeline.counters_at_writeback, 1u);
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+    EXPECT_EQ(destructions, 0u);
+  }
+  instruction.reset();
+  EXPECT_EQ(destructions, 1u);
+}
+
+TEST(GpuVmPipeline, FailedIssueAndWritebackDestroyCallerOwner) {
+  for (amdgpu::VmAccessOutcome access :
+       {amdgpu::VmAccessOutcome::Faulted, amdgpu::VmAccessOutcome::Malformed,
+        amdgpu::VmAccessOutcome::Complete}) {
+    SCOPED_TRACE(static_cast<unsigned>(access));
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.access = access;
+    pipeline.completion = amdgpu::MemoryAccessCompletion::Failed;
+
+    const amdgpu::VmAccessOutcome expected =
+        access == amdgpu::VmAccessOutcome::Complete ? amdgpu::VmAccessOutcome::Malformed : access;
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), expected);
+    EXPECT_EQ(instruction, nullptr);
+    EXPECT_EQ(destructions, 1u);
+    EXPECT_EQ(pipeline.writeback_calls, access == amdgpu::VmAccessOutcome::Complete ? 1u : 0u);
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_TRUE(pipeline.empty());
+  }
+}
+
+TEST(GpuVmPipeline, DeferredCompletionConsumesOwnerIncludingInlineCallback) {
+  for (bool complete_inline : {false, true}) {
+    SCOPED_TRACE(complete_inline);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.completion = amdgpu::MemoryAccessCompletion::Deferred;
+    pipeline.complete_inline = complete_inline;
+
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction, nullptr);
+    EXPECT_EQ(pipeline.counters_at_writeback, 1u);
+    if (!complete_inline) {
+      EXPECT_EQ(destructions, 0u);
+      EXPECT_EQ(context.wf->wait_counters().vmcnt, 1u);
+      pipeline.complete_pending();
+    }
+    EXPECT_EQ(destructions, 1u);
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_TRUE(pipeline.empty());
+  }
+}
+
+TEST(GpuVmPipeline, UnavailableIssueConsumesOwnerThroughRetryOrCancellation) {
+  for (bool cancel : {false, true}) {
+    SCOPED_TRACE(cancel);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.access = amdgpu::VmAccessOutcome::Unavailable;
+
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction, nullptr);
+    EXPECT_EQ(destructions, 0u);
+    EXPECT_EQ(context.wf->wait_counters().vmcnt, 1u);
+    EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+    EXPECT_FALSE(pipeline.empty());
+    if (cancel) {
+      pipeline.cancel(*context.wf);
+      context.cu->free_wavefront_resources(*context.wf);
+    } else {
+      pipeline.access = amdgpu::VmAccessOutcome::Complete;
+      pipeline.tick();
+      EXPECT_EQ(pipeline.counters_at_writeback, 1u);
+      EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+    }
+    EXPECT_TRUE(pipeline.empty());
+    EXPECT_TRUE(context.wf->wait_counters().empty());
+    EXPECT_EQ(destructions, 1u);
+  }
+}
+
+TEST(GpuVmPipeline, StaleCompletionDestroysOwnerWithoutTouchingReplacementWave) {
+  for (bool deferred : {false, true}) {
+    SCOPED_TRACE(deferred);
+    TranslatedPipelineContext context;
+    ASSERT_NO_FATAL_FAILURE(context.initialize());
+    ASSERT_NE(context.wf, nullptr);
+    uint32_t destructions = 0;
+    std::unique_ptr<Instruction> instruction =
+        std::make_unique<TrackedMemoryInstruction>(destructions);
+    OwnershipTestPipeline pipeline;
+    pipeline.completion = deferred ? amdgpu::MemoryAccessCompletion::Deferred
+                                   : amdgpu::MemoryAccessCompletion::Complete;
+    const uint64_t old_generation = context.wf->dispatch_generation();
+    pipeline.before_completion = [&](amdgpu::Wavefront &wave) {
+      context.cu->free_wavefront_resources(wave);
+      amdgpu::Wavefront *replacement = context.cu->dispatch_wf(1, 0, kGfx1250ScalarSlots, 32);
+      ASSERT_EQ(replacement, &wave);
+      ASSERT_NE(replacement->dispatch_generation(), old_generation);
+      replacement->wait_counters().vmcnt = 2;
+      replacement->set_state(amdgpu::WfState::VM_RETRY);
+    };
+
+    EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(instruction, nullptr);
+    if (deferred)
+      pipeline.complete_pending();
+    EXPECT_EQ(destructions, 1u);
+    EXPECT_EQ(context.wf->wait_counters().vmcnt, 2u);
+    EXPECT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  }
+}
+
+TEST(GpuVmPipeline, FinalCounterRetirementReturnsCompletedOwnerAfterWaveReset) {
+  TranslatedPipelineContext context;
+  ASSERT_NO_FATAL_FAILURE(context.initialize());
+  ASSERT_NE(context.wf, nullptr);
+  uint32_t destructions = 0;
+  std::unique_ptr<Instruction> instruction =
+      std::make_unique<TrackedMemoryInstruction>(destructions);
+  Instruction *original = instruction.get();
+  OwnershipTestPipeline pipeline;
+  pipeline.before_completion = [](amdgpu::Wavefront &wave) {
+    wave.set_state(amdgpu::WfState::ENDING);
+  };
+  const uint64_t old_generation = context.wf->dispatch_generation();
+
+  EXPECT_EQ(pipeline.issue_deferred(instruction, *context.wf), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(instruction.get(), original);
+  EXPECT_EQ(destructions, 0u);
+  EXPECT_EQ(context.wf->dispatch_generation(), old_generation);
+  EXPECT_TRUE(context.wf->is_halted());
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.wf->sgpr_alloc().count, 0u);
+  EXPECT_EQ(context.wf->vgpr_alloc().count, 0u);
+  instruction.reset();
+  EXPECT_EQ(destructions, 1u);
+}
 
 class InstructionVmPlugin final : public ExecutionPlugin {
 public:
@@ -1514,6 +1745,99 @@ TEST(GpuVmPipeline, ClaimedFaultResumesWithoutStaleMemoryWaits) {
       EXPECT_EQ(faults, 1u);
       EXPECT_EQ(context.cu->memory_wait_diagnostic_count(), 0u);
       EXPECT_EQ(context.cu->xcnt_diagnostic_count(), 0u);
+    }
+  }
+}
+
+TEST(GpuVmPipeline, ReissuedLoadPreservesOlderRaceAndScoreboardDependencies) {
+  for (bool scalar : {false, true}) {
+    for (bool retained_fault : {false, true}) {
+      SCOPED_TRACE(testing::Message()
+                   << "scalar=" << scalar << " retained_fault=" << retained_fault);
+      TranslatedPipelineContext context;
+      ASSERT_NO_FATAL_FAILURE(context.initialize(false, true));
+      ASSERT_NE(context.wf, nullptr);
+      auto &wave = *context.wf;
+      PluginSinkConfig sinks;
+      auto &sink = sinks.emplace<StringSink>();
+      auto group = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
+      auto plugin = std::make_unique<plugins::race_detector::RaceDetectorPlugin>();
+      const auto *observer = plugin.get();
+      ASSERT_TRUE(group->add(std::move(plugin)));
+      context.sim.soc->set_plugin_group(group);
+      group->onInit();
+      std::array waves{&wave};
+      group->onAmdgpuWorkgroupDispatched(0, 0, 32, kGfx1250ScalarSlots, waves);
+      const auto &race = *static_cast<plugins::race_detector::RaceWavefrontState *>(
+                              wave.plugin_state(observer->slot_index()))
+                              ->race_state;
+
+      constexpr uint64_t code = 0x1000, data = 0x2000;
+      uint64_t cursor = code;
+      const auto emit = [&](const auto &words) {
+        context.external->store(cursor, words);
+        cursor += sizeof(words);
+      };
+      const auto load = [&](uint8_t dest) {
+        if (scalar)
+          emit(
+              cdna5::build_smem(cdna5::kSLoadB32Smem, {.sbase = 0, .sdata = dest, .soffset = 124}));
+        else
+          emit(cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 0, .vdst = dest}));
+      };
+      load(4);
+      const uint64_t retry_pc = cursor;
+      load(5);
+      const uint64_t wait_pc = cursor;
+      emit(cdna5::build_sopp(scalar ? cdna5::kSWaitKmcntSopp : cdna5::kSWaitLoadcntSopp,
+                             {.simm16 = 2}));
+      emit(scalar ? cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 8})
+                  : cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 260, .vdst = 8}));
+      context.external->store(data, 42u);
+      wave.pc = code;
+      wave.set_exec(1);
+      wave.set_queue_id(1);
+      context.cu->write_sgpr(wave.sgpr_alloc().base, data);
+      context.cu->write_sgpr(wave.sgpr_alloc().base + 1, 0);
+      context.cu->write_vgpr(wave.vgpr_alloc().base, 0, 0);
+      context.cu->step();
+      ASSERT_EQ(wave.pc, retry_pc);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 1u);
+      const auto older = race.getWaveMemoryEvents().front();
+      context.external->unavailable_translation_address = data;
+      context.cu->step();
+      ASSERT_EQ(wave.state(), amdgpu::WfState::VM_RETRY);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 2u);
+      wave.set_runtime_suspended(true);
+      if (retained_fault) {
+        context.cu->set_memory_violation_handler(
+            [&](amdgpu::Wavefront &faulted, uint64_t, bool, uint64_t issue_pc) {
+              EXPECT_EQ(issue_pc, retry_pc);
+              faulted.pc = issue_pc;
+              return true;
+            });
+        context.external->unavailable_translation_address.reset();
+        context.external->faulted_read_call = context.external->read_calls + 1;
+      }
+      context.cu->retry_paused_queue_memory(77, 1, /*replay_loads=*/!retained_fault);
+      ASSERT_EQ(wave.pc, retry_pc);
+      ASSERT_EQ(wave.state(), amdgpu::WfState::RUNNING);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 1u);
+      ASSERT_EQ(race.getWaveMemoryEvents().front(), older);
+      const auto counter = scalar ? amdgpu::WaitCounterKind::Km : amdgpu::WaitCounterKind::Load;
+      const auto &scoreboard = wave.ensure_memory_wait_scoreboard();
+      ASSERT_EQ(scoreboard.outstanding(counter), 1u);
+      context.external->unavailable_translation_address.reset();
+      wave.set_runtime_suspended(false);
+      context.cu->step();
+      ASSERT_EQ(wave.pc, wait_pc);
+      context.cu->step();
+      ASSERT_EQ(wave.pc, wait_pc + 4);
+      EXPECT_EQ(scoreboard.outstanding(counter), 2u);
+      ASSERT_EQ(race.getWaveMemoryEvents().size(), 2u);
+      EXPECT_EQ(race.getWaveMemoryEvents().front(), older);
+      context.cu->step();
+      EXPECT_NE(sink.str().find(scalar ? "Race on SGPR s4" : "Race on VGPR v4"), std::string::npos);
     }
   }
 }

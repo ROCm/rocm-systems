@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
@@ -74,6 +75,14 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
     if (!queue.command_access)
       queue.command_access = gpu_vm->snapshot_pinned(queue.address_space);
     const auto &access = queue.command_access;
+    const auto retire_root_packet = [&](uint64_t cursor, uint32_t ring_bytes) {
+      if (!ring_bytes)
+        return VmAccessOutcome::Complete;
+      // Nested IBs never advance the root ring. The journal retains the
+      // stream's snapshot until this packet's writeback is durable.
+      queue.read_pointer_journal.retire(cursor, cursor % (ring_bytes / 4), *access);
+      return queue.read_pointer_journal.publish();
+    };
     // Bound one event's packet work, including IB chains.
     const uint32_t packet_budget = queue.submission_queue ? 4096 : 256;
     for (uint32_t budget = 0; budget < packet_budget && !state.submissions.empty(); ++budget) {
@@ -96,6 +105,30 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         return fail("PM4 read pointer publication failed");
       }
       auto &submission = state.submissions.front();
+      if (submission.data_transfer) {
+        auto &transfer = *submission.data_transfer;
+        const auto outcome = transfer.resume(*access);
+        if (outcome == VmAccessOutcome::Unavailable) {
+          context.retry();
+          return util::Result::success();
+        }
+        if (outcome != VmAccessOutcome::Complete)
+          return fail(transfer.failure_message());
+        const uint64_t cursor = transfer.root_cursor;
+        const uint32_t ring_bytes = transfer.root_ring_bytes;
+        // The data effect is complete even if cursor publication must retry.
+        submission.data_transfer.reset();
+        const auto retired = retire_root_packet(cursor, ring_bytes);
+        if (retired == VmAccessOutcome::Unavailable) {
+          context.retry();
+          return util::Result::success();
+        }
+        if (retired != VmAccessOutcome::Complete) {
+          queue.publication_faulted = true;
+          return fail("PM4 read pointer publication failed");
+        }
+        continue;
+      }
       if (submission.ready) {
         util::StringDiagnostic diagnostic;
         util::FailureOr<bool> ready = submission.ready(diagnostic.emitter());
@@ -120,6 +153,18 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         continue;
       }
       auto &ib = submission.buffers.front();
+      if (ib.reset_gds_wave_id) {
+        if (context.arch != rocjitsu::IsaFamily::Rdna1 &&
+            context.arch != rocjitsu::IsaFamily::Rdna2)
+          return fail("unsupported GDS wave ID reset on this target");
+        // GFX10's KMD emits this reset only on a compute ring.
+        if (!submission.graphics_engine) {
+          if (!context.reset_gds_wave_id)
+            return fail("missing GDS wave ID reset service");
+          context.reset_gds_wave_id();
+        }
+        ib.reset_gds_wave_id = false;
+      }
       if (!ib.dwords) {
         submission.buffers.pop_front();
         continue;
@@ -213,8 +258,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::PredExec: {
         if (require(1).failed())
           return util::Result::failure();
-        if ((context.arch != ROCJITSU_CODE_ARCH_CDNA3 && context.arch != ROCJITSU_CODE_ARCH_CDNA4 &&
-             context.arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+        if ((context.arch != rocjitsu::IsaFamily::Cdna3 &&
+             context.arch != rocjitsu::IsaFamily::Cdna4 &&
+             context.arch != rocjitsu::IsaFamily::Cdna5) ||
             (words[0] & 0x00ffc000) || context.xcc_id >= 8)
           return fail("unsupported PRED_EXEC control or target");
         const uint32_t skip = words[0] & 0x3fff;
@@ -240,9 +286,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const bool push = command == 1 || command == 3;
         // GFX12 has push/pop only. Reset values are qualified for GFX11.
         if (!submission.graphics_engine || command > 3 ||
-            (reset && (context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-                       (context.arch != ROCJITSU_CODE_ARCH_RDNA3 &&
-                        context.arch != ROCJITSU_CODE_ARCH_RDNA3_5))))
+            (reset && (context.arch == rocjitsu::IsaFamily::Invalid ||
+                       (context.arch != rocjitsu::IsaFamily::Rdna3 &&
+                        context.arch != rocjitsu::IsaFamily::Rdna3_5))))
           return fail("unsupported CLEAR_STATE mode or engine");
         if (push) {
           if (state.saved_context_registers)
@@ -314,9 +360,10 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return fail("unsupported WRITE_DATA destination");
         if (flush_caches().failed())
           return util::Result::failure();
-        if (access->write(address(1), {reinterpret_cast<const std::byte *>(words.data() + 3),
-                                       (words.size() - 3) * 4}) != VmAccessOutcome::Complete)
-          return fail("PM4 WRITE_DATA failed");
+        const auto bytes = std::as_bytes(std::span(words).subspan(3));
+        submission.data_transfer.emplace(
+            std::nullopt, address(1), std::vector<std::byte>(bytes.begin(), bytes.end()),
+            root_cursor, root_ring_bytes, nullptr, "PM4 WRITE_DATA failed");
         break;
       }
       case Pm4Opcode::AtomicMem: {
@@ -412,16 +459,15 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           value = address(1);
         else if (source == 9)
           value = gpu_timestamp(context.arch);
-        else if (source == 1 || source == 2) {
-          if (access->read(address(1), {reinterpret_cast<std::byte *>(&value), bytes}) !=
-              VmAccessOutcome::Complete)
-            return fail("PM4 COPY_DATA read failed");
-        } else {
+        else if (source != 1 && source != 2) {
           return fail("unsupported COPY_DATA source");
         }
-        if (access->write(address(3), {reinterpret_cast<const std::byte *>(&value), bytes}) !=
-            VmAccessOutcome::Complete)
-          return fail("PM4 COPY_DATA write failed");
+        std::vector<std::byte> data(bytes);
+        std::memcpy(data.data(), &value, bytes);
+        submission.data_transfer.emplace(
+            source == 1 || source == 2 ? std::optional<uint64_t>(address(1)) : std::nullopt,
+            address(3), std::move(data), root_cursor, root_ring_bytes, "PM4 COPY_DATA read failed",
+            "PM4 COPY_DATA write failed");
         break;
       }
       case Pm4Opcode::WaitRegMem: {
@@ -433,10 +479,11 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const uint32_t space = (words[0] >> 4) & 3;
         const uint32_t operation = (words[0] >> 6) & 3;
         if (space == 0 && operation == 1 &&
-            (context.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-             context.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-             context.arch == ROCJITSU_CODE_ARCH_CDNA3 || context.arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-             context.arch == ROCJITSU_CODE_ARCH_RDNA4) &&
+            (context.arch == rocjitsu::IsaFamily::Rdna3 ||
+             context.arch == rocjitsu::IsaFamily::Rdna3_5 ||
+             context.arch == rocjitsu::IsaFamily::Cdna3 ||
+             context.arch == rocjitsu::IsaFamily::Cdna4 ||
+             context.arch == rocjitsu::IsaFamily::Rdna4) &&
             words[1] == 0xe26 && words[2] == 0xe27) {
           // NBIO 4.3/7.9/7.11 and NBIF 6.3 share this HDP_FLUSH_REQ/DONE pair.
           // WR_WAIT_WR_REG requests host-data
@@ -550,8 +597,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         const uint32_t index = words[0] >> 28;
         const uint32_t first = words[0] & 0xffff;
         const bool interleave = submission.graphics_engine && index == 2 && first == 0x22f &&
-                                words.size() == 2 && context.arch != ROCJITSU_CODE_ARCH_INVALID &&
-                                context.arch == ROCJITSU_CODE_ARCH_RDNA4;
+                                words.size() == 2 && context.arch != rocjitsu::IsaFamily::Invalid &&
+                                context.arch == rocjitsu::IsaFamily::Rdna4;
         // Index 3 applies the KMD CU mask to RSRC3/4. CU affinity does not
         // change functional shader results; retain the programmed resources.
         // GFX12 index 2 updates the dispatch-interleave shadow. Scheduling
@@ -668,10 +715,10 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::AcquireMem: // ACQUIRE_MEM: earlier dispatches and DMA are already retired.
         // GFX9 carries CP_COHER_CNTL in ordinal 2 and ends with POLL_INTERVAL.
         // Later generations append a GCR control word.
-        if (require((context.arch == ROCJITSU_CODE_ARCH_CDNA1 ||
-                     context.arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-                     context.arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-                     context.arch == ROCJITSU_CODE_ARCH_CDNA4)
+        if (require((context.arch == rocjitsu::IsaFamily::Cdna1 ||
+                     context.arch == rocjitsu::IsaFamily::Cdna2 ||
+                     context.arch == rocjitsu::IsaFamily::Cdna3 ||
+                     context.arch == rocjitsu::IsaFamily::Cdna4)
                         ? 6
                         : 7)
                 .failed())
@@ -685,9 +732,9 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         if (event == 15 && event_index >= 8 && event_index <= 11) {
           if (require(3).failed())
             return util::Result::failure();
-          const bool supports_streamout_query = context.arch != ROCJITSU_CODE_ARCH_INVALID &&
-                                                (context.arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-                                                 context.arch == ROCJITSU_CODE_ARCH_RDNA3_5);
+          const bool supports_streamout_query = context.arch != rocjitsu::IsaFamily::Invalid &&
+                                                (context.arch == rocjitsu::IsaFamily::Rdna3 ||
+                                                 context.arch == rocjitsu::IsaFamily::Rdna3_5);
           if (!submission.graphics_engine || !supports_streamout_query ||
               words[0] != (15 | (event_index << 8)) || (words[1] & 7))
             return fail("unsupported PM4 streamout query event");
@@ -724,8 +771,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       case Pm4Opcode::StreamoutStatsQuery: {
         if (require(5).failed())
           return util::Result::failure();
-        if (!submission.graphics_engine || context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-            context.arch != ROCJITSU_CODE_ARCH_RDNA4 || (words[0] & 7) || (words[3] & 7) ||
+        if (!submission.graphics_engine || context.arch == rocjitsu::IsaFamily::Invalid ||
+            context.arch != rocjitsu::IsaFamily::Rdna4 || (words[0] & 7) || (words[3] & 7) ||
             words[2] > 3 || address(0) > UINT64_MAX - 79)
           return fail("unsupported PM4 streamout statistics query");
         // GFX12 shaders maintain four needed/written counter pairs in ordinary memory,
@@ -755,21 +802,17 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
           return fail("unsupported PM4 DMA destination");
         if (flush_caches().failed())
           return util::Result::failure();
-        if (src_select == 2) {
-          std::vector<uint8_t> data(bytes);
-          for (uint32_t i = 0; i < bytes; ++i)
-            data[i] = words[1] >> ((i % 4) * 8);
-          if (access->write(address(3), std::as_bytes(std::span(data))) !=
-              VmAccessOutcome::Complete)
-            return fail("PM4 DMA fill failed");
-        } else if (src_select == 0 || src_select == 3) {
-          std::vector<std::byte> data(bytes);
-          if (access->read(address(1), data) != VmAccessOutcome::Complete ||
-              access->write(address(3), data) != VmAccessOutcome::Complete)
-            return fail("PM4 DMA copy failed");
-        } else {
+        if (src_select != 0 && src_select != 2 && src_select != 3)
           return fail("unsupported PM4 DMA source");
+        std::vector<std::byte> data(bytes);
+        if (src_select == 2) {
+          for (uint32_t i = 0; i < bytes; ++i)
+            data[i] = static_cast<std::byte>(words[1] >> ((i % 4) * 8));
         }
+        const char *failure = src_select == 2 ? "PM4 DMA fill failed" : "PM4 DMA copy failed";
+        submission.data_transfer.emplace(
+            src_select == 2 ? std::nullopt : std::optional<uint64_t>(address(1)), address(3),
+            std::move(data), root_cursor, root_ring_bytes, failure, failure);
         break;
       }
       case Pm4Opcode::IndirectBuffer: {
@@ -794,8 +837,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         break;
       }
       case Pm4Opcode::DispatchDirectInterleaved:
-        if (!submission.graphics_engine || context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-            context.arch != ROCJITSU_CODE_ARCH_RDNA4)
+        if (!submission.graphics_engine || context.arch == rocjitsu::IsaFamily::Invalid ||
+            context.arch != rocjitsu::IsaFamily::Rdna4)
           return fail("interleaved dispatch requires a GFX12 graphics queue");
         [[fallthrough]];
       case Pm4Opcode::DispatchDirect: {
@@ -808,8 +851,8 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
         break;
       }
       case Pm4Opcode::DispatchIndirectInterleaved:
-        if (!submission.graphics_engine || context.arch == ROCJITSU_CODE_ARCH_INVALID ||
-            context.arch != ROCJITSU_CODE_ARCH_RDNA4)
+        if (!submission.graphics_engine || context.arch == rocjitsu::IsaFamily::Invalid ||
+            context.arch != rocjitsu::IsaFamily::Rdna4)
           return fail("interleaved dispatch requires a GFX12 graphics queue");
         [[fallthrough]];
       case Pm4Opcode::DispatchIndirect: {
@@ -835,12 +878,10 @@ void process_pm4_packets(ComputeQueueRecord &queue, GpuVm *gpu_vm,
       default:
         return fail(std::format("unsupported PM4 opcode {:#x}", opcode));
       }
+      if (submission.data_transfer)
+        continue;
       if (root_ring_bytes) {
-        // An IB enters a child frame; only the root packet advances the root ring.
-        // The journal retains this stream's snapshot until writeback is durable.
-        uint64_t retired = root_cursor;
-        queue.read_pointer_journal.retire(retired, retired % (root_ring_bytes / 4), *access);
-        const auto published = queue.read_pointer_journal.publish();
+        const auto published = retire_root_packet(root_cursor, root_ring_bytes);
         if (published == VmAccessOutcome::Unavailable) {
           context.retry();
           return util::Result::success();

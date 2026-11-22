@@ -148,6 +148,12 @@ HIP_PUBLIC_API hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDesc
   return hip::GetHipDispatchTable()->hipArrayGetDescriptor_fn(pArrayDescriptor, array);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray,
+                                           unsigned int planeIdx) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipArrayGetPlane_fn(pPlaneArray, hArray, planeIdx);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
                            hipArray_t array) {
   TRY;
@@ -356,6 +362,12 @@ HIP_PUBLIC_API hipError_t hipDeviceGetCacheConfig(hipFuncCache_t* cacheConfig) {
 HIP_PUBLIC_API hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t* mem_pool, int device) {
   TRY;
   return hip::GetHipDispatchTable()->hipDeviceGetDefaultMemPool_fn(mem_pool, device);
+  CATCH;
+}
+HIP_PUBLIC_API hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type,
+                                                          hipDevice_t dev) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipDeviceGetExecAffinitySupport_fn(pi, type, dev);
   CATCH;
 }
 HIP_PUBLIC_API hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {

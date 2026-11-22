@@ -225,6 +225,12 @@ device:
   Unit_hipDeviceGetLuid_VerifyLuidFrm_hipGetDeviceProperties:
     <<: *level_default
     tags: [query]
+  Unit_hipDeviceGetExecAffinitySupport_Positive:
+    <<: *level_2
+    tags: [query]
+  Unit_hipDeviceGetExecAffinitySupport_Negative:
+    <<: *level_2
+    tags: [query]
   Unit_Uuid_FntlTstsFor_SetEnv_HIP_VISIBLE_DEVICES:
     <<: *level_default
     disabled:
@@ -391,6 +397,12 @@ device:
   Unit_hipInit_Positive:
     <<: *level_default
     tags: [init, smoke, P0]
+  Unit_hipInit_Positive_NoQueuesAtInit:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: "ROCM-34268 - counts the process's KFD create-queue ioctls: unit/device/CMakeLists.txt builds it only for AMD on UNIX, and WSL has no KFD."
+    tags: [init, P0]
   Unit_hipInit_Negative:
     <<: *level_default
     disabled:
@@ -454,7 +466,8 @@ device:
   Unit_hipGetProcAddress_SetGetMemPoolAPIs:
     <<: *level_default
     tags: [multigpu, P0]
-  Unit_hipGetDriverEntryPoint_Positive: *level_default
+  Unit_hipGetDriverEntryPoint_Positive:
+    <<: *level_default
   Unit_hipGetDriverEntryPoint_Negative: *level_default
   Unit_hipGetDriverEntryPoint_spt_Positive: *level_default
   Unit_hipGetDriverEntryPoint_spt_Negative: *level_default

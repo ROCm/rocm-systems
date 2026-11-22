@@ -545,6 +545,20 @@ public:
       std::fprintf(stderr, "rocjitsu: cannot register fork child initialization: %s\n",
                    std::strerror(fork_error));
     real().resolve();
+    // A library loaded with RTLD_LOCAL can still serve the C VM API while
+    // libc owns the application's mappings. Enable the index only when our
+    // mapping entry points actually own the process's global bindings.
+    Dl_info interposer{};
+    if (dladdr(reinterpret_cast<void *>(&init), &interposer)) {
+      const bool observed =
+          std::ranges::all_of(std::array{"mmap", "mmap64", "munmap", "mremap", "shmat", "shmdt"},
+                              [&](const char *symbol) {
+                                Dl_info resolved{};
+                                return dladdr(dlsym(RTLD_DEFAULT, symbol), &resolved) &&
+                                       resolved.dli_fbase == interposer.dli_fbase;
+                              });
+      rocjitsu::host_mapping_lock().set_mapping_changes_observed(observed);
+    }
     // Keep generated topology and proc snapshots independent of limits lowered
     // by application code before its first GPU call. Inherited hard limits on
     // GPU backing are handled by the keeper's shared-RAM fallback.
@@ -2741,14 +2755,21 @@ public:
               ib.ip_instance || ib.ring >= (ib.ip_type == AMDGPU_HW_IP_GFX ? 1u : 4u) ||
               !ib.ib_bytes || (ib.ib_bytes & 3) ||
               (ib.flags & ~(AMDGPU_IB_FLAG_PREAMBLE | AMDGPU_IB_FLAG_PREEMPT |
-                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC)))
+                            AMDGPU_IB_FLAG_TC_WB_NOT_INVALIDATE | AMDGPU_IB_FLAG_EMIT_MEM_SYNC |
+                            AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID)))
+            return -EINVAL;
+          if ((ib.flags & AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID) &&
+              !driver->supports_pm4_gds_wave_id_reset(file->render_minor))
             return -EINVAL;
           if (engine != UINT32_MAX && (engine != ib.ip_type || ring != ib.ring))
             return -EINVAL;
           submission.graphics_engine = ib.ip_type == AMDGPU_HW_IP_GFX;
           engine = ib.ip_type;
           ring = ib.ring;
-          submission.buffers.push_back({.address = ib.va_start, .dwords = ib.ib_bytes / 4});
+          submission.buffers.push_back(
+              {.address = ib.va_start,
+               .dwords = ib.ib_bytes / 4,
+               .reset_gds_wave_id = bool(ib.flags & AMDGPU_IB_FLAG_RESET_GDS_MAX_WAVE_ID)});
           break;
         }
         case AMDGPU_CHUNK_ID_FENCE: {
@@ -3444,6 +3465,8 @@ public:
       return -EINVAL;
     }
     if (!prt && drv && !gem.cpu_ptr) {
+      // Keep the host mapping lock before the private fd lock, as in mmap_gem.
+      auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
       void *p = gem.dmabuf_fd->use([&](int fd) {
         return rocjitsu::map_memory_backing(nullptr, gem.size, PROT_READ | PROT_WRITE, MAP_SHARED,
                                             fd, 0);
@@ -4081,8 +4104,10 @@ private:
         (void)gem.remote_owner->gem_va_unmap(gem.drm_file_id, range.va_address, range.map_size);
       gem.remote_owner.reset();
     }
-    if (gem.cpu_ptr && gem.size)
+    if (gem.cpu_ptr && gem.size) {
+      auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
       InterposerContext::real().munmap(gem.cpu_ptr, gem.size);
+    }
     gem.cpu_ptr = nullptr;
     gem.installed_vas.clear();
     // Release our private dup of the backing dmabuf (taken in prime_import) now that
@@ -5894,6 +5919,15 @@ FcntlArgKind fcntl_arg_kind(int cmd) {
 #if defined(F_GETLK64) && (!defined(F_GETLK) || F_GETLK64 != F_GETLK)
   case F_GETLK64:
 #endif
+#ifdef F_OFD_SETLK
+  case F_OFD_SETLK:
+#endif
+#ifdef F_OFD_SETLKW
+  case F_OFD_SETLKW:
+#endif
+#ifdef F_OFD_GETLK
+  case F_OFD_GETLK:
+#endif
 #ifdef F_GETOWNER_UIDS
   case F_GETOWNER_UIDS:
 #endif
@@ -6318,6 +6352,23 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
     }
     return mapped;
   });
+}
+
+RJ_INTERPOSER_EXPORT void *shmat(int shmid, const void *addr, int flags) noexcept {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().shmat)
+    return reinterpret_cast<void *>(syscall(SYS_shmat, shmid, addr, flags));
+  if (!rj_owns_interposer_state())
+    return InterposerContext::real().shmat(shmid, addr, flags);
+  return with_host_mapping_held(
+      [&] { return InterposerContext::real().shmat(shmid, addr, flags); });
+}
+
+RJ_INTERPOSER_EXPORT int shmdt(const void *addr) noexcept {
+  if (!InterposerContext::real().ready() || !InterposerContext::real().shmdt)
+    return static_cast<int>(syscall(SYS_shmdt, addr));
+  if (!rj_owns_interposer_state())
+    return InterposerContext::real().shmdt(addr);
+  return with_host_mapping_held([&] { return InterposerContext::real().shmdt(addr); });
 }
 
 RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {

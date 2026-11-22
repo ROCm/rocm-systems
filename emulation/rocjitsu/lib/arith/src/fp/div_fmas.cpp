@@ -70,17 +70,13 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
 
-  // The upstream integer model supplies exact unscaled results on both GPUs.
-  // RDNA3 active OMOD has no borrowed exact model; retain the loose path.
+  // The upstream integer model supplies exact results on both GPUs, including RDNA3 active OMOD:
+  // W7900 captures round at normal precision, then scale, overflowing per the guest rounding.
   constexpr uint32_t instruction_controls =
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_A |
       RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
   if (int error = rocjitsu::arith::validate(flags, mode & ~instruction_controls, fp_flags)) {
     return error;
-  }
-  if (Rdna3 && (mode & RJ_ARITH_ALU_OMOD_MASK) &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
@@ -170,10 +166,7 @@ int rj_arith_v_div_fmas_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t ins
                                 const uint32_t *const *b, const uint32_t *const *c,
                                 uint32_t condition, uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -191,10 +184,7 @@ int rj_arith_v_div_fmas_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t ins
                                 const uint32_t *const *b, const uint32_t *const *c,
                                 uint32_t condition, uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -212,10 +202,7 @@ int rj_arith_v_div_fmas_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t ins
                                 const uint32_t *const *b, const uint32_t *const *c,
                                 uint64_t condition, uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -233,10 +220,7 @@ int rj_arith_v_div_fmas_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t ins
                                 const uint32_t *const *b, const uint32_t *const *c,
                                 uint64_t condition, uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }

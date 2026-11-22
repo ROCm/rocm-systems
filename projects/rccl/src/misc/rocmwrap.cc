@@ -76,24 +76,24 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
 #endif
 
   // Smallest legal allocation: one granularity unit.
-  if (CUPFN(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess ||
+  if (CUPROBE(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM)) != hipSuccess ||
       granularity == 0)
     goto done;
 
-  if (CUPFN(cuMemCreate(&handle, granularity, &prop, 0)) != hipSuccess)
+  if (CUPROBE(cuMemCreate(&handle, granularity, &prop, 0)) != hipSuccess)
     goto done; // 7.0.2.2-without-backport fails here
   created = true;
 
-  if (CUPFN(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess) goto cleanup;
+  if (CUPROBE(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess) goto cleanup;
   reserved = true;
 
-  if (CUPFN(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess) goto cleanup;
+  if (CUPROBE(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess) goto cleanup;
   mapped = true;
 
   accessDesc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   accessDesc.location.id = devOrdinal;
   accessDesc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-  if (CUPFN(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess) goto cleanup;
+  if (CUPROBE(cuMemSetAccess(ptr, granularity, &accessDesc, 1)) != hipSuccess) goto cleanup;
 
   // register.cc queries: LEGACY_IPC is the op 7.0.2.2 rejects even though alloc/map above succeed.
   {
@@ -101,10 +101,10 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
     size_t baseSize = 0;
     CUmemorytype memType;
     int legacyIpcCap = 0;
-    if (CUPFN(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
-    if (CUPFN(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
+    if (CUPROBE(cuMemGetAddressRange(&base, &baseSize, ptr)) != hipSuccess) goto cleanup;
+    if (CUPROBE(cuPointerGetAttribute(&memType, CU_POINTER_ATTRIBUTE_MEMORY_TYPE, ptr)) != hipSuccess) goto cleanup;
 #if HIP_VERSION >= 71260540
-    if (CUPFN(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
+    if (CUPROBE(cuPointerGetAttribute((void*)&legacyIpcCap, CU_POINTER_ATTRIBUTE_IS_LEGACY_CUDA_IPC_CAPABLE, base)) !=
         hipSuccess)
       goto cleanup;
 #else
@@ -116,8 +116,8 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
   // Net transport exports every cuMem buffer as DMA-BUF; a host that cannot must keep cuMem off.
   {
     int dmaBufFd = -1;
-    if (CUPFN(cuMemGetHandleForAddressRange((void*)&dmaBufFd, ptr, granularity, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
-                                            0)) != hipSuccess ||
+    if (CUPROBE(cuMemGetHandleForAddressRange((void*)&dmaBufFd, ptr, granularity, CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD,
+                                              0)) != hipSuccess ||
         dmaBufFd < 0)
       goto cleanup;
     close(dmaBufFd);
@@ -130,7 +130,6 @@ cleanup:
   if (mapped) CUCHECKIGNORE(cuMemUnmap(ptr, granularity));
   if (reserved) CUCHECKIGNORE(cuMemAddressFree(ptr, granularity));
   if (created) CUCHECKIGNORE(cuMemRelease(handle));
-  (void)hipGetLastError(); // clear any sticky error from the probe
 done:
   if (!ok) INFO(NCCL_INIT, "cuMem functional probe failed on device %d; disabling cuMem", devOrdinal);
   return ok;
@@ -263,7 +262,7 @@ int ncclCuMemHostEnable() {
       CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
       size = 1;
       ALIGN_SIZE(size, granularity);
-      if (CUPFN(cuMemCreate(&handle, size, &prop, 0)) != CUDA_SUCCESS) {
+      if (CUPROBE(cuMemCreate(&handle, size, &prop, 0)) != CUDA_SUCCESS) {
         INFO(NCCL_INIT, "cuMem host allocations do not appear to be working; falling back to a /dev/shm/ based "
                         "implementation. This could be due to the container runtime disabling NUMA support. "
                         "To disable this warning, set NCCL_CUMEM_HOST_ENABLE=0");
