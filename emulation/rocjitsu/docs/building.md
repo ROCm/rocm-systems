@@ -39,8 +39,15 @@ configuration. Keep that header tree at a matching revision.
 | `ROCJITSU_ENABLE_INTERPOSER` | `ON` | Include the Linux LD_PRELOAD interposer in librocjitsu |
 | `RJ_ENABLE_HOST_FAULT_RECOVERY` | `ON` | Recover host memory faults with SIGSEGV/SIGBUS handlers |
 | `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers |
+| `RJ_INSTALL_MINIDEBUGINFO` | `ON` on Linux | Compress private ELF symbols in the installed Release `librocjitsu.so` for GDB |
 | `LTO` | `OFF` | Enable link-time optimization for Release/RelWithDebInfo |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support; requires CMake 3.28+ and Linux 6.1+ UAPI headers |
+
+Linux Release installs retain private function names in the compressed
+`.gnu_debugdata` section when the toolchain provides objcopy and readelf.
+Use `-DRJ_INSTALL_MINIDEBUGINFO=OFF` to keep the regular ELF symbol table for
+tools that read it directly. Builds with DWARF and TheRock split-debug packages
+retain their existing debug information.
 
 ### Explicit C API embedding
 
