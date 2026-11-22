@@ -35,9 +35,6 @@ void ds_bpermute_x86_64_v4(int lanes, int group, uint64_t exec_mask, uint32_t *d
 // Requires the named CPU features and validated instruction controls.
 void ds_swizzle_x86_64_v4(int lanes, uint64_t exec_mask, uint32_t *d, const uint32_t *a,
                           uint16_t offset);
-
-// Exchange rows using the named CPU features and independently masked stores.
-void swap_rows_x86_64_v4(int lanes, int stride, uint64_t exec_mask, uint32_t *d, uint32_t *a);
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)

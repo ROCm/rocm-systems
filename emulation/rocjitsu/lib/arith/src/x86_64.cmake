@@ -277,3 +277,22 @@ endfunction()
 foreach(feature IN ITEMS X86_64_V3 X86_64_V4 X86_64_V4_BF16 AVX512VNNI)
     rj_arith_add_x86_64_backend(${feature})
 endforeach()
+
+# The sparse layouts revisit packed input words. Contiguous loads and shuffles avoid
+# the repeated gathers and scatters generated for these reductions on x86-64-v4.
+if(RJ_ARITH_COMPILER_X86_64_V4)
+    check_cxx_compiler_flag(
+        "-mno-gather -mno-scatter"
+        RJ_ARITH_COMPILER_NO_GATHER_SCATTER
+    )
+    if(RJ_ARITH_COMPILER_NO_GATHER_SCATTER)
+        set_property(
+            SOURCE
+                mfma/x86_64/smfmac_float_x86_64_v4.cpp
+                mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
+                wmma/x86_64/swmmac_gfx1250_float_x86_64_v4.cpp
+            APPEND
+            PROPERTY COMPILE_OPTIONS "-mno-gather" "-mno-scatter"
+        )
+    endif()
+endif()

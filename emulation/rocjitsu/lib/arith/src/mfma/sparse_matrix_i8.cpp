@@ -37,7 +37,8 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     index = selected;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  // The 16-column K=128 tile reduces faster in two AVX2 halves.
+  if (K != 128 && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     sparse_matrix_i8_x86_64_v4<M, K, Wmma>(controls, clamp, d, a, b, index);
     return RJ_ARITH_SUCCESS;
   }

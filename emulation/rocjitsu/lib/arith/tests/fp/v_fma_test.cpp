@@ -118,6 +118,19 @@ template <bool Half, typename Call> static void check_guest_controls(Call call) 
                      1, 0, r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[3][0], 0U);
+
+      // A flushed subnormal times infinity overrides the addend's NaN payload.
+      r.v[0][0] = r.v[1][1] = 1;
+      r.v[1][0] = r.v[0][1] = 0x7f800000;
+      r.v[2][0] = r.v[2][1] = 0x7fc12345;
+      for (uint64_t flush : {uint64_t{0}, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS}) {
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | flush, 3, 0,
+                       r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        const uint32_t expected = flush ? 0xffc00000U : 0x7fc12345U;
+        EXPECT_EQ(r.v[3][0], expected);
+        EXPECT_EQ(r.v[3][1], expected);
+      }
     }
 
     for (uint64_t rounding :

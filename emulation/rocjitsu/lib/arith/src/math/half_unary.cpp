@@ -17,6 +17,19 @@
 
 namespace {
 
+// FP16 square root consumes the DPP temporary in AVX2 chunks. Route it at the
+// same width so the store and the dependent load use the same granularity.
+template <rocjitsu::arith::Unary Op> uint64_t routing_level(uint64_t flags) {
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if constexpr (Op == rocjitsu::arith::Unary::Sqrt) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      return RJ_ARITH_CPU_X86_64_V3;
+    }
+  }
+#endif
+  return flags;
+}
+
 template <rocjitsu::arith::Unary Op>
 constexpr bool supports_exact =
     Op == rocjitsu::arith::Unary::Trunc || Op == rocjitsu::arith::Unary::Ceil ||
@@ -34,7 +47,7 @@ template <rocjitsu::arith::Unary Op, bool Rdna3 = false, bool PreserveClampNan =
 [[gnu::noinline]] int unary_exact(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                   uint32_t *const *d, const uint32_t *const *a) {
   if (mode >> 32) {
-    return rocjitsu::arith::execute_dpp(flags, exec_mask, mode, a,
+    return rocjitsu::arith::execute_dpp(routing_level<Op>(flags), exec_mask, mode, a,
                                         [&](uint32_t exec_mask, const uint32_t *const *source) {
                                           return unary_exact<Op, Rdna3, PreserveClampNan>(
                                               flags, exec_mask, uint32_t(mode), d, source);
@@ -98,7 +111,7 @@ template <rocjitsu::arith::Unary Op, bool GuestDenormals = true, bool PreserveCl
 [[gnu::noinline]] int unary(uint64_t flags, uint32_t exec_mask, uint64_t modifiers,
                             uint32_t *const *d, const uint32_t *const *a) {
   if (modifiers >> 32) {
-    return rocjitsu::arith::execute_dpp(flags, exec_mask, modifiers, a,
+    return rocjitsu::arith::execute_dpp(routing_level<Op>(flags), exec_mask, modifiers, a,
                                         [&](uint32_t exec_mask, const uint32_t *const *source) {
                                           return unary<Op, GuestDenormals, PreserveClampNan>(
                                               flags, exec_mask, uint32_t(modifiers), d, source);
