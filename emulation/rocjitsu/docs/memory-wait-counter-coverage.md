@@ -80,7 +80,10 @@ an incoming indexed LDS load does not need a wait before overwriting a pending
 indexed LDS result in both the runtime and static checkers. RDNA3/3.5 section
 12.5, RDNA4 sections 5.7.1.4 and 12.5, and CDNA5 sections 5.7.1.4 and 11.2 state
 this directly. CDNA1-4 and RDNA1/2 section 4.4 order LGKM results of the same
-type. Scalar memory results require a wait on all targets.
+type. On RDNA1/2 the runtime also allows a GDS return to overwrite an older
+GDS return in issue order. Overlapping LDS and GDS results still require a
+wait. Other targets retain conservative GDS writeback checks, and scalar
+memory results require a wait on all targets.
 
 On RDNA3, RDNA3.5, RDNA4 and CDNA5, FLAT's LDS-serviced lanes share that order:
 incoming LDS-routed FLAT lanes and incoming indexed LDS loads can overwrite
@@ -191,9 +194,16 @@ source-reuse guarantees on every target. The narrower rule is that a
 source-only obligation cannot serve as a destination or memory-completion
 requirement.
 
-Static waitcheck models indexed GDS and ordered-count source registers and EXEC
-on qualified legacy targets other than CDNA4. The executing GDS forms on this
-branch are the GWS operations below.
+RDNA1, RDNA2, RDNA3 and RDNA3.5 execute indexed GDS loads, stores and atomics.
+RDNA1/2 apply the M0 GDS window to participating lanes. RDNA3/3.5 ordinary
+indexed accesses use the first active lane. Append and consume count the full
+EXEC mask. RDNA1 and RDNA2 execute the supported single-DWORD ordered count. For
+`DS_ORDERED_COUNT`, the race plugin checks the first active lane's outgoing
+source VGPR until its EXPCNT event
+retires. It checks the returned value across the whole wave until the separate
+LGKMCNT event retires. On RDNA1 and RDNA2 the runtime checker protects the issued GDS source VGPRs
+and EXEC until EXPCNT permits an overwrite. Static waitcheck also covers the
+source registers on legacy targets other than CDNA4.
 
 GWS operations (`ds_gws_*`) execute with `GDS=1` on CDNA1–3 and RDNA1–3.5.
 They issue a zero-payload request through the local-memory pipeline and add an
@@ -251,7 +261,7 @@ with a DS wait alone. Neither capture measures CDNA completion.
 | Stores and atomics without return | Store queue, or the shared legacy VMEM queue; no destination register |
 | Generic FLAT loads, stores and atomics | RDNA and CDNA5 occupy both vector-memory and LDS queues. CDNA1–4 select queues from the resolved requests. See [FLAT register readiness](#flat-register-readiness) for result dependencies. |
 | LDS, including permutation, swizzle and DS no-op | DS/legacy LGKM queue; returning forms track registers |
-| GDS data operations (static analysis) | LGKM and, on qualified legacy targets other than CDNA4, EXP source dependencies. |
+| GDS data operations, including indexed accesses on RDNA1/2/3/3.5 and ordered count on RDNA1/2/3.5 | LGKM and, on legacy targets other than CDNA4, EXP. For GFX10 ordered count, the race plugin checks the contributing lane's source through EXP and the whole-wave result through LGKM. On RDNA3.5, the streamout ordered count returns through the first active lane or lane zero for empty EXEC. On RDNA1/2 the runtime checker protects source VGPRs and EXEC through EXP. Static waitcheck also tracks those sources on the other qualified legacy targets. |
 | GWS (`ds_gws_*`; executes on CDNA1–3 and RDNA1–3.5) | Zero-payload request on the DS/legacy LGKM queue with the GDS completion class, plus EXP; no register results. Static waitcheck separately protects source VGPRs and EXEC |
 | Scalar loads, atomics, cache operations, timestamps, barrier-state and wave-ID queries | KM/legacy LGKM queue; returned scalar registers are tracked |
 | Messages, including message returns | KM/legacy LGKM queue. Return forms contribute two units, with the result pending through the return unit |

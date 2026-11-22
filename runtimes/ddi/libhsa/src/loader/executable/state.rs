@@ -16,7 +16,7 @@ pub(in crate::loader) fn loaded_symbol_agent(program: bool, agent: HsaAgent) -> 
 
 /// Loads code-object bytes and publishes a handle in the selected scope.
 pub(crate) unsafe fn load_executable_code_object(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     executable: HsaExecutable,
     agent: HsaAgent,
     bytes: Arc<[u8]>,
@@ -38,7 +38,7 @@ pub(crate) unsafe fn load_executable_code_object(
     reason = "the loader adapter preserves the C entry point arguments and adds optional destination ownership"
 )]
 pub(crate) unsafe fn load_executable_code_object_at(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     executable: HsaExecutable,
     agent: HsaAgent,
     bytes: Arc<[u8]>,
@@ -134,11 +134,11 @@ pub(crate) fn freeze_executable(executable: HsaExecutable) -> Result<(), Status>
     if !record.core.can_release() {
         return Err(ERROR);
     }
-    let inflight = runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+    let inflight = runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
     record.debugger.prepare(&record.core)?;
     let publications = record.core.begin_freeze().map_err(map_loader_error)?;
-    let stop = runtime.operation_stop();
-    let health = runtime.health.clone();
+    let stop = runtime.control.operation_stop();
+    let health = runtime.control.health.clone();
     drop(guard);
 
     let published = publications

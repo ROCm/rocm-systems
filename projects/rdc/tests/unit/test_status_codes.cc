@@ -21,9 +21,8 @@ THE SOFTWARE.
 */
 
 // Statuses that RDC returns for a GPU group that does not exist, and the status
-// strings. Needs no GPU: the test builds RdcWatchTableImpl.cc and
-// RdcGroupSettingsImpl.cc itself, because librdc initializes AMD SMI when it is
-// loaded, and links only librdc_bootstrap.
+// strings. Needs no GPU: the test builds RdcWatchTableImpl.cc,
+// RdcGroupSettingsImpl.cc and SmiUtils.cc itself instead of linking librdc.
 
 #include <gtest/gtest.h>
 

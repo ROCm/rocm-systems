@@ -189,13 +189,12 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
             if((pm4_factory->GetBlockInfo(event.block_name)->attr & CounterBlockUmcAttr) == 0u)
                 continue;
 
-#if DEBUG_TRACE == 2
-            printf("DATA: sample index(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
-                   sample_index,
-                   sample_id,
-                   p->block_name,
-                   p->block_index,
-                   p->counter_id,
+#if AQLPROFILE_DEBUG_LEVEL == 2
+            printf("DATA: id(%zu) block id(%u) index(%u) counter id(%u) res(%lu)\n",
+                   umc_sample_id,
+                   event.block_name,
+                   event.block_index,
+                   event.event_id,
                    *samples);
 #endif
 
@@ -224,7 +223,7 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
             size_t xcc_sample_count = attrib.get_num_instances() * block_samples_count;
             for(uint32_t blk = 0; blk < block_samples_count; ++blk)
             {
-#if DEBUG_TRACE == 2
+#if AQLPROFILE_DEBUG_LEVEL == 2
                 printf("DATA: xcc(%u) blk(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
                        xcc_index,
                        blk,
@@ -268,7 +267,7 @@ _internal_aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
             size_t aid_sample_count = attrib.get_num_instances() * block_samples_count;
             for(uint32_t blk = 0; blk < block_samples_count; ++blk)
             {
-#if DEBUG_TRACE == 2
+#if AQLPROFILE_DEBUG_LEVEL == 2
                 printf("DATA: xcc(%u) blk(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
                        xcc_index,
                        blk,
@@ -309,7 +308,6 @@ _internal_aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 han
     pm4_builder::CmdBuffer commands;
     auto                   memorymgr =
         std::make_shared<CounterMemoryManager>(profile.agent, alloc_cb, dealloc_cb, userdata);
-    MemoryManager::RegisterManager(memorymgr);
     memorymgr->CopyEvents(profile.events, profile.event_count);
 
     pm4_builder::CmdBuffer read_cmd;
@@ -343,19 +341,20 @@ _internal_aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 han
     size_t read_size  = aql_profile::CommandBufferMgr::Align(read_cmd.Size());
     memorymgr->CreateCmdBuf(start_size + stop_size + read_size);
 
-    handle->handle                      = memorymgr->GetHandler();
     pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
     uint8_t*                 cmdbuf     = reinterpret_cast<uint8_t*>(memorymgr->GetCmdBuf());
 
-    memcpy_cb(cmdbuf, read_cmd.Data(), read_cmd.Size(), userdata);
+    MemoryManager::CheckStatus(memcpy_cb(cmdbuf, read_cmd.Data(), read_cmd.Size(), userdata));
     aql_profile::PopulateAql(cmdbuf, read_cmd.Size(), cmd_writer, &packets->read_packet);
     cmdbuf += read_size;
-    memcpy_cb(cmdbuf, start_cmd.Data(), start_cmd.Size(), userdata);
+    MemoryManager::CheckStatus(memcpy_cb(cmdbuf, start_cmd.Data(), start_cmd.Size(), userdata));
     aql_profile::PopulateAql(cmdbuf, start_cmd.Size(), cmd_writer, &packets->start_packet);
     cmdbuf += start_size;
-    memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), userdata);
+    MemoryManager::CheckStatus(memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), userdata));
     aql_profile::PopulateAql(cmdbuf, stop_cmd.Size(), cmd_writer, &packets->stop_packet);
 
+    MemoryManager::RegisterManager(memorymgr);
+    handle->handle = memorymgr->GetHandler();
     return HSA_STATUS_SUCCESS;
 }
 

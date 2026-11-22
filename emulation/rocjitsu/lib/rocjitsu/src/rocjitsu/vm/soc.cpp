@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/result.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -19,15 +20,15 @@
 namespace rocjitsu {
 namespace {
 
-amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+amdgpu::SdmaPacketDialect sdma_dialect(rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Cdna5)
     return amdgpu::SdmaPacketDialect::Gfx1250;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna4)
     return amdgpu::SdmaPacketDialect::Rdna4;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+  if (arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+      arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Rdna2) {
     return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
   }
   return amdgpu::SdmaPacketDialect::Legacy;
@@ -35,7 +36,7 @@ amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
 
 } // namespace
 
-SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
+SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rocjitsu::IsaFamily arch)
     : simdojo::CompositeComponent(std::move(name)), arch_(arch),
       sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
       queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this), memory_(memory) {
@@ -242,7 +243,7 @@ SoC::SoC(std::string name, const Config &config)
     });
 }
 
-util::Result SoC::set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
+util::Result SoC::set_arch(rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error) {
   if (!sdma_queue_scheduler_.set_packet_dialect(sdma_dialect(arch)))
     return emit_error.emit() << "SoC architecture cannot change while copy queues are active";
   arch_ = arch;

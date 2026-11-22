@@ -13,7 +13,7 @@ use rocddi::driver::linux_kfd::{DebuggerRegistration, DebuggerRegistrationMode};
 use rocddi::topology::GpuInfo;
 
 use crate::ffi::{ERROR, OUT_OF_RESOURCES, Status};
-use crate::runtime::map_error;
+use crate::status::map_error;
 
 /// Exact trap build target and target/revision fixup rules from `ROCr`.
 pub(crate) fn trap_bytes(info: &GpuInfo) -> Option<&'static [u8]> {

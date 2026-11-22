@@ -111,7 +111,7 @@ fn prepare(snapshot: &ImageSnapshot, import: bool) -> Result<Dispatch<TransferOw
         let generation = guard.active_generation().ok_or(NOT_INITIALIZED)?;
         let runtime = initialized_mut(&mut guard)?;
         let index = image_gpu_index(runtime, snapshot.agent)?;
-        let info = runtime.gpus[index].info();
+        let info = runtime.agents.gpus[index].info();
         let object: &[u8] = match (info.gfx_major, info.gfx_minor, info.gfx_stepping) {
             (9, 0, 8) => include_bytes!("image_transfer_gfx908.hsaco"),
             (9, 0, 10) => include_bytes!("image_transfer_gfx90a.hsaco"),
@@ -138,8 +138,8 @@ fn prepare(snapshot: &ImageSnapshot, import: bool) -> Result<Dispatch<TransferOw
         )?;
         runtime.memory_state.retain_copy_borrow(base)?;
         (
-            runtime.gpus[index].device.clone(),
-            runtime.host_page_size as u64,
+            runtime.agents.gpus[index].device.clone(),
+            runtime.agents.host_page_size as u64,
             object,
             BackingLease { generation, base },
         )

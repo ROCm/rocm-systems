@@ -16,8 +16,6 @@ namespace rocprofsys::trace_cache
 
 struct sample_processor_t
 {
-    void clear_handlers() { m_processors.clear(); }
-
     void add_handler(std::shared_ptr<sample_processor_interface> handler)
     {
         m_processors.push_back(std::move(handler));

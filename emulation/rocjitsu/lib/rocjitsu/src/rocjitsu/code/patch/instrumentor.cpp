@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
@@ -55,14 +56,14 @@ namespace rocjitsu {
 
 namespace {
 
-rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rj_code_arch_t arch) {
+rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rocjitsu::IsaFamily arch) {
   if (object.target_id() != ROCJITSU_CODE_TARGET_INVALID)
     return object.target_id();
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *descriptor = registry.find(arch);
   if (descriptor == nullptr)
     return ROCJITSU_CODE_TARGET_INVALID;
-  const IsaGpuTargetDescription *target = registry.find_default_gpu_target(*descriptor);
+  const IsaTargetBinding *target = registry.find_default_target(*descriptor);
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
 
@@ -76,9 +77,9 @@ bool requires_cdna5_valu_follower(const Instruction &inst) {
 
 // These ISA message tables assign MSG_DEALLOC_VGPRS to message 3. Older
 // architectures give that encoding different semantics.
-bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
-      arch != ROCJITSU_CODE_ARCH_RDNA3_5 && arch != ROCJITSU_CODE_ARCH_RDNA4)
+bool deallocates_vgprs(const Instruction &instruction, rocjitsu::IsaFamily arch) {
+  if (arch != rocjitsu::IsaFamily::Cdna5 && arch != rocjitsu::IsaFamily::Rdna3 &&
+      arch != rocjitsu::IsaFamily::Rdna3_5 && arch != rocjitsu::IsaFamily::Rdna4)
     return false;
   if (instruction.mnemonic() != "s_sendmsg" && instruction.mnemonic() != "s_sendmsghalt")
     return false;
@@ -87,9 +88,9 @@ bool deallocates_vgprs(const Instruction &instruction, rj_code_arch_t arch) {
   // In-tree OPR_SENDMSG.MSG is 9/4/7/7 bits for RDNA3/3.5/4/CDNA5.
   // LLVM SendMsg::ID_MASK_GFX11Plus_ (SIDefines.h) uses the low byte. Until these descriptions
   // agree, reject deallocation under either interpretation (including 0x103).
-  const uint32_t message_mask = arch == ROCJITSU_CODE_ARCH_RDNA3     ? 0x1ffu
-                                : arch == ROCJITSU_CODE_ARCH_RDNA3_5 ? 0xfu
-                                                                     : 0x7fu;
+  const uint32_t message_mask = arch == rocjitsu::IsaFamily::Rdna3     ? 0x1ffu
+                                : arch == rocjitsu::IsaFamily::Rdna3_5 ? 0xfu
+                                                                       : 0x7fu;
   return message == nullptr || (message->encoding_value() & message_mask) == kDeallocVgprsMessage ||
          (message->encoding_value() & 0xffu) == kDeallocVgprsMessage;
 }
@@ -98,22 +99,22 @@ enum class CallableState { GprIndexing, Vskip, UnavailableStorage };
 
 enum class StateWrite { Unchanged, Safe, Unsafe };
 
-bool has_callable_state(rj_code_arch_t arch, CallableState state) {
+bool has_callable_state(rocjitsu::IsaFamily arch, CallableState state) {
   switch (state) {
   case CallableState::GprIndexing:
     return isa_properties(arch).mode_has_gpr_idx_en;
   case CallableState::Vskip:
     return arch_is_cdna_4_or_lower(arch);
   case CallableState::UnavailableStorage:
-    return arch == ROCJITSU_CODE_ARCH_CDNA5 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-           arch == ROCJITSU_CODE_ARCH_RDNA3_5 || arch == ROCJITSU_CODE_ARCH_RDNA4;
+    return arch == rocjitsu::IsaFamily::Cdna5 || arch == rocjitsu::IsaFamily::Rdna3 ||
+           arch == rocjitsu::IsaFamily::Rdna3_5 || arch == rocjitsu::IsaFamily::Rdna4;
   }
   return false;
 }
 
 StateWrite
-callable_state_write(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
-                     CallableState state,
+callable_state_write(const Instruction &inst, std::span<const uint8_t> text,
+                     rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<const Instruction *> *preserving_calls = nullptr) {
   if (!has_callable_state(arch, state))
     return StateWrite::Unchanged;
@@ -147,7 +148,7 @@ callable_state_write(const Instruction &inst, std::span<const uint8_t> text, rj_
 // A resolved straight-line helper can preserve the required state without an
 // ABI assumption. More complex or unresolved callees remain unknown here.
 bool callee_preserves_state(const BasicBlock::CallEdge &edge, std::span<const uint8_t> text,
-                            rj_code_arch_t arch, CallableState state) {
+                            rocjitsu::IsaFamily arch, CallableState state) {
   if (edge.callee == nullptr || !edge.callee->successors().empty() ||
       !edge.callee->predecessors().empty())
     return false;
@@ -263,8 +264,8 @@ std::optional<uint64_t> static_pc_reentry_target(const BasicBlock &block,
 // the closed text changes it. Unknown/external transfers still fail.
 bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBlock>> blocks,
                                                 std::span<const KernelDescriptorInfo> kernels,
-                                                std::span<const uint8_t> text, rj_code_arch_t arch,
-                                                CallableState state) {
+                                                std::span<const uint8_t> text,
+                                                rocjitsu::IsaFamily arch, CallableState state) {
   std::unordered_set<const Instruction *> known_returns;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
@@ -310,33 +311,26 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
   return true;
 }
 
-// PC-reading / PC-relative instructions to reject as anchors: relocating any of
-// them into a trampoline changes the PC value they read (s_getpc) or the target
-// they branch to. s_getpc and the s_rfe_ family carry no control-flow flag or
-// branch_offset_bytes, so validate_anchor's flag/offset checks miss them and the
-// denylist is the only thing that catches them. The s_call / s_setpc / s_swappc
-// entries are already rejected upstream by their INDIRECT_BRANCH / INDIRECT_CALL
-// flags and are listed only as defense-in-depth. gfx1250 renames the whole
-// family from *_b64 to *_i64 (e.g. s_getpc_b64 -> s_get_pc_i64), so both
-// spellings are listed; the s_rfe_ prefix match below covers s_rfe_b64,
-// s_rfe_i64, and s_rfe_restore_b64.
-constexpr std::array<std::string_view, 8> kPcRelativeDenylist = {
-    "s_getpc_b64",  "s_call_b64", "s_setpc_b64",  "s_swappc_b64",
-    "s_get_pc_i64", "s_call_i64", "s_set_pc_i64", "s_swap_pc_i64",
-};
-
-constexpr std::string_view kRfePrefix = "s_rfe_";
-
-[[nodiscard]] bool is_denylisted_mnemonic(std::string_view mnemonic) {
-  for (auto m : kPcRelativeDenylist)
-    if (mnemonic == m)
-      return true;
-  if (mnemonic.size() >= kRfePrefix.size() && mnemonic.substr(0, kRfePrefix.size()) == kRfePrefix)
+// Relocation changes the value observed by PC readers. PC restore and set
+// operations remain disallowed separately from ordinary branch metadata.
+[[nodiscard]] bool is_pc_relative_anchor(const Instruction &inst) {
+  if (inst.reads_pc())
     return true;
-  return false;
+  switch (inst.amdgpu_operation()) {
+  case amdgpu::Operation::S_SETPC_B64:
+  case amdgpu::Operation::S_SET_PC_I64:
+  case amdgpu::Operation::S_RFE_B64:
+  case amdgpu::Operation::S_RFE_I64:
+  case amdgpu::Operation::S_RFE_RESTORE_B64:
+    return true;
+  default:
+    return false;
+  }
 }
 
-[[nodiscard]] bool is_s_clause(const Instruction &inst) { return inst.mnemonic() == "s_clause"; }
+[[nodiscard]] bool is_s_clause(const Instruction &inst) {
+  return inst.amdgpu_operation() == amdgpu::Operation::S_CLAUSE;
+}
 
 // Per-site result of Instrumentor::patch's preflight: the chosen trampoline
 // offset and the concrete bytes we'll splice in once all preflights succeed.
@@ -386,12 +380,12 @@ std::string reg_name(RegisterRef ref) {
 // The fields are signed, so the cap is the positive half: the CDNA FLAT path
 // writes the 12-bit offset (pad_12 left 0), RDNA4 has a signed 24-bit VSCRATCH
 // ioffset.
-uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
+uint32_t max_scratch_offset_bytes(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return 0xFFF; // 12-bit, pad_12 = 0
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return 0x7FFFFF; // positive half of signed 24-bit
   default:
     return 0;
@@ -406,12 +400,12 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 
 // All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
 // RDNA/gfx1250 have none.
-bool arch_has_accvgpr(rj_code_arch_t arch) {
+bool arch_has_accvgpr(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
   default:
     return false;
@@ -422,23 +416,23 @@ bool arch_has_accvgpr(rj_code_arch_t arch) {
 // allocation, split at the descriptor's ACCUM_OFFSET field. CDNA1/gfx908 allocates
 // AGPRs separately and has no such field; RDNA and gfx1250 have no AccVGPR file at
 // all.
-bool arch_has_unified_vgpr_allocation(rj_code_arch_t arch) {
+bool arch_has_unified_vgpr_allocation(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
     return false;
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_INVALID:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Invalid:
     break;
   }
   assert(false && "unified VGPR allocation for an unadmitted architecture");
@@ -454,7 +448,7 @@ struct KernelVgprBounds {
 };
 
 // Decode @p desc's VGPR allocation for @p arch.
-KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
+KernelVgprBounds kernel_vgpr_bounds(rocjitsu::IsaFamily arch,
                                     const rocjitsu::amdhsa::kernel_descriptor_t &desc) {
   const uint32_t granulated = RJ_AMDHSA_BITS_GET(
       desc.compute_pgm_rsrc1, rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
@@ -486,7 +480,7 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
 
 // The wave size every kernel in @p kernels runs at, or nullopt when there are
 // none or they disagree.
-std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
+std::optional<uint8_t> common_wavefront_size(rocjitsu::IsaFamily arch,
                                              std::span<const KernelDescriptorInfo> kernels) {
   std::optional<uint8_t> common;
   for (const KernelDescriptorInfo &kernel : kernels) {
@@ -504,10 +498,10 @@ std::optional<uint8_t> common_wavefront_size(rj_code_arch_t arch,
 // FLAT_SCRATCH stays rejected: the spill store/load depend on it, so a probe
 // that clobbers it entangles with the spill mechanism. Fail closed there rather
 // than let it silently corrupt the host kernel's state.
-bool check_probe_special_state(const ProbeClobberSummary &summary, rj_code_arch_t arch,
+bool check_probe_special_state(const ProbeClobberSummary &summary, rocjitsu::IsaFamily arch,
                                std::span<const uint32_t> allocations, std::string *error_out) {
   const bool writes_backing =
-      arch == ROCJITSU_CODE_ARCH_CDNA3 && std::ranges::any_of(allocations, [&](uint32_t count) {
+      arch == rocjitsu::IsaFamily::Cdna3 && std::ranges::any_of(allocations, [&](uint32_t count) {
         const auto base = cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count));
         return summary.ordinary_clobbers.intersects(RegisterRef{RegClass::SGPR, base, 2});
       });
@@ -570,7 +564,7 @@ bool validate_anchor_bytes(const Instruction &anchor, uint64_t anchor_offset,
 
 bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
                            std::span<const uint8_t> text_bytes,
-                           [[maybe_unused]] rj_code_arch_t arch, std::string *error_out) {
+                           [[maybe_unused]] rocjitsu::IsaFamily arch, std::string *error_out) {
   if (!validate_anchor_bytes(anchor, anchor_offset, text_bytes, error_out))
     return false;
   constexpr uint64_t kControlFlowFlags =
@@ -583,8 +577,8 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
     report(error_out, "anchor instruction has a PC-relative branch offset");
     return false;
   }
-  if (is_denylisted_mnemonic(anchor.mnemonic())) {
-    report(error_out, "anchor mnemonic is in the PC-relative denylist");
+  if (is_pc_relative_anchor(anchor)) {
+    report(error_out, "anchor instruction has PC-relative semantics");
     return false;
   }
   if (is_s_clause(anchor)) {
@@ -597,7 +591,7 @@ bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
 std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                rj_code_arch_t arch, std::string *error_out, bool setreg_vgpr_msb_fixup) {
+                rocjitsu::IsaFamily arch, std::string *error_out, bool setreg_vgpr_msb_fixup) {
   auto fail = [&](const char *msg) {
     report(error_out, (msg + (", anchor_offset = " + std::to_string(anchor_offset))).c_str());
   };
@@ -666,7 +660,7 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
   // CDNA5 ISA 5.7.2 / 7.12.1 require independent VALUs for co-execution hazards;
   // scalar waits do not provide that spacing before argument copies or spills.
   // Reject whole families conservatively, without inferring a latency class.
-  if (pt.kind == InstrumentationKind::AfterInst && arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (pt.kind == InstrumentationKind::AfterInst && arch == rocjitsu::IsaFamily::Cdna5 &&
       may_require_cdna5_valu_spacing(anchor)) {
     fail("AfterInst requires proven VALU spacing for CDNA5 matrix or transcendental anchors");
     return std::nullopt;
@@ -681,7 +675,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
       fail("kernel boundary instrumentation requires a callable probe and valid anchor bytes");
       return std::nullopt;
     }
-    if (pt.kind == InstrumentationKind::KernelExit && anchor.mnemonic() != "s_endpgm") {
+    if (pt.kind == InstrumentationKind::KernelExit &&
+        anchor.amdgpu_operation() != amdgpu::Operation::S_ENDPGM) {
       fail("KernelExit must name s_endpgm");
       return std::nullopt;
     }
@@ -759,7 +754,7 @@ bool compute_probe_reserved_registers(std::span<const ProbeCallable> probes,
   return true;
 }
 
-bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_code_arch_t arch,
+bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rocjitsu::IsaFamily arch,
                       std::vector<SpillSlot> &out, std::string *error_out) {
   out.clear();
 
@@ -811,7 +806,7 @@ bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_cod
 
 bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_unavailable,
                       const std::vector<SpillSlot> &vgpr_spills, uint32_t kernel_vgpr_count,
-                      SpillManager &spills, rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                      SpillManager &spills, rocjitsu::IsaFamily arch, std::vector<SpillSlot> &out,
                       uint16_t &out_bridge, std::string *error_out) {
   out.clear();
 
@@ -888,7 +883,8 @@ bool plan_sgpr_spills(const RegisterSet &spill_set, const RegisterSet &bridge_un
 }
 
 bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillManager &spills,
-                     rj_code_arch_t arch, std::vector<SpillSlot> &out, std::string *error_out) {
+                     rocjitsu::IsaFamily arch, std::vector<SpillSlot> &out,
+                     std::string *error_out) {
   out.clear();
 
   // Plans AccVGPR spills only; the orchestrator routes VGPRs/SGPRs elsewhere.
@@ -961,7 +957,7 @@ bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count, SpillMana
 namespace {
 
 // Fill the layout/identity fields shared by every trampoline plan
-TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
+TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rocjitsu::IsaFamily arch,
                               uint64_t trampoline_offset) {
   TrampolinePlan plan;
   plan.arch = arch;
@@ -1027,7 +1023,8 @@ bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObjec
 } // namespace
 
 std::optional<TrampolinePlan> make_trampoline_plan(const ResolvedInstrumentationSite &site,
-                                                   rj_code_arch_t arch, uint64_t trampoline_offset,
+                                                   rocjitsu::IsaFamily arch,
+                                                   uint64_t trampoline_offset,
                                                    std::string *error_out) {
   OptionalStringDiagnosticSink record_error(error_out);
   const util::DiagnosticEmitter error(record_error);
@@ -1141,7 +1138,7 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
   std::vector<uint32_t> all_counts;
   for (const auto &kernel : kernels) {
     const uint32_t count =
-        *AmdGpuCodeObject::min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA3, std::span(&kernel, 1));
+        *AmdGpuCodeObject::min_kernel_sgpr_count(rocjitsu::IsaFamily::Cdna3, std::span(&kernel, 1));
     all_counts.push_back(count);
     auto *entry = block_for_offset(offsets, kernel.entry_text_offset);
     KernelScopeSpec spec;
@@ -1360,7 +1357,7 @@ class Instrumentor::CallableStateAnalysis {
 public:
   CallableStateAnalysis(std::span<const std::unique_ptr<BasicBlock>> blocks,
                         std::span<const KernelDescriptorInfo> kernels,
-                        std::span<const uint8_t> text, rj_code_arch_t arch) {
+                        std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
     std::unordered_set<uint64_t> entries;
     for (const KernelDescriptorInfo &kernel : kernels)
       entries.insert(kernel.entry_text_offset);
@@ -1373,9 +1370,9 @@ public:
         states_.try_emplace(&inst);
         has_mfma_producer_ |= inst.is_mfma();
         has_cdna5_producer_ |=
-            arch == ROCJITSU_CODE_ARCH_CDNA5 && may_require_cdna5_valu_spacing(inst);
+            arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(inst);
         has_cdna5_packed_permute_ |=
-            arch == ROCJITSU_CODE_ARCH_CDNA5 && requires_cdna5_valu_follower(inst);
+            arch == rocjitsu::IsaFamily::Cdna5 && requires_cdna5_valu_follower(inst);
       }
     }
     while (!work.empty()) {
@@ -1426,7 +1423,7 @@ private:
 
   void analyze_state(std::span<const std::unique_ptr<BasicBlock>> blocks,
                      std::span<const KernelDescriptorInfo> kernels, std::span<const uint8_t> text,
-                     rj_code_arch_t arch, CallableState state,
+                     rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<uint64_t> &entries,
                      const std::unordered_set<const BasicBlock *> &reachable) {
     std::unordered_set<const Instruction *> preserving_calls;
@@ -1529,7 +1526,7 @@ private:
   }
 };
 
-Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rocjitsu::IsaFamily arch,
                            InstrumentationOptions options)
     : obj_(obj), arch_(arch), options_(options) {}
 
@@ -1551,7 +1548,7 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   }
   if (blocks_built_)
     return true;
-  if (arch_ == ROCJITSU_CODE_ARCH_RV32I || arch_ == ROCJITSU_CODE_ARCH_RV64I) {
+  if (arch_ == rocjitsu::IsaFamily::Rv32i || arch_ == rocjitsu::IsaFamily::Rv64i) {
     report(error_out, "AMDGPU instrumentation does not support RISC-V architectures");
     return false;
   }
@@ -1559,15 +1556,15 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   const rj_code_target_id_t target = obj_.target_id();
   if (target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetDescriptor *descriptor = registry.find(target);
-    if (descriptor == nullptr || descriptor->architecture_id != arch_) {
+    if (descriptor == nullptr || descriptor->family != arch_) {
       report(error_out, "code-object target does not match the requested architecture");
       return false;
     }
   } else if (obj_.image_size() >= sizeof(Elf64_Ehdr)) {
     Elf64_Ehdr header = {};
     std::memcpy(&header, obj_.image_data(), sizeof(header));
-    const rj_code_arch_t source_arch = arch_for_elf_mach(header.e_flags);
-    if (source_arch != ROCJITSU_CODE_ARCH_INVALID && source_arch != arch_) {
+    const rocjitsu::IsaFamily source_arch = arch_for_elf_mach(header.e_flags);
+    if (source_arch != rocjitsu::IsaFamily::Invalid && source_arch != arch_) {
       report(error_out, "code-object ELF architecture does not match the requested architecture");
       return false;
     }
@@ -1718,11 +1715,11 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
 
   const auto &registry = default_isa_target_registry();
   const rj_code_target_id_t destination_target = effective_target(obj_, arch_);
-  const IsaGpuTargetDescription *gpu_target = registry.find_gpu_target(destination_target);
+  const IsaTargetBinding *gpu_target = registry.find_target(destination_target);
   const bool setreg_vgpr_msb_fixup =
       gpu_target == nullptr || gpu_target->capabilities.setreg_vgpr_msb_fixup;
   ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA5 && out.wave_size) {
+  if (arch_ == rocjitsu::IsaFamily::Cdna5 && out.wave_size) {
     if (!ensure_liveness_built(*out.wave_size, out.kernels, &err)) {
       out.errors.push_back(err);
       return out;
@@ -2249,7 +2246,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   std::optional<SpillManager> spills;
 
   std::unordered_map<uint64_t, std::vector<uint32_t>> cdna3_owners;
-  if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 && kernels.size() > 1 && !resolved.probes.empty())
+  if (arch_ == rocjitsu::IsaFamily::Cdna3 && kernels.size() > 1 && !resolved.probes.empty())
     cdna3_owners = cdna3_probe_sgpr_counts(blocks_, kernels, sites);
 
   std::vector<AppliedSite> applied;
@@ -2286,7 +2283,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
           continue;
         }
         const auto alias = std::ranges::find_if(allocations, [&](uint32_t count) {
-          return arch_ == ROCJITSU_CODE_ARCH_CDNA3 &&
+          return arch_ == rocjitsu::IsaFamily::Cdna3 &&
                  cdna3::sgpr_pair_overlaps_vcc_or_flat_scratch(count, link_base);
         });
         if (alias != allocations.end()) {
@@ -2608,8 +2605,13 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     for (const std::unique_ptr<BasicBlock> &block : blocks_) {
       for (const Instruction &instruction : block->instructions()) {
         const std::string_view mnemonic = instruction.mnemonic();
-        if ((mnemonic.starts_with("s_cbranch_cdbg") || mnemonic == "s_subvector_loop_begin" ||
-             mnemonic == "s_subvector_loop_end") &&
+        const amdgpu::Operation operation = instruction.amdgpu_operation();
+        if (((operation == amdgpu::Operation::S_CBRANCH_CDBGSYS ||
+              operation == amdgpu::Operation::S_CBRANCH_CDBGUSER ||
+              operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_AND_USER ||
+              operation == amdgpu::Operation::S_CBRANCH_CDBGSYS_OR_USER) ||
+             operation == amdgpu::Operation::S_SUBVECTOR_LOOP_BEGIN ||
+             operation == amdgpu::Operation::S_SUBVECTOR_LOOP_END) &&
             !instruction.branch_offset_bytes()) {
           result.edit_error = TextEditError{
               .code = TextEditErrorCode::UnsupportedReferences,
@@ -2703,7 +2705,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
         result.errors.emplace_back("instrumentation exceeds the bounded register allocation");
         return result;
       }
-      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3) {
+      if (arch_ == rocjitsu::IsaFamily::Cdna3) {
         const uint32_t old_end =
             cdna3::sgpr_alias_end(*AmdGpuCodeObject::min_kernel_sgpr_count(arch_, kernels));
         const uint32_t new_end =
@@ -2721,7 +2723,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                          amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                          result.resources.vgprs / granule - 1);
-      if (arch_ == ROCJITSU_CODE_ARCH_CDNA3 || arch_ == ROCJITSU_CODE_ARCH_CDNA4) {
+      if (arch_ == rocjitsu::IsaFamily::Cdna3 || arch_ == rocjitsu::IsaFamily::Cdna4) {
         RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
                            amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                            (result.resources.sgprs + kCdnaSpecialSgprTailReserve + 7) / 8 - 1);

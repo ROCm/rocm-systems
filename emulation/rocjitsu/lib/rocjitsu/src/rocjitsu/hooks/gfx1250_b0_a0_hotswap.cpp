@@ -28,8 +28,8 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object_identity.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_a0_cache.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/code/dbt/translation_store.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <algorithm>
 #include <atomic>
@@ -391,7 +391,7 @@ void log_translation(uint64_t source_id, const char *outcome, size_t changed, si
 }
 
 void log_translation_diagnostic(uint64_t source_id,
-                                const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) noexcept {
+                                const rocjitsu::Gfx1250B0ToA0DiagnosticView *diagnostic) noexcept {
   if (diagnostic == nullptr)
     return;
   const char *severity = diagnostic->severity != nullptr ? diagnostic->severity : "unknown";
@@ -503,7 +503,7 @@ uint64_t sample_fingerprint(std::span<const uint8_t> bytes) noexcept {
 /// original translation record rather than logging a weaker one.
 struct TranslationRecord {
   Blob output;
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
   rj_status_t status = ROCJITSU_STATUS_SUCCESS;
 };
 
@@ -930,7 +930,7 @@ void hold_claimed_translation_for_test() {
   g_gate_open.wait(lock, [] { return !g_gate_closed; });
 }
 
-void override_translation_status_for_test(rj_status_t &status, uint8_t *&data, size_t &size) {
+void override_translation_status_for_test(rj_status_t &status, std::vector<uint8_t> &data) {
   std::lock_guard lock(g_forced_status_mutex);
   if (!g_forced_status_armed)
     return;
@@ -938,13 +938,11 @@ void override_translation_status_for_test(rj_status_t &status, uint8_t *&data, s
   status = g_forced_status;
   if (status == ROCJITSU_STATUS_SUCCESS)
     return;
-  rj_gfx1250_b0_to_a0_free(data);
-  data = nullptr;
-  size = 0;
+  data.clear();
 }
 #else
 void hold_claimed_translation_for_test() {}
-void override_translation_status_for_test(rj_status_t &, uint8_t *&, size_t &) {}
+void override_translation_status_for_test(rj_status_t &, std::vector<uint8_t> &) {}
 #endif // RJ_HOTSWAP_TEST_HOOKS
 
 bool install(HsaApiTable *table) noexcept {
@@ -1449,21 +1447,18 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     return reused_status;
   }
 
-  uint8_t *translated_data = nullptr;
-  size_t translated_size = 0;
+  std::vector<uint8_t> translated_data;
   g_state.translations.fetch_add(1, std::memory_order_relaxed);
   hold_claimed_translation_for_test();
-  translation.status = rj_gfx1250_b0_to_a0_translate(
-      source->data(), source->size(), &translated_data, &translated_size, &translation.info,
-      [](const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data) noexcept {
-        const auto *info = static_cast<const rj_gfx1250_b0_to_a0_translation_info_t *>(user_data);
+  translation.status = rocjitsu::translate_gfx1250_b0_to_a0(
+      *source, translated_data, translation.info,
+      [](const rocjitsu::Gfx1250B0ToA0DiagnosticView *diagnostic, void *user_data) noexcept {
+        const auto *info = static_cast<const rocjitsu::Gfx1250B0ToA0TranslationInfo *>(user_data);
         log_translation_diagnostic(info->source_code_object_id, diagnostic);
       },
       &translation.info);
-  override_translation_status_for_test(translation.status, translated_data, translated_size);
-  if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data == nullptr ||
-      translated_size == 0) {
-    rj_gfx1250_b0_to_a0_free(translated_data);
+  override_translation_status_for_test(translation.status, translated_data);
+  if (translation.status != ROCJITSU_STATUS_SUCCESS || translated_data.empty()) {
     // Copying a large input to disk after an allocation failure adds pressure
     // to a system that just ran out, and the bytes are not what failed.
     if (translation.status != ROCJITSU_STATUS_OUT_OF_RESOURCES)
@@ -1480,8 +1475,8 @@ hsa_status_t HSA_API load_agent_code_object(hsa_executable_t executable, hsa_age
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
-  translation.output = copy_bytes(translated_data, translated_size);
-  rj_gfx1250_b0_to_a0_free(translated_data);
+  const size_t translated_size = translated_data.size();
+  translation.output = adopt_bytes(std::move(translated_data));
 
   remember(translation);
   const hsa_status_t load_status =
@@ -1692,7 +1687,7 @@ extern "C" RJ_HOOK_EXPORT void rj_test_log_translation(uint64_t source_id, size_
 // to select its severity.
 extern "C" RJ_HOOK_EXPORT void
 rj_test_log_translation_diagnostic(uint64_t source_id,
-                                   const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic) {
+                                   const rocjitsu::Gfx1250B0ToA0DiagnosticView *diagnostic) {
   log_translation_diagnostic(source_id, diagnostic);
 }
 // Test-only seam onto the pre-translated tier. Its production root is derived

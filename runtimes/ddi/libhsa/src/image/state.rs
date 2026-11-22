@@ -72,9 +72,9 @@ impl ImageState {
     }
 }
 /// Validates a GPU agent and returns its image-capable runtime index.
-pub(super) fn image_gpu_index(runtime: &HsaState, agent: HsaAgent) -> Result<usize, Status> {
-    let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-    let info = runtime.gpus[index].info();
+pub(super) fn image_gpu_index(runtime: &HsaSession, agent: HsaAgent) -> Result<usize, Status> {
+    let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
+    let info = runtime.agents.gpus[index].info();
     if !descriptor::supported_gpu(&info) || Generation::from_gpu(&info).is_none() {
         return Err(NOT_SUPPORTED);
     }
@@ -107,7 +107,7 @@ pub(super) fn image_snapshot(
 ) -> Result<(ImageSnapshot, InFlightToken), Status> {
     let guard = lock()?;
     let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-    if runtime.gpu_index(agent).is_none() {
+    if runtime.agents.gpu_index(agent).is_none() {
         return Err(INVALID_AGENT);
     }
     let record = runtime
@@ -115,7 +115,7 @@ pub(super) fn image_snapshot(
         .images
         .get(&(agent.handle, image.handle))
         .ok_or(INVALID_ARGUMENT)?;
-    let token = runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
+    let token = runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?;
     Ok((
         ImageSnapshot {
             agent,

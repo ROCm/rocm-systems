@@ -47,7 +47,91 @@ remaining public adapters can migrate as their owning operations are changed.
 Use explicit requests, retained owners, and existing operation/generation
 leases. Do not add a parallel framework of service traits or another global
 registry. Callback and native work must leave lifecycle locks before blocking;
-the operation lease still prevents release of the retained generation.
+the operation lease still prevents release of the retained HSA session.
+
+## Frontend sessions
+
+`libhsa::session::HsaSession` and `libamdf::session::AmdfSession` extend
+`rocddi::session::Session` through composition. Each frontend owner holds its own native
+session and adds the objects and policy required by its public API. The AMDF
+owner remains exposed as `amdf_instance_t`; HSA publishes one session under its
+process lifecycle coordinator. Generation numbers identify successive HSA
+session lifetimes and remain part of admission and stale-work checks.
+
+The native session already owns driver selection, admission, process identity,
+resource dependencies, and checked retirement. Allocator-backed owner storage
+and native signal-event services also live in rocddi. Both frontend sessions
+borrow those services directly. Shared process driver backing sits below the
+independent native sessions; retiring one frontend never retires another's
+session.
+
+`rocddi::memory::storage::RetainOnDrop` provides the common explicit-retention
+mechanism used by both frontends and by `SessionRetirement`. It suppresses the
+owner's destructor on scope exit or unwind; the caller explicitly releases it
+after cleanup proves destruction is safe. The guard does not pin storage,
+extend borrowed lifetimes, perform cleanup, or choose the public API's error
+policy.
+
+Frontend lifecycle policy stays with its API. AMDF destruction checks public
+children before mutation and returns `BUSY` while they remain; creation is inert
+and cached metadata queries keep their no-allocation/no-lock contract. HSA
+closes public admission before draining calls and preparing tools. Its native
+session stays open until tool cleanup finishes. These guarantees require
+separate frontend transitions over the common native mechanisms.
+
+## HSA session ownership
+
+HSA initialization references describe the lifetime of public HSA objects and
+tool callbacks. A rocddi `Session` describes native admission, resource
+retirement, and attachment to a driver context. These lifetimes differ: final
+HSA shutdown must exclude ordinary callers while tools still use native services
+to stop profiling and release their operands. AMDF owns its own sessions and
+does not participate in HSA initialization references.
+
+The HSA source layout follows those owners:
+
+| Source | Responsibility |
+| --- | --- |
+| `api/lifecycle.rs` | C entry points and panic boundaries. |
+| `lifecycle.rs`, `lifecycle/operations.rs` | One process coordinator, initialization references, HSA session publication, and exclusive transition execution outside the registry lock. State variants own the HSA session or native retirement object needed for their next action. |
+| `session.rs` | The HSA owner graph: public object registries, agents, configuration, events, control, and a private rocddi session. |
+| `session/startup.rs` | Construction and rollback of unpublished native attachments and HSA state. |
+| `session/retirement.rs` | Detached callback shutdown and ordered release of a prepared HSA session. |
+| `session/control.rs`, `admission.rs` | Session health, ordinary and cleanup cancellation, counted leases, and scoped thread-local execution. |
+| `agent.rs`, `config.rs`, `events.rs` | HSA agent projections and activated GPU attachments, sampled policy, and system-event registrations and worker ownership. |
+| `queue.rs`, `signal.rs`, `memory.rs`, `loader.rs`, `image.rs`, `pc_sampling.rs` | The corresponding HSA object operations and registries. |
+
+The HSA session composes these owners; it does not provide a second native
+device abstraction. Agent queries stay with `Agents`, system-event state stays
+with `SystemEvents`, and native mechanisms stay with rocddi. Clock, logging, and
+status conversion have their own focused modules. There is no catch-all
+`runtime.rs` or parallel runtime service hierarchy.
+
+The final HSA reference closes public admission and cancels ordinary work. The
+coordinator first drains admitted calls, then grants tools a scoped cleanup
+delegation window while the native session remains open. Successful preparation
+closes delegation and advances to a second drain for its admitted descendants.
+Either drain can return `RESOURCE_BUSY` after five seconds while keeping its
+session and checkpoint. A later shutdown resumes there without replaying
+completed preparation. Existing leases still admit nested calls; an idle,
+closed gate cannot be reopened by stale thread-local state.
+
+After both drains, shutdown stops and joins callback producers, checks native
+queue inactivation, and finishes tool retirement and unload under one
+synchronous cleanup lease. It then closes native session admission and
+detaches a prepared HSA session for ordered resource release. When only native
+retirement remains, the lifecycle holds the exact
+`SessionRetirement` owner for a later shutdown attempt. Uncertain frontend
+cleanup instead retains the remaining owner graph and prohibits replacement.
+
+Startup uses the same distinction: `InitRollback` preserves either completion,
+a retryable `SessionRetirement`, or uncertainty. The next initialization retries
+native rollback before constructing another HSA session and commits its first
+reference only after publication and tool loading complete. Transition guards
+retain incomplete ownership on an error or unwind. Transferable lease tokens
+are separate from closure-scoped thread-local execution, so callback reentry
+and worker handoff cannot extend a thread-local scope by dropping guards out of
+order.
 
 ## Code objects and loaded images
 
@@ -71,7 +155,7 @@ separate qualification; resemblance to another runtime is not proof.
 for consuming devices. Public freeze and private kernel dispatch use the same
 mechanism. Pending, active, completed, and uncertain publication have different
 release/retry rules. An error result alone does not prove that operands can be
-released. The HSA owner quarantines the generation and retains the image after
+released. The HSA owner quarantines the HSA session and retains the image after
 uncertain native retirement.
 
 ## Surface images
