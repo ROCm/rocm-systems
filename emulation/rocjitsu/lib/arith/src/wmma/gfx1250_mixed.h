@@ -6,6 +6,7 @@
 #include "mfma/mixed_formats.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
 #if defined(__AVX2__)
+#include "mfma/x86_64/mixed_decode.h"
 #include "mfma/x86_64/reduction.h"
 #endif
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -52,7 +53,14 @@ void gfx1250_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t 
                           const uint32_t *const *scale_a = nullptr,
                           const uint32_t *const *scale_b = nullptr) {
   int fa = M == 32 ? 4 : int(controls & 7), fb = M == 32 ? 4 : int(controls >> 3 & 7);
-  alignas(64) float left[M][128], right[128][16], result[M][16];
+  alignas(64) float result[M][16];
+#if defined(__AVX2__)
+  alignas(64) float left[128][M], right[128][16];
+  const bool interleave_four = Block == 0 && fa >= 2 && fb >= 2;
+  mixed_x86::decode<2, 16>(a, fa, interleave_four, left);
+  mixed_x86::decode<2, 16>(b, fb, interleave_four, right);
+#else
+  alignas(64) float left[M][128], right[128][16];
   for (int row = 0; row < M; ++row) {
     for (int k = 0; k < 128; ++k) {
       left[row][k] = gfx1250_mixed_input(a, row, k, fa, fb, Block != 0);
@@ -63,6 +71,7 @@ void gfx1250_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t 
       right[k][col] = gfx1250_mixed_input(b, col, k, fb, fa, Block != 0);
     }
   }
+#endif
   for (int row = 0; row < M; ++row) {
     for (int col = 0; col < 16; ++col) {
       uint32_t initial = c[8 * (row / 16) + row % 8][col + 16 * (row % 16 / 8)];
@@ -82,7 +91,7 @@ void gfx1250_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t 
         for (int col = 0; col < 16; col += kMfmaWidth) {
           auto sum = mfma_broadcast(0.0f);
           for (int k = block * Block; k < (block + 1) * Block; ++k) {
-            sum = mfma_multiply_add(mfma_broadcast(left[row][k]), mfma_load(right[k] + col), sum);
+            sum = mfma_multiply_add(mfma_broadcast(left[k][row]), mfma_load(right[k] + col), sum);
           }
           mfma_store(sums + col, sum);
         }
@@ -108,7 +117,7 @@ void gfx1250_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t 
       for (int col = 0; col < 16; col += kMfmaWidth) {
         auto acc = mfma_load(result[row] + col);
         for (int k = 0; k < 128; ++k) {
-          acc = mfma_multiply_add(mfma_broadcast(left[row][k]), mfma_load(right[k] + col), acc);
+          acc = mfma_multiply_add(mfma_broadcast(left[k][row]), mfma_load(right[k] + col), acc);
         }
         mfma_store(result[row] + col, acc);
       }
