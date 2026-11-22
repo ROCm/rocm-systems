@@ -18,21 +18,14 @@ if(NOT TARGET rocm::trace)
 endif()
 
 # TraceLogging: in the Windows SDK; on Linux, the LTTng flavour of microsoft/tracelogging, whose
-# CMake package brings liblttng-ust. A tracelogging::tracelogging target already defined in this
-# build (one built in-tree) is used as is; otherwise the installed package is found.
+# CMake package brings liblttng-ust (microsoft/tracelogging d8e68c94 or later: earlier packages
+# do not install the find modules their config needs). A tracelogging::tracelogging target
+# already defined in this build (one built in-tree) is used as is; otherwise the installed
+# package is found.
 if(WIN32)
   target_link_libraries(amdhip64 PRIVATE advapi32)
 else()
   if(NOT TARGET tracelogging::tracelogging)
-    # The installed tracelogging package links its helper library to
-    # lttng-ust-tracepoint::lttng-ust-tracepoint but does not install the module that defines
-    # that target, so a consumer has to.
-    if(NOT TARGET lttng-ust-tracepoint::lttng-ust-tracepoint)
-      find_library(CLR_LTTNG_UST_TRACEPOINT_LIBRARY NAMES lttng-ust-tracepoint REQUIRED)
-      add_library(lttng-ust-tracepoint::lttng-ust-tracepoint UNKNOWN IMPORTED)
-      set_target_properties(lttng-ust-tracepoint::lttng-ust-tracepoint PROPERTIES
-                            IMPORTED_LOCATION "${CLR_LTTNG_UST_TRACEPOINT_LIBRARY}")
-    endif()
     find_package(tracelogging CONFIG REQUIRED)
   endif()
   target_link_libraries(amdhip64 PRIVATE tracelogging::tracelogging)

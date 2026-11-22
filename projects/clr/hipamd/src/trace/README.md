@@ -27,8 +27,8 @@ design and plan are in sdk-future-design (`proposals/api-tracing-hld.md`,
 ## Building
 
 - **Linux:** needs the LTTng flavour of [microsoft/tracelogging](https://github.com/microsoft/tracelogging)
-  (`LTTng/`, built and installed with CMake) and liblttng-ust 2.13 or later; CMake finds them
-  with `find_package(tracelogging)`.
+  (`LTTng/`, built and installed with CMake, at commit `d8e68c94` or later, which TheRock pins)
+  and liblttng-ust 2.13 or later; CMake finds them with `find_package(tracelogging)`.
 - **Windows:** TraceLogging is in the Windows SDK.
 
 ## Recording
