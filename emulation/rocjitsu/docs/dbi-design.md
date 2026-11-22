@@ -258,6 +258,11 @@ their additional firmware entry is outside this bounded ownership model. Validat
 records retain caller insertion order, including a `KernelEntry` callback and an
 ordinary point sharing the same source offset.
 
+Explicit-entry requests require `.text` to be the sole allocated executable
+section, including unmaterialized executable ranges. Otherwise native code
+outside the decoded CFG could enter a selected scope without its dispatch
+bootstrap or resource allocation.
+
 Descriptor ownership also requires a complete symbol inventory: weak `.kd`
 definitions and distinct names aliasing one descriptor are rejected before
 planning. Identical name/location records in `.symtab` and `.dynsym` remain

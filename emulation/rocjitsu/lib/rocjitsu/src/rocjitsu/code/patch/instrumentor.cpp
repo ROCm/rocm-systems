@@ -3348,6 +3348,12 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     return result;
   }
   const Section *text = obj_.text_sections().front();
+  const std::vector<const Section *> &executable_sections = obj_.allocated_executable_sections();
+  if (executable_sections.size() != 1 || executable_sections.front() != text) {
+    result.errors.emplace_back(
+        "entry requests require .text to be the sole allocated executable section");
+    return result;
+  }
   const std::span<const uint8_t> original(reinterpret_cast<const uint8_t *>(obj_.image_data()),
                                           obj_.image_size());
   const std::vector<KernelDescriptorInfo> kernels =

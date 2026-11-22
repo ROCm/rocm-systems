@@ -8401,6 +8401,208 @@ void add_entry_growth_points(Instrumentor &instrumentor, const AmdGpuCodeObject 
                                            {.source = ProbeArgSource::LogBufferPtrHi}}});
 }
 
+std::vector<uint8_t> make_disjoint_entry_image_with_external_native(uint64_t flags, uint32_t type,
+                                                                    bool export_descriptor) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  const std::vector<uint8_t> original = make_disjoint_entry_growth_image();
+  const AmdGpuCodeObject source(original.data(), original.size());
+  const Section *text = source.text_sections().front();
+  const uint64_t native_address = text->vaddr() - 256;
+  const std::optional<int16_t> displacement =
+      compute_sopp_branch_simm16(native_address, text->vaddr());
+  if (!displacement)
+    return {};
+  const FailureOr<uint32_t> branch = build_s_branch(*displacement, kArch);
+  if (branch.failed())
+    return {};
+  std::vector<uint8_t> native_bytes(128, 0);
+  std::memcpy(native_bytes.data(), &branch.value(), sizeof(uint32_t));
+  amdhsa::kernel_descriptor_t native_descriptor = {};
+  native_descriptor.kernel_code_entry_byte_offset = -64;
+  std::memcpy(native_bytes.data() + 64, &native_descriptor, sizeof(native_descriptor));
+  CodeObjectPatcher patcher(source);
+  if (!patcher.append_nonalloc_section(".native", native_bytes))
+    return {};
+  std::vector<uint8_t> image = patcher.emit();
+  const AmdGpuCodeObject appended(image.data(), image.size());
+  std::vector<Elf64_Shdr> sections = CodeObjectPatcher(appended).section_headers();
+  const Section *native = nullptr;
+  for (const std::unique_ptr<Section> &section : appended.all_sections())
+    if (section->name() == ".native")
+      native = section.get();
+  if (native == nullptr || !native->sectionHeaderIndex())
+    return {};
+  const size_t native_index = *native->sectionHeaderIndex();
+  Elf64_Shdr &native_section = sections[native_index];
+  native_section.sh_flags = flags;
+  native_section.sh_type = type;
+  native_section.sh_addr = native_address;
+
+  if (export_descriptor) {
+    const std::vector<Elf64_Shdr>::iterator symbol_table =
+        std::ranges::find(sections, SHT_SYMTAB, &Elf64_Shdr::sh_type);
+    if (symbol_table == sections.end() || symbol_table->sh_link >= sections.size())
+      return {};
+    Elf64_Shdr &strings = sections[symbol_table->sh_link];
+    std::vector<uint8_t> names(image.begin() + strings.sh_offset,
+                               image.begin() + strings.sh_offset + strings.sh_size);
+    const uint32_t name = add_elf_name(names, "native_kernel.kd");
+    std::vector<Elf64_Sym> symbols(symbol_table->sh_size / sizeof(Elf64_Sym));
+    std::memcpy(symbols.data(), image.data() + symbol_table->sh_offset,
+                symbols.size() * sizeof(Elf64_Sym));
+    symbols.push_back({.st_name = name,
+                       .st_info = elf_symbol_info(kElfSymbolBindGlobal, kElfSymbolTypeObject),
+                       .st_other = 0,
+                       .st_shndx = static_cast<uint16_t>(native_index),
+                       .st_value = native_address + 64,
+                       .st_size = sizeof(native_descriptor)});
+    strings.sh_offset = image.size();
+    strings.sh_size = names.size();
+    image.insert(image.end(), names.begin(), names.end());
+    symbol_table->sh_offset = align_up_for_test(image.size(), alignof(Elf64_Sym));
+    symbol_table->sh_size = symbols.size() * sizeof(Elf64_Sym);
+    image.resize(symbol_table->sh_offset + symbol_table->sh_size);
+    std::memcpy(image.data() + symbol_table->sh_offset, symbols.data(), symbol_table->sh_size);
+  }
+
+  Elf64_Ehdr header = {};
+  std::memcpy(&header, image.data(), sizeof(header));
+  // The two-kernel fixture leaves room for a third PT_LOAD before .text.
+  const uint64_t program_offset = header.e_phoff + header.e_phnum * header.e_phentsize;
+  if (program_offset + sizeof(Elf64_Phdr) > text->sectionOffset())
+    return {};
+  if ((flags & SHF_ALLOC) != 0) {
+    const Elf64_Phdr program = {.p_type = PT_LOAD,
+                                .p_flags =
+                                    static_cast<uint32_t>(4 | ((flags & SHF_EXECINSTR) != 0)),
+                                .p_offset = native_section.sh_offset,
+                                .p_vaddr = native_address,
+                                .p_paddr = native_address,
+                                .p_filesz = type == SHT_NOBITS ? 0 : native_section.sh_size,
+                                .p_memsz = native_section.sh_size,
+                                .p_align = 1};
+    // Keep LOADs ordered by address, as ROCr derives its allocation from
+    // the first and last LOAD rather than the minimum/maximum extents.
+    std::memmove(image.data() + header.e_phoff + header.e_phentsize, image.data() + header.e_phoff,
+                 header.e_phnum * header.e_phentsize);
+    std::memcpy(image.data() + header.e_phoff, &program, sizeof(program));
+    ++header.e_phnum;
+  }
+  std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
+  std::memcpy(image.data(), &header, sizeof(header));
+  return image;
+}
+
+TEST(InstrumentorDisjointEntries, RejectsAllocatedExecutableCodeOutsideSelectedText) {
+  constexpr uint64_t kExecutable = SHF_ALLOC | SHF_EXECINSTR;
+  for (const bool export_descriptor : {false, true}) {
+    for (const uint64_t flags : {uint64_t{SHF_ALLOC}, uint64_t{SHF_EXECINSTR}, kExecutable}) {
+      SCOPED_TRACE(export_descriptor);
+      SCOPED_TRACE(flags);
+      // An exported native kernel always requires allocated executable bytes.
+      if (export_descriptor && flags != kExecutable)
+        continue;
+      const std::vector<uint8_t> image =
+          make_disjoint_entry_image_with_external_native(flags, SHT_PROGBITS, export_descriptor);
+      const AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      ASSERT_EQ(source.text_sections().size(), 1u);
+      const Section *text = source.text_sections().front();
+      const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+      ASSERT_EQ(kernels.size(), 2u);
+      ASSERT_EQ(source.allocated_executable_sections().size(), flags == kExecutable ? 2u : 1u);
+      const Section *native = nullptr;
+      for (const std::unique_ptr<Section> &section : source.all_sections())
+        if (section->name() == ".native")
+          native = section.get();
+      ASSERT_NE(native, nullptr);
+      ASSERT_LT(native->vaddr() + native->size(), text->vaddr());
+      uint32_t word = 0;
+      std::memcpy(&word, native->data(), sizeof(word));
+      const int64_t target =
+          static_cast<int64_t>(native->vaddr()) + 4 + int64_t{static_cast<int16_t>(word)} * 4;
+      EXPECT_EQ(target, text->vaddr());
+      if (export_descriptor) {
+        const std::vector<KernelDescriptorInfo> native_kernels =
+            scan_kernel_descriptors(image, native->sectionOffset(), native->size());
+        ASSERT_EQ(native_kernels.size(), 1u);
+        EXPECT_EQ(native_kernels.front().kernel_name, "native_kernel");
+        EXPECT_EQ(native_kernels.front().entry_text_offset, 0u);
+      }
+      InstrumentationOptions options;
+      for (size_t index = 0; index < kernels.size(); ++index)
+        options.entries.push_back(entry_growth_request(kernels[index], index));
+      Instrumentor instrumentor(source, rocjitsu::IsaFamily::Cdna5, options);
+      instrumentor.add_point_by_offset(4);
+      instrumentor.add_point_by_offset(260);
+      const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+      const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+      if (flags != kExecutable) {
+        ASSERT_TRUE(validation.errors.empty());
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        EXPECT_FALSE(result.elf_bytes.empty());
+        EXPECT_EQ(result.entries.size(), 2u);
+        continue;
+      }
+      const std::string expected =
+          "entry requests require .text to be the sole allocated executable section";
+      EXPECT_EQ(validation.errors, std::vector<std::string>{expected});
+      EXPECT_TRUE(validation.sites.empty());
+      EXPECT_EQ(result.errors, std::vector<std::string>{expected});
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.entries.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+      EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+    }
+  }
+}
+
+TEST(InstrumentorDisjointEntries, SoleExecutableSectionMustBeSelectedTextAndMaterialized) {
+  for (const bool native_nobits : {false, true}) {
+    SCOPED_TRACE(native_nobits);
+    std::vector<uint8_t> image = make_disjoint_entry_image_with_external_native(
+        SHF_ALLOC | SHF_EXECINSTR, native_nobits ? SHT_NOBITS : SHT_PROGBITS, false);
+    const AmdGpuCodeObject original(image.data(), image.size());
+    ASSERT_TRUE(original.is_valid());
+    if (!native_nobits) {
+      // Keep exactly one allocated executable section, but make it .native
+      // rather than .text. A count-only admission check would accept this.
+      const Section *text = original.text_sections().front();
+      ASSERT_TRUE(text->sectionHeaderIndex());
+      Elf64_Ehdr header = {};
+      std::memcpy(&header, image.data(), sizeof(header));
+      const uint64_t offset = header.e_shoff + *text->sectionHeaderIndex() * header.e_shentsize;
+      Elf64_Shdr section = {};
+      std::memcpy(&section, image.data() + offset, sizeof(section));
+      section.sh_flags &= ~SHF_EXECINSTR;
+      std::memcpy(image.data() + offset, &section, sizeof(section));
+    }
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_EQ(source.text_sections().size(), 1u);
+    ASSERT_EQ(source.allocated_executable_sections().size(), native_nobits ? 2u : 1u);
+    const std::vector<KernelDescriptorInfo> kernels = entry_growth_kernels(image);
+    ASSERT_EQ(kernels.size(), 2u);
+    InstrumentationOptions options;
+    for (size_t index = 0; index < kernels.size(); ++index)
+      options.entries.push_back(entry_growth_request(kernels[index], index));
+    Instrumentor instrumentor(source, rocjitsu::IsaFamily::Cdna5, options);
+    instrumentor.add_point_by_offset(4);
+    instrumentor.add_point_by_offset(260);
+    const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+    const InstrumentedCodeObject result = instrumentor.patch();
+    const std::string expected =
+        "entry requests require .text to be the sole allocated executable section";
+    EXPECT_EQ(validation.errors, std::vector<std::string>{expected});
+    EXPECT_TRUE(validation.sites.empty());
+    EXPECT_EQ(result.errors, std::vector<std::string>{expected});
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.entries.empty());
+    EXPECT_TRUE(result.sites.empty());
+  }
+}
+
 TEST(InstrumentorDisjointEntries, ValidationPreservesInterleavedEntryAndOrdinaryPointOrder) {
   constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
   const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
