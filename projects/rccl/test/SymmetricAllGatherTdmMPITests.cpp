@@ -48,7 +48,7 @@ namespace
 constexpr size_t kMiB          = 1024 * 1024;
 constexpr size_t kWindowMin    = 64 * kMiB;  // symTdmMinR2[AllGather], gfx1250 SPX
 constexpr size_t kEagerMax     = 128 * kMiB; // symTdmMaxR2[AllGather]
-constexpr size_t kCrossTrayMax = 512 * kMiB; // symTdmCrossTrayMaxR2[AllGather]
+constexpr size_t kCrossTrayMax = 1024 * kMiB; // symTdmCrossTrayMaxR2[AllGather]
 constexpr int    kIterations   = 2;
 constexpr auto   kDrainTimeout = std::chrono::seconds(120);
 
