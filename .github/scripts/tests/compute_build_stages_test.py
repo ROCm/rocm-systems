@@ -15,6 +15,7 @@ everything" (the safe default).
 
 import os
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -138,6 +139,53 @@ class ComputeBuildStagesTest(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_emulation_changes_build_downstream_test_artifacts(self):
+        self._install_fake_topology(
+            all_stages=["compiler-runtime", "emulation", "math-libs", "dctools-core"],
+            required=["emulation"],
+            known={"rocjitsu", "mirage", "rdc"},
+        )
+        for projects in (
+            "emulation/rocjitsu",
+            "emulation/mirage",
+            "emulation/rocjitsu,projects/rdc",
+        ):
+            with self.subTest(projects=projects):
+                self.assertEqual(
+                    cbs.compute_build_stages(projects, "_therock", run_all_tests=False),
+                    [],
+                )
+
+    def test_emulation_cli_preserves_downstream_test_selection(self):
+        self._install_fake_topology(
+            all_stages=["compiler-runtime", "emulation", "math-libs"],
+            required=["emulation"],
+            known={"rocjitsu", "mirage"},
+            windows_disabled={"rocjitsu", "mirage"},
+        )
+        for project in ("rocjitsu", "mirage"):
+            with self.subTest(project=project), tempfile.TemporaryDirectory() as temp:
+                output_path = Path(temp) / "github-output"
+                projects = f"emulation/{project}"
+                with patch.dict(os.environ, {"GITHUB_OUTPUT": str(output_path)}):
+                    self.assertEqual(
+                        cbs.main(
+                            [
+                                "--changed-projects",
+                                projects,
+                                "--run-all-tests",
+                                "false",
+                            ]
+                        ),
+                        0,
+                    )
+                outputs = dict(
+                    line.split("=", 1) for line in output_path.read_text().splitlines()
+                )
+                self.assertEqual(outputs["build_stages"], "")
+                self.assertEqual(outputs["changed_projects"], projects)
+                self.assertEqual(outputs["windows_amdgpu_families"], "none")
 
     def test_allowlist_is_required_stages(self):
         self._install_fake_topology(

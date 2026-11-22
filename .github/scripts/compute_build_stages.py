@@ -67,6 +67,10 @@ FULL_BUILD_PROJECTS = {
     "hip-tests",
     "rocr-runtime",
     "amdsmi",
+    # Emulator changes select downstream MIOpen tests whose artifacts are
+    # outside the emulation stage. Build all stages to supply those inputs.
+    "mirage",
+    "rocjitsu",
     # Legacy profiler bucket used THEROCK_ENABLE_ALL=ON.
     "aqlprofile",
     "rocprofiler",
