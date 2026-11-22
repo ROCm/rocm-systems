@@ -119,10 +119,12 @@ test_categories:
       - "DdaReduceScatterFabricLL.*"
       - "DdaReduceScatterFabricSpreadLL.*"
       - "DdaAllReduceFabricLL.*"
+      - "DdaAllReduceFabricLL128PeerPar.*"
       - "DdaAllGatherFabricLL128.*"
       - "RasDiagnostics.*"
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
+      - "HipProbe.*"
     exclude_windows:
       - "*"
     labels:

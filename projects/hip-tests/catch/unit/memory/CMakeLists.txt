@@ -139,6 +139,17 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX)
   add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
   target_link_libraries(hipMemAdviseTstAlignedAllocMem hip::host hip::device)
+
+  # Helper spawned by Unit_hipHostRegister_SharedLockDeviceSubset to exercise
+  # hipHostRegister's multi-device shared-lock path under a restricted
+  # HIP_VISIBLE_DEVICES subset (see hipHostRegister.cc).
+  set_source_files_properties(hipHostRegisterSharedLockSubset_Exe.cc PROPERTIES LANGUAGE HIP)
+  add_executable(hipHostRegisterSharedLockSubset_Exe EXCLUDE_FROM_ALL
+    hipHostRegisterSharedLockSubset_Exe.cc)
+  set_target_properties(hipHostRegisterSharedLockSubset_Exe PROPERTIES LINKER_LANGUAGE HIP)
+  add_dependencies(MemoryTest1 hipHostRegisterSharedLockSubset_Exe)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterSharedLockSubset_Exe)
+  target_link_libraries(hipHostRegisterSharedLockSubset_Exe hip::host hip::device)
 endif()
 
 set(TEST_SRC

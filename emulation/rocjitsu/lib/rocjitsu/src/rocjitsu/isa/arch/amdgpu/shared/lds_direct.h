@@ -5,6 +5,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -45,7 +46,7 @@ inline void execute_lds_direct_load(Instruction &inst, Wavefront &wf, uint32_t d
     return;
   const uint32_t type = (wf.m0() >> 16) & 7, address = wf.m0() & 0xffff;
   if (!valid_lds_direct_operand(wf.m0()) ||
-      (dst >= wf.num_vgprs() && wf.cu().arch() != ROCJITSU_CODE_ARCH_RDNA3_5)) {
+      (dst >= wf.num_vgprs() && wf.cu().arch() != rocjitsu::IsaFamily::Rdna3_5)) {
     wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }

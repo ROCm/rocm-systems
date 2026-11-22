@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/input.h"
 #include "rocjitsu/code/consan/image/metadata.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -178,13 +179,12 @@ FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
   if (profile == nullptr)
     return reject(error, InputErrorCode::UnsupportedTarget,
                   "unsupported or inconsistent native LDS target profile");
-  const rj_code_arch_t arch = profile->arch;
+  const rocjitsu::IsaFamily arch = profile->arch;
   const IsaTargetRegistry &registry = default_isa_target_registry();
-  const IsaGpuTargetDescription *binding =
-      registry.find_gpu_target_by_code_object_id(profile->name);
+  const IsaTargetBinding *binding = registry.find_target_by_code_object_id(profile->name);
   const IsaTargetDescriptor *provider = registry.find(profile->public_id);
   if (!registry.ok() || binding == nullptr || provider == nullptr ||
-      binding->elf_machine != profile->elf_machine || provider->architecture_id != arch)
+      binding->elf_machine != profile->elf_machine || provider->family != arch)
     return reject(error, InputErrorCode::UnsupportedTarget, "selected ISA provider is unavailable");
   if (validate_image_header(image, *profile, error).failed())
     return Result::failure();

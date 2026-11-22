@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <array>
 #include <cassert>
@@ -109,7 +110,7 @@ inline std::vector<uint8_t> with_resource_metadata(const std::vector<uint8_t> &i
 // Synthetic simulation kernels need a real resource note when DBI grows their
 // scratch. Derive it from the same descriptor rather than duplicating sizes.
 inline std::vector<uint8_t> with_descriptor_metadata(const std::vector<uint8_t> &image,
-                                                     rj_code_arch_t arch) {
+                                                     rocjitsu::IsaFamily arch) {
   const AmdGpuCodeObject object(image.data(), image.size());
   if (!object.is_valid() || object.text_sections().size() != 1)
     return {};

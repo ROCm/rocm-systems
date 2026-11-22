@@ -303,6 +303,8 @@ protected:
   // PCIe switch, and one <xgmi> entry per local peer stamped the way xml.cc stamps amd-smi's
   // report. amd-smi only sees the GPUs of its own host, so no entry names another host's GPU, and
   // every host reuses the same bus ids. With fabricSupported=0 the entries are 1-hop XGMI instead.
+  // fabricBwGbps, when given, is the fabric_bw_gbps text on every entry; nullptr leaves it off, as in
+  // topologies dumped before the attribute existed.
   static constexpr int kFabricGpusPerHost = 4;
   // XML nodes addFabricHost() adds; keep in sync with it.
   static constexpr int kFabricGpuXmlNodes = 3;  // PCIe switch, GPU <pci>, <gpu>
@@ -313,7 +315,7 @@ protected:
   static void fabricGpuBusId(int g, char* busId, size_t len) {
     snprintf(busId, len, "0000:%02x:00.0", 0x11 + g * 0x10);
   }
-  void addFabricHost(uint64_t hostHash, int baseRank, int fabricSupported) {
+  void addFabricHost(uint64_t hostHash, int baseRank, int fabricSupported, const char* fabricBwGbps = nullptr) {
     struct ncclXmlNode* cpu = addSystemCpu(hostHash);
     struct ncclXmlNode* gpus[kFabricGpusPerHost] = {};
     for (int g = 0; g < kFabricGpusPerHost; g++) {
@@ -333,6 +335,7 @@ protected:
         fabricGpuBusId(p, peerBus, sizeof(peerBus));
         struct ncclXmlNode* link = addGpuLink(gpus[g], peerBus, /*count=*/1, PCI_ACCELERATOR_CLASS);
         EXPECT_EQ(xmlSetAttrInt(link, "fabric_supported", fabricSupported), ncclSuccess);
+        if (fabricBwGbps != nullptr) EXPECT_EQ(xmlSetAttr(link, "fabric_bw_gbps", fabricBwGbps), ncclSuccess);
       }
     }
   }
@@ -351,10 +354,10 @@ protected:
 
   // Two fused hosts of one clique, both stamped with the same fabric_supported.
   struct ncclTopoSystem* buildTwoFabricHosts(uint64_t hostA, uint64_t hostB, int fabricSupported,
-                                             int crossClique = 1) {
+                                             int crossClique = 1, const char* fabricBwGbps = nullptr) {
     setCrossClique(crossClique);
-    addFabricHost(hostA, /*baseRank=*/0, fabricSupported);
-    addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, fabricSupported);
+    addFabricHost(hostA, /*baseRank=*/0, fabricSupported, fabricBwGbps);
+    addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, fabricSupported, fabricBwGbps);
     return buildSystemWithPaths(hostA);
   }
 
@@ -409,6 +412,52 @@ protected:
       EXPECT_TRUE(found) << "hop " << h << " does not leave the node it starts from";
     }
     EXPECT_EQ(path->list[path->count - 1]->remNode, target);
+  }
+
+  static int countLinksTo(struct ncclTopoNode* from, struct ncclTopoNode* to, int type) {
+    int n = 0;
+    for (int i = 0; i < from->nlinks; i++) n += from->links[i].type == type && from->links[i].remNode == to;
+    return n;
+  }
+
+  // Two cross-clique fabric hosts with fabric_bw_gbps=attr on every entry (absent for nullptr): each DEV must
+  // have exactly one link to the shared NVS in each direction, however many peer entries it has.
+  void expectFabricSwitchBandwidth(const char* attr, float expectedBw) {
+    struct ncclTopoSystem* built =
+        buildTwoFabricHosts(0x12520, 0x12521, /*fabricSupported=*/1, /*crossClique=*/1, attr);
+    ASSERT_NE(built, nullptr);
+    ASSERT_EQ(built->nodes[NVS].count, 1);
+    struct ncclTopoNode* nvs = built->nodes[NVS].nodes;
+    for (int d = 0; d < built->nodes[DEV].count; d++) {
+      struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+      ASSERT_EQ(countLinksTo(dev, nvs, LINK_NVL), 1) << "DEV " << d;
+      ASSERT_EQ(countLinksTo(nvs, dev, LINK_NVL), 1) << "DEV " << d;
+      EXPECT_FLOAT_EQ(findLink(dev, nvs)->bw, expectedBw) << "DEV " << d;
+      EXPECT_FLOAT_EQ(findLink(nvs, dev)->bw, expectedBw) << "DEV " << d;
+    }
+    ncclTopoFree(built);
+  }
+
+  // Takes ownership of built: direct DEV<->DEV links inside each host, none across hosts, no switch.
+  void expectDirectPeerLinksOnly(struct ncclTopoSystem* built) {
+    ASSERT_NE(built, nullptr);
+    EXPECT_EQ(built->nodes[NVS].count, 0);
+    const float linkBw = ncclTopoXGMISpeed("gfx1250");
+    for (int d = 0; d < built->nodes[DEV].count; d++) {
+      struct ncclTopoNode* dev = built->nodes[DEV].nodes + d;
+      for (int p = 0; p < built->nodes[DEV].count; p++) {
+        if (p == d) continue;
+        struct ncclTopoNode* peer = built->nodes[DEV].nodes + p;
+        struct ncclTopoLink* link = findLink(dev, peer);
+        if (NCCL_TOPO_ID_SYSTEM_ID(dev->id) == NCCL_TOPO_ID_SYSTEM_ID(peer->id)) {
+          ASSERT_NE(link, nullptr) << "DEV " << d << " -> DEV " << p;
+          EXPECT_FLOAT_EQ(link->bw, linkBw) << "DEV " << d << " -> DEV " << p;
+        } else {
+          EXPECT_EQ(link, nullptr) << "DEV " << d << " -> DEV " << p << " links across hosts";
+        }
+      }
+    }
+    ncclTopoFree(built);
   }
 
   struct ncclTopoSystem* system = nullptr;
@@ -2301,6 +2350,76 @@ TEST_F(TopoTest, UaloeFabric_NonFabricHostStaysOffTheSwitch) {
   }
 
   ncclTopoFree(built);
+}
+
+// fabric_bw_gbps is the bandwidth of the GPU as a whole: the DEV gets that, not that times its peer entries.
+TEST_F(TopoTest, UaloeFabric_PlatformBandwidthIsOneLinkPerDev) {
+  expectFabricSwitchBandwidth("900", 900.0f);
+}
+
+// A value that is not a positive number is as good as none: the per-entry default applies.
+TEST_F(TopoTest, UaloeFabric_ZeroPlatformBandwidthUsesDefault) {
+  expectFabricSwitchBandwidth("0", kFabricPeerEntries * ncclTopoXGMISpeed("gfx1250"));
+}
+
+TEST_F(TopoTest, UaloeFabric_NegativePlatformBandwidthUsesDefault) {
+  expectFabricSwitchBandwidth("-1", kFabricPeerEntries * ncclTopoXGMISpeed("gfx1250"));
+}
+
+TEST_F(TopoTest, UaloeFabric_NanPlatformBandwidthUsesDefault) {
+  expectFabricSwitchBandwidth("nan", kFabricPeerEntries * ncclTopoXGMISpeed("gfx1250"));
+}
+
+TEST_F(TopoTest, UaloeFabric_InfinitePlatformBandwidthUsesDefault) {
+  expectFabricSwitchBandwidth("inf", kFabricPeerEntries * ncclTopoXGMISpeed("gfx1250"));
+}
+
+TEST_F(TopoTest, UaloeFabric_UnparsablePlatformBandwidthUsesDefault) {
+  expectFabricSwitchBandwidth("fast", kFabricPeerEntries * ncclTopoXGMISpeed("gfx1250"));
+}
+
+// Each host's entries decide its own DEVs, so a host dumped without the attribute keeps the default.
+TEST_F(TopoTest, UaloeFabric_PlatformBandwidthIsPerHost) {
+  const uint64_t hostA = 0x12522, hostB = 0x12523;
+  setCrossClique(1);
+  addFabricHost(hostA, /*baseRank=*/0, /*fabricSupported=*/1, "900");
+  addFabricHost(hostB, /*baseRank=*/kFabricGpusPerHost, /*fabricSupported=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(hostA);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[NVS].count, 1);
+  struct ncclTopoNode* nvs = built->nodes[NVS].nodes;
+
+  for (int g = 0; g < built->nodes[GPU].count; g++) {
+    struct ncclTopoNode* gpu = built->nodes[GPU].nodes + g;
+    const bool onHostA = gpu->gpu.rank < kFabricGpusPerHost;
+    const float expected = onHostA ? 900.0f : kFabricPeerEntries * ncclTopoXGMISpeed("gfx1250");
+    struct ncclTopoLink* up = findLink(gpu->gpu.parent, nvs);
+    ASSERT_NE(up, nullptr) << "rank " << gpu->gpu.rank;
+    EXPECT_FLOAT_EQ(up->bw, expected) << "rank " << gpu->gpu.rank;
+    struct ncclTopoLink* down = findLink(nvs, gpu->gpu.parent);
+    ASSERT_NE(down, nullptr) << "rank " << gpu->gpu.rank;
+    EXPECT_FLOAT_EQ(down->bw, expected) << "rank " << gpu->gpu.rank;
+  }
+
+  ncclTopoFree(built);
+}
+
+// The platform bandwidth belongs to the switch link only: where there is no switch, the direct peer links
+// keep their per-entry bandwidth.
+TEST_F(TopoTest, UaloeFabric_PlatformBandwidthIgnoredInsideOneClique) {
+  expectDirectPeerLinksOnly(
+      buildTwoFabricHosts(0x12524, 0x12525, /*fabricSupported=*/1, /*crossClique=*/0, "900"));
+}
+
+TEST_F(TopoTest, UaloeFabric_PlatformBandwidthIgnoredOnOneHost) {
+  setCrossClique(1);
+  addFabricHost(0x12526, /*baseRank=*/0, /*fabricSupported=*/1, "900");
+  expectDirectPeerLinksOnly(buildSystemWithPaths(0x12526));
+}
+
+TEST_F(TopoTest, UaloeFabric_PlatformBandwidthIgnoredOnXgmiEntries) {
+  expectDirectPeerLinksOnly(
+      buildTwoFabricHosts(0x12527, 0x12528, /*fabricSupported=*/0, /*crossClique=*/1, "900"));
 }
 
 // A full clique puts every DEV on the shared NVS, so one BFS level from a GPU holds the other 143

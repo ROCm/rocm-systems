@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/consan/contract.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <span>
 #include <vector>
@@ -43,7 +44,8 @@ struct NativeLdsAccess {
                                               InputError &error);
 
 [[nodiscard]] Result classify_lds_race_instruction(const Instruction &instruction,
-                                                   rj_code_arch_t arch, uint32_t allocated_vgprs,
+                                                   rocjitsu::IsaFamily arch,
+                                                   uint32_t allocated_vgprs,
                                                    std::vector<NativeLdsAccess> &accesses,
                                                    InputError &error);
 [[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,

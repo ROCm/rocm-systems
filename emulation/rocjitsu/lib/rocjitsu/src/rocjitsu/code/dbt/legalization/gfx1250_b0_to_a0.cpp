@@ -5,6 +5,7 @@
 /// @brief Handwritten gfx1250 B0-to-A0 legalization classification.
 
 #include "rocjitsu/code/dbt/legalization/gfx1250_b0_to_a0.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/code/analysis/gfx1250_vgpr_msb.h"
@@ -28,7 +29,7 @@ namespace {
 
 // gfx1250 is Wave32-only.
 constexpr uint8_t kGfx1250WaveSize =
-    static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
+    static_cast<uint8_t>(isa_properties(rocjitsu::IsaFamily::Cdna5).wave_size_max);
 
 /// @brief Instructions that require a B0-to-A0 expansion or rejection.
 /// @details These operation groups are intentionally broader than the implemented
