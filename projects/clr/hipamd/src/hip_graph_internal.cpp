@@ -1908,6 +1908,11 @@ hipError_t GraphExecClassic::Run(hip::Stream* launch_stream) {
 
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
     if (firstNode != nullptr) {
+      if (!AMD_DIRECT_DISPATCH) {
+        // The worker thread may still execute the mem alloc and free nodes of the previous launch.
+        // Let it finish before this thread releases the graph's memory and resets the node count.
+        launch_stream->finish();
+      }
       auto* parentGraph = firstNode->GetParentGraph();
       auto* pool = parentGraph->Device()->GetGraphMemoryPool();
       for (auto* node : memAllocNodes_) {
@@ -3561,6 +3566,11 @@ hipError_t GraphExecSegmented::Run(hip::Stream* launch_stream) {
 
   if (flags_ & hipGraphInstantiateFlagAutoFreeOnLaunch) {
     if (firstNode != nullptr) {
+      if (!AMD_DIRECT_DISPATCH) {
+        // The worker thread may still execute the mem alloc and free nodes of the previous launch.
+        // Let it finish before this thread releases the graph's memory and resets the node count.
+        launch_stream->finish();
+      }
       auto* parentGraph = firstNode->GetParentGraph();
       auto* pool = parentGraph->Device()->GetGraphMemoryPool();
       for (auto* node : memAllocNodes_) {

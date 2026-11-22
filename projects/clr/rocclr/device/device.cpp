@@ -360,6 +360,19 @@ void MemObjMap::AddMemObj(const void* k, amd::Memory* v) {
   }
 }
 
+void MemObjMap::ReplaceMemObj(const void* k, amd::Memory* v) {
+  std::unique_lock lock(AllocatedLock_);
+  MemObjMap_.insert_or_assign(reinterpret_cast<uintptr_t>(k), v);
+}
+
+void MemObjMap::RemoveMemObjIfEqual(const void* k, const amd::Memory* v) {
+  std::unique_lock lock(AllocatedLock_);
+  auto it = MemObjMap_.find(reinterpret_cast<uintptr_t>(k));
+  if ((it != MemObjMap_.end()) && (it->second == v)) {
+    MemObjMap_.erase(it);
+  }
+}
+
 void MemObjMap::RemoveMemObj(const void* k) {
   std::unique_lock lock(AllocatedLock_);
   auto rval = MemObjMap_.erase(reinterpret_cast<uintptr_t>(k));
@@ -822,8 +835,16 @@ void Device::FinalizeMapMemObjBookkeeping(amd::Memory* vaddr_sub_obj, amd::Memor
                                           void* va_ptr, bool import_vmm_for_interprocess) const {
   assert(vaddr_sub_obj != nullptr);
   assert(phys != nullptr);
-  assert(amd::MemObjMap::FindMemObj(va_ptr) == nullptr);
-  amd::MemObjMap::AddMemObj(va_ptr, vaddr_sub_obj);
+  amd::Memory* old_obj = amd::MemObjMap::FindMemObj(va_ptr);
+  if ((old_obj != nullptr) && (old_obj == amd::MemObjMap::FindVirtualMemObj(va_ptr)) &&
+      (old_obj->getSvmPtr() == va_ptr)) {
+    // A graph memory allocation keeps its VA reservation registered while it maps memory, so
+    // pointer lookups on other threads never miss the address. Swap it for the mapping in one step.
+    amd::MemObjMap::ReplaceMemObj(va_ptr, vaddr_sub_obj);
+  } else {
+    assert(old_obj == nullptr);
+    amd::MemObjMap::AddMemObj(va_ptr, vaddr_sub_obj);
+  }
   vaddr_sub_obj->getUserData().phys_mem_obj = phys;
   phys->getUserData().vaddr_mem_obj = vaddr_sub_obj;
   if (import_vmm_for_interprocess && (phys->getMemFlags() & ROCCLR_MEM_INTERPROCESS)) {
