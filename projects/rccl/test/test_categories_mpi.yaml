@@ -4,6 +4,9 @@
 # Tiers:
 #   quick — broad MPI smoke (P2P, SHM, NET, NetIB, ImplicitLaunchOrder, UBR, GraphCapture).
 #   quick_env_* — smoke env-overlays (narrow pattern set under non-default env).
+#   The tiers leave NCCL_MULTI_SEGMENT_REGISTER at the build default; standard_env_multi_segment_register(_off) pin it on and off.
+#   Under the HIP default of 0 the net is IB, so NetIbMultiSegmentMPITest (IB-MSEG only) skips in quick/standard;
+#   standard_env_multi_segment_register runs it.
 #   standard — same test_patterns as comprehensive; lighter env.
 #   comprehensive — same test_patterns as standard; adds env (rank logs, implicit launch order,
 #     P2P/SHM CE memcpy flags).
@@ -26,6 +29,8 @@ test_categories:
       - "ShmMPITest.*"
       - "NetTransportMPITest.*"
       - "NetIbMPITest.*"
+      # Skips unless the net is IB-MSEG; see the header.
+      - "NetIbMultiSegmentMPITest.*"
       - "InspectorPromP2pMPITest.*"
       - "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
       - "UBR_AllReduce.OutOfPlace_MultiNode"
@@ -405,6 +410,8 @@ test_categories:
       - "GdrFlushTest.*"
       # Only the flag-off case runs here; the flag-on cases skip without RCCL_IB_GDR_FLUSH_FLAG=1.
       - "GdrFlushFlagTest.*"
+      # Skips unless the net is IB-MSEG; see the header.
+      - "NetIbMultiSegmentMPITest.*"
       - "ImplicitLaunchOrderMPITest.*"
       - "UBR_AllReduce.*"
       - "UBR_AllGather.*"
@@ -436,6 +443,26 @@ test_categories:
       - "mpi"
     env_variables:
       - "NCCL_DEBUG=INFO"
+  standard_env_multi_segment_register:
+    description: "IB-MSEG multi-segment registration with NCCL_MULTI_SEGMENT_REGISTER=1 pinned, whatever the build default. UT_NET_IB_MSEG_REQUIRE_DMABUF=1 turns a missing IB-MSEG net, DMA-BUF or VMM into a failure instead of a skip."
+    test_patterns:
+      - "NetIbMultiSegmentMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_MULTI_SEGMENT_REGISTER=1"
+      - "UT_NET_IB_MSEG_REQUIRE_DMABUF=1"
+  standard_env_multi_segment_register_off:
+    description: "IB-MSEG (NCCL_NET=IB-MSEG) with NCCL_MULTI_SEGMENT_REGISTER=0 pinned: the receiver keeps the legacy CTS, declines a multi-segment registration and the caller stages."
+    test_patterns:
+      - "NetIbMultiSegmentMPITest.MultiSegmentRegisterOff_*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "NCCL_NET=IB-MSEG"
+      - "NCCL_MULTI_SEGMENT_REGISTER=0"
   standard_env_gdr_flush_flag:
     description: "Remote GDR flush flag. RCCL_PARAM caches RCCL_IB_GDR_FLUSH_FLAG for the process lifetime, so it is set before launch. GdrFlushFlagTest and GdrFlushTest need exactly 2 ranks, and GdrFlushFlagProtoSwitchMPITest needs 2 or more nodes; each skips otherwise. Cluster jobs run this via test_runner suite net_ib_gdr_flush_flag (2 ranks on 2 nodes)."
     test_patterns:

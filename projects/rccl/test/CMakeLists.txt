@@ -426,6 +426,7 @@ if(BUILD_TESTS)
       IommuPassthrough_test.cpp
       MatchSubnet_test.cpp
       MiscTests.cpp
+      NetIbMultiSegmentUnitTests.cpp
       RomeTopoConsensusTests.cpp
       EnqueueCountTests.cpp
       DdaCollCommonTests.cpp
@@ -885,6 +886,7 @@ if(BUILD_TESTS)
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       transport/NetIbCast/NetIbCastUdmaTests.cpp
       transport/Gin/GinMtuNegotiationTests.cpp
+      transport/NetIb/NetIbSegmentedSendPrefixTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
       common/GpuCountProbe.cpp
@@ -1127,6 +1129,7 @@ if(BUILD_TESTS)
       transport/NetIbMPI/GeneralTests.cpp
       transport/NetIbMPI/GdrFlushTests.cpp
       transport/NetIbMPI/GdrFlushFlagTests.cpp
+      transport/NetIbMPI/NetIbMultiSegmentMPITests.cpp
       transport/NetIbMPI/NicFusionTests.cpp
       transport/NetIbMPI/CastTests.cpp
       transport/NetIbMPI/OptRecvCompletionTests.cpp

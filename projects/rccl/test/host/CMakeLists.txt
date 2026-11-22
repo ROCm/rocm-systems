@@ -395,6 +395,7 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc GDR flush flag seams
     fakes/transport_net_ib_connect_net_fakes.cc  # the rest of net_ib's flag entry points (rcclIbGdrFlushOpsFor)
     fakes/net_ib_multiseg_fakes.cc       # src/transport/net_ib_multiseg: ncclNetIbMseg, GDR flush flag seams
+    fakes/rccl_mseg_fakes.cc             # src/rccl_dev_runtime.cc: rcclMultiSegOn
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/search_fakes.cc

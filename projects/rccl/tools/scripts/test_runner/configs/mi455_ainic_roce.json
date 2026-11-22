@@ -1600,6 +1600,21 @@
           "name": "CeHierAlltoAllvEligibilityTest",
           "description": "Hierarchical CE AlltoAllv eligibility and gating tests",
           "test_filter": "CeHierAlltoAllvEligibilityTest.*"
+        },
+        {
+          "name": "A20_NetIb_SegmentedSendPrefix",
+          "description": "IB-MSEG segmented send: splits at local and remote segment boundaries, validates the remote layout before posting, and keeps or frees the request on a partial post per QP.",
+          "test_filter": "NetIbSegmentedSendPrefix.*"
+        },
+        {
+          "name": "A20_NetIb_SegmentedFlushPrefix",
+          "description": "IB-MSEG flush: one read of the last non-zero receive's first byte with that byte's segment MR, the scratchpad write and read in one post, errors for a range outside every segment or a missing MR, and request cleanup on a rejected post.",
+          "test_filter": "NetIbSegmentedFlushPrefix.*"
+        },
+        {
+          "name": "A20_NetIb_SegmentedHooks",
+          "description": "IB-MSEG P2P hooks: segmented-send selection, layout readiness, CTS plus layout-prefix posts, and irecv handle checks and layout fill.",
+          "test_filter": "NetIbSegmentedHooks.*"
         }
       ]
     },
@@ -7378,7 +7393,7 @@
     },
     {
       "name": "NET IB - Memory Registration",
-      "description": "InfiniBand memory registration tests. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace.",
+      "description": "InfiniBand memory registration tests. Disabled: Broadcom Thor Ultra has no matching OFED/verbs userspace. The IB-MSEG multi-segment data-path jobs (net_ib_multisegment*, multisegment_netproxy*) are not defined on AINIC: NCCL_NET is unset, so AINIC keeps IB-CAST; the host-only segmented-send fixtures run in unit_tests_fixtures_debug.",
       "config": "net_ib_memory",
       "enabled": false
     },

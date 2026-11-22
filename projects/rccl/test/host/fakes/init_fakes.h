@@ -38,6 +38,7 @@
 #include "transport_stubs.h"     // src/transport/*.cc + src/plugin/net.cc
 #include "transport_net_ib_fakes.h"  // src/transport/net_ib
 #include "net_ib_multiseg_fakes.h"   // src/transport/net_ib_multiseg
+#include "rccl_mseg_fakes.h"         // src/rccl_dev_runtime.cc multi-segment entry points
 #include "tuning_fakes.h"        // src/graph/tuning.cc
 
 struct ncclComm;

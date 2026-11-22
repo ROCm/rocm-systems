@@ -24,6 +24,14 @@ set(_MICRO_TRANSPORT_SIBLINGS
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/p2p_resiliency_recovery_ainic.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/reg_tmp.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/common_tmp.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/connect_tmp.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/gdr_tmp.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/init_tmp.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/p2p_multiseg.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/p2p_tmp.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/reg_tmp.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/seg_p2p.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc
   ${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc
@@ -80,6 +88,12 @@ set(_MICRO_TRANSPORT_DEFS
   NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
   NET_IB_CAST_SCHEDULER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/scheduler.cc"
   NET_IB_OPS_FAULT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_ops_fault.cc"
+  # IB-MSEG: hipify renames the fork's copies whose basenames net_ib/ (or src/) lists first.
+  NET_IB_MSEG_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/connect_tmp.cc"
+  NET_IB_MSEG_GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/gin_tmp.cc"
+  NET_IB_MSEG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/p2p_tmp.cc"
+  NET_IB_MSEG_P2P_MULTISEG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/p2p_multiseg.cc"
+  NET_IB_MSEG_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/reg_tmp.cc"
   NET_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket.cc"
   # common_tmp.cc: src/CMakeLists.txt lists transport/net_ib/common.cc first.
   NET_SOCKET_COMMON_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_socket/common_tmp.cc"
@@ -412,6 +426,125 @@ rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbWqeLatMon net_i
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/gdr.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/init_tmp.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib/reg.cc)
+
+# IB-MSEG: the net_ib binaries above against the fork's units and fakes. The fork declares its parameters extern,
+# so each binary links net_ib_mseg_params*.cc for the units it compiles for real.
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbMsegConnect net_ib_multiseg/connect-test.cc
+  SOURCES
+    fakes/comm_fakes.cc
+    fakes/env_fakes.cc
+    fakes/gdr_peermem_fakes.cc
+    fakes/gdr_probe_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_mseg_params.cc
+    fakes/net_ib_mseg_params_connect.cc
+    fakes/os_fakes.cc
+    fakes/rccl_mseg_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    fakes/transport_net_ib_mseg_p2p_fakes.cc
+    fakes/transport_net_ib_mseg_recovery_fakes.cc
+    fakes/transport_net_ib_mseg_resiliency_fakes.cc
+    fakes/transport_net_ib_mseg_wqe_lat_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/common_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/gdr_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/init_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/reg_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/seg_p2p.cc
+  EXTRA_DEFS
+    # NetIbMsegParamCopies compares the copies with the unhipified net_ib sources.
+    NET_IB_MSEG_PARAM_COPIES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fakes"
+    NET_IB_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../src/transport/net_ib")
+
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbMsegGin net_ib_multiseg/gin-test.cc
+  SOURCES
+    fakes/comm_fakes.cc
+    fakes/env_fakes.cc
+    fakes/gdr_peermem_fakes.cc
+    fakes/gdr_probe_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc
+    fakes/net_ib_mseg_params.cc
+    fakes/net_ib_mseg_params_connect.cc
+    fakes/net_ib_mseg_params_p2p.cc
+    fakes/os_fakes.cc
+    fakes/rccl_mseg_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    fakes/transport_net_ib_mseg_recovery_fakes.cc
+    fakes/transport_net_ib_mseg_resiliency_fakes.cc
+    fakes/transport_net_ib_mseg_wqe_lat_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/common_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/connect_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/gdr_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/init_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/p2p_multiseg.cc  # p2p.cc calls its multi-segment hooks
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/p2p_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/reg_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/seg_p2p.cc)
+
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbMsegP2p net_ib_multiseg/net-ib-p2p-test.cc
+  SOURCES
+    fakes/comm_fakes.cc
+    fakes/env_fakes.cc
+    fakes/gdr_peermem_fakes.cc
+    fakes/gdr_probe_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/hsa_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc
+    fakes/net_ib_mseg_params.cc
+    fakes/net_ib_mseg_params_connect.cc
+    fakes/net_ib_mseg_params_p2p.cc
+    fakes/os_fakes.cc
+    fakes/rccl_mseg_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    fakes/transport_net_ib_mseg_recovery_fakes.cc
+    fakes/transport_net_ib_mseg_resiliency_fakes.cc
+    fakes/transport_net_ib_mseg_wqe_lat_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/common_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/connect_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/gdr_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/init_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/reg_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/seg_p2p.cc)
+
+rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbMsegReg net_ib_multiseg/reg-test.cc
+  SOURCES
+    fakes/env_fakes.cc
+    fakes/gdr_peermem_fakes.cc
+    fakes/gdr_probe_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_mseg_params.cc
+    fakes/os_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    fakes/transport_net_ib_mseg_fakes.cc
+    fakes/transport_net_ib_mseg_p2p_fakes.cc
+    fakes/transport_net_ib_mseg_recovery_fakes.cc
+    fakes/transport_net_ib_mseg_resiliency_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/common_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/gdr_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/init_tmp.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_multiseg/seg_p2p.cc)
 
 rccl_add_transport_micro_binary(rccl-UnitTestsMicroTransportNetIbCastCapability
   net_ib_cast/net-ib-cast-capability-test.cc

@@ -137,13 +137,19 @@ static ncclNet_t g_microFakeNet = [] {
   n.name = "microfake";
   return n;
 }();
+// The net ncclNetInit resolves; ScopedInitNet swaps it for one test.
+static ncclNet_t* g_microInitNet = &g_microFakeNet;
+struct ScopedInitNet {
+  explicit ScopedInitNet(ncclNet_t* net) { g_microInitNet = net; }
+  ~ScopedInitNet() { g_microInitNet = &g_microFakeNet; }
+};
 ncclResult_t ncclNetInit(struct ncclComm* comm) {
-  if (g_ncclNetInitResult == ncclSuccess && comm) comm->ncclNet = &g_microFakeNet;
+  if (g_ncclNetInitResult == ncclSuccess && comm) comm->ncclNet = g_microInitNet;
   return g_ncclNetInitResult;
 }
 ncclResult_t ncclNetInitFromParent(struct ncclComm* comm, struct ncclComm* parent) {
   if (g_ncclNetInitResult == ncclSuccess && comm)
-    comm->ncclNet = parent ? parent->ncclNet : &g_microFakeNet;
+    comm->ncclNet = parent ? parent->ncclNet : g_microInitNet;
   return g_ncclNetInitResult;
 }
 // ASan aborts on allocations above its 1 TiB cap rather than returning NULL, and eats SIGFPE; both break death tests.
@@ -2689,6 +2695,35 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolsUnsupported_SkipsPoolCreate) {
   auto comm = FreshComm();
   EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
   EXPECT_EQ(nullptr, comm->memPool);
+}
+
+// Only IB-MSEG registers one MR per segment, so commAlloc asks rcclMultiSegOn with the resolved net's identity.
+TEST_F(InitMicrotest, CommAlloc_MultiSegNetFollowsIbMsegPlugin) {
+  InstallCommAllocSuccess();
+  std::vector<bool> asked;
+  g_multiSegOn = [&](bool perSegment) {
+    asked.push_back(perSegment);
+    return perSegment;
+  };
+  {
+    ScopedInitNet net(&ncclNetIbMseg);
+    auto comm = FreshComm();
+    ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+    EXPECT_TRUE(comm->rcclMultiSegNet);
+  }
+  auto comm = FreshComm();
+  ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+  EXPECT_FALSE(comm->rcclMultiSegNet) << "another net keeps the single-MR path";
+  EXPECT_EQ((std::vector<bool>{true, false}), asked);
+}
+
+// The switch and DMA-BUF gates live in rcclMultiSegOn; its false wins even for IB-MSEG.
+TEST_F(InitMicrotest, CommAlloc_MultiSegNetOffWhenGateOff) {
+  InstallCommAllocSuccess();
+  ScopedInitNet net(&ncclNetIbMseg);
+  auto comm = FreshComm();
+  ASSERT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+  EXPECT_FALSE(comm->rcclMultiSegNet);
 }
 
 namespace {

@@ -71,6 +71,9 @@ test_categories:
       - "P2pChannelBase.*"
       - "Search*.*"
       - "NetIbCastUdma.*"
+      - "NetIbSegmentedSendPrefix.*"
+      - "NetIbSegmentedFlushPrefix.*"
+      - "NetIbSegmentedHooks.*"
     exclude_windows:
       - "*"
     labels:

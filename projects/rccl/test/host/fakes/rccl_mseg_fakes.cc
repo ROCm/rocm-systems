@@ -13,6 +13,7 @@
 
 ASSERT_HOOK_MATCHES_PROD(g_rmaMaxInflightRequests, rcclRmaProxyMaxInflightRequests);
 ASSERT_HOOK_MATCHES_PROD(g_hostSegmentFdLookup, rcclHostSegmentFdLookup);
+ASSERT_HOOK_MATCHES_PROD(g_multiSegOn, rcclMultiSegOn);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 std::function<uint32_t(bool, uint32_t)> g_rmaMaxInflightRequests = [](bool, uint32_t n) { return n; };
@@ -25,4 +26,13 @@ std::function<int(uintptr_t, size_t, uint64_t*)> g_hostSegmentFdLookup = [](uint
 };
 int rcclHostSegmentFdLookup(uintptr_t base, size_t len, uint64_t* offset) {
   return g_hostSegmentFdLookup(base, len, offset);
+}
+
+std::function<bool(bool)> g_multiSegOn = [](bool) { return false; };
+bool rcclMultiSegOn(bool pluginRegistersPerSegment) { return g_multiSegOn(pluginRegistersPerSegment); }
+
+void ResetRcclMsegFakes() {
+  g_rmaMaxInflightRequests = [](bool, uint32_t n) { return n; };
+  g_hostSegmentFdLookup = [](uintptr_t, size_t, uint64_t*) { return -1; };
+  g_multiSegOn = [](bool) { return false; };
 }

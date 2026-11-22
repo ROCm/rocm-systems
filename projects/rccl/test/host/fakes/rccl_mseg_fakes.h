@@ -17,5 +17,9 @@
 extern std::function<uint32_t(bool /*multiSeg*/, uint32_t /*maxRequests*/)> g_rmaMaxInflightRequests;
 // rcclHostSegmentFdLookup: defaults to no published owner fd (-1).
 extern std::function<int(uintptr_t /*base*/, size_t /*len*/, uint64_t* /*offset*/)> g_hostSegmentFdLookup;
+// rcclMultiSegOn: defaults to multi-segment off.
+extern std::function<bool(bool /*pluginRegistersPerSegment*/)> g_multiSegOn;
+
+void ResetRcclMsegFakes();
 
 #endif // RCCL_TEST_HOST_RCCL_MSEG_FAKES_H_

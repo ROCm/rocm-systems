@@ -326,7 +326,7 @@ ncclResult_t MPITestCore::createTestCommunicator()
     group_guard.dismiss(); // ncclGroupEnd succeeded, don't call it again
 
     // Create HIP stream - if this fails, comm_guard automatically cleans up test_comm_
-    HIP_TEST_CHECK(hipStreamCreate(&test_stream_));
+    HIP_TEST_CHECK(hipStreamCreateWithFlags(&test_stream_, test_stream_flags_));
 
     // RAII guard: Automatically destroys test_stream_ if subsequent operations fail
     auto stream_guard = makeScopeGuard(
