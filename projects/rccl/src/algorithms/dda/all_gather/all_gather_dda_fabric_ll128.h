@@ -56,8 +56,7 @@ __device__ __forceinline__ void ddaLL128AGLocalCopy(T* recvbuff, const T* sendbu
   }
 }
 
-// Phase 2: polls this column's peer's slices in my slot, striding by warp within the column, and unpacks them.
-// Stops on abort, then waits for this wave's stores, so the caller can publish its epoch after its barrier.
+// Phase 2: unpacks this column's peer's slices from my slot, a warp a slice. Stops on abort; stores done on return.
 __device__ __forceinline__ void ddaLL128AGGather(const uint64_t* gatherSlot, int8_t* dstBytes, size_t perRankBytes,
                                                  size_t slicesTotal, uint64_t flag, int warp, int nwarps, int lane,
                                                  bool flagLane, DdaKernelParams params) {
@@ -145,12 +144,10 @@ __launch_bounds__(1024)
 // Block size of the staged kernel: its two LDS windows per warp take 64 KiB.
 constexpr unsigned kDdaLL128AGStageThreads = 512;
 
-// Most peers one staged fill takes: the wait ladder's top rung, 15 pushes. Two fills can be in flight, which stays
-// within the 6-bit async counter only up to 7 peers a fill; the launcher's count is held there below.
+// Most peers one fill takes: the wait ladder's top rung. Two fills in flight fit the 6-bit async counter only up to 7.
 constexpr int kDdaLL128AGStageMaxPushPeers = (1 << kDdaLL128StageWaitRungs) - 1;
 
-// Peers the launcher sends one staged fill to. 4 is off the ladder's rungs (3 and 7), so a refill also waits for one
-// push of the last fill; 3 or 7 would change the units per warp too, so the measured 4 stays until either is measured.
+// Peers a fill goes to. Off the ladder's rungs (3, 7), so a refill also waits on one push of the last fill.
 constexpr int kDdaLL128AGStagePushPeers = 4;
 static_assert(kDdaLL128AGStagePushPeers >= 1 && kDdaLL128AGStagePushPeers <= kDdaLL128AGStageMaxPushPeers,
               "a fill goes to 1..kDdaLL128AGStageMaxPushPeers peers");
@@ -159,8 +156,8 @@ static_assert(kDdaLL128AGStagePushPeers >= 1 && kDdaLL128AGStagePushPeers <= kDd
 static_assert(2 * kDdaLL128AGStagePushPeers * kDdaLL128StagePushOps <= 63, "two fills overflow the async counter");
 #endif
 
-// Peer groups of the staged phase 1: nPeers split into ceil(nPeers / pushPeers) groups, group g holding peer indices
-// g, g + groups, ... (peer index i is rank (self + 1 + i) % nRanks).
+// Staged peer groups: ceil(nPeers / pushPeers), group g holding peer indices g, g + groups, ...
+// Peer index i is rank (self + 1 + i) % nRanks.
 __host__ __device__ constexpr int ddaLL128AGStageGroups(int nPeers, int pushPeers) {
   return (nPeers + pushPeers - 1) / pushPeers;
 }
@@ -184,8 +181,8 @@ __host__ __device__ constexpr uint32_t ddaLL128AGRowSlice(uint32_t k, uint32_t r
   return k / nwarps * (rows * nwarps) + row * nwarps + k % nwarps;
 }
 
-// ddaAllGatherFabricLL128 with an LDS-staged phase 1 (kDdaLL128WireAsync): same grid, arguments, wire lines and
-// phase 2, plus ddaLL128StageBytes(blockDim.x) of dynamic LDS and pushPeers, 1..kDdaLL128AGStageMaxPushPeers.
+// ddaAllGatherFabricLL128 with an LDS-staged phase 1: ddaLL128StageBytes(blockDim.x) of dynamic LDS,
+// pushPeers 1..kDdaLL128AGStageMaxPushPeers.
 template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(kDdaLL128AGStageThreads)
@@ -218,8 +215,7 @@ __launch_bounds__(kDdaLL128AGStageThreads)
   const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
   const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff);
 
-  // Phase 1: (slice, peer group) units, slice major, over the slices this row polls, so a row waits only on its own
-  // row of the other ranks. A warp loads a unit's slice one unit ahead, fills an LDS window and pushes it per peer.
+  // Phase 1: (slice, peer group) units over the slices this row polls, so a row waits only on its own row of the peers.
   const int nPeers = nRanks - 1;
   const uint32_t groups = (uint32_t)ddaLL128AGStageGroups(nPeers, pushPeers);
   const uint32_t units = ddaLL128AGRowSlices((uint32_t)slicesTotal, blockIdx.y, gridDim.y, (uint32_t)nwarps) * groups;
@@ -243,7 +239,7 @@ __launch_bounds__(kDdaLL128AGStageThreads)
       ddaLL128LoadRegsBatched<int8_t>(nxt, srcBytes + (size_t)nextSlice * (size_t)kDdaLL128DataBytesPerSlice,
                                       ddaLL128AGSliceBytes(perRankBytes, nextSlice), lane, flagLane);
       if constexpr (ddaLL128Staged<kWire>()) {
-        // Defensive, as in the AllReduce two-shot: a VGPR count would make the ladder's rungs divergent and wait to 0.
+        // Defensive: a VGPR count would make the ladder's rungs divergent and wait to 0.
         stage.lastOps = __builtin_amdgcn_readfirstlane(stage.lastOps);
       }
       ddaLL128StageFill<kWire>(stage, cur, flag, flagLane, lane);

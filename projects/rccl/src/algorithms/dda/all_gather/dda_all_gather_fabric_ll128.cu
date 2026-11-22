@@ -7,26 +7,26 @@
 
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 
-#include <cstddef>
-#include <cstdint>
-#include <utility>
+#include "algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h"
+#include "checks.h"
+#include "comm.h"
+#include "debug.h"
+#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
-#include "algorithms/dda/all_gather/all_gather_dda_fabric_ll128.h"
-#include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
-#include "checks.h"
-#include "comm.h"
-#include "debug.h"
-#include "rccl_common.h"
+#include <cstddef>
+#include <cstdint>
+#include <utility>
 
 // Block size when neither a valid RCCL_DDA_LL128_AG_THREADS nor the arch table sets one.
 constexpr unsigned kDdaLL128AGDefaultThreads = 512;
 
 RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
-// Staged phase 1 from this many pushed payload bytes per block, perRankBytes * nPeers / blocks; 0 or negative: off.
-// Cached, so every rank agrees. Only gfx1250 wave32 blocks of kDdaLL128AGStageThreads stage.
+// Stages phase 1 from this many pushed payload bytes a block; <= 0 is off. Needs gfx1250 wave32 and
+// kDdaLL128AGStageThreads.
 RCCL_PARAM(DdaLL128AGAsyncWireMinBytes, "DDA_LL128_AG_ASYNC_WIRE_MIN_BYTES", 80 * 1024);
 
 namespace {
@@ -79,7 +79,6 @@ size_t ddaLL128AGBytesPerBlock(size_t perRankBytes, int nPeers, const dim3& grid
 }
 
 // Whether a launch takes the staged phase 1. Every input matches on all ranks of a DDA comm, so every rank agrees.
-// The 80 KiB default was measured on SPX; DPX picks 256-thread blocks below 32 MiB, which keep the unstaged kernels.
 bool ddaLL128AGUseAsyncWire(const ncclComm* comm, size_t bytesPerBlock, unsigned threads) {
   const int64_t minBytes = rcclParamDdaLL128AGAsyncWireMinBytes();
   if (minBytes <= 0 || bytesPerBlock < (size_t)minBytes) {
@@ -125,12 +124,6 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
 
   const size_t bytesPerBlock = ddaLL128AGBytesPerBlock(perRankBytes, nRanks - 1, grid);
   const bool asyncWire = ddaLL128AGUseAsyncWire(comm, bytesPerBlock, block.x);
-  if (!asyncWire) {
-    INFO(NCCL_COLL,
-         "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
-         "(warp-per-slice, bpp=%u, slotWords=%zu)",
-         nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer, ddaLL128AgSlotWords(bankSize, nRanks));
-  }
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -150,6 +143,10 @@ static ncclResult_t ncclAllGatherDdaFabricLL128Typed(
     CUDACHECK(cudaGetLastError());
     return ncclSuccess;
   }
+  INFO(NCCL_COLL,
+       "DDA fabric AllGather LL128: nRanks=%d perRankBytes=%zu slices=%zu grid=%ux%u block=%u "
+       "(warp-per-slice, bpp=%u, slotWords=%zu)",
+       nRanks, perRankBytes, slices, grid.x, grid.y, block.x, blocksPerPeer, ddaLL128AgSlotWords(bankSize, nRanks));
   // NRANKS_CT 4/8: unrolled; 0: runtime fallback.
   switch (nRanks) {
   case 4:

@@ -7,6 +7,8 @@
 // Host-only microtests for src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu: eligibility against the
 // LL128 threshold and slot, the block size and grid budget from the arch table, the peer-column grid, and the launch.
 
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -15,10 +17,9 @@
 #include <utility>
 #include <vector>
 
-#include <gtest/gtest.h>
-
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+
 #include "fakes/param_redirect.h"
 
 #include DDA_ALL_GATHER_FABRIC_LL128_CC_PATH
@@ -324,8 +325,8 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_AsyncWireOffAtZeroOrNegative) {
   }
 }
 
-// With the knob on, at every rank count, a gfx1250 wave32 comm launches the staged kernel on the same grid, block and
-// arguments, plus two LDS windows per warp and the 4 peers a fill goes to.
+// With the knob on, a gfx1250 wave32 comm launches the staged kernel on the same grid, block and arguments, plus
+// its LDS and pushPeers.
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_AsyncWireOnTheSameGrid) {
   comm().WarpSize = 32;
   const std::pair<int, const void*> cases[] = {{4, Kernel<4>()}, {8, Kernel<8>()}, {6, Kernel<0>()}, {32, Kernel<0>()}};
@@ -362,8 +363,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_AsyncWireOnTheSameGrid) {
   }
 }
 
-// The knob is in pushed payload bytes per block. At 512 threads 32r runs 31x8 and 4r 3x85, so 1 MiB a rank on 32r and
-// 85 x 128 KiB a rank on 4r both push 128 KiB a block and take the same decision on each side of the knob.
+// The knob is in pushed bytes a block: 32r (31x8) at 1 MiB a rank and 4r (3x85) at 85 x 128 KiB both push 128 KiB.
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_AsyncWireFromPayloadBytesPerBlock) {
   comm().WarpSize = 32;
   constexpr size_t kPerBlock = 128 * 1024;
@@ -412,8 +412,7 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Launch_AsyncWireOnlyOnGfx1250Wave32At51
   }
 }
 
-// Defaults: unset, the knob stages from 80 KiB of pushed payload a block with 4 peers a fill. On 4r the 3x85 grid
-// pushes exactly 80 KiB a block at 85 x 80 KiB a rank, and 16 B a rank less falls short.
+// Unset, the knob stages from 80 KiB a block with 4 peers a fill: 4r (3x85) at 85 x 80 KiB a rank, not 16 B less.
 TEST_F(DdaAllGatherFabricLL128Microtest, Launch_AsyncWireDefaults) {
   comm().WarpSize = 32;
   params_.erase("RCCL_DDA_LL128_AG_ASYNC_WIRE_MIN_BYTES");

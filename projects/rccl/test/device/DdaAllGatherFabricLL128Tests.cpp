@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// DDA LL128 AllGather one-shot on one GPU: the default kernel and the LDS-staged one; a helper kernel plays the peers.
-// Both must gather the host reference and push exactly the lines PublishLines writes for this rank.
+// DDA LL128 AllGather one-shot on one GPU, a helper kernel playing the peers: the default and staged kernels must
+// gather the host reference.
 
 #include <algorithm>
 #include <cstdint>
@@ -67,8 +67,8 @@ size_t slotWords(int nRanks, size_t perRankBytes) {
   return dda::common::ddaLL128AgSlotWords(bankBytes(nRanks, perRankBytes), nRanks);
 }
 
-// Writes rank peers[blockIdx.x]'s payload into its slot of `area` as the LL128 lines that peer sends: one warp per
-// (peer, slice). Uses the per-lane load, not the batched one under test.
+// Writes peers[blockIdx.x]'s LL128 lines into its slot of `area`, a warp a slice, via the per-lane load (not the
+// batched one under test).
 __global__ void PublishLines(uint64_t* area, const int8_t* rows, const int* peers, size_t slotWordsArg,
                              size_t perRankBytes, uint64_t wireFlag) {
   const int peer = peers[blockIdx.x];
@@ -153,8 +153,8 @@ class DdaAllGatherFabricLL128 : public DeviceTestBase {
     sendBuf_ = std::make_unique<DeviceBuffer<uint8_t>>(c.perRankBytes);
   }
 
-  // Zeroed scratch, untouched recvbuff (my slot preloaded when in place), fresh epoch cells, then the peers' lines, or
-  // when aborted_ no lines and a raised abort flag.
+  // Zeroed scratch, untouched recvbuff (my slot preloaded in place), fresh epochs, then the peers' lines; aborted_:
+  // no lines and a raised abort flag.
   void reset() {
     for (DeviceBuffer<uint8_t>& b : scratch_) {
       b.zero();
@@ -253,8 +253,8 @@ class DdaAllGatherFabricLL128 : public DeviceTestBase {
     return area.copyTo();
   }
 
-  // My slot in every peer's scratch: my lines exactly in whole slices; in the partial one only the flags, since the
-  // batched load fills its padding with in-bounds data where PublishLines leaves zeros.
+  // My slot in every peer's scratch: my lines in whole slices; only flags in the partial one, whose padding the
+  // batched load fills with in-bounds data.
   void expectPushed(const Snapshot& snap) {
     const std::vector<uint64_t> want = myLines();
     const size_t whole = c_.perRankBytes / kDdaLL128DataBytesPerSlice * kDdaLL128WireWordsPerSlice;
@@ -302,8 +302,8 @@ class DdaAllGatherFabricLL128 : public DeviceTestBase {
   DeviceBuffer<uint32_t> abort_{1};
 };
 
-// 4 and 8 ranks (unrolled), 6 and 16 (runtime); 1 to 3 blocks a peer at 128, 256 and 512 threads (512 on 4, 6 and 16
-// ranks, as the launcher stages); a partial last slice; out of place and in place (the local copy is skipped).
+// 4 and 8 ranks (unrolled), 6 and 16 (runtime), 1 to 3 blocks a peer at 128 to 512 threads, a partial last slice,
+// out of place and in place.
 const Case kCases[] = {
   {4, 1, 4, 1, 128, kSmallBytes, false},  {4, 3, 4, 1, 128, kSmallBytes, true},
   {4, 2, 4, 2, 512, kLargeBytes, false},  {8, 5, 8, 2, 256, kMediumBytes, false},
@@ -311,10 +311,11 @@ const Case kCases[] = {
   {6, 2, 0, 3, 512, kLargeBytes, true},   {16, 9, 0, 1, 512, kMediumBytes, false},
 };
 
-// Both kernels, banks 0 and 1, gather the host reference bit for bit and push my lines. The staged one runs 1, 2, 3,
-// 4 (the launcher's) and 15 (the most) peers a fill, so uneven groups and a 15-push fill on 16 ranks; same lines too.
+// Both kernels on both banks match the host reference, staged at 1 to 4 and 15 peers a fill. Without async LDS
+// stores it fails after the default checks.
 TEST_F(DdaAllGatherFabricLL128, AsyncWireMatchesDefaultAndHostReference) {
-  ASSERT_TRUE(stagedBuilt()) << "the gfx1250 device pass has no async LDS stores";
+  const bool stagedOk = stagedBuilt();
+  EXPECT_TRUE(stagedOk) << "the gfx1250 device pass has no async LDS stores";
   for (const Case& c : kCases) {
     for (uint32_t flag : {kFlag, kFlag + 1}) {
       flag_ = flag;
@@ -325,6 +326,9 @@ TEST_F(DdaAllGatherFabricLL128, AsyncWireMatchesDefaultAndHostReference) {
       const Snapshot def = run();
       expectGathered(def);
       expectPushed(def);
+      if (!stagedOk) {
+        continue;
+      }
       for (int pushPeers : {1, 2, 3, kDdaLL128AGStagePushPeers, kDdaLL128AGStageMaxPushPeers}) {
         SCOPED_TRACE(testing::Message() << "async wire, " << pushPeers << " peers a fill, "
                                         << dda::common::ddaLL128AGStageGroups(c.nRanks - 1, pushPeers) << " groups");
