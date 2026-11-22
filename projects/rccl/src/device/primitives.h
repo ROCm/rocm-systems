@@ -64,15 +64,6 @@
 #define RCCL_STORE_FREE_STEP_BARRIER 0
 #endif
 
-// gfx1250 Simple fuses its end-of-step barrier with the cheap post-send fence (stepEndBarrier()). Not with TDM Simple,
-// whose stores a store-count wait does not cover. -DENABLE_SIMPLE_FUSED_STEP_END=OFF keeps the two barriers.
-#if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_SIMPLE_FUSED_STEP_END) && \
-  !(defined(ENABLE_TDM_SIMPLE) && ENABLE_TDM_SIMPLE)
-#define RCCL_SIMPLE_FUSED_STEP_END 1
-#else
-#define RCCL_SIMPLE_FUSED_STEP_END 0
-#endif
-
 // gfx1250 Simple's start-of-step barrier orders LDS only (stepStartBarrier()). Needs system-scope slot loads, no TDM.
 // -DENABLE_SIMPLE_STORE_FREE_STEP_START=OFF keeps the full-fence barrier.
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && !defined(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START) && \

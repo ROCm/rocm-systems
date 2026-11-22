@@ -9,9 +9,9 @@
  * @brief LL128 and Simple Ring AllReduce with every ring hop on the NET transport.
  *
  * Regression test for the LL128 post-send fence: if the proxy sees the tail before every 128-byte line of the step
- * is visible, the NIC sends stale lines and the receiver polls them forever. On gfx1250 Simple drains the step in
- * stepEndBarrier() before that post. P2P and SHM are disabled so one node is enough. They are cached for the process,
- * so run the test in its own process with both set:
+ * is visible, the NIC sends stale lines and the receiver polls them forever. The Simple case catches the same failure
+ * in Simple's end-of-step barrier. P2P and SHM are disabled so one node is enough. They are cached for the process, so
+ * run the test in its own process with both set:
  *   NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1 mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=NetLl128MPITest.*
  */
 

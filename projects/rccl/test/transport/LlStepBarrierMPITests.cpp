@@ -8,12 +8,12 @@
  * @file LlStepBarrierMPITests.cpp
  * @brief Ring and Tree collectives on P2P, SHM and NET, and Simple's local copies, checked element by element.
  *
- * On gfx1250 these run the store-free step barriers (storeFreeStepBarrier(), Simple's stepStartBarrier() and
- * stepEndBarrier()) and reduceCopy's 16-byte buffer stores. Every rank and every iteration sends different input, so
- * data read before it landed, or a slot overwritten while it is still read, shows up as a wrong element rather than
- * only as a hang. Other architectures run the full-fence barriers through the same test. DDA, CE, direct and symmetric
- * kernels are chosen ahead of Ring and their switches are cached for the process, so run the test in its own process
- * with them off:
+ * On gfx1250 these run the store-free step barriers (storeFreeStepBarrier() and Simple's stepStartBarrier()) and
+ * reduceCopy's 16-byte buffer stores, and catch end-of-step barrier regressions too. Every rank and every iteration
+ * sends different input, so data read before it landed, or a slot overwritten while it is still read, shows up as a
+ * wrong element rather than only as a hang. Other architectures run the full-fence barriers through the same test.
+ * DDA, CE, direct and symmetric kernels are chosen ahead of Ring and their switches are cached for the process, so run
+ * the test in its own process with them off:
  *   RCCL_LL128_FORCE_ENABLE=1 RCCL_DDA_ENABLE=0 RCCL_DIRECT_ALLGATHER_DISABLE=1 RCCL_DIRECT_REDUCE_SCATTER_DISABLE=1
  *   RCCL_SYM_K_MAX_BYTES=0 RCCL_TDM_LL128_ENABLE=0 mpirun -np 8 ./rccl-UnitTestsMPI --gtest_filter=LlStepBarrierMPITest.*
  * The *OverShm* case also needs NCCL_P2P_DISABLE=1, and the *OverNet* case NCCL_P2P_DISABLE=1 and NCCL_SHM_DISABLE=1.
@@ -357,7 +357,7 @@ TEST_F(LlStepBarrierMPITest, RingSimpleOverP2pMatchesPerIterationInput)
         {"Ring", NCCL_ALGO_RING, "Simple", NCCL_PROTO_SIMPLE, &p2pTransport, kRingColls, std::size(kRingColls)});
 }
 
-// SHM and NET set a connFifo: stepStartBarrier() keeps the full barrier and stepEndBarrier() drains for the proxy.
+// SHM and NET set a connFifo: stepStartBarrier() keeps the full barrier, and the post-send fence drains for the proxy.
 TEST_F(LlStepBarrierMPITest, RingSimpleOverShmMatchesPerIterationInput)
 {
     runCollectives(

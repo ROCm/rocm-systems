@@ -83,8 +83,9 @@ class Primitives<T, RedOp, Fan, Direct,
     else barrier();
   }
 
-  // Orders LDS only: the last step drained at its end barrier, and the post threads' tail or head only has to reach
-  // the peer. Slot loads issue after the wait thread's system-scope acquire. connFifo comms keep subBarrier().
+  // Orders LDS only: the last step drained at its end barrier and post-send fence, and the post threads' tail or head
+  // only has to reach the peer. Slot loads issue after the wait thread's system-scope acquire. connFifo comms keep
+  // subBarrier().
   inline __device__ void stepStartBarrier() {
 #if RCCL_SIMPLE_STORE_FREE_STEP_START
     if (stepStoreFree && nworkers != WARP_SIZE) {
@@ -93,23 +94,6 @@ class Primitives<T, RedOp, Fan, Direct,
     }
 #endif
     subBarrier();
-  }
-
-  // Each wave drains its own loads and stores, then an LDS-only barrier. Returns true where that replaced the cheap
-  // post-send fence, so postPeer() skips its second barrier.
-  inline __device__ bool stepEndBarrier() {
-#if RCCL_SIMPLE_FUSED_STEP_END
-    if (skip_fence) {
-      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");  // s_wait_loadcnt 0 and s_wait_storecnt 0
-      __atomic_signal_fence(__ATOMIC_SEQ_CST);  // Keeps the fence above from merging into the barrier's "local" one.
-      if (nworkers != WARP_SIZE) {
-        ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
-      }
-      return true;
-    }
-#endif
-    barrier();
-    return false;
   }
 
   // Multi-RPN (hierarchical) PAT runs NCCL_PAT_MULTI_RPN_NWORKERS workers.
@@ -263,17 +247,8 @@ class Primitives<T, RedOp, Fan, Direct,
   }
 
   template <int Recv, int Send>
-  inline __device__ void postPeer(bool dataStored, bool drained = false) {
-    if (drained) {
-      // stepEndBarrier() already ran the cheap post-send fence.
-#if RCCL_SIMPLE_FUSED_STEP_END
-      // Each wave released its stores at workgroup scope before the barrier. The posting threads acquire them and
-      // release at system scope, so the step post below publishes the step's data to the peer.
-      if (flags & (Recv * RolePostRecv | Send * RolePostSend)) {
-        __builtin_amdgcn_fence(__ATOMIC_ACQ_REL, "", "global");
-      }
-#endif
-    } else if (skip_fence) {
+  inline __device__ void postPeer(bool dataStored) {
+    if (skip_fence) {
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
       // To be revisited for correctness and performance on gfx1250
@@ -396,8 +371,8 @@ class Primitives<T, RedOp, Fan, Direct,
           // skip data flush.
           workSize = 0;
         }
-        bool drained = stepEndBarrier(); // This barrier has a counterpart in following loop
-        postPeer<Recv, Send>(0 < workSize, drained);
+        barrier(); // This barrier has a counterpart in following loop
+        postPeer<Recv, Send>(0 < workSize);
         offset += sliceSize;
         slice += 1;
         // Yes, for some template arguments this code will be unreachable.  That's fine.
@@ -416,9 +391,9 @@ class Primitives<T, RedOp, Fan, Direct,
         // since we've exited the loop above.
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(0, 0, 0, sliceSize);
       }
-      bool drained = stepEndBarrier(); // Has couterpart in preceding worker-only loop.
+      barrier(); // Has couterpart in preceding worker-only loop.
       int workSize = ncclShmem.aborted ? 0 : sliceSize;
-      postPeer<Recv, Send>(0 < workSize, drained);
+      postPeer<Recv, Send>(0 < workSize);
       offset += sliceSize;
       slice += 1;
     }
