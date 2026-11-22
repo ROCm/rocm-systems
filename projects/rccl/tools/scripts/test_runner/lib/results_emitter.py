@@ -418,17 +418,13 @@ class ResultsEmitter:
             _atomic_write(os.path.join(run_dir, "run.json"),
                           json.dumps(self.manifest, indent=2, default=str))
 
-            # tests.jsonl may already exist from the incremental per-test writer
-            # (_append_test_record in test_executor.py). In that case it is the
-            # authoritative record (it was written right after each test, so it
-            # reflects partial results even if the run was killed). Only write
-            # it here if it does not exist yet (non-incremental callers).
-            tests_jsonl = os.path.join(run_dir, "tests.jsonl")
-            if not os.path.exists(tests_jsonl):
-                with open(tests_jsonl, "w", encoding="utf-8") as f:
-                    for t in self.tests:
-                        slim = {k: v for k, v in t.items() if k != "perf_rows"}
-                        f.write(json.dumps(slim, default=str) + "\n")
+            # Always rewrite from self.tests: the incremental per-test file
+            # (_append_test_record) was written before add_test() set log_relpath.
+            _atomic_write(os.path.join(run_dir, "tests.jsonl"), "".join(
+                json.dumps({k: v for k, v in t.items() if k != "perf_rows"},
+                           default=str) + "\n"
+                for t in self.tests
+            ))
 
             with open(os.path.join(run_dir, "perf.jsonl"), "w", encoding="utf-8") as f:
                 for t in self.tests:

@@ -1290,7 +1290,7 @@ class TestExecutor:
         # appending to tests.jsonl and refreshing run.json from the very first
         # test. This way a killed or hung run leaves a valid result directory for
         # all completed tests without any post-hoc log scraping.
-        if self.emit_enabled:
+        if getattr(self, "emit_enabled", False):
             self._prepare_incremental_emit()
 
     def _prepare_incremental_emit(self):

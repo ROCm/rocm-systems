@@ -132,7 +132,10 @@ def list_gtest_cases(binary_path, rocm_path="/opt/rocm"):
     lib_path = os.path.join(rocm_path, "lib")
     bin_dir = os.path.dirname(os.path.abspath(binary_path))
     bin_parent = os.path.dirname(bin_dir)
-    env["LD_LIBRARY_PATH"] = bin_dir + ":" + bin_parent + ":" + lib_path + ":" + env.get("LD_LIBRARY_PATH", "")
+    # Join only non-empty parts: an empty entry makes the loader search the CWD.
+    env["LD_LIBRARY_PATH"] = ":".join(
+        p for p in (bin_dir, bin_parent, lib_path, env.get("LD_LIBRARY_PATH", "")) if p
+    )
     env["HSA_HOTSWAP_DISABLE"] = "0"
 
     try:
