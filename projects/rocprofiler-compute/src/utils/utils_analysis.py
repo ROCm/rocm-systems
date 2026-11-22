@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import re
+from collections import ChainMap
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,7 +12,11 @@ import numpy as np
 import pandas as pd
 
 from utils import csv_compression, schema
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
+from utils.inject_roctx.constants import (
+    KNOWN_ML_API_BACKENDS,
+    OPERATOR_BACKENDS,
+    USER_REGION_BACKEND,
+)
 from utils.logger import (
     console_debug,
     console_error,
@@ -101,6 +106,8 @@ _DISPATCH_ID_KEYS = [
     "End_Timestamp",
 ]
 _KERNEL_ID_KEYS = ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"]
+# process_rocpd_csv merges the passes of one dispatch on these keys.
+_MERGE_KEYS = ["Dispatch_ID", *_KERNEL_ID_KEYS]
 ARGS_DISPLAY_MAX_ITEMS = 8
 ARGS_DISPLAY_MAX_CHARS = 160
 ARGS_DISPLAY_MAX_VARIANTS = 5
@@ -437,7 +444,7 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
         "ltid": "n/a",
         "args": "n/a",
     }
-    backend = "user"
+    backend = USER_REGION_BACKEND
     for token in tokens[1:]:
         if token in KNOWN_ML_API_BACKENDS:
             backend = token
@@ -1017,49 +1024,10 @@ def fold_identical_sibling_subtrees(
     return folded
 
 
-def filter_forest_by_backends(
-    forest: dict[str, list[CallTreeNode]],
-    backends: list[str],
-) -> dict[str, list[CallTreeNode]]:
-    """Copy a forest, keeping nodes for the requested backends and their ancestors.
-
-    An empty backends list keeps every node, including user. Ancestors kept
-    only as scaffolding have their own kernels cleared, so a torch parent
-    of a triton child does not contribute GPU time or kernel lines to a
-    triton listing. Inclusive stats on each copy are recomputed from the
-    kernels and children that remain.
-    """
-    if not backends:
-        return forest
-
-    filtered: dict[str, list[CallTreeNode]] = {}
-    for thread_id, roots in forest.items():
-        kept_roots: list[CallTreeNode] = []
-        for root in roots:
-            copied_root = _copy_backend_view(root, backends)
-            if copied_root is not None:
-                kept_roots.append(copied_root)
-        if kept_roots:
-            filtered[thread_id] = kept_roots
-    return filtered
-
-
-def _copy_backend_view(
-    node: CallTreeNode, backends: List[str]
-) -> Optional[CallTreeNode]:
-    """Copy one node for filter_forest_by_backends, or None when nothing is kept."""
-    kept_children: list[CallTreeNode] = []
-    for child in node.children:
-        copied_child = _copy_backend_view(child, backends)
-        if copied_child is not None:
-            kept_children.append(copied_child)
-    if node.backend not in backends and not kept_children:
-        return None
+def _clone_operator_subtree(node: CallTreeNode) -> CallTreeNode:
+    """Copy a node and every descendant, keeping kernels on each."""
     copied_node = clone_call_tree_node(node)
-    copied_node.children = kept_children
-    if node.backend not in backends:
-        copied_node.kernels = {}
-    rollup_node_stats(copied_node)
+    copied_node.children = [_clone_operator_subtree(child) for child in node.children]
     return copied_node
 
 
@@ -1070,6 +1038,11 @@ def _copy_scoped_operator_node(
 ) -> Optional[CallTreeNode]:
     """Copy one node, keeping match kernels and in-scope descendant kernels."""
     node_is_match = id(node) in matched_node_ids
+    # A matched user region keeps everything inside it.
+    if node_is_match and node.backend == USER_REGION_BACKEND:
+        copied_region = _clone_operator_subtree(node)
+        rollup_node_stats(copied_region)
+        return copied_region
     descendant_backends = inherited_backends
     if node_is_match and node.backend is not None:
         descendant_backends = set(inherited_backends)
@@ -1111,6 +1084,86 @@ def copy_matched_operator_subtree(
         if kept_roots:
             subtree[thread_id] = kept_roots
     return subtree
+
+
+def filter_forest_by_backends(
+    forest: dict[str, list[CallTreeNode]],
+    backends: list[str],
+) -> dict[str, list[CallTreeNode]]:
+    """Copy the call trees, keeping the nodes of the given backends.
+
+    No backends keeps every node. Other nodes stay only as parents on the way
+    to a kept node, without kernels of their own.
+    """
+    if not backends:
+        return forest
+    backend_nodes = [
+        node
+        for roots in forest.values()
+        for node, _path in iter_call_tree_paths(roots)
+        if node.backend in backends
+    ]
+    return copy_matched_operator_subtree(forest, backend_nodes)
+
+
+def traced_frameworks_from_config(profiling_config: dict[str, Any]) -> list[str]:
+    """Return the frameworks that --trace-ml-api traced, from profiling_config.yaml."""
+    return list(profiling_config.get("trace_ml_api") or [])
+
+
+def check_backends_traced(backends: list[str], traced_frameworks: list[str]) -> None:
+    """Raise ValueError unless the workload traced every given backend.
+
+    User regions are recorded by every --trace-ml-api run.
+    """
+    if not traced_frameworks:
+        raise ValueError(
+            "Workload was not profiled with --trace-ml-api. Profile again with "
+            "--trace-ml-api to use --list-operators or --operator."
+        )
+    for backend in backends:
+        if backend in KNOWN_ML_API_BACKENDS and backend not in traced_frameworks:
+            raise ValueError(
+                f"Workload was not profiled with --trace-ml-api {backend}."
+            )
+
+
+def split_backend_prefix(pattern: str) -> tuple[Optional[str], str]:
+    """Split 'torch:*conv*' into ('torch', '*conv*').
+
+    A pattern without a prefix returns (None, pattern). The '::' in names such
+    as aten::addmm is not a prefix.
+    """
+    prefix, separator, rest = pattern.partition(":")
+    if not separator or rest.startswith(":"):
+        return None, pattern
+    return prefix, rest or "**"
+
+
+def bind_operator_patterns(
+    patterns: list[str], traced_frameworks: list[str]
+) -> dict[str, list[str]]:
+    """Group --operator patterns by the backend they match in one workload.
+
+    A pattern without a prefix uses the prefix before it. Before any prefix, it
+    matches every traced framework and user regions. No patterns match every
+    operator. Raises ValueError for an unknown prefix or an untraced framework.
+    """
+    patterns_by_backend: dict[str, list[str]] = {}
+    backends = [*traced_frameworks, USER_REGION_BACKEND]
+    for token in patterns or ["**"]:
+        prefix, pattern = split_backend_prefix(token)
+        if prefix is not None:
+            if prefix not in OPERATOR_BACKENDS:
+                raise ValueError(
+                    f"Unknown --operator prefix {prefix!r}. "
+                    f"Prefixes: {', '.join(OPERATOR_BACKENDS)}"
+                )
+            backends = [prefix]
+        for backend in backends:
+            patterns_by_backend.setdefault(backend, []).append(pattern)
+    check_backends_traced(list(patterns_by_backend), traced_frameworks)
+    return patterns_by_backend
 
 
 def _node_source_location(node: CallTreeNode) -> str:
@@ -1593,7 +1646,7 @@ def process_ml_api_trace_output(
         console_warning(
             "No marker files with corresponding counter files found. "
             "Ensure profiling was done with ML API tracing enabled "
-            "(e.g., via '--torch-trace')."
+            "(e.g., via '--trace-ml-api')."
         )
         workload.ml_api_trace_pairs = []
         return
@@ -1696,13 +1749,22 @@ def add_unit_counter(df: pd.DataFrame) -> None:
     df[UNIT_COUNTER] = 1
 
 
+@demarcate
 def impute_counters_iteration_multiplex(
     df: pd.DataFrame,
-    policy: str,
     workload_dir: Path,
-) -> pd.DataFrame:
-    """
-    Perform data imputation for missing counter values due to iteration multiplexing.
+) -> Tuple[pd.DataFrame, Dict[str, ChainMap]]:
+    """Fill in the counters each launch did not collect under iteration
+    multiplexing.
+
+    Each launch of a kernel collects one pass, in turn. A round is one launch
+    of every pass. Returns two things:
+
+    - The imputed frame. Each launch takes its missing counters from the
+      other launches of its round.
+    - One table per pass. Each launch takes that pass's counters from the one
+      launch of its round that collected the pass, so a pass's counters always
+      come from one launch.
     """
     # Counter buckets configured for the workload. A kernel needs at least
     # this many dispatches to cover every bucket.
@@ -1727,23 +1789,22 @@ def impute_counters_iteration_multiplex(
     ]
 
     # Group by unique kernel configurations
-    unique_occurences = (
-        df.groupby("Kernel_Name")
-        if policy == "kernel"
-        else df.groupby(
-            [
-                "Kernel_Name",
-                "Grid_Size",
-                "Workgroup_Size",
-                "LDS_Per_Workgroup",
-            ],
-            as_index=False,
-        )
+    unique_occurences = df.groupby(
+        [
+            "Kernel_Name",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+        ],
+        as_index=False,
     )
 
     counter_columns = [col for col in df.columns if col not in non_counter_column_index]
     # Collect imputed groups as dataframes
     group_dfs: list[pd.DataFrame] = []
+    # Each pass's counter values, one piece per kernel, keyed by the set of
+    # counters the pass collects
+    pass_pieces: dict[frozenset[str], list[pd.DataFrame]] = {}
 
     # Log imputation task summary before processing
     console_debug(
@@ -1764,8 +1825,8 @@ def impute_counters_iteration_multiplex(
             group_dfs.append(group_copy)
             continue
 
-        # Identify counter buckets
-        counter_groups: set[frozenset[str]] = set()
+        # Find the passes, in the order the launches collect them
+        counter_groups: list[frozenset[str]] = []
         for _, row in group.iterrows():
             # Set of counter column names with non empty values
             cols_frozenset = frozenset(row[counter_columns].dropna().index)
@@ -1776,7 +1837,7 @@ def impute_counters_iteration_multiplex(
             # we can stop once we see a repeated bucket
             if cols_frozenset in counter_groups:
                 break
-            counter_groups.add(cols_frozenset)
+            counter_groups.append(cols_frozenset)
 
         # If no counters found for this group, continue
         if not counter_groups:
@@ -1786,8 +1847,15 @@ def impute_counters_iteration_multiplex(
         # all counters and impute missing values
         # Create subgroup_id column for groupby: 0,0,0,...,1,1,1,...,2,2,2,...
         # Use numpy for vectorized operation
+        round_ids = np.arange(len(group)) // len(counter_groups)
+        # Which counters each launch collected
+        collected = group[counter_columns].notna()
+        for counter_group in counter_groups:
+            pass_pieces.setdefault(counter_group, []).append(
+                _pass_values_by_round(group, collected, counter_group, round_ids)
+            )
         group_copy = group.copy()
-        group_copy["__subgroup_id"] = np.arange(len(group_copy)) // len(counter_groups)
+        group_copy["__subgroup_id"] = round_ids
         # groupby().bfill() automatically excludes the grouping column from result
         group_copy[counter_columns] = (
             group_copy[[*counter_columns, "__subgroup_id"]]
@@ -1802,8 +1870,21 @@ def impute_counters_iteration_multiplex(
         _warn_kernels_with_incomplete_coverage(incomplete_kernel_names)
 
     if not group_dfs:
-        return pd.DataFrame(columns=df.columns)
-    return pd.concat(group_dfs, ignore_index=True)
+        return pd.DataFrame(columns=df.columns), {}
+    # Pass tables join their pieces by the original row labels, so reset
+    # the labels last
+    imputed_df = pd.concat(group_dfs)
+    merged_df = imputed_df.reset_index(drop=True)
+    dispatches = merged_df.drop(columns=counter_columns)
+    # A kernel that never collected a pass has empty counters in its table
+    pass_tables = {
+        f"pass_{number}": ChainMap(
+            pd.concat(pieces).reindex(imputed_df.index).reset_index(drop=True),
+            dispatches,
+        )
+        for number, pieces in enumerate(pass_pieces.values())
+    }
+    return merged_df, pass_tables
 
 
 def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
@@ -1830,6 +1911,39 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
     )
 
 
+def _pass_values_by_round(
+    group: pd.DataFrame,
+    collected: pd.DataFrame,
+    counter_group: frozenset[str],
+    round_ids: np.ndarray,
+) -> pd.DataFrame:
+    """Give every launch of one kernel the counters of one pass.
+
+    The values come from the launch of the same round that collected exactly
+    that pass. A round without such a launch gets empty values.
+    """
+    columns = sorted(counter_group)
+    # Launches whose collected counters are exactly this pass's counters
+    collected_this_pass = collected[columns].all(axis=1) & ~collected.drop(
+        columns=columns
+    ).any(axis=1)
+    source = (
+        group
+        .loc[collected_this_pass, columns]
+        .assign(Round=round_ids[collected_this_pass.to_numpy()])
+        .drop_duplicates("Round")
+    )
+    # Copy each round's source values onto every launch of that round
+    values = (
+        pd
+        .DataFrame({"Round": round_ids})
+        .merge(source, on="Round", how="left")
+        .drop(columns="Round")
+    )
+    values.index = group.index
+    return values
+
+
 def process_rocpd_csv(
     df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, dict[tuple, int]]:
@@ -1845,13 +1959,7 @@ def process_rocpd_csv(
     slot_to_id: dict[tuple, int] = {}
 
     # Group by unique kernel and merge into a single row
-    for group_key, group_df in df.groupby([
-        "Dispatch_ID",
-        "Kernel_Name",
-        "Grid_Size",
-        "Workgroup_Size",
-        "LDS_Per_Workgroup",
-    ]):
+    for group_key, group_df in df.groupby(_MERGE_KEYS):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
             "Grid_Size": group_df["Grid_Size"].iloc[0],
@@ -1866,14 +1974,76 @@ def process_rocpd_csv(
             "Start_Timestamp": group_df["Start_Timestamp"].iloc[0],
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
-        # Each counter will become its own column
-        row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
+        # Each counter becomes its own column. A counter that several passes
+        # collected keeps the value of the first pass.
+        first_values = group_df.drop_duplicates("Counter_Name")
+        row.update(
+            dict(zip(first_values["Counter_Name"], first_values["Counter_Value"]))
+        )
         data.append(row)
         slot_to_id[group_key] = len(data)
     df = pd.DataFrame(data)
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df, slot_to_id
+
+
+def split_counters_by_pass(
+    counter_rows: pd.DataFrame,
+    merged_df: pd.DataFrame,
+) -> Dict[str, ChainMap]:
+    """Return one table per pass, keyed by Pass_Key.
+
+    Each table has the rows of merged_df, its dispatch columns, and only the
+    counters and timestamps that pass collected. A dispatch the pass did not see
+    has empty counters there.
+
+    A table is a ChainMap: table[column] reads the pass's own counters and
+    timestamps first, then the dispatch columns, which all passes share.
+    """
+    if counter_rows.empty or "Pass_Key" not in counter_rows.columns:
+        return {}
+    counter_rows = counter_rows.assign(
+        Merged_Row=counter_rows.groupby(_MERGE_KEYS).ngroup()
+    )
+    counter_names = set(counter_rows["Counter_Name"])
+    dispatch_columns = [
+        column
+        for column in merged_df.columns
+        if column not in counter_names
+        and column not in ("Start_Timestamp", "End_Timestamp")
+    ]
+    dispatches = merged_df[dispatch_columns]
+    pass_tables: Dict[str, ChainMap] = {}
+    for pass_key, rows in counter_rows.groupby("Pass_Key", sort=False):
+        counters = rows.pivot_table(
+            index="Merged_Row",
+            columns="Counter_Name",
+            values="Counter_Value",
+            aggfunc="first",
+        )
+        timestamps = rows.groupby("Merged_Row")[["Start_Timestamp", "End_Timestamp"]]
+        pass_counters = timestamps.first().join(counters).reindex(merged_df.index)
+        pass_tables[str(pass_key)] = ChainMap(pass_counters, dispatches)
+    return pass_tables
+
+
+def pass_tables_on_rows(
+    pass_tables: Dict[str, ChainMap], rows: pd.DataFrame
+) -> List[ChainMap]:
+    """Return the pass tables cut to the rows of rows, part of the merged table.
+
+    The pass tables share one dispatches table, so it is cut once.
+    """
+    if not pass_tables:
+        return []
+    _counters, dispatches = next(iter(pass_tables.values())).maps
+    dispatches_on_rows = dispatches.loc[rows.index]
+    tables_on_rows = []
+    for table in pass_tables.values():
+        counters = table.maps[0]
+        tables_on_rows.append(ChainMap(counters.loc[rows.index], dispatches_on_rows))
+    return tables_on_rows
 
 
 def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
@@ -1951,16 +2121,3 @@ def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
         Kernel_ID=kernel_groups.ngroup(),
     )
     return numbered.loc[:, COUNTER_RESULTS_COLUMNS]
-
-
-def get_matrix_ops_type(gpu_series: str) -> str:
-    """
-    Get the matrix operation type supported by the profiled hardware in roofline
-    run_parameters.
-    For the supported architecture of this tool, only CDNA2/3/4 supports Matrix
-    Fused Multiply-Add instructions; all other architectures support Warp
-    Matrix Multiply-Accumulate operations.
-    """
-    if gpu_series.upper() in ["MI200", "MI300", "MI350"]:
-        return "MFMA"
-    return "WMMA"

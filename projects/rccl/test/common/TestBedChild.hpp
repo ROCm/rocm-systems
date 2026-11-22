@@ -113,7 +113,8 @@ namespace RcclUnitTesting
     void ClosePipes();
 
     // Execution
-    void StartExecutionLoop();
+    // Returns the child's exit code, for main to return.
+    int StartExecutionLoop();
 
   protected:
     // Number of elements UT_PRINT_VALUES prints from a buffer of numElements (-1 prints all)

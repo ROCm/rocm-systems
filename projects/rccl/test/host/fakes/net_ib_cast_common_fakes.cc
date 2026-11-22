@@ -20,6 +20,7 @@ int IbCastNDevs = -1;
 struct ncclIbMergedDev IbCastMergedDevs[MAX_IB_VDEVS];
 struct ncclIbDev IbCastDevs[MAX_IB_DEVS];
 int IbCastRelaxedOrderingEnabled = 0;
+uint32_t IbCastMaxPostSendBytes = UINT32_MAX;
 ncclProfilerCallback_t IbCastProfilerFunction;
 std::thread IbCastAsyncThread;
 // net.cc compares a plugin's address against it.

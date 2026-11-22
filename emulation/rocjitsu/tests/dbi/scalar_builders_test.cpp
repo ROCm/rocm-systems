@@ -6,6 +6,7 @@
 // Expected encodings are ground truth captured from
 // `llvm-mc -triple=amdgcn -mcpu=<gfx942|gfx950|gfx1200> -show-encoding`.
 
+#include "rocjitsu/isa/isa_family.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -21,8 +22,10 @@ namespace {
 // s_ff1_i32_b64 s9, s[6:7] (s_ctz_i32_b64 on gfx1200); s_and_b32 s12, s10, 3;
 // s_cbranch_scc0 5; s_cbranch_scc1 -4. Identical on gfx942 and gfx950.
 TEST(ScalarBuilders, MatchLlvmOnCdna) {
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
-    EXPECT_EQ(build_v_readfirstlane_b32(4, 0, arch), 0x7e080500u);
+  for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    util::FailureOr<uint32_t> maybe_readfirstlane = build_v_readfirstlane_b32(4, 0, arch);
+    ASSERT_TRUE(maybe_readfirstlane.succeeded());
+    EXPECT_EQ(maybe_readfirstlane.value(), 0x7e080500u);
     util::FailureOr<uint32_t> maybe_bcnt1_i32_b64 = build_s_bcnt1_i32_b64(8, 6, arch);
     ASSERT_TRUE(maybe_bcnt1_i32_b64.succeeded());
     EXPECT_EQ(maybe_bcnt1_i32_b64.value(), 0xbe880d06u);
@@ -45,8 +48,10 @@ TEST(ScalarBuilders, MatchLlvmOnCdna) {
 }
 
 TEST(ScalarBuilders, MatchLlvmOnRdna4) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
-  EXPECT_EQ(build_v_readfirstlane_b32(4, 0, kArch), 0x7e080500u);
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
+  util::FailureOr<uint32_t> maybe_readfirstlane = build_v_readfirstlane_b32(4, 0, kArch);
+  ASSERT_TRUE(maybe_readfirstlane.succeeded());
+  EXPECT_EQ(maybe_readfirstlane.value(), 0x7e080500u);
   util::FailureOr<uint32_t> maybe_bcnt1_i32_b64 = build_s_bcnt1_i32_b64(8, 6, kArch);
   ASSERT_TRUE(maybe_bcnt1_i32_b64.succeeded());
   EXPECT_EQ(maybe_bcnt1_i32_b64.value(), 0xbe881906u);
@@ -67,9 +72,13 @@ TEST(ScalarBuilders, MatchLlvmOnRdna4) {
 }
 
 TEST(ScalarBuilders, UnsupportedArchitecturesReturnFailure) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_INVALID, ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_CDNA1}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Invalid, rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Cdna1}) {
     SCOPED_TRACE(static_cast<int>(arch));
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(build_v_readfirstlane_b32(4, 0, arch, diagnostic.emitter()).failed());
+    EXPECT_EQ(diagnostic.message(),
+              "Unimplemented instruction: v_readfirstlane_b32 for target architecture");
     EXPECT_TRUE(build_s_bcnt1_i32_b64(8, 6, arch).failed());
     EXPECT_TRUE(build_s_first_set_bit_b64(9, 6, arch).failed());
     EXPECT_TRUE(build_s_and_b32(12, 10, 131, arch).failed());

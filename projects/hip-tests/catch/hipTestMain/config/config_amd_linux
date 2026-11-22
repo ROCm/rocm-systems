@@ -134,8 +134,6 @@
         "Unit_Device_tgammaf_Accuracy_Limited_Positive",
         "=== TODO === fail on 100% test data",
         "Unit_Device___hfma2_Accuracy_Positive",
-        "=== Test does not reflect a valid use case - SWDEV-569454",
-        "Unit_hipStreamPerThread_MultiThread",
         "==SWDEV-526803 Test disabled till rocr adds impl for fabric handle ==",
         "Unit_hipMemExportFabricHandleToStdout_Positive_Basic",
     #endif

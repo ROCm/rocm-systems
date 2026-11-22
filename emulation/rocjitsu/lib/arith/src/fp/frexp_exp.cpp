@@ -5,9 +5,9 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "fp/frexp_exp.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -37,6 +37,13 @@ int frexp_exp(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, ui
 
   // Sign modifiers do not affect the exponent. Integer results ignore OMOD;
   // the exponent always fits in int32_t, so CLAMP does not change the result.
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::frexp_exp_x86_64_v4(Fp64, exec_mask, d[0], a,
+                                         flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::frexp_exp_x86_64_v3(Fp64, exec_mask, d[0], a,

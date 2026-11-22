@@ -30,6 +30,10 @@
 
 namespace rocjitsu::test {
 
+// Declare 40 SGPRs for a callable returning through s[30:31]. The gfx942
+// 32-SGPR allocation aliases that pair to VCC.
+inline constexpr uint32_t kCallableProbeGranulatedSgprCount = 40 / 8 - 1;
+
 // Instruction word constants (gfx950)
 
 // VOP1 v_mov_b32 encodings (gfx950: [31:25]=0x3F, vdst[24:17], op=1<<9,
@@ -121,10 +125,8 @@ inline constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
 
 inline uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
-  names.resize(offset + name.size() + 1);
-  if (!name.empty()) {
-    std::memcpy(names.data() + offset, name.data(), name.size());
-  }
+  names.insert(names.end(), name.begin(), name.end());
+  names.push_back('\0');
   return offset;
 }
 

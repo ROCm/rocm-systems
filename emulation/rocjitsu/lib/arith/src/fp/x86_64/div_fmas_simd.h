@@ -9,8 +9,9 @@
 #pragma once
 
 #include "common/bits.h"
+#include "common/compiler.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -57,6 +58,7 @@ template <typename Ops> inline typename Ops::V division_vector_top(DivisionVecto
   auto high = Ops::inverse(Ops::eq(a.hi, Ops::set(0)));
   auto word = Ops::select(high, a.hi, a.lo), top = Ops::select(high, Ops::set(64), Ops::set(0));
   constexpr unsigned shifts[] = {32u, 16u, 8u, 4u, 2u, 1u};
+  RJ_ARITH_UNROLL(6)
   for (unsigned shift : shifts) {
     auto upper = Ops::shr(word, Ops::set(shift));
     auto present = Ops::inverse(Ops::eq(upper, Ops::set(0)));
@@ -73,6 +75,27 @@ inline DivisionVector128<Ops> division_vector_sub(DivisionVector128<Ops> a,
   return {
       Ops::sub(a.lo, b.lo),
       Ops::sub(Ops::sub(a.hi, b.hi), Ops::select(Ops::ugt(b.lo, a.lo), Ops::set(1), Ops::set(0)))};
+}
+
+// Return lanes whose value sum * 2^exponent stays below the smallest normal after rounding to
+// nearest at normal precision, as division_round judges tininess. Only a value one binade below
+// the smallest normal, at or above the midpoint under it, rounds up to it.
+template <int Width, typename Ops>
+inline typename Ops::Mask division_vector_tiny(DivisionVector128<Ops> sum, typename Ops::V highest,
+                                               typename Ops::V exponent) {
+  using F = IeeeFormat<Width>;
+  auto zero = Ops::set(0), one = Ops::set(1);
+  auto normal_shift = Ops::sub(highest, Ops::set(F::fraction));
+  auto midpoint =
+      division_vector_sub<Ops>(division_vector_left<Ops>({one, zero}, Ops::add(highest, one)),
+                               division_vector_left<Ops>({one, zero}, Ops::sub(normal_shift, one)));
+  auto at_midpoint = Ops::either(
+      Ops::ugt(sum.hi, midpoint.hi),
+      Ops::both(Ops::eq(sum.hi, midpoint.hi), Ops::inverse(Ops::ugt(midpoint.lo, sum.lo))));
+  auto edge = Ops::both(Ops::eq(Ops::add(highest, exponent), Ops::set(uint64_t(-F::bias))),
+                        Ops::both(Ops::gt(normal_shift, zero), at_midpoint));
+  return Ops::both(Ops::gt(Ops::set(uint64_t(1 - F::bias)), Ops::add(highest, exponent)),
+                   Ops::inverse(edge));
 }
 
 // Return exact DIV_FMAS bits with conditional post-scaling and output modifiers. If causes is
@@ -181,6 +204,13 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
     result = Ops::select(Ops::gt(Ops::set(uint64_t(1 - F::bias)), result_exponent), zero, result);
   }
   result = Ops::select(Ops::eq(Ops::bor(sum.lo, sum.hi), zero), sign, result);
+  // A flushing output also flushes a value that reaches the smallest normal only on the
+  // subnormal grid. Only the binade below the smallest normal can; lower ones stay subnormal and
+  // are flushed below.
+  if (!omod && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+      Ops::any(Ops::eq(Ops::add(highest, exponent), Ops::set(uint64_t(-F::bias))))) {
+    result = Ops::select(division_vector_tiny<Width, Ops>(sum, highest, exponent), sign, result);
+  }
 
   // Reuse the scalar division_round classifier's discarded bits and tininess
   // threshold. Reporting is optional; numeric arithmetic is shared unchanged.
@@ -198,17 +228,7 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
       if (Ops::any(Ops::both(participating, inexact))) {
         *causes |= RJ_ARITH_EXCEPTION_INEXACT;
       }
-      auto normal_shift = Ops::sub(highest, Ops::set(F::fraction));
-      auto midpoint = division_vector_sub<Ops>(
-          division_vector_left<Ops>({one, zero}, Ops::add(highest, one)),
-          division_vector_left<Ops>({one, zero}, Ops::sub(normal_shift, one)));
-      auto at_midpoint = Ops::either(
-          Ops::ugt(sum.hi, midpoint.hi),
-          Ops::both(Ops::eq(sum.hi, midpoint.hi), Ops::inverse(Ops::ugt(midpoint.lo, sum.lo))));
-      auto edge = Ops::both(Ops::eq(Ops::add(highest, exponent), Ops::set(uint64_t(-F::bias))),
-                            Ops::both(Ops::gt(normal_shift, zero), at_midpoint));
-      auto tiny = Ops::both(Ops::gt(Ops::set(uint64_t(1 - F::bias)), Ops::add(highest, exponent)),
-                            Ops::inverse(edge));
+      auto tiny = division_vector_tiny<Width, Ops>(sum, highest, exponent);
       if (Ops::any(Ops::both(participating, Ops::both(inexact, tiny)))) {
         *causes |= RJ_ARITH_EXCEPTION_UNDERFLOW;
       }
@@ -276,6 +296,7 @@ inline void division_vector_run(uint32_t exec_mask, uint32_t mode, uint32_t *con
   for (int lane = 0; lane < 32; lane += Ops::lanes) {
     typename Ops::V inputs[3];
     const uint32_t *const *sources[] = {a, b, c};
+    RJ_ARITH_UNROLL(3)
     for (int i = 0; i < 3; ++i) {
       inputs[i] = Ops::load_words(sources[i][0] + lane);
       if constexpr (Width == 64) {

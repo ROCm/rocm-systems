@@ -9,11 +9,13 @@
 /// then unset (SIMD). Scalar-vs-SIMD bit-equivalence is verified separately by
 /// the *SimdCorrectness* suites (in-process double-run + EXPECT_EQ), not here.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -95,13 +97,15 @@ struct BenchFixture {
 
   BenchFixture() : gpu_mem("vadd_simd_bench_mem"), l2("vadd_simd_bench_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vadd_simd", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vadd_simd", cfg, &gpu_mem, &l2);
+    if (!cu)
+      return;
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -186,6 +190,7 @@ ModeStats time_mode(BenchFixture &fx, Instruction *inst, uint64_t seed, bool san
 
 void run_words(const char *label, uint32_t w0, uint32_t w1, bool sanitize_finite) {
   BenchFixture fx;
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   ASSERT_NE(fx.cu, nullptr);
   ASSERT_NE(fx.decoder, nullptr);
   ASSERT_NE(fx.wf, nullptr);

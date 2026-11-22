@@ -4,9 +4,11 @@
 // Shared setup for a few decoded RDNA matrix regressions.
 #pragma once
 
+#include "compute_unit_test_util.h"
 #include "fixtures/float_dot/rdna_matrix_sample.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -103,8 +105,8 @@ inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat, bool gf
 
 // Execute one instruction, check selected destination words, and verify that
 // registers outside the destination range are unchanged.
-inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
-                  const Registers &input, std::span<const Sample> expected,
+inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words,
+                  uint32_t mode, const Registers &input, std::span<const Sample> expected,
                   uint32_t output_words = 256) {
   SCOPED_TRACE(testing::Message() << "arch=" << arch << " width=" << width << " word0=" << std::hex
                                   << words[0] << " word1=" << words[1] << " mode=" << mode);
@@ -118,7 +120,9 @@ inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> w
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("matrix_test", cfg, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "matrix_test", cfg, &memory, &cache));
   auto *wave = cu->dispatch_wf(0, 0, 106, 256, width);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffffu);
@@ -147,8 +151,8 @@ inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> w
   wave->halt();
 }
 // Allow short expectations to stay inline at their call sites.
-inline void check(rj_code_arch_t arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
-                  const Registers &input, std::initializer_list<Sample> expected,
+inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words,
+                  uint32_t mode, const Registers &input, std::initializer_list<Sample> expected,
                   uint32_t output_words = 256) {
   check(arch, width, words, mode, input, std::span<const Sample>(expected.begin(), expected.size()),
         output_words);

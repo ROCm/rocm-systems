@@ -76,7 +76,8 @@ struct rcclArchThresholds {
   // Symmetric kernel upper-bound per collective when recv buffer is registered (R2).
   // Above this size CE is faster than symk; setting this withdraws symk as the final
   // choice in rcclSelectAllReduce so CE-registered can win. It does not unblock the
-  // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all.
+  // CE 2-shot or DDA branches, which stay gated on whether symk was requested at all,
+  // except on gfx1250, where a withdrawn symk hands some registered AllReduce to fabric DDA.
   // kThreshUnlimited means no suppression (symk may win at any size for that collective).
   // Unused collectives default to kThreshUnlimited.
   size_t symMaxR2[RCCL_DDA_FUNC_COUNT];
@@ -97,6 +98,10 @@ struct rcclArchThresholds {
   size_t symTdmMaxR2Graph[RCCL_DDA_FUNC_COUNT];
   // Upper edge across UALink trays; it only lowers the window. 0 = no cap.
   size_t symTdmCrossTrayMaxR2[RCCL_DDA_FUNC_COUNT];
+  // AllGather only, R2 total bytes. On a comm where the hierarchical LSA AllGather kernel can run,
+  // these replace symMinR2 / symMaxR2 / symMaxR2Graph for AllGather. 0 = no hierarchical window.
+  size_t agHierSymMinR2;
+  size_t agHierSymMaxR2;
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
@@ -118,6 +123,17 @@ struct rcclArchThresholds {
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
 
+  // AllReduce only: with the peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL) the LL128 one-shot runs
+  // to min(RCCL_DDA_LL128_ONESHOT_THRESHOLD's default, this / nRanks), since it moves (nRanks - 1) x the message per
+  // rank. 0 = that default at every rank count.
+  size_t ddaArLL128OneShotRankBytes;
+
+  // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_wrap.cc). 0 turns that re-route off.
+  size_t ddaArRegCaptureMinBytes;      // graph capture: DDA instead of Ring up to max(this, nRanks x the next)
+  size_t ddaArRegCapturePerRankBytes;  // per-rank part of the capture bound
+  size_t ddaArRegEagerMinShardBytes;   // eager: DDA LL128 instead of CE-registered from this per-rank shard
+  size_t ddaArRegEagerMaxShardBytes;   // up to this per-rank shard
+
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
   // on comms of at least rankScaledMinRanks ranks. Budget 0 = the init block cap.
@@ -133,6 +149,34 @@ struct rcclArchThresholds {
   int ddaAgLL128MaxBlocks;
   size_t ddaAgLL128MaxBlocksMinBytes;
   size_t ddaAgLL128MaxBlocksMaxBytes;
+
+  // DDA LL128 AllToAll block size and block cap, as the AllGather pair above. 0 keeps 256 threads
+  // and the init block cap.
+  int ddaA2aLL128Threads;
+  size_t ddaA2aLL128ThreadsMinBytes;
+  size_t ddaA2aLL128ThreadsMaxBytes;
+  int ddaA2aLL128MaxBlocks;
+  size_t ddaA2aLL128MaxBlocksMinBytes;
+  size_t ddaA2aLL128MaxBlocksMaxBytes;
+  // DDA LL128 two-shot Broadcast: threads per block (0 = use kDdaLL128BcDefaultThreads).
+  // The two-shot variant benefits from fewer threads (better occupancy at large messages).
+  unsigned ddaLL128BcTwoShotThreads;
+
+  // DDA LL128 ReduceScatter batched kernel block size at every size. 0 keeps 512 threads.
+  int ddaRsLL128Threads;
+  // DDA LL128 ReduceScatter takes its peer-parallel kernel while the shard is at most max(ddaRsLL128PeerMaxShard,
+  // nRanks x ddaRsLL128PeerMaxShardPerRank) and the message at most ddaRsLL128PeerMaxBytes. Zeros keep batched.
+  size_t ddaRsLL128PeerMaxShard;
+  size_t ddaRsLL128PeerMaxShardPerRank;
+  size_t ddaRsLL128PeerMaxBytes;
+  // On comms of at least ddaRsLL128LargeCommMinRanks ranks an enabled DDA LL128 ReduceScatter tier runs to
+  // ddaRsLL128LargeCommMaxBytes when that is above its rank-scaled cap. 0 leaves the tier cap alone.
+  int ddaRsLL128LargeCommMinRanks;
+  size_t ddaRsLL128LargeCommMaxBytes;
+  // On comms of at least ddaRsLLLargeCommMinRanks ranks an enabled DDA LL ReduceScatter tier runs to
+  // ddaRsLLLargeCommMaxBytes when that is above its cap. 0 leaves the tier cap alone.
+  int ddaRsLLLargeCommMinRanks;
+  size_t ddaRsLLLargeCommMaxBytes;
 
   // Ring / Tree crossovers that replace the tuning model's ranges on single-node
   // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them
@@ -151,8 +195,8 @@ struct rcclArchThresholds {
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
                                         // (DDA LL128 takes those shards on at most a quarter more blocks)
 
-  // DDA ReduceScatter LL128 from rankScaledMinRanks ranks: shards up to this per rank start at 128-thread blocks
-  // while LL is on, larger ones run the blocks 512 threads would take at 256 threads. 0 = 512 threads throughout.
+  // DDA ReduceScatter LL128 batched kernel from rankScaledMinRanks ranks: shards up to this per rank start at
+  // 128-thread blocks while LL is on, widening to ddaRsLL128Threads once the grid is full. 0 = ddaRsLL128Threads.
   size_t rsDdaLL128NarrowMaxPerRank;
 
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter

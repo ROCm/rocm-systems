@@ -3,7 +3,7 @@
 
 #include "library/perf.hpp"
 #include "common/clocks.hpp"
-#include "core/locking.hpp"
+#include "common/result.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -16,10 +16,13 @@
 #include "logger/debug.hpp"
 
 #include <asm/unistd.h>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <ctime>
 #include <fcntl.h>
+#include <fmt/format.h>
+#include <fstream>
 #include <linux/perf_event.h>
 #include <mutex>
 #include <poll.h>
@@ -28,20 +31,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#if !defined(ROCPROFSYS_RETURN_ERROR_MSG)
-#    define ROCPROFSYS_RETURN_ERROR_MSG(COND, ...)                                       \
-        if((COND))                                                                       \
-        {                                                                                \
-            auto _msg_ss = std::stringstream{};                                          \
-            _msg_ss << __VA_ARGS__;                                                      \
-            return std::optional<std::string>{ _msg_ss.str() };                          \
-        }
-#endif
 
 namespace rocprofsys::perf
 {
@@ -67,6 +61,22 @@ struct size_params
 };
 
 const size_params k_sizes = {};
+
+constexpr const char* k_paranoid_path = "/proc/sys/kernel/perf_event_paranoid";
+
+/// Current perf_event_paranoid value, or the reason it could not be read.
+result<int, std::string>
+read_perf_event_paranoid()
+{
+    auto file  = std::ifstream{ k_paranoid_path };
+    int  value = 0;
+    if(file >> value)
+    {
+        return result<int, std::string>{ value };
+    }
+    return result<int, std::string>{ failure{
+        fmt::format("could not read {}", k_paranoid_path) } };
+}
 }  // namespace
 
 long
@@ -162,24 +172,22 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
     m_fd = perf_event_open(&_pe, _pid, _cpu, -1, 0);
     if(m_fd == -1)
     {
-        const std::string path = "/proc/sys/kernel/perf_event_paranoid";
+        // Read errno first; any later syscall can overwrite it.
+        const int open_errno = errno;
 
-        auto file = std::ifstream{ path.c_str() };
+        if(open_errno == EACCES || open_errno == EPERM)
+        {
+            const auto paranoid = read_perf_event_paranoid();
+            const auto current =
+                paranoid.is_ok() ? fmt::format("current value is {}", paranoid.value())
+                                 : paranoid.error();
+            return fmt::format(
+                "Failed to open perf event: {}. Consider tweaking {} to 2 or less "
+                "({}), or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).",
+                strerror(open_errno), k_paranoid_path, current);
+        }
 
-        ROCPROFSYS_RETURN_ERROR_MSG(!file,
-                                    "Failed to open " << path << ": " << strerror(errno));
-
-        int value = 4;
-        file >> value;
-
-        ROCPROFSYS_RETURN_ERROR_MSG(file.bad(), "Failed to read from "
-                                                    << path << ": " << strerror(errno));
-
-        ROCPROFSYS_RETURN_ERROR_MSG(
-            true, "Failed to open perf event. Consider tweaking "
-                      << path << " to 2 or less " << "(current value is " << value
-                      << "), "
-                      << "or granting rocprof-sys CAP_PERFMON (or CAP_SYS_ADMIN).");
+        return fmt::format("Failed to open perf event: {}.", strerror(open_errno));
     }
 
     // If sampling, map the perf event file
@@ -188,11 +196,13 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
         void* ring_buffer = mmap(nullptr, k_sizes.mmap, PROT_READ | PROT_WRITE,
                                  MAP_SHARED, static_cast<int>(m_fd), 0);
 
-        ROCPROFSYS_RETURN_ERROR_MSG(
-            ring_buffer == MAP_FAILED,
-            "Mapping perf_event ring buffer failed. Make sure the current user has "
-            "permission to invoke the perf tool, and that the program being profiled "
-            "does not use an excessive number of threads (>1000)");
+        if(ring_buffer == MAP_FAILED)
+        {
+            return fmt::format(
+                "Mapping perf_event ring buffer failed. Make sure the current user "
+                "has permission to invoke the perf tool, and that the program being "
+                "profiled does not use an excessive number of threads (>1000)");
+        }
 
         m_mapping = reinterpret_cast<struct perf_event_mmap_page*>(ring_buffer);
     }
@@ -239,24 +249,8 @@ perf_event::open(double freq, std::uint32_t batch_size, pid_t pid, int cpu)
 }
 
 /// Read event count
-long
-perf_event::get_fileno() const
-{
-    return m_fd;
-}
 
 /// Read event count
-std::uint64_t
-perf_event::get_count() const
-{
-    std::uint64_t count;
-    if(read(m_fd, &count, sizeof(std::uint64_t)) != sizeof(std::uint64_t))
-    {
-        LOG_CRITICAL("Failed to read event count from perf_event file");
-        std::exit(1);
-    }
-    return count;
-}
 
 /// Start counting events
 bool
@@ -475,30 +469,6 @@ perf_event::record::get_ip() const
 }
 
 std::uint64_t
-perf_event::record::get_pid() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
-    {
-        LOG_CRITICAL("Record does not have a `pid` field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return locate_field<sample::pid_tid, std::uint32_t*>()[0];
-}
-
-std::uint64_t
-perf_event::record::get_tid() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::pid_tid))
-    {
-        LOG_CRITICAL("Record does not have a `tid` field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return locate_field<sample::pid_tid, std::uint32_t*>()[1];
-}
-
-std::uint64_t
 perf_event::record::get_time() const
 {
     if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::time))
@@ -508,30 +478,6 @@ perf_event::record::get_time() const
         std::abort();
     }
     return *locate_field<sample::time, std::uint64_t*>();
-}
-
-std::uint64_t
-perf_event::record::get_period() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::period))
-    {
-        LOG_CRITICAL("Record does not have a 'period' field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return *locate_field<sample::period, std::uint64_t*>();
-}
-
-std::uint32_t
-perf_event::record::get_cpu() const
-{
-    if(!is_sample() || m_source == nullptr || !m_source->is_sampling(sample::cpu))
-    {
-        LOG_CRITICAL("Record does not have a 'cpu' field ({}|{:p})", is_sample(),
-                     static_cast<const void*>(m_source));
-        std::abort();
-    }
-    return *locate_field<sample::cpu, std::uint32_t*>();
 }
 
 container::c_array<std::uint64_t>

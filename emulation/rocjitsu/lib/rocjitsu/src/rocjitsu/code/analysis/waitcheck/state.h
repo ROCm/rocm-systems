@@ -51,6 +51,7 @@
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <array>
 #include <bitset>
@@ -97,45 +98,48 @@ struct PartialRegisterAccess {
 /// dataflow facts, excluded from the static identity. PendingState stores events
 /// sorted by that identity, with at most one event for each identity per counter.
 struct PendingEvent {
-  WaitCounterKind counter = WaitCounterKind::Load;
-  WaitEventKind kind = WaitEventKind::Unknown;
   RegisterSet regs;
   // Subset of regs with a committed value available while this producer remains
   // pending. A consumer that permits older generations can exclude these lanes
   // from this event's use hazards; this does not prove the new result completed.
   RegisterSet old_value_regs;
-  // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
-  // operations independently. Keep the exceptional partial destination
-  // sparse: almost every event still covers whole 32-bit register lanes.
-  std::optional<RegisterRef> partial_reg;
-  uint8_t partial_reg_mask = kVgprFull32Mask;
-  std::optional<RegisterRef> special_reg;
-  std::optional<int64_t> barrier_id;
-  bool produces_regs = false;
-  // A newly issued event is pending on every path reaching that instruction.
-  // Joins clear this must fact when any incoming path lacks the event. It is
-  // state information, not part of the static event identity.
-  bool present_on_all_paths = true;
   // Subset of regs already ready on every path where this event is absent.
   // Empty when present_on_all_paths is true (there are no absent paths). When
   // false, retirement can establish readiness only for these covered lanes.
   // The available value need not be from this producer: readiness promises an
   // available committed generation, not the identity of the latest write.
   RegisterSet ready_on_absent_paths;
-  bool check_uses = true;
-  bool check_defs = true;
-  bool check_exec_defs = false;
   std::string section_name;
+  std::string instruction;
   uint64_t section_offset = 0;
   uint64_t file_offset = 0;
-  std::string instruction;
-  bool check_memory_order = false;
-  bool check_program_end = false;
-  bool check_counter_parity_order = false;
+  std::optional<int64_t> barrier_id;
+  WaitEventKind kind = WaitEventKind::Unknown;
   // Lower bound on younger requests issued on this counter, independent of the
   // event's canonical vector position. Matching events join by minimum. Use the
   // wait-threshold width for arithmetic; only dense per-kind summaries are packed.
   uint32_t min_younger = 0;
+  // LLVM tracks the low/high 16-bit physical subregisters used by D16 memory
+  // operations independently. Keep the exceptional partial destination
+  // sparse: almost every event still covers whole 32-bit register lanes.
+  std::optional<RegisterRef> partial_reg;
+  std::optional<RegisterRef> special_reg;
+  WaitCounterKind counter = WaitCounterKind::Load;
+  uint8_t partial_reg_mask = kVgprFull32Mask;
+  bool produces_regs = false;
+  // A newly issued event is pending on every path reaching that instruction.
+  // Joins clear this must fact when any incoming path lacks the event. It is
+  // state information, not part of the static event identity.
+  bool present_on_all_paths = true;
+  bool check_uses = true;
+  bool check_defs = true;
+  bool check_exec_defs = false;
+  bool check_memory_order = false;
+  bool check_program_end = false;
+  bool check_counter_parity_order = false;
+  // Guaranteed younger requests in this event's own typed EXPCNT FIFO.
+  // Other export types can overtake it and contribute no progress proof.
+  uint8_t min_younger_in_fifo = 0;
 
   bool operator==(const PendingEvent &) const = default;
 };
@@ -311,7 +315,8 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   static void apply_wait(PendingState &state, WaitCounterKind counter, uint32_t count);
 
-  static util::Result apply_kmcnt_wait(PendingState &state, uint32_t count, rj_code_arch_t arch);
+  static util::Result apply_kmcnt_wait(PendingState &state, uint32_t count,
+                                       rocjitsu::IsaFamily arch);
 
   static void apply_implied_vm_vsrc_wait(PendingState &state, WaitCounterKind counter,
                                          uint32_t count);
@@ -341,20 +346,21 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   [[nodiscard]] static bool flat_memory_makes_counter_out_of_order(const PendingState &state,
                                                                    WaitCounterKind counter,
-                                                                   rj_code_arch_t arch);
+                                                                   rocjitsu::IsaFamily arch);
 
-  [[nodiscard]] static util::FailureOr<bool>
-  counter_out_of_order(const PendingState &state, WaitCounterKind counter, rj_code_arch_t arch);
+  [[nodiscard]] static util::FailureOr<bool> counter_out_of_order(const PendingState &state,
+                                                                  WaitCounterKind counter,
+                                                                  rocjitsu::IsaFamily arch);
 
   static util::Result apply_counter_wait(PendingState &state, WaitCounterKind counter,
-                                         uint32_t count, rj_code_arch_t arch);
+                                         uint32_t count, rocjitsu::IsaFamily arch);
 
   [[nodiscard]] static util::FailureOr<uint32_t>
   dependency_required_count(const PendingState &state, const PendingEvent &event,
-                            rj_code_arch_t arch);
+                            rocjitsu::IsaFamily arch);
 
   static util::Result apply_memory_wait(PendingState &state, WaitCounterKind counter,
-                                        uint32_t count, rj_code_arch_t arch);
+                                        uint32_t count, rocjitsu::IsaFamily arch);
 
   static void clear_salu_sgpr_hazards(SgprHazardState &state);
 
@@ -370,13 +376,13 @@ struct WaitcheckStateOps : WaitcheckTarget {
   static void apply_sgpr_hazard_wait(SgprHazardState &state, uint32_t depctr);
 
   static util::Result apply_wait_fields(PendingState &state, const WaitFields &fields,
-                                        rj_code_arch_t arch);
+                                        rocjitsu::IsaFamily arch);
 
   static util::Result apply_embedded_waitcnt(PendingState &state, const Instruction &inst,
-                                             rj_code_arch_t arch);
+                                             rocjitsu::IsaFamily arch);
 
   static util::Result apply_waitcnt(PendingState &state, const Instruction &inst,
-                                    rj_code_arch_t arch);
+                                    rocjitsu::IsaFamily arch);
 
 private:
   // Counter facets of one static operation can track different registers and

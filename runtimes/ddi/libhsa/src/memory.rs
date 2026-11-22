@@ -17,14 +17,16 @@
 //! allocations, pointer metadata, IPC and interop, virtual memory, and
 //! copy/SVM operations. This root retains shared state and shutdown order.
 
+pub(crate) mod advice;
+pub(crate) mod compute_copy;
 pub(crate) mod copy_svm;
 pub(crate) mod interop;
-pub(crate) use crate::api::memory::copy_svm::hsa_memory_copy;
-pub(crate) use copy_svm::image_device_address;
+pub(crate) mod prefetch;
+pub(crate) mod svm;
 use copy_svm::*;
+pub(crate) use copy_svm::{copy, image_copy_borrow, image_device_address};
 pub(crate) mod virtual_memory;
 
-use crate::platform::fd::{AsFd, IntoRawFd};
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::mem::{align_of, size_of};
@@ -34,14 +36,14 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::platform::memory as linux_interop;
-use crate::platform::memory::AisFileOperation as AisOperation;
-use crate::platform::memory::{KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation};
+use crate::platform::memory as native_memory;
+
 use rocddi::device::Device;
 use rocddi::device::gpu::{
     CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
     GpuCopyTimestamps, GpuCopyWait,
 };
+use rocddi::memory::advice::{AdviceLocation as SvmLocation, MemoryAdvice};
 use rocddi::memory::device::{
     Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
@@ -50,8 +52,10 @@ use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{HsaState, InFlightGeneration, boundary, initialized_mut, lock, map_error};
+use crate::lifecycle::{InFlightSession, initialized_mut, lock};
+use crate::session::HsaSession;
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile, SignalState};
+use crate::status::{boundary, map_error};
 
 /// Handle slots reserved for each agent's memory pools.
 pub(crate) const POOL_HANDLE_STRIDE: u64 = 0x10;
@@ -123,24 +127,10 @@ const ALLOC_EXECUTABLE: u32 = 1 << 2;
 pub(crate) const ALLOC_UNCACHED: u32 = 1 << 3;
 /// Native allocation flags accepted by this frontend.
 const ALLOC_FLAGS: u32 = ALLOC_PCIE | ALLOC_CONTIGUOUS | ALLOC_EXECUTABLE | ALLOC_UNCACHED;
-/// SVM policy bit allowing host access.
-pub(crate) const SVM_FLAG_HOST_ACCESS: u32 = 0x01;
-/// SVM policy bit requesting coherent access.
-pub(crate) const SVM_FLAG_COHERENT: u32 = 0x02;
-/// SVM policy bit restricting placement to the local hive.
-pub(crate) const SVM_FLAG_HIVE_LOCAL: u32 = 0x04;
-/// SVM policy bit making GPU access read-only.
-pub(crate) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
-/// SVM policy bit allowing GPU execution.
-pub(crate) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
-/// SVM policy bit marking a range read-mostly for GPUs.
-pub(crate) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 /// Largest accepted SVM migration-granularity encoding.
 pub(crate) const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
 /// Maximum number of SVM attributes accepted in one request.
 pub(crate) const SVM_MAX_ATTRIBUTES: usize = 2044;
-/// Linux I/O error number used when native cleanup cannot be proved.
-const EIO: i32 = 5;
 
 /// Accepts only the HSA virtual-memory access bits implemented here.
 pub(crate) fn valid_access_permissions(access: u32) -> bool {
@@ -156,6 +146,15 @@ pub(crate) enum AsyncCopyProfiling {
     Enabled,
 }
 
+/// Unlock identifies the host address, so every alias shares one release count.
+#[derive(Clone, Copy)]
+enum HostLockState {
+    /// Successful lock calls not yet matched by an unlock.
+    Locked(usize),
+    /// Final cleanup started; aliases reject access until cleanup succeeds.
+    Retiring,
+}
+
 /// HSA memory handles and metadata around rocddi allocation owners.
 pub(crate) struct MemoryState {
     /// Ordinary HSA allocations keyed by host address.
@@ -166,10 +165,12 @@ pub(crate) struct MemoryState {
     pub(crate) interop_allocations: HashMap<usize, Memory>,
     /// Host ranges locked for GPU access.
     pub(crate) locked_allocations: Vec<LockedMemory>,
+    /// Counts and cleanup state shared by registrations of one host address.
+    host_locks: HashMap<usize, HostLockState>,
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
-    pub(crate) health: Arc<crate::runtime::GenerationHealth>,
+    pub(crate) health: Arc<crate::session::SessionHealth>,
     /// Process setting captured by new asynchronous copies.
     pub(crate) async_copy_profiling: AsyncCopyProfiling,
     /// Virtual address reservations ordered by base address.
@@ -178,24 +179,28 @@ pub(crate) struct MemoryState {
     pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     /// Active virtual-memory mappings ordered by base address.
     pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
+    /// Most recently issued prefetch destinations until native work retires.
+    pub(crate) pending_prefetches: prefetch::PendingPrefetches,
     /// Prefetch and copy workers joined before memory owners are released.
     pub(crate) workers: Vec<thread::JoinHandle<()>>,
 }
 
 impl MemoryState {
     /// Initializes the allocation, registration, and virtual memory registries.
-    pub(crate) fn new(health: Arc<crate::runtime::GenerationHealth>) -> Self {
+    pub(crate) fn new(health: Arc<crate::session::SessionHealth>) -> Self {
         Self {
             allocations: HashMap::new(),
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
+            host_locks: HashMap::new(),
             async_copy_borrows: HashMap::new(),
             health,
             async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
             vmem_mappings: BTreeMap::new(),
+            pending_prefetches: prefetch::PendingPrefetches::default(),
             workers: Vec::new(),
         }
     }
@@ -222,6 +227,7 @@ impl MemoryState {
     }
 
     /// Joins memory workers after the shared stop request is published.
+    #[cfg(test)]
     pub(crate) fn join_workers(&mut self) {
         for worker in self.take_workers() {
             let _ = worker.join();
@@ -235,7 +241,9 @@ impl MemoryState {
 
     /// Releases HSA metadata after queues, copies, and signal users stop.
     pub(crate) fn clear(&mut self) {
+        self.pending_prefetches = prefetch::PendingPrefetches::default();
         self.locked_allocations.clear();
+        self.host_locks.clear();
         // Mappings borrow handles and reservations. Release them first, then
         // the physical handles and finally their reserved address ranges.
         self.vmem_mappings.clear();
@@ -292,7 +300,7 @@ impl PointerDescription {
     }
 
     /// Translates a device address to its host mapping when available.
-    fn host_address(&self, address: usize) -> Option<usize> {
+    pub(crate) fn host_address(&self, address: usize) -> Option<usize> {
         if self
             .host_base
             .is_some_and(|host| contains(host, self.size, address))
@@ -312,7 +320,7 @@ impl PointerDescription {
     }
 
     /// Returns the offset of a complete range within this allocation.
-    fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
+    pub(crate) fn offset_range(&self, address: usize, size: usize) -> Option<usize> {
         let base = if contains(self.agent_base, self.size, address) {
             self.agent_base
         } else if self
@@ -328,7 +336,7 @@ impl PointerDescription {
     }
 }
 
-/// HsaState-owned allocation plus callbacks registered for its destruction.
+/// HsaSession-owned allocation plus callbacks registered for its destruction.
 pub(crate) struct Memory {
     /// Native backing and its mapping lifetime.
     pub(crate) allocation: Allocation,
@@ -485,9 +493,11 @@ impl Memory {
 /// ranges need only the pointer metadata, hence the optional owner.
 pub(crate) struct LockedMemory {
     /// Native registration when the host range needed one.
-    allocation: Option<Allocation>,
+    pub(crate) allocation: Option<Allocation>,
     /// Host and agent aliases reported by pointer queries.
     pub(crate) description: PointerDescription,
+    /// Native cleanup completed, but the group still needs an address tombstone.
+    pub(crate) retired: bool,
 }
 
 /// Reserved virtual-address interval and the mappings currently occupying it.
@@ -500,6 +510,8 @@ pub(crate) struct VmemReservation {
     pub(crate) deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
     /// Mappings that still occupy this reserved range.
     pub(crate) mappings: usize,
+    /// Anonymous ranges given host backing through SVM registration.
+    pub(crate) svm_ranges: Vec<(usize, usize)>,
 }
 
 impl VmemReservation {
@@ -522,6 +534,7 @@ impl VmemReservation {
             },
             deallocation_callbacks: Vec::new(),
             mappings: 0,
+            svm_ranges: Vec::new(),
         }
     }
 
@@ -612,7 +625,7 @@ impl VmemHandle {
             VmemBacking::Fabric { token, imports } => {
                 if !imports.contains_key(&gpu_index) {
                     imports.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
-                    let memory = linux_interop::import_fabric_virtual_memory(device, *token)
+                    let memory = native_memory::import_fabric_virtual_memory(device, *token)
                         .map_err(map_error)?;
                     imports.insert(gpu_index, memory);
                 }
@@ -642,6 +655,10 @@ impl VmemHandle {
 }
 
 /// Native device mapping owner; CPU accesses share the host map on `VmemMapping`.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "device mapping owners stay inline in the preallocated access transaction"
+)]
 pub(crate) enum VmemAccessOwner {
     /// Native mapping in an activated device VM.
     Device(VirtualDeviceMapping),
@@ -751,6 +768,7 @@ impl LockedMemory {
     ) -> Self {
         Self {
             allocation,
+            retired: false,
             description: PointerDescription {
                 pointer_type: POINTER_TYPE_LOCKED,
                 agent_base: device_base,

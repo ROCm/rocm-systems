@@ -11,6 +11,7 @@
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -43,6 +44,9 @@ void write_kernel_descriptor_for_test(void *descriptor, const TestKernelDescript
 uint16_t append_elf_section_for_test(std::vector<uint8_t> &image, Elf64_Shdr section,
                                      std::span<const uint8_t> contents);
 
+/// The optional function extent may end at text_words.size(); the pointer-table target
+/// must be strictly smaller. Invalid arguments record a nonfatal test failure while
+/// still producing an image so callers can safely inspect its ELF header.
 /// @param export_text_function Give the `.text` function global binding and a name of its own.
 /// @details A device function is LOCAL and shares the fixture's "kernel" name by default, which
 /// object_defines_only_kernels() then pairs with the "kernel.kd" descriptor and counts as a kernel.
@@ -85,7 +89,7 @@ struct TestTextFunction {
     std::optional<TestRuntimeTextReference> runtime_text_reference = std::nullopt);
 [[nodiscard]] std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry();
 
-[[nodiscard]] std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch);
+[[nodiscard]] std::unique_ptr<Instruction> decode_one(uint32_t word, rocjitsu::IsaFamily arch);
 [[nodiscard]] bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
                                         std::string_view message);
 /// @brief Whether a warning of @p kind naming @p guest_offset contains @p message.

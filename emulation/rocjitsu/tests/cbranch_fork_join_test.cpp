@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -75,7 +77,7 @@ Program if_else_program(uint32_t fork) {
   };
 }
 
-class CbranchForkJoinTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class CbranchForkJoinTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     ComputeUnitCore::Config config{};
@@ -85,8 +87,8 @@ protected:
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 256;
     config.functional_quantum = 1;
-    cu = ComputeUnitCore::create("cbranch_fork_join_cu", config, &memory, &l2);
-    ASSERT_NE(cu, nullptr);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cbranch_fork_join_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, kCodeBase, 104, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
@@ -831,7 +833,7 @@ TEST_P(CbranchForkJoinTest, WaitScoreboardSeesNoStackAccessForAFallthroughJoin) 
 
 // MODE.CSP and the fork/join instructions exist only on CDNA1-4.
 INSTANTIATE_TEST_SUITE_P(Cdna, CbranchForkJoinTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 
 } // namespace
