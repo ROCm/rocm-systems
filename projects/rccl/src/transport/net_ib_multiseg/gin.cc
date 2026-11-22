@@ -343,7 +343,9 @@ ncclResult_t IbMsegGinIbGdakiGetProperties(int dev, ncclNetProperties_t* props) 
 
 ncclResult_t IbMsegGinIbGdakiListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
   std::lock_guard<std::mutex> lock(IbMsegGinIbGdakiLockMutex);
-  return ncclNetIbMseg.listen(ctx, IbMsegGinIbGdakiDevIndexes[dev], opaqueHandle, listenComm);
+  NCCLCHECK(ncclNetIbMseg.listen(ctx, IbMsegGinIbGdakiDevIndexes[dev], opaqueHandle, listenComm));
+  rcclIbMarkGinListen(opaqueHandle, *listenComm); // RCCL: GIN comms skip the multi-segment layout.
+  return ncclSuccess;
 }
 
 static ncclResult_t IbMsegGinIbGdakiValidateDeviceSupport(struct IbMsegGinIbCollComm* cComm) {
@@ -463,6 +465,12 @@ ncclResult_t IbMsegRmaIbProxyGetProperties(int dev, ncclNetProperties_t* props) 
   return ncclSuccess;
 }
 
+static ncclResult_t IbMsegRmaIbProxyListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
+  NCCLCHECK(IbMsegListen(ctx, dev, opaqueHandle, listenComm));
+  rcclIbMarkGinListen(opaqueHandle, *listenComm); // RCCL: GIN comms skip the multi-segment layout.
+  return ncclSuccess;
+}
+
 ncclResult_t IbMsegRmaIbProxyConnect(void* ctx, void* handles[], int nranks, int rank, void* listenComm, void** collComm,
                                    volatile uint32_t* abortFlag) {
   // Check the current GPU supports GDR
@@ -573,6 +581,7 @@ ncclResult_t IbMsegRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* conf
   handle = handles + NCCL_NET_HANDLE_MAXSIZE * cComm->rank;
 
   NCCLCHECKGOTO(ncclNetIbMseg.listen(cComm->ctx, cComm->dev, handle, &lComm), ret, end);
+  rcclIbMarkGinListen(handle, lComm); // RCCL: per-peer RMA comms skip the multi-segment layout.
   NCCLCHECKGOTO(cComm->allGather(cComm, handle, handles, NCCL_NET_HANDLE_MAXSIZE), ret, end);
 
   for (int c = 0; c < config->nContexts; c++) {
@@ -1084,7 +1093,7 @@ ncclRma_t IbMsegRmaIbProxy = {"RMA_IB_PROXY",
                             IbMsegDevices,
                             IbMsegRmaIbProxyGetRmaProperties,
                             IbMsegRmaIbProxyGetProperties,
-                            IbMsegListen,
+                            IbMsegRmaIbProxyListen,
                             IbMsegRmaIbProxyConnect,
                             IbMsegRmaIbProxyCreateContext,
                             IbMsegRmaIbProxyRegMrSym,

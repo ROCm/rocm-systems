@@ -72,6 +72,7 @@ struct IbMsegConnectionMetadata {
   // payload, or 0 when this connection keeps the RDMA read flush.
   uint32_t flagFlushRkey;
   uint64_t flagFlushAddr;
+  int useMultiSeg; // RCCL: each side's connect decision; the CTS layouts differ, so the two must match.
 };
 
 ncclResult_t IbMsegQpCreate(struct IbMsegQp* qp, struct IbMsegQpCreateAttr* createQpAttrs);

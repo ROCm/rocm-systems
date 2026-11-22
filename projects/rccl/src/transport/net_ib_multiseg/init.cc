@@ -701,6 +701,7 @@ ncclResult_t IbMsegInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
             }
 
             IbMsegDevs[IbMsegNDevs].maxQp = devAttr.max_qp;
+            IbMsegDevs[IbMsegNDevs].maxMr = devAttr.max_mr;
             IbMsegDevs[IbMsegNDevs].oooRqSize = oooRqSize;
             IbMsegDevs[IbMsegNDevs].mrCache.capacity = 0;
             IbMsegDevs[IbMsegNDevs].mrCache.population = 0;

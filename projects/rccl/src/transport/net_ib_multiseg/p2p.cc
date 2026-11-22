@@ -9,6 +9,7 @@
 #include "common_mseg.h"
 #include "compiler.h"
 #include "p2p_resiliency_mseg.h"
+#include "p2p_multiseg_mseg.h" // RCCL: multi-segment hooks
 
 extern int64_t ncclParamIbArThreshold();
 int64_t IbMsegArThreshold = 8192;
@@ -81,20 +82,55 @@ static ncclResult_t IbMsegPrintWr(struct ibv_send_wr* wr, char* wrStr) {
 
 // The alignment for IB writes that is required to make LL and LL128 protocols work
 #define IB_WRITE_CHUNK_ALIGNMENT 128
+// RCCL: the segmented builder in p2p_multiseg.cc must split chunks the same way.
+static_assert(IB_WRITE_CHUNK_ALIGNMENT == rcclIbWriteChunkAlignment, "segmented chunk alignment differs");
+
+// RCCL: a slice post holds one more event per request on its device until its signaled write completes.
+static void rcclIbSendHoldSlice(struct IbMsegRequest** reqs, int nreqs, int devIndex, int delta) {
+  for (int r = 0; r < nreqs; r++) reqs[r]->events[devIndex] += delta;
+}
+
+// RCCL: posts comm->wrs on qp. A failed post releases the slice hold, drops the events of the QPs that
+// unposted(prefixPosted, out) lists as never completing, and marks the comm fatal.
+template <typename UnpostedFn>
+static ncclResult_t rcclIbPostSendWrs(struct IbMsegSendComm* comm, IbMsegQp* qp, struct IbMsegRequest** reqs,
+                                      int nreqs, bool last, UnpostedFn unposted) {
+  if (!last) rcclIbSendHoldSlice(reqs, nreqs, qp->devIndex, 1);
+  if (IbMsegWqeLatEnabled) IbMsegWqeLatMonStampSend(qp, comm->wrs);
+  struct ibv_send_wr* bad_wr = NULL;
+  ncclResult_t ret = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
+  if (ret == ncclSuccess) return ncclSuccess;
+  if (!last) rcclIbSendHoldSlice(reqs, nreqs, qp->devIndex, -1); // RCCL: the signaled slice write did not post.
+  int posted = 0;
+  for (struct ibv_send_wr* p = comm->wrs; p != NULL && p != bad_wr; p = p->next) posted++;
+  IbMsegQp* lost[NCCL_IB_MAX_QPS];
+  const int nLost = unposted(posted > 0, lost);
+  for (int k = 0; k < nLost; k++) {
+    for (int r = 0; r < nreqs; r++) {
+      if (reqs[r]->events[lost[k]->devIndex] > 0) reqs[r]->events[lost[k]->devIndex]--;
+    }
+  }
+  // Mark connection as fatal. DO NOT free requests here - the caller
+  // (IbMsegIsend) owns the requests and will handle cleanup.
+  IbMsegStatsFatalError(&comm->base.stats);
+  return ret;
+}
 
 // Keep this hot loop on a 64-byte boundary.
 __attribute__((aligned(64)))
 ncclResult_t IbMsegMultiSend(struct IbMsegSendComm* comm, int slot) {
   struct IbMsegRequest** reqs = comm->sendReqs[slot];
-  volatile struct IbMsegSendFifo* slots = comm->ctsFifo[slot];
-  int nreqs = slots[0].nreqs;
-  if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
+  volatile struct IbMsegSendFifo* slots = rcclIbSendCtsRow(comm, slot);
+  int nreqs = reqs[0]->nreqs; // RCCL: the count IbMsegIsend validated, not a re-read of the peer-written CTS row.
+  if (nreqs < 1 || nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
+
+  // RCCL: rcclIbFillSendWrs builds every chain, one WR when each side is one segment.
+  const bool multi = rcclIbMultiSendNeedsSegmented(comm, slot, nreqs);
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0],
         reqs[0]->base, reqs[0]->id, slot, nreqs);
 
   bool flagFlush = comm->flagFlush && slots[0].flagFlush;
-  ncclResult_t ret;
   int nqps = 0;
   NCCLCHECK(IbMsegCommBaseGetNqpsPerRequest(&comm->base, &nqps));
 #ifdef NCCL_ENABLE_NET_PROFILING
@@ -117,23 +153,10 @@ ncclResult_t IbMsegMultiSend(struct IbMsegSendComm* comm, int slot) {
   }
   uint64_t wr_id = 0ULL;
   for (int r = 0; r < nreqs; r++) {
-    struct ibv_send_wr* wr = comm->wrs + r;
-    memset(wr, 0, sizeof(struct ibv_send_wr));
-
-    struct ibv_sge* sge = comm->sges + r;
-    sge->addr = (uintptr_t)reqs[r]->send.data;
-    wr->opcode = IBV_WR_RDMA_WRITE;
-    wr->send_flags = 0;
-    wr->wr.rdma.remote_addr = slots[r].addr;
-    wr->next = wr + 1;
     wr_id += (uint64_t)(slot & 0xff) << (r * 8);
-    wr->wr_id = wr_id;
 #ifdef NCCL_ENABLE_NET_PROFILING
     reqs[r]->pInfo[0].nEventHandles = 0;
 #endif
-
-    wr->sg_list = sge;
-    wr->num_sge = 1;
   }
 
   // For ID-based matching scheme, immData carries the request ID.
@@ -144,50 +167,33 @@ ncclResult_t IbMsegMultiSend(struct IbMsegSendComm* comm, int slot) {
   //      Send size is still sent but receiver ignores it since the sizes are
   //      written to directly to remote completion records array
   uint32_t immData = comm->base.recvMatchingScheme == BY_ID ? (uint32_t)reqs[0]->id : reqs[0]->send.size;
-
-  struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
-  struct ibv_send_wr* sizesWr = NULL;
-  struct ibv_send_wr* flagWr = NULL;
+  // A split send's immediate rides the last slice, so a non-BY_INDEX receiver needs the size record.
+  const bool needSizesWr =
+    nreqs > 1 || (multi && comm->base.recvMatchingScheme != BY_INDEX && reqs[0]->send.size > 0);
+  // When Adaptive Routing is enabled, send the bulk of the data first as an RDMA Write.
+  const bool arExtra =
+    !(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > IbMsegArThreshold;
+  const bool extraImmWr = (nreqs > 1) || needSizesWr || arExtra;
   if (flagFlush) {
     // Payload (and sizes) go out as plain RDMA writes followed by the flag
     // write, which carries the immediate data. Each QP writes its own flag.
-    if (nreqs > 1) {
-      sizesWr = ++lastWr;
-      memset(sizesWr, 0, sizeof(struct ibv_send_wr));
-      sizesWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct IbMsegRequestCompletionRecord);
-      sizesWr->num_sge = 1;
-      sizesWr->wr_id = wr_id;
-      sizesWr->opcode = IBV_WR_RDMA_WRITE;
-      sizesWr->next = sizesWr + 1;
-    }
-    lastWr++;
-    memset(lastWr, 0, sizeof(struct ibv_send_wr));
     comm->flagFlushSrc[slot] = reqs[0]->id + 1;
     comm->flagFlushSge.addr = (uint64_t)&comm->flagFlushSrc[slot];
-    lastWr->sg_list = &comm->flagFlushSge;
-    lastWr->num_sge = 1;
-    lastWr->wr.rdma.rkey = comm->flagFlushRkey;
-    flagWr = lastWr;
-  } else if (nreqs > 1 ||
-             (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > IbMsegArThreshold)) {
-    // When Adaptive Routing is enabled, send the bulk of the data first as an
-    // RDMA Write.
-    lastWr++;
-    memset(lastWr, 0, sizeof(struct ibv_send_wr));
-    if (nreqs > 1) {
-      // Write remote sizes array
-      lastWr->wr.rdma.remote_addr = comm->remCmplsRecords.addr + slot * sizeof(struct IbMsegRequestCompletionRecord);
-      lastWr->num_sge = 1;
-      sizesWr = lastWr;
-    }
   }
-  lastWr->wr_id = wr_id;
-  lastWr->opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
-  lastWr->imm_data = htobe32(immData);
-  lastWr->next = NULL;
-  lastWr->send_flags = IBV_SEND_SIGNALED;
 
   uint32_t sendOffsets[NCCL_NET_IB_MAX_RECVS] = {0};
+  // RCCL: a QP whose chunk crosses a segment boundary keeps its cursor; rcclIbSendProgress posts the rest.
+  // Without a cursor, a single-segment send keeps each QP's offsets on the stack.
+  if (multi && comm->sendCursor == NULL) NCCLCHECK(ncclCalloc(&comm->sendCursor, 1));
+  struct rcclIbSendCursor* cursor = comm->sendCursor;
+  uint32_t qpOff[NCCL_NET_IB_MAX_RECVS];
+  uint32_t qpEnd[NCCL_NET_IB_MAX_RECVS];
+  if (cursor != NULL) {
+    cursor->slot = slot;
+    cursor->active = 0;
+    cursor->nqps = nqps;
+  }
+  bool slicesLeft = false;
   // For small messages (< splitDataThreshold) with multiple QPs, avoid splitting:
   // send the entire payload through one QP selected via round-robin, post zero-length WRs on the rest.
   int64_t splitDataThreshold = rcclParamIbSplitDataThreshold();
@@ -203,13 +209,10 @@ ncclResult_t IbMsegMultiSend(struct IbMsegSendComm* comm, int slot) {
 
     int devIndex = qp->devIndex;
     int origDevIndex = comm->base.qps[qpIndex].devIndex;
+    uint32_t chunkLen[NCCL_NET_IB_MAX_RECVS];
+    uint32_t* off = cursor != NULL ? cursor->off[i] : qpOff;
+    uint32_t* end = cursor != NULL ? cursor->end[i] : qpEnd;
     for (int r = 0; r < nreqs; r++) {
-      // Track this event for completion
-      // IbMsegAddEvent(reqs[r], devIndex);
-
-      // Select proper rkey (needed even for 0-size send)
-      comm->wrs[r].wr.rdma.rkey = slots[r].rkeys[qp->remDevIdx];
-
       // Compute per-QP chunk size: for small messages, only the active QP carries data.
       // i==0 always corresponds to the active QP because IbMsegCommBaseGetQpForRequest
       // rotates by req->id, so qpIndex=(id+i)%nqps; at i=0 that equals id%nqps.
@@ -227,29 +230,23 @@ ncclResult_t IbMsegMultiSend(struct IbMsegSendComm* comm, int slot) {
       }
       // Check the data left to send. If the send is too small, it might be
       // that on the current QP there is no data left to be sent.
-      comm->wrs[r].sg_list->length = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
-      if (comm->wrs[r].sg_list->length == 0) {
-        comm->wrs[r].num_sge = 0;
-      } else {
-        comm->wrs[r].sg_list->lkey = reqs[r]->send.lkeys[devIndex];
-      }
+      chunkLen[r] = std::min<uint32_t>(reqs[r]->send.size - sendOffsets[r], chunkSize);
+      off[r] = sendOffsets[r];
+      end[r] = sendOffsets[r] + chunkLen[r];
+    }
+    if (cursor != NULL) {
+      cursor->qp[i] = qp;
+      cursor->qpIndex[i] = qpIndex;
+      cursor->qpState[i] = RCCL_IB_SEND_QP_DONE;
     }
 
-    if (sizesWr) {
-      // Populating the correct gather information based on the device and
-      // slot used.
-      // Note that the lkey is already correct from the initialization phase.
-      sizesWr->sg_list = &(comm->devs[devIndex].sge);
-      sizesWr->sg_list[0].addr = (uint64_t)(comm->remCmplsRecords.elems[slot]);
-      sizesWr->sg_list[0].length = nreqs * sizeof(int);
-      // Populate the correct RKey based on the device used
-      sizesWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
-    }
-    if (flagWr) flagWr->wr.rdma.remote_addr = comm->flagFlushRemAddr + qpIndex * NCCL_GDR_FLUSH_FLAG_STRIDE;
-
-    // Selective retransmission: skip posting if already delivered
-    if (!(comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true)) {
-      struct ibv_send_wr* bad_wr;
+    // Selective retransmission: skip posting if already delivered. Offsets still advance.
+    const bool delivered = comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true;
+    struct ibv_send_wr* lastWr = NULL;
+    if (!delivered) {
+      bool last = true;
+      NCCLCHECK(rcclIbFillSendWrs(comm, slot, devIndex, qp->remDevIdx, qpIndex, off, end, true, wr_id, immData,
+                                  needSizesWr, extraImmWr, flagFlush, &lastWr, &last));
 #ifdef NCCL_ENABLE_NET_PROFILING
       // QP profiling loop
       for (int r = 0; r < nreqs; r++) {
@@ -260,10 +257,10 @@ ncclResult_t IbMsegMultiSend(struct IbMsegSendComm* comm, int slot) {
         int64_t pluginId = NCCL_PROFILER_NET_TYPE_IB | NCCL_PROFILER_NET_IB_VER;
         reqs[r]->pInfo[0].data.type = ncclProfileQp;
         reqs[r]->pInfo[0].data.qp.device = devIndex;
-        reqs[r]->pInfo[0].data.qp.wr_id = comm->wrs[r].wr_id;
-        reqs[r]->pInfo[0].data.qp.opcode = comm->wrs[r].opcode;
+        reqs[r]->pInfo[0].data.qp.wr_id = multi ? lastWr->wr_id : comm->wrs[r].wr_id;
+        reqs[r]->pInfo[0].data.qp.opcode = multi ? lastWr->opcode : comm->wrs[r].opcode;
         reqs[r]->pInfo[0].data.qp.qpNum = qp->qp->qp_num;
-        reqs[r]->pInfo[0].data.qp.length = comm->sges[r].length;
+        reqs[r]->pInfo[0].data.qp.length = multi ? chunkLen[r] : comm->sges[r].length;
         void* pHandle = reqs[r]->pInfo[0].pHandle;
         NCCLCHECK(IbMsegProfilerFunction(&reqs[r]->pInfo[0].qpEventHandles[nEventHandles], ncclProfilerNetEventStart,
                                        pHandle, pluginId, &reqs[r]->pInfo[0].data));
@@ -286,44 +283,104 @@ ncclResult_t IbMsegMultiSend(struct IbMsegSendComm* comm, int slot) {
         currWr = currWr->next;
       }
 #endif // ENABLE_TRACE
-      if (IbMsegWqeLatEnabled) IbMsegWqeLatMonStampSend(qp, comm->wrs);
-      ret = wrap_ibv_post_send(qp->qp, comm->wrs, &bad_wr);
-      if (ret != ncclSuccess) {
-        // Mark connection as fatal. DO NOT free requests here - the caller
-        // (IbMsegIsend) owns the requests and will handle cleanup.
-        // Some requests may have events from earlier QP iterations.
-        IbMsegStatsFatalError(&comm->base.stats);
-        return ret;
+      // RCCL: segmented sends drop events for QPs that will not complete; a posted prefix keeps its QP.
+      NCCLCHECK(rcclIbPostSendWrs(comm, qp, reqs, nreqs, last, [&](bool prefixPosted, IbMsegQp** lost) {
+        int n = 0;
+        if (!multi) return n;
+        for (int k = prefixPosted ? i + 1 : i; k < nqps; k++) {
+          if (!(comm->base.resiliency && reqs[0]->send.sentData[qpIndexes[k]])) lost[n++] = qps[k];
+        }
+        return n;
+      }));
+      if (!last) {
+        cursor->qpState[i] = RCCL_IB_SEND_QP_INFLIGHT;
+        slicesLeft = true;
       }
     }
 
-    // Update the send offset and addresses for the next QP according to the
-    // actual data size that was sent on the current QP, for every request
+    // Update the send offset for the next QP by the chunk this QP carried.
     for (int r = 0; r < nreqs; r++) {
-      sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + comm->wrs[r].sg_list->length, reqs[r]->send.size);
-      comm->wrs[r].sg_list->addr += comm->wrs[r].sg_list->length;
-      comm->wrs[r].wr.rdma.remote_addr += comm->wrs[r].sg_list->length;
-      TRACE(NCCL_NET,
-            "NET/IB: %s: Send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, reqIdx=%d, wr_id=%ld) posted %d "
-            "bytes on QP index %d (devIndex=%d, qp_num=%u), total posted %d/%d bytes",
-            __func__, reqs[r], reqs[0]->base, reqs[r]->id, slot, nreqs, r, comm->wrs[r].wr_id,
-            comm->wrs[r].sg_list->length, qpIndex, devIndex, qp->qp->qp_num, sendOffsets[r], reqs[r]->send.size);
-      reqs[r]->send.sentData[qpIndex] = true;
-      // TODO: add ibv_dev_index to remDevs struct to enable full TRACE log with remote device info
-      TRACE(NCCL_VERBS,
-            "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, opcode=%d, send_flags=%d, imm_data=%d, "
-            "remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
-            comm->wrs[r].wr_id, r, qp->qp->qp_num, comm->devs[qp->devIndex].base.ibDevN, comm->wrs[r].opcode,
-            comm->wrs[r].send_flags, comm->wrs[r].imm_data, comm->wrs[r].wr.rdma.remote_addr, comm->wrs[r].wr.rdma.rkey,
-            comm->wrs[r].sg_list ? comm->wrs[r].sg_list->length : 0,
-            comm->wrs[r].sg_list ? comm->wrs[r].sg_list->lkey : 0);
+      sendOffsets[r] = std::min<uint32_t>(sendOffsets[r] + chunkLen[r], reqs[r]->send.size);
+      if (!delivered) reqs[r]->send.sentData[qpIndex] = true;
+      if (!multi && !delivered) {
+        TRACE(NCCL_NET,
+              "NET/IB: %s: Send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, reqIdx=%d, wr_id=%ld) posted %d "
+              "bytes on QP index %d (devIndex=%d, qp_num=%u), total posted %d/%d bytes",
+              __func__, reqs[r], reqs[0]->base, reqs[r]->id, slot, nreqs, r, comm->wrs[r].wr_id, chunkLen[r], qpIndex,
+              devIndex, qp->qp->qp_num, sendOffsets[r], reqs[r]->send.size);
+        // TODO: add ibv_dev_index to remDevs struct to enable full TRACE log with remote device info
+        TRACE(NCCL_VERBS,
+              "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, opcode=%d, send_flags=%d, imm_data=%d, "
+              "remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
+              comm->wrs[r].wr_id, r, qp->qp->qp_num, comm->devs[qp->devIndex].base.ibDevN, comm->wrs[r].opcode,
+              comm->wrs[r].send_flags, comm->wrs[r].imm_data, comm->wrs[r].wr.rdma.remote_addr,
+              comm->wrs[r].wr.rdma.rkey, comm->wrs[r].sg_list ? comm->wrs[r].sg_list->length : 0,
+              comm->wrs[r].sg_list ? comm->wrs[r].sg_list->lkey : 0);
+      }
     }
+  }
+  if (slicesLeft) {
+    cursor->active = 1;
+    cursor->wrId = wr_id;
+    cursor->immData = immData;
+    cursor->needSizesWr = needSizesWr;
+    cursor->extraImmWr = extraImmWr;
+    cursor->flagFlush = flagFlush;
   }
 
   TRACE(NCCL_NET, "NET/IB: %s: Send request posted (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld)", __func__,
         reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs, wr_id);
 
   return ncclSuccess;
+}
+
+// RCCL: post the next slice on each QP whose last slice completed. The slot is done once every QP posted its tail;
+// flagFlushSge still holds this slot's flag because no other slot posts in between.
+static ncclResult_t rcclIbSendResume(struct IbMsegSendComm* comm) {
+  struct rcclIbSendCursor* c = comm->sendCursor;
+  struct IbMsegRequest** reqs = comm->sendReqs[c->slot];
+  const int nreqs = reqs[0]->nreqs;
+  bool done = true;
+  for (int i = 0; i < c->nqps; i++) {
+    if (c->qpState[i] == RCCL_IB_SEND_QP_IDLE) {
+      IbMsegQp* qp = c->qp[i];
+      bool last = true;
+      struct ibv_send_wr* lastWr = NULL;
+      NCCLCHECK(rcclIbFillSendWrs(comm, c->slot, qp->devIndex, qp->remDevIdx, c->qpIndex[i], c->off[i], c->end[i],
+                                  false, c->wrId, c->immData, c->needSizesWr, c->extraImmWr, c->flagFlush, &lastWr,
+                                  &last));
+      // RCCL: this QP and the idle ones after it do not post their next slice this pass.
+      NCCLCHECK(rcclIbPostSendWrs(comm, qp, reqs, nreqs, last, [&](bool prefixPosted, IbMsegQp** lost) {
+        int n = 0;
+        for (int k = prefixPosted ? i + 1 : i; k < c->nqps; k++) {
+          if (c->qpState[k] == RCCL_IB_SEND_QP_IDLE) lost[n++] = c->qp[k];
+        }
+        return n;
+      }));
+      c->qpState[i] = last ? RCCL_IB_SEND_QP_DONE : RCCL_IB_SEND_QP_INFLIGHT;
+    }
+    if (c->qpState[i] != RCCL_IB_SEND_QP_DONE) done = false;
+  }
+  if (done) c->active = 0;
+  return ncclSuccess;
+}
+
+ncclResult_t rcclIbSendProgress(struct IbMsegSendComm* comm) {
+  struct rcclIbSendCursor* c = comm->sendCursor;
+  if (c == NULL) return ncclSuccess;
+  for (;;) {
+    if (c->active) {
+      NCCLCHECK(rcclIbSendResume(comm));
+      if (c->active) return ncclSuccess;
+    }
+    if (c->queued == 0) return ncclSuccess;
+    const int next = (int)((comm->base.fifoHead - c->queued) % NET_IB_MAX_REQUESTS);
+    bool ready = true;
+    NCCLCHECK(rcclIbSendLayoutsReady(comm, next, &ready));
+    if (!ready) return ncclSuccess;
+    c->queued--;
+    NCCLCHECK(IbMsegMultiSend(comm, next));
+  }
 }
 
 // Keep this hot loop on a 64-byte boundary.
@@ -345,7 +402,7 @@ ncclResult_t IbMsegIsend(void* sendComm, void* data, size_t size, int tag, void*
 
   int slot = comm->base.fifoHead % NET_IB_MAX_REQUESTS;
   struct IbMsegRequest** reqs = comm->sendReqs[slot];
-  slots = comm->ctsFifo[slot];
+  slots = rcclIbSendCtsRow(comm, slot);
   uint64_t idx = comm->base.fifoHead + 1;
   struct IbMsegRequest* req = NULL;
 
@@ -357,11 +414,21 @@ ncclResult_t IbMsegIsend(void* sendComm, void* data, size_t size, int tag, void*
   }
   // Order the nreqs load after the idx load above; on weakly ordered CPUs it could otherwise return a stale value.
   std::atomic_thread_fence(std::memory_order_acquire);
-  nreqs = slots[0].nreqs;
+  nreqs = IbMsegCtsNreqs(slots[0].nreqs); // RCCL: ignore the layout bit in the count.
+  if (nreqs > NCCL_NET_IB_MAX_RECVS) {
+    WARN("NET/IB : peer posted nreqs %d > %d", nreqs, NCCL_NET_IB_MAX_RECVS);
+    ret = ncclInternalError;
+    goto isendFail;
+  }
   // Wait until all data has arrived
   for (int r = 1; r < nreqs; r++)
     while (slots[r].idx != idx);
-  std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
+  // RCCL: the layout lines sit outside the CTS rows' cache lines, so each carries its own idx; retry until all land.
+  if (comm->useMultiSeg && IbMsegCtsHasLayout(slots[0].nreqs) && !rcclIbCtsLayoutsArrived(slots, nreqs, idx)) {
+    *request = NULL;
+    return ncclSuccess;
+  }
+  std::atomic_thread_fence(std::memory_order_seq_cst); // order the idx load against the layout and CTS fields
   for (int r = 0; r < nreqs; r++) {
     if (reqs[r] != NULL || slots[r].tag != tag) continue;
 
@@ -414,6 +481,7 @@ ncclResult_t IbMsegIsend(void* sendComm, void* data, size_t size, int tag, void*
       IbMsegAddEvent(req, qpDevIndexes[i]);
     }
 
+    req->send.mh = mhandleWrapper; // RCCL: segmented send reads per-segment lkeys from this handle.
     // Store all lkeys
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       req->send.lkeys[i] = mhandleWrapper->mrs[i]->lkey;
@@ -436,8 +504,20 @@ ncclResult_t IbMsegIsend(void* sendComm, void* data, size_t size, int tag, void*
     if (comm->sendReqsCnt[slot] < nreqs) return ncclSuccess;
 
     TIME_START(0);
-    ncclResult_t isendRet;
-    NCCLCHECKGOTO(IbMsegMultiSend(comm, slot), isendRet, isendFail);
+    // RCCL: behind a slot still posting slices, or until its referenced layouts are read, wait;
+    // rcclIbSendProgress posts queued slots in fifo order.
+    bool layoutsReady = true;
+    struct rcclIbSendCursor* cursor = comm->sendCursor;
+    const bool idle = cursor == NULL || (!cursor->active && cursor->queued == 0);
+    if (idle) {
+      NCCLCHECKGOTO(rcclIbSendLayoutsReady(comm, slot, &layoutsReady), ret, isendFail);
+    }
+    if (!idle || !layoutsReady) {
+      cursor->queued++; // unread layouts imply useMultiSeg, which allocates the cursor
+    } else {
+      // RCCL: keep the post error in ret; isendFail returns it when it frees the request.
+      NCCLCHECKGOTO(IbMsegMultiSend(comm, slot), ret, isendFail);
+    }
 
     comm->base.fifoHead++;
     TIME_STOP(0);
@@ -460,6 +540,13 @@ isendFail:
       // caught on the next operation.
       return ncclSuccess;
     } else {
+      // RCCL: the segmented builder can drop every event; unlink the slot entry before freeing.
+      for (int k = 0; k < nreqs; k++) {
+        if (reqs[k] == req) {
+          reqs[k] = NULL;
+          comm->sendReqsCnt[slot]--;
+        }
+      }
       IbMsegFreeRequest(req);
       *request = NULL;
     }
@@ -477,14 +564,13 @@ ncclResult_t IbMsegPostFifo(struct IbMsegRecvComm* comm, struct IbMsegRequest* r
 
   struct ibv_send_wr wr;
   memset(&wr, 0, sizeof(wr));
-  wr.wr.rdma.remote_addr = comm->remCtsFifo.addr + slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct IbMsegSendFifo);
 
   // Lookup the correct rkey
   wr.wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].rkey;
 
   // Populating the correct gather information based on the device and user
   // provided information
-  struct IbMsegSendFifo* localElem = comm->remCtsFifo.elems[slot];
+  struct IbMsegSendFifo* localElem = rcclIbRecvCtsRow(comm, slot);
   wr.sg_list = &(comm->devs[ctsQp->devIndex].sge);
   wr.sg_list[0].addr = (uint64_t)localElem;
   wr.sg_list[0].length = req->nreqs * sizeof(struct IbMsegSendFifo);
@@ -524,6 +610,10 @@ ncclResult_t IbMsegPostFifo(struct IbMsegRecvComm* comm, struct IbMsegRequest* r
     wr.wr_id = slot;
   }
 
+  // RCCL: a multi-segment slot extends this one WR over the layout prefix. idx stays last.
+  rcclIbPrepareCtsWrite(comm, req, slot, &wr);
+  struct ibv_send_wr* firstWr = &wr;
+
   TRACE(NCCL_NET,
         "NET/IB: %s: Posting a CTS (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld, opcode=%d, send_flags=%d, "
         "qp_num=%u)",
@@ -531,7 +621,7 @@ ncclResult_t IbMsegPostFifo(struct IbMsegRecvComm* comm, struct IbMsegRequest* r
 
   struct ibv_send_wr* bad_wr;
   ncclResult_t postFifoRet;
-  NCCLCHECKGOTO(wrap_ibv_post_send(ctsQp->qp, &wr, &bad_wr), postFifoRet, postFifoFail);
+  NCCLCHECKGOTO(wrap_ibv_post_send(ctsQp->qp, firstWr, &bad_wr), postFifoRet, postFifoFail);
   TRACE(NCCL_VERBS,
         "Posted send wr_id=%lu, wr_indx=%d, qp_num=%d, src_nic=%d, dst_nic=%d, dlid=%u, opcode=%d, send_flags=%d, "
         "imm_data=%d, remote_addr=%lx, rkey=%x, length=%d, lkey=%x",
@@ -564,6 +654,7 @@ ncclResult_t IbMsegIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   IbMsegQp* qps[NCCL_IB_MAX_QPS];
   int qpIndexes[NCCL_IB_MAX_QPS];
   struct IbMsegSendFifo* localElem = nullptr;
+  bool anyMultiSeg = false;
   if (comm->base.ready == 0) {
     WARN("NET/IB: IbMsegIrecv() called when comm->base.ready == 0");
     *request = NULL;
@@ -647,10 +738,12 @@ ncclResult_t IbMsegIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   req->recv.cmplsRecords = &comm->cmplsRecords[slot];
   memset(req->recv.cmplsRecords->sizes, 0, sizeof(int) * n);
   memset(req->recv.cmplsRecords->completions, 0, sizeof(req->recv.cmplsRecords->completions));
-  localElem = comm->remCtsFifo.elems[slot];
+  localElem = rcclIbRecvCtsRow(comm, slot);
   for (int i = 0; i < n; i++) {
     localElem[i].addr = (uint64_t)data[i];
     struct IbMsegMrHandle* mhandleWrapper = (struct IbMsegMrHandle*)mhandles[i];
+    // RCCL: reject a missing per-device MR before the CTS rkey load.
+    NCCLCHECKGOTO(rcclIbIrecvCheckHandle(comm, mhandleWrapper, i), ret, irecvFail);
     // Send all applicable rkeys
     for (int j = 0; j < comm->base.vProps.ndevs; j++) {
       localElem[i].rkeys[j] = mhandleWrapper->mrs[j]->rkey;
@@ -658,9 +751,13 @@ ncclResult_t IbMsegIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
     localElem[i].nreqs = n;
     localElem[i].size = sizes[i]; // Sanity/Debugging
     localElem[i].tag = tags[i];
-    localElem[i].idx = comm->base.fifoHead + 1;
     localElem[i].flagFlush = req->recv.flagFlush;
+    // RCCL: layout prefix first. idx is stored after it so it is the last word of the write.
+    NCCLCHECKGOTO(rcclIbIrecvFillLayout(comm, slot, i, mhandleWrapper, &anyMultiSeg), ret, irecvFail);
   }
+  // RCCL: this write includes the layout prefix.
+  if (anyMultiSeg) rcclIbCtsFlagLayout(localElem, n, comm->base.fifoHead + 1);
+  for (int i = 0; i < n; i++) localElem[i].idx = comm->base.fifoHead + 1;
 
   // Post to FIFO to notify sender
   TIME_START(2);
@@ -739,8 +836,15 @@ ncclResult_t IbMsegIflush(void* recvComm, int n, void** data, int* sizes, void**
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
+      // RCCL: on a multi-segment handle the read's rkey is the MR of the segment holding that byte.
+      struct ibv_mr* flushMr = IbMsegMrForRange(mhandle, (uintptr_t)data[last], /*len=*/1, i);
+      if (flushMr == NULL) {
+        WARN("NET/IB: flush missing MR for receive %d buffer %p", last, data[last]);
+        ret = ncclInternalError;
+        goto iflushFail;
+      }
       wr.wr.rdma.remote_addr = (uint64_t)data[last];
-      wr.wr.rdma.rkey = mhandle->mrs[i]->rkey;
+      wr.wr.rdma.rkey = flushMr->rkey;
     }
     wr.sg_list = &comm->devs[i].gpuFlush.sge;
     wr.num_sge = 1;
@@ -985,6 +1089,9 @@ static inline ncclResult_t IbMsegCompletionEventProcess(struct IbMsegNetCommBase
     rComm->postedSpeedUpdate = false;
     return ncclSuccess;
   }
+  // RCCL: a send comm reads only referenced segment layouts.
+  if (commBase->isSend && wc->opcode == IBV_WC_RDMA_READ)
+    return rcclIbSendLayoutReadDone((struct IbMsegSendComm*)commBase, wc->wr_id);
 
   union ncclSocketAddress addr;
   ncclSocketGetAddr(&commBase->sock, &addr);
@@ -1018,6 +1125,8 @@ static inline ncclResult_t IbMsegCompletionEventProcess(struct IbMsegNetCommBase
     struct IbMsegSendComm* sendComm = (struct IbMsegSendComm*)commBase;
     struct IbMsegRequest* sendReq = NULL;
     int slot = req->id % NET_IB_MAX_REQUESTS;
+    // RCCL: a slice completion frees its QP for the next slice; the QP's profiler event runs until the tail.
+    [[maybe_unused]] const bool slice = rcclIbSendSliceDone(sendComm, slot, devIndex, wc->qp_num);
     for (int j = 0; j < req->nreqs; j++) {
       sendReq = sendComm->sendReqs[slot][j];
       if (!commBase->resiliency && (sendReq->events[devIndex] <= 0)) {
@@ -1031,8 +1140,10 @@ static inline ncclResult_t IbMsegCompletionEventProcess(struct IbMsegNetCommBase
 #ifdef NCCL_ENABLE_NET_PROFILING
       // Stop Qp event for sendReq
       int qpIndex = getReqQpIndex(sendReq, j, wc->qp_num);
-      NCCLCHECK(IbMsegProfilerFunction(&sendReq->pInfo[j].qpEventHandles[qpIndex], ncclProfilerNetEventStop, NULL, 0,
-                                     NULL));
+      if (!slice) {
+        NCCLCHECK(IbMsegProfilerFunction(&sendReq->pInfo[j].qpEventHandles[qpIndex], ncclProfilerNetEventStop, NULL,
+                                         0, NULL));
+      }
 #endif
     }
   } else {
@@ -1197,6 +1308,8 @@ ncclResult_t IbMsegTest(void* request, int* done, int* sizes) {
         goto fail;
       }
     }
+    // RCCL: a completion may have freed a QP of a send still posting slices.
+    if (r->base->isSend) NCCLCHECKGOTO(rcclIbSendProgress((struct IbMsegSendComm*)r->base), ret, fail);
   } while (totalWrDone > 0);
 
   // If no (more) CQEs found on any device, return and come back later

@@ -17,6 +17,7 @@
 #include "param.h"
 #include "ib_gid_utils.h"
 #include "profiler/net_ib.h"
+#include "ib_multiseg_mseg.h" // RCCL: struct rcclIbSegStats.
 
 #include <pthread.h>
 #include <stdio.h>
@@ -34,6 +35,7 @@
 #include "ibvwrap.h"
 #include "mlx5/mlx5dvwrap.h"
 #include "wqe_lat_mon_mseg.h"
+#include "seg_p2p_mseg.h" // RCCL: shared CTS layout, per-segment MRs and the layout cache.
 
 #define MAXSUFFIXSIZE 16
 #define MAXNAMESIZE (64 + MAXSUFFIXSIZE)
@@ -112,6 +114,7 @@ struct alignas(64) IbMsegDev {
   char* pciPath;
   int realPort;
   int maxQp;
+  int maxMr; // RCCL: devAttr.max_mr, for rcclIbMrAdmit
   float latency;
   struct IbMsegMrCache mrCache;
   int ar; // ADAPTIVE_ROUTING
@@ -218,6 +221,8 @@ struct IbMsegRequestCompletionRecord {
   bool completions[NCCL_IB_MAX_QPS];
 };
 
+struct IbMsegMrHandle; // RCCL: defined below with one MR per segment.
+
 struct IbMsegRequest {
   struct IbMsegNetCommBase* base;
   int type;
@@ -244,6 +249,7 @@ struct IbMsegRequest {
       int size;
       void* data;
       uint32_t lkeys[NCCL_IB_MAX_DEVS_PER_NIC];
+      struct IbMsegMrHandle* mh; // RCCL: segmented send reads per-segment lkeys from this handle.
       // Tracks whether data was transmitted on a QP for this request.
       bool sentData[NCCL_IB_MAX_QPS];
       // Per-device LB weights used for chunk computation.
@@ -294,6 +300,41 @@ struct alignas(64) IbMsegSendFifo {
   uint64_t idx;
 };
 static_assert(sizeof(struct IbMsegSendFifo) == 64, "IbMsegSendFifo must fit in one 64-byte line");
+
+// RCCL: multi-segment CTS slots. The layout prefix sits immediately before the 64-byte
+// entries, so one RDMA write ends at idx. A single-segment write starts at cts.
+struct IbMsegCtsSlot {
+  struct IbMsegSegLayout layout[NCCL_NET_IB_MAX_RECVS];
+  struct IbMsegSendFifo cts[NCCL_NET_IB_MAX_RECVS];
+};
+static_assert(offsetof(struct IbMsegCtsSlot, cts) == sizeof(struct IbMsegSegLayout) * NCCL_NET_IB_MAX_RECVS,
+              "CTS entries must follow the layout prefix with no gap");
+static_assert(offsetof(struct IbMsegCtsSlot, cts) % 64 == 0, "CTS entries stay 64-byte aligned");
+
+// RCCL: byte size of the legacy CTS FIFO, and of one multi-segment slot array.
+#define NCCL_IB_CTS_FIFO_BYTES \
+  (sizeof(struct IbMsegSendFifo) * (size_t)NET_IB_MAX_REQUESTS * (size_t)NCCL_NET_IB_MAX_RECVS)
+#define NCCL_IB_CTS_SLOTS_BYTES (sizeof(struct IbMsegCtsSlot) * (size_t)NET_IB_MAX_REQUESTS)
+
+// RCCL: a segmented send posts one slice of each receive per QP and resumes on a later test.
+enum rcclIbSendQpState : uint8_t { RCCL_IB_SEND_QP_IDLE, RCCL_IB_SEND_QP_INFLIGHT, RCCL_IB_SEND_QP_DONE };
+// RCCL: slots post in fifo order. queued slots follow slot and wait until it posts every tail.
+struct rcclIbSendCursor {
+  int slot;
+  int active; // slot still has slices to post
+  int queued;
+  int nqps;
+  uint64_t wrId;
+  uint32_t immData;
+  bool needSizesWr;
+  bool extraImmWr;
+  bool flagFlush;
+  struct IbMsegQp* qp[NCCL_IB_MAX_QPS];
+  int qpIndex[NCCL_IB_MAX_QPS];
+  enum rcclIbSendQpState qpState[NCCL_IB_MAX_QPS];
+  uint32_t off[NCCL_IB_MAX_QPS][NCCL_NET_IB_MAX_RECVS];
+  uint32_t end[NCCL_IB_MAX_QPS][NCCL_NET_IB_MAX_RECVS];
+};
 
 struct IbMsegQpInitAttr {
   ibv_qp_state state;
@@ -376,9 +417,13 @@ struct alignas(8) IbMsegSendCommDev {
 };
 
 // Wrapper to track an MR per-device, if needed
+// RCCL: multi-segment buffers add one MR per segment; mrs[] aliases segment 0.
 struct IbMsegMrHandle {
   ibv_mr* mrs[NCCL_IB_MAX_DEVS_PER_NIC];
+  struct rcclIbSegMr seg; // RCCL: per-segment MRs; seg.nSegments 1 is the legacy single MR
 };
+static_assert(NCCL_IB_MAX_DEVS_PER_NIC == RCCL_IB_MSEG_MAX_DEVS && NCCL_NET_IB_MAX_RECVS == RCCL_IB_MSEG_MAX_RECVS,
+              "the shared multi-segment tables use the plugin's device and receive counts");
 
 // Forward declaration
 struct IbMsegResiliency;
@@ -429,6 +474,8 @@ static inline void IbMsegComputeLbWeights(struct IbMsegNetCommBase* base) {
 }
 
 struct IbMsegNetCommDevBase* IbMsegGetNetCommDevBase(IbMsegNetCommBase* base, int devIndex);
+// RCCL: false when nMr more MRs would pass any rail's max_mr. Counts this process's cached MRs only.
+bool rcclIbMrAdmit(IbMsegNetCommBase* base, int nMr);
 
 static inline void IbMsegComputeDevSpeeds(struct IbMsegNetCommBase* base) {
   uint64_t totalSpeed = 0;
@@ -531,15 +578,16 @@ static inline ncclResult_t IbMsegPostRecvWorkRequest(struct ibv_qp* qp, struct i
 
 struct IbMsegSendComm {
   struct IbMsegNetCommBase base;
-  // Start with CTS FIFO and ibv structs as they have alignment restrictions
-
   // CTS FIFO from which the sender reads the Clear-to-Send (CTS) messages that
   // are written by the receiver (The receiver side writes into it upon
   // issuing a (multi-)receive request). Each row in the 2D array corresponds
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
-  struct IbMsegSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
+  // RCCL: legacy FIFO when useMultiSeg is 0. ctsSlots replaces it otherwise,
+  // and the published address is that array's first CTS row.
+  struct IbMsegSendFifo (*ctsFifo)[NCCL_NET_IB_MAX_RECVS];
+  struct IbMsegCtsSlot* ctsSlots;
+  alignas(32) struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
   // Data writes, plus the completion records write and the GDR flush flag write.
   struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 2];
   // Each dev correlates to a mergedIbDev
@@ -555,6 +603,11 @@ struct IbMsegSendComm {
   struct IbMsegRemCompletionsRecords remCmplsRecords;
   int ar; // Use adaptive routing when all merged devices have it enabled
   uint64_t putSignalScratchpad;
+  int useMultiSeg; // RCCL: cached connect decision; connect fails unless both ends agree, 1 uses ctsSlots.
+  // RCCL: allocated with ctsSlots; a legacy-CTS comm allocates the cursor on its first segmented send.
+  struct rcclIbSendCursor* sendCursor; // RCCL: the slot whose segmented send is still posting.
+  struct rcclIbLayoutCache* layoutCache; // RCCL: receiver layouts that CTS entries referenced.
+  struct rcclIbSegStats segStats;        // RCCL: classic and RMA segmented posts on this comm.
 
   struct {
     uint64_t posted;
@@ -578,8 +631,8 @@ struct IbMsegSendComm {
 // written out of order when IB Relaxed Ordering is enabled
 static_assert((sizeof(struct IbMsegNetCommBase) % 32) == 0,
               "IbMsegNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
-static_assert((offsetof(struct IbMsegSendComm, ctsFifo) % 32) == 0, "IbMsegSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct IbMsegSendFifo) % 32) == 0, "IbMsegSendFifo element size must be 32-byte multiples");
+static_assert(NCCL_IB_CTS_FIFO_BYTES % 64 == 0, "CTS FIFO size must keep the following layout lines 64-byte aligned");
 static_assert((offsetof(struct IbMsegSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct IbMsegSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 
@@ -602,7 +655,8 @@ struct IbMsegRemCtsFifo {
   // the CTS FIFO locally on its side. Receiver uses this memory to place the
   // CTS messages and populates the RDMA message "gather address" with the
   // memory of the CTS message that is sent.
-  struct IbMsegSendFifo elems[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  // RCCL: a separate NCCL_IB_CTS_FIFO_BYTES block, NULL when useMultiSeg because ctsSlots holds the rows.
+  struct IbMsegSendFifo (*elems)[NCCL_NET_IB_MAX_RECVS];
   uint64_t addr;
   // Array of RKeys (one RKey per device) from which the receiver chooses the
   // RKey (depending on the device being used) when it posts a CTS to the
@@ -645,6 +699,10 @@ struct IbMsegRecvComm {
   // Structure to hold all the related structures regarding the CTS FIFO
   // structure.
   struct IbMsegRemCtsFifo remCtsFifo;
+  // RCCL: local combined slots when useMultiSeg. NULL keeps the legacy elems shadow.
+  struct IbMsegCtsSlot* ctsSlots;
+  uint64_t ctsSlotStride; // RCCL: bytes from one remote CTS row to the next. 0 means the legacy stride.
+  int useMultiSeg; // RCCL: cached connect decision; connect fails unless both ends agree, 1 uses ctsSlots.
   // Structure to hold all the completion records of all the outstanding
   // receive requests on the receiver side.
   struct IbMsegRequestCompletionRecord cmplsRecords[NET_IB_MAX_REQUESTS];
@@ -694,6 +752,7 @@ struct IbMsegListenComm {
   struct IbMsegCommStage* stage;
   // Accepted receivers set up the GDR flush flag (ncclNetIbMseg only, see IbMsegNetCtx).
   int gdrFlushFlag;
+  bool isGin; // RCCL: set by rcclIbMarkGinListen; accepted GIN comms skip the multi-segment layout.
 };
 
 static inline void IbMsegCheckSpeedChanges(struct IbMsegSendComm* sendComm, struct IbMsegNetCommBase* base) {
@@ -792,6 +851,8 @@ ncclResult_t IbMsegDevices(int* ndev);
 ncclResult_t IbMsegGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbMsegGetPhysProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbMsegListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
+// RCCL: mark a GIN listener; the flag rides in the handle so both ends skip the multi-segment layout.
+void rcclIbMarkGinListen(void* opaqueHandle, void* listenComm);
 // nQpsPerDev > 0: that many QPs per device. <= 0: NCCL_IB_QPS_PER_CONNECTION / RCCL_IB_QPS_PER_P2P.
 ncclResult_t IbMsegConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                                ncclNetDeviceHandle_t** sendDevComm, int nQpsPerDev, int envTrafficClass);
@@ -847,6 +908,19 @@ static uint16_t IbMsegExtractLocalSubnetPrefix(uint64_t subnet_prefix) {
 
 static int IbMsegExtractFlid(union ibv_gid* gid) {
   return ncclIbGidFlid(gid->raw);
+}
+
+// RCCL: relaxed, since tests read the counters from another thread only after the transfer completed.
+static inline void rcclIbSegStatsAdd(struct rcclIbSegStats* s, int nWrs, bool laterSeg) {
+  COMPILER_ATOMIC_FETCH_ADD(&s->posts, (uint64_t)1, std::memory_order_relaxed);
+  COMPILER_ATOMIC_FETCH_ADD(&s->wrs, (uint64_t)nWrs, std::memory_order_relaxed);
+  if (laterSeg) COMPILER_ATOMIC_FETCH_ADD(&s->laterSegPosts, (uint64_t)1, std::memory_order_relaxed);
+}
+
+static inline void rcclIbSegStatsRead(const struct rcclIbSegStats* s, struct rcclIbSegStats* out) {
+  out->posts = COMPILER_ATOMIC_LOAD(&s->posts, std::memory_order_relaxed);
+  out->wrs = COMPILER_ATOMIC_LOAD(&s->wrs, std::memory_order_relaxed);
+  out->laterSegPosts = COMPILER_ATOMIC_LOAD(&s->laterSegPosts, std::memory_order_relaxed);
 }
 
 #endif

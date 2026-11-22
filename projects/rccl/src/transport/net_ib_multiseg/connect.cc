@@ -9,8 +9,61 @@
 #include "common_mseg.h"
 #include "p2p_mseg.h"
 #include "p2p_resiliency_mseg.h"
+#include "ib_multiseg_mseg.h" // RCCL: the connect-time multi-segment decision.
+#include "p2p_multiseg_mseg.h" // RCCL: the send comm's read-layout cache.
+#include "rccl_common.h" // RCCL: rcclMultiSegOn gates the multi-segment CTS.
 
 #include <mutex>
+
+// RCCL: cached once per comm. The core's fd -1 gate (switch and DMA-BUF) off, a GIN comm or a resilient comm keeps
+// the legacy CTS.
+static int IbMsegResolveUseMultiSeg(bool forGin, bool resilient) {
+  const bool reg = rcclMultiSegOn(/*pluginRegistersPerSegment=*/true);
+  const int ok = IbMsegUseMultiSeg(reg, forGin, resilient) ? 1 : 0;
+  TRACE(NCCL_INIT | NCCL_NET, "NET/IB: multi-segment CTS %s (register=%d gin=%d resilient=%d)", ok ? "on" : "off",
+        (int)reg, (int)forGin, (int)resilient);
+  return ok;
+}
+
+// RCCL: ranks with different multi-segment settings would read each other's CTS in the wrong layout.
+static ncclResult_t IbMsegCheckPeerUseMultiSeg(int local, int remote, const char* peerDevName) {
+  if (local == remote) return ncclSuccess;
+  WARN("NET/IB: multi-segment CTS is %s here but %s on the peer (%s); set NCCL_MULTI_SEGMENT_REGISTER, "
+       "NCCL_DMABUF_ENABLE and NCCL_IB_RESILIENCY_PORT_FAILOVER the same on every rank",
+       local ? "on" : "off", remote ? "on" : "off", peerDevName);
+  return ncclInvalidUsage;
+}
+
+// RCCL: one page-aligned block. Multi-segment comms use combined slots, the send cursor and the layout cache;
+// otherwise the legacy FIFO.
+static ncclResult_t IbMsegSendCommAllocCts(struct IbMsegSendComm* comm, bool combinedSlots) {
+  void* region = NULL;
+  if (combinedSlots) {
+    NCCLCHECK(ncclIbMalloc(&region, NCCL_IB_CTS_SLOTS_BYTES));
+    comm->ctsSlots = (struct IbMsegCtsSlot*)region;
+    comm->ctsFifo = NULL;
+    NCCLCHECK(ncclCalloc(&comm->sendCursor, 1));
+    NCCLCHECK(ncclCalloc(&comm->layoutCache, 1));
+  } else {
+    NCCLCHECK(ncclIbMalloc(&region, NCCL_IB_CTS_FIFO_BYTES));
+    comm->ctsFifo = (struct IbMsegSendFifo (*)[NCCL_NET_IB_MAX_RECVS])region;
+    comm->ctsSlots = NULL;
+  }
+  return ncclSuccess;
+}
+
+// RCCL: the CTS block is one allocation, either the legacy FIFO or the combined slots.
+static void IbMsegSendCommFreeCts(struct IbMsegSendComm* comm) {
+  if (comm == NULL) return;
+  free(comm->ctsSlots);
+  free(comm->ctsFifo);
+  free(comm->sendCursor);
+  free(comm->layoutCache);
+  comm->ctsSlots = NULL;
+  comm->ctsFifo = NULL;
+  comm->sendCursor = NULL;
+  comm->layoutCache = NULL;
+}
 
 USE_NCCL_PARAM(ncclParamIbGidIndex, int32_t);
 USE_NCCL_PARAM(ncclParamIbRoutableFlidIbGidIndex, int32_t);
@@ -69,6 +122,7 @@ struct IbMsegHandle {
   // NIC on the same subnet (for multi-subnet RoCE direct-connect topologies).
   // Zero-valued slots are ignored (validGid() returns false).
   union ibv_gid listenGids[2];
+  int isGin; // RCCL: set by rcclIbMarkGinListen; GIN comms skip the multi-segment layout.
 };
 
 USE_NCCL_PARAM(ncclParamIbQpsPerConn, int32_t);
@@ -764,6 +818,11 @@ fail:
   goto exit;
 }
 
+void rcclIbMarkGinListen(void* opaqueHandle, void* listenComm) {
+  ((struct IbMsegHandle*)opaqueHandle)->isGin = 1;
+  ((struct IbMsegListenComm*)listenComm)->isGin = true;
+}
+
 ncclResult_t IbMsegNetListen(void* ctx, int dev, void* opaqueHandle, void** listenComm) {
   NCCLCHECK(IbMsegListen(ctx, dev, opaqueHandle, listenComm));
   ((struct IbMsegListenComm*)*listenComm)->gdrFlushFlag = ctx ? ((struct IbMsegNetCtx*)ctx)->gdrFlushFlag : 0;
@@ -962,6 +1021,9 @@ ncclResult_t IbMsegConnectImpl(void* ctx, int dev, void* opaqueHandle, void** se
 
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(struct IbMsegSendComm)));
   NCCLCHECKGOTO(IbMsegSendCommInit(comm), ret, fail);
+  comm->useMultiSeg = IbMsegResolveUseMultiSeg(handle->isGin != 0, comm->base.resiliency != NULL);
+  // RCCL: combined CTS slots only when multi-segment. The published address is the first CTS row.
+  NCCLCHECKGOTO(IbMsegSendCommAllocCts(comm, comm->useMultiSeg != 0), ret, fail);
   NCCLCHECKGOTO(IbMsegStatsInit(&comm->base.stats), ret, fail);
   NCCLCHECKGOTO(ncclSocketInit(&comm->base.sock, &handle->connectAddr, handle->magic, ncclSocketTypeNetIb, NULL, 1),
                 ret, fail);
@@ -1053,6 +1115,7 @@ ib_recv_dev_list:
   memset(&meta, 0, sizeof(meta));
   meta.ndevs = comm->base.vProps.ndevs;
   meta.isP2p = isP2p;
+  meta.useMultiSeg = comm->useMultiSeg;
 
   // Create QPs on the sender side
   NCCLCHECKGOTO(IbMsegSenderQpsCreate(comm, &meta), ret, fail);
@@ -1072,8 +1135,10 @@ ib_recv_dev_list:
                                   sizeof(comm->putSignalScratchpad), IBV_ACCESS_LOCAL_WRITE),
                   ret, fail);
 
-    // Prepare my CTS FIFO
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo, sizeof(comm->ctsFifo),
+    // RCCL: one MR over the legacy FIFO or the combined slots. The layout prefix is in that MR.
+    void* ctsBase = comm->ctsSlots != NULL ? (void*)comm->ctsSlots : (void*)comm->ctsFifo;
+    size_t ctsBytes = comm->ctsSlots != NULL ? NCCL_IB_CTS_SLOTS_BYTES : NCCL_IB_CTS_FIFO_BYTES;
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, ctsBase, ctsBytes,
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1130,7 +1195,8 @@ ib_recv_dev_list:
                   ret, fail);
   }
   trafficClass = IbMsegGetTrafficClass(ctx);
-  meta.addr = (uint64_t)comm->ctsFifo;
+  // RCCL: peers add ctsSlotStride to reach the next row. Multi-segment comms publish the first CTS row.
+  meta.addr = comm->ctsSlots != NULL ? (uint64_t)comm->ctsSlots[0].cts : (uint64_t)comm->ctsFifo;
   meta.sl = (ncclParamIbSl() != NCCL_PARAM_VAL_AUTO)       ? ncclParamIbSl() :
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_SL_DEFAULT;
@@ -1164,6 +1230,8 @@ ib_connect:
   if (stage->offset != sizeof(remMeta)) return ncclSuccess;
 
   memcpy(&remMeta, stage->buffer, sizeof(IbMsegConnectionMetadata));
+  // RCCL: defensive; the accepting peer checks first and closes the socket on a mismatch, so the read above fails.
+  NCCLCHECKGOTO(IbMsegCheckPeerUseMultiSeg(comm->useMultiSeg, remMeta.useMultiSeg, remMeta.devName), ret, fail);
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1246,6 +1314,7 @@ fail:
     (void)wrap_ibv_dereg_mr(comm->devs[0].flagFlushSrcMr);
     comm->devs[0].flagFlushSrcMr = nullptr;
   }
+  IbMsegSendCommFreeCts(comm); // RCCL: the CTS block is a separate allocation.
   free(comm);
   goto exit;
 }
@@ -1678,6 +1747,7 @@ ncclResult_t IbMsegAcceptImpl(void* listenComm, void** recvComm, ncclNetDeviceHa
   NCCLCHECK(ncclIbMalloc((void**)&rComm, sizeof(struct IbMsegRecvComm)));
   NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(IbMsegRecvCommInit(rComm), ret, fail);
+  rComm->useMultiSeg = IbMsegResolveUseMultiSeg(lComm->isGin, rComm->base.resiliency != NULL);
   NCCLCHECKGOTO(IbMsegStatsInit(&rComm->base.stats), ret, fail);
   stage->comm = rComm;
   stage->state = IbMsegCommStateAccept;
@@ -1751,6 +1821,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct IbMsegConnectionMetadata));
+  NCCLCHECKGOTO(IbMsegCheckPeerUseMultiSeg(rComm->useMultiSeg, remMeta.useMultiSeg, remMeta.devName), ret, fail);
   rComm->base.nqps = rcclIbSelectNqps(nQpsPerDev, remMeta.isP2p, rComm->base.vProps.ndevs, remMeta.ndevs, __func__);
 
   // Subnet-aware device selection: use the remote sender's GIDs to find a local
@@ -1879,6 +1950,17 @@ ib_recv:
 
   rComm->flushEnabled = ((peermemAvailable || useDmaBuf) && (ncclParamIbGdrFlushDisable() == 0)) ? 1 : 0;
 
+  // RCCL: the sender's useMultiSeg was checked to match, so it selects the remote stride and the local slots or
+  // legacy FIFO shadow.
+  if (rComm->useMultiSeg) {
+    NCCLCHECKGOTO(ncclIbMalloc((void**)&rComm->ctsSlots, NCCL_IB_CTS_SLOTS_BYTES), ret, fail);
+    rComm->ctsSlotStride = sizeof(struct IbMsegCtsSlot);
+  } else {
+    NCCLCHECKGOTO(ncclIbMalloc((void**)&rComm->remCtsFifo.elems, NCCL_IB_CTS_FIFO_BYTES), ret, fail);
+    rComm->ctsSlots = NULL;
+    rComm->ctsSlotStride = NCCL_NET_IB_MAX_RECVS * sizeof(struct IbMsegSendFifo);
+  }
+
   NCCLCHECKGOTO(IbMsegReceiverQpsCreateToRts(rComm, &remMeta, &meta), ret, fail);
   if (rComm->prepostReceiveWorkRequests) {
     NCCLCHECKGOTO(IbMsegReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
@@ -1893,8 +1975,10 @@ ib_recv:
   for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
     rCommDev = rComm->devs + i;
 
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->ctsFifoMr, rCommDev->base.pd, &rComm->remCtsFifo.elems,
-                                  sizeof(rComm->remCtsFifo.elems),
+    // RCCL: one local MR. A multi-segment peer writes the layout and the CTS from the combined slots.
+    void* ctsLocal = rComm->ctsSlots != NULL ? (void*)rComm->ctsSlots : (void*)rComm->remCtsFifo.elems;
+    size_t ctsLocalBytes = rComm->ctsSlots != NULL ? NCCL_IB_CTS_SLOTS_BYTES : NCCL_IB_CTS_FIFO_BYTES;
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->ctsFifoMr, rCommDev->base.pd, ctsLocal, ctsLocalBytes,
                                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
@@ -2079,6 +2163,7 @@ ib_recv:
 
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
+  meta.useMultiSeg = rComm->useMultiSeg;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = IbMsegCommStateSend;
@@ -2114,6 +2199,8 @@ exit:
   return ret;
 fail:
   if (rComm) (void)IbMsegFreeFlagFlush(rComm);
+  if (rComm) free(rComm->ctsSlots); // RCCL: combined CTS slots, only when useMultiSeg.
+  if (rComm) free(rComm->remCtsFifo.elems); // RCCL: legacy FIFO shadow, only without useMultiSeg.
   (void)ncclSocketClose(&rComm->base.sock);
   free(rComm);
   goto exit;
@@ -2142,6 +2229,7 @@ ncclResult_t IbMsegCloseSend(void* sendComm) {
     if (comm->remoteSpeedMr) {
       NCCLCHECK(wrap_ibv_dereg_mr(comm->remoteSpeedMr));
     }
+    NCCLCHECK(rcclIbSendLayoutCacheFree(comm)); // RCCL: read layouts' MRs go before their PDs.
 
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct IbMsegSendCommDev* commDev = comm->devs + i;
@@ -2157,6 +2245,7 @@ ncclResult_t IbMsegCloseSend(void* sendComm) {
     if (comm->base.resiliency) {
       NCCLCHECK(IbMsegResiliencyDestroy(&comm->base.resiliency));
     }
+    IbMsegSendCommFreeCts(comm); // RCCL: the CTS block is a separate allocation.
     free(comm);
   }
   TIME_PRINT("IB");
@@ -2202,6 +2291,8 @@ ncclResult_t IbMsegCloseRecv(void* recvComm) {
     if (comm->base.resiliency) {
       NCCLCHECK(IbMsegResiliencyDestroy(&comm->base.resiliency));
     }
+    free(comm->ctsSlots); // RCCL: combined CTS slots, only when useMultiSeg.
+    free(comm->remCtsFifo.elems); // RCCL: legacy FIFO shadow, only without useMultiSeg.
     free(comm);
   }
   return ncclSuccess;

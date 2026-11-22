@@ -954,6 +954,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
         comm->busId, comm->compCap);
 
   comm->dmaBufSupport = (dmaBufSupported(comm) == ncclSuccess) ? true : false;
+  // RCCL: only IB-MSEG registers one MR per segment for fd -1; split comms resolve the same net here.
+  comm->rcclMultiSegNet = rcclMultiSegOn(comm->ncclNet == &ncclNetIbMseg);
 
   // Initialize memory manager
   if (parent && parent->shareResources && parent->memManager) {
