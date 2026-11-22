@@ -36,6 +36,8 @@ struct IbMsegGinIbCollComm {
   ncclResult_t (*getGidIndex)(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                               int* gidIndex);
   bool gdakiUnsupported;
+  // RCCL: per-rank registration records (status and segment layout); rcclRmaIbProxyConnectFinish allocates them.
+  void* regRecords;
 };
 
 #endif

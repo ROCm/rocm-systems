@@ -21,10 +21,14 @@ set(NET_IB_MULTISEG_SOURCES
     src/transport/net_ib_multiseg/p2p_resiliency_recovery.cc
     src/transport/net_ib_multiseg/p2p_resiliency_recovery_mseg.h
     src/transport/net_ib_multiseg/reg.cc
+    src/transport/net_ib_multiseg/seg_export_mseg.h
     src/transport/net_ib_multiseg/seg_mseg.h
     src/transport/net_ib_multiseg/seg_p2p.cc
     src/transport/net_ib_multiseg/seg_p2p_mseg.h
     src/transport/net_ib_multiseg/seg_reg_mseg.h
+    src/transport/net_ib_multiseg/seg_rma_mseg.h
+    src/transport/net_ib_multiseg/seg_rma_round_mseg.h
+    src/transport/net_ib_multiseg/seg_sym_mseg.h
     src/transport/net_ib_multiseg/seg_wr_mseg.h
     src/transport/net_ib_multiseg/wqe_lat_mon.cc
     src/transport/net_ib_multiseg/wqe_lat_mon_mseg.h

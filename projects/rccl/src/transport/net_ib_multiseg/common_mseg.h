@@ -455,6 +455,7 @@ struct alignas(32) IbMsegNetCommBase {
   uint64_t totalSpeed;
   uint8_t weights[NCCL_IB_MAX_DEVS_PER_NIC];
   uint64_t devSpeeds[NCCL_IB_MAX_DEVS_PER_NIC];
+  bool isRma; // RCCL: GIN/RMA proxy comm (connected with nQpsPerDev > 0)
 };
 
 // Compute per-device LB weights (1-100); weight is never 0 since it is not considered a speed update but rather a port down.

@@ -826,6 +826,26 @@ fail:
   return result;
 }
 
+// RCCL: whether the cuMem allocation mapped at ptr lives in host memory.
+static inline ncclResult_t ncclCuMemIsSysmemSegment(CUdeviceptr ptr, bool* isSysmem) {
+  CUmemGenericAllocationHandle handle;
+  CUmemAllocationProp prop;
+  *isSysmem = false;
+  CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)ptr));
+  CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
+#if defined(__HIP_PLATFORM_AMD__)
+#if NCCL_CUMEM_HOST_GATE
+  // HIP rejects HostNuma. Host segments use hipMemLocationTypeHost on native
+  // ROCm 7.12 and the 7.0.2.x backport.
+  *isSysmem = prop.location.type == hipMemLocationTypeHost;
+#endif
+#else
+  *isSysmem = prop.location.type == CU_MEM_LOCATION_TYPE_HOST_NUMA;
+#endif
+  CUCHECK(cuMemRelease(handle));
+  return ncclSuccess;
+}
+
 // Get the base and size of all segments that span a given user buffer
 static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize,
                                                     CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize,
@@ -847,24 +867,7 @@ static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t
     CUCHECK(cuMemGetAddressRange(&baseSend, &baseSendSize, mappedPtrEnd));
 
     if (hasSysmemSegment != nullptr && *hasSysmemSegment == false) {
-      CUmemGenericAllocationHandle handle;
-      CUmemAllocationProp prop;
-      CUCHECK(cuMemRetainAllocationHandle(&handle, (void*)mappedPtrEnd));
-      CUCHECK(cuMemGetAllocationPropertiesFromHandle(&prop, handle));
-#if defined(__HIP_PLATFORM_AMD__)
-#if NCCL_CUMEM_HOST_GATE
-      // HIP rejects HostNuma. Host segments use hipMemLocationTypeHost on native
-      // ROCm 7.12 and the 7.0.2.x backport.
-      if (prop.location.type == hipMemLocationTypeHost) {
-        *hasSysmemSegment = true;
-      }
-#endif
-#else
-      if (prop.location.type == CU_MEM_LOCATION_TYPE_HOST_NUMA) {
-        *hasSysmemSegment = true;
-      }
-#endif
-      CUCHECK(cuMemRelease(handle));
+      NCCLCHECK(ncclCuMemIsSysmemSegment(mappedPtrEnd, hasSysmemSegment));
     }
 
     if (*totalMappedBufferSize == 0) {
@@ -915,6 +918,11 @@ static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* m
 static inline ncclResult_t ncclCuMemGetAddressRange(CUdeviceptr userBuff, size_t userBuffSize,
                                                     CUdeviceptr* mappedPtrBase, size_t* totalMappedBufferSize,
                                                     int* numSegments, bool* hasSysmemSegment = nullptr) {
+  WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
+  return ncclInternalError;
+}
+
+static inline ncclResult_t ncclCuMemIsSysmemSegment(CUdeviceptr ptr, bool* isSysmem) {
   WARN("CUMEM requires ROCM_VERSION >= 7.0.0");
   return ncclInternalError;
 }

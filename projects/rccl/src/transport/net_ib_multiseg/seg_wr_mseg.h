@@ -37,4 +37,43 @@ static inline void rcclIbSegFillWr(const struct rcclIbSegTable* local, uint32_t 
   sge->lkey = lkey;
 }
 
+// Returns the WR count, or -1 if the chain exceeds maxWr or runs past a table. With covered set, the chain stops at
+// maxWr or at the end of a table instead, *covered is the bytes it moves, and -1 means it moved none.
+struct rcclIbSegWrIn {
+  const struct rcclIbSegTable* local;
+  const uint32_t* lkeys;
+  const struct rcclIbSegTable* remote;
+  const uint32_t* rkeys;
+  uint64_t localOff;
+  uint64_t remoteOff;
+  uint64_t len;
+  enum ibv_wr_opcode opcode;
+  int maxWr;
+  uint64_t* covered;
+};
+
+static inline int rcclIbSegAppendWrs(const struct rcclIbSegWrIn* in, struct ibv_send_wr* wrs, struct ibv_sge* sges) {
+  if (in == NULL || in->remote == NULL || in->rkeys == NULL) return -1;
+  if (in->len == 0) return 0;
+  if (wrs == NULL || sges == NULL || in->local == NULL || in->lkeys == NULL) return -1;
+  struct rcclIbSegCursor cur;
+  rcclIbSegCursorInit(&cur, in->local, in->remote, in->localOff, in->remoteOff, in->len);
+  int n = 0;
+  struct rcclIbSegSlice slice;
+  while (rcclIbSegCursorNext(&cur, in->local, in->remote, &slice)) {
+    if (n >= in->maxWr) return -1;
+    rcclIbSegFillWr(in->local, in->lkeys[slice.localSeg], in->remote, in->rkeys[slice.remoteSeg], &slice, in->opcode,
+                    &wrs[n], &sges[n]);
+    if (n > 0) wrs[n - 1].next = &wrs[n];
+    n++;
+    if (in->covered != NULL && n == in->maxWr) break;
+  }
+  if (in->covered != NULL) {
+    *in->covered = in->len - cur.remaining;
+    return n > 0 ? n : -1;
+  }
+  if (cur.remaining != 0) return -1;
+  return n;
+}
+
 #endif

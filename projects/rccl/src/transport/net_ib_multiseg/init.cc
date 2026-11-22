@@ -7,6 +7,7 @@
 
 #include "common_mseg.h"
 #include "p2p_resiliency_recovery_mseg.h"
+#include "seg_mseg.h"
 
 ncclResult_t pciPathToInt64(char* path, int64_t* id);
 

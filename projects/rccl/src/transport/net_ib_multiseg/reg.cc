@@ -92,6 +92,9 @@ static ncclResult_t rcclIbMultiSegAdmit(struct IbMsegNetCommBase* base, int nSeg
   return ncclSuccess;
 }
 
+// RCCL: the fail path releases MRs created before a later device fails.
+ncclResult_t IbMsegDeregMrInternal(IbMsegNetCommDevBase* base, ibv_mr* mhandle);
+
 /* DMA-BUF support */
 ncclResult_t IbMsegRegMrDmaBufInternal(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
                                        uint64_t mrFlags, void** mhandle) {
@@ -102,6 +105,7 @@ ncclResult_t IbMsegRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
   }
   struct IbMsegNetCommBase* base = (struct IbMsegNetCommBase*)comm;
   struct IbMsegMrHandle* mhandleWrapper = NULL;
+  int registered = 0;
   NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
   mhandleWrapper->seg.nSegments = 1; // RCCL: a real fd stays one MR.
   for (int i = 0; i < base->vProps.ndevs; i++) {
@@ -109,11 +113,16 @@ ncclResult_t IbMsegRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
     struct IbMsegNetCommDevBase* devComm = IbMsegGetNetCommDevBase(base, i);
     NCCLCHECKGOTO(IbMsegRegMrDmaBufInternal2(devComm, data, size, type, offset, fd, mrFlags, mhandleWrapper->mrs + i),
                   ret, fail);
+    registered++;
   }
   *mhandle = (void*)mhandleWrapper;
 exit:
   return ret;
 fail:
+  for (int i = 0; i < registered; i++) { // RCCL: drop MRs already created when a later device fails to register.
+    struct IbMsegNetCommDevBase* devComm = IbMsegGetNetCommDevBase(base, i);
+    (void)IbMsegDeregMrInternal(devComm, mhandleWrapper->mrs[i]);
+  }
   free(mhandleWrapper);
   goto exit;
 }
