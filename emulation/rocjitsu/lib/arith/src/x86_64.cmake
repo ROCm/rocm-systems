@@ -132,6 +132,8 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact8_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v3.cpp
@@ -139,6 +141,8 @@ set(rj_arith_x86_64_v3_sources
 )
 
 set(rj_arith_x86_64_v4_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_mixed_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/smfmac_float_x86_64_v4.cpp
@@ -230,12 +234,16 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/packed_permute_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/permlane_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact8_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v4.cpp
 )
 
 set(rj_arith_x86_64_v4_bf16_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v4_bf16.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_fp8_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4_bf16.cpp
 )
 
