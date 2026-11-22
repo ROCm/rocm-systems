@@ -55,7 +55,8 @@ inline const char *facts_route_name(FactsRoute route) {
 // Keep the seed and its optional child alive through validation and emission.
 class FactsRouteFixture {
 public:
-  FactsRouteFixture(const AmdGpuCodeObject &source, rocjitsu::IsaFamily arch) : seed_(source, arch) {}
+  FactsRouteFixture(const AmdGpuCodeObject &source, rocjitsu::IsaFamily arch)
+      : seed_(source, arch) {}
 
   testing::AssertionResult prepare(FactsRoute route, uint64_t warm_anchor = 0) {
     if (route == FactsRoute::WarmFork || route == FactsRoute::WarmQueriedFork ||

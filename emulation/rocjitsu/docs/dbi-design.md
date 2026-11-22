@@ -206,7 +206,10 @@ model. This check follows the private replacement layout, so removing an unsafe
 edge can make a batch admissible. Probe-free replacements retain their existing
 structural and growth checks. The callable-probe MOVREL check also runs on the
 effective guest blocks, including relative SGPR accesses introduced only by
-replacement bodies.
+replacement bodies. Replacement batches with probes and queues observing
+`AnchorVgpr` require complete physical VGPR usage in the effective guest.
+Other observation queues retain their per-site MODE checks and the additional
+patch-time physical-usage requirement for `AfterInst`.
 
 Before probe planning, all replacements are laid out privately using the same
 TrampolineBuilder and CodeObjectPatcher used for final output. Fresh CFG/liveness
@@ -369,10 +372,10 @@ Rules enforced:
 - `anchor.size()` is 4 or 8 and fits inside `text_bytes` (subtraction-based bounds check; resists overflow when `anchor_offset` is huge).
 - `anchor.raw_encoding()` is non-null.
 - `anchor` is not a branch / cond branch / indirect branch / indirect call / program terminator, and `branch_offset_bytes()` is `nullopt`.
-- `anchor.mnemonic()` is not on the small PC-relative denylist (`s_getpc_b64`, `s_call_b64`, `s_setpc_b64`, `s_swappc_b64`, `s_rfe_*`, plus the gfx1250 spellings `s_get_pc_i64`, `s_call_i64`, `s_set_pc_i64`, `s_swap_pc_i64`) — these may not surface as flag bits on every ISA.
-- `anchor.mnemonic()` is not `s_clause`. This predicate sees no surrounding stream, so the orchestrator separately rejects an anchor *inside* a clause run.
+- `anchor.reads_pc()` is false: decoded ISA metadata identifies PC readers independently of their target-specific spellings. Set-PC and return-from-exception operations are also excluded by their decoded operation.
+- `anchor.amdgpu_operation()` is not `S_CLAUSE`. This predicate sees no surrounding stream, so the orchestrator separately rejects an anchor *inside* a clause run.
 
-`arch` is accepted now so a future ISA-specific denylist can grow without an API change.
+`arch` is accepted for target-specific validation without changing the API.
 
 ### `validate_anchor(anchor, anchor_offset, text_bytes, pt, arch, error_out)`
 
@@ -651,17 +654,19 @@ The analysis sets `LivenessAnalysisOptions::exec_masked_defs_kill`, so a masked 
 
 Callable probes enter with VSKIP proven clear. Dispatch establishes that state
 for KernelEntry probes; other sites require a proof on the effective guest CFG.
-When the decoded text has no VSKIP writer, resolved local calls also preserve
+When no decoded instruction may enable VSKIP, resolved local calls also preserve
 this state if their return links remain intact. The bounded proof follows scalar
 copies and constant-lane saves/restores of the incoming return pair, including
 non-leaf callees; unknown transfers, damaged links, and recursive summaries
-remain unproven. This proves only VSKIP, not interprocedural register liveness.
+remain unproven. On CDNA1–4, clear GPR indexing can use the same bounded flow
+proof with an independent check for GPR-indexing enables. These establish MODE
+preconditions; EXEC and interprocedural register liveness retain their own checks.
 Probe bodies that may enable VSKIP are rejected because the call envelope also
 requires vector instructions to execute. Probe live-in analysis seeds its entry
 with this callable precondition, independently of its EXEC policy.
-The execution-state check runs with the allocation checks during patch preflight;
-`validate_points()` resolves structural and probe-body contracts without promising
-that those preflight requirements can be met.
+`validate_points()` checks per-site MODE and storage state alongside structural
+and probe-body contracts. Patch preflight additionally checks physical register
+usage, allocation and spill requirements.
 
 Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5 without a proof that all `MODE.VGPR_MSB` roles are zero at each call site (the instrumentor derives this from the sole kernel entry and rejects guests with calls); relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
 
@@ -961,8 +966,9 @@ zero instead of the requested launch value.
 `AnchorVgpr` sources are parallel copies made before constants or scalar-sourced
 argument writes. The builder orders overlapping copies and breaks cycles with a
 dead VGPR. Observed sources participate in resource exclusion even if the guest
-itself no longer uses them. Each observation is a read before its anchor in the
-effective CFG, including when a replacement deletes the last guest read. Liveness
+itself no longer uses them. Each observation is a read at its selected point in
+the effective CFG: after the anchor for AfterInst, before it for ordinary sites,
+including when a replacement deletes the last guest read. Liveness
 propagates that read backward to earlier probes until a definition is proven to
 execute and overwrite every lane. A VSKIP-affected instruction can end that range
 only where VSKIP is proven clear, including when its result is an SGPR or an
@@ -971,9 +977,13 @@ dispatch entries with backedges, and treats unknown entries, possible enables,
 and calls conservatively. Explicit clears can restore the proof. Partial or unknown EXEC remains conservative;
 EXEC precision is disabled for unmodeled calls, transfers, or descriptor entries.
 Dispatch-only KernelEntry reads are local to their entry probe, rather than reads
-on guest backedges. Kernarg-preload descriptors retain conservative EXEC liveness:
-firmware may dispatch at entry + 256, whose mask cannot inherit instructions in
-the skipped prefix. Adding a queued point invalidates the cached liveness.
+on guest backedges. CDNA3/CDNA4 kernarg-preload descriptors retain conservative
+EXEC liveness: firmware may dispatch at entry + 256, whose mask cannot inherit
+instructions in the skipped prefix. Both dispatch paths are explicit external
+CFG roots, bounded by the original text; firmware entry discovery starts with
+fresh register facts even when the software prefix falls through. Dispatch-clear
+MODE state still merges with guest backedges. Adding a queued point invalidates
+the cached liveness.
 Sources must fit the original ordinary VGPR allocation before register growth;
 growth also reserves observed inputs beyond the original metadata's used count.
 Register-backup destinations must avoid live values,

@@ -23,6 +23,8 @@
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna3/sgpr_layout.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -2665,7 +2667,7 @@ TEST(InstrumentorProbePatch, VskipProofSupportsCompiledLeafAndNonLeafCalls) {
   };
   for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     const uint32_t machine = arch == rocjitsu::IsaFamily::Cdna3 ? EF_AMDGPU_MACH_AMDGCN_GFX942
-                                                              : EF_AMDGPU_MACH_AMDGCN_GFX950;
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX950;
     const std::vector<uint8_t> probe =
         make_amdgpu_probe_elf("return_probe", {build_s_setpc_b64(30, arch).value()}, machine);
     const AmdGpuCodeObject probe_object(probe.data(), probe.size());
@@ -2714,6 +2716,248 @@ TEST(InstrumentorProbePatch, VskipProofSupportsCompiledLeafAndNonLeafCalls) {
   }
 }
 
+// The software prefix loads the same two dwords firmware supplies when it
+// enters at +256; metadata must describe both valid dispatch paths.
+std::vector<uint8_t> make_preload_kernel_elf(const std::vector<uint32_t> &words,
+                                             rocjitsu::IsaFamily arch, uint32_t machine) {
+  std::vector<uint8_t> image =
+      make_amdgpu_kernel_elf(words, 64, kCallableProbeGranulatedSgprCount, machine, 0, 0, false,
+                             false, false, false, false, true, 2 * sizeof(uint32_t));
+  const AmdGpuCodeObject initial(image.data(), image.size());
+  if (!initial.is_valid() || initial.text_sections().size() != 1)
+    return {};
+  const Section &text = *initial.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+  if (kernels.size() != 1)
+    return {};
+  amdhsa::kernel_descriptor_t descriptor = kernels.front().descriptor;
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, amdhsa::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 4);
+  RJ_AMDHSA_BITS_SET(descriptor.kernarg_preload, amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 2);
+  std::memcpy(image.data() + kernels.front().descriptor_file_offset, &descriptor,
+              sizeof(descriptor));
+  return with_descriptor_metadata(image, arch);
+}
+
+TEST(InstrumentorProbePatch, VskipProofSupportsPreloadFirmwareEntryInsideABlock) {
+  constexpr uint64_t kFirmwareEntry = 256;
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const uint32_t machine = arch == rocjitsu::IsaFamily::Cdna3 ? EF_AMDGPU_MACH_AMDGCN_GFX942
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX950;
+    const util::FailureOr<std::array<uint32_t, 2>> load = build_s_load_dwordx2(2, 0, 0, arch);
+    const util::FailureOr<std::vector<uint32_t>> wait = build_wait_all_loads_complete(arch);
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+    ASSERT_TRUE(load.succeeded() && wait.succeeded() && nop.succeeded());
+    const std::vector<uint8_t> probe_image =
+        make_amdgpu_probe_elf("return_probe", {build_s_setpc_b64(30, arch).value()}, machine);
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    const CompiledCallProgram call = make_compiled_call_program(arch, false);
+    for (bool fallthrough : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "arch=" << static_cast<int>(arch) << " fallthrough=" << fallthrough);
+      std::vector<uint32_t> words(load.value().begin(), load.value().end());
+      words.insert(words.end(), wait.value().begin(), wait.value().end());
+      const int16_t displacement =
+          static_cast<int16_t>(kFirmwareEntry / sizeof(uint32_t) - words.size() - 1);
+      words.push_back(fallthrough ? nop.value() : build_s_branch(displacement, arch).value());
+      words.resize(kFirmwareEntry / sizeof(uint32_t), nop.value());
+      words.insert(words.end(), call.words.begin(), call.words.end());
+      const std::vector<uint8_t> image = make_preload_kernel_elf(words, arch, machine);
+      ASSERT_FALSE(image.empty());
+      const std::vector<uint8_t> pristine = image;
+      const AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+      ASSERT_NE(decoder, nullptr);
+      const util::FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+          BasicBlock::build(source, *decoder, arch);
+      ASSERT_TRUE(blocks.succeeded());
+      const BasicBlock *firmware_block = nullptr;
+      size_t recovered_calls = 0;
+      for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+        if (block->start_offset() <= kFirmwareEntry && kFirmwareEntry < block->end_offset())
+          firmware_block = block.get();
+        for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+          EXPECT_EQ(edge.kind, BasicBlock::CallEdgeKind::IndirectSwapPc);
+          ++recovered_calls;
+        }
+      }
+      ASSERT_NE(firmware_block, nullptr);
+      EXPECT_EQ(firmware_block->start_offset() == kFirmwareEntry, !fallthrough);
+      ASSERT_EQ(recovered_calls, 1u);
+      Instrumentor instrumentor(source, arch);
+      instrumentor.add_point({.anchor_offset = kFirmwareEntry + call.anchor_offset,
+                              .kind = InstrumentationKind::BeforeInst,
+                              .probe_obj = &probe,
+                              .probe_symbol = "return_probe",
+                              .probe_args = {}});
+      const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+      ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+      const InstrumentedCodeObject result = instrumentor.patch();
+      EXPECT_TRUE(result.errors.empty()) << (result.errors.empty() ? "" : result.errors.front());
+      EXPECT_FALSE(result.elf_bytes.empty());
+      EXPECT_EQ(result.sites.size(), 1u);
+      ASSERT_EQ(source.image_size(), pristine.size());
+      EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    }
+  }
+}
+
+TEST(InstrumentorProbePatch, PreloadFirmwareEntryDoesNotInheritPrefixCallTarget) {
+  constexpr uint64_t kFirmwareEntry = 256;
+  constexpr size_t kBuilderWords = 4; // getpc, add + literal, addc
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    SCOPED_TRACE(::testing::Message() << "arch=" << static_cast<int>(arch));
+    const uint32_t machine = arch == rocjitsu::IsaFamily::Cdna3 ? EF_AMDGPU_MACH_AMDGCN_GFX942
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX950;
+    const util::FailureOr<std::array<uint32_t, 2>> load = build_s_load_dwordx2(2, 0, 0, arch);
+    const util::FailureOr<std::vector<uint32_t>> wait = build_wait_all_loads_complete(arch);
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+    ASSERT_TRUE(load.succeeded() && wait.succeeded() && nop.succeeded());
+    const CompiledCallProgram call = make_compiled_call_program(arch, false);
+    ASSERT_GT(call.words.size(), kBuilderWords);
+    std::vector<uint32_t> words(load.value().begin(), load.value().end());
+    words.insert(words.end(), wait.value().begin(), wait.value().end());
+    const size_t builder_word = words.size();
+    words.insert(words.end(), call.words.begin(), call.words.begin() + kBuilderWords);
+    ASSERT_LT(words.size(), kFirmwareEntry / sizeof(uint32_t));
+    words.resize(kFirmwareEntry / sizeof(uint32_t), nop.value());
+    // The firmware can enter directly at this swappc, skipping the only
+    // materialization of its target s[8:9]. Falling through the prefix is valid.
+    words.insert(words.end(), call.words.begin() + kBuilderWords, call.words.end());
+    const size_t callee_word = kFirmwareEntry / sizeof(uint32_t) + call.callee_word - kBuilderWords;
+    words[builder_word + 2] =
+        static_cast<uint32_t>((callee_word - builder_word - 1) * sizeof(uint32_t));
+    const std::vector<uint8_t> image = make_preload_kernel_elf(words, arch, machine);
+    ASSERT_FALSE(image.empty());
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    const std::array<uint64_t, 2> entries = {0, kFirmwareEntry};
+    const std::array<uint64_t, 1> split_points = {kFirmwareEntry};
+    for (bool entered_fresh : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "entered_fresh=" << entered_fresh);
+      const std::span<const uint64_t> selected_entries =
+          entered_fresh ? std::span<const uint64_t>(entries)
+                        : std::span<const uint64_t>(entries).first(1);
+      const util::FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+          BasicBlock::build_cfg(source, *decoder, arch,
+                                {.decode_policy = BasicBlock::DecodePolicy::FullSection,
+                                 .entries = selected_entries,
+                                 .split_points = split_points});
+      ASSERT_TRUE(blocks.succeeded());
+      const BasicBlock *firmware_block = nullptr;
+      size_t recovered_calls = 0;
+      for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+        if (block->start_offset() == kFirmwareEntry)
+          firmware_block = block.get();
+        recovered_calls += block->call_edges().size();
+      }
+      ASSERT_NE(firmware_block, nullptr);
+      // The fallthrough path still supplies a legitimate bounded target.
+      // Fresh entry adds an unconstrained alternative; it cannot certify that
+      // the known candidate is the complete target set.
+      EXPECT_EQ(recovered_calls, 1u);
+      const std::vector<IndirectCallFixup> &fixups = firmware_block->static_indirect_call_fixups();
+      ASSERT_EQ(fixups.size(), 1u);
+      EXPECT_EQ(fixups.front().source_call_offset, kFirmwareEntry);
+      EXPECT_EQ(fixups.front().source_target_offset, callee_word * sizeof(uint32_t));
+      EXPECT_EQ(fixups.front().source_incomplete, entered_fresh);
+      if (entered_fresh) {
+        EXPECT_EQ(firmware_block->successor_issue(),
+                  BasicBlock::SuccessorIssue::IndirectControlFlow);
+      }
+    }
+    const std::vector<uint8_t> probe_image =
+        make_amdgpu_probe_elf("return_probe", {build_s_setpc_b64(30, arch).value()}, machine);
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    const InstrumentationPoint point = {.anchor_offset = kFirmwareEntry + call.anchor_offset -
+                                                         kBuilderWords * sizeof(uint32_t),
+                                        .kind = InstrumentationKind::BeforeInst,
+                                        .probe_obj = &probe,
+                                        .probe_symbol = "return_probe",
+                                        .probe_args = {}};
+    const std::unique_ptr<Instruction> anchor(
+        decode_valid(*decoder, words.data() + point.anchor_offset / sizeof(uint32_t)));
+    ASSERT_NE(anchor, nullptr);
+    const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(words.data()),
+                                              words.size() * sizeof(uint32_t));
+    std::string anchor_error;
+    ASSERT_TRUE(
+        validate_anchor(*anchor, point.anchor_offset, text_bytes, point, arch, &anchor_error)
+            .has_value())
+        << anchor_error;
+    Instrumentor instrumentor(source, arch);
+    instrumentor.add_point(point);
+    // Structural anchor admission succeeds. The fresh-entry call can reach
+    // unknown code, so both query and emission must reject its unknown MODE
+    // state. GPR indexing is checked before the independent VSKIP condition.
+    constexpr std::string_view kUnknownState = "probe observation may inherit enabled GPR indexing";
+    const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+    ASSERT_FALSE(validation.errors.empty());
+    EXPECT_NE(validation.errors.front().find(kUnknownState), std::string::npos)
+        << validation.errors.front();
+    EXPECT_TRUE(validation.sites.empty());
+    const InstrumentedCodeObject result = instrumentor.patch();
+    ASSERT_FALSE(result.errors.empty());
+    EXPECT_NE(result.errors.front().find(kUnknownState), std::string::npos)
+        << result.errors.front();
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+    ASSERT_EQ(source.image_size(), pristine.size());
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+  }
+}
+
+TEST(InstrumentorProbePatch, PreloadFirmwareEntryMergesVskipEnabledBackedges) {
+  constexpr uint64_t kFirmwareEntry = 256;
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const uint32_t machine = arch == rocjitsu::IsaFamily::Cdna3 ? EF_AMDGPU_MACH_AMDGCN_GFX942
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX950;
+    const util::FailureOr<std::array<uint32_t, 2>> load = build_s_load_dwordx2(2, 0, 0, arch);
+    const util::FailureOr<std::vector<uint32_t>> wait = build_wait_all_loads_complete(arch);
+    const util::FailureOr<uint32_t> nop = build_s_nop(0, arch);
+    ASSERT_TRUE(load.succeeded() && wait.succeeded() && nop.succeeded());
+    const std::vector<uint8_t> probe_image =
+        make_amdgpu_probe_elf("return_probe", {build_s_setpc_b64(30, arch).value()}, machine);
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    for (bool loop : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << "arch=" << static_cast<int>(arch) << " loop=" << loop);
+      std::vector<uint32_t> words(load.value().begin(), load.value().end());
+      words.insert(words.end(), wait.value().begin(), wait.value().end());
+      words.resize(kFirmwareEntry / sizeof(uint32_t), nop.value());
+      words.insert(words.end(), {nop.value(), 0xbf108081u,
+                                 loop ? 0xbf88fffdu : nop.value(), // s_cbranch_execz +256
+                                 0xbf108080u, build_s_endpgm(arch).value()});
+      const std::vector<uint8_t> image = make_preload_kernel_elf(words, arch, machine);
+      ASSERT_FALSE(image.empty());
+      const AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      Instrumentor instrumentor(source, arch);
+      instrumentor.add_point({.anchor_offset = kFirmwareEntry,
+                              .kind = InstrumentationKind::BeforeInst,
+                              .probe_obj = &probe,
+                              .probe_symbol = "return_probe",
+                              .probe_args = {}});
+      const InstrumentedCodeObject result = instrumentor.patch();
+      if (loop) {
+        ASSERT_FALSE(result.errors.empty());
+        EXPECT_NE(result.errors.front().find("VSKIP"), std::string::npos) << result.errors.front();
+        EXPECT_TRUE(result.elf_bytes.empty());
+        EXPECT_TRUE(result.sites.empty());
+      } else {
+        ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+        EXPECT_FALSE(result.elf_bytes.empty());
+        EXPECT_EQ(result.sites.size(), 1u);
+      }
+      ASSERT_EQ(source.image_size(), image.size());
+      EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+    }
+  }
+}
+
 TEST(InstrumentorProbePatch, VskipProofRejectsEscapingOrModifiedCompiledCallReturns) {
   enum class Corruption {
     ExternalCall,
@@ -2722,24 +2966,27 @@ TEST(InstrumentorProbePatch, VskipProofRejectsEscapingOrModifiedCompiledCallRetu
     MixedLanes,
     BranchMerge,
     RecursiveCall,
-    VskipWriter
+    VskipWriter,
+    GprIndexWriter,
+    NonLeafVskipWriter
   };
   for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     const uint32_t machine = arch == rocjitsu::IsaFamily::Cdna3 ? EF_AMDGPU_MACH_AMDGCN_GFX942
-                                                              : EF_AMDGPU_MACH_AMDGCN_GFX950;
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX950;
     const std::vector<uint8_t> probe =
         make_amdgpu_probe_elf("return_probe", {build_s_setpc_b64(30, arch).value()}, machine);
     const AmdGpuCodeObject probe_object(probe.data(), probe.size());
     for (Corruption corruption :
          {Corruption::ExternalCall, Corruption::ReturnLink, Corruption::SavedLane,
           Corruption::MixedLanes, Corruption::BranchMerge, Corruption::RecursiveCall,
-          Corruption::VskipWriter}) {
+          Corruption::VskipWriter, Corruption::GprIndexWriter, Corruption::NonLeafVskipWriter}) {
       SCOPED_TRACE(::testing::Message()
                    << "arch=" << arch << " corruption=" << static_cast<int>(corruption));
       CompiledCallProgram program = make_compiled_call_program(
           arch,
           corruption == Corruption::SavedLane || corruption == Corruption::MixedLanes ||
-              corruption == Corruption::BranchMerge,
+              corruption == Corruption::BranchMerge || corruption == Corruption::GprIndexWriter ||
+              corruption == Corruption::NonLeafVskipWriter,
           corruption == Corruption::BranchMerge ? SavedLinkJoin::Clobber : SavedLinkJoin::None);
       switch (corruption) {
       case Corruption::ExternalCall:
@@ -2773,11 +3020,27 @@ TEST(InstrumentorProbePatch, VskipProofRejectsEscapingOrModifiedCompiledCallRetu
       case Corruption::VskipWriter:
         program.words.insert(program.words.begin() + program.callee_word, 0xbf108081u);
         break;
+      case Corruption::NonLeafVskipWriter:
+        // Leave the return-link saves and all nested targets intact. Their
+        // vector lane transfers cannot prove a return when VSKIP may be set.
+        program.words.insert(program.words.end() - 1, 0xbf108081u);
+        break;
+      case Corruption::GprIndexWriter: {
+        const uint32_t writer =
+            arch == rocjitsu::IsaFamily::Cdna3
+                ? cdna3::build_sopc(cdna3::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0]
+                : cdna4::build_sopc(cdna4::kSSetGprIdxOnSopc, {.ssrc0 = 5, .ssrc1 = 8})[0];
+        // Keep both nested targets fixed and change only the final leaf body.
+        program.words.insert(program.words.end() - 1, writer);
+        break;
+      }
       }
       const std::vector<uint8_t> image =
           make_amdgpu_kernel_elf(program.words, 64, kCallableProbeGranulatedSgprCount, machine);
       const AmdGpuCodeObject object(image.data(), image.size());
-      if (corruption == Corruption::BranchMerge || corruption == Corruption::RecursiveCall) {
+      if (corruption == Corruption::BranchMerge || corruption == Corruption::RecursiveCall ||
+          corruption == Corruption::GprIndexWriter ||
+          corruption == Corruption::NonLeafVskipWriter) {
         const std::unique_ptr<Decoder> decoder = Decoder::create(arch);
         const util::FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
             BasicBlock::build(object, *decoder, arch);
@@ -2795,7 +3058,10 @@ TEST(InstrumentorProbePatch, VskipProofRejectsEscapingOrModifiedCompiledCallRetu
                               .probe_args = {}});
       const InstrumentedCodeObject result = instrumentor.patch();
       ASSERT_FALSE(result.errors.empty());
-      EXPECT_NE(result.errors.front().find("VSKIP"), std::string::npos) << result.errors.front();
+      const std::string_view expected = corruption == Corruption::VskipWriter
+                                            ? "probe observation may inherit enabled VSKIP"
+                                            : "probe observation may inherit enabled GPR indexing";
+      EXPECT_NE(result.errors.front().find(expected), std::string::npos) << result.errors.front();
       EXPECT_TRUE(result.elf_bytes.empty());
       EXPECT_TRUE(result.sites.empty());
       EXPECT_EQ(object.image_size(), image.size());
@@ -2907,7 +3173,10 @@ TEST(InstrumentorProbePatch, Cdna3ReturnLinkUsesEveryKernelThatCanReachTheSite) 
       // Unproven MODE is rejected before per-site SGPR ownership is checked.
       {.entry = {0xbf800000u, indirect.value()}, .error = kUnprovenMode},
       {.entry = {call, end, ret}, .error = ""},
-      {.entry = {call, end, 0xbf850001u, 0xbf800000u, ret}, .error = kUnprovenMode},
+      // Both callee paths retain the link and return before the other kernel.
+      {.entry = {call, end, 0xbf850001u, 0xbf800000u, ret}, .error = ""},
+      // An opaque alternative still prevents bounding the first kernel's flow.
+      {.entry = {call, end, 0xbf850001u, indirect.value(), ret}, .error = kUnprovenMode},
       {.entry = {call, end, 0xbe840080u, ret},
        .error = kUnprovenMode}, // Overwrite either link word.
       {.entry = {call, end, 0xbe850080u, ret}, .error = kUnprovenMode},

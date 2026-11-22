@@ -324,8 +324,8 @@ TEST(ProbeCallableTest, RejectsVskipEnablingBodiesAndAcceptsClearControls) {
     const std::vector<uint8_t> image = make_elf(body);
     const AmdGpuCodeObject object(image.data(), image.size());
     std::string error;
-    const std::optional<ProbeCallable> callable =
-        build_probe_callable(object, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2, 0, &error);
+    const std::optional<ProbeCallable> callable = build_probe_callable(
+        object, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2, 0, &error);
     EXPECT_EQ(callable.has_value(), test_case.accepted) << error;
     if (!test_case.accepted) {
       EXPECT_NE(error.find("VSKIP"), std::string::npos) << error;

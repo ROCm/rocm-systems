@@ -102,6 +102,24 @@ rj_code_target_id_t effective_target(const AmdGpuCodeObject &object, rocjitsu::I
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
 
+// CDNA3/CDNA4 retain a second dispatch entry for compatible preload firmware.
+// Hardware preloading on gfx1250 uses only the descriptor entry.
+bool has_kernarg_preload_firmware_entry(const KernelDescriptorInfo &kernel,
+                                        rocjitsu::IsaFamily arch) {
+  return (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) &&
+         kernarg_preload_length(kernel.descriptor) != 0;
+}
+
+std::optional<uint64_t> kernarg_preload_firmware_entry(const KernelDescriptorInfo &kernel,
+                                                       rocjitsu::IsaFamily arch,
+                                                       uint64_t text_size) {
+  constexpr uint64_t kFirmwareSkip = 256;
+  if (!has_kernarg_preload_firmware_entry(kernel, arch) || kernel.entry_text_offset >= text_size ||
+      text_size - kernel.entry_text_offset <= kFirmwareSkip)
+    return std::nullopt;
+  return kernel.entry_text_offset + kFirmwareSkip;
+}
+
 bool requires_cdna5_valu_follower(const Instruction &inst) {
   // These gfx1250/1251 permutes need an immediately issuing safe VALU.
   // https://github.com/llvm/llvm-project/commit/0c8e5777423c2e657d7e5c61b2cc812253f9b3ec
@@ -1202,12 +1220,12 @@ bool kernel_has_unknown_target(BasicBlock &entry, const KernelScopeSpec &spec,
 // Return provenance for the closed-text MODE proof is separate from register
 // liveness. Summarized callees may destroy any register they actually define;
 // lane saves survive a nested call only when its inspected callees leave them alone.
-class ClosedVskipCalls {
+class ClosedCallFlow {
 public:
-  ClosedVskipCalls(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                   const BlockOffsetIndex &offsets,
-                   const std::unordered_set<const BasicBlock *> &proven_reentries,
-                   uint32_t ordinary_sgprs)
+  ClosedCallFlow(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                 const BlockOffsetIndex &offsets,
+                 const std::unordered_set<const BasicBlock *> &proven_reentries,
+                 uint32_t ordinary_sgprs)
       : offsets_(offsets), proven_reentries_(proven_reentries), ordinary_sgprs_(ordinary_sgprs) {
     for (const std::unique_ptr<BasicBlock> &block : blocks)
       decoded_.insert(block.get());
@@ -1457,16 +1475,26 @@ private:
   }
 };
 
-// Omitted but bounded call/return edges cannot introduce set VSKIP when
-// every instruction in the inspected text leaves it clear. This establishes
-// only the MODE precondition, never EXEC or interprocedural register liveness.
-bool vskip_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                                       std::span<const KernelDescriptorInfo> kernels,
-                                       std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
+// Bounded call/return edges preserve a MODE bit only when its own writer scan
+// proves it stays clear. This establishes neither EXEC nor register liveness.
+bool mode_state_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
+                                            std::span<const KernelDescriptorInfo> kernels,
+                                            std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
+                                            CallableState state, uint64_t entry_text_size) {
+  if (!arch_is_cdna_4_or_lower(arch) ||
+      (state != CallableState::GprIndexing && state != CallableState::Vskip))
+    return false;
   std::unordered_set<const BasicBlock *> proven_reentries;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
-      if (may_enable_vskip(inst, text, arch) || inst.mnemonic().starts_with("s_rfe"))
+      const bool enables = state == CallableState::GprIndexing
+                               ? may_enable_gpr_indexing(inst, text, arch)
+                               : may_enable_vskip(inst, text, arch);
+      // Return-link tags in VGPR lanes require their save/restore instructions
+      // to issue, even when this invocation proves GPR indexing rather than VSKIP.
+      const bool skips_lane_saves =
+          state == CallableState::GprIndexing && may_enable_vskip(inst, text, arch);
+      if (enables || skips_lane_saves || inst.mnemonic().starts_with("s_rfe"))
         return false;
       if ((inst.flags() & INDIRECT_CALL) &&
           (&inst != block->terminator() || block->call_edges().empty()))
@@ -1488,8 +1516,14 @@ bool vskip_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBl
     if (entry == nullptr || !count)
       return false;
     KernelScopeSpec spec;
-    if (kernarg_preload_length(kernel.descriptor))
-      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    if (has_kernarg_preload_firmware_entry(kernel, arch)) {
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, arch, entry_text_size);
+      BasicBlock *extra = firmware ? block_for_offset(offsets, *firmware) : nullptr;
+      if (extra == nullptr || extra->start_offset() != *firmware)
+        return false;
+      spec.own_entries.insert(*firmware);
+    }
     const std::vector<BasicBlock *> reached =
         reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
     const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
@@ -1498,7 +1532,7 @@ bool vskip_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBl
                                   : ordinary_sgpr_bound(arch, *count);
     if (kernel_has_unknown_target(*entry, spec, offsets, reachable, ordinary, proven_reentries,
                                   true)) {
-      ClosedVskipCalls calls(blocks, offsets, proven_reentries, ordinary);
+      ClosedCallFlow calls(blocks, offsets, proven_reentries, ordinary);
       if (!calls.contains_flow(*entry, spec))
         return false;
     }
@@ -1511,7 +1545,8 @@ bool vskip_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBl
 std::unordered_map<uint64_t, std::vector<uint32_t>>
 cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                         std::span<const KernelDescriptorInfo> kernels,
-                        std::span<const ResolvedInstrumentationSite> sites) {
+                        std::span<const ResolvedInstrumentationSite> sites,
+                        uint64_t source_text_size) {
   std::unordered_map<uint64_t, std::vector<uint32_t>> owners;
   const auto offsets = build_block_offset_index(blocks);
   const auto positions = build_block_position_index(blocks);
@@ -1522,16 +1557,23 @@ cdna3_probe_sgpr_counts(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
     all_counts.push_back(count);
     auto *entry = block_for_offset(offsets, kernel.entry_text_offset);
     KernelScopeSpec spec;
-    // On gfx942 firmware can start 256 bytes beyond a kernarg-preload entry.
-    if (kernarg_preload_length(kernel.descriptor))
-      spec.own_entries.insert(kernel.entry_text_offset + 256);
+    bool missing_firmware_entry = false;
+    if (has_kernarg_preload_firmware_entry(kernel, rocjitsu::IsaFamily::Cdna3)) {
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, rocjitsu::IsaFamily::Cdna3, source_text_size);
+      BasicBlock *extra = firmware ? block_for_offset(offsets, *firmware) : nullptr;
+      missing_firmware_entry = extra == nullptr || extra->start_offset() != *firmware;
+      if (!missing_firmware_entry)
+        spec.own_entries.insert(*firmware);
+    }
     std::vector<BasicBlock *> reached;
     if (entry)
       reached = reachable_kernel_blocks(blocks, offsets, positions, *entry, spec);
     const std::unordered_set<BasicBlock *> reachable(reached.begin(), reached.end());
     const bool incomplete =
-        !entry || kernel_has_unknown_target(*entry, spec, offsets, reachable,
-                                            cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count)));
+        !entry || missing_firmware_entry ||
+        kernel_has_unknown_target(*entry, spec, offsets, reachable,
+                                  cdna3::flat_scratch_base(cdna3::sgpr_alias_end(count)));
     for (const auto &site : sites) {
       if (site.is_probe_call() &&
           (incomplete || reachable.contains(block_for_offset(offsets, site.anchor_offset))))
@@ -1736,12 +1778,27 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
 // their observation states once, independently of the requested instrumentation.
 class Instrumentor::CallableStateAnalysis {
 public:
-  CallableStateAnalysis(std::span<const std::unique_ptr<BasicBlock>> blocks,
+  CallableStateAnalysis(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                         std::span<const KernelDescriptorInfo> kernels,
-                        std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
+                        std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
+                        uint64_t source_text_size) {
+    const uint64_t entry_text_size = std::min<uint64_t>(text.size(), source_text_size);
     std::unordered_set<uint64_t> entries;
-    for (const KernelDescriptorInfo &kernel : kernels)
+    for (const KernelDescriptorInfo &kernel : kernels) {
       entries.insert(kernel.entry_text_offset);
+      if (!has_kernarg_preload_firmware_entry(kernel, arch))
+        continue;
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, arch, entry_text_size);
+      // An appended replacement cave cannot supply a missing source entry.
+      if (!firmware || !std::ranges::any_of(blocks, [&](const std::unique_ptr<BasicBlock> &block) {
+            return block->start_offset() == *firmware;
+          })) {
+        missing_firmware_entry_ = true;
+        continue;
+      }
+      entries.insert(*firmware);
+    }
     std::unordered_set<const BasicBlock *> reachable;
     std::vector<const BasicBlock *> work;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1769,7 +1826,7 @@ public:
     for (const CallableState state :
          {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
       if (has_callable_state(arch, state))
-        analyze_state(blocks, kernels, text, arch, state, entries, reachable);
+        analyze_state(blocks, kernels, text, arch, state, entries, reachable, entry_text_size);
     }
   }
 
@@ -1781,7 +1838,7 @@ public:
                                    CallableState state) const {
     const std::unordered_map<const Instruction *, PointState>::const_iterator found =
         states_.find(&anchor);
-    return found == states_.end() ||
+    return missing_firmware_entry_ || found == states_.end() ||
            ((after ? found->second.after : found->second.before) & state_bit(state)) != 0;
   }
 
@@ -1796,17 +1853,19 @@ private:
     uint8_t outgoing = 0;
   };
   std::unordered_map<const Instruction *, PointState> states_;
+  bool missing_firmware_entry_ = false;
   bool has_mfma_producer_ = false;
   bool has_cdna5_producer_ = false;
   bool has_cdna5_packed_permute_ = false;
 
   static uint8_t state_bit(CallableState state) { return 1u << static_cast<unsigned>(state); }
 
-  void analyze_state(std::span<const std::unique_ptr<BasicBlock>> blocks,
+  void analyze_state(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                      std::span<const KernelDescriptorInfo> kernels, std::span<const uint8_t> text,
                      rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<uint64_t> &entries,
-                     const std::unordered_set<const BasicBlock *> &reachable) {
+                     const std::unordered_set<const BasicBlock *> &reachable,
+                     uint64_t entry_text_size) {
     std::unordered_set<const Instruction *> preserving_calls;
     std::unordered_set<const Instruction *> known_returns;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1836,14 +1895,14 @@ private:
       incomplete |=
           issue != BasicBlock::SuccessorIssue::None && !known_returns.contains(block->terminator());
     }
-    // The general proof models straight-line callees. VSKIP alone can also
-    // use the bounded return-link proof; this does not relax the other states
-    // or the stricter post-anchor completeness checks below.
+    // The general proof models straight-line callees. Each MODE bit can also
+    // use the bounded return-link proof with its own writer scan. Storage and
+    // the stricter post-anchor completeness checks retain their existing gates.
     const bool closed_state =
         incomplete &&
         (callable_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state) ||
-         (state == CallableState::Vskip &&
-          vskip_is_preserved_in_closed_text(blocks, kernels, text, arch)));
+         mode_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state,
+                                                entry_text_size));
 
     // Each bit denotes a possible incoming state; zero has no proven source.
     // Constant writes seed the worklist even inside cycles. Ordinary edges join
@@ -2152,9 +2211,22 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
                                          analysis.image_size());
     const std::vector<KernelDescriptorInfo> kernels =
         scan_kernel_descriptors(image, text->sectionOffset(), text->size());
-    for (const KernelDescriptorInfo &kernel : kernels)
+    const uint64_t entry_text_size =
+        obj_.text_sections().size() == 1
+            ? std::min(text->size(), obj_.text_sections().front()->size())
+            : 0;
+    for (const KernelDescriptorInfo &kernel : kernels) {
       kernel_entries.push_back(kernel.entry_text_offset);
+      const std::optional<uint64_t> firmware =
+          kernarg_preload_firmware_entry(kernel, arch_, entry_text_size);
+      if (firmware)
+        kernel_entries.push_back(*firmware);
+    }
+    std::ranges::sort(kernel_entries);
+    kernel_entries.erase(std::ranges::unique(kernel_entries).begin(), kernel_entries.end());
   }
+  // Both firmware paths are external roots: a split point alone would retain
+  // indirect-target facts from a prefix the command processor can skip.
   FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
       BasicBlock::build(analysis, *decoder_, arch_, decode_error.emitter(), kernel_entries);
   if (blocks.failed()) {
@@ -2245,17 +2317,27 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
   // unmodeled input, since preceding instructions need not run on dispatch.
   bool can_analyze_exec = !kernels.empty();
   std::vector<const BasicBlock *> entries;
+  const uint64_t entry_text_size = std::min(text->size(), obj_.text_sections().front()->size());
   for (const KernelDescriptorInfo &kernel : kernels) {
-    // Preload firmware may skip the first 256 bytes. That entry is not a CFG
-    // boundary here, so its dispatch mask cannot inherit prefix instructions.
-    if (kernarg_preload_length(kernel.descriptor))
-      can_analyze_exec = false;
     const std::vector<BasicBlock *>::const_iterator entry =
         std::ranges::find(scope, kernel.entry_text_offset, &BasicBlock::start_offset);
     if (entry == scope.end())
       can_analyze_exec = false;
     else
       entries.push_back(*entry);
+    if (!has_kernarg_preload_firmware_entry(kernel, arch_))
+      continue;
+    // Firmware dispatch has clear VSKIP but may have partial EXEC, even though
+    // the skipped-prefix boundary is represented in this graph.
+    can_analyze_exec = false;
+    const std::optional<uint64_t> firmware =
+        kernarg_preload_firmware_entry(kernel, arch_, entry_text_size);
+    if (firmware) {
+      const std::vector<BasicBlock *>::const_iterator extra =
+          std::ranges::find(scope, *firmware, &BasicBlock::start_offset);
+      if (extra != scope.end())
+        entries.push_back(*extra);
+    }
   }
   for (const BasicBlock *block : scope) {
     if (!block->call_edges().empty() || block->has_implicit_terminator() ||
@@ -2697,6 +2779,16 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ProbeEntryState probe_entry_state = ProbeEntryState::Unknown;
   const bool has_probe_requests = std::ranges::any_of(
       requests, [](const InstrumentationPoint &point) { return point.probe_obj != nullptr; });
+  // Replacement liveness and physical VGPR observations require enumerable uses.
+  // Ordinary observations retain per-point MODE admission; AfterInst also checks
+  // completeness before preservation planning.
+  const bool requires_complete_vgpr_usage =
+      has_replacements || std::ranges::any_of(requests, [](const InstrumentationPoint &point) {
+        return point.probe_obj != nullptr &&
+               std::ranges::any_of(point.probe_args, [](const ProbeArgValue &arg) {
+                 return arg.source == ProbeArgSource::AnchorVgpr;
+               });
+      });
   if (has_probe_requests && !out.kernels.empty() && out.wave_size) {
     if (!ensure_liveness_built(*out.wave_size, out.kernels, &err, requests)) {
       out.errors.push_back(std::move(err));
@@ -2707,7 +2799,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       out.errors.emplace_back("probe calls require available guest liveness");
       return out;
     }
-    if (!complete.value()) {
+    if (requires_complete_vgpr_usage && !complete.value()) {
       out.errors.emplace_back("probe calls do not support relative or GPR-indexed VGPR access");
       return out;
     }
@@ -2903,7 +2995,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
       site = replacements[replacement_indices.at(pt.anchor_offset)];
     else
       site = validate_anchor(*anchor, pt.anchor_offset, text_bytes, pt, arch_, &perr,
-                               setreg_vgpr_msb_fixup);
+                             setreg_vgpr_msb_fixup);
     if (!site) {
       out.errors.push_back(std::move(perr));
       continue;
@@ -2947,8 +3039,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
           continue;
         }
         if (!callable_state_analysis_)
-          callable_state_analysis_ =
-              std::make_unique<CallableStateAnalysis>(blocks_, out.kernels, analysis_text_bytes, arch_);
+          callable_state_analysis_ = std::make_unique<CallableStateAnalysis>(
+              blocks_, out.kernels, analysis_text_bytes, arch_, text->size());
         // A scalar anchor does not discharge dependencies left by earlier VALUs.
         // Until spacing is proven, exclude the entire decoded object, including
         // unreachable producers and helper bodies rather than guessing ownership.
@@ -3298,7 +3390,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
   std::unordered_map<uint64_t, std::vector<uint32_t>> cdna3_owners;
   if (arch_ == rocjitsu::IsaFamily::Cdna3 && kernels.size() > 1 && !resolved.probes.empty())
-    cdna3_owners = cdna3_probe_sgpr_counts(blocks_, kernels, sites);
+    cdna3_owners =
+        cdna3_probe_sgpr_counts(blocks_, kernels, sites, obj_.text_sections().front()->size());
 
   std::vector<AppliedSite> applied;
   applied.reserve(sites.size());

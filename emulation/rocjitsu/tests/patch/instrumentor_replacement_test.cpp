@@ -1588,7 +1588,8 @@ TEST(InstrumentorReplacement, ConcreteVariantControlsSourceAndReplacementDecodin
 TEST(InstrumentorReplacement, RejectsArchitectureOverrideForConcreteAndLegacySources) {
   for (const uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX908, EF_AMDGPU_MACH_AMDGCN_GFX950}) {
     const rocjitsu::IsaFamily source_arch = arch_for_elf_mach(machine);
-    const rocjitsu::IsaFamily wrong_arch = source_arch == kArch ? rocjitsu::IsaFamily::Cdna1 : kArch;
+    const rocjitsu::IsaFamily wrong_arch =
+        source_arch == kArch ? rocjitsu::IsaFamily::Cdna1 : kArch;
     const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, source_arch);
     ASSERT_TRUE(maybe_nop.succeeded());
     const uint32_t nop = maybe_nop.value();
@@ -1853,10 +1854,16 @@ TEST(InstrumentorReplacement, Rdna4FunctionAlignmentDoesNotHideExecutableBytesOr
     const AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
     if (index == 3) {
+      // Descriptor entries are CFG roots, so this malformed entry is rejected
+      // before observation can cache a usable CFG. Queries and forks must agree.
       Instrumentor warmed(source, arch);
       warmed.add_point_by_offset(8);
       const Instrumentor::ValidationResult eligible = warmed.validate_points();
-      ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
+      EXPECT_FALSE(eligible.errors.empty());
+      EXPECT_TRUE(eligible.sites.empty());
+      EXPECT_TRUE(std::ranges::any_of(eligible.errors, [](const std::string &message) {
+        return message.find("alignment") != std::string::npos;
+      }));
       TextEditError error;
       EXPECT_EQ(warmed.instruction_boundaries(error), nullptr);
       EXPECT_NE(error.message.find("alignment"), std::string::npos) << error.message;
@@ -1988,7 +1995,7 @@ TEST(InstrumentorReplacement, ForkBatchesCheckDescriptorEntriesBeforePublishingA
   }
 }
 
-TEST(InstrumentorReplacement, RejectsSourceDebugBranchesWithoutDestinationMetadata) {
+TEST(InstrumentorReplacement, DecodedDebugBranchReferencesRejectInteriorEdits) {
   constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna3;
   const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
   ASSERT_TRUE(maybe_nop.succeeded());
@@ -1998,7 +2005,7 @@ TEST(InstrumentorReplacement, RejectsSourceDebugBranchesWithoutDestinationMetada
   const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
   ASSERT_TRUE(endpgm.succeeded());
   // These gfx942 debug branches target the literal inside the edit at [4,12).
-  // Their absent branch metadata must not hide that uncollected reference.
+  // Their decoded references can be collected, but cannot enter an edited extent.
   constexpr std::array<uint32_t, 4> kDebugBranches = {0xbf970001u, 0xbf980001u, 0xbf990001u,
                                                       0xbf9a0001u};
   for (const uint32_t branch : kDebugBranches) {
@@ -2007,19 +2014,36 @@ TEST(InstrumentorReplacement, RejectsSourceDebugBranchesWithoutDestinationMetada
         test::make_gfx942_kernel_elf({branch, 0xbe8000ffu, 0x12345678u, endpgm.value()}, 0);
     const std::vector<uint8_t> pristine = image;
     const AmdGpuCodeObject source(image.data(), image.size());
-    Instrumentor instrumentor(source, arch);
-    instrumentor.add_point(replacement_point(4, {0xbe8000ffu, 0x12345678u}, {nop, nop}));
-    const Instrumentor::ValidationResult validated = instrumentor.validate_points();
-    EXPECT_TRUE(validated.sites.empty());
-    EXPECT_FALSE(validated.errors.empty());
-    ASSERT_TRUE(validated.edit_error);
-    EXPECT_EQ(validated.edit_error->code, TextEditErrorCode::UnsupportedReferences);
-    EXPECT_EQ(validated.edit_error->offset, 0u);
-    const InstrumentedCodeObject result = instrumentor.patch();
-    expect_no_output(result);
-    ASSERT_TRUE(result.edit_error);
-    EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
-    EXPECT_EQ(result.edit_error->offset, 0u);
+    ASSERT_TRUE(source.is_valid());
+    for (const test::FactsRoute route : {test::FactsRoute::Cold, test::FactsRoute::Queried,
+                                         test::FactsRoute::Fork, test::FactsRoute::WarmFork}) {
+      SCOPED_TRACE(test::facts_route_name(route));
+      test::FactsRouteFixture fixture(source, arch);
+      ASSERT_TRUE(fixture.prepare(route, 4));
+      Instrumentor &instrumentor = fixture.batch();
+      if (route != test::FactsRoute::Cold) {
+        TextEditError error;
+        const InstructionBoundaries *facts = instrumentor.instruction_boundaries(error);
+        ASSERT_NE(facts, nullptr) << error.message;
+        EXPECT_EQ(facts, fixture.seed().instruction_boundaries(error));
+        ASSERT_EQ(facts->reference_addresses().size(), 1u);
+        EXPECT_EQ(facts->reference_addresses().front(),
+                  source.text_sections().front()->vaddr() + 8);
+      }
+      instrumentor.add_point(replacement_point(4, {0xbe8000ffu, 0x12345678u}, {nop, nop}));
+      const Instrumentor::ValidationResult validated = instrumentor.validate_points();
+      EXPECT_TRUE(validated.sites.empty());
+      EXPECT_FALSE(validated.errors.empty());
+      ASSERT_TRUE(validated.edit_error);
+      EXPECT_EQ(validated.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+      EXPECT_EQ(validated.edit_error->offset, 8u);
+      const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+      expect_no_output(result);
+      EXPECT_TRUE(result.patches.empty());
+      ASSERT_TRUE(result.edit_error);
+      EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+      EXPECT_EQ(result.edit_error->offset, 8u);
+    }
     EXPECT_TRUE(test::source_image_matches(source, pristine));
   }
   const std::vector<uint8_t> image = test::make_gfx942_kernel_elf(
@@ -2039,11 +2063,11 @@ TEST(InstrumentorReplacement, RejectsSourceDebugBranchesWithoutDestinationMetada
   EXPECT_TRUE(test::source_image_matches(source, pristine));
 }
 
-TEST(InstrumentorReplacement, SubvectorLoopReferencesRejectQueryForkValidationAndEmission) {
+TEST(InstrumentorReplacement, DecodedSubvectorLoopReferencesRejectInteriorEdits) {
   for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     SCOPED_TRACE(arch);
     const uint32_t machine = arch == rocjitsu::IsaFamily::Rdna1 ? EF_AMDGPU_MACH_AMDGCN_GFX1010
-                                                              : EF_AMDGPU_MACH_AMDGCN_GFX1030;
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX1030;
     const std::array<uint16_t, 2> opcodes =
         arch == rocjitsu::IsaFamily::Rdna1
             ? std::array{rdna1::kSSubvectorLoopBeginSopk, rdna1::kSSubvectorLoopEndSopk}
@@ -2062,7 +2086,8 @@ TEST(InstrumentorReplacement, SubvectorLoopReferencesRejectQueryForkValidationAn
     for (const uint16_t opcode : opcodes) {
       SCOPED_TRACE(opcode);
       // A label displacement of one names offset 8, inside the source literal
-      // instruction at [4,12). Neither loop form exposes that reference today.
+      // instruction at [4,12). Complete metadata permits source queries, while
+      // each mutation path must still protect that interior reference.
       const util::FailureOr<uint32_t> maybe_loop = build_sopk_encoding(arch, opcode, 0, 1);
       ASSERT_TRUE(maybe_loop.succeeded());
       const uint32_t loop = maybe_loop.value();
@@ -2074,35 +2099,40 @@ TEST(InstrumentorReplacement, SubvectorLoopReferencesRejectQueryForkValidationAn
       ASSERT_NE(decoder, nullptr);
       const DecodeResult decoded = decoder->decode_window(words);
       ASSERT_TRUE(decoded.succeeded());
-      EXPECT_FALSE(decoded.value()->branch_offset_bytes());
+      EXPECT_EQ(decoded.value()->branch_offset_bytes(), std::optional<int64_t>(4));
       const std::string mnemonic(decoded.value()->mnemonic());
       ASSERT_TRUE(mnemonic == "s_subvector_loop_begin" || mnemonic == "s_subvector_loop_end");
 
-      Instrumentor streamed(source, arch);
-      TextEditError error;
-      EXPECT_EQ(streamed.instruction_boundaries(error), nullptr);
-      EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences);
-      EXPECT_EQ(error.offset, 0u);
-      EXPECT_NE(error.message.find(mnemonic), std::string::npos);
-      EXPECT_TRUE(streamed.fork(error).failed());
-      EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences);
-      EXPECT_EQ(error.offset, 0u);
-
-      Instrumentor replacement(source, arch);
-      replacement.add_point(replacement_point(4, {move, 0x12345678u}, {nop, nop}));
-      const Instrumentor::ValidationResult validated = replacement.validate_points();
-      EXPECT_TRUE(validated.sites.empty());
-      EXPECT_FALSE(validated.errors.empty());
-      ASSERT_TRUE(validated.edit_error);
-      EXPECT_EQ(validated.edit_error->code, TextEditErrorCode::UnsupportedReferences);
-      EXPECT_EQ(validated.edit_error->offset, 0u);
-      EXPECT_NE(validated.edit_error->message.find(mnemonic), std::string::npos);
-      const InstrumentedCodeObjectDebug result = replacement.patch_with_debug_summaries();
-      expect_no_output(result);
-      EXPECT_TRUE(result.patches.empty());
-      ASSERT_TRUE(result.edit_error);
-      EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
-      EXPECT_EQ(result.edit_error->offset, 0u);
+      for (const test::FactsRoute route : {test::FactsRoute::Cold, test::FactsRoute::Queried,
+                                           test::FactsRoute::Fork, test::FactsRoute::WarmFork}) {
+        SCOPED_TRACE(test::facts_route_name(route));
+        test::FactsRouteFixture fixture(source, arch);
+        ASSERT_TRUE(fixture.prepare(route, 4));
+        Instrumentor &replacement = fixture.batch();
+        if (route != test::FactsRoute::Cold) {
+          TextEditError error;
+          const InstructionBoundaries *facts = replacement.instruction_boundaries(error);
+          ASSERT_NE(facts, nullptr) << error.message;
+          EXPECT_EQ(facts, fixture.seed().instruction_boundaries(error));
+          ASSERT_EQ(facts->reference_addresses().size(), 1u);
+          EXPECT_EQ(facts->reference_addresses().front(),
+                    source.text_sections().front()->vaddr() + 8);
+        }
+        replacement.add_point(replacement_point(4, {move, 0x12345678u}, {nop, nop}));
+        const Instrumentor::ValidationResult validated = replacement.validate_points();
+        EXPECT_TRUE(validated.sites.empty());
+        EXPECT_FALSE(validated.errors.empty());
+        ASSERT_TRUE(validated.edit_error);
+        EXPECT_EQ(validated.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+        EXPECT_EQ(validated.edit_error->offset, 8u);
+        EXPECT_NE(validated.edit_error->message.find("branch reference"), std::string::npos);
+        const InstrumentedCodeObjectDebug result = replacement.patch_with_debug_summaries();
+        expect_no_output(result);
+        EXPECT_TRUE(result.patches.empty());
+        ASSERT_TRUE(result.edit_error);
+        EXPECT_EQ(result.edit_error->code, TextEditErrorCode::UnsupportedReferences);
+        EXPECT_EQ(result.edit_error->offset, 8u);
+      }
 
       // Exercise both the ordinary observation guard and the path that copies
       // an already decoded pristine CFG into shared source facts.
@@ -2111,17 +2141,22 @@ TEST(InstrumentorReplacement, SubvectorLoopReferencesRejectQueryForkValidationAn
       const Instrumentor::ValidationResult eligible = observed.validate_points();
       ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
       ASSERT_EQ(eligible.sites.size(), 1u);
-      EXPECT_EQ(observed.instruction_boundaries(error), nullptr);
-      EXPECT_EQ(error.code, TextEditErrorCode::UnsupportedReferences);
-      EXPECT_NE(error.message.find(mnemonic), std::string::npos);
-      EXPECT_TRUE(observed.fork(error).failed());
+      TextEditError error;
+      const InstructionBoundaries *observed_facts = observed.instruction_boundaries(error);
+      ASSERT_NE(observed_facts, nullptr) << error.message;
+      ASSERT_EQ(observed_facts->reference_addresses().size(), 1u);
+      EXPECT_EQ(observed_facts->reference_addresses().front(),
+                source.text_sections().front()->vaddr() + 8);
+      FailureOr<std::unique_ptr<Instrumentor>> observed_fork = observed.fork(error);
+      ASSERT_TRUE(observed_fork.succeeded()) << error.message;
+      EXPECT_EQ(observed_fork.value()->instruction_boundaries(error), observed_facts);
       const InstrumentedCodeObjectDebug observation = observed.patch_with_debug_summaries();
       expect_no_output(observation);
       EXPECT_TRUE(observation.patches.empty());
       ASSERT_TRUE(observation.edit_error);
       EXPECT_EQ(observation.edit_error->code, TextEditErrorCode::UnsupportedReferences);
-      EXPECT_EQ(observation.edit_error->offset, 0u);
-      EXPECT_NE(observation.edit_error->message.find(mnemonic), std::string::npos);
+      EXPECT_EQ(observation.edit_error->offset, 8u);
+      EXPECT_NE(observation.edit_error->message.find("branch reference"), std::string::npos);
       EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
     }
     // Known branch destinations at either source boundary remain supported.
@@ -2144,11 +2179,11 @@ TEST(InstrumentorReplacement, SubvectorLoopReferencesRejectQueryForkValidationAn
   }
 }
 
-TEST(InstrumentorReplacement, SubvectorLoopPayloadsRequireDestinationMetadata) {
+TEST(InstrumentorReplacement, SubvectorLoopPayloadsRemainPcDependent) {
   for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     SCOPED_TRACE(arch);
     const uint32_t machine = arch == rocjitsu::IsaFamily::Rdna1 ? EF_AMDGPU_MACH_AMDGCN_GFX1010
-                                                              : EF_AMDGPU_MACH_AMDGCN_GFX1030;
+                                                                : EF_AMDGPU_MACH_AMDGCN_GFX1030;
     const std::array<uint16_t, 2> opcodes =
         arch == rocjitsu::IsaFamily::Rdna1
             ? std::array{rdna1::kSSubvectorLoopBeginSopk, rdna1::kSSubvectorLoopEndSopk}
@@ -2164,6 +2199,7 @@ TEST(InstrumentorReplacement, SubvectorLoopPayloadsRequireDestinationMetadata) {
     ASSERT_TRUE(source.is_valid());
     for (const uint16_t opcode : opcodes) {
       SCOPED_TRACE(opcode);
+      // A decoded destination does not make a PC-dependent payload movable.
       const util::FailureOr<uint32_t> loop = build_sopk_encoding(arch, opcode, 0, 0);
       ASSERT_TRUE(loop.succeeded());
       Instrumentor replacement(source, arch);

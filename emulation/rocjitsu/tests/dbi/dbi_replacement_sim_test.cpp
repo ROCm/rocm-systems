@@ -735,8 +735,16 @@ TEST_P(DbiVskipReplacementSim, CallableSiteRequiresVskipClearAtItsActualBoundary
       point.probe_args = {probe_arg_vgpr(1)};
       instrumentor.add_point(std::move(point));
       const Instrumentor::ValidationResult validated = instrumentor.validate_points();
-      ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
-      ASSERT_EQ(validated.sites.size(), 1u);
+      if (test_case.accepted) {
+        ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
+        ASSERT_EQ(validated.sites.size(), 1u);
+      } else {
+        ASSERT_FALSE(validated.errors.empty());
+        EXPECT_NE(validated.errors.front().find("probe observation may inherit enabled VSKIP"),
+                  std::string::npos)
+            << validated.errors.front();
+        EXPECT_TRUE(validated.sites.empty());
+      }
       const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
       ASSERT_EQ(source.image_size(), pristine.size());
       EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
@@ -792,14 +800,19 @@ TEST_P(DbiVskipReplacementSim, LocalClearDoesNotProveCallableStateAcrossAnOpaque
     point.probe_args = {probe_arg_vgpr(1)};
     instrumentor.add_point(std::move(point));
     const Instrumentor::ValidationResult validated = instrumentor.validate_points();
-    ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
-    ASSERT_EQ(validated.sites.size(), 1u);
+    ASSERT_FALSE(validated.errors.empty());
+    EXPECT_NE(validated.errors.front().find("probe observation may inherit enabled GPR indexing"),
+              std::string::npos)
+        << validated.errors.front();
+    EXPECT_TRUE(validated.sites.empty());
     const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
     EXPECT_TRUE(result.elf_bytes.empty());
     EXPECT_TRUE(result.sites.empty());
     EXPECT_TRUE(result.patches.empty());
     ASSERT_FALSE(result.errors.empty());
-    EXPECT_NE(result.errors.front().find("VSKIP"), std::string::npos);
+    EXPECT_NE(result.errors.front().find("probe observation may inherit enabled GPR indexing"),
+              std::string::npos)
+        << result.errors.front();
     ASSERT_EQ(source.image_size(), pristine.size());
     EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
   }
@@ -966,7 +979,7 @@ TEST_P(DbiPreloadReplacementSim, FirmwareEntryDoesNotInheritExecFromTheSkippedPr
   }
 }
 
-TEST_P(DbiReplacementSim, InteriorDescriptorEntryKeepsObservationExecAnalysisConservative) {
+TEST_P(DbiReplacementSim, InteriorDescriptorEntrySeparatesExecAndVskipProofs) {
   ObservationProgram program;
   ASSERT_NO_FATAL_FAILURE(make_observation_program(ObservationDefinition::Full, 0, program, true));
   const std::vector<uint8_t> pristine = program.image;
@@ -988,11 +1001,25 @@ TEST_P(DbiReplacementSim, InteriorDescriptorEntryKeepsObservationExecAnalysisCon
   ASSERT_TRUE(validated.errors.empty()) << validated.errors.front();
   ASSERT_EQ(validated.sites.size(), 2u);
   const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
-  EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
-    return error.find("fixed scratch to spill into") != std::string::npos;
-  }));
-  EXPECT_TRUE(result.elf_bytes.empty());
-  EXPECT_TRUE(result.sites.empty());
+  // Descriptor entries are now block boundaries, so the full EXEC write after
+  // this entry can discharge the observation's old value. CDNA still merges
+  // unknown VSKIP from the decoded prefix and conservatively requires a spill.
+  if (GetParam().arch == rocjitsu::IsaFamily::Rdna4) {
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 2u);
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    const uint32_t scratch = test::patched_private_segment_size(candidate);
+    EXPECT_EQ(scratch, 0u);
+    ASSERT_NO_FATAL_FAILURE(expect_memory(test::section_words(candidate, ".text"), scratch,
+                                          kReplacementInput, 1, program.early_offset));
+  } else {
+    EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+      return error.find("fixed scratch to spill into") != std::string::npos;
+    }));
+    EXPECT_TRUE(result.elf_bytes.empty());
+    EXPECT_TRUE(result.sites.empty());
+  }
   ASSERT_EQ(source.image_size(), pristine.size());
   EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
 }
@@ -1134,6 +1161,100 @@ TEST_P(DbiVectorRelativeSim, CallableProbeRejectsReplacementIntroducingHiddenVgp
       EXPECT_NE(result.errors.front().find("VGPR"), std::string::npos);
     }
     ASSERT_NO_FATAL_FAILURE(expect_source_unchanged(source, value.image));
+  }
+}
+
+TEST_P(DbiReplacementSim, AfterObservationUsesTheValueDefinedByItsAnchor) {
+  const ReplacementSimTarget &target = GetParam();
+  const util::FailureOr<uint32_t> nop = build_s_nop(0, target.arch);
+  const util::FailureOr<uint32_t> end = build_s_endpgm(target.arch);
+  const util::FailureOr<uint16_t> exec = scalar_operand_exec_lo(target.arch);
+  const util::FailureOr<uint16_t> all_ones = scalar_inline_neg_one(target.arch);
+  ASSERT_TRUE(nop.succeeded() && end.succeeded() && exec.succeeded() && all_ones.succeeded());
+  std::vector<uint8_t> logger_image;
+  std::vector<uint8_t> clobber_image;
+  ASSERT_NO_FATAL_FAILURE(make_probe_images(LoggerOutput::Shared, logger_image, clobber_image));
+  const AmdGpuCodeObject logger(logger_image.data(), logger_image.size());
+  const AmdGpuCodeObject clobber(clobber_image.data(), clobber_image.size());
+  ASSERT_TRUE(logger.is_valid() && clobber.is_valid());
+  struct Case {
+    InstrumentationKind kind;
+    bool partial_exec;
+    uint32_t private_bytes;
+    std::optional<uint32_t> expected;
+  };
+  const std::array<Case, 5> cases = {Case{.kind = InstrumentationKind::AfterInst,
+                                          .partial_exec = false,
+                                          .private_bytes = 0,
+                                          .expected = kOriginalInput},
+                                     Case{.kind = InstrumentationKind::BeforeInst,
+                                          .partial_exec = false,
+                                          .private_bytes = 0,
+                                          .expected = std::nullopt},
+                                     Case{.kind = InstrumentationKind::BeforeInst,
+                                          .partial_exec = false,
+                                          .private_bytes = kInitialPrivateBytes,
+                                          .expected = kReplacementInput},
+                                     Case{.kind = InstrumentationKind::AfterInst,
+                                          .partial_exec = true,
+                                          .private_bytes = 0,
+                                          .expected = std::nullopt},
+                                     Case{.kind = InstrumentationKind::AfterInst,
+                                          .partial_exec = true,
+                                          .private_bytes = kInitialPrivateBytes,
+                                          .expected = kOriginalInput}};
+  for (const Case &test_case : cases) {
+    SCOPED_TRACE(static_cast<int>(test_case.kind));
+    SCOPED_TRACE(test_case.partial_exec);
+    SCOPED_TRACE(test_case.private_bytes);
+    const util::FailureOr<uint32_t> set_exec = build_s_mov_b64(
+        exec.value(), test_case.partial_exec ? scalar_positive_inline_u32(1) : all_ones.value(),
+        target.arch);
+    ASSERT_TRUE(set_exec.succeeded());
+    std::vector<uint32_t> words = setup_;
+    words.push_back(set_exec.value());
+    const uint64_t early_offset = words.size() * sizeof(uint32_t);
+    words.push_back(nop.value());
+    const uint64_t definition_offset = words.size() * sizeof(uint32_t);
+    words.push_back(test::make_mov_vgpr_inline(1, kOriginalInput));
+    words.push_back(end.value());
+    std::vector<uint8_t> image;
+    ASSERT_NO_FATAL_FAILURE(make_image(words, image, test_case.private_bytes));
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    Instrumentor instrumentor(source, target.arch);
+    InstrumentationPoint early = probe_at(early_offset, clobber);
+    early.force_full_exec = true;
+    instrumentor.add_point(std::move(early));
+    InstrumentationPoint observer = probe_at(definition_offset, logger);
+    observer.kind = test_case.kind;
+    observer.probe_args = {probe_arg_vgpr(1)};
+    instrumentor.add_point(std::move(observer));
+    const Instrumentor::ValidationResult validation = instrumentor.validate_points();
+    ASSERT_TRUE(validation.errors.empty()) << validation.errors.front();
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    ASSERT_EQ(source.image_size(), pristine.size());
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
+    if (!test_case.expected) {
+      EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+        return error.find("fixed scratch to spill into") != std::string::npos;
+      }));
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+      continue;
+    }
+    ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+    ASSERT_EQ(result.sites.size(), 2u);
+    const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    const uint32_t scratch = test::patched_private_segment_size(candidate);
+    if (test_case.private_bytes == 0) {
+      EXPECT_EQ(scratch, 0u);
+    }
+    ASSERT_NO_FATAL_FAILURE(
+        expect_memory(test::section_words(candidate, ".text"), scratch, *test_case.expected, 1));
   }
 }
 

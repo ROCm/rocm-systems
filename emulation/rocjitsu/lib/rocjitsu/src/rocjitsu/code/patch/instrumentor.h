@@ -211,7 +211,8 @@ struct InstrumentationPatch {
 /// relocated guest before its instrumentation range; ordinary BeforeInst maps
 /// it after that range. Probe bodies are shared separately. An inline observation
 /// reports its nop; replacement without a probe has an empty instrumentation range.
-/// Return branches follow the guest range and are described by the debug patch.
+/// Return branches follow the guest and instrumentation ranges and are described
+/// by the debug patch.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;

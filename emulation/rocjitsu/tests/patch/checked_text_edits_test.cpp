@@ -912,7 +912,7 @@ TEST(CheckedTextEdits, Gfx1100EditsRetainSourceTarget) {
   EXPECT_TRUE(matches_checked_output(source, requests, result.value().elf_bytes));
 }
 
-TEST(CheckedTextEdits, LegacyElfIdentityIsSourceDerivedAndUnchanged) {
+TEST(CheckedTextEdits, Gfx908ConcreteIdentityIsSourceDerivedAndUnchanged) {
   constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna1;
   const util::FailureOr<uint32_t> original = build_s_nop(1, arch);
   ASSERT_TRUE(original.succeeded());
@@ -923,7 +923,8 @@ TEST(CheckedTextEdits, LegacyElfIdentityIsSourceDerivedAndUnchanged) {
   std::vector<uint8_t> image = test::make_amdgpu_kernel_elf({original.value(), endpgm.value()}, 0,
                                                             3, EF_AMDGPU_MACH_AMDGCN_GFX908);
   const AmdGpuCodeObject source(image.data(), image.size());
-  ASSERT_EQ(source.target_id(), ROCJITSU_CODE_TARGET_INVALID);
+  // gfx908 has a concrete registry binding; replacement preserves that identity.
+  ASSERT_EQ(source.target_id(), ROCJITSU_CODE_TARGET_GFX908);
   const std::vector<ReplacementEdit> requests = {
       {.offset = 0,
        .expected = make_instruction_bytes({original.value()}),
@@ -933,7 +934,7 @@ TEST(CheckedTextEdits, LegacyElfIdentityIsSourceDerivedAndUnchanged) {
   ASSERT_TRUE(result.succeeded()) << error.message;
   const AmdGpuCodeObject candidate(result.value().elf_bytes.data(),
                                    result.value().elf_bytes.size());
-  EXPECT_EQ(candidate.target_id(), ROCJITSU_CODE_TARGET_INVALID);
+  EXPECT_EQ(candidate.target_id(), ROCJITSU_CODE_TARGET_GFX908);
   const std::vector<uint8_t> expected = result.value().elf_bytes;
   EXPECT_TRUE(matches_checked_output(source, requests, expected));
   for (const uint32_t machine :
