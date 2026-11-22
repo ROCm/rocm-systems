@@ -789,7 +789,7 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     initialize_node_pmc_infos();
     report.step("Reading stream hardware links");
     initialize_stream_hardware_links();
-    report.step("Reading node info");
+    report.finish("Reading node info");
     initialize_node_info();
     return true;
 }

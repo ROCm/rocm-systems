@@ -23,7 +23,7 @@ namespace profiler_hub
  * it. So no message carries a made-up value such as 0.0. A phase message takes
  * the next whole percent through step(). A loop that has a real fraction
  * reports it through within() on a window set by set_window(). The value never
- * falls and never reaches 100%, which the caller's own completion owns.
+ * falls, and only finish() reaches 100%.
  *
  * Callbacks can arrive from worker threads, so every call is serialized.
  */
@@ -44,6 +44,14 @@ public:
         // the percentage never rounds it down into the previous one.
         const int next = std::min(whole_percent() + 1, k_last_percent);
         emit((static_cast<double>(next) + 0.5) / 100.0, text);
+    }
+
+    /** @brief Reports @p text at 100%. The read's last message. */
+    void finish(const std::string& text)
+    {
+        const std::scoped_lock lock{ m_mutex };
+        m_last = 1.0;
+        if(m_sink) m_sink(m_last, text.c_str());
     }
 
     /** @brief The next within() calls spread over @p span of the full range. The

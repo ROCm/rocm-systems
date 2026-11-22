@@ -14,6 +14,8 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -24,11 +26,19 @@ namespace
 
 using namespace std::chrono_literals;
 
+struct progress_report
+{
+    double                     value{};
+    std::optional<std::string> description;
+};
+
 struct callback_log
 {
-    std::atomic<int>                progress_calls{ 0 };
-    std::atomic<double>             last_progress{ -1.0 };
-    std::atomic<const char*>        last_description{ nullptr };
+    std::atomic<int>    progress_calls{ 0 };
+    std::atomic<double> last_progress{ -1.0 };
+    // The description is valid only during the callback, so it is copied.
+    std::mutex                      reports_mutex;
+    std::vector<progress_report>    reports;
     std::atomic<int>                finished_calls{ 0 };
     std::atomic<ph_future_status_t> status{ PH_FUTURE_ERROR };
     std::atomic<ph_result_t>        result{ PH_RESULT_INTERNAL_ERROR };
@@ -41,10 +51,30 @@ callback_log g_log;
 void
 on_progress(ph_future_t future, double value, ph_progress_description_t description)
 {
-    g_log.progress_future  = future;
-    g_log.last_progress    = value;
-    g_log.last_description = description;
+    g_log.progress_future = future;
+    g_log.last_progress   = value;
+    {
+        const std::scoped_lock lock{ g_log.reports_mutex };
+        g_log.reports.push_back({ value,
+                                  description == nullptr
+                                      ? std::nullopt
+                                      : std::optional<std::string>{ description } });
+    }
     ++g_log.progress_calls;
+}
+
+std::vector<progress_report>
+progress_reports()
+{
+    const std::scoped_lock lock{ g_log.reports_mutex };
+    return g_log.reports;
+}
+
+std::optional<std::string>
+last_description()
+{
+    const std::scoped_lock lock{ g_log.reports_mutex };
+    return g_log.reports.empty() ? std::nullopt : g_log.reports.back().description;
 }
 
 void
@@ -61,14 +91,17 @@ class c_api_future_test : public ::testing::Test
 protected:
     void SetUp() override
     {
-        g_log.progress_calls   = 0;
-        g_log.last_progress    = -1.0;
-        g_log.last_description = nullptr;
-        g_log.finished_calls   = 0;
-        g_log.status           = PH_FUTURE_ERROR;
-        g_log.result           = PH_RESULT_INTERNAL_ERROR;
-        g_log.finished_future  = nullptr;
-        g_log.progress_future  = nullptr;
+        g_log.progress_calls = 0;
+        g_log.last_progress  = -1.0;
+        {
+            const std::scoped_lock lock{ g_log.reports_mutex };
+            g_log.reports.clear();
+        }
+        g_log.finished_calls  = 0;
+        g_log.status          = PH_FUTURE_ERROR;
+        g_log.result          = PH_RESULT_INTERNAL_ERROR;
+        g_log.finished_future = nullptr;
+        g_log.progress_future = nullptr;
     }
 
     void TearDown() override
@@ -172,20 +205,20 @@ TEST_F(c_api_future_test, progress_is_reported_clamped_until_the_operation_ends)
 
     m_future->report_progress(0.25, "loading");
     EXPECT_DOUBLE_EQ(g_log.last_progress, 0.25);
-    EXPECT_STREQ(g_log.last_description.load(), "loading");
+    EXPECT_EQ(last_description(), "loading");
     m_future->report_progress(7.0, "still loading");
     EXPECT_DOUBLE_EQ(g_log.last_progress, 1.0);
-    EXPECT_STREQ(g_log.last_description.load(), "still loading");
+    EXPECT_EQ(last_description(), "still loading");
     m_future->report_progress(-3.0, nullptr);
     EXPECT_DOUBLE_EQ(g_log.last_progress, 0.0);
-    EXPECT_EQ(g_log.last_description.load(), nullptr);
+    EXPECT_EQ(last_description(), std::nullopt);
     EXPECT_EQ(g_log.progress_future, m_future);
 
     m_future->finish(PH_FUTURE_FINISHED, PH_RESULT_SUCCESS);
     m_future->report_progress(0.5, "ignored");
 
     EXPECT_EQ(g_log.progress_calls, 3);
-    EXPECT_EQ(g_log.last_description.load(), nullptr);
+    EXPECT_EQ(last_description(), std::nullopt);
 }
 
 TEST_F(c_api_future_test, wait_returns_after_the_finished_callback_has_returned)
@@ -341,8 +374,20 @@ TEST_F(c_api_async_ctx_test, the_context_is_read_in_the_background_and_reports_i
     EXPECT_EQ(g_log.finished_calls, 1);
     EXPECT_EQ(g_log.status, PH_FUTURE_FINISHED);
     EXPECT_DOUBLE_EQ(g_log.last_progress, 1.0);
-    EXPECT_STREQ(g_log.last_description.load(), "Reading node info");
-    EXPECT_EQ(g_log.progress_calls, 13);
+    EXPECT_EQ(last_description(), "Reading node info");
+
+    // A client may show a message only when the percentage changes, so the
+    // value never falls, never sits at 0, and each message moves on.
+    const std::vector<progress_report> reports = progress_reports();
+    ASSERT_FALSE(reports.empty());
+    EXPECT_EQ(reports.front().description, "Reading schema version");
+    EXPECT_GT(reports.front().value, 0.0);
+    for(size_t index = 1; index < reports.size(); ++index)
+    {
+        EXPECT_GT(reports[index].value, reports[index - 1].value)
+            << "after " << reports[index - 1].description.value_or("") << ": "
+            << reports[index].description.value_or("");
+    }
 
     ph_track_list_t tracks{};
     ASSERT_EQ(ph_get_track_list(m_ctx, &tracks, nullptr), PH_RESULT_SUCCESS);
