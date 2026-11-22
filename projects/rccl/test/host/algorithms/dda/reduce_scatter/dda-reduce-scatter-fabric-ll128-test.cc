@@ -80,14 +80,10 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     };
   }
 
-  // The launch-shape entries of the gfx1250 SPX table on one node: 256-thread batched blocks, LL on at its 1 MiB cap.
+  // The launch-shape entries of the gfx1250 SPX table: 256-thread batched blocks, LL on at its 1 MiB cap.
   void UseShapeTable() {
     table_.ddaLLMax[ncclFuncReduceScatter] = size_t{1} << 20;
     table_.rankScaledMinRanks = 8;
-    table_.rsRingLL128MaxPerRank = size_t{8} << 20;
-    table_.rsRingLL128MaxPerRank1B = size_t{32} << 20;
-    table_.rsRingSimpleCappedMaxPerRank = size_t{32} << 20;
-    table_.rsRingSimpleCappedChannels = 128;
     table_.rsDdaLL128NarrowMaxPerRank = size_t{1} << 20;
     comm().archThresholds = &table_;
     g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 256; };
@@ -367,46 +363,25 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ThreadsOverrideWinsOverTheSh
   UseShapeTable();
   params_["RCCL_DDA_LL128_RS_THREADS"] = 512;
   EXPECT_EQ(GridBlock(4 * kSliceFloats), Shape(1u, 512u));
-  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(160u, 512u));
+  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(256u, 512u));
   params_["RCCL_DDA_LL128_RS_THREADS"] = 64;
   EXPECT_EQ(GridBlock(4 * kSliceFloats), Shape(2u, 64u));
   params_["RCCL_DDA_LL128_RS_THREADS"] = 48;
   EXPECT_EQ(GridBlock(4 * kSliceFloats), Shape(1u, 128u)) << "an invalid override is ignored";
 }
 
-// From the table's rankScaledMinRanks on one node, a batched shard in the band where Ring Simple runs on capped
-// channels (above the Ring LL128 bound for its type size, up to rsRingSimpleCappedMaxPerRank) gets at most a quarter
-// more blocks than those channels: 160 for 128.
-TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTableCapsTheGridInTheRingSimpleCappedBand) {
+// The shape table leaves shards past the narrow window on the full grid budget, including Ring Simple's capped band
+// (8 MiB, 32 MiB], where capping the grid to Ring's channels was slower.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTableKeepsTheGridBudgetPastTheNarrowWindow) {
   using Shape = std::pair<unsigned, unsigned>;
   constexpr size_t kMiBFloats = (size_t{1} << 20) / sizeof(float);
   UseShapeTable();
   ASSERT_EQ(comm().ddaFabricMaxBlocks, 256);
   ASSERT_EQ(comm().ddaLLEpochLen, 256);
-  EXPECT_EQ(GridBlock(8 * kMiBFloats), Shape(256u, 256u)) << "an 8 MiB shard Ring runs on LL128: no Ring limit";
-  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(160u, 256u)) << "past 8 MiB: 128 Ring channels and a quarter";
-  EXPECT_EQ(GridBlock(32 * kMiBFloats), Shape(160u, 256u)) << "a 32 MiB shard is still within the capped band";
-  EXPECT_EQ(GridBlock(17477 * kSliceFloats), Shape(256u, 256u)) << "past 32 MiB Ring Simple is not capped";
-  EXPECT_EQ(GridBlock(64 * kMiBFloats, ncclFloat8e4m3), Shape(256u, 256u)) << "1-byte types: Ring LL128 to 32 MiB";
-  EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), 4370 * kSliceFloats, ncclFloat32), 160u);
+  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(256u, 256u)) << "just past an 8 MiB shard";
+  EXPECT_EQ(GridBlock(32 * kMiBFloats), Shape(256u, 256u)) << "a 32 MiB shard";
+  EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), 4370 * kSliceFloats, ncclFloat32), 256u);
   EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), 64 * kMiBFloats, ncclFloat8e4m3), 256u);
-  table_.rsRingLL128MaxPerRank1B = 0;
-  EXPECT_EQ(GridBlock(64 * kMiBFloats, ncclFloat8e4m3), Shape(160u, 256u)) << "no 1-byte entry: the 2/4-byte band";
-  table_.rsRingLL128MaxPerRank1B = size_t{32} << 20;
-  comm().ddaFabricMaxBlocks = 6;
-  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(6u, 256u)) << "a smaller grid budget still holds";
-  comm().ddaFabricMaxBlocks = 256;
-  comm().nNodes = 2;
-  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(256u, 256u)) << "Ring caps channels on one node only";
-  comm().nNodes = 1;
-  comm().nRanks = 7;
-  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(256u, 256u)) << "below rankScaledMinRanks";
-  comm().nRanks = 8;
-  PeerParallelUpTo(size_t{1} << 30);
-  EXPECT_EQ(RunOne(4370 * kSliceFloats).grid.x, 256u) << "the peer-parallel kernel keeps its grid budget";
-  PeerParallelUpTo(0);
-  comm().archThresholds = nullptr;
-  EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(256u, 256u)) << "no table";
 }
 
 // The reported block count is the launch grid of either kernel, caps included.

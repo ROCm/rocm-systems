@@ -75,21 +75,6 @@ static inline bool ddaLL128RsPeerParallel(const ncclComm* comm, size_t shardByte
   return bytes <= rcclDdaFabricRsLL128PeerMaxBytes(comm);
 }
 
-// Batched grid budget for a shard Ring would run: where Ring Simple runs on capped channels (one node, the table's
-// band above the Ring LL128 bound for this type size), at most a quarter more blocks than those channels.
-static inline int ddaLL128RsMaxBlocks(const ncclComm* comm, const rcclArchThresholds* t, size_t shardBytes,
-                                      int typeSize, int nBlocksMax) {
-  if (t == nullptr || comm->nNodes != 1 || t->rsRingSimpleCappedChannels <= 0) {
-    return nBlocksMax;
-  }
-  const size_t ringLL128Max =
-    typeSize == 1 && t->rsRingLL128MaxPerRank1B != 0 ? t->rsRingLL128MaxPerRank1B : t->rsRingLL128MaxPerRank;
-  if (shardBytes > ringLL128Max && shardBytes <= t->rsRingSimpleCappedMaxPerRank) {
-    nBlocksMax = std::min(nBlocksMax, t->rsRingSimpleCappedChannels + t->rsRingSimpleCappedChannels / 4);
-  }
-  return nBlocksMax;
-}
-
 // Whether LL ran the shards LL128 now takes narrow: LL on at no less than the table's cap, its bank in the scratch.
 // Otherwise those shards ran LL128 at full width before.
 static inline bool ddaLL128RsTakesLLShards(const ncclComm* comm, const rcclArchThresholds* t) {
@@ -122,9 +107,9 @@ struct DdaLL128RsGeom {
 
 // A warp (batched) or a warp group (peer-parallel) carries one slice, so blocks = ceil(slices / slicesPerBlock),
 // capped by the grid budget. More slices than the grid holds just means more passes through the slice loop. From
-// rankScaledMinRanks ranks the arch table also shapes the batched launch: shards LL ran start at narrow blocks and
-// widen to the batched block size once the budget is full, and shards in Ring Simple's capped band get fewer blocks.
-static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes, int typeSize) {
+// rankScaledMinRanks ranks, batched shards LL ran start at narrow blocks and widen to the batched block size once the
+// budget is full.
+static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   if (nBlocksMax < 1) {
@@ -149,7 +134,6 @@ static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, siz
     slicesPerBlock = threads / groupThreads;
   } else {
     const rcclArchThresholds* t = rcclDdaFabricRsLL128ShapeTable(comm);
-    nBlocksMax = ddaLL128RsMaxBlocks(comm, t, shardBytes, typeSize, nBlocksMax);
     const unsigned batchedThreads = ddaLL128RSThreads(comm);
     threads = batchedThreads;
     if (ddaLL128RsNarrow(comm, t, shardBytes)) {
@@ -182,7 +166,7 @@ static ncclResult_t ncclReduceScatterDdaFabricLL128Typed(const void* sendbuff, v
   const size_t slices = ddaLL128Slices(shardBytes);
   const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
 
-  const DdaLL128RsGeom geom = ddaReduceScatterFabricLL128Geom(comm, shardBytes, (int)sizeof(T));
+  const DdaLL128RsGeom geom = ddaReduceScatterFabricLL128Geom(comm, shardBytes);
 
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   // Same epoch counter every other LL/LL128 tier uses: they share a scratch
@@ -277,8 +261,7 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
 }
 
 uint32_t ncclReduceScatterDdaFabricLL128Blocks(ncclComm* comm, size_t recvcount, ncclDataType_t datatype) {
-  const int typeSize = ncclTypeSize(datatype);
-  const dim3 grid = ddaReduceScatterFabricLL128Geom(comm, recvcount * typeSize, typeSize).grid;
+  const dim3 grid = ddaReduceScatterFabricLL128Geom(comm, recvcount * ncclTypeSize(datatype)).grid;
   return grid.x * grid.y;
 }
 
