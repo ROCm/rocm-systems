@@ -447,13 +447,13 @@ def _agents_not_reporting(sdk, counter):
 def _unusable_common_counter_reason(sdk, table, counter):
     """Why a requested common counter cannot serve as a replay sanity check, or None.
 
-    A counter qualifies only if every replayed agent reports it and it reads nonzero for at
-    least one dispatch. gfx1200 and gfx1201 list counters that never increment
-    (SQ_INSTS_VALU in every performance level), so on those targets a counter that is
-    explicitly zero for every pass of every dispatch is treated as unimplemented rather
-    than as a replay defect. On every other target, including gfx942 and gfx1250, that
-    same shape is a regression and still fails. A counter zero or absent in only some
-    passes or dispatches always fails.
+    None means do not skip: the counter is kept, and the per-pass checks decide whether it
+    passes. A counter that a replayed agent does not report is skipped. gfx1200 and gfx1201
+    list counters that never increment (SQ_INSTS_VALU in every performance level), so on
+    those targets a counter that is explicitly zero for every pass of every dispatch is
+    skipped as unimplemented rather than treated as a replay defect. On every other target,
+    including gfx942 and gfx1250, that same shape is a regression and fails the per-pass
+    checks. A counter zero or absent in only some passes or dispatches always fails.
     """
     missing = _agents_not_reporting(sdk, counter)
     if missing:
