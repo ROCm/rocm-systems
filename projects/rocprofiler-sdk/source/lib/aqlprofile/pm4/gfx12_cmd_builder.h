@@ -308,7 +308,7 @@ private:
         APPEND_COMMAND_WRAPPER(cmdbuf, pm4mec_copy_data_cmd);
     }
 
-    static const bool enable_copy_data_remote_mode_ = false;
+    static const bool enable_copy_data_remote_mode_ = true;
 
 public:
     Gfx12CmdBuilder(const reg_base_offset_table* _table)

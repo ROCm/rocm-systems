@@ -34,6 +34,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_static_resolve.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/source_modifier.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -159,8 +160,8 @@ inline bool dot2_src_needs_half_replication(uint32_t selector) {
 
 /// @brief Return whether floating CLAMP converts a NaN result to positive zero.
 /// @details GFX12 and gfx1250 always convert NaN. Earlier profiles require MODE.DX10_CLAMP.
-inline bool floating_clamp_nan_to_zero(rj_code_arch_t arch, bool dx10_clamp) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5 || dx10_clamp;
+inline bool floating_clamp_nan_to_zero(rocjitsu::IsaFamily arch, bool dx10_clamp) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || dx10_clamp;
 }
 
 /// @brief Return the floating NaN CLAMP policy for one wavefront.
@@ -562,10 +563,10 @@ inline util::native<uint32_t> select_vop3_true16_src(util::native<uint32_t> valu
 
 inline bool cdna_vop3_low_dst_zeroes_high(const Wavefront &wf) {
   switch (wf.cu().arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
   default:
     return false;
@@ -3865,9 +3866,9 @@ template <typename Encoding> inline uint32_t packed_opsel_hi_2(const Encoding &e
 // gfx1100 and gfx1201 apply NEG_LO/NEG_HI to the selected integer source halves.
 // RDNA3.5 follows RDNA3; CDNA5 follows RDNA4 for their common packed operations.
 template <typename Encoding>
-inline uint32_t packed_integer_negations(rj_code_arch_t arch, const Encoding &enc) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5)
+inline uint32_t packed_integer_negations(rocjitsu::IsaFamily arch, const Encoding &enc) {
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+      arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)
     return static_cast<uint32_t>(enc.neg) | (static_cast<uint32_t>(enc.neg_hi) << 16);
   return 0;
 }
@@ -4201,8 +4202,9 @@ template <typename Inst, typename Op>
   const bool neg0_hi = inst.inst_.neg_hi & 1u;
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   RegisterAccess regs(wf);
-  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
-                                                                      : ScalarPairMode::Preserve;
+  const auto scalar_mode = wf.cu().arch() == rocjitsu::IsaFamily::Cdna5
+                               ? ScalarPairMode::Replicate32
+                               : ScalarPairMode::Preserve;
   auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
   auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
   auto dst = regs.write_operand_pair32(inst.vdst, exec);
@@ -4278,8 +4280,9 @@ template <typename Inst, typename Op>
   const bool neg1_hi = inst.inst_.neg_hi & 2u;
   const bool neg2_hi = inst.inst_.neg_hi & 4u;
   RegisterAccess regs(wf);
-  const auto scalar_mode = wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5 ? ScalarPairMode::Replicate32
-                                                                      : ScalarPairMode::Preserve;
+  const auto scalar_mode = wf.cu().arch() == rocjitsu::IsaFamily::Cdna5
+                               ? ScalarPairMode::Replicate32
+                               : ScalarPairMode::Preserve;
   auto src0 = regs.read_operand_pair32(inst.src0, exec, scalar_mode);
   auto src1 = regs.read_operand_pair32(inst.src1, exec, scalar_mode);
   auto src2 = regs.read_operand_pair32(inst.src2, exec, scalar_mode);

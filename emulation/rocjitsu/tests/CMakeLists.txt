@@ -638,6 +638,7 @@ add_executable(
     dbi/dbi_log_record_sim_test.cpp
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
+    code/target_api_test.cpp
     code/executable_test.cpp
     code/file_loading_test.cpp
     code/relocation_function_table_test.cpp
@@ -1679,7 +1680,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         COMMAND
             ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
             -DMODEL_BINARY=$<TARGET_FILE:rocjitsu_gfx1250_b0_to_a0>
-            -DREQUIRED_MODEL_ARCHES=cdna5 -P
+            -DREQUIRED_MODEL_ARCHES=cdna5
+            -DEXTRA_FORBIDDEN_SYMBOLS=rj_gfx1250_b0_to_a0_ -P
             ${CMAKE_CURRENT_SOURCE_DIR}/check_model_only_symbols.cmake
     )
 
@@ -2015,6 +2017,8 @@ rj_add_test(
     REQUIRES_INTERPOSER
     NAME "SystemGraphTest.DaemonStartsSelectedNode"
     COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_with_runtime_directory.py
         ${RJ_CLI}
         --daemon
         --config
@@ -2024,8 +2028,6 @@ rj_add_test(
         --
         /bin/true
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-    # AF_UNIX sun_path is short; the source/build checkout may be much longer.
-    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-system-graph"
     TIMEOUT 60
 )
 
@@ -2385,6 +2387,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(
         hsa_hotswap_rocjitsu_unit_test
         PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
     )
@@ -2425,6 +2428,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_include_directories(
         translation_store_test
         PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
             ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
     )
@@ -2545,6 +2549,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 
     # Compile as C and link only the shared library's public ABI.
+    add_executable(code_target_c_api_test code/target_api_c_test.c)
+    target_link_libraries(code_target_c_api_test PRIVATE rocjitsu_shared)
+    target_include_directories(
+        code_target_c_api_test
+        PRIVATE ${PROJECT_SOURCE_DIR}/lib/rocjitsu/include
+    )
+    set_target_properties(code_target_c_api_test PROPERTIES C_STANDARD 11)
+    rj_configure_target(code_target_c_api_test WARNINGS)
+    add_test(NAME CodeTargetCApi.CClient COMMAND code_target_c_api_test)
+
     add_executable(vm_config_c_api_test vm_config_c_api_test.c)
     target_link_libraries(vm_config_c_api_test PRIVATE rocjitsu_shared)
     if(RJ_ENABLE_UBSAN AND RJ_UBSAN_VPTR)
@@ -2552,6 +2566,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # instrumented library's vptr checks.
         set_target_properties(
             vm_config_c_api_test
+            code_target_c_api_test
             PROPERTIES LINKER_LANGUAGE CXX
         )
     endif()
@@ -2568,6 +2583,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     # An installed ROCm SDK may provide an older library with the same SONAME.
     set_tests_properties(
+        CodeTargetCApi.CClient
         VmConfigCApi
         PROPERTIES
             ENVIRONMENT_MODIFICATION
@@ -4814,7 +4830,7 @@ if(RJ_ENABLE_HIP_TESTS)
         rj_add_test_path(daemon_test RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN "hip_instruction_failure_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_INTERPOSER_DUP_BIN "interposer_dup_test")
         rj_add_test_path(daemon_test RJ_INSTALLED_DAEMON_LOGGING_CONFIG "${_rj_installed_daemon_logging_config}")
-        target_link_libraries(daemon_test PRIVATE GTest::gtest_main)
+        target_link_libraries(daemon_test PRIVATE GTest::gtest_main flatbuffers)
         add_dependencies(
             daemon_test
             rocjitsu_bin
@@ -4949,7 +4965,49 @@ if(RJ_ENABLE_HIP_TESTS)
         )
 
         # --- RCCL collective test ---
-        if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        # Split TheRock wheels can install the RCCL host library without its GPU
+        # code. In that case the first collective fails even though HIP and RCCL
+        # initialization succeed. Check the SDK's default archive locations when
+        # the library refers to those archives and the caller has not supplied
+        # an explicit search path.
+        set(RJ_RCCL_HAS_GFX950_DEVICE_CODE TRUE)
+        if(
+            RCCL_LIB
+            AND RJ_HIP_RUNTIME_SUPPORTS_GFX950
+            AND "$ENV{ROCM_KPACK_PATH}" STREQUAL ""
+            AND "$ENV{ROCM_KPACK_PATH_PREFIX}" STREQUAL ""
+        )
+            file(
+                STRINGS "${RCCL_LIB}"
+                _rj_rccl_archive_ref
+                LIMIT_COUNT 1
+                REGEX "rccl_lib_@GFXARCH@[.]kpack"
+            )
+            if(_rj_rccl_archive_ref)
+                get_filename_component(_rj_rccl_lib_dir "${RCCL_LIB}" DIRECTORY)
+                file(
+                    GLOB _rj_rccl_archives
+                    LIST_DIRECTORIES false
+                    "${_rj_rccl_lib_dir}/../.kpack/rccl_lib_*.kpack"
+                    "${_rj_rccl_lib_dir}/.kpack/rccl_lib_*.kpack"
+                )
+                list(
+                    FILTER _rj_rccl_archives
+                    INCLUDE
+                    REGEX
+                        "/rccl_lib_(gfx950|gfx9-4-generic)(:sramecc[+])?(:xnack-)?[.]kpack$"
+                )
+                if(NOT _rj_rccl_archives)
+                    set(RJ_RCCL_HAS_GFX950_DEVICE_CODE FALSE)
+                endif()
+            endif()
+        endif()
+
+        if(
+            RCCL_LIB
+            AND RJ_HIP_RUNTIME_SUPPORTS_GFX950
+            AND RJ_RCCL_HAS_GFX950_DEVICE_CODE
+        )
             rj_add_hip_test(
                 hip_rccl_test
                 ARCH gfx950
@@ -4980,10 +5038,15 @@ if(RJ_ENABLE_HIP_TESTS)
                 )
             endforeach()
             message(STATUS "RCCL collective test enabled (found ${RCCL_LIB})")
-        elseif(RCCL_LIB)
+        elseif(RCCL_LIB AND NOT RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             message(
                 STATUS
                 "RCCL collective test disabled (libamdhip64 does not advertise gfx950 support)"
+            )
+        elseif(RCCL_LIB)
+            message(
+                STATUS
+                "RCCL collective test disabled (install the gfx950 device package for this SDK)"
             )
         else()
             message(STATUS "RCCL collective test disabled (librccl not found)")
