@@ -834,7 +834,7 @@ ncclGin_t ncclGinProxy{
 
 int ncclGinProxyVersion = -1;
 
-// RCCL: ncclGinProxyInit runs inside ncclRmaInit, before init.cc knows comm->rcclMultiSegRma.
+// RCCL: ncclGinProxyInit runs inside ncclRmaInit, before comm->rcclMultiSegRma is known; set it before createContext.
 void rcclGinProxySetMultiSeg(bool multiSeg) { rmaMultiSeg = multiSeg; }
 
 ncclResult_t ncclGinProxyInit(struct ncclComm* comm) {

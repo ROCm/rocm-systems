@@ -1720,8 +1720,8 @@ TEST_F(SymMemoryMapLsaTest, AllHostOwnersWithReuseParam_Succeeds) {
   EXPECT_EQ(barrier.calls, 1);
 }
 
-// This rank exported the host segment, so NIC registration can still export it.
-// The owner fd is only for the ranks that imported it.
+// This rank owns the host segment, but the default export fake hands back no fd, so nothing is kept and no
+// peer's fd is fetched.
 TEST_F(SymMemoryMapLsaTest, HostOwner_DoesNotFetchFd) {
   ScopedHook loadParam(g_loadParam, ParamSetTo("SYM_REUSE_SYSMEM_HANDLES", 1));
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, PropsAt(kLocHost));
@@ -1920,9 +1920,9 @@ TEST_F(SymMemoryMapLsaTest, Importer_NoExporterSkipsProxy) {
   EXPECT_EQ(mem.hostOwnerFds, nullptr);
 }
 
-// Export reported success but handed back -1. The peer's host allocation is not this
-// rank's memory, so this rank must not import its fd and keeps none.
-TEST_F(SymMemoryMapLsaTest, NegativeExportFd_DoesNotImportOtherOwner) {
+// Export reported success but handed back -1, so this rank is not an exporter. The gathered messages cannot tell
+// that from an imported handle, so it borrows the one exporter's fd and never keeps the -1.
+TEST_F(SymMemoryMapLsaTest, NegativeExportFd_BorrowsTheOneExporter) {
   const int ranks[] = {8, 9};
   SetTeam(ranks, 2, /*self=*/0);
   ASSERT_EQ(pipe(pipeFds), 0);
@@ -1944,9 +1944,11 @@ TEST_F(SymMemoryMapLsaTest, NegativeExportFd_DoesNotImportOtherOwner) {
 
   EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
   EXPECT_EQ(exportFd.calls, 1);
-  EXPECT_EQ(proxy.calls, 0);
-  EXPECT_EQ(asked, -1);
-  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(asked, 9);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
+  symMemoryCloseHostOwnerFds(&mem);
 }
 
 // This rank failed to export its own host allocation. The other two are separate
@@ -1974,6 +1976,35 @@ TEST_F(SymMemoryMapLsaTest, ExportFails_SeveralHostOwnersImportNothing) {
   EXPECT_EQ(proxy.calls, 0);
   EXPECT_EQ(asked, -1);
   EXPECT_EQ(mem.hostOwnerFds, nullptr);
+}
+
+// DeepEP hybrid: this rank and one peer import the owner's host handle, so neither can export it. Both may read
+// as host, but only the owner exports, so this rank imports the owner's fd.
+TEST_F(SymMemoryMapLsaTest, ExportFails_OneExporterAmongHostImportersImportsItsFd) {
+  const int ranks[] = {5, 6, 7};
+  SetTeam(ranks, 3, /*self=*/2);
+  ASSERT_EQ(pipe(pipeFds), 0);
+  int asked = -1;
+  ScopedHook loadParam(g_loadParam, ParamSetTo("SYM_REUSE_SYSMEM_HANDLES", 1));
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle, PropsAt(kLocHost));
+  ScopedHook exportFd(g_hipMemExportToShareableHandle,
+                      [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, unsigned long long) {
+                        return hipErrorInvalidValue;
+                      });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather, PeerSegments({{0, kLocHost, 1}, {1, kLocHost, 0}}));
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int rank, void*, int* fd) {
+    asked = rank;
+    if (fd) *fd = dup(pipeFds[1]);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(symMemoryMapLsa(comm, &mem), ncclSuccess);
+  EXPECT_EQ(exportFd.calls, 1);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(asked, 5) << "the fd comes from the one exporter";
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
+  symMemoryCloseHostOwnerFds(&mem);
 }
 #endif
 
@@ -2312,7 +2343,7 @@ TEST_F(SymTeamDestroyAllTest, MixedList_FreesEveryTeamWithoutDriverCalls) {
 //
 // This suite covers the single-window path; the elastic path follows below.
 
-// An RMA backend on the comm; whether it registers per segment is the comm's flag, decided once at assignment.
+// An RMA backend on the comm, with the comm's flag for whether that backend registers per segment.
 static ncclRma_t g_fakeRma{};
 static void UseRma(ncclComm* comm, bool multiSeg) {
   comm->rmaState.rmaProxyState.ncclRma = &g_fakeRma;
@@ -2436,26 +2467,28 @@ TEST_F(SymMemoryRegisterGinTest, MultiSegFlagOn_NonProxyGinBackend_LeavesMultiSe
   EXPECT_EQ(reg.calls, 1);
 }
 
-// Per-segment registration is DMA-BUF only, so NCCL_DMABUF_ENABLE=0 leaves a device-only
-// multi-segment window unregistered on the proxy backend too.
-TEST_F(SymMemoryRegisterGinTest, DmaBufDisabled_LeavesMultiSegmentWindowUnregistered) {
+// A flag from rcclMultiSegOn: per-segment registration is DMA-BUF only, so NCCL_DMABUF_ENABLE=0 leaves a
+// device-only multi-segment window unregistered on the proxy backend, and DMA-BUF on registers it.
+TEST_F(SymMemoryRegisterGinTest, MultiSegOnFlag_RegistersOnlyWithDmaBuf) {
   mem.minGlobalNumSegments = 2;
   mem.maxGlobalNumSegments = 2;
   UseGinBackend(NCCL_GIN_TYPE_PROXY);
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
-    if (std::string(env) == "MULTI_SEGMENT_REGISTER") return 1;
-    return std::string(env) == "DMABUF_ENABLE" ? 0 : deftVal;
-  });
-  comm->rcclMultiSegRma = rcclMultiSegOn(true);
   ScopedHook reg(g_devrGinRegister,
                  [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
                    return ncclSuccess;
                  });
 
-  EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
-  EXPECT_EQ(mem.numGinSegments, 0);
-  EXPECT_EQ(reg.calls, 0);
-  EXPECT_EQ(mem.ginSegmentInfos, nullptr);
+  for (int dmaBuf : {0, 1}) {
+    SCOPED_TRACE(dmaBuf);
+    ScopedHook loadParam(g_loadParam, [dmaBuf](const char* env, int64_t deftVal) -> int64_t {
+      std::string key = env;
+      return key == "MULTI_SEGMENT_REGISTER" ? 1 : key == "DMABUF_ENABLE" ? dmaBuf : deftVal;
+    });
+    comm->rcclMultiSegRma = rcclMultiSegOn(true);
+    EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclSuccess);
+    EXPECT_EQ(reg.calls, dmaBuf);
+    EXPECT_EQ(mem.ginSegmentInfos != nullptr, dmaBuf == 1);
+  }
 }
 
 // comm->rcclMultiSegRma off (the default): a device-only multi-segment window is left
@@ -2877,8 +2910,7 @@ protected:
     comm->nRanks = 2;
     mem.primaryAddr = reinterpret_cast<void*>(0x100000);
     mem.size = 8192;
-    // 2.31 registers with the proxy only for a communicator-wide single-segment
-    // layout, so the register step is unreachable without this.
+    // Without comm->rcclMultiSegRma only a communicator-wide single-segment layout registers with the proxy.
     mem.maxGlobalNumSegments = 1;
     mem.minGlobalNumSegments = 1;
   }
@@ -2948,22 +2980,25 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegFlagOn_RegistersWholeRange) {
   EXPECT_EQ(registeredSize, mem.size);
 }
 
-// Branch: with NCCL_MULTI_SEGMENT_REGISTER=1 but NCCL_DMABUF_ENABLE=0 the comm flag stays off,
-// so a multi-segment window connects and skips registration.
-TEST_F(SymMemoryRegisterRmaTest, DmaBufDisabled_SkipsRegister) {
+// Branch: a flag from rcclMultiSegOn with NCCL_MULTI_SEGMENT_REGISTER=1 stays off under NCCL_DMABUF_ENABLE=0,
+// so a multi-segment window connects and skips registration; with DMA-BUF on it registers.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegOnFlag_RegistersOnlyWithDmaBuf) {
   mem.maxGlobalNumSegments = 2;
   mem.minGlobalNumSegments = 2;
-  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
-    if (std::string(env) == "MULTI_SEGMENT_REGISTER") return 1;
-    return std::string(env) == "DMABUF_ENABLE" ? 0 : deftVal;
-  });
-  UseRma(comm, rcclMultiSegOn(true));
   ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
   ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
 
-  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
-  EXPECT_EQ(connect.calls, 1);
-  EXPECT_EQ(reg.calls, 0);
+  for (int dmaBuf : {0, 1}) {
+    SCOPED_TRACE(dmaBuf);
+    ScopedHook loadParam(g_loadParam, [dmaBuf](const char* env, int64_t deftVal) -> int64_t {
+      std::string key = env;
+      return key == "MULTI_SEGMENT_REGISTER" ? 1 : key == "DMABUF_ENABLE" ? dmaBuf : deftVal;
+    });
+    UseRma(comm, rcclMultiSegOn(true));
+    EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+    EXPECT_EQ(reg.calls, dmaBuf);
+  }
+  EXPECT_EQ(connect.calls, 2);
 }
 
 // Branch: an RMA backend without per-segment MRs leaves the comm flag off, so a uniform
@@ -3023,15 +3058,8 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegFlagOn_TablePastTheBudget_SkipsRegister
   EXPECT_EQ(reg.calls, 2) << "a single segment always registers";
 }
 
-// Branch: only the comm's multi-segment flag caps the proxies' requests in flight per peer.
-TEST(RmaProxyInflightCapTest, MultiSegmentFlagCapsInflightRequests) {
-  EXPECT_EQ(rcclRmaProxyMaxInflightRequests(true, 256), uint32_t{RCCL_RMA_MAX_INFLIGHT_REQUESTS});
-  EXPECT_EQ(rcclRmaProxyMaxInflightRequests(true, 16), 16u) << "a smaller proxy limit stays";
-  EXPECT_EQ(rcclRmaProxyMaxInflightRequests(false, 256), 256u) << "other backends post one MR per op";
-}
-
 // Branch: the comm flag needs a plugin that registers per segment, NCCL_MULTI_SEGMENT_REGISTER and DMA-BUF.
-TEST(RmaProxyInflightCapTest, MultiSegOnNeedsPluginSwitchAndDmaBuf) {
+TEST(SymMultiSegOnTest, NeedsPluginSwitchAndDmaBuf) {
   EXPECT_FALSE(rcclMultiSegOn(true)) << "multi-segment off";
   {
     ScopedHook loadParam(g_loadParam, MultiSegRegisterOn());

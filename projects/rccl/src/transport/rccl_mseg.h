@@ -13,6 +13,9 @@
 
 // RCCL: segment limits for multi-segment registrations. Upstream registers one MR for the whole range.
 
+// RCCL: regMrDmaBuf with fd -1 asks a per-segment net plugin to walk the range itself; offset then carries the
+// cuMemGetHandleForAddressRange flags. Core sends it only when the comm's net flag is set.
+
 // RCCL: most segments one registration takes.
 #define RCCL_IB_REG_SEG_DEFAULT 1024
 

@@ -130,8 +130,8 @@ bool rcclMultiSegOn(bool pluginRegistersPerSegment) {
 }
 
 bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
-  // only RMA backends that register one MR per physical segment can take a multi-segment window,
-  // and they need the same count on every rank with a table that fits. Each segment is a DMA-BUF MR.
+  // only an RMA backend that registers one DMA-BUF MR per physical segment, walking them itself when the proxy
+  // passes fd -1, takes a multi-segment window; it needs one count on every rank and a table that fits.
   return comm->rcclMultiSegRma && minGlobalNumSegments == maxGlobalNumSegments &&
          rcclRmaSegTableFits(comm->nRanks, maxGlobalNumSegments);
 }

@@ -852,7 +852,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
 }
 
 // Branch: the sanitized per-peer queue size goes through the multi-segment in-flight cap with the flag
-// rcclGinProxySetMultiSeg set after ncclGinProxyInit, as init.cc does; Init itself does not read the comm flag.
+// rcclGinProxySetMultiSeg set after ncclGinProxyInit and before createContext; Init itself does not read the comm flag.
 TEST_F(GinHostProxyContextMicrotest, Create_MultiSegmentCapClampsQueueSize) {
   rma_.maxRecvs = 4;
   for (bool multiSeg : {true, false}) {

@@ -670,9 +670,9 @@ static ncclResult_t symMemoryMapLsa(struct ncclComm* comm, struct ncclDevrMemory
       // RCCL: imported host handles fail this export. The creating rank's fd is what GIN can register.
       if (localHostFds != nullptr && ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type) &&
           ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
-          mem->memHandles[segment] != 0 && CUPFN(cuMemExportToShareableHandle) != nullptr) {
+          mem->memHandles[segment] != 0) {
         int fd = -1;
-        CUresult st = CUPFN(cuMemExportToShareableHandle)(&fd, mem->memHandles[segment], ncclCuMemHandleType, 0);
+        CUresult st = cuMemExportToShareableHandle(&fd, mem->memHandles[segment], ncclCuMemHandleType, 0);
         if (st == CUDA_SUCCESS && fd >= 0) {
           msg->hostExportable = 1;
           localHostFds[segment] = fd;
@@ -715,8 +715,13 @@ static ncclResult_t symMemoryMapLsa(struct ncclComm* comm, struct ncclDevrMemory
           messages[r * maxSegments + segment].type = hostType;
         }
       }
-      // RCCL: a rank that exported its own fd registers that fd. With one host owner, other ranks import its fd;
-      // with several owners an import would back this rank's MR with a peer's pages, so they keep no fd.
+      // RCCL: a rank that exported its own fd registers that fd. With one exporter, other ranks import its fd
+      // (an imported handle cannot export, and may read as host); with several an import could be a peer's pages.
+      int exporter = -1, nExporters = 0;
+      for (int r = 0; r < devr->lsaDomainSize; r++) {
+        if (segment >= segmentCounts[r] || !messages[r * maxSegments + segment].hostExportable) continue;
+        if (nExporters++ == 0) exporter = r;
+      }
       if (segment < numSegments && localHostFds != nullptr && localHostFds[segment] >= 0) {
         if (mem->hostOwnerFdStatus == ncclSuccess) mem->hostOwnerFdStatus = symMemoryEnsureHostOwnerFds(mem);
         if (mem->hostOwnerFds != nullptr) {
@@ -724,17 +729,9 @@ static ncclResult_t symMemoryMapLsa(struct ncclComm* comm, struct ncclDevrMemory
           localHostFds[segment] = -1;
           INFO(NCCL_REG, "Symmetric window segment %d: NIC registration uses the local host allocation fd", segment);
         }
-      } else if (nHost == 1) {
-        int exporter = -1;
-        for (int r = 0; r < devr->lsaDomainSize; r++) {
-          if (segment >= segmentCounts[r]) continue;
-          if (messages[r * maxSegments + segment].hostExportable) {
-            exporter = r;
-            break;
-          }
-        }
+      } else if (nExporters == 1) {
         // RCCL: no fallback to a non-exporter. Its proxy would repeat the failed export and never reply.
-        if (exporter >= 0 && mem->hostOwnerFdStatus == ncclSuccess) {
+        if (mem->hostOwnerFdStatus == ncclSuccess) {
           mem->hostOwnerFdStatus =
             symMemoryGetHostOwnerFd(comm, mem, segment, exporter, messages + exporter * maxSegments + segment);
         }
@@ -1000,9 +997,8 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
   if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment &&
       !rcclDevrGinRegistersMultiSegment(comm, mem->minGlobalNumSegments, mem->maxGlobalNumSegments)) {
     if (mem->winFlags & NCCL_WIN_GIN_ONLY) {
-      WARN("Window %p spans %d device-memory segments; GIN-only windows cannot be registered on HIP unless "
-           "NCCL_MULTI_SEGMENT_REGISTER=1 and NCCL_DMABUF_ENABLE=1 select a GIN proxy over an RMA backend that "
-           "registers per segment",
+      WARN("Window %p spans %d device-memory segments; GIN-only windows cannot be registered on HIP without a GIN "
+           "proxy over an RMA backend that registers per segment",
            mem->primaryAddr, mem->maxGlobalNumSegments);
       ret = ncclInvalidUsage;
       goto fail;
