@@ -281,7 +281,7 @@ test_categories:
       - "RCCL_SYM_K_MAX_BYTES=0"
       - "RCCL_TDM_LL128_ENABLE=0"
   quick_env_shm_simple_step_barrier:
-    description: "Ring Simple AllReduce, ReduceScatter, AllGather, Broadcast and Reduce over SHM, checked element by element as in quick_env_p2p_ll_step_barrier. SHM sets a connFifo, so on gfx1250 Simple keeps the full start-of-step barrier and drains each step at its end barrier before the post. NCCL_P2P_DISABLE and the switches above Ring are cached for the process lifetime, so they are set before launch."
+    description: "Ring Simple AllReduce, ReduceScatter, AllGather, Broadcast and Reduce over SHM, checked element by element as in quick_env_p2p_ll_step_barrier. Default SHM has no connFifo, so on gfx1250 Simple runs the LDS-only start-of-step barrier, checked here over host memory; NET and SHM with CUDA memcpy keep the full barrier. NCCL_P2P_DISABLE and the switches above Ring are cached for the process lifetime, so they are set before launch."
     test_patterns:
       - "LlStepBarrierMPITest.RingSimpleOverShmMatchesPerIterationInput"
     exclude_windows: *mpi_exclude_windows

@@ -357,7 +357,8 @@ TEST_F(LlStepBarrierMPITest, RingSimpleOverP2pMatchesPerIterationInput)
         {"Ring", NCCL_ALGO_RING, "Simple", NCCL_PROTO_SIMPLE, &p2pTransport, kRingColls, std::size(kRingColls)});
 }
 
-// SHM and NET set a connFifo: stepStartBarrier() keeps the full barrier, and the post-send fence drains for the proxy.
+// Default SHM has no connFifo, so stepStartBarrier() orders LDS only and this checks it over host memory. NET, and SHM
+// with NCCL_SHM_USE_CUDA_MEMCPY=1, set a connFifo: the full barrier is kept and the post-send fence drains for the proxy.
 TEST_F(LlStepBarrierMPITest, RingSimpleOverShmMatchesPerIterationInput)
 {
     runCollectives(
