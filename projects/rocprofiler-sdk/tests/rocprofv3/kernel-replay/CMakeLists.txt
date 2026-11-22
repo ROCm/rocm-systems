@@ -73,8 +73,8 @@ rocprofiler_add_integration_execute_test(
 # are present, and rocpd's counters_collection averages the shared counters over the
 # passes rather than summing them. A sanity counter the agent does not report is skipped.
 # A counter that reads zero for every dispatch is skipped only on gfx1200 and gfx1201; on
-# other targets, including gfx1250, that is a failure. No -x, so one skipped or failing
-# counter does not hide the remaining checks.
+# other targets, including gfx1250, that is a failure. The validator stops at the first
+# failure (-x).
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-kernel-replay-validate BUNDLE_TESTS
     TEST_PATHS validate.py
@@ -88,6 +88,7 @@ rocprofiler_add_integration_validate_test(
          SQ_INSTS_VALU
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay/out_results.db
+         -x
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
@@ -127,6 +128,7 @@ rocprofiler_add_integration_validate_test(
          SQ_INSTS_VALU
          --rocpd-input
          ${CMAKE_CURRENT_BINARY_DIR}/kernel-replay-interval/out_results.db
+         -x
     TIMEOUT 120
     LABELS "kernel-replay"
     PYTHON_PATH
