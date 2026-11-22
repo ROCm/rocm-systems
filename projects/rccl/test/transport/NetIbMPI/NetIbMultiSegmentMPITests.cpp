@@ -13,7 +13,9 @@
 
 #include "NetIbMPITestBase.hpp"
 #include "NetIbMultiSegmentHelpers.hpp"
+#include "HostApiHelpers.hpp"
 #include "MPIHelpers.hpp"
+#include "MultiSegmentTestSupport.hpp"
 
 #include "transport/rccl_mseg.h"
 
@@ -40,14 +42,13 @@ bool MultiSegmentRegisterOn() { return ncclParamMultiSegmentRegister() != 0; }
 
 // Opt-in CI strictness: when set, a net other than IB-MSEG or a missing DMA-BUF, VMM or dma-buf export API fails the
 // test instead of skipping.
-constexpr const char* kRequireDmaBufEnvVar = "UT_NET_IB_MSEG_REQUIRE_DMABUF";
-bool RequireDmaBuf() {
-    const char* v = getenv(kRequireDmaBufEnvVar);
-    return v && atoi(v) != 0;
-}
-void FailIfDmaBufRequired(const char* what) {
-    if (RequireDmaBuf()) ADD_FAILURE() << what << " with " << kRequireDmaBufEnvVar << "=1";
-}
+const RCCLTestHelpers::MsegPrereq kDmaBufPrereq{"UT_NET_IB_MSEG_REQUIRE_DMABUF"};
+void FailIfDmaBufRequired(const char* what) { kDmaBufPrereq.FailIfRequired(what); }
+
+using RCCLHostApiHelpers::AllSentinel;
+using RCCLHostApiHelpers::FillBuf;
+using RCCLHostApiHelpers::FillSentinel;
+using RCCLHostApiHelpers::VerifyBuf;
 } // namespace
 
 // Register an nSeg window and honor skip/fail from the bool helper. Also sets
@@ -64,7 +65,7 @@ void FailIfDmaBufRequired(const char* what) {
 
 class NetIbMultiSegmentMPITest : public NetIbMPITest {
 protected:
-    std::vector<std::unique_ptr<MultiSegmentVmmBuffer>> owned_;
+    RCCLTestHelpers::OwnedVmmPool pool_;
 
     void SetUp() override {
         NetIbMPITest::SetUp();
@@ -78,34 +79,20 @@ protected:
     }
 
     void TearDown() override {
-        for (auto& b : owned_) FreeMultiSegmentVmm(*b);
-        owned_.clear();
+        pool_.Release();
         NetIbMPITest::TearDown();
     }
 
-    MultiSegmentVmmBuffer* AllocSym(int nSeg, size_t segBytes = kSegBytes) {
-        if (nSeg <= 0) return nullptr;
-        return AllocLayout(std::vector<size_t>(nSeg, segBytes));
-    }
-
-    MultiSegmentVmmBuffer* AllocLayout(const std::vector<size_t>& segBytes) {
-        int dev = 0;
-        if (hipGetDevice(&dev) != hipSuccess) return nullptr;
-        auto b = std::make_unique<MultiSegmentVmmBuffer>();
-        if (!AllocSegmentedVmm(dev, segBytes, b.get())) return nullptr;
-        owned_.push_back(std::move(b));
-        return owned_.back().get();
-    }
+    MultiSegmentVmmBuffer* AllocSym(int nSeg, size_t segBytes = kSegBytes) { return pool_.AllocUniform(nSeg, segBytes); }
+    MultiSegmentVmmBuffer* AllocLayout(const std::vector<size_t>& segBytes) { return pool_.AllocLayout(segBytes); }
 
     bool SyncSkip(bool want) {
         return MPIHelpers::anyRankTrue(want);
     }
 
-    // SyncSkip for a DMA-BUF or VMM prerequisite: a failure instead of a skip under kRequireDmaBufEnvVar.
+    // SyncSkip for a DMA-BUF or VMM prerequisite: a failure instead of a skip under the require knob.
     bool MissingPrereq(bool missing) {
-        const bool any = SyncSkip(missing);
-        if (any) FailIfDmaBufRequired("a DMA-BUF or VMM prerequisite is missing on at least one rank");
-        return any;
+        return kDmaBufPrereq.Skip(missing, "a DMA-BUF or VMM prerequisite is missing on at least one rank");
     }
 
     bool PtrSupported(int mask) {
@@ -120,37 +107,6 @@ protected:
     static bool directGdrFlushEnabled() {
         const char* v = getenv("RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING");
         return v && atoi(v) == 0;
-    }
-
-    static void FillDevice(void* dptr, size_t size, uint8_t seed) {
-        if (size == 0) return;
-        std::vector<uint8_t> h(size);
-        for (size_t i = 0; i < size; i++) h[i] = static_cast<uint8_t>(seed + (i & 0xFF));
-        ASSERT_EQ(hipMemcpy(dptr, h.data(), size, hipMemcpyHostToDevice), hipSuccess);
-    }
-
-    static bool VerifyDevice(void* dptr, size_t size, uint8_t seed) {
-        if (size == 0) return true;
-        std::vector<uint8_t> h(size, 0);
-        if (hipMemcpy(h.data(), dptr, size, hipMemcpyDeviceToHost) != hipSuccess) return false;
-        for (size_t i = 0; i < size; i++)
-            if (h[i] != static_cast<uint8_t>(seed + (i & 0xFF))) return false;
-        return true;
-    }
-
-    static void FillDeviceConstant(void* dptr, size_t size, uint8_t value) {
-        if (size == 0) return;
-        ASSERT_EQ(hipMemset(dptr, value, size), hipSuccess);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-    }
-
-    static bool VerifyDeviceConstant(void* dptr, size_t size, uint8_t value) {
-        if (size == 0) return true;
-        std::vector<uint8_t> h(size, 0);
-        if (hipMemcpy(h.data(), dptr, size, hipMemcpyDeviceToHost) != hipSuccess) return false;
-        for (uint8_t byte : h)
-            if (byte != value) return false;
-        return true;
     }
 
     // One-directional transfer (rank1 -> rank0) with independent source and
@@ -169,7 +125,7 @@ protected:
             EXPECT_EQ(sz, static_cast<int>(size))
                 << "reported recv size srcOff=" << srcOff << " dstOff=" << dstOff;
         } else {
-            FillDevice(static_cast<uint8_t*>(sBuf) + srcOff, size, seed);
+            FillBuf(static_cast<uint8_t*>(sBuf) + srcOff, size, seed);
             void* buf = static_cast<uint8_t*>(sBuf) + srcOff;
             PostSendWithRetry(pair.sendComm, buf, size, tag, sendMh_, &req);
             int sz = 0;
@@ -177,7 +133,7 @@ protected:
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
-            EXPECT_TRUE(VerifyDevice(static_cast<uint8_t*>(rBuf) + dstOff, size, seed))
+            EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(rBuf) + dstOff, size, seed))
                 << "data mismatch srcOff=" << srcOff << " dstOff=" << dstOff
                 << " size=" << size;
         MPI_Barrier(MPI_COMM_WORLD);
@@ -193,16 +149,16 @@ protected:
                                        size_t totalSize, size_t srcOff, size_t dstOff,
                                        size_t size, int tag, uint8_t seed, uint8_t sentinel) {
         const int rank = MPIEnvironment::world_rank;
-        if (rank == 0) FillDeviceConstant(rBuf, totalSize, sentinel);
+        if (rank == 0) FillSentinel(rBuf, totalSize, sentinel);
         MPI_Barrier(MPI_COMM_WORLD);
 
         SendRecvChunkAtOffsets(pair, sBuf, rBuf, srcOff, dstOff, size, tag, seed);
 
         if (rank == 0) {
-            EXPECT_TRUE(VerifyDeviceConstant(rBuf, dstOff, sentinel))
+            const size_t tail = totalSize - dstOff - size;
+            EXPECT_TRUE(dstOff == 0 || AllSentinel(rBuf, dstOff, sentinel))
                 << "bytes before destination were overwritten";
-            EXPECT_TRUE(VerifyDeviceConstant(static_cast<uint8_t*>(rBuf) + dstOff + size,
-                                             totalSize - dstOff - size, sentinel))
+            EXPECT_TRUE(tail == 0 || AllSentinel(static_cast<uint8_t*>(rBuf) + dstOff + size, tail, sentinel))
                 << "bytes after destination were overwritten";
         }
         MPI_Barrier(MPI_COMM_WORLD);
@@ -416,21 +372,10 @@ TEST_F(NetIbMultiSegmentMPITest, DeepEP_MultiNodeAsymmetricCrossBoundaryStress) 
 
     const size_t seg = lastBuf_->segSize;
     const size_t total = lastBuf_->totalSize;
-    const std::vector<size_t> edgeWidths = {
-        size_t{1}, size_t{63}, size_t{4095}, size_t{65535}, size_t{131071}
-    };
-
     for (int i = 0; i < kIterations; ++i) {
-        const int srcBoundary = 1 + (i % (kWideSegments - 1));
-        const int dstBoundary = 1 + ((i * 5 + 1) % (kWideSegments - 1));
-        const size_t left = edgeWidths[static_cast<size_t>(i) % edgeWidths.size()];
-        const size_t right = edgeWidths[static_cast<size_t>(i + 2) % edgeWidths.size()];
-        const size_t srcOff = static_cast<size_t>(srcBoundary) * seg - left;
-        const size_t dstOff = static_cast<size_t>(dstBoundary) * seg - left;
-        const size_t size = left + right;
-
+        const auto c = RCCLTestHelpers::BoundaryStress(i, kWideSegments, seg, /*dstMul=*/5, /*dstAdd=*/1, /*rightShift=*/2);
         SendRecvChunkAtOffsetsChecked(pair, lastBuf_->ptr, lastBuf_->ptr, total,
-                                      srcOff, dstOff, size, /*tag=*/800 + i,
+                                      c.srcOff, c.dstOff, c.size, /*tag=*/800 + i,
                                       static_cast<uint8_t>(0x20 + i), /*sentinel=*/0xE5);
     }
 }
@@ -587,10 +532,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
             EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
                 << "flush RDMA read did not complete";
         }
-        EXPECT_TRUE(VerifyDevice(rbuf, chunk, 0xC0)) << "data mismatch after flush";
+        EXPECT_TRUE(VerifyBuf(rbuf, chunk, 0xC0)) << "data mismatch after flush";
     } else {
         void* sbuf = static_cast<uint8_t*>(lastBuf_->ptr) + off;
-        FillDevice(sbuf, chunk, 0xC0);
+        FillBuf(sbuf, chunk, 0xC0);
         void* req = nullptr;
         PostSendWithRetry(pair.sendComm, sbuf, chunk, tag, mh, &req);
         int sz = 0;
@@ -631,11 +576,11 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
             EXPECT_EQ(WaitForCompletion(freq, &fsz, kDefaultTimeoutMs), ncclSuccess)
                 << "whole-buffer flush RDMA read did not complete";
         }
-        EXPECT_TRUE(VerifyDevice(rbuf, total, 0xA5))
+        EXPECT_TRUE(VerifyBuf(rbuf, total, 0xA5))
             << "whole-buffer payload mismatch after flush";
     } else {
         void* sbuf = lastBuf_->ptr;
-        FillDevice(sbuf, total, 0xA5);
+        FillBuf(sbuf, total, 0xA5);
         void* req = nullptr;
         PostSendWithRetry(pair.sendComm, sbuf, total, tag, mh, &req);
         int sz = 0;
@@ -685,12 +630,12 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
             int flushSize = 0;
             EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess);
         }
-        EXPECT_TRUE(VerifyDevice(bufs[0], chunk, 0x62));
-        EXPECT_TRUE(VerifyDevice(bufs[1], chunk, 0x63));
+        EXPECT_TRUE(VerifyBuf(bufs[0], chunk, 0x62));
+        EXPECT_TRUE(VerifyBuf(bufs[1], chunk, 0x63));
     } else {
         void* reqs[2] = {};
-        FillDevice(bufs[0], chunk, 0x62);
-        FillDevice(bufs[1], chunk, 0x63);
+        FillBuf(bufs[0], chunk, 0x62);
+        FillBuf(bufs[1], chunk, 0x63);
         PostSendWithRetry(pair.sendComm, bufs[0], chunk, tags[0], handles[0], &reqs[0]);
         PostSendWithRetry(pair.sendComm, bufs[1], chunk, tags[1], handles[1], &reqs[1]);
         for (int i = 0; i < 2; i++) {
@@ -748,10 +693,10 @@ TEST_F(NetIbMultiSegmentMPITest, MultiRecvMixesSingleAndMultiSegmentHandles) {
                 EXPECT_EQ(WaitForCompletion(flushReq, &flushSize, kDefaultTimeoutMs), ncclSuccess) << "order " << order;
             }
             for (int i = 0; i < 2; i++)
-                EXPECT_TRUE(VerifyDevice(bufs[i], chunk, seeds[i])) << "order " << order << " entry " << i;
+                EXPECT_TRUE(VerifyBuf(bufs[i], chunk, seeds[i])) << "order " << order << " entry " << i;
         } else {
             void* reqs[2] = {};
-            for (int i = 0; i < 2; i++) FillDevice(bufs[i], chunk, seeds[i]);
+            for (int i = 0; i < 2; i++) FillBuf(bufs[i], chunk, seeds[i]);
             for (int i = 0; i < 2; i++)
                 PostSendWithRetry(pair.sendComm, bufs[i], chunk, tags[i], handles[i], &reqs[i]);
             for (int i = 0; i < 2; i++) {
@@ -816,9 +761,9 @@ TEST_F(NetIbMultiSegmentMPITest, HostAndDeviceSingleSegmentRegression) {
                 PostSingleRecv(pair.recvComm, dptr, size, tag, mh, &req);
                 int sz = 0;
                 EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
-                EXPECT_TRUE(VerifyDevice(dptr, size, 0x3C));
+                EXPECT_TRUE(VerifyBuf(dptr, size, 0x3C));
             } else {
-                FillDevice(dptr, size, 0x3C);
+                FillBuf(dptr, size, 0x3C);
                 PostSendWithRetry(pair.sendComm, dptr, size, tag, mh, &req);
                 int sz = 0;
                 EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
@@ -879,7 +824,7 @@ TEST_F(NetIbMultiSegmentMPITest, SendQueueFatChainOversubscribe) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     if (rank != 0) {
-        FillDevice(src, xfer, 0x51);
+        FillBuf(src, xfer, 0x51);
         bool keepPosting = true;
         for (int g = 0; g < kGroups && keepPosting; g++) {
             for (int r = 0; r < kRecvs && keepPosting; r++) {
@@ -972,14 +917,14 @@ TEST_F(NetIbMultiSegmentMPITest, ConcurrentPairsMoveEverySegmentBoundary) {
         int sz = 0;
         // No ASSERTs here: a rank returning early would hang the final allRanksTrue.
         if (receiver) {
-            FillDeviceConstant(buf->ptr, buf->totalSize, 0xEE);
+            FillSentinel(buf->ptr, buf->totalSize, 0xEE);
             PostSingleRecv(pair.recvComm, p, chunk, 700 + s, mh, &req);
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
             EXPECT_EQ(sz, static_cast<int>(chunk)) << "reported size at boundary " << s;
-            EXPECT_TRUE(VerifyDevice(p, chunk, seed)) << "boundary " << s << " from rank " << peer;
-            EXPECT_TRUE(VerifyDeviceConstant(buf->ptr, off, 0xEE)) << "bytes before boundary " << s;
+            EXPECT_TRUE(VerifyBuf(p, chunk, seed)) << "boundary " << s << " from rank " << peer;
+            EXPECT_TRUE(AllSentinel(buf->ptr, off, 0xEE)) << "bytes before boundary " << s;
         } else {
-            FillDevice(p, chunk, seed);
+            FillBuf(p, chunk, seed);
             PostSendWithRetry(pair.sendComm, p, chunk, 700 + s, mh, &req);
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
         }

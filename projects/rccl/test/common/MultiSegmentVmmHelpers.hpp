@@ -9,7 +9,9 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -153,49 +155,87 @@ struct MultiSegmentVmmBuffer
     bool valid() const { return ptr != nullptr && nSegments > 0; }
 };
 
-// Map one granularity-rounded segment per `segBytes` entry contiguously on `dev`.
-// `segSize` is the common size, or 0 when the sizes differ. Returns false
-// (cleaned up) on any HIP failure so the caller can GTEST_SKIP.
-inline bool AllocSegmentedVmm(int dev, const std::vector<size_t>& segBytes,
-                              MultiSegmentVmmBuffer* out)
+// One VMM segment: its size, where its memory lives, and optionally an existing (e.g. imported) handle to map
+// instead of a new allocation. AllocSegmentedVmm owns a given handle: it maps it or releases it on failure.
+struct VmmSegSpec
 {
-    if (out == nullptr || segBytes.empty()) return false;
-    *out = MultiSegmentVmmBuffer{};
-    const int nSegments = static_cast<int>(segBytes.size());
+    size_t                          bytes;
+    hipMemLocationType              loc    = hipMemLocationTypeDevice;
+    hipMemGenericAllocationHandle_t handle = 0;
+};
 
-    hipMemAllocationProp prop = MakeVmmProp(hipMemLocationTypeDevice, dev, /*gpuDirectRdma=*/true);
+// The AllocSegmentedVmm step that failed, for callers that report it.
+enum class VmmSegStep { None, Setup, Create, Map, DeviceAccess, HostAccess };
+struct VmmSegFailure
+{
+    VmmSegStep step    = VmmSegStep::None;
+    int        segment = -1;
+    hipError_t err     = hipSuccess;
+};
 
-    size_t granularity = 0;
-    if (hipMemGetAllocationGranularity(&granularity, &prop,
-                                       hipMemAllocationGranularityMinimum) != hipSuccess
-        || granularity == 0)
-    {
-        return false;
-    }
-
-    std::vector<size_t> segSizes;
-    segSizes.reserve(nSegments);
+// Map one granularity-rounded segment per spec contiguously on `dev`, in a VA aligned to `alignment`
+// (0: the granularity). Device RW over every segment; host RW on host segments is best-effort unless
+// `requireHostAccess`. `segSize` is the common size, or 0 when the sizes differ. Returns false (cleaned up)
+// on any HIP failure and, when `failure` is set, says which step failed.
+inline bool AllocSegmentedVmm(int dev, const std::vector<VmmSegSpec>& specs, MultiSegmentVmmBuffer* out,
+                              size_t alignment = 0, bool requireHostAccess = false,
+                              VmmSegFailure* failure = nullptr)
+{
+    const int nSegments = static_cast<int>(specs.size());
+    hipDeviceptr_t base = 0;
     size_t totalSize = 0;
-    for (size_t bytes : segBytes)
+    std::vector<size_t> segSizes;
+    std::vector<hipMemGenericAllocationHandle_t> handles;
+    handles.reserve(nSegments);
+
+    // Releases everything mapped so far and every given handle not yet mapped.
+    auto fail = [&](VmmSegStep step, int segment, hipError_t err) {
+        ReleaseMappedVmm(base, totalSize, handles, segSizes, /*uniformSegSize=*/0);
+        for (size_t i = handles.size(); i < specs.size(); ++i)
+            if (specs[i].handle != 0) (void)hipMemRelease(specs[i].handle);
+        if (failure) *failure = {step, segment, err};
+        return false;
+    };
+    if (out == nullptr || specs.empty()) return fail(VmmSegStep::Setup, -1, hipErrorInvalidValue);
+    *out = MultiSegmentVmmBuffer{};
+
+    auto propOf = [dev](hipMemLocationType loc) {
+        const bool host = loc == hipMemLocationTypeHost;
+        return MakeVmmProp(loc, host ? 0 : dev, /*gpuDirectRdma=*/!host);
+    };
+    size_t granularity = 0;
+    bool anyHost = false;
+    for (const VmmSegSpec& spec : specs)
     {
-        segSizes.push_back(((bytes + granularity - 1) / granularity) * granularity);
+        const hipMemAllocationProp prop = propOf(spec.loc);
+        size_t g = 0;
+        const hipError_t err = hipMemGetAllocationGranularity(&g, &prop, hipMemAllocationGranularityMinimum);
+        if (err != hipSuccess || g == 0) return fail(VmmSegStep::Setup, -1, err);
+        granularity = std::max(granularity, g);
+        anyHost = anyHost || spec.loc == hipMemLocationTypeHost;
+    }
+    if (alignment == 0) alignment = granularity;
+    if (alignment % granularity != 0) return fail(VmmSegStep::Setup, -1, hipErrorInvalidValue);
+
+    segSizes.reserve(nSegments);
+    for (const VmmSegSpec& spec : specs)
+    {
+        segSizes.push_back(((spec.bytes + granularity - 1) / granularity) * granularity);
         totalSize += segSizes.back();
     }
     size_t segSize = segSizes[0];
     for (size_t len : segSizes)
         if (len != segSize) segSize = 0;
 
-    hipDeviceptr_t base = 0;
-    if (hipMemAddressReserve(&base, totalSize, granularity, 0, 0) != hipSuccess)
+    const hipError_t reserveErr = hipMemAddressReserve(&base, totalSize, alignment, 0, 0);
+    if (reserveErr != hipSuccess)
     {
-        return false;
+        base = 0;
+        return fail(VmmSegStep::Setup, -1, reserveErr);
     }
 
-    std::vector<hipMemGenericAllocationHandle_t> handles;
-    handles.reserve(nSegments);
-
-    auto cleanup = [&]() {
-        ReleaseMappedVmm(base, totalSize, handles, segSizes, /*uniformSegSize=*/0);
+    auto segVa = [&](size_t off) {
+        return reinterpret_cast<hipDeviceptr_t>(reinterpret_cast<uintptr_t>(base) + off);
     };
 
     hipMemAccessDesc accessDesc = {};
@@ -206,29 +246,50 @@ inline bool AllocSegmentedVmm(int dev, const std::vector<size_t>& segBytes,
     size_t off = 0;
     for (int s = 0; s < nSegments; ++s)
     {
-        hipMemGenericAllocationHandle_t h = 0;
-        if (hipMemCreate(&h, segSizes[s], &prop, 0) != hipSuccess)
+        const hipMemAllocationProp prop = propOf(specs[s].loc);
+        hipMemGenericAllocationHandle_t h = specs[s].handle;
+        hipError_t err = h != 0 ? hipSuccess : hipMemCreate(&h, segSizes[s], &prop, 0);
+        if (err != hipSuccess) return fail(VmmSegStep::Create, s, err);
+        err = hipMemMap(segVa(off), segSizes[s], 0, h, 0);
+        if (err != hipSuccess)
         {
-            cleanup();
-            return false;
+            if (specs[s].handle == 0) (void)hipMemRelease(h);
+            return fail(VmmSegStep::Map, s, err);
         }
         handles.push_back(h);
-
-        hipDeviceptr_t segVa = reinterpret_cast<hipDeviceptr_t>(
-            reinterpret_cast<uintptr_t>(base) + off);
-        if (hipMemMap(segVa, segSizes[s], 0, h, 0) != hipSuccess)
-        {
-            cleanup();
-            return false;
-        }
+        // A mixed-location range is granted per segment.
+        if (anyHost && (err = hipMemSetAccess(segVa(off), segSizes[s], &accessDesc, 1)) != hipSuccess)
+            return fail(VmmSegStep::DeviceAccess, s, err);
         off += segSizes[s];
     }
 
-    // One access grant over the whole contiguous range.
-    if (hipMemSetAccess(base, totalSize, &accessDesc, 1) != hipSuccess)
+    // One access grant over a device-only range.
+    if (!anyHost)
     {
-        cleanup();
-        return false;
+        const hipError_t err = hipMemSetAccess(base, totalSize, &accessDesc, 1);
+        if (err != hipSuccess) return fail(VmmSegStep::DeviceAccess, -1, err);
+    }
+
+    // Best-effort unless required: callers touch host segments only through hipMemcpy/hipMemset.
+    hipMemAccessDesc hostAccess = {};
+    hostAccess.location.type    = hipMemLocationTypeHost;
+    hostAccess.location.id      = 0;
+    hostAccess.flags            = hipMemAccessFlagsProtReadWrite;
+    off = 0;
+    for (int s = 0; s < nSegments; ++s)
+    {
+        if (specs[s].loc == hipMemLocationTypeHost)
+        {
+            const hipError_t err = hipMemSetAccess(segVa(off), segSizes[s], &hostAccess, 1);
+            if (err != hipSuccess)
+            {
+                if (requireHostAccess) return fail(VmmSegStep::HostAccess, s, err);
+                (void)hipGetLastError();
+                fprintf(stderr, "[ WARNING  ] host access grant on VMM segment %d failed (%s); continuing\n", s,
+                        hipGetErrorString(err));
+            }
+        }
+        off += segSizes[s];
     }
 
     out->ptr       = reinterpret_cast<void*>(base);
@@ -239,6 +300,24 @@ inline bool AllocSegmentedVmm(int dev, const std::vector<size_t>& segBytes,
     out->handles   = std::move(handles);
     out->segSizes  = std::move(segSizes);
     return true;
+}
+
+// Device segments of the given sizes.
+inline bool AllocSegmentedVmm(int dev, const std::vector<size_t>& segBytes, MultiSegmentVmmBuffer* out)
+{
+    std::vector<VmmSegSpec> specs;
+    specs.reserve(segBytes.size());
+    for (size_t bytes : segBytes) specs.push_back({bytes});
+    return AllocSegmentedVmm(dev, specs, out);
+}
+
+// DeepEP ElasticSymmetricMemory without hybrid import: [GPU][CPU] in one 2 MiB-aligned VA.
+inline bool AllocDeepEpElasticVmm(int dev, size_t gpuBytes, size_t cpuBytes, MultiSegmentVmmBuffer* out)
+{
+    constexpr size_t kDeepEpAlignment = 2u * 1024 * 1024;
+    if (gpuBytes == 0 || cpuBytes == 0 || gpuBytes % kDeepEpAlignment != 0 || cpuBytes % kDeepEpAlignment != 0)
+        return false;
+    return AllocSegmentedVmm(dev, {{gpuBytes}, {cpuBytes, hipMemLocationTypeHost}}, out, kDeepEpAlignment);
 }
 
 // Map `nSegments` granularity-rounded segments of `segBytes` each contiguously on `dev`.

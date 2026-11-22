@@ -12,9 +12,12 @@
 #include "fakes/fail_loud.h"
 #include "fakes/signature-drift.h"
 #include "net.h"
+#include "nccl_rma.h"
 
 // init.cc and net.cc compare a plugin's address against it.
 ncclNet_t ncclNetIbMseg = {"IB-MSEG"};
+// init.cc compares the comm's RMA backend against it.
+ncclRma_t IbMsegRmaIbProxy{};
 
 static ncclResult_t DefaultIbMsegNetP2pPolicy(void*, int) {
   FailLoudUnfaked("net_ib_multiseg_fakes", "IbMsegNetP2pPolicy");

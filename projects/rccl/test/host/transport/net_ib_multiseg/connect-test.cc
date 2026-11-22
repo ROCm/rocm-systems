@@ -1178,7 +1178,7 @@ class NetIbMsegConnectMultiSegMicrotest : public NetIbMsegConnectMicrotest {
     return meta;
   }
 
-  IbMsegSendComm* Connect(IbMsegHandle* handle) {
+  IbMsegSendComm* Connect(IbMsegHandle* handle, int nQpsPerDev = 1) {
     g_ncclSocketConnect = [](ncclSocket*) { return ncclSuccess; };
     g_ncclSocketReady = [](ncclSocket*, int* ready) {
       *ready = 1;
@@ -1186,7 +1186,7 @@ class NetIbMsegConnectMultiSegMicrotest : public NetIbMsegConnectMicrotest {
     };
     void* sendComm = nullptr;
     for (int step = 0; step < 10 && sendComm == nullptr; ++step) {
-      EXPECT_EQ(IbMsegConnectImpl(nullptr, 0, handle, &sendComm, nullptr, /*nQpsPerDev=*/1, /*envTrafficClass=*/17),
+      EXPECT_EQ(IbMsegConnectImpl(nullptr, 0, handle, &sendComm, nullptr, nQpsPerDev, /*envTrafficClass=*/17),
                 ncclSuccess);
     }
     return static_cast<IbMsegSendComm*>(sendComm);
@@ -1250,6 +1250,33 @@ TEST_F(NetIbMsegConnectMultiSegMicrotest, Connect_GinCommKeepsTheLegacyFifo) {
   EXPECT_EQ(ctsMr->length, NCCL_IB_CTS_FIFO_BYTES);
 
   EXPECT_EQ(IbMsegCloseSend(comm), ncclSuccess);
+}
+
+// Only GIN/RMA connects pass nQpsPerDev, and those QPs get the deeper RMA send queue.
+TEST_F(NetIbMsegConnectMultiSegMicrotest, Connect_NQpsPerDevMarksRmaAndSizesSendQueue) {
+  auto baseCreate = g_ibvCreateQp;
+  std::vector<uint32_t> depths;
+  ScopedHook create(g_ibvCreateQp, [&](ibv_qp** out, ibv_pd* pd, ibv_qp_init_attr* attr) {
+    depths.push_back(attr->cap.max_send_wr);
+    return baseCreate(out, pd, attr);
+  });
+  for (int nQpsPerDev : {0, 1}) {
+    SCOPED_TRACE(nQpsPerDev);
+    depths.clear();
+    IbMsegHandle handle{};
+    handle.magic = NCCL_SOCKET_MAGIC;
+    ScriptedHandshakePeer peer([&handle] { return static_cast<int>(handle.stage.state); },
+                               Peer(/*ctsAddr=*/0x9000, /*qpn=*/200, /*useMultiSeg=*/true));
+
+    IbMsegSendComm* comm = Connect(&handle, nQpsPerDev);
+    ASSERT_NE(comm, nullptr);
+    EXPECT_EQ(comm->base.isRma, nQpsPerDev > 0);
+    ASSERT_FALSE(depths.empty());
+    const uint32_t expected = nQpsPerDev > 0 ? RCCL_RMA_SEND_QP_WRS : 2 * NET_IB_MAX_REQUESTS;
+    for (uint32_t depth : depths) EXPECT_EQ(depth, expected);
+
+    EXPECT_EQ(IbMsegCloseSend(comm), ncclSuccess);
+  }
 }
 
 // The receiver allocates the slots from its own decision; the sender reaches the same one.
@@ -1731,6 +1758,119 @@ TEST_F(NetIbMsegConnectMicrotest, CreateFlushQp_FirstUseCreatesLoopbackQpAndHost
   EXPECT_EQ(comm.devs[0].gpuFlush.qp.rtrAttr.remoteQpNum, comm.devs[0].gpuFlush.qp.qp->qp_num);
   EXPECT_NE(comm.devs[0].gpuFlush.hostMr, nullptr);
   EXPECT_EQ(comm.devs[0].gpuFlush.sge.lkey, comm.devs[0].gpuFlush.hostMr->lkey);
+}
+
+// Branch: with multi-segment on (rcclMultiSegOn) a GIN/RMA comm's sender QP holds a full chain per in-flight
+// request; NET comms and multi-segment off keep the base.
+TEST_F(NetIbMsegConnectMicrotest, SenderQps_MultiSegmentRegisterSetsSendQueueDepth) {
+  ConfigureSingleDevice();
+  InstallSingleDeviceResourceFakes();
+  auto baseCreate = g_ibvCreateQp;
+  std::vector<uint32_t> depths;
+  ScopedHook create(g_ibvCreateQp, [&](ibv_qp** out, ibv_pd* pd, ibv_qp_init_attr* attr) {
+    depths.push_back(attr->cap.max_send_wr);
+    return baseCreate(out, pd, attr);
+  });
+  for (bool multiSeg : {false, true}) {
+    for (bool isRma : {false, true}) {
+      g_multiSegOn = [multiSeg](bool pluginRegistersPerSegment) { return pluginRegistersPerSegment && multiSeg; };
+      IbMsegSendComm comm{};
+      comm.base.vProps.ndevs = 1;
+      comm.base.nqps = 1;
+      comm.base.isRma = isRma;
+      comm.devs[0].base.ibDevN = 0;
+      comm.devs[0].base.pd = &pd_;
+      comm.devs[0].base.cq = &cq_;
+      comm.devs[0].base.gidInfo = IbMsegDevs[0].gidInfo;
+      IbMsegConnectionMetadata local{};
+      const int expected = multiSeg && isRma ? RCCL_RMA_SEND_QP_WRS : 2 * NET_IB_MAX_REQUESTS;
+
+      ASSERT_EQ(IbMsegSenderQpsCreate(&comm, &local), ncclSuccess);
+      ASSERT_FALSE(depths.empty());
+      EXPECT_EQ(depths.back(), static_cast<uint32_t>(expected)) << "multiSeg=" << multiSeg << " isRma=" << isRma;
+    }
+  }
+}
+
+// Branch: each loopback flush QP records its own device index. In-flight flush chains fit the base depth either way.
+TEST_F(NetIbMsegConnectMicrotest, CreateFlushQp_KeepsBaseDepthAndLoopbackDeviceIndex) {
+  ConfigureSingleDevice();
+  InstallSingleDeviceResourceFakes();
+  auto baseParams = g_loadParam;
+  auto baseCreate = g_ibvCreateQp;
+  std::vector<uint32_t> depths;
+  ScopedHook create(g_ibvCreateQp, [&](ibv_qp** out, ibv_pd* pd, ibv_qp_init_attr* attr) {
+    depths.push_back(attr->cap.max_send_wr);
+    return baseCreate(out, pd, attr);
+  });
+  for (int64_t multiSeg : {0, 1}) {
+    g_loadParam = [baseParams, multiSeg](const char* name, int64_t fallback) {
+      return std::strcmp(name, "MULTI_SEGMENT_REGISTER") == 0 ? multiSeg : baseParams(name, fallback);
+    };
+    IbMsegRecvComm comm{};
+    comm.flushEnabled = 1;
+    comm.base.vProps.ndevs = 2;
+    for (int d = 0; d < 2; d++) {
+      comm.devs[d].base.ibDevN = 0;
+      comm.devs[d].base.pd = &pd_;
+      comm.devs[d].base.cq = &cq_;
+      comm.devs[d].base.gidInfo = IbMsegDevs[0].gidInfo;
+      comm.devs[d].gpuFlush.qp.devIndex = -1;
+      comm.devs[d].gpuFlush.qp.remDevIdx = -1;
+    }
+    depths.clear();
+
+    ASSERT_EQ(IbMsegCreateFlushQp(&comm), ncclSuccess);
+    ASSERT_EQ(depths.size(), 2u);
+    for (int d = 0; d < 2; d++) {
+      EXPECT_EQ(comm.devs[d].gpuFlush.qp.devIndex, d);
+      EXPECT_EQ(comm.devs[d].gpuFlush.qp.remDevIdx, d);
+      EXPECT_EQ(depths[d], static_cast<uint32_t>(2 * NET_IB_MAX_REQUESTS)) << "multiSeg=" << multiSeg;
+    }
+  }
+}
+
+// Branch: a peer device index outside [0, peer ndevs) is rejected before it indexes remDevs.
+TEST_F(NetIbMsegConnectMicrotest, SenderQpsToRts_PeerDeviceIndexOutOfRangeIsRejected) {
+  ConfigureSingleDevice();
+  InstallSingleDeviceResourceFakes();
+  IbMsegSendComm comm{};
+  comm.base.vProps.ndevs = 1;
+  comm.base.nqps = 1;
+  comm.devs[0].base.ibDevN = 0;
+  ScopedHook modify(g_ibvModifyQp, [](ibv_qp*, ibv_qp_attr*, int) {
+    ADD_FAILURE() << "a rejected peer must not transition any QP";
+    return ncclSystemError;
+  });
+
+  for (int devIndex : {-1, 1, NCCL_IB_MAX_DEVS_PER_NIC}) {
+    IbMsegConnectionMetadata remote{};
+    remote.ndevs = 1;
+    remote.qpInfo[0].devIndex = devIndex;
+    EXPECT_EQ(IbMsegSenderQpsToRts(&comm, &remote), ncclInternalError) << "devIndex=" << devIndex;
+  }
+  EXPECT_EQ(modify.calls, 0);
+}
+
+// Branch: the receiver rejects a peer device index outside [0, peer ndevs) before creating its QP.
+TEST_F(NetIbMsegConnectMicrotest, ReceiverQpsCreateToRts_PeerDeviceIndexOutOfRangeCreatesNoQp) {
+  ConfigureSingleDevice();
+  InstallSingleDeviceResourceFakes();
+  IbMsegRecvComm comm{};
+  comm.base.vProps.ndevs = 1;
+  comm.base.nqps = 1;
+  comm.devs[0].base.ibDevN = 0;
+  comm.devs[0].base.pd = &pd_;
+  comm.devs[0].base.cq = &cq_;
+
+  for (int devIndex : {-1, 1, NCCL_IB_MAX_DEVS_PER_NIC}) {
+    IbMsegConnectionMetadata remote{};
+    IbMsegConnectionMetadata meta{};
+    remote.ndevs = 1;
+    remote.qpInfo[0].devIndex = devIndex;
+    EXPECT_EQ(IbMsegReceiverQpsCreateToRts(&comm, &remote, &meta), ncclInternalError) << "devIndex=" << devIndex;
+  }
+  EXPECT_TRUE(qps_.empty());
 }
 
 TEST_F(NetIbMsegConnectMicrotest, PostReceiveWorkRequests_ResiliencyDepthControlsPostCount) {

@@ -13,6 +13,10 @@ ncclResult_t g_ncclGinInitResult = ncclSuccess;
 ncclResult_t ncclGinInit(struct ncclComm*) { return g_ncclGinInitResult; }
 ncclResult_t ncclGinInitFromParent(struct ncclComm*, struct ncclComm*) { return g_ncclGinInitResult; }
 
+// src/gin/gin_host_proxy.cc; init.cc passes comm->rcclMultiSegRma.
+bool g_rcclGinProxyMultiSeg = false;
+void rcclGinProxySetMultiSeg(bool multiSeg) { g_rcclGinProxyMultiSeg = multiSeg; }
+
 // src/gin/gin_host.cc. rccl-UnitTestsMicroGinHost compiles the real TU and does
 // not link this file, so the fake is not guarded.
 bool g_ginHasError = false;

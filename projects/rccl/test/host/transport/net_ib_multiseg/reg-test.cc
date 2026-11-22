@@ -296,9 +296,7 @@ TEST_F(NetIbMsegRegMicrotest, RegMr_MultiDeviceFailureReturnsErrorWithoutPublish
   EXPECT_EQ(reg.calls, 2);
 }
 
-TEST_F(NetIbMsegRegMicrotest, DISABLED_RegMr_MultiDeviceFailureUnwindsEarlierRegistrations) {
-  // Production leaves the first device's MR cached when the second device
-  // registration fails. Enable with the fix tracked by AICOMRCCL-3112.
+TEST_F(NetIbMsegRegMicrotest, RegMr_MultiDeviceFailureUnwindsEarlierRegistrations) {
   IbMsegSendComm comm{};
   comm.base.isSend = true;
   comm.base.vProps.ndevs = 2;
