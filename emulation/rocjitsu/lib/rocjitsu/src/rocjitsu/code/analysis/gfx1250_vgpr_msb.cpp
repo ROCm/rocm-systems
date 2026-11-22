@@ -34,8 +34,7 @@ bool may_change_vgpr_msb(const Instruction &instruction, rocjitsu::IsaFamily arc
   if (hwreg == nullptr)
     return true;
   const uint16_t encoding = static_cast<uint16_t>(hwreg->encoding_value());
-  return (setreg_vgpr_msb_fixup &&
-          amdgpu::decode_vgpr_msb_hwreg(encoding).id == amdgpu::MODE_HWREG) ||
+  return (setreg_vgpr_msb_fixup && amdgpu::decode_hwreg_slice(encoding).id == amdgpu::MODE_HWREG) ||
          amdgpu::hwreg_slice_overlaps_vgpr_msb(encoding);
 }
 
@@ -187,7 +186,7 @@ void transfer_instruction(VgprMsbState &state, const Instruction &inst,
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
+  const bool writes_mode = amdgpu::decode_hwreg_slice(hwreg).id == amdgpu::MODE_HWREG;
 
   if (setreg_vgpr_msb_fixup && writes_mode) {
     if (inst.amdgpu_operation() == amdgpu::Operation::S_SETREG_B32) {

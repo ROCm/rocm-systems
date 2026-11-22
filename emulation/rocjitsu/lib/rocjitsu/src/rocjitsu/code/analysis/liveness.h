@@ -109,12 +109,13 @@ struct LivenessAnalysisOptions {
   /// @brief Kernel entry block where architectural VGPR_MSB state is zero.
   BasicBlock *entry_block = nullptr;
 
-  /// @brief Further blocks entered with the same architectural state as entry_block.
+  /// @brief Further blocks entered with the ABI's VGPR_MSB bank-zero state.
   ///
   /// @details These are address-taken device functions adopted into this scope. They are reached
   /// by a call through a pointer rather than by a decoded edge, so without seeding their blocks
-  /// stay unreachable and every VGPR_MSB query over them answers nullopt. The state to seed them
-  /// with is the ABI's, which is the same one entry_block gets.
+  /// stay unreachable and every VGPR_MSB query over them answers nullopt. The VGPR-bank ABI
+  /// seeds them with bank zero, as for entry_block. This option supplies no VSKIP-clear proof:
+  /// Incoming VSKIP is unknown unless the block is also listed in vskip_clear_entry_blocks.
   std::span<BasicBlock *const> additional_entry_blocks;
 
   /// @brief Entries whose incoming VSKIP is proven clear, such as dispatch roots.

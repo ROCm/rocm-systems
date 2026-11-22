@@ -5816,7 +5816,7 @@ TEST(LivenessAnalysis, ExecMaskedVgprDefDoesNotKillInactiveLaneValue) {
 
 TEST(VgprMsbHwregSlice, MatchesTheBankFieldBitsForEveryEncoding) {
   for (uint32_t encoding = 0; encoding <= 0xffffu; ++encoding) {
-    const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(encoding);
+    const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(encoding);
     bool overlaps = false;
     for (uint32_t bit = 12; bit <= 19; ++bit)
       overlaps |= slice.id == amdgpu::MODE_HWREG && bit >= slice.begin &&

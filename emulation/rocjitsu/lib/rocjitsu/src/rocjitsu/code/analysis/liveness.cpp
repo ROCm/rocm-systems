@@ -118,14 +118,14 @@ std::optional<bool> mode_bit_write(const Instruction &inst, std::span<const uint
   const std::optional<uint32_t> literal = text_word_at(text, offset + sizeof(uint32_t));
   if (!literal)
     return true;
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(hwreg);
   return ((*literal >> (bit - slice.begin)) & 1u) != 0;
 }
 
 std::optional<bool> vskip_write(const Instruction &inst, std::span<const uint8_t> text,
                                 uint64_t offset) {
   if (inst.amdgpu_operation() != amdgpu::Operation::S_SETVSKIP)
-    return mode_bit_write(inst, text, 28, offset);
+    return mode_bit_write(inst, text, amdgpu::MODE_VSKIP_SHIFT, offset);
   const Operand *source = inst.src_operand(0);
   const Operand *selector = inst.src_operand(1);
   if (source == nullptr || selector == nullptr)
