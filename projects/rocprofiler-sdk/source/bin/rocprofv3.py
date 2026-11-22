@@ -1525,6 +1525,44 @@ def services_conflicting_with_kernel_replay(args, environ=None):
     return conflicts
 
 
+def validate_kernel_replay_configuration(args):
+    """Reject an invalid effective run configuration before launching an application."""
+    pmc = getattr(args, "pmc", None)
+    pmc_groups = getattr(args, "pmc_groups", None)
+    if pmc and pmc_groups:
+        fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
+
+    kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
+    beta_acknowledged = getattr(args, "kernel_replay_beta_enabled", None)
+
+    if kernel_replay_mode:
+        if not beta_acknowledged:
+            fatal_error(
+                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled"
+            )
+        if not pmc and not pmc_groups:
+            fatal_error(
+                "--replay-mode kernel requires counter collection "
+                "(--pmc or pmc_groups)"
+            )
+        replay_conflicts = services_conflicting_with_kernel_replay(args)
+        if replay_conflicts:
+            fatal_error(
+                "--replay-mode kernel cannot be combined with "
+                + " or ".join(replay_conflicts)
+                + ". Kernel replay only varies counter groups from one pass to the next; "
+                "every other service stays on for all of the passes and would report each "
+                "kernel once per pass. Collect them in a separate run."
+            )
+    elif beta_acknowledged:
+        fatal_error(
+            "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature but "
+            "does not select it. Add --replay-mode kernel to use kernel replay, or drop the "
+            "acknowledgement to use application replay"
+        )
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
 
@@ -1669,6 +1707,7 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
+    validate_kernel_replay_configuration(args)
 
     # Validate custom MPI environment variables
     # If one custom variable is specified, both must be provided
@@ -2296,46 +2335,13 @@ def run(app_args, args, **kwargs):
                 warning("Extra counter file '{}' was empty.", args.extra_counters)
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
-    if args.pmc and args.pmc_groups:
-        fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
-
     kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
 
     if kernel_replay_mode:
-        if not getattr(args, "kernel_replay_beta_enabled", None):
-            fatal_error(
-                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
-                "feature via --kernel-replay-beta-enabled"
-            )
-        if not args.pmc and not args.pmc_groups:
-            fatal_error(
-                "--replay-mode kernel requires counter collection "
-                "(--pmc or pmc_groups)"
-            )
-        replay_conflicts = services_conflicting_with_kernel_replay(args)
-        if replay_conflicts:
-            fatal_error(
-                "--replay-mode kernel cannot be combined with "
-                + " or ".join(replay_conflicts)
-                + ". Kernel replay only varies counter groups from one pass to the next; "
-                "every other service stays on for all of the passes and would report each "
-                "kernel once per pass. Collect them in a separate run."
-            )
-
         # Route counter collection through the in-process kernel-replay service. The SDK derives
         # the pass count from the number of counter groups via the tool's pass-count callback, so
         # there is nothing else to communicate.
         update_env("ROCPROF_KERNEL_REPLAY", True, overwrite_if_true=True)
-
-    elif getattr(args, "kernel_replay_beta_enabled", None):
-        # The flag only acknowledges the beta; it does not select replay. Its name reads as if it
-        # did, so accepting it alone would silently give application replay to someone who asked
-        # for kernel replay and believes they got it.
-        fatal_error(
-            "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature but "
-            "does not select it. Add --replay-mode kernel to use kernel replay, or drop the "
-            "acknowledgement to use application replay"
-        )
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
@@ -2744,50 +2750,8 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
-    # pmc_groups only ever arrives from an input file, so look for it there rather than on
-    # cmd_args, where it is never set.
-    input_has_counters = any(
-        has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
-    )
 
     replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
-    if replay_enabled and not (cli_has_pmc or input_has_counters):
-        fatal_error(
-            "--replay-mode kernel requires counter collection "
-            "(--pmc, input-file pmc, or pmc_groups)"
-        )
-    # Validate each effective job before starting any application. An input file may contain
-    # both replay and non-replay jobs, so checking whether any one job selects replay can allow
-    # earlier jobs to launch before a later job fails in run().
-    for inp in inp_args:
-        replay_mode = getattr(cmd_args, "replay_mode", None)
-        if replay_mode is None:
-            replay_mode = getattr(inp, "replay_mode", None)
-        job_replay_enabled = replay_mode == "kernel"
-        beta_acknowledged = getattr(cmd_args, "kernel_replay_beta_enabled", None)
-        if beta_acknowledged is None:
-            beta_acknowledged = getattr(inp, "kernel_replay_beta_enabled", None)
-        has_counters = (
-            any(getattr(cmd_args, "pmc", None) or [])
-            or any(getattr(inp, "pmc", None) or [])
-            or any(getattr(inp, "pmc_groups", None) or [])
-        )
-        if job_replay_enabled and not beta_acknowledged:
-            fatal_error(
-                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
-                "feature via --kernel-replay-beta-enabled"
-            )
-        if job_replay_enabled and not has_counters:
-            fatal_error(
-                "--replay-mode kernel requires counter collection "
-                "(--pmc, input-file pmc, or pmc_groups)"
-            )
-        if beta_acknowledged and not job_replay_enabled:
-            fatal_error(
-                "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature "
-                "but does not select it. Add --replay-mode kernel to use kernel replay, or "
-                "drop the acknowledgement to use application replay"
-            )
 
     # Kernel replay replays each dispatch once per counter group within one application run, so
     # the groups given on the command line are passes of a single run rather than the per-group
@@ -2853,6 +2817,7 @@ def main(argv=None):
 
         args = get_args(cmd_args, inp_args[0])
         validate_selected_regions_conflicts(args)
+        validate_kernel_replay_configuration(args)
 
         if args.pid:
             # For reattachment support, args must be the same as previous rocprofv3 sessions
@@ -2961,7 +2926,8 @@ def main(argv=None):
         # Get base args from first input arg (for CLI-only passes)
         base_args = get_args(cmd_args, inp_args[0])
 
-        # Run each pass with its specific config
+        # Construct and validate every effective run before starting any application.
+        all_pass_args = []
         for idx, pass_config in enumerate(all_pass_configs):
             if pass_config["from_cli"]:
                 # CLI pass: use base_args and override PMC
@@ -2973,11 +2939,15 @@ def main(argv=None):
                 pass_args = get_args(cmd_args, pass_config["config"])
 
             validate_selected_regions_conflicts(pass_args)
+            validate_kernel_replay_configuration(pass_args)
+            all_pass_args.append((idx + 1, pass_args))
 
+        # Run each pass with its specific config only after all configurations are valid.
+        for pass_id, pass_args in all_pass_args:
             _ec = run(
                 app_args,
                 pass_args,
-                pass_id=(idx + 1),
+                pass_id=pass_id,
                 use_execv=False,
             )
             if _ec is not None and _ec != 0:
