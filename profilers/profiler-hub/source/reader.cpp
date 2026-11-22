@@ -83,7 +83,7 @@ reader_t::impl::database_path() const
 void
 reader_t::impl::build_catalog()
 {
-    ensure_track_topology_indexes();
+    ensure_track_topology_indexes({});
     for(const catalog_category_t category : { catalog_category_t::string_list,
                                               catalog_category_t::nodes,
                                               catalog_category_t::processes,
@@ -254,9 +254,9 @@ reader_t::impl::apply_pagination(reader_types::timeline_event_list_t& events,
 // ============================================================================
 
 void
-reader_t::ensure_track_topology_indexes()
+reader_t::ensure_track_topology_indexes(const index_progress_fn& progress)
 {
-    m_impl->ensure_track_topology_indexes();
+    m_impl->ensure_track_topology_indexes(progress);
 }
 
 void

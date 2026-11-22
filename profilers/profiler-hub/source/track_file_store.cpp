@@ -429,6 +429,7 @@ track_file_store::open(const std::string&              cache_root,
 {
     m_ready   = false;
     m_writing = false;
+    m_stale_reason.clear();
     clear_tracks();
     m_sources.clear();
     m_directory.clear();
@@ -460,24 +461,48 @@ track_file_store::open(const std::string&              cache_root,
 
         const std::filesystem::path metadata =
             std::filesystem::path{ m_directory } / "timeline.meta";
-        if(!std::filesystem::is_regular_file(metadata)) return true;
+        if(!std::filesystem::is_regular_file(metadata))
+        {
+            m_stale_reason =
+                "no track cache exists for this version of the trace file yet";
+            return true;
+        }
 
         binary_reader in{ metadata };
         char          magic[4] = {};
         in.bytes(magic, 4);
-        if(!same_magic(magic, k_meta_magic) || in.u32() != k_format_version) return true;
+        if(!same_magic(magic, k_meta_magic) || in.u32() != k_format_version)
+        {
+            m_stale_reason = "the track cache format changed";
+            return true;
+        }
         if(in.u32() != m_schema || in.u32() != m_version_major ||
            in.u32() != m_version_minor || in.u32() != m_version_patch)
         {
+            m_stale_reason = "the trace schema version changed";
             return true;
         }
 
         const uint32_t source_count = in.u32();
-        if(source_count != m_sources.size()) return true;
+        if(source_count != m_sources.size())
+        {
+            m_stale_reason = "the set of trace files changed";
+            return true;
+        }
         for(const source_identity_t& identity : m_sources)
         {
-            if(in.u64() != identity.size || in.i64() != identity.mtime) return true;
-            if(in.text() != identity.path) return true;
+            const uint64_t cached_size  = in.u64();
+            const int64_t  cached_mtime = in.i64();
+            if(cached_size != identity.size || cached_mtime != identity.mtime)
+            {
+                m_stale_reason = "the trace file changed since the cache was written";
+                return true;
+            }
+            if(in.text() != identity.path)
+            {
+                m_stale_reason = "the trace file path changed";
+                return true;
+            }
         }
 
         m_hist_origin       = in.u64();
@@ -540,6 +565,8 @@ track_file_store::open(const std::string&              cache_root,
         clear_tracks();
         m_strings.clear();
         m_ready = false;
+        m_stale_reason =
+            std::string{ "the track cache could not be read: " } + failure.what();
         return true;
     }
 }

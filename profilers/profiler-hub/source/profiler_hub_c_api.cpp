@@ -719,14 +719,20 @@ ph_get_histogram(ph_ctx_t        ctx,
     }
     *histogram = {};
 
-    return run_operation(ctx, future, [ctx, max_buckets, histogram]() -> ph_result_t {
-        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
-        {
-            return ready;
-        }
-        ctx->build_histogram(max_buckets, *histogram);
-        return PH_RESULT_SUCCESS;
-    });
+    return run_operation(
+        ctx, future, [ctx, max_buckets, histogram, future]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+            ctx->build_histogram(
+                max_buckets,
+                *histogram,
+                [future](double value, ph_progress_description_t description) {
+                    if(future != nullptr) future->report_progress(value, description);
+                });
+            return PH_RESULT_SUCCESS;
+        });
 }
 
 ph_result_t

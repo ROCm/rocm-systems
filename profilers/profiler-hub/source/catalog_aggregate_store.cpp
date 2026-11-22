@@ -140,6 +140,12 @@ stat_source(const std::string& path, source_identity_t& identity)
     return true;
 }
 
+void
+note_progress(const reader_catalog_t& catalog, const std::string& text)
+{
+    if(catalog.progress) catalog.progress(text, std::nullopt);
+}
+
 std::string
 catalog_directory(const reader_catalog_t& catalog)
 {
@@ -339,14 +345,21 @@ load_catalog_aggregates(reader_catalog_t& catalog)
         const auto node = catalog.nodes_by_id.find(rocpd_v2::k_node_id);
         if(node == catalog.nodes_by_id.end()) return false;
 
+        note_progress(catalog, "Loading cached catalog aggregates");
+        const auto outdated = [&catalog] {
+            note_progress(catalog,
+                          "Cached catalog aggregates are out of date. Reading the "
+                          "trace instead");
+            return false;
+        };
         binary_reader in{ path };
         char          magic[4] = {};
         in.bytes(magic, 4);
-        if(!same_magic(magic, k_magic) || in.u32() != k_format_version) return false;
-        if(in.u32() != catalog.aggregate_cache_source) return false;
+        if(!same_magic(magic, k_magic) || in.u32() != k_format_version) return outdated();
+        if(in.u32() != catalog.aggregate_cache_source) return outdated();
         if(in.u64() != live.size || in.u64() != static_cast<uint64_t>(live.mtime))
-            return false;
-        if(in.text() != live.path) return false;
+            return outdated();
+        if(in.text() != live.path) return outdated();
 
         const uint32_t                                process_count = in.u32();
         std::vector<reader_types::process_info_ptr_t> processes;
@@ -585,6 +598,9 @@ load_catalog_aggregates(reader_catalog_t& catalog)
     } catch(const std::exception& error)
     {
         LOG_WARNING("[Profiler-Hub] Catalog aggregates were not used: {}", error.what());
+        note_progress(
+            catalog,
+            "Cached catalog aggregates were not usable. Reading the trace instead");
         return false;
     }
 }
@@ -724,17 +740,24 @@ load_derived_tracks(reader_catalog_t& catalog)
             return false;
         }
 
+        note_progress(catalog, "Loading cached derived tracks");
+        const auto outdated = [&catalog] {
+            note_progress(catalog,
+                          "Cached derived tracks are out of date. Reading the trace "
+                          "instead");
+            return false;
+        };
         binary_reader in{ path };
         char          magic[4] = {};
         in.bytes(magic, 4);
         if(!same_magic(magic, k_derived_magic) || in.u32() != k_derived_format_version)
         {
-            return false;
+            return outdated();
         }
-        if(in.u32() != catalog.aggregate_cache_source) return false;
+        if(in.u32() != catalog.aggregate_cache_source) return outdated();
         if(in.u64() != live.size || in.u64() != static_cast<uint64_t>(live.mtime))
-            return false;
-        if(in.text() != live.path) return false;
+            return outdated();
+        if(in.text() != live.path) return outdated();
 
         const uint32_t                              track_count = in.u32();
         std::vector<reader_types::track_info_ptr_t> tracks;
@@ -937,6 +960,8 @@ load_derived_tracks(reader_catalog_t& catalog)
     } catch(const std::exception& error)
     {
         LOG_WARNING("[Profiler-Hub] Derived tracks were not used: {}", error.what());
+        note_progress(catalog,
+                      "Cached derived tracks were not usable. Reading the trace instead");
         return false;
     }
 }

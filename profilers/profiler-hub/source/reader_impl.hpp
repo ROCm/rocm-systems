@@ -48,7 +48,13 @@ struct reader_t::impl
 
     virtual void build_catalog_category(reader_t::catalog_category_t category,
                                         reader_catalog_t&            catalog) = 0;
-    virtual void ensure_track_topology_indexes()                   = 0;
+
+    /** @brief Receives (fraction done, text) while indexes are built. */
+    using index_progress_fn = reader_t::index_progress_fn;
+
+    /** @brief Builds the indexes the track queries rely on. Only indexes that are
+     *         missing are built and reported through @p progress. */
+    virtual void ensure_track_topology_indexes(const index_progress_fn& progress) = 0;
 
     // Info table accessors (cached)
     [[nodiscard]] reader_types::node_info_list_t            get_all_nodes();

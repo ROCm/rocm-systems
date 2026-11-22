@@ -15,6 +15,7 @@ set(profiler-hub_sources
     ${CMAKE_CURRENT_LIST_DIR}/reader_catalog.hpp
     ${CMAKE_CURRENT_LIST_DIR}/populate_reader_catalog.cpp
     ${CMAKE_CURRENT_LIST_DIR}/populate_reader_catalog.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/read_progress.hpp
     ${CMAKE_CURRENT_LIST_DIR}/storage.cpp
     ${CMAKE_CURRENT_LIST_DIR}/storage_impl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/file_probe.cpp

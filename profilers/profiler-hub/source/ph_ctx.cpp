@@ -6,6 +6,7 @@
 #include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
 #include "profiler-hub/cpp/reader.hpp"
+#include "read_progress.hpp"
 #include "reader_catalog.hpp"
 #include "sql_cancel.hpp"
 #include "trace_trim.hpp"
@@ -17,6 +18,7 @@
 #include <mutex>
 #include <numeric>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <tuple>
 
@@ -704,10 +706,14 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
 {
     if(stop_requested()) return false;
 
-    if(progress) progress(0.0, "Reading schema version");
+    // One rising percentage across all phases, so a message never shares its
+    // percentage with the one before it.
+    profiler_hub::read_progress_t report{ progress };
+
+    report.step("Reading schema version");
     open_sources();
 
-    if(progress) progress(0.0, "Building reader catalog");
+    report.step("Building reader catalog");
     std::vector<std::string> cache_paths;
     cache_paths.reserve(m_accepted.size());
     for(const accepted_source_t& accepted : m_accepted)
@@ -728,40 +734,62 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
             source.catalog->aggregate_cache_paths  = cache_paths;
             source.catalog->aggregate_cache_source = index;
         }
-        populate_reader_catalog(m_thread_pool, *source.pool, *source.catalog);
+        // With several traces open, say which one a message is about.
+        const std::string trace_prefix =
+            m_sources.size() > 1 ? "Trace " + std::to_string(index + 1) + " of " +
+                                       std::to_string(m_sources.size()) + ": "
+                                 : std::string{};
+        // Index creation is the only catalog phase with a real fraction. It
+        // spreads over a share of the range.
+        report.set_window(0.20 / static_cast<double>(m_sources.size()));
+        const auto catalog_report = [&](const std::string&           text,
+                                        const std::optional<double>& fraction) {
+            if(fraction.has_value())
+            {
+                report.within(*fraction, trace_prefix + text);
+            }
+            else
+            {
+                report.step(trace_prefix + text);
+            }
+        };
+        populate_reader_catalog(
+            m_thread_pool, *source.pool, *source.catalog, catalog_report);
         if(legacy_rocpd && !source.catalog->derived_aggregates_ready)
         {
+            report.step(trace_prefix + "Saving aggregate cache");
             save_catalog_aggregates(*source.catalog);
         }
         if(modern_rocpd && !source.catalog->derived_aggregates_ready)
         {
+            report.step(trace_prefix + "Saving derived tracks");
             save_derived_tracks(*source.catalog);
         }
         source.catalog->publish_memory_activity_pmc_infos();
         if(stop_requested()) return false;
     }
 
-    if(progress) progress(0.0, "Building track list");
+    report.step("Building track list");
     initialize_track_list();
-    prepare_track_store();
-    if(!load_all_tracks(stop_requested, progress)) return false;
+    prepare_track_store(report);
+    if(!load_all_tracks(stop_requested, report)) return false;
     attach_track_store();
 
-    if(progress) progress(1.0, "Reading node agents");
+    report.step("Reading node agents");
     initialize_node_agents();
-    if(progress) progress(1.0, "Reading processes");
+    report.step("Reading processes");
     initialize_node_processes();
-    if(progress) progress(1.0, "Reading threads");
+    report.step("Reading threads");
     initialize_node_threads();
-    if(progress) progress(1.0, "Reading streams");
+    report.step("Reading streams");
     initialize_node_streams();
-    if(progress) progress(1.0, "Reading queues");
+    report.step("Reading queues");
     initialize_node_queues();
-    if(progress) progress(1.0, "Reading PMC info");
+    report.step("Reading PMC info");
     initialize_node_pmc_infos();
-    if(progress) progress(1.0, "Reading stream hardware links");
+    report.step("Reading stream hardware links");
     initialize_stream_hardware_links();
-    if(progress) progress(1.0, "Reading node info");
+    report.step("Reading node info");
     initialize_node_info();
     return true;
 }
@@ -1409,10 +1437,14 @@ narrow_histogram_count(std::size_t value)
 }  // namespace
 
 void
-ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
+ph_ctx::build_histogram(
+    uint32_t                                                      max_buckets,
+    ph_histogram_t&                                               output,
+    const std::function<void(double, ph_progress_description_t)>& progress)
 {
     if(m_track_store && m_track_store->ready())
     {
+        if(progress) progress(0.5, "Reading track histogram from cache");
         const profiler_hub::histogram_grid_t   grid = histogram_grid(max_buckets);
         const profiler_hub::stored_histogram_t stored =
             m_track_store->histogram(static_cast<uint64_t>(grid.origin),
@@ -1449,6 +1481,16 @@ ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
     for(const std::unique_ptr<trace_source_t>& held : m_sources)
     {
         using profiler_hub::reader_types::timestamp_ns_t;
+        if(progress)
+        {
+            const std::string text = "Building track histogram from the trace (" +
+                                     std::to_string(parts.size() + 1) + " of " +
+                                     std::to_string(m_sources.size()) + " files)";
+            // The middle of this file's share, so the value is never 0.
+            progress((static_cast<double>(parts.size()) + 0.5) /
+                         static_cast<double>(m_sources.size()),
+                     text.c_str());
+        }
         bool           source_any = false;
         timestamp_ns_t origin     = 0;
         for(const auto& track : held->catalog->tracks)
@@ -1631,10 +1673,11 @@ ph_ctx::histogram_grid(size_t max_buckets) const
 }
 
 void
-ph_ctx::prepare_track_store()
+ph_ctx::prepare_track_store(profiler_hub::read_progress_t& progress)
 {
     if(m_cache_directory.empty() || m_sources.empty()) return;
 
+    progress.step("Opening track cache");
     auto                     store = std::make_unique<profiler_hub::track_file_store>();
     std::vector<std::string> paths;
     paths.reserve(m_sources.size());
@@ -1669,11 +1712,15 @@ ph_ctx::prepare_track_store()
         store->set_histogram_grid(static_cast<uint64_t>(grid.origin),
                                   static_cast<uint64_t>(grid.bucket_size),
                                   static_cast<uint64_t>(grid.bucket_count));
-        LOG_INFO("[Profiler-Hub] Writing track cache {}", store->directory());
+        LOG_INFO("[Profiler-Hub] Writing track cache {}: {}",
+                 store->directory(),
+                 store->stale_reason());
+        progress.step("Track cache cannot be used: " + store->stale_reason());
     }
     else
     {
         LOG_INFO("[Profiler-Hub] Using track cache {}", store->directory());
+        progress.step("Track cache found");
     }
     m_track_store = std::move(store);
 }
@@ -1689,8 +1736,8 @@ ph_ctx::attach_track_store()
 }
 
 bool
-ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
-                        const progress_fn&       progress)
+ph_ctx::load_all_tracks(const stop_requested_fn&       stop_requested,
+                        profiler_hub::read_progress_t& progress)
 {
     const auto total_events = std::accumulate(
         m_c_tracks.begin(),
@@ -1701,9 +1748,26 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
     const bool writing       = m_track_store && m_track_store->writing();
     const bool cached        = m_track_store && m_track_store->ready();
     uint64_t   loaded_events = 0;
+    size_t     visited       = 0;
+    // The tracks take most of the range. Finishing the cache and reading the
+    // node lists use the rest.
+    progress.set_window_until(0.90);
     for(auto& c_track : m_c_tracks)
     {
         if(stop_requested()) return false;
+        ++visited;
+
+        if(total_events != 0)
+        {
+            const std::string text = std::string{ writing  ? "Writing track files"
+                                                  : cached ? "Loading tracks from cache"
+                                                           : "Loading tracks" } +
+                                     " (" + std::to_string(visited) + " of " +
+                                     std::to_string(m_c_tracks.size()) + " tracks)";
+            progress.within(static_cast<double>(loaded_events) /
+                                static_cast<double>(total_events),
+                            text);
+        }
 
         const placed_track_t* place = place_of(c_track.id);
         if(place == nullptr) return false;
@@ -1772,17 +1836,12 @@ ph_ctx::load_all_tracks(const stop_requested_fn& stop_requested,
         }
 
         loaded_events += c_track.event_count;
-        if(progress && total_events != 0)
-        {
-            progress(static_cast<double>(loaded_events) /
-                         static_cast<double>(total_events),
-                     writing ? "Writing track files" : "Loading tracks");
-        }
     }
 
     if(writing)
     {
         if(stop_requested()) return false;
+        progress.step("Finishing track cache");
         if(!m_track_store->finish_write())
         {
             throw std::runtime_error{ "the track cache could not be saved" };

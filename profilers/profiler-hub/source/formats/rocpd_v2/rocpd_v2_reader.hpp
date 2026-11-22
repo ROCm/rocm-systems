@@ -92,7 +92,7 @@ public:
 
     void build_catalog_category(catalog_category_t category,
                                 reader_catalog_t&  catalog) override;
-    void ensure_track_topology_indexes() override;
+    void ensure_track_topology_indexes(const index_progress_fn& progress) override;
 
     // Timeline event queries
     [[nodiscard]] reader_types::timeline_event_list_t get_events(

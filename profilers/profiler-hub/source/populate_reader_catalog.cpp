@@ -64,11 +64,22 @@ run_all_and_rethrow(common::thread_pool&                      workers,
 }  // namespace
 
 void
-populate_reader_catalog(common::thread_pool&     workers,
-                        common::connection_pool& connections,
-                        reader_catalog_t&        catalog)
+populate_reader_catalog(common::thread_pool&       workers,
+                        common::connection_pool&   connections,
+                        reader_catalog_t&          catalog,
+                        const catalog_progress_fn& progress)
 {
     using category_t = reader_t::catalog_category_t;
+
+    // Readers report cache loads through the catalog. The callback may refer to
+    // the caller's locals, so it must not outlive this call.
+    struct progress_scope_t
+    {
+        reader_catalog_t& catalog;
+        ~progress_scope_t() { catalog.progress = nullptr; }
+    };
+    catalog.progress = progress;
+    const progress_scope_t progress_scope{ catalog };
 
     const auto make_step_task = [&](std::function<void(common::connection&)> step) {
         return std::function<void()>{ [&connections, step = std::move(step)] {
@@ -86,10 +97,15 @@ populate_reader_catalog(common::thread_pool&     workers,
             });
     };
 
-    run_all_and_rethrow(workers, { make_step_task([](common::connection& conn) {
-                            conn.reader().ensure_track_topology_indexes();
+    const auto announce = [&progress](const std::string& text) {
+        if(progress) progress(text, std::nullopt);
+    };
+
+    run_all_and_rethrow(workers, { make_step_task([&progress](common::connection& conn) {
+                            conn.reader().ensure_track_topology_indexes(progress);
                         }) });
 
+    announce("Reading strings, nodes, processes, threads, and agents");
     run_all_and_rethrow(workers,
                         {
                             make_sequential_task({
@@ -101,6 +117,7 @@ populate_reader_catalog(common::thread_pool&     workers,
                             }),
                         });
 
+    announce("Reading tracks, streams, queues, and PMC info");
     run_all_and_rethrow(workers,
                         {
                             make_sequential_task({ category_t::tracks,

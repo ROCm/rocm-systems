@@ -498,8 +498,11 @@ struct read_statements
     // scans rocpd_sample for each region row. Databases written before this
     // existed won't have the indexes yet; create them lazily on open. A failure
     // (e.g. read-only file) is only logged -- queries still work without them,
-    // just slower.
-    void create_track_topology_indexes()
+    // just slower. @p progress, when set, receives (index position / index
+    // count, text) before each index that is missing and has to be built.
+    void create_track_topology_indexes(
+        const std::function<void(const std::string&, std::optional<double>)>&
+            progress = {})
     {
         struct index_t
         {
@@ -539,9 +542,45 @@ struct read_statements
             { "rocpd_event", "stack_id", "stack_id" },
         } };
 
-        const auto create = [this](const index_t& index) {
-            const std::string table = fmt::format("{}_{}", index.table, m_uuid);
-            if(!table_present(table)) return;
+        // Only indexes that are missing on a present table need work. A trace
+        // that already carries them reports nothing and costs two lookups each.
+        std::vector<index_t> pending;
+        const auto           collect = [&](const index_t& index) {
+            if(!table_present(fmt::format("{}_{}", index.table, m_uuid))) return;
+            if(index_present(
+                   fmt::format("idx_{}_{}_{}", index.table, m_uuid, index.name)))
+                return;
+            pending.push_back(index);
+        };
+        for(const index_t& index : k_event_indexes)
+        {
+            collect(index);
+        }
+        if(m_hip_event_table)
+        {
+            for(const index_t& index : k_hip_event_indexes)
+            {
+                collect(index);
+            }
+        }
+        for(const index_t& index : k_child_indexes)
+        {
+            collect(index);
+        }
+
+        for(size_t position = 0; position < pending.size(); ++position)
+        {
+            const index_t& index = pending[position];
+            if(progress)
+            {
+                progress(fmt::format("Creating index {} on {} ({} of {})",
+                                     index.name,
+                                     index.table,
+                                     position + 1,
+                                     pending.size()),
+                         static_cast<double>(position) /
+                             static_cast<double>(pending.size()));
+            }
             try
             {
                 m_backend->execute(
@@ -553,27 +592,12 @@ struct read_statements
                                 index.columns));
             } catch(const std::runtime_error& err)
             {
-                LOG_ERROR("Failed to create the {} index on {}: {}",
+                LOG_ERROR("Failed to create the {} index on {}_{}: {}",
                           index.name,
-                          table,
+                          index.table,
+                          m_uuid,
                           err.what());
             }
-        };
-
-        for(const index_t& index : k_event_indexes)
-        {
-            create(index);
-        }
-        if(m_hip_event_table)
-        {
-            for(const index_t& index : k_hip_event_indexes)
-            {
-                create(index);
-            }
-        }
-        for(const index_t& index : k_child_indexes)
-        {
-            create(index);
         }
     }
 
@@ -1423,6 +1447,22 @@ private:
             m_backend
                 ->create_read_statement_executor<present_row>(
                     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '" +
+                        name + "'",
+                    &present_row::one)()
+                .to_vector();
+        return !rows.empty();
+    }
+
+    bool index_present(const std::string& name)
+    {
+        struct present_row
+        {
+            size_t one{};
+        };
+        const auto rows =
+            m_backend
+                ->create_read_statement_executor<present_row>(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = '" +
                         name + "'",
                     &present_row::one)()
                 .to_vector();

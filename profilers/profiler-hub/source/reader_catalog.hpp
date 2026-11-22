@@ -234,6 +234,11 @@ struct reader_catalog_t
     uint32_t                 aggregate_cache_source{ 0 };
     bool                     derived_aggregates_ready{ false };
 
+    // Set by populate_reader_catalog for the length of one populate call. A
+    // reader reports slow steps such as cache loads through it. May run on a
+    // worker thread.
+    std::function<void(const std::string&, std::optional<double>)> progress;
+
 private:
     void link_owner(reader_types::track_info_t& track,
                     size_t                      nid,

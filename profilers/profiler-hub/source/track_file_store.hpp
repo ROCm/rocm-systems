@@ -76,6 +76,8 @@ public:
     [[nodiscard]] bool               ready() const { return m_ready; }
     [[nodiscard]] bool               writing() const { return m_writing; }
     [[nodiscard]] const std::string& directory() const { return m_directory; }
+    /** @brief Why open() found no usable cache. Empty when it found one. */
+    [[nodiscard]] const std::string& stale_reason() const { return m_stale_reason; }
 
     /** Copies @p text into the string table. The pointer stays valid for the
      *  life of the store. Only valid while writing. */
@@ -173,9 +175,10 @@ private:
     void index_track(const track_entry_t& entry);
     void clear_tracks();
 
-    uint32_t m_checkpoint_interval;
-    bool     m_ready{ false };
-    bool     m_writing{ false };
+    uint32_t    m_checkpoint_interval;
+    std::string m_stale_reason;
+    bool        m_ready{ false };
+    bool        m_writing{ false };
 
     std::string                    m_directory;
     std::vector<source_identity_t> m_sources;

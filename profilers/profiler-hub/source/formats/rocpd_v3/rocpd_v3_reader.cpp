@@ -294,9 +294,9 @@ rocpd_v3_reader::rocpd_v3_reader(std::unique_ptr<profiler_hub::storage_t> storag
 {}
 
 void
-rocpd_v3_reader::ensure_track_topology_indexes()
+rocpd_v3_reader::ensure_track_topology_indexes(const index_progress_fn& progress)
 {
-    m_read_statements->create_track_topology_indexes();
+    m_read_statements->create_track_topology_indexes(progress);
 }
 
 void

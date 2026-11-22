@@ -28,7 +28,8 @@ struct ph_future;
 namespace profiler_hub
 {
 class track_file_store;
-}
+class read_progress_t;
+}  // namespace profiler_hub
 
 struct ph_ctx
 {
@@ -128,7 +129,10 @@ struct ph_ctx
     [[nodiscard]] ph_sample_list_t          get_track_samples(uint32_t track_id,
                                                               uint64_t start_ts,
                                                               uint64_t end_ts);
-    void build_histogram(uint32_t max_buckets, ph_histogram_t& histogram);
+    void                                    build_histogram(
+                                           uint32_t                                                      max_buckets,
+                                           ph_histogram_t&                                               histogram,
+                                           const std::function<void(double, ph_progress_description_t)>& progress = {});
 
     /** Writes every loaded source into one trimmed database. Times are absolute
      *  on source 0's clock; each other source keeps the same displayed range. */
@@ -157,12 +161,12 @@ private:
     void               set_load_state(load_state_t state);
     void               set_load_state_if_loading(load_state_t state);
 
-    void                                         initialize_track_list();
-    void                                         prepare_track_store();
-    void                                         attach_track_store();
+    void initialize_track_list();
+    void prepare_track_store(profiler_hub::read_progress_t& progress);
+    void attach_track_store();
     [[nodiscard]] profiler_hub::histogram_grid_t histogram_grid(size_t max_buckets) const;
-    [[nodiscard]] bool        load_all_tracks(const stop_requested_fn& stop_requested,
-                                              const progress_fn&       progress);
+    [[nodiscard]] bool        load_all_tracks(const stop_requested_fn&       stop_requested,
+                                              profiler_hub::read_progress_t& progress);
     void                      initialize_node_info();
     void                      initialize_node_agents();
     void                      initialize_node_processes();

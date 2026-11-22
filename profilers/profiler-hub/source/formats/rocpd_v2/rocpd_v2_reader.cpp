@@ -312,26 +312,56 @@ rocpd_v2_reader::has_table(std::string_view name)
 }
 
 void
-rocpd_v2_reader::ensure_track_topology_indexes()
+rocpd_v2_reader::ensure_track_topology_indexes(const index_progress_fn& progress)
 {
-    constexpr std::array<std::string_view, 5> k_indexes{
-        "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_api_track ON rocpd_api(pid, tid, start)",
-        "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_op_track ON rocpd_op(gpuId, queueId, "
-        "start)",
-        "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_monitor_track ON "
-        "rocpd_monitor(deviceId, monitorType, start)",
-        "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_api_ops_api ON rocpd_api_ops(api_id)",
-        "CREATE INDEX IF NOT EXISTS ph_rocpd_v2_api_ops_op ON rocpd_api_ops(op_id)",
-    };
-    for(const std::string_view sql : k_indexes)
+    struct index_t
     {
+        std::string_view table;
+        std::string_view name;
+        std::string_view columns;
+    };
+    constexpr std::array<index_t, 5> k_indexes{ {
+        { "rocpd_api", "ph_rocpd_v2_api_track", "pid, tid, start" },
+        { "rocpd_op", "ph_rocpd_v2_op_track", "gpuId, queueId, start" },
+        { "rocpd_monitor", "ph_rocpd_v2_monitor_track", "deviceId, monitorType, start" },
+        { "rocpd_api_ops", "ph_rocpd_v2_api_ops_api", "api_id" },
+        { "rocpd_api_ops", "ph_rocpd_v2_api_ops_op", "op_id" },
+    } };
+
+    // Only indexes that are missing on a present table need work. A trace that
+    // already carries them reports nothing.
+    std::vector<index_t> pending;
+    for(const index_t& index : k_indexes)
+    {
+        if(!has_table(index.table)) continue;
+        const size_t present = count_of(*m_backend,
+                                        "SELECT COUNT(*) FROM sqlite_master WHERE type = "
+                                        "'index' AND name = " +
+                                            rocpd_v2::quote_text(index.name));
+        if(present == 0) pending.push_back(index);
+    }
+
+    for(size_t position = 0; position < pending.size(); ++position)
+    {
+        const index_t& index = pending[position];
+        if(progress)
+        {
+            progress("Creating index " + std::string{ index.name } + " on " +
+                         std::string{ index.table } + " (" +
+                         std::to_string(position + 1) + " of " +
+                         std::to_string(pending.size()) + ")",
+                     static_cast<double>(position) / static_cast<double>(pending.size()));
+        }
         try
         {
-            m_backend->execute(std::string{ sql });
+            m_backend->execute("CREATE INDEX IF NOT EXISTS " + std::string{ index.name } +
+                               " ON " + std::string{ index.table } + "(" +
+                               std::string{ index.columns } + ")");
         } catch(const std::exception& error)
         {
             // A read-only file still opens. Its track queries scan instead.
-            LOG_WARNING("rocpd schema 2 index was not created: {}", error.what());
+            LOG_WARNING(
+                "rocpd schema 2 index {} was not created: {}", index.name, error.what());
         }
     }
 }

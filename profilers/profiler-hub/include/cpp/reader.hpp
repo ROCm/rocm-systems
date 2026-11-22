@@ -6,6 +6,7 @@
 #include <profiler-hub/cpp/reader_types.hpp>
 #include <profiler-hub/cpp/storage.hpp>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -405,9 +406,11 @@ struct reader_t
 
 private:
     friend class common::connection;
-    friend void populate_reader_catalog(common::thread_pool&     workers,
-                                        common::connection_pool& connections,
-                                        reader_catalog_t&        catalog);
+    friend void populate_reader_catalog(
+        common::thread_pool&                                                  workers,
+        common::connection_pool&                                              connections,
+        reader_catalog_t&                                                     catalog,
+        const std::function<void(const std::string&, std::optional<double>)>& progress);
 
     // Pooled/shared-catalog construction: `catalog` is shared with sibling
     // connections in the same pool and may be populated by any of them (see
@@ -442,7 +445,11 @@ private:
     // order documented on reader_catalog_t.
     void build_catalog_category(catalog_category_t category, reader_catalog_t& catalog);
 
-    void ensure_track_topology_indexes();
+    // Receives the text of each index being built and its fraction done.
+    using index_progress_fn =
+        std::function<void(const std::string&, std::optional<double>)>;
+
+    void ensure_track_topology_indexes(const index_progress_fn& progress);
 
     std::unique_ptr<impl> m_impl;
 };
