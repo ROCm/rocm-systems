@@ -14,6 +14,11 @@ occupancy:
     <<: *level_default
     tags: [P0]
   Unit_hipOccupancyMaxPotentialBlockSize_Positive_TemplateInvocation: *level_default
+  Unit_hipOccupancyMaxPotentialBlockSize_Positive_LaunchBounds:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia]
+      reason: "Checks the AMD runtime's answer (0 blocks) for a block above the kernel's launch bounds; the CUDA result for that case is not documented."
   Unit_hipModuleOccupancyMaxPotentialBlockSize_Negative_Parameters:
     <<: *level_default
     disabled:
@@ -24,6 +29,11 @@ occupancy:
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
+  Unit_hipModuleOccupancyMaxPotentialBlockSize_Positive_LaunchBounds:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia]
+      reason: "Checks the AMD runtime's answer (0 blocks) for a block above the kernel's launch bounds; the CUDA result for that case is not documented."
   Unit_hipModuleOccupancyMaxPotentialBlockSizeWithFlags_Negative_Parameters:
     <<: *level_default
     disabled:
@@ -106,3 +116,8 @@ occupancy:
     disabled:
       targets: [nvidia]
       reason: "AIRUNTIME-2744 - AMD-specific LDS/occupancy consistency check; not applicable on the NVIDIA platform. Needs re-triage."
+  Unit_hipOccupancy_Positive_LdsAbovePerBlockLimitIsZero:
+    <<: *level_default
+    unsupported:
+      targets: [nvidia]
+      reason: "AMD-specific per-WGP versus per-workgroup LDS limits; unit/occupancy/CMakeLists.txt builds hipOccupancyLdsPerMultiprocessor.cc only for AMD."
