@@ -9152,6 +9152,30 @@ TEST(WrapMicrotestIsolated, DdaFabricRsLL128PeerMaxBytes_FromSpxTable) {
       });
 }
 
+// The ReduceScatter LL128 launch-shape table is the comm's gfx1250 SPX table from rankScaledMinRanks (8) ranks.
+// Fewer ranks, RCCL_IGNORE_ARCH_TABLE=1 and no comm leave null, which keeps the plain batched launch.
+TEST(WrapMicrotestIsolated, DdaFabricRsLL128ShapeTable_FromRankScaledMinRanks) {
+  RUN_ISOLATED_TEST(
+      "Wrap_DdaFabricRsLL128ShapeTable_FromRankScaledMinRanks",
+      []() {
+        int64_t ignoreTable = 0;
+        g_loadParam = [&ignoreTable](const char* env, int64_t def) -> int64_t {
+          return std::strcmp(env, "RCCL_IGNORE_ARCH_TABLE") == 0 ? ignoreTable : def;
+        };
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX);
+        ASSERT_NE(nullptr, comm->archThresholds);
+        comm->nRanks = 4;
+        EXPECT_EQ(nullptr, rcclDdaFabricRsLL128ShapeTable(comm)) << "4 ranks";
+        comm->nRanks = 8;
+        EXPECT_EQ(comm->archThresholds, rcclDdaFabricRsLL128ShapeTable(comm)) << "8 ranks";
+        ignoreTable = 1;
+        EXPECT_EQ(nullptr, rcclDdaFabricRsLL128ShapeTable(comm)) << "RCCL_IGNORE_ARCH_TABLE=1";
+        EXPECT_EQ(nullptr, rcclDdaFabricRsLL128ShapeTable(nullptr));
+        DeleteCommWithArch(comm);
+      });
+}
+
 // DDA LL128 AlltoAll reads its own ddaA2aLL128* window, inclusive at both ends; a synthetic table pins
 // the accessors. The real tables and no table keep 0 threads; SPX and no table keep the init cap, and DPX
 // caps the grid at 72 blocks from 256 KiB to 16 MiB, where DPX runs LL128 (LL stops at 128 KiB).

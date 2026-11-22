@@ -75,15 +75,6 @@ static inline bool ddaLL128RsPeerParallel(const ncclComm* comm, size_t shardByte
   return bytes <= rcclDdaFabricRsLL128PeerMaxBytes(comm);
 }
 
-// The arch table's launch-shape entries when they apply to this comm (rankScaledMinRanks ranks and up), else null.
-static inline const rcclArchThresholds* ddaLL128RsShapeTable(const ncclComm* comm) {
-  const rcclArchThresholds* t = comm->archThresholds;
-  if (t == nullptr || t->rankScaledMinRanks <= 0 || comm->nRanks < t->rankScaledMinRanks) {
-    return nullptr;
-  }
-  return t;
-}
-
 // Batched grid budget for a shard Ring would run: where Ring Simple runs on capped channels (one node, the table's
 // band above the Ring LL128 bound for this type size), at most a quarter more blocks than those channels.
 static inline int ddaLL128RsMaxBlocks(const ncclComm* comm, const rcclArchThresholds* t, size_t shardBytes,
@@ -157,7 +148,7 @@ static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, siz
     }
     slicesPerBlock = threads / groupThreads;
   } else {
-    const rcclArchThresholds* t = ddaLL128RsShapeTable(comm);
+    const rcclArchThresholds* t = rcclDdaFabricRsLL128ShapeTable(comm);
     nBlocksMax = ddaLL128RsMaxBlocks(comm, t, shardBytes, typeSize, nBlocksMax);
     const unsigned batchedThreads = ddaLL128RSThreads(comm);
     threads = batchedThreads;
