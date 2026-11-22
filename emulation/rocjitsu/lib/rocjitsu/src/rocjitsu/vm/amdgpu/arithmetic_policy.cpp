@@ -62,4 +62,9 @@ ArithmeticExecution::ArithmeticExecution(ArithmeticPolicy policy)
   static_assert(cpu_flags_mask == (RJ_ARITH_CPU_MASK | RJ_ARITH_CPU_FEATURES_MASK));
 }
 
+void ArithmeticExecution::limit_cpu_level(uint64_t max_level) {
+  flags_ = (flags_ & ~cpu_flags_mask) | rj_arith_limit_cpu_flags(detected_cpu_flags(), max_level);
+  force_scalar_ = max_level == RJ_ARITH_CPU_BASELINE;
+}
+
 } // namespace rocjitsu::amdgpu
