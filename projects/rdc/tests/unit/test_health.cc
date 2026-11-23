@@ -43,10 +43,18 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
 #include "rdc_lib/impl/RdcGroupSettingsImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
+#include "rdc_lib/impl/SmiUtils.h"
 
 // Defined in RdcNotificationImpl.cc, which this test does not build. Only
 // rdc_field_listen_notif() reads it.
 const uint32_t amd::rdc::kMaxRSMIEvents = 64;
+
+// Defined in SmiUtils.cc, which this test does not build either. RdcGroupSettingsImpl.cc looks a
+// GPU up only when the GPU's partition count is not found, which no test here sets up.
+amdsmi_status_t amd::rdc::get_processor_handle_from_id(uint32_t, amdsmi_processor_handle*) {
+  ADD_FAILURE() << "unexpected get_processor_handle_from_id()";
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+}
 
 namespace {
 
