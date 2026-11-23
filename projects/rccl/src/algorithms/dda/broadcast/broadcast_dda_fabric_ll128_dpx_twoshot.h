@@ -77,7 +77,7 @@ constexpr size_t ddaLL128BcDpxSlotSlices(size_t bankSize, int nRanks, size_t tot
   return (bankSlices / (size_t)(nRanks + 1) >= cs) ? cs : 0;
 }
 
-// ---------------------------------------------------------------------------
+------------------------------------------
 // Kernel
 // ---------------------------------------------------------------------------
 
@@ -100,9 +100,15 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
   const int nRanks   = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int nNonRoot = nRanks - 2;   // number of non-root peers = grid width
 
-  // Co-root identities (root and rootSib are always adjacent: same busId[63:4])
-  const int rootLocal = root % 2;
-  const int rootSib   = root - rootLocal + (1 - rootLocal);
+  // Co-root identities.
+  // DPX topology invariant (enforced by scaleInSize validation in fabric_init.cu):
+  // sibling ranks are always assigned as consecutive even-odd pairs —
+  // (0,1), (2,3), (4,5), ... — so rank % 2 gives the intra-package position
+  // and rank ^ 1 gives the sibling.  root % 2 is therefore well-defined even
+  // though root can be any rank; it only carries this meaning because the
+  // eligibility check has already confirmed scaleInSize == 2 with that ordering.
+  const int rootLocal = root % 2;          // 0 if root is even, 1 if odd
+  const int rootSib   = root ^ 1;          // the other rank on root's package
 
   const bool isRoot    = (selfRank == root);
   const bool isRootSib = (selfRank == rootSib);
@@ -132,8 +138,10 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
   const int minCoRoot = root < rootSib ? root : rootSib;
   const int peer      = col < minCoRoot ? col : col + 2;   // non-root rank
 
-  // Which co-root owns this column?
-  // col parity relative to rootLocal: even offset → root, odd offset → rootSib.
+  // Column ownership: the N-2 non-root columns are split evenly between the two
+  // co-roots.  Columns with the same parity as rootLocal belong to root; the
+  // rest belong to rootSib.  This ensures each co-root handles exactly half the
+  // scale-up transfers so neither link is idle while the other is saturated.
   const bool colIsRoot = (col % 2 == rootLocal);
 
   // Data offset for col (0-based index into the N-2 chunk layout)
@@ -153,18 +161,49 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
   // ROOT role
   // =========================================================================
   if (isRoot) {
-    // ---- Sibling loop: stage rootSib's chunks over the in-package (scale-in) link ----
-    // Runs on blocks where col is owned by rootSib (!colIsRoot).
-    // root reads chunk[col] from sendbuff and stores into rootSib's staging slot
-    // (peerScratch[rootSib].gather[peer]).  rootSib will poll and forward in its
-    // own sibling loop below.  recvbuff write is fused here.
-    if (!colIsRoot) {
+    // ---- All-CU two-phase root scatter ----
+    // All N-2 blocks are active in both phases.  Columns are paired:
+    //   chunkPair = col / 2  — which of the (N-2)/2 chunk pairs to service
+    //   subBlk    = col % 2  — selects interleaved warp start within the pair
+    //
+    // Two blocks cooperate to cover all chunkSlices slices of the same chunk
+    // via a doubled warp stride (wstride2). Root sends to colIsRoot ranks only
+    // (dirPeer, one per non-root package); rootSib sends to !colIsRoot ranks
+    // only (sibPeer) via staging cut-through. The two co-roots never share a
+    // scatter slot.
+    //
+    // Phase 1 (scale-in):  both blocks stage chunk[sibColIdx] to rootSib's
+    //                      staging slot for sibPeer, interleaved via wstride2.
+    // Phase 2 (scale-up):  both blocks scatter chunk[dirColIdx] directly to
+    //                      dirPeer's scatter slot, interleaved via wstride2.
+    // Within each block phase 1 completes before phase 2: per-block temporal
+    // separation of scale-in and scale-up traffic.
+
+    const int chunkPair = col / 2;
+    const int subBlk    = col % 2;
+
+    // !colIsRoot column for this pair -> rootSib staging target in phase 1
+    const int sibColIdx = chunkPair * 2 + (1 - rootLocal);
+    const int sibPeer   = sibColIdx < minCoRoot ? sibColIdx : sibColIdx + 2;
+
+    // colIsRoot column for this pair -> direct scatter target in phase 2
+    const int dirColIdx = chunkPair * 2 + rootLocal;
+    const int dirPeer   = dirColIdx < minCoRoot ? dirColIdx : dirColIdx + 2;
+
+    // Two blocks cover the same chunk; each takes alternate warps.
+    const size_t wstart   = (size_t)subBlk * (size_t)gridDim.y * (size_t)nwarps
+                            + (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
+    //each pair of blocks works on a contigious chunk (set of slices)
+    const size_t wstride2 = 2 * (size_t)gridDim.y * (size_t)nwarps;
+
+    // ---- Phase 1: stage chunk[sibColIdx] to rootSib staging (scale-in) ----
+    {
       uint64_t* stagingDst =
         reinterpret_cast<uint64_t*>(peerScratch[rootSib]) + gatherOff +
-        (uint64_t)peer * slotWireWords;
-      for (size_t s = gwarp; s < chunkSlices; s += wstride) {
+        (uint64_t)sibPeer * slotWireWords;
+      for (size_t s = wstart; s < chunkSlices; s += wstride2) {
         const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
-        const size_t dOff    = chunkOff(col) + s * (size_t)kDdaLL128DataBytesPerSlice;
+        const size_t dOff    = chunkOff(sibColIdx) + s * (size_t)kDdaLL128DataBytesPerSlice;
         const size_t rem     = totalBytes > dOff ? totalBytes - dOff : 0;
         const int    elt     = rem < (size_t)kDdaLL128DataBytesPerSlice
                                  ? (int)rem : kDdaLL128DataBytesPerSlice;
@@ -179,15 +218,12 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
       }
     }
 
-    // ---- Non-root scatter loop: scatter root's chunks over the scale-up fabric ----
-    // Runs on blocks where col is owned by root (colIsRoot).
-    // root reads chunk[col] from sendbuff and writes directly to peer's scatter slot.
-    // recvbuff write is fused here.
-    if (colIsRoot) {
-      uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords;
-      for (size_t s = gwarp; s < chunkSlices; s += wstride) {
+    // ---- Phase 2: scatter chunk[dirColIdx] to dirPeer (scale-up) ----
+    {
+      uint64_t* scatterDst = reinterpret_cast<uint64_t*>(peerScratch[dirPeer]) + bankWords;
+      for (size_t s = wstart; s < chunkSlices; s += wstride2) {
         const size_t wireOff = s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
-        const size_t dOff    = chunkOff(col) + s * (size_t)kDdaLL128DataBytesPerSlice;
+        const size_t dOff    = chunkOff(dirColIdx) + s * (size_t)kDdaLL128DataBytesPerSlice;
         const size_t rem     = totalBytes > dOff ? totalBytes - dOff : 0;
         const int    elt     = rem < (size_t)kDdaLL128DataBytesPerSlice
                                  ? (int)rem : kDdaLL128DataBytesPerSlice;
@@ -213,16 +249,13 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
         ddaLL128ClearWire(const_cast<uint64_t*>(myGather) + 2 * lane, lane);
     }
   }
-
-  // =========================================================================
   // ROOTSIB role
   // =========================================================================
   else if (isRootSib) {
-    // ---- Sibling loop: poll staging slot written by root, cut-through to peer scatter slot ----
-    // Runs on blocks where col is owned by rootSib (!colIsRoot).
-    // rootSib polls peerScratch[rootSib].gather[peer] (the staging slot root wrote over
-    // scale-in), forwards the wire words directly to peerScratch[peer].scatter_slot
-    // (scale-up), clears the staging slot, and fuses the recvbuff write.
+    // ---- Sibling cut-through: !colIsRoot blocks only ----
+    // rootSib polls peerScratch[rootSib].gather[peer] (staging slot written by
+    // root over scale-in), forwards wire words to peerScratch[peer].scatter_slot
+    // (scale-up), clears staging, and fuses the recvbuff write.
     if (!colIsRoot) {
       const uint64_t* stagingSrc =
         reinterpret_cast<const uint64_t*>(peerScratch[rootSib]) + gatherOff +
@@ -244,9 +277,8 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
       }
     }
 
-    // ---- Non-root allgather receive loop: poll gather slots written by non-roots ----
-    // Runs on blocks where col is owned by root (colIsRoot).
-    // Non-roots fan out to rootSib's gather[peer] during the all-gather phase.
+    // ---- Allgather gather: colIsRoot blocks only ----
+    // Non-roots fan out to rootSib's gather[peer] during the allgather phase.
     // rootSib polls, writes recvbuff, and clears.
     if (colIsRoot) {
       const uint64_t* myGather =
@@ -267,8 +299,6 @@ __global__ void ddaBroadcastFabricLL128DpxTwoShot(
       }
     }
   }
-
-  // =========================================================================
   // NON-ROOT role — standard SPX all-gather with DPX column mapping
   // =========================================================================
   else {
