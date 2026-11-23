@@ -80,6 +80,49 @@ public:
 inline bool ordinary_memory(const Instruction &inst) {
   return inline_operation_kind(inst.amdgpu_operation()) == InlineOperationKind::Memory;
 }
+// LDS reads and the LDS-free lane permute write only their VGPR destinations,
+// which the footprint covers; they execute in program order on the issuer.
+inline bool lds_read(Operation operation) {
+  switch (operation) {
+  case Operation::DS_READ_B32:
+  case Operation::DS_READ_B64:
+  case Operation::DS_READ_B96:
+  case Operation::DS_READ_B128:
+  case Operation::DS_READ2_B32:
+  case Operation::DS_READ2_B64:
+  case Operation::DS_READ2ST64_B32:
+  case Operation::DS_READ2ST64_B64:
+  case Operation::DS_READ_I8:
+  case Operation::DS_READ_U8:
+  case Operation::DS_READ_I16:
+  case Operation::DS_READ_U16:
+  case Operation::DS_READ_I8_D16:
+  case Operation::DS_READ_I8_D16_HI:
+  case Operation::DS_READ_U8_D16:
+  case Operation::DS_READ_U8_D16_HI:
+  case Operation::DS_READ_U16_D16:
+  case Operation::DS_READ_U16_D16_HI:
+  case Operation::DS_READ_B64_TR_B4:
+  case Operation::DS_READ_B64_TR_B8:
+  case Operation::DS_READ_B64_TR_B16:
+  case Operation::DS_READ_B96_TR_B6:
+  case Operation::DS_BPERMUTE_B32:
+    return true;
+  default:
+    return false;
+  }
+}
+inline bool global_data_share(const Instruction &inst) {
+  const auto *issue = inst.amdgpu_memory_issue_info();
+  if (!issue)
+    return false;
+  for (const auto &obligation : issue->counter_obligations())
+    if (obligation.completion_class() == MemoryCompletionClass::GDS)
+      return true;
+  return false;
+}
+inline constexpr int kM0Encoding = 124;
+
 inline bool safe_inline(const Instruction &inst) {
   const Operation operation = inst.amdgpu_operation();
   if (operation == Operation::Unknown || inst.amdgpu_secondary_operation() != Operation::Unknown)
@@ -94,20 +137,27 @@ inline bool safe_inline(const Instruction &inst) {
   if (modifiers.dpp)
     return false;
   if (operation == Operation::S_DELAY_ALU || operation == Operation::S_NOP ||
-      operation == Operation::V_NOP)
+      operation == Operation::V_NOP || operation == Operation::S_SETPRIO)
     return true;
+  if (lds_read(operation))
+    return !global_data_share(inst);
   if (candidate(inst) || ordinary_memory(inst))
     return true;
   if (inst.is_waitcnt())
     return operation != Operation::S_WAIT_ALU && operation != Operation::S_WAIT_IDLE;
   // Explicitly exclude instructions with hidden EXEC, MODE, cache, scheduling,
   // register-allocation or cross-lane register-index side effects.
-  if (inline_operation_kind(operation) != InlineOperationKind::Arithmetic)
+  if (inline_operation_kind(operation) != InlineOperationKind::Arithmetic &&
+      operation != Operation::S_MOVK_I32)
     return false;
   for (int i = 0; i != inst.num_dst_operands(); ++i) {
     const auto *op = inst.dst_operand(i);
     // Ordinary SGPRs only. Fieldless SCC/VCC are permitted by the whitelist;
-    // WMMA workers do not read them. Explicit special-register writes drain.
+    // WMMA workers do not read them. Explicit special-register writes drain,
+    // except an M0 move: matrix helpers never read M0, and the LDS and
+    // buffer-to-LDS instructions that do run on the issuer in program order.
+    if (op && operation == Operation::S_MOV_B32 && op->encoding_value() == kM0Encoding)
+      continue;
     if (op && !op->is_vgpr() && !op->is_fieldless() &&
         (op->encoding_value() < 0 || op->encoding_value() + (op->size_bits() + 31) / 32 > 102))
       return false;

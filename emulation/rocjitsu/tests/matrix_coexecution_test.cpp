@@ -910,7 +910,9 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
     std::unique_ptr<Instruction> first(decode_valid(*decoder, c.words.data()));
     SCOPED_TRACE(first->mnemonic());
     SCOPED_TRACE(c.arch);
-    const bool expect_async = false;
+    // Only CDNA4 MFMA families currently run on helpers.
+    const bool expect_async =
+        c.arch == rocjitsu::IsaFamily::Cdna4 && amdgpu::async_mma_policy::candidate(*first);
     const size_t suffix = c.words.size() - 2;
     const bool acc = c.mfma && ((c.words[suffix] >> 15) & 1);
     for (unsigned hazard = 0; hazard != 5; ++hazard) {

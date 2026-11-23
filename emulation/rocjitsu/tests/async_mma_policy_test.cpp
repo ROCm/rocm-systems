@@ -28,6 +28,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <bit>
@@ -87,6 +88,47 @@ TEST(AsyncMmaPolicyTest, Cdna4EncodingHintCoversOrdinaryAndExtendedMfma) {
   }
   const auto add = cdna4::build_sop2(cdna4::kSAddU32Sop2, {.ssrc0 = 1, .ssrc1 = 2, .sdst = 0});
   EXPECT_FALSE(policy::encoding_may_be_candidate(rocjitsu::IsaFamily::Cdna4, add[0]));
+}
+
+TEST(AsyncMmaPolicyTest, Cdna4LdsReadsAndM0MovesStayInsideTheWindow) {
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
+  const auto footprint_writes = [&](const auto &encoding) {
+    std::array<uint32_t, 4> words{};
+    std::ranges::copy(encoding, words.begin());
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    EXPECT_TRUE(policy::safe_inline(*inst)) << inst->mnemonic();
+    const auto access = policy::footprint(*inst, 256);
+    EXPECT_TRUE(access.has_value());
+    return access ? access->writes.count() : 0;
+  };
+  // Every destination register must be tracked, including dual and transposed loads.
+  EXPECT_EQ(footprint_writes(cdna4::build_ds(cdna4::kDsRead2B64, {.addr = 1, .vdst = 8})), 4u);
+  EXPECT_EQ(footprint_writes(cdna4::build_ds(cdna4::kDsReadB128, {.addr = 1, .vdst = 8})), 4u);
+  EXPECT_EQ(footprint_writes(cdna4::build_ds(cdna4::kDsReadB64TrB16, {.addr = 1, .vdst = 8})),
+            2u);
+  EXPECT_EQ(footprint_writes(cdna4::build_ds(cdna4::kDsBpermuteB32, {.addr = 1, .data0 = 2,
+                                                                     .vdst = 8})),
+            1u);
+
+  const auto decode = [&](const auto &encoding) {
+    std::array<uint32_t, 4> words{};
+    std::ranges::copy(encoding, words.begin());
+    return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
+  };
+  EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_ds(cdna4::kDsReadB128, {.gds = 1, .addr = 1, .vdst = 8}))));
+  EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_ds(cdna4::kDsWriteB128, {.addr = 1, .data0 = 4}))));
+  EXPECT_TRUE(policy::safe_inline(*decode(cdna4::build_sopp(cdna4::kSSetprioSopp, {.simm16 = 1}))));
+  EXPECT_TRUE(policy::safe_inline(
+      *decode(cdna4::build_sopk(cdna4::kSMovkI32Sopk, {.simm16 = 7, .sdst = 4}))));
+  // M0 (124) is the only special register a move may write without draining.
+  EXPECT_TRUE(policy::safe_inline(
+      *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 124}))));
+  EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 126}))));
+  EXPECT_FALSE(policy::safe_inline(
+      *decode(cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 3, .sdst = 106}))));
 }
 
 TEST(AsyncMmaPolicyTest, TargetSelectionMatchesTheAcceptedInstructionShapes) {
@@ -208,7 +250,7 @@ TEST(AsyncMmaPolicyTest, DynamicAsyncCandidatesRejectReservedFormatsAtDecode) {
           opcode, {.vdst = 64, .cbsz = 4, .src0 = 256, .src1 = 288, .src2 = 320, .blgp = 4});
       std::unique_ptr<Instruction> decoded(
           decode_valid(*cdna4_decoder, scaled ? good.data() : dense.data()));
-      EXPECT_FALSE(policy::candidate(*decoded));
+      EXPECT_TRUE(policy::candidate(*decoded));
       for (unsigned format : {5u, 6u, 7u}) {
         for (bool first : {false, true}) {
           const auto bad_scaled = mma_test::make_cdna4_mfma_scale_words(
