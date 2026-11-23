@@ -1,8 +1,6 @@
 # HRR tests
 
-Layout, what each suite covers, and how to run it. CI runs everything here from
-[`.github/workflows/hrr-ci.yml`](../../../.github/workflows/hrr-ci.yml); the commands below
-are the same ones it uses.
+Layout, what each suite covers, and how to run it.
 
 ## Layout
 
@@ -74,6 +72,16 @@ spawn. With it off, those cases need an `hrr-playback` on `PATH`.
 If the SDK's HIP headers are older than this tree, pass
 `-DHRR_HIP_INCLUDE_DIRS="<repo>/projects/hip/include;<repo>/projects/clr/hipamd/include"`
 as CI does.
+
+## Running the CPU-only tests from an install
+
+Tests labelled `cpu-only` (unit, handler, generator rules) need no GPU.
+Configure with `-DHRR_BUILD_TESTS=ON -DHRR_INSTALL_TESTS=ON`, then run
+`cmake --install` and `ctest --test-dir <prefix>/share/hrr/test -L cpu-only`.
+The installed tree holds the unit and any built handler binary. It preserves a
+caller-provided `HRR_PLAYBACK_BIN`; otherwise it uses the platform's
+`hrr-playback` executable under `<prefix>/bin`, or finds it on `PATH` when that
+executable was not installed. Integration tests are not installed.
 
 ## Running the integration tests
 
@@ -179,8 +187,8 @@ skip:
 ```
 
 Direct workloads (`[hrr-direct]`, `[direct]`) are spawned by a driver and must not
-carry rules. `targets.arch` is the same list as `HRR_ARCHS` in
-`.github/workflows/hrr-ci.yml`; `hrr_test_config.py lint --workflow` checks that.
+carry rules. `hrr_test_config.py lint --workflow <workflow>` checks that
+`targets.arch` matches the workflow's `HRR_ARCHS` list.
 
 CI compares each binary's registered cases against its YAML, in both directions,
 because a case behind an `#if` or a missing define disappears without any failure.

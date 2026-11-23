@@ -157,7 +157,7 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledColl_CopiesTheRawFiel
 
 // Across trays this path leaves the symmetric kernels out of AllGather only.
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_CrossTrayLeavesOutAllGatherSymmetricKernels) {
-  const uint64_t all = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+  const rcclTuningMask all = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
   struct ncclRawTask* allGather = scene_.NewColl(ncclFuncAllGather);
   struct ncclRawTask* reduceScatter = scene_.NewColl(ncclFuncReduceScatter);
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();

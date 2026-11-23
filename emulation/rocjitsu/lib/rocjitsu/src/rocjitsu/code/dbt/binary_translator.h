@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -148,10 +149,10 @@ struct BinaryTranslatorOptions {
 
 /// @brief Result of translating a code object.
 struct TranslatedCodeObject {
-  std::vector<uint8_t> elf_bytes;                        ///< Translated ELF for the host ISA.
-  rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID; ///< Host ISA architecture.
-  std::vector<TranslationDiagnostic> diagnostics;        ///< Translation warnings/errors.
-  bool rewrite_discharge_checked = false;                ///< Final output scan was attempted.
+  std::vector<uint8_t> elf_bytes; ///< Translated ELF for the host ISA.
+  rocjitsu::IsaFamily host_arch = rocjitsu::IsaFamily::Invalid; ///< Host ISA architecture.
+  std::vector<TranslationDiagnostic> diagnostics;               ///< Translation warnings/errors.
+  bool rewrite_discharge_checked = false;  ///< Final output scan was attempted.
   bool rewrite_discharge_verified = false; ///< No registered rewrite remained actionable.
 
   /// @brief True if translation produced no error diagnostics.
@@ -188,13 +189,19 @@ struct TranslatedCodeObject {
 /// Fallthrough is preserved by emitting reachable blocks in original .text order.
 class BinaryTranslator {
 public:
+  /// @brief Construct a translator with authoritative concrete source and output targets.
+  /// @details Recognizable source metadata must match guest_target. Otherwise the
+  /// explicit target supplies the decoder and semantic capabilities.
+  BinaryTranslator(rj_code_target_id_t guest_target, rj_code_target_id_t host_target,
+                   BinaryTranslatorOptions options = {});
+
   /// @brief Construct a translator for the given (guest, host) ISA pair.
   /// @param guest_arch    Source ISA architecture.
   /// @param host_arch     Target ISA architecture.
   /// @param target_mach   EF_AMDGPU_MACH value for the target processor.
   ///                      0 = auto-detect from host_arch (default GFX1200 for RDNA4).
-  BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch, uint32_t target_mach = 0,
-                   BinaryTranslatorOptions options = {});
+  BinaryTranslator(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch,
+                   uint32_t target_mach = 0, BinaryTranslatorOptions options = {});
   ~BinaryTranslator();
 
   /// @brief Install an optional callback for per-instruction debugging.
@@ -239,8 +246,9 @@ private:
                                      bool &copied_original, bool &changed,
                                      std::vector<uint32_t> &target_words);
 
-  rj_code_arch_t guest_arch_;                               ///< Source ISA.
-  rj_code_arch_t host_arch_;                                ///< Target ISA.
+  rj_code_target_id_t guest_target_ = ROCJITSU_CODE_TARGET_INVALID;
+  rocjitsu::IsaFamily guest_arch_;                          ///< Source ISA.
+  rocjitsu::IsaFamily host_arch_;                           ///< Target ISA.
   uint32_t target_mach_;                                    ///< ELF MACH flag for target processor.
   TranslationTraceCallback trace_callback_;                 ///< Optional debug trace callback.
   BinaryTranslatorOptions options_;                         ///< Optional translation controls.

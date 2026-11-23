@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
@@ -392,6 +393,13 @@ private:
 
 class DeviceCacheCoherenceTestAccess {
 public:
+  static util::FailureOr<CacheMaintenanceGroupResult> acquire_legacy_cache_maintenance_group(
+      std::span<const std::shared_ptr<DeviceCacheCoherence>> domains,
+      DeviceCacheOperation operation, util::DiagnosticEmitter emit_error) {
+    return DeviceCacheCoherence::acquire_legacy_cache_maintenance_group(domains, operation,
+                                                                        emit_error);
+  }
+
   static std::vector<DeviceCacheMaintenanceLease>
   acquire_scoped_alias_maintenance_group(std::span<const DeviceCacheDomain> domains,
                                          std::span<const DeviceCacheAliasScope> aliases,
@@ -1849,7 +1857,7 @@ TEST(DeviceCacheCoherenceTest, GroupMaintenanceDistinguishesSeparateBackingMemor
   EXPECT_EQ(second_memory.read8(kAddress), 0x66u);
 }
 
-TEST(DeviceCacheCoherenceTest, GroupPreflightRejectsDirtyNonzeroVmidBeforeAnyWrite) {
+TEST(DeviceCacheCoherenceTest, GroupPreflightRetriesDirtyNonzeroVmidBeforeAnyWrite) {
   using rocjitsu::amdgpu::L2CacheTestAccess;
   using rocjitsu::amdgpu::MemorySideCacheTestAccess;
 
@@ -1885,7 +1893,17 @@ TEST(DeviceCacheCoherenceTest, GroupPreflightRejectsDirtyNonzeroVmidBeforeAnyWri
             rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
                 domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
       },
-      util::Exception);
+      rocjitsu::amdgpu::CacheMaintenanceUnavailable);
+  util::StringDiagnostic diagnostic;
+  // Exercise the checked legacy core used if a nonzero writer arrives after
+  // the prepared path selected its VMID-zero fallback.
+  auto checked = DeviceCacheCoherenceTestAccess::acquire_legacy_cache_maintenance_group(
+      domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate, diagnostic.emitter());
+  ASSERT_TRUE(checked.succeeded());
+  EXPECT_EQ(checked.value().outcome, rocjitsu::amdgpu::CacheMaintenanceOutcome::Retry);
+  EXPECT_TRUE(checked.value().leases.empty());
+  EXPECT_TRUE(diagnostic.message().empty());
+  EXPECT_TRUE(L2CacheTestAccess::cache_access_available(second_l2));
   EXPECT_EQ(memory.read8(kFirstAddress), 0u);
   EXPECT_EQ(first_domain->current_epoch(), first_epoch);
   EXPECT_EQ(second_domain->current_epoch(), second_epoch);
@@ -1990,6 +2008,144 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedCompleteGrantWithWrongIdentityIsTerm
   EXPECT_EQ(owner->bytes_[8], std::byte{0});
   EXPECT_EQ(coherence->current_epoch(), epoch);
   EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
+  using rocjitsu::amdgpu::CacheMaintenanceOutcome;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWriteback;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+  using rocjitsu::amdgpu::VmTransferEffectGate;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, 101, 23, dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  util::StringDiagnostic diagnostic;
+  std::shared_ptr<VmTransferEffectGate> reported_gate;
+  auto report = [&](std::string_view message) {
+    EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+    reported_gate->close();
+    EXPECT_TRUE(reported_gate->drained());
+    EXPECT_EQ(coherence->current_epoch(), data_epoch);
+    EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+    diagnostic(message);
+  };
+  const util::DiagnosticEmitter emit_error(report);
+  const auto check_dirty = [&] {
+    EXPECT_EQ(owner->bytes_[8], std::byte{0});
+    EXPECT_EQ(coherence->current_epoch(), data_epoch);
+    EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+  };
+  const std::array messages{"prepared cache writeback does not cover dirty line",
+                            "prepared cache writeback VM gate was revoked",
+                            "prepared cache writeback failed"};
+  for (size_t failure = 0; failure < messages.size(); ++failure) {
+    auto gate = std::make_shared<VmTransferEffectGate>();
+    reported_gate = gate;
+    if (failure == 1)
+      gate->revoke();
+    owner->fail_on_attempt = failure == 2 ? 1 : 0;
+    const auto resolve = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+      return PreparedCanonicalWritebackTestAccess::make(
+          address, size, kVmid, 101, failure == 0 ? 24 : 23,
+          rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), gate);
+    };
+    EXPECT_TRUE(DeviceCacheCoherence::acquire_cache_maintenance_group(
+                    domains, DeviceCacheOperation::WritebackInvalidate, resolve, emit_error)
+                    .failed());
+    EXPECT_EQ(diagnostic.message(), messages[failure]);
+    check_dirty();
+  }
+  const auto unavailable = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+    return PreparedCanonicalWritebackTestAccess::make(
+        address, size, kVmid, 101, 23,
+        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), nullptr);
+  };
+  const std::string terminal_diagnostic(diagnostic.message());
+  auto retry = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate, unavailable, emit_error);
+  ASSERT_TRUE(retry.succeeded());
+  EXPECT_EQ(retry.value().outcome, CacheMaintenanceOutcome::Retry);
+  EXPECT_TRUE(retry.value().leases.empty());
+  EXPECT_EQ(diagnostic.message(), terminal_diagnostic);
+  EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+  check_dirty();
+
+  auto changing_gate = std::make_shared<VmTransferEffectGate>();
+  const auto changed_snapshot = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+    std::array<uint8_t, L2Cache::LINE_SIZE> changed = dirty;
+    changed[8] = 0x6b;
+    L2CacheTestAccess::replace_prepared_dirty_line_bytes(l2, kAddress, changed, kVmid);
+    return PreparedCanonicalWritebackTestAccess::make(
+        address, size, kVmid, 101, 23,
+        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), changing_gate);
+  };
+  auto changed = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate, changed_snapshot, emit_error);
+  ASSERT_TRUE(changed.succeeded());
+  EXPECT_EQ(changed.value().outcome, CacheMaintenanceOutcome::Retry);
+  EXPECT_TRUE(changed.value().leases.empty());
+  EXPECT_EQ(diagnostic.message(), terminal_diagnostic);
+  EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+  changing_gate->close();
+  EXPECT_TRUE(changing_gate->drained());
+  check_dirty();
+  L2CacheTestAccess::replace_prepared_dirty_line_bytes(l2, kAddress, dirty, kVmid);
+
+  const auto internal_failure = [](uint32_t, uint32_t, uint64_t,
+                                   size_t) -> PreparedCanonicalWriteback {
+    throw util::Exception(std::string_view("internal resolver failure"));
+  };
+  EXPECT_THROW(
+      (void)DeviceCacheCoherence::acquire_cache_maintenance_group(
+          domains, DeviceCacheOperation::WritebackInvalidate, internal_failure, emit_error),
+      util::Exception);
+  const auto allocation_failure = [](uint32_t, uint32_t, uint64_t,
+                                     size_t) -> PreparedCanonicalWriteback {
+    throw std::bad_alloc();
+  };
+  EXPECT_THROW(
+      (void)DeviceCacheCoherence::acquire_cache_maintenance_group(
+          domains, DeviceCacheOperation::WritebackInvalidate, allocation_failure, emit_error),
+      std::bad_alloc);
+  check_dirty();
+
+  owner->fail_on_attempt = 0;
+  auto gate = std::make_shared<VmTransferEffectGate>();
+  const auto resolve = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+    return PreparedCanonicalWritebackTestAccess::make(
+        address, size, kVmid, 101, 23,
+        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), gate);
+  };
+  auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate, resolve, emit_error);
+  ASSERT_TRUE(leases.succeeded()) << diagnostic.message();
+  EXPECT_EQ(leases.value().outcome, CacheMaintenanceOutcome::Complete);
+  ASSERT_EQ(leases.value().leases.size(), 1u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0x5a});
+  EXPECT_FALSE(L2CacheTestAccess::cache_access_available(l2));
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  leases.value().leases.clear();
+  EXPECT_TRUE(L2CacheTestAccess::cache_access_available(l2));
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+  EXPECT_GT(coherence->current_epoch(), data_epoch);
+  EXPECT_GT(coherence->current_instruction_epoch(), instruction_epoch);
 }
 
 TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedGateRetainsDirtyL2Run) {
@@ -4091,6 +4247,7 @@ private:
   size_t size_;
 };
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes) {
   constexpr uint32_t kVmid = 41;
   constexpr uint64_t kGpuAddress = 0x140000;
@@ -4176,6 +4333,7 @@ TEST(DeviceCacheCoherenceTest, FailedL2WritebackRetainsOnlyUnpublishedDirtyBytes
   EXPECT_EQ(retried_second, kSecondValue);
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
 }
+#endif
 
 TEST(DeviceCacheCoherenceTest, PartialL2WritebackInvalidatesCleanMemorySideCopies) {
   constexpr uint64_t kFirstAddress = 0x1000;
@@ -4258,6 +4416,7 @@ TEST(DeviceCacheCoherenceTest, PartialL2WritebackInvalidatesCleanMemorySideCopie
   EXPECT_EQ(hierarchy.physical->load<uint32_t>(kDirtyMemorySideAddress), 0x6d6d6d6du);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry) {
   constexpr uint32_t kVmid = 42;
   constexpr uint64_t kGpuAddress = 0x150000;
@@ -4334,6 +4493,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
                                            scans_before_failure.second + 1}));
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
 }
+#endif
 
 TEST(DeviceCacheCoherenceTest, FailedMemorySideEvictionRestoresDirtyVictimForRetry) {
   constexpr uint32_t kFirstVmid = 100;
@@ -7641,7 +7801,7 @@ TEST(L2CacheTest, CompletionRetiresOnlyTheSelectedRootsCuLines) {
   l2.set_backing_memory(&memory);
   l2.set_gpu_vm(&vm);
   ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  config.arch = rocjitsu::IsaFamily::Cdna3;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 256;

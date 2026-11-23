@@ -46,6 +46,9 @@ pub(crate) fn session_without_devices(native_session: NativeSession) -> HsaSessi
             gpus: Vec::new(),
         },
         config: HsaConfig {
+            core_dump: crate::core_dump::Config::default(),
+            queue_fault_message_enabled: true,
+            yielding_poll_enabled: false,
             sdma_enabled: false,
             peer_sdma_enabled: false,
             disable_fragment_allocator: false,
@@ -54,7 +57,7 @@ pub(crate) fn session_without_devices(native_session: NativeSession) -> HsaSessi
         debugger: None,
         logging: Arc::new(LogOutput::new()),
         next_handle: 0x4853_4101_0000_0000,
-        queue_state: QueueState::new(),
+        queue_state: QueueState::new(4),
         loader: LoaderState::new(),
         image_state: ImageState::new(),
         memory_state: MemoryState::new(health.clone()),

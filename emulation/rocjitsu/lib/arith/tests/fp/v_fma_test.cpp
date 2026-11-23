@@ -118,6 +118,19 @@ template <bool Half, typename Call> static void check_guest_controls(Call call) 
                      1, 0, r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[3][0], 0U);
+
+      // A flushed subnormal times infinity overrides the addend's NaN payload.
+      r.v[0][0] = r.v[1][1] = 1;
+      r.v[1][0] = r.v[0][1] = 0x7f800000;
+      r.v[2][0] = r.v[2][1] = 0x7fc12345;
+      for (uint64_t flush : {uint64_t{0}, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS}) {
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | flush, 3, 0,
+                       r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        const uint32_t expected = flush ? 0xffc00000U : 0x7fc12345U;
+        EXPECT_EQ(r.v[3][0], expected);
+        EXPECT_EQ(r.v[3][1], expected);
+      }
     }
 
     for (uint64_t rounding :
@@ -901,4 +914,46 @@ TEST(FpFmaF64Gfx11, CapturedNans) {
   using rocjitsu::arith::test::check_captured_gfx11;
   check_captured_gfx11<32, 64>(rj_arith_v_fma_f64_w32, fma_f64_lanes);
   check_captured_gfx11<64, 64>(rj_arith_v_fma_f64_w64, fma_f64_lanes);
+}
+
+// Every CPU path rounds CDNA OMOD underflow before deciding whether to flush the output.
+TEST(FpFmaF64Cdna, ScaledMinimumNormal) {
+  using namespace rocjitsu::arith::test;
+  for (auto cpu : supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_fma_f64_w32_gfx942, rj_arith_v_fma_f64_w32_gfx1250}) {
+      // Output flushing precedes OMOD, which also canonicalizes tiny scaled results.
+      for (bool flush_core : {false, true}) {
+        if (call != rj_arith_v_fma_f64_w32_gfx1250) {
+          continue; // gfx942 disables OMOD when guest denormals are preserved.
+        }
+        Registers<8, 32> r;
+        r.v[0][0] = 0;
+        r.v[1][0] = flush_core ? 0x00080000U : 0x80100000U;
+        r.v[2][0] = 0;
+        r.v[3][0] = 0x3ff00000U;
+        r.v[4][0] = r.v[5][0] = 0;
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                               (flush_core ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
+        ASSERT_EQ(call(flags, 1, flush_core ? RJ_ARITH_ALU_OMOD_2 : RJ_ARITH_ALU_OMOD_HALF, r.v + 6,
+                       r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[6][0], 0U);
+        EXPECT_EQ(r.v[7][0], 0U);
+      }
+      for (unsigned rounding = 0; rounding < 4; ++rounding) {
+        Registers<8, 32> r;
+        r.v[0][0] = 0xffffffffU;
+        r.v[1][0] = 0x001fffffU;
+        r.v[2][0] = 0;
+        r.v[3][0] = 0x3ff00000U;
+        r.v[4][0] = r.v[5][0] = 0;
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                               RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | (uint64_t(rounding) << 24);
+        ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_HALF, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[6][0], 0U);
+        EXPECT_EQ(r.v[7][0], rounding <= 1 ? 0x00100000U : 0U);
+      }
+    }
+  }
 }
