@@ -2,6 +2,19 @@
 #
 # SPDX-License-Identifier: MIT
 
+# Load libhsa-runtime64 with dlopen at run time (amd::roc::Hsa) instead of linking it, so that
+# libamdhip64 has no link-time dependency on ROCr. On by default for Linux shared builds.
+if(UNIX AND NOT AMD_COMPUTE_WIN AND BUILD_SHARED_LIBS)
+  set(_rocclr_rocr_dll_default ON)
+else()
+  set(_rocclr_rocr_dll_default OFF)
+endif()
+option(ROCR_DLL_LOAD "Load libhsa-runtime64 with dlopen instead of linking it"
+       ${_rocclr_rocr_dll_default})
+if(ROCR_DLL_LOAD AND AMD_COMPUTE_WIN)
+  message(WARNING "ROCR_DLL_LOAD has no effect with AMD_COMPUTE_WIN: ROCr is built from source and linked statically")
+endif()
+
 if (AMD_COMPUTE_WIN)
   find_path(AMD_HSA_INCLUDE_DIR hsa.h
     PATHS
@@ -88,6 +101,14 @@ else()
 
   if (ROCR_DLL_LOAD)
     target_compile_definitions(rocclr PUBLIC ROCR_DYN_DLL)
+    # Only the headers are needed, without linking ROCr. rocrctx.hpp includes them as "hsa.h",
+    # so the hsa/ subdirectory of every ROCr include directory has to be on the path as well.
+    if(TARGET hsa-runtime64::hsa-runtime64)
+      get_target_property(_rocr_inc_dirs hsa-runtime64::hsa-runtime64 INTERFACE_INCLUDE_DIRECTORIES)
+      foreach(_rocr_inc_dir IN LISTS _rocr_inc_dirs)
+        target_include_directories(rocclr SYSTEM PUBLIC ${_rocr_inc_dir} ${_rocr_inc_dir}/hsa)
+      endforeach()
+    endif()
   else()
     if (STATIC_ROCR)
       target_link_libraries(rocclr PUBLIC hsa-runtime64::hsa-runtime64_static)

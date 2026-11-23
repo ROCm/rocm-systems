@@ -1731,7 +1731,7 @@ bool Device::populateOCLDeviceConstants() {
     }
 
     if (HSA_STATUS_SUCCESS !=
-        hsa_agent_get_info(bkendDevice_,
+        Hsa::agent_get_info(bkendDevice_,
                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
                            &info_.numberOfShaderEngines_)) {
       return false;
@@ -3961,9 +3961,9 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   if (!metadata_version_queried_) {
     uint8_t major = 0, minor = 0;
-    hsa_amd_queue_get_info(queue,
+    Hsa::amd_queue_get_info(queue,
         HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MAJOR, &major);
-    hsa_amd_queue_get_info(queue,
+    Hsa::amd_queue_get_info(queue,
         HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_DISPATCH_PKT_VERSION_MINOR, &minor);
     if (major < (1 << 3) && minor < (1 << 5)) {
       metadata_version_header_ =
@@ -3981,12 +3981,12 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
     // Leaving the ring base null makes MetaDataPreloader::HasMetadataQueue() false,
     // which is the single gate every metadata path already checks.
     if (DEBUG_CLR_ENABLE_KDQ) {
-      hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
+      Hsa::amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_PREFETCH_METADATA_RING_BUFFER,
                              &extras.metadataRingBuffer);
     }
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
-      if (hsa_amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
+      if (Hsa::amd_queue_get_info(queue, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
               HSA_STATUS_SUCCESS &&
           db_id != 0) {
         extras.doorbellPtr = reinterpret_cast<volatile uint64_t*>(db_id);
@@ -4319,7 +4319,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
           roc::VirtualGPU* vgpu = reinterpret_cast<roc::VirtualGPU*>(it);
           bool faulted = false;
           if (vgpu->gpu_queue() != nullptr &&
-              hsa_amd_queue_get_info(vgpu->gpu_queue(),
+              Hsa::amd_queue_get_info(vgpu->gpu_queue(),
                                      HSA_AMD_QUEUE_INFO_VM_FAULT_STATUS,
                                      &faulted) == HSA_STATUS_SUCCESS &&
               faulted) {
@@ -5091,7 +5091,7 @@ bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& ha
   // will consume once the queue signal/wait submission path lands.
   auto* holder = new hsa_amd_external_semaphore_t{};
 
-  hsa_status_t s = hsa_amd_external_semaphore_handle_open(bkendDevice_, &desc, holder);
+  hsa_status_t s = Hsa::external_semaphore_handle_open(bkendDevice_, &desc, holder);
   if (s != HSA_STATUS_SUCCESS) {
     delete holder;
     return false;
@@ -5105,7 +5105,7 @@ bool Device::importExtSemaphore(void** extSemaphore, const amd::Os::FileDesc& ha
 void Device::DestroyExtSemaphore(void* extSemaphore) {
   if (extSemaphore == nullptr) return;
   auto* holder = static_cast<hsa_amd_external_semaphore_t*>(extSemaphore);
-  hsa_amd_external_semaphore_handle_close(*holder);
+  Hsa::external_semaphore_handle_close(*holder);
   delete holder;
 }
 

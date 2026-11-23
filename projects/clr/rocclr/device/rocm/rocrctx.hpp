@@ -139,6 +139,10 @@ struct RocrEntryPoints {
   decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_;
   decltype(hsa_amd_vmem_address_reserve_align)* hsa_amd_vmem_address_reserve_align_;
   decltype(hsa_amd_enable_logging)* hsa_amd_enable_logging_;
+  decltype(hsa_amd_external_semaphore_handle_open)* hsa_amd_external_semaphore_handle_open_;
+  decltype(hsa_amd_external_semaphore_handle_close)* hsa_amd_external_semaphore_handle_close_;
+  decltype(hsa_amd_queue_signal_external_semaphore)* hsa_amd_queue_signal_external_semaphore_;
+  decltype(hsa_amd_queue_wait_external_semaphore)* hsa_amd_queue_wait_external_semaphore_;
   decltype(hsa_amd_memory_get_preferred_copy_engine)* hsa_amd_memory_get_preferred_copy_engine_;
   decltype(hsa_amd_ais_file_read)* hsa_amd_ais_file_read_;
   decltype(hsa_amd_ais_file_write)* hsa_amd_ais_file_write_;
@@ -435,6 +439,50 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t pointer_info(const void* ptr, hsa_amd_pointer_info_t* info,
     void* (*alloc)(size_t), uint32_t* num_agents_accessible, hsa_agent_t** accessible) {
     return ROCR_DYN(hsa_amd_pointer_info)(ptr, info, alloc, num_agents_accessible, accessible);
+  }
+  static hsa_status_t external_semaphore_handle_open(hsa_agent_t agent, const hsa_amd_external_semaphore_handle_descriptor_t* desc, hsa_amd_external_semaphore_t* out_sem) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_external_semaphore_handle_open);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(agent, desc, out_sem);
+#else
+    return hsa_amd_external_semaphore_handle_open(agent, desc, out_sem);
+#endif
+  }
+  static hsa_status_t external_semaphore_handle_close(hsa_amd_external_semaphore_t sem) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_external_semaphore_handle_close);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(sem);
+#else
+    return hsa_amd_external_semaphore_handle_close(sem);
+#endif
+  }
+  static hsa_status_t queue_signal_external_semaphore(hsa_queue_t* queue, hsa_amd_external_semaphore_t sem, uint64_t value) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_queue_signal_external_semaphore);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(queue, sem, value);
+#else
+    return hsa_amd_queue_signal_external_semaphore(queue, sem, value);
+#endif
+  }
+  static hsa_status_t queue_wait_external_semaphore(hsa_queue_t* queue, hsa_amd_external_semaphore_t sem, uint64_t value) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_queue_wait_external_semaphore);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(queue, sem, value);
+#else
+    return hsa_amd_queue_wait_external_semaphore(queue, sem, value);
+#endif
   }
   static hsa_status_t ipc_memory_create(void* ptr, size_t len, hsa_amd_ipc_memory_t* handle) {
     return ROCR_DYN(hsa_amd_ipc_memory_create)(ptr, len, handle);

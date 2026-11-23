@@ -5766,7 +5766,7 @@ bool VirtualGPU::createSchedulerParam() {
     schedulerDoorbell_ = nullptr;
     if (DEBUG_CLR_DIRECT_DOORBELL) {
       uint64_t db_id = 0;
-      if (hsa_amd_queue_get_info(schedulerQueue_, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
+      if (Hsa::amd_queue_get_info(schedulerQueue_, HSA_AMD_QUEUE_INFO_DOORBELL_ID, &db_id) ==
               HSA_STATUS_SUCCESS &&
           db_id != 0) {
         schedulerDoorbell_ = reinterpret_cast<volatile uint64_t*>(db_id);
@@ -6775,13 +6775,13 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
     dispatchBarrierPacket(kBarrierPacketHeader);
 
     hsa_status_t s =
-        hsa_amd_queue_signal_external_semaphore(gpu_queue_, *holder, cmd.fence());
+        Hsa::queue_signal_external_semaphore(gpu_queue_, *holder, cmd.fence());
     if (s != HSA_STATUS_SUCCESS) {
       LogError("Failed to signal external semaphore");
     }
   } else {
     hsa_status_t s =
-        hsa_amd_queue_wait_external_semaphore(gpu_queue_, *holder, cmd.fence());
+        Hsa::queue_wait_external_semaphore(gpu_queue_, *holder, cmd.fence());
     if (s != HSA_STATUS_SUCCESS) {
       LogError("Failed to wait on external semaphore");
     } else {
