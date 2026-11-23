@@ -52,7 +52,9 @@ class AttachTargetCliTest(unittest.TestCase):
                 "--",
                 sys.executable,
                 "-c",
-                "import os; print(os.environ.get('ROCJITSU_INVOCATION_DIR', ''))",
+                "import os; "
+                "print(os.environ.get('ROCJITSU_INVOCATION_DIR', '')); "
+                "print(os.environ.get('ROCJITSU_REQUIRE_SELECTED_DAEMON', ''))",
             ],
             env=self.env,
             text=True,
@@ -78,7 +80,8 @@ class AttachTargetCliTest(unittest.TestCase):
                 self.bind_daemon_socket(runtime_dir)
                 result = self.run_attach(target)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertEqual(result.stdout.strip(), str(runtime_dir))
+                lines = result.stdout.splitlines()
+                self.assertEqual(lines, [str(runtime_dir), "1"])
 
     def test_rejects_non_socket_target(self):
         runtime_dir = self.root / "not-a-socket"
@@ -87,6 +90,43 @@ class AttachTargetCliTest(unittest.TestCase):
         result = self.run_attach(runtime_dir)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no daemon socket", result.stderr)
+
+    def test_local_launch_uses_reserved_invocation_directory(self):
+        read_fd, write_fd = os.pipe()
+        child_pid = os.fork()
+        if child_pid == 0:
+            try:
+                os.close(read_fd)
+                runtime_dir = self.runtime / str(os.getpid())
+                self.bind_daemon_socket(runtime_dir)
+                os.dup2(write_fd, 1)
+                os.close(write_fd)
+                os.execve(
+                    self.cli,
+                    [
+                        self.cli,
+                        "--profile",
+                        "mi350x",
+                        "--",
+                        sys.executable,
+                        "-c",
+                        "import os; print(os.environ.get('ROCJITSU_INVOCATION_DIR', ''))",
+                    ],
+                    self.env,
+                )
+            except BaseException:
+                os._exit(127)
+
+        os.close(write_fd)
+        with os.fdopen(read_fd, "r", encoding="utf-8") as pipe:
+            output = pipe.read()
+        _, status = os.waitpid(child_pid, 0)
+        self.assertTrue(os.WIFEXITED(status), output)
+        self.assertEqual(os.WEXITSTATUS(status), 0, output)
+        self.assertEqual(
+            output.strip(), str(self.runtime / "invocations" / str(child_pid))
+        )
+        self.assertTrue((self.runtime / str(child_pid) / "daemon.sock").exists())
 
 
 if __name__ == "__main__":

@@ -315,14 +315,16 @@ add_test(
         "-DTEST_REGEX=--config:? requires a value" -P ${_rj_cli_failure_script}
 )
 
-add_test(
-    NAME RocjitsuAttachWithoutConfigSkipsDefaultProfile
-    COMMAND
-        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
-        "-DTEST_ENVIRONMENT=ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/attach-no-profile-runtime"
-        "-DTEST_ARGS=--attach;default;--;true" "-DTEST_REGEX=no daemon socket"
-        -P ${_rj_cli_failure_script}
-)
+if(ROCJITSU_ENABLE_INTERPOSER)
+    add_test(
+        NAME RocjitsuAttachWithoutConfigSkipsDefaultProfile
+        COMMAND
+            ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+            "-DTEST_ENVIRONMENT=ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/attach-no-profile-runtime"
+            "-DTEST_ARGS=--attach;default;--;true"
+            "-DTEST_REGEX=no daemon socket" -P ${_rj_cli_failure_script}
+    )
+endif()
 
 add_test(
     NAME RocjitsuAttachRejectsMissingTarget
@@ -516,14 +518,16 @@ if(NOT ROCJITSU_ENABLE_INTERPOSER)
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_interposer_disabled.cmake
     )
 endif()
-add_test(
-    NAME RocjitsuAttachTargetCliTest
-    COMMAND
-        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
-        ${Python3_EXECUTABLE} -B
-        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_attach_target_cli.py -v
-)
-set_tests_properties(RocjitsuAttachTargetCliTest PROPERTIES TIMEOUT 120)
+if(ROCJITSU_ENABLE_INTERPOSER)
+    add_test(
+        NAME RocjitsuAttachTargetCliTest
+        COMMAND
+            ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_attach_target_cli.py -v
+    )
+    set_tests_properties(RocjitsuAttachTargetCliTest PROPERTIES TIMEOUT 120)
+endif()
 add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND

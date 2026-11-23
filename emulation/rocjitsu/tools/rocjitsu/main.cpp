@@ -474,14 +474,16 @@ bool daemon_socket_accepts_connections(const std::filesystem::path &socket_path)
 
 // Best-effort reap of per-PID runtime dirs left behind by prior invocations that
 // exited via execvp (which never returns, so cleanup_runtime_files does not run).
-// Each numeric <pid> subdir of the runtime root is removed if that PID is no
-// longer alive, so a recycled PID cannot inherit a stale config_path/daemon.sock.
+// Each numeric <pid> subdir of the reserved invocation root is removed if that
+// PID is no longer alive, so a recycled PID cannot inherit a stale
+// config_path/daemon.sock. Named daemon directories live directly under the
+// runtime root and are never removed by this launcher-owned reaper.
 void reap_stale_runtime_dirs() {
   // Never iterate an empty root: directory_iterator("") scans the CWD, which would
   // let this reaper remove_all unrelated numeric directories. rpc_default_runtime_dir()
   // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset, but guard here too
   // since the loop body deletes.
-  const std::string root = rpc_default_runtime_dir();
+  const std::string root = rpc_invocation_runtime_root();
   if (root.empty()) {
     return;
   }
@@ -1233,6 +1235,9 @@ int main(int argc, char *argv[]) {
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, attach_runtime_dir->string());
   } else {
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
+  }
+  if (attach_runtime_dir) {
+    launch_environment.set(rocjitsu::kRpcRequireSelectedDaemonEnv, "1");
   }
   if (launched_daemon_pid) {
     launch_environment.set(rocjitsu::kRpcDaemonPidEnv, std::to_string(*launched_daemon_pid));

@@ -177,9 +177,11 @@ rocJITsu does not leave a live launcher-owned daemon behind.
 
 The runtime files are separate from process lifetime. Launches that `exec` an
 application cannot run C++ cleanup after a successful `exec`, so rocJITsu writes
-per-invocation files under a PID-named runtime directory and later reclaims
-stale PID directories opportunistically. The reaper removes only numeric
-directories whose PID no longer exists and does not follow symlinks.
+per-invocation files under a reserved `invocations/<pid>` runtime directory and
+later reclaims stale invocation directories opportunistically. The reaper removes
+only numeric directories under `invocations/` whose PID no longer exists and
+does not follow symlinks; named daemon directories directly under the runtime
+root are left alone.
 
 ### Attach mode and runtime state
 
@@ -188,9 +190,11 @@ starts the application with the interposer and points it at one existing daemon
 socket. `default` selects the current runtime directory, resolved from
 `ROCJITSU_RUNTIME_DIR`, then `$XDG_RUNTIME_DIR/rocjitsu`, then
 `/tmp/rocjitsu-<uid>`. Any other identifier selects a subdirectory under that
-runtime directory. A path selects that runtime directory directly; a path ending
-in `daemon.sock` selects its parent directory. Use `rocjitsu paths` or
-`rocjitsu paths --json` to inspect the default paths.
+runtime directory. A path selects that runtime directory directly; for example,
+`--attach ./daemon.sock` selects a socket in the current directory while bare
+`--attach daemon.sock` is treated as a daemon ID. A path ending in `daemon.sock`
+selects its parent directory. Use `rocjitsu paths` or `rocjitsu paths --json` to
+inspect the default paths.
 
 The daemon has already built its machine from the config it was started with.
 For that reason, attach rejects launch-only settings that would otherwise mutate

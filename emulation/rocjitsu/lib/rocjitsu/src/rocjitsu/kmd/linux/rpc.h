@@ -357,6 +357,11 @@ inline std::string rpc_default_config_file_path() {
 /// directory. Attach mode sets the selected daemon runtime directory.
 inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
 
+/// @brief Environment variable requiring the selected daemon socket.
+/// @details Attach mode sets this so a client whose selected daemon disappears
+/// before its first KFD open fails instead of falling back to the default daemon.
+inline constexpr char kRpcRequireSelectedDaemonEnv[] = "ROCJITSU_REQUIRE_SELECTED_DAEMON";
+
 /// @brief Environment variable carrying the PID of the daemon the CLI forked.
 /// @details Exported beside kRpcInvocationDirEnv, and for the same reason: the
 /// CLI knows this PID because it forked the process, then execs the workload
@@ -374,12 +379,16 @@ inline constexpr char kRpcInvocationDirEnv[] = "ROCJITSU_INVOCATION_DIR";
 inline constexpr char kRpcDaemonPidEnv[] = "ROCJITSU_DAEMON_PID";
 
 /// @brief Per-invocation runtime directory scoped by PID.
-/// @details The CLI creates <runtime_dir>/<pid>/ before execvp and exports its
-/// path via $ROCJITSU_INVOCATION_DIR so the interposer locates the correct
-/// config/socket without depending on the process-tree shape. All descendants
-/// inherit the same directory through the environment.
+/// @details The CLI creates <runtime_dir>/invocations/<pid>/ before execvp and
+/// exports its path via $ROCJITSU_INVOCATION_DIR so the interposer locates the
+/// correct config/socket without depending on the process-tree shape. All
+/// descendants inherit the same directory through the environment.
+inline std::string rpc_invocation_runtime_root() {
+  return rpc_default_runtime_dir() + "/invocations";
+}
+
 inline std::string rpc_invocation_runtime_dir(pid_t pid) {
-  return rpc_default_runtime_dir() + "/" + std::to_string(pid);
+  return rpc_invocation_runtime_root() + "/" + std::to_string(pid);
 }
 
 /// @brief Per-invocation daemon socket path scoped by PID.

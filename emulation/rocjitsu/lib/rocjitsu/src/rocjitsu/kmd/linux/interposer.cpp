@@ -323,7 +323,10 @@ int connect_to_daemon(const std::string &runtime_dir) {
   // cross-connected to an unrelated daemon at the shared socket.
   const bool dir_absent = rocjitsu::libc_passthrough().access(runtime_dir.c_str(), F_OK) != 0 &&
                           (errno == ENOENT || errno == ENOTDIR);
-  if (dir_absent) {
+  const char *require_selected = getenv(rocjitsu::kRpcRequireSelectedDaemonEnv);
+  const bool exact_selection =
+      require_selected && *require_selected && std::string_view(require_selected) != "0";
+  if (dir_absent && !exact_selection) {
     return try_connect(rocjitsu::rpc_default_socket_path());
   }
   errno = connect_errno;
@@ -540,8 +543,10 @@ public:
     // (including grandchildren spawned through wrappers like ctest, whose PID
     // differs from the launcher's) inherits the exact directory holding
     // config_path/daemon.sock. Attach mode uses the same variable to name the
-    // selected daemon runtime directory. Fall back to this process's PID-scoped
-    // default only when no launcher set the variable.
+    // selected daemon runtime directory and sets ROCJITSU_REQUIRE_SELECTED_DAEMON
+    // so that selection cannot fall back to the default daemon after validation.
+    // Fall back to this process's PID-scoped default only when no launcher set the
+    // variable.
     // Assigned before resolve() (which flips real().ready() true, the gate every
     // interposed entry point checks) so no reader can observe an empty value.
     // Treat an unset OR empty $ROCJITSU_INVOCATION_DIR as "no launcher dir": an
