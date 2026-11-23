@@ -3,11 +3,13 @@
 
 #include "gtest/gtest.h"
 
+#include "common/clocks.hpp"
 #include "core/perf.hpp"
 
 #include <linux/perf_event.h>
 
 #include <cstdint>
+#include <ctime>
 #include <ostream>
 #include <stdexcept>
 #include <string_view>
@@ -217,3 +219,53 @@ TEST(perf_config_overflow_sampling, cache_references_stays_hardware_event)
     EXPECT_EQ(attr.type, static_cast<std::uint32_t>(PERF_TYPE_HARDWARE));
     EXPECT_EQ(attr.config, static_cast<std::uint64_t>(PERF_COUNT_HW_CACHE_REFERENCES));
 }
+
+// --- config_overflow_sampling: sample clock ---
+
+namespace
+{
+struct sample_clock_case
+{
+    std::string_view event;
+    clockid_t        expected_clock;
+};
+
+std::ostream&
+operator<<(std::ostream& out, const sample_clock_case& value)
+{
+    return out << value.event;
+}
+}  // namespace
+
+using perf_overflow_sample_clock = ::testing::TestWithParam<sample_clock_case>;
+
+TEST_P(perf_overflow_sample_clock, selects_clock_the_kernel_accepts)
+{
+    constexpr double k_events_per_sample = 1000.0;
+    const auto       param               = GetParam();
+
+    perf_event_attr attr{};
+    rocprofsys::perf::config_overflow_sampling(attr, param.event, k_events_per_sample);
+    const std::uint64_t uses_clockid = attr.use_clockid;
+
+    EXPECT_EQ(uses_clockid, 1U);
+    EXPECT_EQ(attr.clockid, param.expected_clock);
+}
+
+// regression: ISS-828 - every overflow event asked for the timeline clock
+// (CLOCK_BOOTTIME), and perf_event_open() fails with EINVAL for that clock on a hardware
+// event.
+INSTANTIATE_TEST_SUITE_P(
+    hardware_events_use_monotonic, perf_overflow_sample_clock,
+    ::testing::Values(
+        sample_clock_case{ "perf::PERF_COUNT_HW_CACHE_REFERENCES", CLOCK_MONOTONIC },
+        sample_clock_case{ "perf::PERF_COUNT_HW_CPU_CYCLES", CLOCK_MONOTONIC },
+        sample_clock_case{ "perf::PERF_COUNT_HW_CACHE_L1D:READ:MISS", CLOCK_MONOTONIC }));
+
+INSTANTIATE_TEST_SUITE_P(
+    software_events_use_timeline_clock, perf_overflow_sample_clock,
+    ::testing::Values(
+        sample_clock_case{ "perf::PERF_COUNT_SW_CPU_CLOCK",
+                           rocprofsys::clocks::timeline::k_timeline_clock_id },
+        sample_clock_case{ "perf::PERF_COUNT_SW_PAGE_FAULTS",
+                           rocprofsys::clocks::timeline::k_timeline_clock_id }));

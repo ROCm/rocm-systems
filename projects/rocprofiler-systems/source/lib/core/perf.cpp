@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
+#include "common/clocks.hpp"
 #include "logger/debug.hpp"
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <fmt/format.h>
 #include <linux/perf_event.h>
 #include <optional>
@@ -208,15 +210,22 @@ get_hw_cache_config(std::string_view name)
         throw make_error("missing PERF_COUNT_HW_CACHE_ prefix");
     }
 
+    // Split by hand: the pieces of std::views::split are not contiguous in GCC 11, so a
+    // string_view cannot be built from them. Always yields at least one token.
+    const auto spec = name.substr(prefix_pos + k_hw_cache_prefix.size());
     std::vector<std::string_view> tokens;
-    for(const auto token : name.substr(prefix_pos + k_hw_cache_prefix.size()) |
-                               std::views::split(k_modifier_separator))
+    for(std::size_t token_pos = 0; token_pos <= spec.size();)
     {
-        tokens.emplace_back(token.begin(), token.end());
+        const auto separator_pos = spec.find(k_modifier_separator, token_pos);
+        tokens.emplace_back(spec.substr(token_pos, separator_pos - token_pos));
+        if(separator_pos == std::string_view::npos)
+        {
+            break;
+        }
+        token_pos = separator_pos + 1;
     }
 
-    const auto cache =
-        tokens.empty() ? std::nullopt : find_named(k_hw_cache_ids, tokens.front());
+    const auto cache = find_named(k_hw_cache_ids, tokens.front());
     if(!cache)
     {
         throw make_error("unknown cache id");
@@ -300,5 +309,13 @@ config_overflow_sampling(struct perf_event_attr& perf_event_att, std::string_vie
     {
         perf_event_att.sample_period = static_cast<std::uint64_t>(freq);
     }
+
+    // perf_event_open() fails with EINVAL when a hardware event asks for the timeline
+    // clock (CLOCK_BOOTTIME), so only software events sample on it. Hardware samples are
+    // stamped in CLOCK_MONOTONIC and shifted onto the timeline when they are parsed.
+    perf_event_att.use_clockid = 1;
+    perf_event_att.clockid     = (perf_event_att.type == PERF_TYPE_SOFTWARE)
+                                     ? clocks::timeline::k_timeline_clock_id
+                                     : CLOCK_MONOTONIC;
 }
 }  // namespace rocprofsys::perf
