@@ -385,10 +385,10 @@ DEFINE_ld_st__size(1, uint8_t, b8, r) DEFINE_ld_st__size(2, uint16_t, b16, h) DE
   !defined(RCCL_DISABLE_SIMPLE_BUFFER_STORE) && __has_builtin(__builtin_amdgcn_raw_buffer_store_b128) && \
   __has_builtin(__builtin_amdgcn_make_buffer_rsrc)
 #define RCCL_SIMPLE_BUFFER_STORE 1
-// Device-only block: uniform.h defines __device__ to empty when it is missing, which a host pass must not see.
+// Device-only block: uniform.h and cachePolicy.h define __device__ to empty when it is missing, which a host pass
+// must not see.
 #include "uniform.h"
-// cpol of the buffer stores: SCOPE_SYS (scope field at bit 3), the scope the DWORDX4 store builtin gives.
-#define RCCL_BUFFER_CPOL_SCOPE_SYS (3 << 3)
+#include "tdm/cachePolicy.h"
 
 struct WaveStore16 {
   __amdgpu_buffer_rsrc_t rsrc;
@@ -408,7 +408,9 @@ __device__ __forceinline__ bool waveStore16Begin(uintptr_t addr, WaveStore16& w)
 
 // Only after waveStore16Begin() returned true.
 __device__ __forceinline__ void waveStore16(WaveStore16 const& w, uint32_t ioff, BytePack<16> value) {
-  __builtin_amdgcn_raw_buffer_store_b128(value.v4u, w.rsrc, w.voff + ioff, 0, RCCL_BUFFER_CPOL_SCOPE_SYS);
+  // cpol SCOPE_SYS, the scope the DWORDX4 store builtin gives.
+  __builtin_amdgcn_raw_buffer_store_b128(value.v4u, w.rsrc, w.voff + ioff, 0,
+                                         createCachePolicy(TemporalHint::RT, MemScope::SYS));
 }
 #else
 #define RCCL_SIMPLE_BUFFER_STORE 0
