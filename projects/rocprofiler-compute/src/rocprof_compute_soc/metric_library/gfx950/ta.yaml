@@ -3,9 +3,9 @@ ta.buffer_coalescable_insts:
   formula: SUM(TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of coalesceable buffer memory instructions executed on all compute
-    units, per normalization unit. Higher values indicate better memory access patterns
-    for private memory operations.
+    The total number of coalesceable buffer instructions processed by the address
+    processing unit, counted once per wavefront, per normalization unit. Higher values
+    indicate better memory access patterns for buffer memory operations.
 ta.buffer_rd_insts_for_lds:
   name: TA Buffer Read Instructions for LDS
   formula: SUM(TA_BUFFER_READ_LDS_WAVEFRONTS_sum) / SUM($denom)
