@@ -197,3 +197,12 @@ in modes 2 and 3.
 The old true16-dot emitter loses its last production users and is deleted.
 Its semantic classes now route directly to the shared library binding, along
 with the migrated HostF32 packed and accumulating forms on CDNA1/2 and RDNA2.
+
+## gfx1251 packed U64
+
+The three packed U64 forms (ADD_NC, SUB_NC, LSHL_ADD) use scalar, AVX2 and
+AVX-512 paths for all semantics. ADD/SUB include independent half-element
+negation and mathematical U64 saturation. LSHL_ADD retains the inherited
+active count range0..4, checked before writes by Rocjitsu; no expanded hardware
+claim is made for other counts. Scalar carriers replicate the appropriate
+U64 data or U32 count. Existing decoder and simulator coverage is retained.

@@ -272,7 +272,7 @@ std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_
     }
     // SGPR restores also use vector instructions through the spill bridge.
     // Widening EXEC cannot make those instructions execute while VSKIP is set.
-    if (may_enable_vskip(*inst, body_bytes, arch)) {
+    if (may_enable_vskip(*inst, body_bytes, arch, w * sizeof(uint32_t))) {
       report(error_out, "probe body may enable VSKIP and suppress the call envelope's restores");
       return std::nullopt;
     }

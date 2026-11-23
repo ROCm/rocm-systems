@@ -62,6 +62,8 @@ RJ_DIAGNOSTIC_POP
 #include "util/result.h"
 #include <gtest/gtest-spi.h>
 
+#include "util/unique_handle.h"
+
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -4276,6 +4278,150 @@ TEST(GpuMemoryThreadingTest, OrdinaryLineTransfersShareAtomicExclusionAcrossMapp
         EXPECT_TRUE(access.get());
       }
     }
+  }
+}
+
+TEST(GpuMemoryThreadingTest, SharedFileAliasesSerializeCopiesAndAtomics) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddress = 0x40000000;
+  constexpr uint64_t kAlias = 0x50000000;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  for (const bool observed : {false, true}) {
+    SCOPED_TRACE(observed);
+    rocjitsu::test::ScopedHostMappingObservation observation(observed);
+    const auto map = [&](int fd) {
+      if (observed) {
+        const auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+        return mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+      }
+      return mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    };
+    const auto unmap = [](void *view) {
+      const auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+      EXPECT_EQ(munmap(view, kPageSize), 0);
+    };
+    util::UniqueHandle fd(memfd_create("rj-atomic-alias", MFD_CLOEXEC));
+    ASSERT_GE(fd.get(), 0);
+    ASSERT_EQ(ftruncate(fd.get(), kPageSize), 0);
+    void *first = map(fd.get());
+    ASSERT_NE(first, MAP_FAILED);
+    const std::unique_ptr<void, decltype(unmap)> first_view(first, unmap);
+    rocjitsu::test::LegacyGpuMemoryFixture memory("file_alias_atomics");
+    KfdProcess process(kPid);
+    process.map_pages(kAddress, first, kPageSize);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation());
+    auto &space = memory.legacy_address_space(kPid);
+    uint64_t value = 0;
+    ASSERT_EQ(space.atomic_load(kAddress, sizeof(uint64_t), value, kPid),
+              amdgpu::CopyOutcome::Complete);
+
+    // A non-interposed embedder can create its next alias after a first
+    // transaction, using libc directly before publishing the GPU address.
+    void *second = map(fd.get());
+    ASSERT_NE(second, MAP_FAILED);
+    const std::unique_ptr<void, decltype(unmap)> second_view(second, unmap);
+    process.map_pages(kAlias, second, kPageSize);
+
+    auto *first_stripe = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(first);
+    EXPECT_EQ(first_stripe, amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(second));
+    auto must_wait_for_alias = [&](auto operation) {
+      std::promise<void> started;
+      auto ready = started.get_future();
+      std::unique_lock lock(*first_stripe);
+      auto access = std::async(std::launch::async, [&] {
+        started.set_value();
+        return operation();
+      });
+      ready.wait();
+      const auto blocked = access.wait_for(std::chrono::milliseconds(10));
+      lock.unlock();
+      EXPECT_EQ(blocked, std::future_status::timeout);
+      EXPECT_TRUE(access.get());
+    };
+
+    const uint64_t replacement = 0x12345678;
+    must_wait_for_alias([&] {
+      return space.atomic_modify_strict(
+                 kAlias, sizeof(replacement),
+                 [&](uint8_t *target) { std::memcpy(target, &replacement, sizeof(replacement)); },
+                 kPid) == amdgpu::CopyOutcome::Complete;
+    });
+    must_wait_for_alias([&] {
+      return space.atomic_load(kAlias, sizeof(value), value, kPid) == amdgpu::CopyOutcome::Complete;
+    });
+    EXPECT_EQ(value, replacement);
+    std::array<uint8_t, amdgpu::kMaxMemoryTransactionBytes> bytes{};
+    must_wait_for_alias(
+        [&] { return space.try_copy_contiguous(kAlias, bytes.data(), bytes.size(), kPid, false); });
+    EXPECT_EQ(std::memcmp(bytes.data(), &replacement, sizeof(replacement)), 0);
+  }
+}
+
+TEST(GpuMemoryThreadingTest, BulkCopyUsesAliasStripeAcrossHostMappingBoundary) {
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kAddress = 0x40000000;
+  constexpr size_t kPageSize = KfdProcess::kPageSize;
+  constexpr size_t kTransaction = amdgpu::kMaxMemoryTransactionBytes;
+  for (bool observed : {false, true}) {
+    SCOPED_TRACE(observed);
+    rocjitsu::test::ScopedHostMappingObservation observation(observed);
+    util::UniqueHandle fd(memfd_create("rj-bulk-alias", MFD_CLOEXEC));
+    ASSERT_GE(fd.get(), 0);
+    ASSERT_EQ(ftruncate(fd.get(), 3 * kPageSize), 0);
+    const auto unmap = [](size_t size) {
+      return [size](void *ptr) {
+        const auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+        EXPECT_EQ(munmap(ptr, size), 0);
+      };
+    };
+    auto unmap_pages = unmap(2 * kPageSize);
+    auto unmap_alias = unmap(kPageSize);
+    std::unique_ptr<void, decltype(unmap_pages)> views(nullptr, unmap_pages);
+    std::unique_ptr<void, decltype(unmap_alias)> alias(nullptr, unmap_alias);
+    {
+      const auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+      auto *pages = static_cast<uint8_t *>(
+          mmap(nullptr, 2 * kPageSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+      ASSERT_NE(pages, MAP_FAILED);
+      views.reset(pages);
+      ASSERT_EQ(mmap(pages, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd.get(), 0),
+                pages);
+      // Adjacent host pages refer to nonadjacent offsets in the file.
+      ASSERT_EQ(mmap(pages + kPageSize, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                     fd.get(), 2 * kPageSize),
+                pages + kPageSize);
+      void *second =
+          mmap(nullptr, kPageSize, PROT_READ | PROT_WRITE, MAP_SHARED, fd.get(), 2 * kPageSize);
+      ASSERT_NE(second, MAP_FAILED);
+      alias.reset(second);
+    }
+    rocjitsu::test::LegacyGpuMemoryFixture memory("bulk_alias");
+    KfdProcess process(kPid);
+    auto *host = static_cast<uint8_t *>(views.get()) + kPageSize - 3 * kTransaction / 2;
+    std::array<uint8_t, 3 * kTransaction> value;
+    value.fill(0xa5);
+    ASSERT_EQ(process.map_pages(kAddress, host, value.size()),
+              KfdProcess::PageTableMutationResult::Applied);
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation());
+
+    std::promise<void> started;
+    auto ready = started.get_future();
+    auto *alias_stripe = amdgpu::GpuMemoryTestAccess::backing_atomic_mutex_for(alias.get());
+    std::unique_lock lock(*alias_stripe);
+    auto write = std::async(std::launch::async, [&] {
+      started.set_value();
+      return memory.write_block(kAddress, value, kPid);
+    });
+    ready.wait();
+    const auto blocked = write.wait_for(std::chrono::milliseconds(10));
+    lock.unlock();
+    EXPECT_EQ(blocked, std::future_status::timeout);
+    EXPECT_EQ(write.get(), amdgpu::AccessOutcome::Complete);
+    EXPECT_TRUE(
+        std::ranges::equal(std::span(static_cast<uint8_t *>(alias.get()), 3 * kTransaction / 2),
+                           std::span(value).last(3 * kTransaction / 2)));
   }
 }
 

@@ -85,13 +85,15 @@ extern "C" {
 
 namespace {
 
+using rocjitsu::test::initialize_runtime_directory;
+
 enum class RunCtxFaultState { Idle, Armed, Fired };
 std::atomic<RunCtxFaultState> run_ctx_fault_state = RunCtxFaultState::Idle;
 std::atomic<uint32_t> completed_run_ctx_calls = 0;
 
 rocjitsu::test::ScopedTempDirectory make_runtime_directory(const char *prefix) {
   rocjitsu::test::ScopedTempDirectory directory;
-  if (testing::AssertionResult initialized = directory.initialize(prefix); !initialized)
+  if (const auto initialized = initialize_runtime_directory(directory, prefix); !initialized)
     throw std::runtime_error(initialized.message());
   return directory;
 }
@@ -210,26 +212,16 @@ bool program_peer_bar0(rocjitsu::test::VfioUserClient &owner, uint64_t base,
 /// stopped does not itself provide that ordering.
 class ServedDevice {
 public:
-  ServedDevice()
-      : socket_path_(std::format("/tmp/rj-vfu-test-{}-{}.sock", ::getpid(), ++instance_counter_)),
-        device_("test-device", kTestId, &trace_) {
-    std::filesystem::remove(socket_path_);
-    built_ = host_.build();
-    if (built_) {
-      serving_ = std::jthread([this](std::stop_token stop) { (void)host_.run(stop); });
-    }
+  [[nodiscard]] testing::AssertionResult start() {
+    if (const auto result = initialize_runtime_directory(runtime_, "rj-v-"); !result)
+      return result;
+    socket_path_ = runtime_.path() + "/v.sock";
+    host_.emplace(socket_path_, device_);
+    if (!host_->build())
+      return testing::AssertionFailure() << "Failed to serve " << socket_path_;
+    serving_ = std::jthread([this](std::stop_token stop) { (void)host_->run(stop); });
+    return testing::AssertionSuccess();
   }
-
-  ~ServedDevice() {
-    serving_.request_stop();
-    if (serving_.joinable()) {
-      serving_.join();
-    }
-    host_.detach();
-    std::filesystem::remove(socket_path_);
-  }
-
-  [[nodiscard]] bool built() const { return built_; }
 
   /// @brief Connect a client, retrying while the server reaches its accept loop.
   [[nodiscard]] bool attach(rocjitsu::test::VfioUserClient &client) {
@@ -244,7 +236,7 @@ public:
 
   rocjitsu::ScratchPciDevice &device() { return device_; }
 
-  rocjitsu::VfioDeviceHost &host() { return host_; }
+  rocjitsu::VfioDeviceHost &host() { return *host_; }
 
   /// @brief Identify the serving thread, so work can assert it ran there.
   [[nodiscard]] std::thread::id serving_thread_id() const { return serving_.get_id(); }
@@ -258,15 +250,14 @@ public:
   }
 
 private:
-  static inline std::atomic<int> instance_counter_ = 0;
-
+  rocjitsu::test::ScopedTempDirectory runtime_;
   rocjitsu::RegisterSymbols symbols_;
   rocjitsu::BarAccessTrace trace_{symbols_};
   std::string socket_path_;
-  rocjitsu::ScratchPciDevice device_;
-  rocjitsu::VfioDeviceHost host_{socket_path_, device_};
+  rocjitsu::ScratchPciDevice device_{"test-device", kTestId, &trace_};
+  // Destroy in this order: join the serving thread, tear down the host, remove its directory.
+  std::optional<rocjitsu::VfioDeviceHost> host_;
   std::jthread serving_;
-  bool built_ = false;
 };
 
 /// A mappable BAR whose callback would fail on the second chunk of an
@@ -353,8 +344,8 @@ public:
                            uint32_t requester_gpu_id = 0, uint32_t owner_gpu_id = 0,
                            bool owner_msix = false, uint64_t owner_fd_offset = 0,
                            bool owner_64bit = false)
-      : runtime_(make_runtime_directory("rj-target-mapped-")),
-        requester_("requester", kTestId, nullptr), owner_(owner_msix, owner_fd_offset, owner_64bit),
+      : runtime_(make_runtime_directory("rj-v-")), requester_("requester", kTestId, nullptr),
+        owner_(owner_msix, owner_fd_offset, owner_64bit),
         requester_host_(runtime_.path() + "/requester.sock", requester_),
         owner_host_(runtime_.path() + "/owner.sock", owner_) {
     if (!owner_.usable() || (seal_owner && !owner_.seal()))
@@ -423,8 +414,7 @@ private:
 class MappedGrantTrio {
 public:
   MappedGrantTrio()
-      : runtime_(make_runtime_directory("rj-target-cohort-")),
-        requester_a_("requester-a", kTestId, nullptr),
+      : runtime_(make_runtime_directory("rj-v-")), requester_a_("requester-a", kTestId, nullptr),
         requester_b_("requester-b", kTestId, nullptr), owner_(),
         requester_a_host_(runtime_.path() + "/requester-a.sock", requester_a_),
         requester_b_host_(runtime_.path() + "/requester-b.sock", requester_b_),
@@ -539,7 +529,7 @@ private:
 
 TEST(VfioDeviceHost, ServesAClientAndReportsItsBusShape) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -558,7 +548,7 @@ TEST(VfioDeviceHost, ServesAClientAndReportsItsBusShape) {
 // space, which is what a guest driver matches on when it decides to bind.
 TEST(VfioDeviceHost, PresentsTheDeclaredIdentityInConfigSpace) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -578,7 +568,7 @@ TEST(VfioDeviceHost, PresentsTheDeclaredIdentityInConfigSpace) {
 
 TEST(VfioDeviceHost, PublishesASecondGenerationPcieEndpointCapability) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -606,9 +596,9 @@ TEST(VfioDeviceHost, PublishesASecondGenerationPcieEndpointCapability) {
 }
 
 TEST(VfioDeviceHost, DoesNotAdvertiseUnimplementedGpuPeerAtomicCompletion) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-atomics-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.local_mem_size = 64 * 1024 * 1024;
@@ -659,7 +649,7 @@ TEST(VfioDeviceHost, DoesNotAdvertiseUnimplementedGpuPeerAtomicCompletion) {
 
 TEST(VfioDeviceHost, CarriesABarWriteAndReadBackToTheDevice) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -676,7 +666,7 @@ TEST(VfioDeviceHost, CarriesABarWriteAndReadBackToTheDevice) {
 // as an error rather than as a successful read of stale bytes.
 TEST(VfioDeviceHost, ReportsADeviceRejectionAsAnError) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -688,7 +678,7 @@ TEST(VfioDeviceHost, ReportsADeviceRejectionAsAnError) {
 
 TEST(VfioDeviceHost, AnnouncesAWindowTheClientSharesMappably) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -707,7 +697,7 @@ TEST(VfioDeviceHost, AnnouncesAWindowTheClientSharesMappably) {
 
 TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   constexpr uint64_t kGuestAddress = 0x180000;
   constexpr uint64_t kWindowSize = 0x1000;
@@ -765,7 +755,7 @@ TEST(VfioDeviceHost, PerformsTypedAtomicAccessOnlyOnLiveMappedGuestMemory) {
 // every access would fail.
 TEST(VfioDeviceHost, WithholdsAWindowSharedWithoutADescriptor) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1575,7 +1565,7 @@ TEST(VfioTargetGrants, RejectsUnsealedBackingWithoutLeavingAGrant) {
 
 TEST(VfioDeviceHost, FailedReadAcrossAnUnreachableWindowLeavesTheDestinationUnchanged) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1607,7 +1597,7 @@ TEST(VfioDeviceHost, FailedReadAcrossAnUnreachableWindowLeavesTheDestinationUnch
 
 TEST(VfioDeviceHost, FailedWriteAcrossAnUnreachableWindowLeavesGuestMemoryUnchanged) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1643,7 +1633,7 @@ TEST(VfioDeviceHost, FailedWriteAcrossAnUnreachableWindowLeavesGuestMemoryUnchan
 
 TEST(VfioDeviceHost, ReadsAcrossHundredsOfMappedWindows) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1677,7 +1667,7 @@ TEST(VfioDeviceHost, ReadsAcrossHundredsOfMappedWindows) {
 
 TEST(VfioDeviceHost, KeepsCountWhenTheSameWindowIsSharedTwice) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   rocjitsu::test::VfioUserClient client;
   ASSERT_TRUE(served.attach(client));
 
@@ -1698,7 +1688,7 @@ TEST(VfioDeviceHost, KeepsCountWhenTheSameWindowIsSharedTwice) {
 // connection, so a VMM may be restarted against a running server.
 TEST(VfioDeviceHostLifecycle, ServesAnotherClientWhenNothingWasShared) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   uint64_t first_generation = 0;
   {
@@ -1720,7 +1710,7 @@ TEST(VfioDeviceHostLifecycle, ServesAnotherClientWhenNothingWasShared) {
 
 TEST(VfioDeviceHostLifecycle, PublishesCompletedDisconnectsAfterTrappedClientSessions) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   EXPECT_EQ(served.host().client_snapshot().completed_disconnects, 0u);
   EXPECT_FALSE(served.host().client_snapshot().attached);
   EXPECT_FALSE(served.host().client_snapshot().disconnect_in_progress);
@@ -1877,7 +1867,7 @@ TEST(VfioDeviceHostLifecycle, FailedDisconnectResetStopsServingWithoutReportingC
 
 TEST(VfioDeviceHostLifecycle, KeepsClosedSnapshotWhileDisconnectResetIsSlow) {
   rocjitsu::test::ScopedTempDirectory runtime;
-  ASSERT_TRUE(runtime.initialize("rj-vfu-slow-reset-"));
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
   const std::string socket_path = std::format("{}/gpu.sock", runtime.path());
   std::promise<void> reset_release;
   ResetObservingDevice device(reset_release.get_future().share());
@@ -2013,9 +2003,9 @@ int exercise_raw_enotconn(const std::string &socket_path) {
 }
 
 TEST(VfioDeviceHostLifecycle, RawEnotconnRevokesAndResetsBeforeDetach) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-enotconn-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   const pid_t child = ::fork();
   ASSERT_GE(child, 0);
@@ -2047,9 +2037,9 @@ TEST(VfioDeviceHostLifecycle, RawEnotconnRevokesAndResetsBeforeDetach) {
 // when the client goes away, so serving ends rather than handing a second
 // client memory the first can still reach.
 TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-gpu-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.vendor_id = 0x1002;
@@ -2120,9 +2110,9 @@ TEST(VfioDeviceHostLifecycle, StopsServingAfterASharedMemoryClientDisconnects) {
 // agree on what is acceptable, or a device reports itself fine and then fails
 // while the transport is being built around it.
 TEST(VfioDeviceHostLifecycle, BuildsTheSmallestBusShapeTheDeviceAccepts) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-floor-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.local_mem_size = 64 * 1024 * 1024;
@@ -2192,9 +2182,9 @@ public:
 // above still passes if vfu_setup_device_nr_irqs() and VfioDeviceHost::trigger()
 // stop being connected to each other.
 TEST(VfioDeviceHostLifecycle, DeliversAMessageToTheVectorTheClientArmed) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-raise-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   RaisingDevice device;
   rocjitsu::VfioDeviceHost host(socket_path, device);
@@ -2243,9 +2233,9 @@ TEST(VfioDeviceHostLifecycle, DeliversAMessageToTheVectorTheClientArmed) {
 // recursive-lock guarantee becomes a bounded test failure instead of wedging
 // the test process during serving-thread destruction.
 TEST(VfioDeviceHostLifecycle, ServingThreadRequestCanReenterTransportForInterrupt) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-request-raise-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   const pid_t child = ::fork();
   ASSERT_GE(child, 0);
@@ -2324,9 +2314,9 @@ TEST(VfioDeviceHostLifecycle, ServingThreadRequestCanReenterTransportForInterrup
 // looks for its table at whatever address comes out -- so the encoding is
 // checked here rather than by booting one and reading dmesg.
 TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
-  const std::string socket_path =
-      std::format("/tmp/rj-vfu-test-msix-{}.sock", static_cast<int>(::getpid()));
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   rocjitsu::config::KfdDeviceConfig identity;
   identity.gfx_target_version = 120500;
@@ -2625,7 +2615,7 @@ void run_multi_function_server_scenario(uint32_t gpu_count, MultiClientDeparture
   ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), gpu_count));
 
   rocjitsu::test::ScopedTempDirectory runtime;
-  ASSERT_TRUE(runtime.initialize("rj-vfu-multi-"));
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
   std::vector<std::string> socket_paths;
   for (uint32_t i = 0; i < gpu_count; ++i)
     socket_paths.push_back(std::format("{}/gpu{}.sock", runtime.path(), i));
@@ -2763,7 +2753,7 @@ TEST(VfioServer, CleansTheFirstListenerWhenTheSecondBindFails) {
   ASSERT_TRUE(compact_vfio_config_has_usable_functions(config.path(), 2));
 
   rocjitsu::test::ScopedTempDirectory runtime;
-  ASSERT_TRUE(runtime.initialize("rj-vfu-multi-fail-"));
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
   const std::string first_socket = runtime.path() + "/gpu0.sock";
   // An existing directory cannot become a socket. It reaches host.build()
   // after the first host has already bound, unlike duplicate-path preflight.
@@ -2901,13 +2891,15 @@ TEST(VfioServer, ReturnsRatherThanHangingWhenTheSocketCannotBeBound) {
   const std::string config = RJ_VFU_TEST_CONFIG_PATH;
   ASSERT_TRUE(std::filesystem::exists(config)) << "no config to build a machine from: " << config;
 
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+
   // A child can be killed and reaped if the server hangs. A timed-out
   // std::launch::async future would block in its destructor and wedge the test.
   const pid_t child = ::fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
-    const int result =
-        rocjitsu::run_vfio_server(config, std::filesystem::temp_directory_path().string());
+    const int result = rocjitsu::run_vfio_server(config, runtime.path());
     ::_exit(result == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
   }
 
@@ -2933,8 +2925,9 @@ TEST(VfioServer, ReturnsRatherThanHangingWhenTheSocketCannotBeBound) {
 TEST(VfioServer, ReportsReadinessAfterTheSocketIsListening) {
   const std::string config = RJ_VFU_TEST_CONFIG_PATH;
   ASSERT_TRUE(std::filesystem::exists(config)) << "no config to build a machine from: " << config;
-  const std::string socket_path = std::format("/tmp/rj-vfu-server-ready-{}.sock", ::getpid());
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   int ready_pipe[2];
   ASSERT_EQ(::pipe(ready_pipe), 0) << strerror(errno);
@@ -2981,8 +2974,9 @@ TEST(VfioServer, ReportsReadinessAfterTheSocketIsListening) {
 TEST(VfioServer, PropagatesAnEngineFailureAfterReadiness) {
   const std::string config = RJ_VFU_TEST_CONFIG_PATH;
   ASSERT_TRUE(std::filesystem::exists(config)) << "no config to build a machine from: " << config;
-  const std::string socket_path = std::format("/tmp/rj-vfu-engine-failure-{}.sock", ::getpid());
-  std::filesystem::remove(socket_path);
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(initialize_runtime_directory(runtime, "rj-v-"));
+  const std::string socket_path = runtime.path() + "/v.sock";
 
   int ready_pipe[2];
   ASSERT_EQ(::pipe(ready_pipe), 0) << strerror(errno);
@@ -3034,7 +3028,7 @@ TEST(VfioServer, PropagatesAnEngineFailureAfterReadiness) {
 // An empty target must be refused before it consumes the single request slot.
 TEST(VfioDeviceHost, RefusesEmptyWorkRatherThanThrowingOnTheServingThread) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   EXPECT_FALSE(served.host().ask_serving_thread({})) << "an empty target was accepted";
 
@@ -3053,7 +3047,7 @@ TEST(VfioDeviceHost, RunsAskedWorkOnTheServingThread) {
   // after the test body has ended.
   std::promise<std::thread::id> ran_on;
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   std::future<std::thread::id> where = ran_on.get_future();
   ASSERT_TRUE(served.host().ask_serving_thread(
@@ -3081,7 +3075,7 @@ TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
   bool second_ran = false;
 
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
 
   // Block the first request inside the serving thread so it stays outstanding
   // while the second is offered.
@@ -3104,7 +3098,7 @@ TEST(VfioDeviceHost, RefusesASecondRequestWhileOneIsOutstanding) {
 // must not leave a caller waiting for work that has nothing left to run it.
 TEST(VfioDeviceHost, DiscardsAskedWorkWhenServingHasStopped) {
   ServedDevice served;
-  ASSERT_TRUE(served.built());
+  ASSERT_TRUE(served.start());
   served.stop_serving();
 
   bool ran = false;
