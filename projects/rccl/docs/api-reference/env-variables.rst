@@ -913,6 +913,24 @@ in the following table.
       - | Integer.
         | Default: unset (``-2``), on for gfx1250 and off elsewhere.
 
+    * - | ``RCCL_A2A_P2P_PEERS_IN_FLIGHT``
+        | Limits how many peers a direct P2P ``ncclAlltoAll`` writes to at a
+        | time. With ``K`` peers in flight, each peer gets the channel pool
+        | divided by ``K`` instead of the per-peer channel count, and the
+        | operation runs as one kernel launch per ``K`` peers, so every channel
+        | carries one peer per launch. The grid is unchanged.
+        | It applies only from 4 MiB per peer and only when it gives a peer more
+        | channels than the per-peer count. It does not apply to the self copy,
+        | to P2P over the network, to channel maps set by
+        | ``RCCL_P2P_SHIFT_SIZE`` on more than two nodes, or with
+        | ``NCCL_ENQUEUE_REARCH_ENABLE``. All ranks must use the same value.
+      - | Integer.
+        | Default: ``-1`` (architecture default): ``16`` on gfx1250, off
+        | elsewhere.
+        | ``0`` or ``1``: off.
+        | ``2`` or greater: ``K``, rounded down to a power of two and bounded
+        | by the P2P channel pool.
+
     * - | ``NCCL_P2P_MAX_PEERS``
         | Sets the maximum number of peers a rank communicates with concurrently
         | over P2P. This overrides the value of the ``maxP2pPeers`` field in
