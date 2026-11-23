@@ -142,7 +142,8 @@ __launch_bounds__(1024)
 // Block size of the staged kernel: its two LDS windows per warp take 64 KiB.
 constexpr unsigned kDdaLL128AGStageThreads = 512;
 
-// Most peers one fill takes: the wait ladder's top rung. Two fills in flight fit the 6-bit async counter only up to 7.
+// Most peers a fill takes (the ladder's top rung). Above 7, two fills exceed the 6-bit async counter, so the wave
+// stalls at issue: correct but slower.
 constexpr int kDdaLL128AGStageMaxPushPeers = (1 << kDdaLL128StageWaitRungs) - 1;
 
 // Peers a fill goes to. Off the ladder's rungs (3, 7), so a refill also waits on one push of the last fill.
