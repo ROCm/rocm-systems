@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -586,7 +587,7 @@ constexpr uint32_t s_mov_b32_s0_imm(uint32_t imm) { return 0xBE800000u | (128u +
 class CuFixture {
 public:
   explicit CuFixture(const std::string &name, uint32_t wf_slots = 1, bool async_mma = false,
-                     rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+                     rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4)
       : memory_(name + "_memory"), l2_(name + "_l2") {
     config_.arch = arch;
     config_.num_wf_slots = wf_slots;
@@ -634,7 +635,7 @@ private:
 
 class CountingDecoder : public rocjitsu::Decoder {
 public:
-  explicit CountingDecoder(rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA4)
+  explicit CountingDecoder(rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4)
       : decoder_(rocjitsu::Decoder::create(arch)) {}
 
   rocjitsu::DecodeResult decode(const rj_code_binary_inst_t *words,
@@ -661,7 +662,7 @@ TEST(DecodedInstructionCacheCuTest, FetchesFifthGfx10NsaWordAcrossCacheLines) {
     }
     uint32_t fifth_word = 0;
   };
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     CuFixture fixture("gfx10_nsa_fetch", 1, false, arch);
     auto decoder = std::make_unique<RecordingDecoder>(arch);
     RecordingDecoder *observer = decoder.get();
@@ -903,7 +904,7 @@ TEST(DecodedInstructionCacheCuTest, FlatMemoryReusesCurrentExecDataAndRoute) {
 }
 
 TEST(DecodedInstructionCacheCuTest, MaskedLdsDirectLoadPreservesWarmDecodeAndState) {
-  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr auto arch = rocjitsu::IsaFamily::Rdna3;
   CuFixture fixture("decoded_lds_direct", 1, false, arch);
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   auto decoder = std::make_unique<CountingDecoder>(arch);
@@ -1226,8 +1227,7 @@ TEST(DecodedInstructionCacheTest, FailedExecutionAndExceptionsDoNotRetainInstruc
   EXPECT_EQ(decoder.calls, 3u);
 }
 
-// Fails every execution: first through the legacy exception path, whose message
-// becomes the failure detail, then with an encoding error that carries none.
+// Fails every execution: first with a detail, then with an encoding error that carries none.
 class FailingDecoder final : public rocjitsu::Decoder {
 public:
   class Failing final : public rocjitsu::Instruction {
@@ -1236,9 +1236,13 @@ public:
   };
 
   static void execute_failing(rocjitsu::Instruction &, void *wave) {
-    if (std::exchange(with_detail, false))
-      throw util::UnimplementedInst("first-failure-detail");
-    static_cast<amdgpu::Wavefront *>(wave)->report_instruction_execution_error(
+    auto &wf = *static_cast<amdgpu::Wavefront *>(wave);
+    if (std::exchange(with_detail, false)) {
+      wf.report_instruction_execution_error(
+          amdgpu::InstructionExecutionError::UnsupportedOperandValue, "first-failure-detail");
+      return;
+    }
+    wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
   }
 
@@ -1251,22 +1255,19 @@ public:
   static inline bool with_detail = true;
 };
 
-TEST(DecodedInstructionCacheCuTest, FailureDetailDoesNotOutliveAThrowingFailureHandler) {
+TEST(DecodedInstructionCacheCuTest, FailureDetailDoesNotOutlivePreviousFailure) {
   CuFixture fixture("failure_detail");
   fixture.cu()->replace_decoder_for_test(std::make_unique<FailingDecoder>());
   FailingDecoder::with_detail = true;
-  bool throw_next = true;
-  fixture.cu()->set_execution_failure_handler([&](amdgpu::Wavefront &) -> bool {
-    if (std::exchange(throw_next, false))
-      throw std::runtime_error("failure handler failed");
-    return false;
-  });
   fixture.write_program(std::array<uint32_t, 1>{kSNop});
   ASSERT_NE(fixture.launch(1, 0), nullptr);
 
-  // The handler throws while the first failure, which has a detail, is reported.
-  EXPECT_THROW(fixture.cu()->step(), std::runtime_error);
+  testing::internal::CaptureStderr();
+  fixture.cu()->step();
+  const std::string first_warning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(first_warning.find("first-failure-detail"), std::string::npos) << first_warning;
   // The next failure has no detail of its own and must not report the first one's.
+  ASSERT_NE(fixture.launch(1, 0), nullptr);
   testing::internal::CaptureStderr();
   fixture.cu()->step();
   const std::string warning = testing::internal::GetCapturedStderr();
@@ -1328,10 +1329,10 @@ TEST(DecodedInstructionCacheTest, VopdOwnsItsEncodingAndIsReusedAcrossIssues) {
       // v_dual_fmaak_f32 v0, v1, v2, 0x40490fdb :: v_dual_mov_b32 v3, v4
       {"v_dual_fmaak_f32 :: v_dual_mov_b32", 12, {0xC8500501u, 0x00020104u, 0x40490FDBu}},
   };
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                          ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                          rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (const auto &tc : cases) {
-      SCOPED_TRACE(std::string(tc.mnemonic) + " arch " + std::to_string(arch));
+      SCOPED_TRACE(std::string(tc.mnemonic) + " arch " + std::to_string(static_cast<int>(arch)));
       CountingDecoder decoder(arch);
       amdgpu::DecodedInstructionCache cache;
       auto words = tc.words;
@@ -1361,7 +1362,7 @@ TEST(DecodedInstructionCacheTest, VopdOwnsItsEncodingAndIsReusedAcrossIssues) {
 // gfx1250 VOPD3 is 12 bytes without a literal: its third word holds register
 // fields, which consumers such as perfsim read back through raw_encoding().
 TEST(DecodedInstructionCacheTest, Gfx1250Vopd3KeepsItsThirdWordAcrossIssues) {
-  CountingDecoder decoder(ROCJITSU_CODE_ARCH_CDNA5);
+  CountingDecoder decoder(rocjitsu::IsaFamily::Cdna5);
   amdgpu::DecodedInstructionCache cache;
   // v_dual_lshlrev_b32 v1, 3, v0 :: v_dual_lshrrev_b32 v10, 6, v0
   const std::array<uint32_t, amdgpu::DecodedInstructionCache::kNumWords> encoding{

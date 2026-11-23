@@ -11,6 +11,7 @@
 #include "rocjitsu/code/dbt/processor_revision.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "tool_result.h"
 
 #include <cstddef>
@@ -89,8 +90,8 @@ struct TranslateOptions {
   rj_code_target_id_t input_target = ROCJITSU_CODE_TARGET_GFX950;
   uint32_t code_object_index = 0;
 
-  rj_code_arch_t guest_arch = ROCJITSU_CODE_ARCH_CDNA4;
-  rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_RDNA4;
+  rocjitsu::IsaFamily guest_arch = rocjitsu::IsaFamily::Cdna4;
+  rocjitsu::IsaFamily host_arch = rocjitsu::IsaFamily::Rdna4;
   uint32_t target_mach = 0;
   ProcessorRevision input_revision = ProcessorRevision::Unspecified;
   ProcessorRevision output_revision = ProcessorRevision::Unspecified;
@@ -110,7 +111,7 @@ struct TranslateOutput {
   std::vector<uint8_t> elf_bytes;
   /// 64-bit FNV-1a identity of the exact selected source code-object bytes.
   uint64_t source_code_object_id = 0;
-  rj_code_arch_t host_arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily host_arch = rocjitsu::IsaFamily::Invalid;
   uint32_t target_mach = 0;
   ProcessorRevision input_revision = ProcessorRevision::Unspecified;
   ProcessorRevision output_revision = ProcessorRevision::Unspecified;

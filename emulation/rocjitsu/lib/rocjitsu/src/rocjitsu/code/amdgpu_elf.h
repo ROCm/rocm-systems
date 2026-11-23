@@ -5,6 +5,7 @@
 #define ROCJITSU_CODE_AMDGPU_ELF_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -79,27 +80,27 @@ inline constexpr uint32_t EF_AMDGPU_MACH_AMDGCN_GFX1201 = 0x4e;
  * LLVM AMDGPU backend), then handle it in elf_mach_for_arch, arch_for_elf_mach, \
  * and elf_mach_name below.
  */
-inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
+inline constexpr uint32_t elf_mach_for_arch(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return EF_AMDGPU_MACH_AMDGCN_GFX908;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return EF_AMDGPU_MACH_AMDGCN_GFX90A;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return EF_AMDGPU_MACH_AMDGCN_GFX942;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return EF_AMDGPU_MACH_AMDGCN_GFX950;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return EF_AMDGPU_MACH_AMDGCN_GFX1010;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return EF_AMDGPU_MACH_AMDGCN_GFX1030;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return EF_AMDGPU_MACH_AMDGCN_GFX1100;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return EF_AMDGPU_MACH_AMDGCN_GFX1150;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return EF_AMDGPU_MACH_AMDGCN_GFX1200;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return EF_AMDGPU_MACH_AMDGCN_GFX1250;
   default:
     return EF_AMDGPU_MACH_NONE;
@@ -111,34 +112,34 @@ inline constexpr uint32_t elf_mach_for_arch(rj_code_arch_t arch) {
 /// @details Several concrete GPU steppings share one rocjitsu decoder/translator
 /// family. Keep this mapping next to the ELF constants so code-object parsing,
 /// load-time hooks, and tests do not each grow their own copy.
-inline constexpr rj_code_arch_t arch_for_elf_mach(uint32_t mach) {
+inline constexpr rocjitsu::IsaFamily arch_for_elf_mach(uint32_t mach) {
   switch (mach & EF_AMDGPU_MACH) {
   case EF_AMDGPU_MACH_AMDGCN_GFX908:
-    return ROCJITSU_CODE_ARCH_CDNA1;
+    return rocjitsu::IsaFamily::Cdna1;
   case EF_AMDGPU_MACH_AMDGCN_GFX90A:
-    return ROCJITSU_CODE_ARCH_CDNA2;
+    return rocjitsu::IsaFamily::Cdna2;
   case EF_AMDGPU_MACH_AMDGCN_GFX940:
   case EF_AMDGPU_MACH_AMDGCN_GFX941:
   case EF_AMDGPU_MACH_AMDGCN_GFX942:
-    return ROCJITSU_CODE_ARCH_CDNA3;
+    return rocjitsu::IsaFamily::Cdna3;
   case EF_AMDGPU_MACH_AMDGCN_GFX950:
-    return ROCJITSU_CODE_ARCH_CDNA4;
+    return rocjitsu::IsaFamily::Cdna4;
   case EF_AMDGPU_MACH_AMDGCN_GFX1010:
-    return ROCJITSU_CODE_ARCH_RDNA1;
+    return rocjitsu::IsaFamily::Rdna1;
   case EF_AMDGPU_MACH_AMDGCN_GFX1030:
-    return ROCJITSU_CODE_ARCH_RDNA2;
+    return rocjitsu::IsaFamily::Rdna2;
   case EF_AMDGPU_MACH_AMDGCN_GFX1100:
-    return ROCJITSU_CODE_ARCH_RDNA3;
+    return rocjitsu::IsaFamily::Rdna3;
   case EF_AMDGPU_MACH_AMDGCN_GFX1150:
-    return ROCJITSU_CODE_ARCH_RDNA3_5;
+    return rocjitsu::IsaFamily::Rdna3_5;
   case EF_AMDGPU_MACH_AMDGCN_GFX1200:
   case EF_AMDGPU_MACH_AMDGCN_GFX1201:
-    return ROCJITSU_CODE_ARCH_RDNA4;
+    return rocjitsu::IsaFamily::Rdna4;
   case EF_AMDGPU_MACH_AMDGCN_GFX1250:
   case EF_AMDGPU_MACH_AMDGCN_GFX1251:
-    return ROCJITSU_CODE_ARCH_CDNA5;
+    return rocjitsu::IsaFamily::Cdna5;
   default:
-    return ROCJITSU_CODE_ARCH_INVALID;
+    return rocjitsu::IsaFamily::Invalid;
   }
 }
 

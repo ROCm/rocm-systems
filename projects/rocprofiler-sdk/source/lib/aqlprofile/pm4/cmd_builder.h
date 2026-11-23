@@ -49,7 +49,7 @@ namespace pm4_builder
 {
 namespace
 {
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
 template <typename T, typename std::enable_if<sizeof(T) % sizeof(uint32_t) == 0, int>::type = 0>
 constexpr size_t
 PacketsSize(T&& packet)
@@ -84,7 +84,7 @@ template <typename... Ts>
 void
 PrintCommand(const char* function_name, Ts&&... packets)
 {
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
     std::ostringstream oss;
     oss << "'" << function_name << "' size(" << std::dec
         << PacketsSize(std::forward<Ts>(packets)...) << ")";

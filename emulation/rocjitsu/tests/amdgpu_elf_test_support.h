@@ -11,6 +11,7 @@
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -88,7 +89,7 @@ struct TestTextFunction {
     std::optional<TestRuntimeTextReference> runtime_text_reference = std::nullopt);
 [[nodiscard]] std::vector<uint8_t> make_large_amdgpu_elf_with_waitcnt_entry();
 
-[[nodiscard]] std::unique_ptr<Instruction> decode_one(uint32_t word, rj_code_arch_t arch);
+[[nodiscard]] std::unique_ptr<Instruction> decode_one(uint32_t word, rocjitsu::IsaFamily arch);
 [[nodiscard]] bool has_error_containing(const TranslatedCodeObject &result, DiagnosticKind kind,
                                         std::string_view message);
 /// @brief Whether a warning of @p kind naming @p guest_offset contains @p message.

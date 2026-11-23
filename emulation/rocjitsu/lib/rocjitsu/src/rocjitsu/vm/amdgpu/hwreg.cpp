@@ -5,6 +5,7 @@
 /// @brief Shader-visible AMDGPU hardware register access helpers.
 
 #include "rocjitsu/vm/amdgpu/hwreg.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -54,6 +55,8 @@ enum class HwregState : uint8_t {
   ShaderTmaLoGfx10,
   ShaderTmaHiGfx10,
   ShaderCyclesGfx1030,
+  ShaderCyclesLoGfx12,
+  ShaderCyclesHiGfx12,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   LdsAllocCdna,
@@ -381,8 +384,8 @@ constexpr HwregDescriptor RDNA4_HWREGS[] = {
     {23, "WAVE_HW_ID1", HwregState::HwId1Gfx11, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {28, "IB_STS2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {29, "SHADER_CYCLES_LO", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
-    {30, "SHADER_CYCLES_HI", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {29, "SHADER_CYCLES_LO", HwregState::ShaderCyclesLoGfx12, HwregWritePolicy::ReadOnly},
+    {30, "SHADER_CYCLES_HI", HwregState::ShaderCyclesHiGfx12, HwregWritePolicy::ReadOnly},
 };
 
 constexpr HwregDescriptor GFX1250_HWREGS[] = {
@@ -419,37 +422,37 @@ template <size_t N> constexpr HwregTable make_table(const HwregDescriptor (&entr
   return {entries, N};
 }
 
-HwregTable table_for_arch(rj_code_arch_t arch) {
+HwregTable table_for_arch(rocjitsu::IsaFamily arch) {
   /*
    * \NPI new ISA architecture: define its own HwregDescriptor table with the \
    * shader HWREG inventory, modeled state, and privilege policy, then add an \
    * explicit case here.
    */
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     return make_table(CDNA1_2_HWREGS<false>);
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     return make_table(CDNA1_2_HWREGS<true>);
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return make_table(CDNA3_4_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return make_table(RDNA1_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return make_table(RDNA2_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
     return make_table(RDNA3_HWREGS);
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return make_table(RDNA4_HWREGS);
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return make_table(GFX1250_HWREGS);
   default:
     return {nullptr, 0};
   }
 }
 
-const HwregDescriptor *find_descriptor(rj_code_arch_t arch, uint32_t id) {
+const HwregDescriptor *find_descriptor(rocjitsu::IsaFamily arch, uint32_t id) {
   HwregTable table = table_for_arch(arch);
   for (size_t i = 0; i < table.size; ++i) {
     if (table.entries[i].id == id)
@@ -481,7 +484,7 @@ bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg
   const auto arch = wf.cu().arch();
   return (state == HwregState::Status || state == HwregState::StatusGfx10 ||
           state == HwregState::Gfx11Status) &&
-         arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5 &&
+         arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5 &&
          field_intersects(decoded, 0, 1);
 }
 
@@ -569,8 +572,8 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::Status:
     raw_value = wf.status_raw();
-    if ((wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
-         wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)) {
+    if ((wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)) {
       // SCC, user priority and HALT are in STATE_PRIV on GFX12. Derive the
       // live STATUS fields instead of exposing their legacy backing bits.
       constexpr uint32_t external_bits =
@@ -628,6 +631,14 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   }
   case HwregState::ShaderCyclesGfx1030:
     raw_value = wf.shader_cycles() & 0xfffffu;
+    return HwregAccessResult::Success;
+  // RDNA4 widens the counter to 64 bits, read as two halves; gfx1201 LO reads
+  // exceed the 20 bits that gfx11 keeps.
+  case HwregState::ShaderCyclesLoGfx12:
+    raw_value = static_cast<uint32_t>(wf.shader_cycles());
+    return HwregAccessResult::Success;
+  case HwregState::ShaderCyclesHiGfx12:
+    raw_value = static_cast<uint32_t>(wf.shader_cycles() >> 32);
     return HwregAccessResult::Success;
   case HwregState::StatePrivGfx12:
     raw_value = gfx12_state_priv_from_status(wf, wf.status_raw(), wf.scratch_base() != 0);
@@ -761,6 +772,8 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::PcHi:
   case HwregState::ApertureBases:
   case HwregState::ShaderCycles:
+  case HwregState::ShaderCyclesLoGfx12:
+  case HwregState::ShaderCyclesHiGfx12:
     return HwregAccessResult::ReadOnly;
   case HwregState::Gfx11Status: {
     constexpr uint32_t writable = 0x1fu | (1u << 8) | (1u << 13) | (1u << 18) | (3u << 20) |
@@ -946,7 +959,7 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   }
 
   // CDNA4 exposes the configured 48-bit TBA and TMA as low/high dword pairs.
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA4 && decoded.id >= 16 && decoded.id <= 19) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna4 && decoded.id >= 16 && decoded.id <= 19) {
     const auto [tba, tma] = wf.cu().trap_addresses();
     const uint64_t address = ((decoded.id < 18 ? tba : tma) & 0x0000ffffffffffffULL) >> 8;
     const uint32_t word = static_cast<uint32_t>(address >> ((decoded.id & 1u) * 32));
@@ -986,7 +999,7 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   // DP_RATE is a physical implementation parameter. No gfx11.5 part has been
   // measured, so do not assume it matches gfx1100.
   if (desc->state == HwregState::HwId1Gfx11 &&
-      ((field_intersects(decoded, 29, 3) && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) ||
+      ((field_intersects(decoded, 29, 3) && wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) ||
        !rdna3_4_hw_id1_location_fits(wf, decoded))) {
     value = 0;
     return HwregAccessResult::Unsupported;
