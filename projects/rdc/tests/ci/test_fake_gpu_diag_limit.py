@@ -34,7 +34,7 @@ TEST_RESULT_SIZE = 1 << 20  # more than sizeof(rdc_diag_test_result_t)
 
 
 @pytest.fixture
-def rdcd(tools, tmp_path):
+def rdcd(tools, tmp_path):  # noqa: F811 (fixture)
     d = Rdcd(tools, tmp_path, RDC_FAKE_DELAY_MS=f"{LINK_WEIGHT}@1={int(DELAY_S * 1000)}").start()
     yield d
     code = d.stop()
@@ -190,7 +190,7 @@ def test_a_run_of_a_killed_client_holds_its_slot_until_it_ends(rdcd):
         assert status == RDC_ST_OK, out
 
 
-def test_a_diagnostic_without_rdcd_fails(tools):
+def test_a_diagnostic_without_rdcd_fails(tools):  # noqa: F811 (fixture)
     rdci = tools[1]
     env = {
         k: v for k, v in os.environ.items() if k != "LD_PRELOAD" and not k.startswith("RDC_FAKE_")

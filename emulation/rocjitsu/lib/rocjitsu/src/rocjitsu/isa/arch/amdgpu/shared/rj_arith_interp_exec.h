@@ -3,8 +3,10 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
+#include "rj_arith/detail/rj_arith_graphics.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -64,8 +66,8 @@ inline void execute_interp(Wavefront &wave, Wave32 wave32, Wave64 wave64, uint64
       (exec_mask | (exec_mask >> 1) | (exec_mask >> 2) | (exec_mask >> 3)) & 0x1111111111111111ULL;
   if (Half && wave.fp16_ovfl())
     flags |= RJ_ARITH_FP16_OVFL;
-  const bool guest_controls = wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-                              wave.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool guest_controls = wave.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+                              wave.cu().arch() == rocjitsu::IsaFamily::Rdna3_5;
   if (!guest_controls || wave.ieee_mode())
     flags |= RJ_ARITH_FP_IEEE_MODE;
   if (guest_controls && !wave.dx10_clamp())

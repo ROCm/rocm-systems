@@ -278,7 +278,7 @@ races. Some examples:
 - **LDS races**: an LDS byte is read by one wave while another wave has an
   outstanding write to the same byte, or written by one wave while another
   wave has an outstanding read of the same byte, without an intervening
-  `s_barrier`;
+  barrier that orders them (see Barriers below);
   or a wave reads bytes targeted by its own outstanding direct-to-LDS operation
   before the required `s_waitcnt vmcnt`. A direct-to-LDS write over bytes of
   the same wave's pending DS read is also reported, on every target with
@@ -370,16 +370,95 @@ following lifecycle:
    event. This means the event is no longer in flight from the perspective of
    the wave that issued the operation, but is still in flight from the
    perspective of other waves in the same workgroup.
-1. **RETIRED** — `s_barrier` has synchronized all waves. The event is fully
-   retired and, from the perspective of all threads in all wavefronts, the
-   operation is complete. A workgroup with a single wave has no other wave to
-   race with, so its LDS events are retired as soon as they are wave-complete,
-   without a barrier. They then leave the LDS lists that race checks scan, so
+1. **RETIRED** — every other live wave of the workgroup has passed a barrier
+   that orders the event (see Barriers below). The event is fully retired and,
+   from the perspective of all threads in all wavefronts, the operation is
+   complete. A wave whose workgroup has no other live wave, because it is the
+   only wave or the others have ended, has no other wave to race with, so its
+   LDS events are retired as soon as they are wave-complete, without a
+   barrier. They then leave the LDS lists that race checks scan, so
    those checks do not slow down as completed events add up in long
    single-wave kernels. Retired events stay in the event registry until it
    trims them, and it trims only from the oldest event: an older event that is
    still pending, such as a global load waiting on `loadcnt`, keeps every
    later retired event in the registry.
+
+### Barriers
+
+On gfx1250 a barrier is split into `s_barrier_signal`, which does not block and
+waits for no memory counter, and `s_barrier_wait`, which blocks until the
+barrier completes: for a workgroup barrier, once every wave has signalled or
+ended; for a named barrier, once it has counted as many signals as its member
+count (CDNA5 ISA 5.6 and 15.3). For a direct handoff from a producer to a
+consumer, the detector recognizes ordering when:
+
+- the issuing wave completed the event (by a wait or counter-capacity
+  backpressure) before its own signal, and
+- the accessing wave issued the access after its own wait.
+
+The detector models each round of a barrier as a release/acquire channel. A
+signal releases what the wave has completed, and what it has acquired from
+earlier rounds; passing the wait acquires everything released into the round
+that set the wave's completion bit. Ordering is transitive, so waves can pass
+ordering through named barriers, and an LDS event is retired once every other
+live wave has acquired it. A wave that ends releases its completed events into
+every later workgroup round it had not signalled, because such a round cannot
+complete until the wave ends; named and cluster rounds, which can complete
+without it, do not. A round the wave had signalled before ending can also
+complete without its end, so it orders only what that signal released. A named
+round orders events only for the waves that joined it. A cluster round counts
+one signal from each workgroup, so within a workgroup it releases what the
+signalling wave had completed or acquired, for example through an earlier
+workgroup barrier; ordering between workgroups is not modeled. The simulator
+reports each counted signal, each completed round and each passed wait to
+plugins.
+
+These rules describe the detector's explicit signal/wait model. Other
+protocols, such as polling a publication flag or a necessary reduction of a
+named barrier's threshold by `s_barrier_leave`, can order LDS accesses but are
+not recognized as handoffs by this model.
+
+The ordering recorded by a counted barrier depends on which signals reached
+its threshold in this execution. For example, A and B each complete a write
+to a different LDS tile and signal a named barrier with member count one. C
+has joined that barrier and waits once, then reads only A's tile. If A's
+signal completed the round C acquires, the read is ordered; if B's signal
+completed it, the detector reports a race with A. Reading both tiles exposes
+an unacquired producer in either order. Member count two orders both writes
+when each producer signals once and completes its write before signalling.
+
+The detector follows the executed rounds; it does not explore other legal
+signal orders. A clean run of a protocol whose contributing signals depend
+on scheduling therefore does not establish that its other schedules are
+race-free. This limitation can arise with ordinary signal/wait instructions,
+without polling or another unmodeled synchronization mechanism.
+
+A completed LDS event stays in the history, and is still checked, until every
+other live wave of the workgroup has acquired it. A workgroup in which some
+wave never passes a barrier wait, or whose waves synchronize only through
+named barriers among subsets, therefore keeps its completed events until those
+waves end. Each wave's completed events are kept in the order of the signals
+that release them, and a cross-wave check scans only the ones the accessing
+wave has not acquired: waves that keep exchanging LDS data through a named
+barrier do not rescan each other's ordered accesses, which remain in the
+history for the waves outside the barrier.
+
+The simulator also reports RDNA4's separate signal and wait through this
+model. Targets with a single `s_barrier` instruction are handled with
+every member's signal and wait at the point where the barrier resolves.
+
+The detector reports an access in the window between a wave's signal and its
+wait, and an event completed after its wave's signal, on every interleaving of
+the waves:
+
+```asm
+; wave 0                         ; wave 1
+ds_store_b32 v0, v1
+s_barrier_signal -1              s_barrier_signal -1
+s_wait_dscnt 0                   s_barrier_wait -1
+s_barrier_wait -1                ds_load_b32 v2, v0   ; race: the store
+                                                      ; completed after the signal
+```
 
 On RDNA and CDNA5 every issued generic `FLAT_*` instruction occupies a
 vector-memory and an LDS counter position, including when EXEC is empty. On
@@ -433,7 +512,7 @@ that does not identify a completed event remains conservatively pending. VMCNT
 is handled the same way for its 63-entry ordered non-FLAT VMEM class.
 
 The detector's persistent counter accounting is limited to operations routed
-through rocJITsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
+through rocjitsu's memory pipelines. A narrow `s_sendmsg*` fallback applies
 issue-time pressure: one LGKMCNT token on the pre-GFX12 capacity targets (CDNA1
 through CDNA4 and GFX11), and on gfx1250 one KMcnt token, or two for
 `s_sendmsg_rtn_*`, which also counts its returned data (CDNA5 ISA 5.4). On
@@ -573,7 +652,7 @@ Naturally aligned atomics of the same width can operate on the same word.
 A returning atomic also protects its result VGPR until its counter completes. Chunks containing only ordinary LDS accesses from the accessing
 wave can bypass the interval scan because those operations are ordered. A
 mixed chunk uses the scan until its count drains. The history remains available
-for checks by other waves until a barrier retires it. Direct-to-LDS and unordered
+for checks by other waves until a barrier orders it for all of them. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
 For a DS or FLAT instruction, the plugin first merges the active lanes' byte
 ranges into intervals and checks the chunk counts under them. When no chunk can
@@ -689,7 +768,7 @@ ctest --test-dir build -R "RaceDetector|IntervalSet"
 
 To run the HIP cases locally, follow the corpus's
 [race-suite instructions](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
-and point the wrapper at the RocJITsu build being tested. Set
+and point the wrapper at the rocjitsu build being tested. Set
 `ROCJITSU_RACE_CONFIG` to `tests/race-detector/race_test_gfx942_config.json` for gfx942,
 `tests/race-detector/race_test_config.json` for gfx950, `configs/gfx1151.json` for
 gfx1151 or `configs/gfx1250_mi455x.json` for gfx1250, using absolute paths from

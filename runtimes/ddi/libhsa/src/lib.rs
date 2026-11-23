@@ -53,6 +53,7 @@ mod api_trace;
 mod callback_arg;
 mod clock;
 mod config;
+mod core_dump;
 mod debugger;
 mod dispatch;
 mod events;

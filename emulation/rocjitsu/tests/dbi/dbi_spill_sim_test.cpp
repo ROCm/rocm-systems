@@ -31,6 +31,7 @@
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -77,16 +78,16 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
 // = index); vsrc1 and vdst are VGPR indices. Reading a register as a source keeps it live
 // across the anchor without clobbering it -- used to pin many registers live at once.
 util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
-                                          rj_code_arch_t arch,
+                                          rocjitsu::IsaFamily arch,
                                           util::DiagnosticEmitter emit_error = {}) {
   const uint8_t d = static_cast<uint8_t>(vdst);
   const uint8_t s1 = static_cast<uint8_t>(vsrc1);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop2(cdna3::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop2(cdna4::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop2(rdna4::kVAddNcU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
   default:
     return emit_error.emit() << "Unimplemented instruction: v_add_u32 for target architecture";
@@ -96,7 +97,7 @@ util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t
 TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
   util::StringDiagnostic diagnostic;
   EXPECT_TRUE(
-      build_v_add_u32(1, 256, 1, ROCJITSU_CODE_ARCH_INVALID, diagnostic.emitter()).failed());
+      build_v_add_u32(1, 256, 1, rocjitsu::IsaFamily::Invalid, diagnostic.emitter()).failed());
   EXPECT_EQ(diagnostic.message(), "Unimplemented instruction: v_add_u32 for target architecture");
 }
 
@@ -108,16 +109,16 @@ TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
 // arch (for builders), the ELF machine flag, and the wavefront size.
 struct SpillSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
 };
 
-inline constexpr SpillSimArch kCdna3SpillArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
+inline constexpr SpillSimArch kCdna3SpillArch{"cdna3", rocjitsu::IsaFamily::Cdna3,
                                               EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64};
-inline constexpr SpillSimArch kCdna4SpillArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
+inline constexpr SpillSimArch kCdna4SpillArch{"cdna4", rocjitsu::IsaFamily::Cdna4,
                                               EF_AMDGPU_MACH_AMDGCN_GFX950, /*wave_size=*/64};
-inline constexpr SpillSimArch kRdna4SpillArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
+inline constexpr SpillSimArch kRdna4SpillArch{"rdna4", rocjitsu::IsaFamily::Rdna4,
                                               EF_AMDGPU_MACH_AMDGCN_GFX1200, /*wave_size=*/32};
 
 // Patches a kernel with a probe that clobbers the live VGPR v2, forcing a spill,
@@ -958,7 +959,7 @@ struct ExecSimArch {
 
 // CDNA3 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna3_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna3;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_28 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_28.succeeded());
   constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_29 =
@@ -975,7 +976,7 @@ struct ExecSimArch {
 
 // CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna4_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_25 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_25.succeeded());
   constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_26 =
@@ -992,7 +993,7 @@ struct ExecSimArch {
 
 // RDNA4 wave32: narrow exec_lo to 0x0000FFFF (lanes 0..15); restore with exec_lo = -1.
 [[nodiscard]] inline ExecSimArch rdna4_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_21 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_21.succeeded());
   constexpr util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_22 =
@@ -1016,7 +1017,8 @@ struct ExecSimArch {
 // Index of the trampoline's EXEC restore: an s_mov_b64 writing EXEC_LO from a
 // dead SGPR temp (< VCC_LO), not the probe's own `s_mov_b64 exec, 0` (reads
 // inline 0 = 128). text.size() if absent.
-[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text, rj_code_arch_t arch) {
+[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text,
+                                       rocjitsu::IsaFamily arch) {
   util::FailureOr<uint32_t> maybe_sop1_op_mov_b64_20 = sop1_op_mov_b64(arch);
   EXPECT_TRUE(maybe_sop1_op_mov_b64_20.succeeded());
   if (maybe_sop1_op_mov_b64_20.failed())
@@ -1498,7 +1500,7 @@ TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask)
 
 void expect_scalar_relative_probe(bool relative_source, bool with_probe,
                                   uint16_t selected_value = 7) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   ASSERT_LE(selected_value, 64);
   const util::FailureOr<uint16_t> m0_operand = scalar_operand_m0(kArch);
   ASSERT_TRUE(m0_operand.succeeded());
