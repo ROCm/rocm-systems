@@ -60,6 +60,11 @@ struct LdsProfile {
   LdsAddressRewriter rewrite;
 };
 
+bool uses_dynamic_vgprs(const KernelDescriptorInfo &kernel) {
+  return RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
+                            amdhsa::COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR) != 0;
+}
+
 std::optional<std::array<uint32_t, 2>> replace_rdna4_b32_address(rj_code_target_id_t target,
                                                                  std::span<const uint32_t> words,
                                                                  uint32_t reg) {
@@ -361,6 +366,10 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
       if (!profile || inst.size() != 8 || !inst.src_operand(0)) {
         continue;
       }
+      // Descriptor counts cannot prove storage after dynamic allocation changes.
+      if (cdna5 && uses_dynamic_vgprs(facts.descriptor)) {
+        continue;
+      }
       const std::optional<RegisterRef> address = inst.src_operand(0)->decoded_vgpr();
       if (!address) {
         continue;
@@ -414,6 +423,10 @@ FailureOr<LdsInventory> discover_lds_wrong_address(const FaultMutationContext &c
             break;
           }
           const KernelDescriptorInfo &descriptor = (*owner_kernels)[owner.kernel_index];
+          if (cdna5 && uses_dynamic_vgprs(descriptor)) {
+            valid = false;
+            break;
+          }
           const uint32_t owner_wave = kernel_wavefront_size(profile->arch, descriptor.descriptor);
           if ((!rdna && owner_wave != (cdna5 ? 32u : 64u)) ||
               (!rdna && !cdna5 &&

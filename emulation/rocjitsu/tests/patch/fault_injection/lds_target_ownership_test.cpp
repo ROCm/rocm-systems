@@ -185,6 +185,119 @@ TEST(LdsTargetCoverage, Cdna5SharedBanksMustAgreeAndFitEveryDescriptor) {
   }
 }
 
+TEST(LdsTargetCoverage, Gfx1251OtherOwnerModeSliceMustAgree) {
+  const test::TargetLdsCase fixture = owner_cases().back();
+  const std::array<uint32_t, 1> bank_zero = {
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0})[0]};
+  const std::array<uint32_t, 2> bank_two = {
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = 1u | (14u << 6) | (1u << 11)})[0],
+      2};
+  const std::vector<uint8_t> image =
+      test::make_target_shared_lds_elf(fixture, {31, 32}, bank_zero, bank_two);
+  const FaultMutationContext source(image);
+  for (std::string_view owner : {"test_kernel0", "test_kernel1"}) {
+    SCOPED_TRACE(owner);
+    FaultMutationError error;
+    const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(source, owner, error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    EXPECT_TRUE(inventory.value().sites().empty());
+  }
+  EXPECT_TRUE(std::ranges::equal(source.image(), image));
+}
+
+TEST(LdsTargetCoverage, Gfx1251OtherOwnerModeBitZeroPreservesBank) {
+  const test::TargetLdsCase fixture = owner_cases().back();
+  const std::array<uint32_t, 1> bank_one = {
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1})[0]};
+  const std::array<uint32_t, 3> second = {
+      bank_one[0], cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = 1})[0], 1};
+  const std::vector<uint8_t> image =
+      test::make_target_shared_lds_elf(fixture, {31, 16}, bank_one, second);
+  const FaultMutationContext source(image);
+  for (std::string_view owner : {"test_kernel0", "test_kernel1"}) {
+    SCOPED_TRACE(owner);
+    FaultMutationError error;
+    const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(source, owner, error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    ASSERT_EQ(inventory.value().sites().size(), 1u);
+    EXPECT_EQ(inventory.value().sites().front().address_bank, 1u);
+    ASSERT_EQ(inventory.value().sites().front().affected_owners.size(), 2u);
+    const FailureOr<LdsSelection> selected = select_lds_wrong_address(inventory.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<LdsResult> result =
+        apply_lds_wrong_address(source, selected.value(), 15, error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    EXPECT_TRUE(test::target_lds_output_matches(source, fixture, 512, 15, result.value().image));
+    EXPECT_TRUE(apply_lds_wrong_address(source, selected.value(), 16, error).failed());
+  }
+  EXPECT_TRUE(std::ranges::equal(source.image(), image));
+}
+
+TEST(LdsTargetCoverage, Cdna5DynamicVgprOwnersAreNotListed) {
+  for (rj_code_target_id_t target : {ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251}) {
+    SCOPED_TRACE(static_cast<int>(target));
+    test::TargetLdsCase fixture = owner_cases().back();
+    fixture.form.target = target;
+    fixture.form.machine = target == ROCJITSU_CODE_TARGET_GFX1250 ? EF_AMDGPU_MACH_AMDGCN_GFX1250
+                                                                  : EF_AMDGPU_MACH_AMDGCN_GFX1251;
+    std::vector<uint8_t> image =
+        test::make_target_lds_elf(fixture, test::kLdsDynamicVgprPrefix, {}, 2);
+    ASSERT_NO_FATAL_FAILURE(test::enable_target_lds_dynamic_vgprs(image));
+    const FaultMutationContext source(image);
+    FaultMutationError error;
+    const FailureOr<LdsInventory> inventory =
+        discover_lds_wrong_address(source, "test_kernel", error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    EXPECT_TRUE(inventory.value().sites().empty());
+    EXPECT_TRUE(select_lds_wrong_address(inventory.value(), {}, error).failed());
+    EXPECT_TRUE(std::ranges::equal(source.image(), image));
+  }
+}
+
+TEST(LdsTargetCoverage, Cdna5SharedDynamicVgprOwnerIsNotListed) {
+  const test::TargetLdsCase fixture = owner_cases().back();
+  for (size_t dynamic_owner : {0u, 1u}) {
+    SCOPED_TRACE(dynamic_owner);
+    std::vector<uint8_t> image = test::make_target_shared_lds_elf(fixture, {2, 2});
+    ASSERT_NO_FATAL_FAILURE(test::enable_target_lds_dynamic_vgprs(image, dynamic_owner));
+    const FaultMutationContext source(image);
+    for (std::string_view owner : {"test_kernel0", "test_kernel1"}) {
+      SCOPED_TRACE(owner);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(source, owner, error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      EXPECT_TRUE(inventory.value().sites().empty());
+      EXPECT_TRUE(select_lds_wrong_address(inventory.value(), {}, error).failed());
+    }
+    EXPECT_TRUE(std::ranges::equal(source.image(), image));
+  }
+}
+
+TEST(LdsTargetCoverage, Gfx1251UnrelatedDynamicOwnerDoesNotExcludeStaticSite) {
+  const test::TargetLdsCase fixture = owner_cases().back();
+  std::vector<uint8_t> image = test::make_target_shared_lds_elf(fixture, {2, 2});
+  ASSERT_NO_FATAL_FAILURE(test::enable_target_lds_dynamic_vgprs(image, 1));
+  const AmdGpuCodeObject original(image.data(), image.size());
+  const Section &text = *original.text_sections().front();
+  const uint32_t end = build_s_endpgm(IsaFamily::Cdna5).value();
+  // Owner 1 exits without calling the helper, so it no longer owns the store.
+  std::memcpy(image.data() + text.sectionOffset() + 256, &end, sizeof(end));
+  const FaultMutationContext source(image);
+  FaultMutationError error;
+  const FailureOr<LdsInventory> inventory =
+      discover_lds_wrong_address(source, "test_kernel0", error);
+  ASSERT_TRUE(inventory.succeeded()) << error.message;
+  ASSERT_EQ(inventory.value().sites().size(), 1u);
+  ASSERT_EQ(inventory.value().sites().front().affected_owners.size(), 1u);
+  EXPECT_EQ(inventory.value().sites().front().affected_owners.front().entry, "test_kernel0");
+  const FailureOr<LdsSelection> selected = select_lds_wrong_address(inventory.value(), {}, error);
+  ASSERT_TRUE(selected.succeeded()) << error.message;
+  const FailureOr<LdsResult> result = apply_lds_wrong_address(source, selected.value(), 40, error);
+  ASSERT_TRUE(result.succeeded()) << error.message;
+  EXPECT_TRUE(test::target_lds_output_matches(source, fixture, 512, 40, result.value().image));
+  EXPECT_TRUE(std::ranges::equal(source.image(), image));
+}
+
 TEST(LdsTargetCoverage, Cdna5LegacyDescriptorWaveBitAlwaysUsesWave32Allocation) {
   for (rj_code_target_id_t target : {ROCJITSU_CODE_TARGET_GFX1250, ROCJITSU_CODE_TARGET_GFX1251}) {
     test::TargetLdsCase fixture = owner_cases().back();

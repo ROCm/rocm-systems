@@ -20,6 +20,25 @@ struct TargetLdsCase {
   uint32_t wave;
 };
 
+// llvm-mc witnesses: s_alloc_vgpr 64; v_mov_b32 v40, 0; s_alloc_vgpr 32.
+inline constexpr std::array<uint32_t, 3> kLdsDynamicVgprPrefix = {0xbe8053c0u, 0x7e500280u,
+                                                                  0xbe8053a0u};
+
+inline void enable_target_lds_dynamic_vgprs(std::vector<uint8_t> &image, size_t owner = 0) {
+  const AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  ASSERT_EQ(source.text_sections().size(), 1u);
+  const Section &text = *source.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
+  ASSERT_LT(owner, kernels.size());
+  amdhsa::kernel_descriptor_t descriptor = kernels[owner].descriptor;
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc3,
+                     amdhsa::COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR, 1);
+  std::memcpy(image.data() + kernels[owner].descriptor_file_offset, &descriptor,
+              sizeof(descriptor));
+}
+
 inline std::vector<TargetLdsCase> target_lds_cases(rj_code_target_id_t target) {
   std::vector<TargetLdsCase> cases;
   if (target == ROCJITSU_CODE_TARGET_GFX1100) {

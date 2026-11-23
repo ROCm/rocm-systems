@@ -275,6 +275,10 @@ the kernel; clause members are not advertised. It does not require a
 barrier or successful Drop qualification. The replacement register must be
 explicit, representable in the eight-bit encoded address field, different from
 the original, and inside every affected descriptor's allocated ordinary VGPR window.
+CDNA5 sites are omitted if any affected owner enables
+`COMPUTE_PGM_RSRC3.ENABLE_DYNAMIC_VGPR`. The descriptor count cannot prove the
+live allocation after `s_alloc_vgpr`; no dynamic allocation proof is implemented.
+Unrelated owners do not exclude an otherwise qualified site.
 A shared instruction is one physical site even when selected through either owner.
 Discovery retains all owners before applying the exact kernel filter, and requires
 all gfx1250/gfx1251 owners to prove the same address bank at that instruction.

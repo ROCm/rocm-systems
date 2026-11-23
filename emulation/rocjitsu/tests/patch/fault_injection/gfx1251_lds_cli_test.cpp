@@ -218,6 +218,40 @@ TEST_P(Gfx1251LdsCli, InvalidSelectorsRegistersAndIdentityDoNotPublishOutput) {
   }
 }
 
+TEST_F(Gfx1251LdsCliBase, DynamicVgprOwnersCannotListOrPublishMutants) {
+  const test::TargetLdsCase fixture = test::target_lds_cases(ROCJITSU_CODE_TARGET_GFX1251).front();
+  for (bool shared : {false, true}) {
+    SCOPED_TRACE(shared);
+    std::vector<uint8_t> image =
+        shared ? test::make_target_shared_lds_elf(fixture, {2, 2}, {}, test::kLdsDynamicVgprPrefix)
+               : test::make_target_lds_elf(fixture, test::kLdsDynamicVgprPrefix, {}, 2);
+    ASSERT_NO_FATAL_FAILURE(test::enable_target_lds_dynamic_vgprs(image, shared ? 1 : 0));
+    write_source(image);
+    const std::vector<std::string> common = {"--input",  input_.string(),
+                                             "--kernel", shared ? "test_kernel0" : "test_kernel",
+                                             "--kind",   "LdsWrongAddress"};
+    std::vector<std::string> command = common;
+    command.push_back("--list");
+    ASSERT_EQ(run(command), 0) << read_log();
+    EXPECT_TRUE(read_log().empty()) << read_log();
+    for (bool exact : {false, true}) {
+      command = common;
+      command.insert(command.end(), {"--output", output_.string(), "--address-vgpr", "40"});
+      if (exact)
+        command.insert(command.end(), {"--exact", shared ? "512" : "12", "--ordinal", "0"});
+      else
+        command.insert(command.end(), {"--ordinal", "0"});
+      EXPECT_GT(run(command), 0) << read_log();
+      EXPECT_EQ(read_log().find("logical_mutations="), std::string::npos);
+      EXPECT_FALSE(std::filesystem::exists(output_));
+      if (std::filesystem::exists(output_)) {
+        ASSERT_TRUE(std::filesystem::remove(output_));
+      }
+    }
+    EXPECT_EQ(read(input_), image);
+  }
+}
+
 TEST_F(Gfx1251LdsCliBase, OutputFailuresAndEmissionRollbackLeaveNoPartialFile) {
   const test::TargetLdsCase row = test::target_lds_cases(ROCJITSU_CODE_TARGET_GFX1251).front();
   const std::vector<uint8_t> image = test::make_target_lds_elf(row);
