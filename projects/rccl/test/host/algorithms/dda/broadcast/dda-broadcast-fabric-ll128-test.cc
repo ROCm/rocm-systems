@@ -23,8 +23,6 @@
 
 #include "fakes/param_redirect.h"
 
-// The LL launcher defines ncclBroadcastDdaBlockBudget, shared with LL128.
-#include DDA_BROADCAST_FABRIC_LL_CC_PATH
 #include DDA_BROADCAST_FABRIC_LL128_CC_PATH
 
 #undef hipExtLaunchKernelGGL
