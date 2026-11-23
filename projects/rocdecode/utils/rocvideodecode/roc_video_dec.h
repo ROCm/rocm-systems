@@ -470,7 +470,7 @@ class RocVideoDecoder {
         /**
          * @brief Check if the given Video Codec is supported on the given GPU
          *
-         * @return true if supported, false if the hardware does not support it
+         * @return true if the driver reports support, false if it does not (not proof of a hardware limitation)
          * @throws RocVideoDecodeException if the capability query itself fails
          */
         bool CodecSupported(int device_id, rocDecVideoCodec codec_id, uint32_t bit_depth);
