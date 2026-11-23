@@ -48,17 +48,18 @@ public:
       return std::nullopt;
     return VmRawBackingWriteGate::Permit{};
   }
-  bool copy(uint64_t, uint8_t *target, void *local, std::size_t size, bool into_memory,
-            bool guarded) const override {
+  bool copy(std::span<const Copy> spans, bool into_memory, bool guarded) const override {
     last_guarded = guarded;
-    if (fault_at == copies++)
-      return false;
-    if (during_copy)
-      during_copy();
-    if (into_memory)
-      std::memcpy(target, local, size);
-    else
-      std::memcpy(local, target, size);
+    for (const Copy &span : spans) {
+      if (fault_at == copies++)
+        return false;
+      if (during_copy)
+        during_copy();
+      if (into_memory)
+        std::memcpy(span.host, span.local, span.size);
+      else
+        std::memcpy(span.local, span.host, span.size);
+    }
     return true;
   }
 

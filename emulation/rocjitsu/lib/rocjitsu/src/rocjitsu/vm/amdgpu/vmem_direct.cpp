@@ -39,30 +39,30 @@ struct Transfer {
 
   // False when a guarded copy faulted; earlier transactions may have moved.
   bool run() const {
-    for (const ResolvedRun &resolved : runs) {
+    // A reordered run fits one transaction and moves through a staging line.
+    std::array<VmDirectBacking::Copy, 64> copies;
+    std::array<std::array<uint8_t, kMaxMemoryTransactionBytes>, 64> staged;
+    bool guarded = false;
+    for (size_t i = 0; i < runs.size(); ++i) {
+      const ResolvedRun &resolved = runs[i];
       const CoalescedLaneRun &run = resolved.run;
-      if (run.lane_ordered) {
-        if (!backing.copy(run.address, resolved.host, request.data + run.first_lane * stride,
-                          run.size, !request.is_load, resolved.guarded))
-          return false;
-        continue;
+      guarded |= resolved.guarded;
+      void *local = request.data + run.first_lane * stride;
+      if (!run.lane_ordered) {
+        local = staged[i].data();
+        if (!request.is_load)
+          gather_lane_run(run.address, run.lane_mask, run.size, request.addrs, request.data, stride,
+                          staged[i].data());
       }
-      // A reordered run fits one transaction.
-      std::array<uint8_t, kMaxMemoryTransactionBytes> bytes;
-      if (request.is_load) {
-        if (!backing.copy(run.address, resolved.host, bytes.data(), run.size, false,
-                          resolved.guarded))
-          return false;
-        scatter_lane_run(run.address, run.lane_mask, run.size, request.addrs, bytes.data(), stride,
-                         request.data);
-      } else {
-        gather_lane_run(run.address, run.lane_mask, run.size, request.addrs, request.data, stride,
-                        bytes.data());
-        if (!backing.copy(run.address, resolved.host, bytes.data(), run.size, true,
-                          resolved.guarded))
-          return false;
-      }
+      copies[i] = {run.address, resolved.host, local, run.size};
     }
+    if (!backing.copy(std::span(copies.data(), runs.size()), !request.is_load, guarded))
+      return false;
+    if (request.is_load)
+      for (size_t i = 0; i < runs.size(); ++i)
+        if (!runs[i].run.lane_ordered)
+          scatter_lane_run(runs[i].run.address, runs[i].run.lane_mask, runs[i].run.size,
+                           request.addrs, staged[i].data(), stride, request.data);
     return true;
   }
   bool completed = false;

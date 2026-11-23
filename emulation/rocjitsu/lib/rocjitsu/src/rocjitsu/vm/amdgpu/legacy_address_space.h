@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
 #include "rocjitsu/vm/amdgpu/raw_backing_write_gate.h"
+#include "rocjitsu/vm/amdgpu/vm_direct_backing.h"
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
 #include "util/conditional_wake_spinlock.h"
@@ -694,14 +695,18 @@ public:
                const std::shared_ptr<LegacyPageTableCacheState> &policies,
                uint64_t generation) const;
 
-  /// @brief Copy one span resolved from a local extent.
-  /// @pre The caller holds the extent generation's admission and a shared
+  /// One span resolved from a local extent and its value bytes.
+  using LocalCopy = VmDirectBacking::Copy;
+
+  /// @brief Copy spans resolved from local extents, in order.
+  /// @pre The caller holds the extents' generation admission and a shared
   /// host-mapping lease. Each memory transaction keeps its backing stripe locks.
-  /// @returns false when a @p guarded copy took a host fault.
-  bool copy_local_backing(uint64_t address, uint8_t *host, void *local, size_t size,
-                          bool into_memory, bool guarded) const {
-    return guarded ? copy_backing_bytes<true>(address, host, local, size, into_memory)
-                   : copy_backing_bytes<false>(address, host, local, size, into_memory);
+  /// One host access guard covers every span.
+  /// @returns false when a @p guarded copy took a host fault; spans before the
+  /// fault, and bytes of the faulting one, may have moved.
+  bool copy_local_backing(std::span<const LocalCopy> copies, bool into_memory, bool guarded) const {
+    return guarded ? copy_backing_spans<true>(copies, into_memory)
+                   : copy_backing_spans<false>(copies, into_memory);
   }
 
   /// @brief Return whether a GPU VA has a VMID page-table mapping.
@@ -1985,6 +1990,47 @@ private:
     if constexpr (Guarded)
       return rocjitsu::with_host_access_guard(copy);
     // Driver-sealed allocations are already pinned by the mapping lease.
+    copy();
+    return true;
+  }
+
+  template <bool Guarded>
+  bool copy_backing_spans(std::span<const LocalCopy> copies, bool into_memory) const {
+    // Lock owners live outside the guarded frame so a recovered fault releases them.
+    std::unique_lock<BackingStripeLock> first_lock;
+    std::unique_lock<BackingStripeLock> last_lock;
+    const auto copy = [&] {
+      const auto &mapping = rocjitsu::host_mapping_lock();
+      const bool observed = mapping.mapping_changes_observed();
+      const auto generation = mapping.generation();
+      BackingKeyRange range{.end = observed ? 0 : UINTPTR_MAX, .mask = PAGE_MASK};
+      const auto backing_key = [&](uintptr_t target) {
+        if ((target < range.begin || target >= range.end) && observed)
+          range = observed_backing_key_range(target, generation);
+        return (target & range.mask) + range.delta;
+      };
+      for (const LocalCopy &span : copies) {
+        size_t copied = 0;
+        while (copied < span.size) {
+          const size_t chunk = transactions_.chunk_size(span.address + copied, span.size - copied);
+          auto *target = span.host + copied;
+          auto *value = static_cast<uint8_t *>(span.local) + copied;
+          const auto [first, last] = backing_copy_stripes(target, chunk, backing_key);
+          first_lock = std::unique_lock(backing_atomic_mutex_at(first));
+          if (last != first)
+            last_lock = std::unique_lock(backing_atomic_mutex_at(last));
+          if (into_memory)
+            std::memcpy(target, value, chunk);
+          else
+            std::memcpy(value, target, chunk);
+          last_lock = {};
+          first_lock.unlock();
+          copied += chunk;
+        }
+      }
+    };
+    if constexpr (Guarded)
+      return rocjitsu::with_host_access_guard(copy);
     copy();
     return true;
   }

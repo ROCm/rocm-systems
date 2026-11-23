@@ -147,9 +147,8 @@ public:
     return try_begin_raw_write(address, size);
   }
 
-  bool copy(uint64_t address, uint8_t *host, void *local, std::size_t size, bool into_memory,
-            bool guarded) const override {
-    return address_space_->copy_local_backing(address, host, local, size, into_memory, guarded);
+  bool copy(std::span<const Copy> copies, bool into_memory, bool guarded) const override {
+    return address_space_->copy_local_backing(copies, into_memory, guarded);
   }
 
   const VmLocalGrants *local_grants() const override {
