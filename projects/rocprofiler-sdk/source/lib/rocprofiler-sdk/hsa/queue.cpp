@@ -131,6 +131,7 @@ public:
                                       hsa_amd_profiling_dispatch_time_t* time,
                                       query_type                         runtime_query) const;
     void                        clear();
+    bool                        is_populated() const;
 
     std::unique_lock<std::recursive_mutex> lock_lifetime(hsa_signal_t signal);
     lifetime_locks_type                    lock_lifetimes();
@@ -152,7 +153,7 @@ private:
 
     using map_type = std::unordered_map<hsa_signal_t, entry>;
 
-    struct shard
+    struct alignas(64) shard
     {
         common::Synchronized<map_type> data           = {};
         std::recursive_mutex           lifetime_mutex = {};
@@ -161,7 +162,9 @@ private:
     shard&       get_shard(hsa_signal_t signal);
     const shard& get_shard(hsa_signal_t signal) const;
 
-    std::array<shard, shard_count> m_shards = {};
+    std::atomic<bool>              m_populated      = {false};
+    std::atomic<bool>              m_has_dispatches = {false};
+    std::array<shard, shard_count> m_shards         = {};
 };
 
 hsa_signal_t
@@ -201,11 +204,19 @@ dispatch_time_cache::lock_lifetimes()
     return locks;
 }
 
+bool
+dispatch_time_cache::is_populated() const
+{
+    return m_populated.load(std::memory_order_acquire);
+}
+
 void
 dispatch_time_cache::create(hsa_signal_t signal, bool ipc)
 {
+    if(!ipc && !m_populated.load(std::memory_order_acquire)) return;
     // Registration of a recycled handle must follow the previous owner's destruction.
-    signal    = plain_signal(signal);
+    signal = plain_signal(signal);
+    if(ipc) m_populated.store(true, std::memory_order_release);
     auto lock = lock_lifetime(signal);
     get_shard(signal).data.wlock([signal, ipc](map_type& data) {
         if(ipc)
@@ -219,6 +230,7 @@ void
 dispatch_time_cache::retain(hsa_signal_t signal)
 {
     signal = plain_signal(signal);
+    m_populated.store(true, std::memory_order_release);
     get_shard(signal).data.wlock([signal](map_type& data) {
         ++data.try_emplace(signal, entry{0, std::nullopt}).first->second.references;
     });
@@ -227,6 +239,7 @@ dispatch_time_cache::retain(hsa_signal_t signal)
 void
 dispatch_time_cache::release(hsa_signal_t signal)
 {
+    if(!m_populated.load(std::memory_order_acquire)) return;
     signal = plain_signal(signal);
     get_shard(signal).data.wlock([signal](map_type& data) {
         if(auto itr = data.find(signal); itr != data.end())
@@ -239,6 +252,7 @@ dispatch_time_cache::release(hsa_signal_t signal)
 void
 dispatch_time_cache::forget(hsa_signal_t signal)
 {
+    if(!m_has_dispatches.load(std::memory_order_acquire)) return;
     signal = plain_signal(signal);
     get_shard(signal).data.ulock(
         [signal](const map_type& data) {
@@ -256,6 +270,8 @@ dispatch_time_cache::track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_
 {
     signal  = plain_signal(signal);
     pending = plain_signal(pending);
+    m_populated.store(true, std::memory_order_release);
+    m_has_dispatches.store(true, std::memory_order_release);
     get_shard(signal).data.wlock([=](map_type& data) {
         data[signal].dispatch = dispatch_time_entry{pending, agent};
     });
@@ -264,6 +280,7 @@ dispatch_time_cache::track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_
 void
 dispatch_time_cache::store(hsa_signal_t signal, hsa_signal_t pending, query_type _query)
 {
+    if(!m_has_dispatches.load(std::memory_order_acquire)) return;
     signal  = plain_signal(signal);
     pending = plain_signal(pending);
     get_shard(signal).data.wlock([=](map_type& data) {
@@ -284,7 +301,7 @@ dispatch_time_cache::query(hsa_agent_t                        agent,
                            hsa_amd_profiling_dispatch_time_t* time,
                            query_type                         runtime_query) const
 {
-    if(!time) return std::nullopt;
+    if(!time || !m_has_dispatches.load(std::memory_order_acquire)) return std::nullopt;
     signal = plain_signal(signal);
     return get_shard(signal).data.rlock([=](const map_type& data) -> std::optional<hsa_status_t> {
         auto itr = data.find(signal);
@@ -307,6 +324,8 @@ dispatch_time_cache::clear()
     auto locks = lock_lifetimes();
     for(auto& value : m_shards)
         value.data.wlock([](map_type& data) { data.clear(); });
+    m_has_dispatches.store(false, std::memory_order_release);
+    m_populated.store(false, std::memory_order_release);
 }
 
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
@@ -354,7 +373,7 @@ signal_destroy_impl(hsa_signal_t signal)
     auto& next  = get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_Core,
                                    ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>();
     auto* cache = get_dispatch_time_cache();
-    if(!cache) return next(signal);
+    if(!cache || !cache->is_populated()) return next(signal);
     auto lock   = cache->lock_lifetime(signal);
     auto status = next(signal);
     if(status == HSA_STATUS_SUCCESS) release_dispatch_time(signal);
