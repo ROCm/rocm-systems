@@ -794,7 +794,9 @@ RocJpegStatus RocJpegVappiDecoder::DestroyDataBuffers() {
  * The output format is determined based on the requested format and the capabilities of the hardware decoder.
  *
  * @param jpeg_stream_params The JPEG stream parameters for the decode operation.
- * @param surface_id [out] The ID of the output surface where the decoded image will be stored.
+ * @param surface_id [out] The ID of the output surface where the decoded image will be stored. It is left unchanged
+ *        until a pool surface is assigned and stays set if the function fails after that, in which case the caller
+ *        must sync and release that surface.
  * @param decode_params Additional parameters for the decode operation.
  * @return The status of the decode operation.
  *         - ROCJPEG_STATUS_SUCCESS if the decode operation was successful.

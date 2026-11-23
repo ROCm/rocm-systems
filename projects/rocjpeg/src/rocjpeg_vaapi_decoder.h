@@ -297,7 +297,8 @@ public:
     /**
      * @brief Submits a JPEG stream for decoding.
      * @param jpeg_stream_params The parameters of the JPEG stream.
-     * @param surface_id The ID of the output surface.
+     * @param surface_id The ID of the output surface. It is left unchanged until a pool surface is assigned and stays
+     *        set if the function fails after that, in which case the caller must sync and release that surface.
      *  @param decode_params Additional parameters for the decode operation.
      * @return The status of the decoding operation.
      */
