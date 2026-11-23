@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
+
 ### Upcoming changes
 
 ### Known issues

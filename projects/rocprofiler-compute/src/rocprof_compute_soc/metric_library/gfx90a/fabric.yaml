@@ -8,12 +8,6 @@ fabric.ai_hbm:
     The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM). It is the
     ratio of total floating-point operations (FLOPs) to total bytes transferred between
     HBM and the L2 cache.
-fabric.atomic:
-  formula: SUM(TCC_EA_ATOMIC_sum) / SUM($denom)
-fabric.atomic_lat:
-  formula: SUM(TCC_EA_ATOMIC_LEVEL_sum) / SUM(TCC_EA_ATOMIC_sum)
-fabric.atomic_traffic:
-  formula: 100 * SUM(TCC_EA_ATOMIC_sum) / SUM(TCC_EA_WRREQ_sum)
 fabric.hbm_bw:
   name: HBM Bandwidth
   formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
@@ -23,43 +17,3 @@ fabric.hbm_bw:
     per second. It reflects peak single-direction (read-only) bandwidth, so write-heavy
     or mixed kernels fall below it.
   peak_empirical: $HBMBw_empirical_peak
-fabric.hbm_rd:
-  formula: SUM(TCC_EA_RDREQ_DRAM_sum) / SUM($denom)
-fabric.hbm_rd_traffic:
-  formula: 100 * SUM(TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
-fabric.hbm_wr_atomic:
-  formula: SUM(TCC_EA_WRREQ_DRAM_sum) / SUM($denom)
-fabric.hbm_wr_atomic_traffic:
-  formula: 100 * SUM(TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
-fabric.rd_32b:
-  formula: SUM(TCC_EA_RDREQ_32B_sum) / SUM($denom)
-fabric.rd_64b:
-  formula: SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / SUM($denom)
-fabric.rd_bw:
-  formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
-fabric.rd_lat:
-  formula: SUM(TCC_EA_RDREQ_LEVEL_sum) / SUM(TCC_EA_RDREQ_sum)
-fabric.rd_uncached:
-  formula: SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM($denom)
-fabric.remote_rd:
-  formula: SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM($denom)
-fabric.remote_rd_traffic:
-  formula: 100 * SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
-fabric.remote_wr_atomic:
-  formula: SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM($denom)
-fabric.remote_wr_atomic_traffic:
-  formula: 100 * SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
-fabric.uncached_rd_traffic:
-  formula: 100 * SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM(TCC_EA_RDREQ_sum)
-fabric.uncached_wr_atomic_traffic:
-  formula: 100 * SUM(TCC_EA_WR_UNCACHED_32B_sum) / SUM(TCC_EA_WRREQ_sum)
-fabric.wr_atomic_32b:
-  formula: AVG((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom)
-fabric.wr_atomic_64b:
-  formula: SUM(TCC_EA_WRREQ_64B_sum) / SUM($denom)
-fabric.wr_atomic_bw:
-  formula: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
-fabric.wr_atomic_uncached:
-  formula: SUM(TCC_EA_WR_UNCACHED_32B_sum) / SUM($denom)
-fabric.wr_lat:
-  formula: SUM(TCC_EA_WRREQ_LEVEL_sum) / SUM(TCC_EA_WRREQ_sum)
