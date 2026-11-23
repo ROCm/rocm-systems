@@ -59,17 +59,93 @@ struct ncclNanBits<hip_bfloat16> {
   using Bits = uint16_t;
 };
 
+// gfx1250 waits s_wait_xcnt 0 ahead of every system-scope global b128 access. The FIFO accesses go out as buffer
+// accesses with a SCOPE_SYS cache policy instead, which keeps the scope without that wait.
+// -DENABLE_NAN_BUFFER_FIFO_LOAD=OFF / -DENABLE_NAN_BUFFER_FIFO_STORE=OFF keep the global loads / stores.
+#if RCCL_LL_FIFO_SYS_SCOPE && __has_builtin(__builtin_amdgcn_raw_buffer_load_b128) && \
+  __has_builtin(__builtin_amdgcn_raw_buffer_store_b128) && __has_builtin(__builtin_amdgcn_make_buffer_rsrc)
+#ifndef RCCL_DISABLE_NAN_BUFFER_FIFO_LOAD
+#define RCCL_NAN_BUFFER_FIFO_LOAD 1
+#endif
+#ifndef RCCL_DISABLE_NAN_BUFFER_FIFO_STORE
+#define RCCL_NAN_BUFFER_FIFO_STORE 1
+#endif
+#endif
+#ifndef RCCL_NAN_BUFFER_FIFO_LOAD
+#define RCCL_NAN_BUFFER_FIFO_LOAD 0
+#endif
+#ifndef RCCL_NAN_BUFFER_FIFO_STORE
+#define RCCL_NAN_BUFFER_FIFO_STORE 0
+#endif
+#define RCCL_NAN_BUFFER_FIFO (RCCL_NAN_BUFFER_FIFO_LOAD || RCCL_NAN_BUFFER_FIFO_STORE)
+// cpol SCOPE_SYS (scope field at bit 3), the scope the global b128 builtins give with RCCL_SYSTEM_SYNCSCOPE.
+#define RCCL_NAN_BUFFER_CPOL_SCOPE_SYS (3 << 3)
+
+// gfx1250: a receiving step issues its forward stores after its sentinel restores and user-buffer stores, then waits
+// only until the forwards of its last slice are outstanding instead of draining every store. storecnt retires in
+// order, so the restores the credit vouches for have landed. Steps with a proxy on either side keep the full drain.
+// -DENABLE_NAN_PARTIAL_DRAIN=OFF drains every store.
+#if RCCL_LL_FIFO_SYS_SCOPE && RCCL_STORE_FREE_STEP_BARRIER && !defined(RCCL_DISABLE_NAN_PARTIAL_DRAIN) && \
+  !(TDM_SUPPORTED && RCCL_TDM_NAN_WINDOW_BYTES)
+#define RCCL_NAN_PARTIAL_DRAIN 1
+#else
+#define RCCL_NAN_PARTIAL_DRAIN 0
+#endif
+
+#if RCCL_NAN_PARTIAL_DRAIN
+// Waits until at most n of this wave's stores are outstanding, rounded down to an immediate. n is wave-uniform.
+inline __device__ void nanWaitStoresAtMost(int n) {
+  if (n >= 12) __asm__ volatile("s_wait_storecnt 0xc" ::: "memory");
+  else if (n >= 8) __asm__ volatile("s_wait_storecnt 0x8" ::: "memory");
+  else if (n >= 4) __asm__ volatile("s_wait_storecnt 0x4" ::: "memory");
+  else if (n >= 3) __asm__ volatile("s_wait_storecnt 0x3" ::: "memory");
+  else if (n >= 2) __asm__ volatile("s_wait_storecnt 0x2" ::: "memory");
+  else if (n >= 1) __asm__ volatile("s_wait_storecnt 0x1" ::: "memory");
+  else __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
+}
+#endif
+
+// One lane's FIFO pointer for row 0 of a slice; row p sits p * WARP_SIZE packs above it.
+struct NanFifoRow {
+#if RCCL_NAN_BUFFER_FIFO
+  __amdgpu_buffer_rsrc_t rsrc;
+  uint32_t voff;
+#endif
+#if !(RCCL_NAN_BUFFER_FIFO_LOAD && RCCL_NAN_BUFFER_FIFO_STORE)
+  v4u_gptr ptr;
+#endif
+};
+
+// The rsrc base is the first active lane's address, and its range covers every offset used here. Every active lane of
+// a row sits less than a row above it, so voff is that lane's offset; the mask lets the compiler fold the row offset
+// into the instruction.
+inline __device__ NanFifoRow nanFifoRow(v4u_gptr ptr) {
+  NanFifoRow r;
+#if RCCL_NAN_BUFFER_FIFO
+  uint64_t a = reinterpret_cast<uint64_t>(ptr);
+  uint64_t base = wave::uniform(a);
+  r.rsrc = __builtin_amdgcn_make_buffer_rsrc(reinterpret_cast<void*>(base), 0, -1LL, 0);
+  r.voff = (uint32_t)(a - base) & (WARP_SIZE * 16 - 1);
+#endif
+#if !(RCCL_NAN_BUFFER_FIFO_LOAD && RCCL_NAN_BUFFER_FIFO_STORE)
+  r.ptr = ptr;
+#endif
+  return r;
+}
+
 // 128-bit FIFO load and store, one per lane.
 //
 // The receiver's poll must be a nontemporal load (or be followed by an acquire
 // fence): a plain load can be served from a stale L1 line and spin on old data.
 // The store is a plain one, as LL128's FIFO store is on gfx9. On gfx1250 both
 // are system-scope b128, as LL128's are there.
-inline __device__ v4u loadNanPack(v4u_gptr ptr) {
-#if RCCL_LL_FIFO_SYS_SCOPE
-  return __builtin_amdgcn_global_load_b128(ptr, RCCL_SYSTEM_SYNCSCOPE);
+inline __device__ v4u loadNanPack(NanFifoRow const& r, int p) {
+#if RCCL_NAN_BUFFER_FIFO_LOAD
+  return __builtin_amdgcn_raw_buffer_load_b128(r.rsrc, r.voff + p * WARP_SIZE * 16, 0, RCCL_NAN_BUFFER_CPOL_SCOPE_SYS);
+#elif RCCL_LL_FIFO_SYS_SCOPE
+  return __builtin_amdgcn_global_load_b128(r.ptr + p * WARP_SIZE, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  return __builtin_nontemporal_load(ptr);
+  return __builtin_nontemporal_load(r.ptr + p * WARP_SIZE);
 #endif
 }
 
@@ -78,11 +154,13 @@ inline __device__ v4u nanUserLoad(P ptr) {
   return __builtin_nontemporal_load(ptr);
 }
 
-inline __device__ void storeNanPack(v4u_gptr ptr, v4u v) {
-#if RCCL_LL_FIFO_SYS_SCOPE
-  __builtin_amdgcn_global_store_b128(ptr, v, RCCL_SYSTEM_SYNCSCOPE);
+inline __device__ void storeNanPack(NanFifoRow const& r, int p, v4u v) {
+#if RCCL_NAN_BUFFER_FIFO_STORE
+  __builtin_amdgcn_raw_buffer_store_b128(v, r.rsrc, r.voff + p * WARP_SIZE * 16, 0, RCCL_NAN_BUFFER_CPOL_SCOPE_SYS);
+#elif RCCL_LL_FIFO_SYS_SCOPE
+  __builtin_amdgcn_global_store_b128(r.ptr + p * WARP_SIZE, v, RCCL_SYSTEM_SYNCSCOPE);
 #else
-  *ptr = v;
+  r.ptr[p * WARP_SIZE] = v;
 #endif
 }
 
@@ -173,6 +251,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool fifoSend = false;
+#if RCCL_NAN_PARTIAL_DRAIN
+  bool fifoRecv = false;  // any receive peer has a connFifo; set in every thread
+#endif
+  static constexpr bool PartialDrain = RCCL_NAN_PARTIAL_DRAIN;
 
   // NaN slots are validated by their payload, so skip waiting on peer stores; connFifo sends keep the fence for the
   // proxy. A receiving step's end barrier is not one of these: its sentinel restores must land before postRecv().
@@ -245,7 +327,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #endif
   }
 
-  inline __device__ void postRecv() {
+  inline __device__ void postRecv(bool restoresLanded) {
     if (recvConnHeadPtr) {
 #if defined(__GFX9__)
       if (!recvCreditHeld) {
@@ -258,7 +340,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
       // skips it, hence the wait below), so only a compiler barrier is needed.
       __atomic_signal_fence(__ATOMIC_SEQ_CST);
 #if RCCL_LL_FIFO_SYS_SCOPE
-      __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
+      if (!restoresLanded) __asm__ volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
       // A network FIFO is refilled by the NIC once the proxy sees this credit, so the
       // restore has to be visible system-wide first or it could land over new data.
@@ -457,7 +539,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
   // does. The whole wave leaves together, the votes are ballots, and a row that
   // has landed is not read again: it stays put until this receiver restores it.
   template <int NR>
-  __device__ __forceinline__ void pollRows(v4u (&vr)[NR], v4u_gptr ptr, int& abortCache) {
+  __device__ __forceinline__ void pollRows(v4u (&vr)[NR], NanFifoRow const& row, int& abortCache) {
     if (!waveAny(anyNan<NR>(vr))) return;
     int spins = 0;
     for (uint32_t pend = pendingRows<NR>(vr); pend != 0; pend = pendingRows<NR>(vr)) {
@@ -470,7 +552,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #endif
 #pragma unroll
       for (int p = 0; p < NR; p++) {
-        if (pend & (1u << p)) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+        if (pend & (1u << p)) vr[p] = loadNanPack(row, p);
       }
     }
   }
@@ -486,6 +568,21 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     bool fetch; // this slice issues the next one's
   };
 
+  template <int NR>
+  __device__ __forceinline__ void forwardSlice(v4u const (&v)[PackPerThread], v4u_gptr const (&sendFifo)[SendSlots],
+                                               int nsend) {
+#pragma unroll
+    for (int i = 1; i < MaxSend; i++) {
+      if (i >= nsend) break;
+      const NanFifoRow row = nanFifoRow(sendFifo[i]);
+#pragma unroll
+      for (int p = 0; p < NR; p++) storeNanPack(row, p, v[p]);
+    }
+    const NanFifoRow row = nanFifoRow(sendFifo[0]);
+#pragma unroll
+    for (int p = 0; p < NR; p++) storeNanPack(row, p, v[p]);
+  }
+
   // Spin until every pack this lane owns has left the sentinel, then reduce and
   // forward. Unlike LL128 there is no reload after the spin: each lane validates
   // exactly the packs it keeps, so the values that ended the loop are the values
@@ -500,19 +597,20 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #pragma unroll
       for (int i = 0; i < MaxRecv; i++) {
         if (i >= nrecv) break;
-        v4u_gptr ptr = recvFifo[i];
+        const NanFifoRow row = nanFifoRow(recvFifo[i]);
         v4u vr[NR];
         if (Steady && i == 0 && ah->have) {
 #pragma unroll
           for (int p = 0; p < NR; p++) vr[p] = ah->fifo[p];
         } else {
 #pragma unroll
-          for (int p = 0; p < NR; p++) vr[p] = loadNanPack(ptr + p * WARP_SIZE);
+          for (int p = 0; p < NR; p++) vr[p] = loadNanPack(row, p);
         }
-        pollRows<NR>(vr, ptr, abortCache);
+        pollRows<NR>(vr, row, abortCache);
         if (Steady && i == 0 && ah->fetch) {
+          const NanFifoRow next = nanFifoRow(recvFifo[i] + ah->fifoStride);
 #pragma unroll
-          for (int p = 0; p < NR; p++) ah->fifo[p] = loadNanPack(ptr + ah->fifoStride + p * WARP_SIZE);
+          for (int p = 0; p < NR; p++) ah->fifo[p] = loadNanPack(next, p);
           if (SRC) {
 #pragma unroll
             for (int p = 0; p < NR; p++) ah->src[p] = nanUserLoad((UserVecPtr)(ah->nextSrc + eltOf(p, lane)));
@@ -537,14 +635,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     // Escaped in place, so the local DST copy matches what the peers receive.
     if (SEND) {
       escapeSentinel<NR>(v);
-#pragma unroll
-      for (int i = 1; i < MaxSend; i++) {
-        if (i >= nsend) break;
-#pragma unroll
-        for (int p = 0; p < NR; p++) storeNanPack(sendFifo[i] + p * WARP_SIZE, v[p]);
-      }
-#pragma unroll
-      for (int p = 0; p < NR; p++) storeNanPack(sendFifo[0] + p * WARP_SIZE, v[p]);
+      if (!PartialDrain) forwardSlice<NR>(v, sendFifo, nsend);
     }
 
     // Hand the consumed slots back to the sentinel only once everything that
@@ -558,8 +649,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
 #pragma unroll
       for (int i = 0; i < MaxRecv; i++) {
         if (i >= nrecv) break;
+        const NanFifoRow row = nanFifoRow(recvFifo[i]);
 #pragma unroll
-        for (int p = 0; p < NR; p++) storeNanPack(recvFifo[i] + p * WARP_SIZE, sentinel);
+        for (int p = 0; p < NR; p++) storeNanPack(row, p, sentinel);
       }
     }
   }
@@ -587,14 +679,23 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     recvReduceSendCopy<NR, RECV, SEND, SrcBuf, DstBuf, Steady>(regs, recvFifo, sendFifo, nrecv, nsend, lane,
                                                                abortCache, eltN, postOp, ah);
     if (DST) {
+      // A copy, so a deferred forward still sends the value from before the accumulator.
+      v4u out[PackPerThread];
+#pragma unroll
+      for (int p = 0; p < NR; p++) out[p] = regs[p];
       if (accPtr != nullptr) {
         v4u accRegs[PackPerThread];
         loadRegs<NR>(accRegs, accPtr, eltN, lane);
         alignTail<NR>(accRegs, eltN, lane);
 #pragma unroll
-        for (int p = 0; p < NR; p++) regs[p] = applyReduce(redOp, accRegs[p], regs[p]);
+        for (int p = 0; p < NR; p++) out[p] = applyReduce(redOp, accRegs[p], out[p]);
       }
-      storeRegs<NR>(dstPtr, regs, eltN, lane);
+      storeRegs<NR>(dstPtr, out, eltN, lane);
+    }
+    if constexpr (PartialDrain && SEND) {
+      // Keeps the forwards behind the restores and user-buffer stores, the order GenericOp()'s counted wait needs.
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+      forwardSlice<NR>(regs, sendFifo, nsend);
     }
   }
 
@@ -836,6 +937,8 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
 #endif
     [[maybe_unused]] bool polled = false;
+    // Forward stores of this wave's last slice: the only stores issued after its last restore (PartialDrain).
+    [[maybe_unused]] int trailing = 0;
     if (!useTdm) {
       nelem -= DataEltPerSlice * warp;
       polled = nelem > 0;
@@ -847,6 +950,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
                                nelem - DataEltPerSlice * nwarps >= DataEltPerSlice,
                              0)) {
           steadyOp<SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, recvFifo, sendFifo, lane, nwarps, abortCache, nelem, postOp);
+          trailing = SEND ? PackPerThread * MaxSend : 0;
         }
       }
       // warp is wave-uniform, so this loop and the row dispatch are scalar
@@ -857,12 +961,15 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
         if (PackPerThread > 1 && eltInSlice <= EltPerRow) {
           runSlice<1, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
                                                   abortCache, eltInSlice, postOp);
+          trailing = SEND ? nsend : 0;
         } else if (PackPerThread > 2 && eltInSlice <= 2 * EltPerRow) {
           runSlice<2, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv, nsend, lane,
                                                   abortCache, eltInSlice, postOp);
+          trailing = SEND ? 2 * nsend : 0;
         } else {
           runSlice<PackPerThread, RECV, SEND, SrcBuf, DstBuf>(srcPtr, dstPtr, accPtr, recvFifo, sendFifo, nrecv,
                                                               nsend, lane, abortCache, eltInSlice, postOp);
+          trailing = SEND ? PackPerThread * nsend : 0;
         }
 #pragma unroll
         for (int i = 0; i < MaxRecv; i++) recvFifo[i] += PackPerSlice * nwarps;
@@ -883,6 +990,15 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     // order; one that did not waits for them here.
     if (RECV && !polled) __asm__ volatile("s_waitcnt vmcnt(0)" ::: "memory");
 #endif
+    bool restoresLanded = false;
+#if RCCL_NAN_PARTIAL_DRAIN
+    if (RECV && !fifoRecv) {
+      // Every wave waits out its own restores before the barrier, so the credit needs no further wait.
+      nanWaitStoresAtMost(trailing);
+      restoresLanded = true;
+      stepBarrier();
+    } else
+#endif
     if (RECV) barrier();
     else stepBarrier();
 
@@ -894,7 +1010,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoNaN, P2p, isNetOffload, Metadata, P
     }
     if (RECV) {
       for (int i = 0; i < MaxRecv; i++) recvStep[i] += 1;
-      postRecv();
+      postRecv(restoresLanded);
     }
   }
 
@@ -963,6 +1079,9 @@ public:
     loadSendSync();
 #if RCCL_STORE_FREE_STEP_BARRIER
     fifoSend = anySendConnFifo(channel, sendPeers, nsend, connIndexSend);
+#endif
+#if RCCL_NAN_PARTIAL_DRAIN
+    for (int i = 0; i < nrecv; i++) fifoRecv |= channel->peers[recvPeers[i]]->recv[connIndexRecv].connFifo != nullptr;
 #endif
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
   }
