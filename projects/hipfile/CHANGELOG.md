@@ -16,6 +16,7 @@
 * The CMake cache variable that selects the include-what-you-use executable when building with `HIPFILE_USE_IWYU` is now `HIPFILE_IWYU_EXE` instead of `IWYU_EXE`. If you set `IWYU_EXE`, set `HIPFILE_IWYU_EXE` instead.
 * Building with `HIPFILE_USE_IWYU` no longer runs include-what-you-use on a GoogleTest that the build downloads, so its suggestions now cover only hipFile's own code. Neither include-what-you-use nor clang-tidy runs on a downloaded GoogleTest when set directly through the `CMAKE_C_INCLUDE_WHAT_YOU_USE`, `CMAKE_CXX_INCLUDE_WHAT_YOU_USE`, or `CMAKE_CXX_CLANG_TIDY` cache variables, either.
 * After a fastpath I/O fails with `ENOTTY` because the amdgpu kernel driver doesn't support AIS, hipFile now disables the fastpath for the rest of the process, and later I/O goes straight to the fallback path. Previously, every I/O tried the fastpath first, failed with `ENOTTY`, and was then retried on the fallback path. `ais-stats` now counts I/O submitted after the fastpath is disabled under "Fastpath Rejections". If the fallback path is disabled with `HIPFILE_ALLOW_COMPAT_MODE=false`, later `hipFileRead()` and `hipFileWrite()` calls will return `-hipFileInternalError` instead of `-1` with `errno` set to `ENOTTY`.
+* `hipFileStreamRegister()` and `hipFileStreamDeregister()` now treat the default stream (a null stream handle or `hipStreamPerThread`) as a no-op that returns success, matching cuFile. Previously, deregistering the default stream returned `hipFileInvalidValue`.
 * `hipFileReadAsync()` and `hipFileWriteAsync()` now hand each transfer to an internal thread pool and use stream wait values to keep stream order, so on devices that support stream wait values, transfers on different streams can run at the same time. Queuing a request no longer waits for the stream.
 * `hipFileReadAsync()` and `hipFileWriteAsync()` run on any stream, registered or not; calling `hipFileStreamRegister()` first is optional and only an optimization, as in cuFile. An unregistered stream runs the transfer on the blocking path without being registered, so only streams you explicitly registered need to be deregistered before they are destroyed.
 * `hipFileReadAsync()` and `hipFileWriteAsync()` on `hipStreamPerThread` now run synchronously, like the null stream.
@@ -58,7 +59,6 @@
 * The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF`.
 * Documented that Linux kernels built with `CONFIG_PCI_P2PDMA=y` are required for fastpath.
-* `hipFileStreamRegister()` and `hipFileStreamDeregister()` now treat the default stream (a null stream handle or `hipStreamPerThread`) as a no-op that returns success, matching cuFile. Previously, deregistering the default stream returned `hipFileInvalidValue`.
 
 ### Fixed
 
@@ -72,6 +72,7 @@
 ### Known issues
 
 * The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
+* Asynchronous fastpath I/O, added in hipFile 0.5.0 for ROCm 10.1.0, performs poorly. The ROCm runtime serializes all stream host functions onto a single thread, so asynchronous fastpath operations cannot run concurrently.
 
 ## hipFile 0.5.0 for ROCm 10.1.0
 
