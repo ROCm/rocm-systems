@@ -116,6 +116,8 @@ option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernel
 option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy and reduce paths" OFF)
 option(ENABLE_TDM_PRIM_LL128                   "Build the experimental gfx1250 TDM LL128 user-buffer path" OFF)
 option(ENABLE_STORE_FREE_STEP_BARRIER          "gfx1250 LL and LL128 step barriers skip waiting for remote stores" ON)
+option(ENABLE_SIMPLE_STORE_FREE_STEP_START     "gfx1250 Simple's start-of-step barrier orders LDS only" ON)
+option(ENABLE_SIMPLE_BUFFER_STORE              "gfx1250 reduceCopy issues 16-byte stores as buffer stores" ON)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -138,6 +140,15 @@ endif()
 if(NOT ENABLE_STORE_FREE_STEP_BARRIER)
   add_compile_definitions(RCCL_DISABLE_STORE_FREE_STEP_BARRIER=1)
 endif()
+
+if(NOT ENABLE_SIMPLE_STORE_FREE_STEP_START)
+  add_compile_definitions(RCCL_DISABLE_SIMPLE_STORE_FREE_STEP_START=1)
+endif()
+
+if(NOT ENABLE_SIMPLE_BUFFER_STORE)
+  add_compile_definitions(RCCL_DISABLE_SIMPLE_BUFFER_STORE=1)
+endif()
+
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):
 #   ENABLE_ROCSHMEM: alltoall_wg offload.  Links librocshmem.a into librccl.so
