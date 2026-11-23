@@ -51,6 +51,12 @@
 #define NCCL_CE_REDUCE_PER_CHUNK_SLOTS 2
 #endif
 
+// Upper bound on RCCL_CE_REDUCE_PER_CHUNK_SLOTS. ceARTmpBuf is
+// slots x RCCL_CE_AR_STAGING_BYTES per rank (2 GiB at the 256 MiB default).
+#ifndef NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS
+#define NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS 8
+#endif
+
 // Block width of the CE local reduce kernel (ce_reduce_launcher.cpp.in, ce_reduce_impl.h.in).
 #ifndef NCCL_CE_REDUCE_THREADS
 #define NCCL_CE_REDUCE_THREADS 256
@@ -125,18 +131,32 @@ inline bool ncclCeReduceScatterPerChunkReduce(size_t totalSteps, int perChunkPar
 
 // Resolve RCCL_CE_REDUCE_PER_CHUNK_SLOTS. Non-positive keeps the compile-time
 // default; values below NCCL_CE_NUM_SLOTS are raised so the pool is never smaller
-// than the double-buffered path.
+// than the double-buffered path, and values above NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS
+// are lowered so an oversized pool cannot fail the lazy staging allocation.
 inline size_t ncclCeResolvePerChunkSlots(int64_t requested) {
   if (requested <= 0) return (size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS;
   if (requested < (int64_t)NCCL_CE_NUM_SLOTS) return (size_t)NCCL_CE_NUM_SLOTS;
+  if (requested > (int64_t)NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS) return (size_t)NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS;
   return (size_t)requested;
+}
+
+// Whether RCCL_CE_REDUCESCATTER can use the CE staging pool on this comm. CE
+// ReduceScatter is single-node only, so multi-node comms ignore the per-chunk
+// knobs and every rank sizes its windows the same.
+inline bool ncclCeReduceScatterStagingEnabled(int64_t ceReduceScatterParam, int nNodes) {
+  return ceReduceScatterParam != 0 && nNodes == 1;
+}
+
+// Per-chunk mode as it actually applies to this comm's staging layout.
+inline bool ncclCeReduceScatterPerChunkEnabled(bool ceReduceScatterEnabled, int perChunkParam) {
+  return ceReduceScatterEnabled && perChunkParam > 0;
 }
 
 // Staging-slot count reserved at CE init. Per-chunk mode needs the larger
 // pool so more chunks land on fresh slots before reuse.
 inline size_t ncclCeReduceScatterNumStagingSlots(bool ceReduceScatterEnabled, int perChunkParam,
                                                  int64_t perChunkSlotsParam) {
-  if (ceReduceScatterEnabled && perChunkParam > 0) {
+  if (ncclCeReduceScatterPerChunkEnabled(ceReduceScatterEnabled, perChunkParam)) {
     return ncclCeResolvePerChunkSlots(perChunkSlotsParam);
   }
   return (size_t)NCCL_CE_NUM_SLOTS;

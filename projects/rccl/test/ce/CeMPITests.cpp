@@ -79,6 +79,51 @@ constexpr int kIntraBatchMaxRanks = 16;
 // element count a per-element term would exceed the range float represents
 // exactly, while the biased values stay well inside it.
 constexpr float kUpperHalfBias = 1048576.0f;
+
+// Reduce-test inputs v(r, i) = (r + 1) + (i % period). The periods are prime so
+// they never divide a chunk or slot size: the same offset in neighbouring chunks
+// holds a different value, and reading the wrong slot or writing the wrong output
+// offset changes the result. Float Sum stays an exact integer (<= 2036 at 8 ranks).
+constexpr size_t kFloatValuePeriod = 251;
+
+// BF16 holds every integer up to 256 exactly. Pick the largest prime period whose
+// worst-case sum n(n+1)/2 + n(p-1) stays within that, so every partial sum is
+// exact. At 8 ranks this is 23: sums <= 212 and the average 4.5 + (i % 23) is exact.
+inline size_t ceBf16ValuePeriod(int nRanks)
+{
+    const long n     = nRanks;
+    const long limit = (256 - n * (n + 1) / 2) / n + 1;
+    for(long p = limit; p > 2; --p)
+    {
+        bool prime = true;
+        for(long d = 2; d * d <= p; ++d)
+            prime = prime && (p % d != 0);
+        if(prime)
+            return static_cast<size_t>(p);
+    }
+    return 2;
+}
+
+inline float ceRankIndexValueFloat(int rank, size_t i)
+{
+    return static_cast<float>(rank + 1) + static_cast<float>(i % kFloatValuePeriod);
+}
+
+inline float ceRankIndexSumFloat(int nRanks, size_t i)
+{
+    return static_cast<float>(nRanks * (nRanks + 1) / 2) +
+           static_cast<float>(nRanks) * static_cast<float>(i % kFloatValuePeriod);
+}
+
+inline float ceRankIndexValueBf16(int rank, size_t i, size_t period)
+{
+    return static_cast<float>(rank + 1) + static_cast<float>(i % period);
+}
+
+inline float ceRankIndexAvgBf16(int nRanks, size_t i, size_t period)
+{
+    return static_cast<float>(nRanks + 1) / 2.0f + static_cast<float>(i % period);
+}
 } // namespace CeMPITestConstants
 
 using namespace CeMPITestConstants;
@@ -922,8 +967,12 @@ protected:
         TEST_INFO("%s: chunk layout assertion — chunksPerShard=%zu", context, chunksPerShard);
     }
 
+    // exactChunksPerShard > 0 pins the chunk layout instead of bounding it from
+    // below. iterations > 1 runs back-to-back calls so a missed doorbell reset
+    // between calls fails the second one.
     void runAllReduce(int minRanks, size_t count, ncclRedOp_t op, const char* testId,
-                      size_t minChunksPerShard = 0)
+                      size_t minChunksPerShard = 0, size_t exactChunksPerShard = 0,
+                      int iterations = 1)
     {
         if(!validateTestPrerequisites(minRanks))
             GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks";
@@ -941,7 +990,13 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, sendSym));
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
 
-        fillRankScalar(sendSym.ptr, alignedCount, rank);
+        // Vary by rank and element with a prime period so neighbouring chunks and
+        // slots hold different bytes; a wrong slot or output offset then changes
+        // the result. Sums stay small integers, so float Sum is exact.
+        ASSERT_EQ(hipSuccess,
+                  initializeBufferWithPattern<float>(sendSym.ptr, alignedCount, [rank](size_t i) {
+                      return ceRankIndexValueFloat(rank, i);
+                  }));
         int predictedAlgo = -1, proto = 0, nChannels = 0;
         ASSERT_EQ(ncclSuccess,
                   rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, alignedCount, ncclFloat32, op,
@@ -954,21 +1009,33 @@ protected:
                                                           << " is not a CE AllReduce variant";
         }
 
-        ASSERT_EQ(ncclSuccess,
-                  ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
-                                getActiveCommunicator(), getActiveStream()));
-        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
-
-        const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
-        if(op == ncclSum)
+        for(int iter = 0; iter < iterations; ++iter)
         {
-            ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, alignedCount,
-                                                [expectedSum](size_t) { return expectedSum; }))
-                << "Rank " << rank << ": CE AllReduce Sum verification failed";
+            if(op == ncclSum)
+            {
+                ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0xFF, bytes));
+            }
+            ASSERT_EQ(ncclSuccess,
+                      ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
+                                    getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            if(op == ncclSum)
+            {
+                ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, alignedCount, [nRanks](size_t i) {
+                    return ceRankIndexSumFloat(nRanks, i);
+                }))
+                    << "Rank " << rank << ": CE AllReduce Sum verification failed on iteration " << iter;
+            }
         }
 
         assertCEAllReducePathTaken(testId);
         assertCEAllReduceChunking(minChunksPerShard, testId);
+        if(isCeAllReduceExpected() && exactChunksPerShard > 0)
+        {
+            EXPECT_EQ(ceLogChunksPerShard(readAllLogs()), exactChunksPerShard)
+                << testId << ": expected exactly " << exactChunksPerShard << " chunks per shard";
+        }
     }
 
     // Max/Min on symmetric windows: symk does not request non-Sum, so after the first call CE 2-shot can take over from registered.
@@ -1113,6 +1180,18 @@ TEST_F(CeMPI_AllReduce, MinOp128MiB)
     runCeOnlyAllReduce(ncclMin, "CeMPI_AllReduce/MinOp128MiB");
 }
 
+// CE-MPI-AR-09: Exactly two chunks per shard, the no-reuse path where the reduce
+// kernel leaves doorbells latched and the host clears them after the closing
+// barrier. With the 16 MiB staging pin a 24 MiB message is 1.5 slots per shard,
+// which is 2 chunks at 3+ ranks (2 ranks hit the 4 MiB chunk floor and get 3).
+// Two back-to-back calls so a missed doorbell reset fails the second.
+TEST_F(CeMPI_AllReduce, TwoChunkNoReuse24MiB)
+{
+    const size_t count = 24ull * 1024 * 1024 / sizeof(float);
+    runAllReduce(kMinRanks8, count, ncclSum, "CeMPI_AllReduce/TwoChunkNoReuse24MiB",
+                 /*minChunksPerShard=*/0, /*exactChunksPerShard=*/2, /*iterations=*/2);
+}
+
 // ===========================================================================
 // CeMPI_ReduceScatter – CE correctness with CTA_POLICY_ZERO, including
 // rank-varying in-place output alignment.
@@ -1192,7 +1271,9 @@ protected:
         void* sendBuf = nullptr;
         ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, totalElem * sizeof(float)));
         RCCLTestGuards::DeviceBufferAutoGuard sendGuard(sendBuf);
-        fillRankScalar(sendBuf, totalElem, rank);
+        ASSERT_EQ(hipSuccess,
+                  initializeBufferWithPattern<float>(sendBuf, totalElem,
+                                                     [rank](size_t i) { return ceRankIndexValueFloat(rank, i); }));
 
         void* recvAllocation = nullptr;
         float* recvBuf = nullptr;
@@ -1212,9 +1293,11 @@ protected:
                                     getActiveCommunicator(), getActiveStream()));
         ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-        const float expectedSum = static_cast<float>(nRanks * (nRanks + 1) / 2);
-        ASSERT_TRUE(verifyBufferData<float>(recvBuf, recvcount,
-                                            [expectedSum](size_t) { return expectedSum; }))
+        // Output element j on this rank reduces input index rank * recvcount + j.
+        const size_t shardBase = static_cast<size_t>(rank) * recvcount;
+        ASSERT_TRUE(verifyBufferData<float>(recvBuf, recvcount, [nRanks, shardBase](size_t j) {
+            return ceRankIndexSumFloat(nRanks, shardBase + j);
+        }))
             << "Rank " << rank << ": CE ReduceScatter Sum verification failed";
         assertCEPathTaken(testId, recvcount, ncclFloat32, ncclSum, sendBuf, recvBuf);
     }
@@ -1236,6 +1319,7 @@ protected:
         ncclCommUserRank(getActiveCommunicator(), &rank);
         ncclCommCount(getActiveCommunicator(), &nRanks);
         const size_t totalElem = recvcount * static_cast<size_t>(nRanks);
+        const size_t period    = ceBf16ValuePeriod(nRanks);
 
         hip_bfloat16* sendBuf = nullptr;
         hip_bfloat16* recvBuf = nullptr;
@@ -1246,11 +1330,15 @@ protected:
         ASSERT_EQ(hipSuccess,
                   initializeBufferWithPattern<hip_bfloat16>(
                       sendBuf, totalElem,
-                      [rank](size_t) { return hip_bfloat16(static_cast<float>(rank + 1)); }));
+                      [rank, period](size_t i) { return hip_bfloat16(ceRankIndexValueBf16(rank, i, period)); }));
 
-        const hip_bfloat16 expected(static_cast<float>(nRanks + 1) / 2.0f);
+        const size_t shardBase = static_cast<size_t>(rank) * recvcount;
+        const auto   expected  = [nRanks, shardBase, period](size_t j) {
+            return hip_bfloat16(ceRankIndexAvgBf16(nRanks, shardBase + j, period));
+        };
         for(int iter = 0; iter < iterations; ++iter)
         {
+            ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0xFF, recvcount * sizeof(hip_bfloat16)));
             if(grouped)
                 ASSERT_EQ(ncclSuccess, ncclGroupStart());
             ASSERT_EQ(ncclSuccess,
@@ -1260,8 +1348,7 @@ protected:
                 ASSERT_EQ(ncclSuccess, ncclGroupEnd());
             ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
-            ASSERT_TRUE(verifyBufferData<hip_bfloat16>(
-                recvBuf, recvcount, [expected](size_t) { return expected; }))
+            ASSERT_TRUE(verifyBufferData<hip_bfloat16>(recvBuf, recvcount, expected))
                 << "Rank " << rank << ": CE ReduceScatter BF16 Avg verification failed"
                 << " on iteration " << iter;
         }

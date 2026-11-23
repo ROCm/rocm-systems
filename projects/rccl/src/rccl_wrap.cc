@@ -1863,7 +1863,8 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
 
   // No upper size cap: CE ReduceScatter pipelines through ceARTmpBuf slots, so
   // large messages are chunked rather than rejected (unlike CE AllReduce 2-shot).
-  // Honour the shared non-AR CE floor (arch table / RCCL_CE_COLL_MIN_BYTES).
+  // Honour the shared non-AR CE floor. ceNonRegMin[ReduceScatter] is 0 in every
+  // arch table, so in practice only RCCL_CE_COLL_MIN_BYTES gates this.
   const size_t totalBytes = (size_t)comm->nRanks * recvcount * ncclTypeSize(datatype);
   const size_t minBytes = rcclCeNonRegMinTab(extAlgoArchTable(comm), ncclFuncReduceScatter);
   if (totalBytes < minBytes) {

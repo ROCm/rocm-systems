@@ -1802,11 +1802,16 @@ threshold table introduced for gfx1250.
           symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
           Single-node symmetric communicators only. There is no upper message-size
           cap; large messages are pipelined through the staging slots. Messages
-          below ``RCCL_CE_COLL_MIN_BYTES`` / the arch-table ``ceNonRegMin`` floor
-          skip CE. Inside ``ncclGroupStart``/``End``, only BF16 ``ncclAvg`` is
-          eligible (eager calls outside a group still allow Sum/Prod/Min/Max).
-          ``RCCL_CE_REDUCE_PER_CHUNK`` and ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS`` must
-          match across all ranks in the communicator.
+          below ``RCCL_CE_COLL_MIN_BYTES`` skip CE. That variable is shared with
+          CE AllGather, AlltoAll and the other non-AllReduce CE collectives, so
+          tuning it for one of them also moves the CE ReduceScatter floor. The
+          arch tables set no ReduceScatter floor, so without the variable there
+          is no minimum size. Inside ``ncclGroupStart``/``End``, only BF16
+          ``ncclAvg`` is eligible (eager calls outside a group still allow
+          Sum/Prod/Min/Max). On single-node communicators with CE ReduceScatter
+          enabled, ``RCCL_CE_REDUCE_PER_CHUNK`` and
+          ``RCCL_CE_REDUCE_PER_CHUNK_SLOTS`` must resolve to the same values on
+          all ranks (checked at init).
       - | ``0``: Disabled (default).
         | ``1``: Enabled, subject to the other eligibility checks.
     * - | ``RCCL_FORCE_CE_COLL``
@@ -1842,12 +1847,16 @@ threshold table introduced for gfx1250.
         | Number of CE staging slots reserved when
           ``RCCL_CE_REDUCE_PER_CHUNK=1``. Larger values let more ReduceScatter
           chunks land on fresh slots before reuse, at the cost of more GPU memory
-          (``slots × nRanks × RCCL_CE_AR_STAGING_BYTES``). Values below the
-          double-buffered pool size (2) are raised to 2; non-positive values keep
-          the compile-time default. All ranks in a communicator must resolve to
+          (``slots × RCCL_CE_AR_STAGING_BYTES`` per rank). Values below the
+          double-buffered pool size (2) are raised to 2, values above 8 are
+          lowered to 8, and non-positive values keep the compile-time default.
+          The staging buffer is shared with CE AllReduce, which only uses 2
+          slots, so a larger pool also grows the memory reserved on comms that
+          run CE AllReduce. The buffer is allocated at the first CE AllReduce or
+          ReduceScatter, not at init. All ranks in a communicator must resolve to
           the same slot count (checked at init).
       - | ``2``: Default per-chunk staging-slot count.
-        | ``N``: Reserve ``N`` slots (at least 2).
+        | ``N``: Reserve ``N`` slots (2 to 8).
 
     * - | ``RCCL_CE_REDUCE_MAX_BLOCKS``
         | Caps the local CE reduction grid. The runtime value is clamped to the

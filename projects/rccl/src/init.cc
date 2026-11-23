@@ -2563,9 +2563,16 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
   allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
-  allGather3Data[rank].ceReducePerChunk = rcclParamCeReducePerChunk() > 0 ? 1 : 0;
-  allGather3Data[rank].ceReduceNumStagingSlots = (int)ncclCeReduceScatterNumStagingSlots(
-      rcclParamCeReduceScatter() != 0, (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
+  {
+    // Effective values only: with CE ReduceScatter off or a multi-node comm the
+    // per-chunk knobs do not reach the staging layout, so a stray per-rank env
+    // difference must not fail init.
+    const bool ceRsStaging = ncclCeReduceScatterStagingEnabled(rcclParamCeReduceScatter(), nNodes);
+    allGather3Data[rank].ceReducePerChunk =
+        ncclCeReduceScatterPerChunkEnabled(ceRsStaging, (int)rcclParamCeReducePerChunk()) ? 1 : 0;
+    allGather3Data[rank].ceReduceNumStagingSlots = (int)ncclCeReduceScatterNumStagingSlots(
+        ceRsStaging, (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
+  }
   allGather3Data[rank].blocking = comm->config.blocking;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;

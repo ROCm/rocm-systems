@@ -10545,6 +10545,21 @@ TEST(WrapMicrotest, CeReduceScatterPerChunkHostDecisions) {
   EXPECT_EQ((size_t)NCCL_CE_NUM_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/1));
   EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/0));
   EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/-1));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS,
+            ncclCeResolvePerChunkSlots(/*requested=*/NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS,
+            ncclCeResolvePerChunkSlots(/*requested=*/NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS + 1));
+  EXPECT_EQ((size_t)NCCL_CE_REDUCE_PER_CHUNK_MAX_SLOTS, ncclCeResolvePerChunkSlots(/*requested=*/INT64_MAX));
+
+  // Multi-node comms and CE ReduceScatter off keep the default layout, so the
+  // per-chunk knobs cannot make ranks size their windows differently there.
+  EXPECT_TRUE(ncclCeReduceScatterStagingEnabled(/*ceReduceScatterParam=*/1, /*nNodes=*/1));
+  EXPECT_TRUE(ncclCeReduceScatterStagingEnabled(/*ceReduceScatterParam=*/-1, /*nNodes=*/1));
+  EXPECT_FALSE(ncclCeReduceScatterStagingEnabled(/*ceReduceScatterParam=*/0, /*nNodes=*/1));
+  EXPECT_FALSE(ncclCeReduceScatterStagingEnabled(/*ceReduceScatterParam=*/1, /*nNodes=*/2));
+  EXPECT_FALSE(ncclCeReduceScatterPerChunkEnabled(/*ceReduceScatterEnabled=*/false, /*perChunkParam=*/1));
+  EXPECT_FALSE(ncclCeReduceScatterPerChunkEnabled(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/-1));
+  EXPECT_TRUE(ncclCeReduceScatterPerChunkEnabled(/*ceReduceScatterEnabled=*/true, /*perChunkParam=*/1));
 }
 
 // Pins the runtime block-cap clamp at both ends. CI uses 64 (strictly inside

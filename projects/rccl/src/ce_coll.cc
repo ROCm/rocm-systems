@@ -192,7 +192,8 @@ ncclResult_t ncclCeInit(struct ncclComm* comm) {
   NCCLCHECK(ceFaultCheck(comm, CE_FAULT_INIT, "ncclCeInit"));
 #endif
   const size_t NUM_SLOTS = ncclCeReduceScatterNumStagingSlots(
-      rcclParamCeReduceScatter() != 0, (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
+      ncclCeReduceScatterStagingEnabled(rcclParamCeReduceScatter(), comm->nNodes),
+      (int)rcclParamCeReducePerChunk(), rcclParamCeReducePerChunkSlots());
   comm->ceColl.numStagingSlots = NUM_SLOTS;
 
   // Declare every variable that is live at a goto-target label up-front, so no
