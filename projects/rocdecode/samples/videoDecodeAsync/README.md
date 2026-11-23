@@ -5,7 +5,7 @@ The video decode async sample decodes a video stream with a producer thread and 
 How a frame is handed over is set by the display policy:
 
 * `sync-copy` (default): the display callback gets the frame with `rocDecGetVideoFrame`, copies it into a buffer owned by the sample and waits for the copy before queuing the buffer. This is safe, because the decoder may reuse the decoded surface as soon as the display callback returns.
-* `no-copy`: the display callback queues the pointer returned by `rocDecGetVideoFrame` without copying, and the consumer reads it later. That pointer is an *alias* of the decoded surface: a second reference to the same memory, not a copy. This is intentionally unsafe: by the time the consumer reads the frame, the parser may have reused the surface for another picture, so the output does not match. It serves as a control showing that a test can detect that reuse.
+* `no-copy`: the display callback queues the pointer returned by `rocDecGetVideoFrame` without copying, and the consumer reads it later. That pointer is an *alias* of the decoded surface: a second reference to the same memory, not a copy. This policy is intentionally unsafe. By the time the consumer reads the frame, the parser might have reused the surface for another picture, so the output doesn't match the reference MD5. It serves as a control that shows a test can detect this reuse.
 
 The consumer workload sets how long each frame is held before it is hashed. `lag:<L>` handles frame n only after frame n+L has been displayed, which holds frames for a fixed number of pictures; `hold:<min>-<max>` waits a random time instead.
 
