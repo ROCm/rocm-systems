@@ -436,9 +436,9 @@ RocJpegStatus RocJpegDecoder::FinalizeSubBatches(const VASurfaceID *surface_ids,
             CHECK_ROCJPEG(jpeg_vaapi_decoder_.GetHipInteropMem(surface_ids[i + k], interop_mems[k]));
         }
 
-        // Pass 2: accumulate batched kernel params per format; memcpy-only work
-        // (CopyChannel) is issued inline on the stream. One batched launch per kernel
-        // type follows the loop.
+        // Pass 2: accumulate batched kernel params per format; memcpy work (CopyChannel,
+        // apart from the repack of a YUY2 crop with an odd left edge) is issued inline on
+        // the stream. One batched launch per kernel type follows the loop.
         ResetBatchedParams();
 
         for (int k = 0; k < current_sub_batch_size; k++) {
@@ -792,7 +792,8 @@ RocJpegStatus RocJpegDecoder::GetImageInfo(RocJpegStreamHandle jpeg_stream_handl
  * @brief Copies a channel from the `hip_interop_dev_mem` to the `destination` image.
  *
  * This function copies the channel specified by `channel_index` from the `hip_interop_dev_mem` to the `destination` image.
- * The `channel_height` parameter specifies the height of the channel.
+ * The `channel_height` parameter specifies the height of the channel. A YUY2 crop with an odd left edge cannot be
+ * copied as is, so its params are added to a batched repack kernel that LaunchBatchedParams issues.
  *
  * @param hip_interop_dev_mem The `HipInteropDeviceMem` object containing the source channel data.
  * @param channel_width The width of the channel to be copied.
@@ -810,10 +811,31 @@ RocJpegStatus RocJpegDecoder::CopyChannel(HipInteropDeviceMem& hip_interop_dev_m
             // adjustments need to be made for these 3 pixel formats
             switch (hip_interop_dev_mem.surface_format) {
                 case VA_FOURCC_NV12:
+                    if (channel_index == 1) {
+                        // Each U,V pair of the interleaved UV plane covers two columns, so start at the pair holding
+                        // column `left`: an odd byte offset would start on a V byte and swap U and V.
+                        top >>= 1;
+                        left &= ~1;
+                    }
+                    break;
                 case VA_FOURCC_422V:
                     top = (channel_index == 1 || channel_index == 2) ? top >> 1 : top;
                     break;
                 case VA_FOURCC_YUY2:
+                    if (left & 1) {
+                        // An odd left edge is the second pixel of a YUYV macropixel. Copying from there would pair
+                        // each luma sample with the wrong chroma, so a kernel repacks the macropixels instead.
+                        YUYVOddLeftBatchParams bp;
+                        bp.dst_width                 = channel_width;
+                        bp.dst_height                = channel_height;
+                        bp.dst_image                 = destination->channel[channel_index];
+                        bp.dst_image_stride_in_bytes = destination->pitch[channel_index];
+                        bp.src_image                 = hip_interop_dev_mem.hip_mapped_device_mem + hip_interop_dev_mem.offset[channel_index] +
+                                                       top * hip_interop_dev_mem.pitch[channel_index] + (left & ~1) * 2;
+                        bp.src_image_stride_in_bytes = hip_interop_dev_mem.pitch[channel_index];
+                        b_yuyv_odd_left_.Add(bp, (channel_width + 7) >> 3, channel_height);
+                        return ROCJPEG_STATUS_SUCCESS;
+                    }
                     left *= 2;
                     break;
             }
@@ -941,6 +963,10 @@ void RocJpegDecoder::ResetBatchedParams() {
     b_yuyv_y_.Reset();
     b_yuv_rgb_.Reset();
     b_yuv_rgbp_.Reset();
+    b_yuyv_yuvp_odd_left_.Reset();
+    b_yuyv_odd_left_.Reset();
+    b_yuv_rgb_odd_crop_.Reset();
+    b_yuv_rgbp_odd_crop_.Reset();
 }
 
 /**
@@ -953,6 +979,10 @@ RocJpegStatus RocJpegDecoder::LaunchBatchedParams() {
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_y_,       ExtractYFromPackedYUYVBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv_rgb_,   ColorConvertYUVToRGBBatched));
     CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv_rgbp_,  ColorConvertYUVToRGBPlanarBatched));
+    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_yuvp_odd_left_, ConvertPackedYUYVToPlanarYUVOddLeftBatched));
+    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuyv_odd_left_,      CopyYUYVOddLeftBatched));
+    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv_rgb_odd_crop_,   ColorConvertYUVToRGBOddCropBatched));
+    CHECK_ROCJPEG(LaunchBatchedBuffer(b_yuv_rgbp_odd_crop_,  ColorConvertYUVToRGBPlanarOddCropBatched));
     return ROCJPEG_STATUS_SUCCESS;
 }
 
@@ -967,15 +997,26 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
     // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
     // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
     // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
+    // A crop edge inside a subsampled chroma sample (an odd left edge for NV12 and YUY2, an odd top edge for NV12 and
+    // YUV440) sets src_x_phase / src_y_phase. The offsets then address the U,V pair (NV12), macropixel (YUY2) or chroma
+    // row holding the first pixel, and the odd-crop kernels take each pixel's chroma from the sample covering it.
     uint32_t roi_offset = 0;
     uint32_t roi_uv_offset = 0;
+    uint16_t src_x_phase = 0;
+    uint16_t src_y_phase = 0;
     int16_t top = decode_params->crop_rectangle.top;
     int16_t left = decode_params->crop_rectangle.left;
     if (is_roi_valid) {
-        if (mem.surface_format == VA_FOURCC_422V || mem.surface_format == VA_FOURCC_NV12) {
+        if (mem.surface_format == VA_FOURCC_NV12) {
+            roi_uv_offset = (top >> 1) * mem.pitch[1] + (left & ~1);
+            src_x_phase = left & 1;
+            src_y_phase = top & 1;
+        } else if (mem.surface_format == VA_FOURCC_422V) {
             roi_uv_offset = (top >> 1) * mem.pitch[1] + left;
+            src_y_phase = top & 1;
         } else if (mem.surface_format == VA_FOURCC_YUY2) {
-            left *= 2;
+            src_x_phase = left & 1;
+            left = (left & ~1) * 2;
         }
         roi_offset = top * mem.pitch[0] + left;
     }
@@ -998,6 +1039,8 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
         bp.dst_height_in_2row_blocks            = dst_height_in_2row_blocks;
         bp.dst_width                            = picture_width;
         bp.dst_height                           = picture_height;
+        bp.src_x_phase                          = src_x_phase;
+        bp.src_y_phase                          = src_y_phase;
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
@@ -1021,7 +1064,11 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGB(HipInteropDeviceMem& m
                 bp.layout = YUV_LAYOUT_YUV400;
                 break;
         }
-        b_yuv_rgb_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
+        if (src_x_phase || src_y_phase) {
+            b_yuv_rgb_odd_crop_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
+        } else {
+            b_yuv_rgb_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
+        }
         return ROCJPEG_STATUS_SUCCESS;
     }
     switch (mem.surface_format) {
@@ -1054,15 +1101,26 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
     // roi_uv_offset is the chroma-specific ROI byte offset, computed against the chroma pitch with the
     // row index halved. It is applied only to the U/V data of the vertically-subsampled formats:
     // YUV440 (VA_FOURCC_422V surface) and YUV420 (VA_FOURCC_NV12 surface).
+    // A crop edge inside a subsampled chroma sample (an odd left edge for NV12 and YUY2, an odd top edge for NV12 and
+    // YUV440) sets src_x_phase / src_y_phase. The offsets then address the U,V pair (NV12), macropixel (YUY2) or chroma
+    // row holding the first pixel, and the odd-crop kernels take each pixel's chroma from the sample covering it.
     uint32_t roi_offset = 0;
     uint32_t roi_uv_offset = 0;
+    uint16_t src_x_phase = 0;
+    uint16_t src_y_phase = 0;
     int16_t top = decode_params->crop_rectangle.top;
     int16_t left = decode_params->crop_rectangle.left;
     if (is_roi_valid) {
-        if (mem.surface_format == VA_FOURCC_422V || mem.surface_format == VA_FOURCC_NV12) {
+        if (mem.surface_format == VA_FOURCC_NV12) {
+            roi_uv_offset = (top >> 1) * mem.pitch[1] + (left & ~1);
+            src_x_phase = left & 1;
+            src_y_phase = top & 1;
+        } else if (mem.surface_format == VA_FOURCC_422V) {
             roi_uv_offset = (top >> 1) * mem.pitch[1] + left;
+            src_y_phase = top & 1;
         } else if (mem.surface_format == VA_FOURCC_YUY2) {
-            left *= 2;
+            src_x_phase = left & 1;
+            left = (left & ~1) * 2;
         }
         roi_offset = top * mem.pitch[0] + left;
     }
@@ -1086,6 +1144,8 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
         bp.dst_height_in_2row_blocks            = dst_height_in_2row_blocks;
         bp.dst_width                            = picture_width;
         bp.dst_height                           = picture_height;
+        bp.src_x_phase                          = src_x_phase;
+        bp.src_y_phase                          = src_y_phase;
         switch (mem.surface_format) {
             case VA_FOURCC_444P:
                 bp.layout      = YUV_LAYOUT_YUV444;
@@ -1109,7 +1169,11 @@ RocJpegStatus RocJpegDecoder::AccumulateColorConvertToRGBPlanar(HipInteropDevice
                 bp.layout = YUV_LAYOUT_YUV400;
                 break;
         }
-        b_yuv_rgbp_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
+        if (src_x_phase || src_y_phase) {
+            b_yuv_rgbp_odd_crop_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
+        } else {
+            b_yuv_rgbp_.Add(bp, dst_width_in_8px_blocks, dst_height_in_2row_blocks);
+        }
         return ROCJPEG_STATUS_SUCCESS;
     }
     switch (mem.surface_format) {
@@ -1135,15 +1199,20 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
     // Only one ROI offset is needed here, and which plane it addresses depends on the surface format:
     // for YUV420 (VA_FOURCC_NV12) it is the chroma offset into the interleaved UV plane (row index halved,
     // chroma pitch) since the luma plane is handled by CopyChannel; for YUY2 it is the offset into the
-    // packed plane (left doubled, because each YUYV pixel occupies 2 bytes).
+    // packed plane (each YUYV pixel occupies 2 bytes).
+    // Both offsets start at the U,V pair (NV12) or macropixel (YUY2) holding column `left`, so that an odd left edge
+    // takes its chroma from the sample covering it. The YUY2 luma must still start at column `left`, so an odd left
+    // edge uses the odd-left kernel, which skips the first pixel of the macropixel.
     uint32_t roi_offset = 0;
+    bool odd_left = false;
     if (is_roi_valid) {
         int16_t top = decode_params->crop_rectangle.top;
         int16_t left = decode_params->crop_rectangle.left;
         if (mem.surface_format == VA_FOURCC_NV12) {
-            roi_offset = (top >> 1) * mem.pitch[1] + left;
+            roi_offset = (top >> 1) * mem.pitch[1] + (left & ~1);
         } else if (mem.surface_format == VA_FOURCC_YUY2) {
-            roi_offset = top * mem.pitch[0] + (left * 2);
+            roi_offset = top * mem.pitch[0] + (left & ~1) * 2;
+            odd_left = left & 1;
         }
     }
     if (mem.surface_format == VA_FOURCC_YUY2) {
@@ -1158,7 +1227,11 @@ RocJpegStatus RocJpegDecoder::AccumulatePlanarYUVOutputFormat(HipInteropDeviceMe
         bp.src_image_stride_in_bytes   = mem.pitch[0];
         bp.dst_width_in_8px_blocks     = (picture_width + 7) / 8;
         bp.dst_width                   = picture_width;
-        b_yuyv_yuvp_.Add(bp, (picture_width + 7) >> 3, picture_height);
+        if (odd_left) {
+            b_yuyv_yuvp_odd_left_.Add(bp, (picture_width + 7) >> 3, picture_height);
+        } else {
+            b_yuyv_yuvp_.Add(bp, (picture_width + 7) >> 3, picture_height);
+        }
     } else {
         // Copy Luma
         CHECK_ROCJPEG(CopyChannel(mem, picture_width, picture_height, 0, destination, decode_params, is_roi_valid));

@@ -44,6 +44,12 @@ THE SOFTWARE.
  * decodable image. The second property is what catches over-acceptance, which
  * a corpus of valid images alone can never detect.
  *
+ * The crop regression test (TestCropMatchesFullDecode) decodes 64x64 4:2:0,
+ * 4:2:2 and 4:4:0 images in every output format, in full and with crop
+ * rectangles whose left or top edge is odd, and checks that each crop matches
+ * the same region of the full decode. It is skipped when the decoder crops
+ * while decoding (hw_roi_decode in RocJpegDecodeCaps).
+ *
  * The class also hosts a two-GPU regression test (TestCrossDeviceDecode). It
  * checks that a decode is finished on the handle's device whatever the calling
  * thread's current device is, and that the thread's current device is left
@@ -72,6 +78,7 @@ class RocJpegApiNegativeTests {
         int TestInvalidGetErrorName();
         int TestInvalidGetDecoderCaps();
         int TestStreamParseFuzz();
+        int TestCropMatchesFullDecode();
         int TestCrossDeviceDecode();
 
         /**

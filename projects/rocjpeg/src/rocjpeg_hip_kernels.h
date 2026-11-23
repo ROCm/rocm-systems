@@ -121,6 +121,24 @@ struct PackedYUYVToPlanarYUVBatchParams {
 };
 void ConvertPackedYUYVToPlanarYUVBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
     const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images);
+// Same, for a crop with an odd left edge: src_image points at the macropixel holding the first destination pixel as its
+// second pixel.
+void ConvertPackedYUYVToPlanarYUVOddLeftBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const PackedYUYVToPlanarYUVBatchParams *d_params, uint32_t n_images);
+
+// Copies packed YUYV for a crop with an odd left edge: src_image points at the macropixel holding the first destination
+// pixel as its second pixel. Each destination macropixel takes its two luma samples from consecutive source pixels and
+// its chroma from the source macropixel holding its first pixel.
+struct YUYVOddLeftBatchParams {
+    uint32_t dst_width;               // Destination width in pixels; the last block of a row is clipped to it.
+    uint32_t dst_height;
+    uint8_t *dst_image;
+    uint32_t dst_image_stride_in_bytes;
+    const uint8_t *src_image;
+    uint32_t src_image_stride_in_bytes;
+};
+void CopyYUYVOddLeftBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUYVOddLeftBatchParams *d_params, uint32_t n_images);
 
 // ---- Unified YUV->RGB batched kernels (cover NV12/YUV444/YUV440/YUYV/YUV400) ----
 
@@ -153,6 +171,12 @@ struct YUVToRGBBatchParams {
     uint32_t       dst_height_in_2row_blocks; // ceil(dst_height / 2)
     uint32_t       dst_width;                 // Destination size in pixels; blocks on the right or bottom edge
     uint32_t       dst_height;                // are clipped to it.
+    // Read only by the *OddCrop* launches, for a crop whose left or top edge falls inside a subsampled chroma sample.
+    // 16-bit, so that both fit in the padding after dst_height and the struct keeps its size.
+    uint16_t       src_x_phase;               // NV12 / YUYV: 1 if the first destination column is the second column of
+                                              // the U,V pair (NV12) or macropixel (YUYV) the source pointers address.
+    uint16_t       src_y_phase;               // NV12 / YUV440: 1 if the first destination row is the second of the two
+                                              // rows sharing the chroma row the chroma pointers address.
 };
 
 struct YUVToRGBPlanarBatchParams {
@@ -173,11 +197,23 @@ struct YUVToRGBPlanarBatchParams {
     uint32_t       dst_height_in_2row_blocks; // ceil(dst_height / 2)
     uint32_t       dst_width;                 // Destination size in pixels; blocks on the right or bottom edge
     uint32_t       dst_height;                // are clipped to it.
+    // Read only by the *OddCrop* launches, for a crop whose left or top edge falls inside a subsampled chroma sample.
+    // 16-bit, so that both fit in the padding after dst_height and the struct keeps its size.
+    uint16_t       src_x_phase;               // NV12 / YUYV: 1 if the first destination column is the second column of
+                                              // the U,V pair (NV12) or macropixel (YUYV) the source pointers address.
+    uint16_t       src_y_phase;               // NV12 / YUV440: 1 if the first destination row is the second of the two
+                                              // rows sharing the chroma row the chroma pointers address.
 };
 
 void ColorConvertYUVToRGBBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
     const YUVToRGBBatchParams *d_params, uint32_t n_images);
 void ColorConvertYUVToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUVToRGBPlanarBatchParams *d_params, uint32_t n_images);
+// Same, for images whose src_x_phase or src_y_phase is set. Kept apart so that the common case (no crop or a crop on
+// even coordinates) runs the plain kernels.
+void ColorConvertYUVToRGBOddCropBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
+    const YUVToRGBBatchParams *d_params, uint32_t n_images);
+void ColorConvertYUVToRGBPlanarOddCropBatched(hipStream_t stream, uint32_t max_gx, uint32_t max_gy,
     const YUVToRGBPlanarBatchParams *d_params, uint32_t n_images);
 
 /**
