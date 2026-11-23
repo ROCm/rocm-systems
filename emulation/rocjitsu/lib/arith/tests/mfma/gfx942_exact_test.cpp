@@ -205,6 +205,35 @@ TEST(MfmaGfx942Exact, SpecialValues) {
   }
 }
 
+TEST(MfmaGfx942Exact, ProductsAt2To128CountAsInfinite) {
+  // Model-derived BF16 overflow: a 2^64 * 2^64 product counts as +Inf even with C = -2^127,
+  // and opposite-sign +-2^128 products produce canonical NaN.
+  constexpr uint32_t kPos2To64 = 0x5f800000U;
+  constexpr uint32_t kNeg2To64 = 0xdf800000U;
+  for (const auto &form : kForms) {
+    if (form.format_a != 1 || form.format_b != 1) {
+      continue;
+    }
+    std::array<uint32_t, 34> single_overflow{};
+    single_overflow[0] = kPos2To64;
+    single_overflow[form.k] = kPos2To64;
+    single_overflow[2 * form.k] = 0xff000000U;
+    single_overflow[2 * form.k + 1] = 0x7f800000U;
+    auto test = form;
+    test.captured = std::span<const uint32_t>(single_overflow).first(2 * form.k + 2);
+    captured_wave(test);
+
+    std::array<uint32_t, 34> opposite_overflows{};
+    opposite_overflows[0] = kPos2To64;
+    opposite_overflows[1] = kNeg2To64;
+    opposite_overflows[form.k] = kPos2To64;
+    opposite_overflows[form.k + 1] = kPos2To64;
+    opposite_overflows[2 * form.k + 1] = 0xffc00000U;
+    test.captured = std::span<const uint32_t>(opposite_overflows).first(2 * form.k + 2);
+    captured_wave(test);
+  }
+}
+
 TEST(MfmaGfx942Exact, Bf16OutputDenormals) {
   // Model-derived subnormal BF16 product outputs and nearest-even ties at C = 0.
   struct DenormalCase {

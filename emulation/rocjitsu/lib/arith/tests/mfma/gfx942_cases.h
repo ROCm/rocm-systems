@@ -4,7 +4,8 @@
 // Each (2 * K + 2)-word row stores one dot's staged FP32 A values, B values, C
 // and expected D: one finite rounding witness per instruction, plus rows that
 // distinguish nearest-even ties, FP8/BF8 far-C cutoff, XF32 4-product stepping,
-// nonfinite C, all-negative-zero sums, and subnormal C preservation.
+// nonfinite C, all-negative-zero sums, subnormal C preservation, and negative
+// floor shifts in dot alignment and normalization.
 #pragma once
 #include <stdint.h>
 
@@ -43,9 +44,14 @@ inline constexpr uint32_t kf16_16x16x4_4b[] = {
     0xbe610000U, 0xbf790000U, 0xbebea000U, 0x7fc00000U, 0xffc00000U,
 };
 
+// Rows 1-2: negative right shifts round down in dot alignment (0x501e1ea3, not 0x501e1ea4)
+// and in normalization (0xd172e441, not 0xd172e440).
 inline constexpr uint32_t kf16_4x4x4_16b[] = {
-    0x3d1ec000U, 0x3f20e000U, 0xbf0a8000U, 0x3f31c000U, 0x3ed86000U,
-    0xbf5b2000U, 0x3ef96000U, 0xbd442000U, 0xbf29e32bU, 0xbfbdaec3U,
+    0x3d1ec000U, 0x3f20e000U, 0xbf0a8000U, 0x3f31c000U, 0x3ed86000U, 0xbf5b2000U,
+    0x3ef96000U, 0xbd442000U, 0xbf29e32bU, 0xbfbdaec3U, 0xbb7d4000U, 0xbb56e000U,
+    0x3b446000U, 0x3ddc2000U, 0xbe492000U, 0xc1702000U, 0x432c2000U, 0xc5952000U,
+    0x501e1ea4U, 0x501e1ea3U, 0x394a4000U, 0x467b0000U, 0x446a8000U, 0x426ac000U,
+    0xc066e000U, 0x44880000U, 0xc41dc000U, 0x398ea000U, 0xd172f45bU, 0xd172e441U,
 };
 
 inline constexpr uint32_t kbf16_32x32x8[] = {

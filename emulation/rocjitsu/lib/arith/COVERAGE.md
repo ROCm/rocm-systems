@@ -74,8 +74,8 @@ the integer empirical model contributed in #14809, with default CBSZ/ABID/BLGP
 and FP16_OVFL clear. Exact modes use that model; exact-allow-Loose falls back
 outside its qualified controls. All-negative-zero sums (+0) and subnormal C
 preservation are hardware-captured; XF32 NaNs with payload only in bits 12:0
-(truncating to infinity) and subnormal BF16 product ties are inferred from the
-model. This qualification does not extend to gfx950
+(truncating to infinity), BF16 2^128 product overflow, and subnormal BF16
+product ties are inferred from the model. This qualification does not extend to gfx950
 or gfx1250, whose strict modes remain unsupported.
 Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported
