@@ -7899,7 +7899,6 @@ class CodeGenerator:
                 f'{first}, {second}, {third});'
             )
 
-        from amdisa.codegen.execute.scalar_fp import gen_scalar_fp
         from amdisa.codegen.execute.rj_arith_scalar import (
             FLOAT_ARITHMETIC,
             FLOAT_COMPARISONS,
@@ -7908,15 +7907,18 @@ class CodeGenerator:
         )
         from amdisa.codegen.execute.rj_arith_float import RjArithBody
 
-        if ctx.arch_name == 'rdna4' and inst.name in (
-            FLOAT_ARITHMETIC.keys() | FLOAT_COMPARISONS.keys() | FLOAT_ROUNDING.keys()
+        if ctx.arch_name == 'rdna3_5' or (
+            ctx.arch_name == 'rdna4'
+            and inst.name
+            in (
+                FLOAT_ARITHMETIC.keys()
+                | FLOAT_COMPARISONS.keys()
+                | FLOAT_ROUNDING.keys()
+            )
         ):
             scalar_body = gen_scalar(ctx)
             if scalar_body is not None:
                 return RjArithBody(scalar_body)
-        scalar_fp_body = gen_scalar_fp(ctx)
-        if scalar_fp_body is not None:
-            return scalar_fp_body
 
         if ctx.arch_name == 'cdna1':
             if inst.name.startswith('V_INTERP_'):
@@ -17076,9 +17078,8 @@ class CodeGenerator:
                         # Failure-only stubs need no DPP/SDWA setup or cleanup.
                         # Conditional rejection retains the modifier wrapper.
                         body_unimplemented = self._is_unimplemented_execute_stub(body)
-                        can_share = (
-                            self._can_share_execute(inst.mnemonic, inst, enc.enc_name)
-                            and 'scalar_fp::' not in body
+                        can_share = self._can_share_execute(
+                            inst.mnemonic, inst, enc.enc_name
                         )
                         # Ops with an arch-portable SIMD fast-path probe must
                         # route through the shared execute template even when
@@ -18085,6 +18086,7 @@ class CodeGenerator:
                 from amdisa.codegen.execute.rj_arith_compare import (
                     COMPARE_NAMES,
                     CLASS_COMPARISONS,
+                    supports_integer_compare,
                 )
 
                 if (
@@ -18115,6 +18117,11 @@ class CodeGenerator:
                         'cdna5',
                     )
                     and any(i.name in COMPARE_NAMES for i in all_insts)
+                ) or (
+                    any(
+                        supports_integer_compare(self.isa_spec.arch_name, i.name)
+                        for i in all_insts
+                    )
                     or any(i.name in CLASS_COMPARISONS for i in all_insts)
                 ):
                     cpp_includes.append(
@@ -18736,15 +18743,6 @@ class CodeGenerator:
                     cpp_includes.append(
                         (
                             'rocjitsu/isa/arch/amdgpu/shared/pseudo_scalar.h',
-                            False,
-                        )
-                    )
-                if any(
-                    'scalar_fp::' in str(impl) for impl in class_func_impls.execution
-                ):
-                    cpp_includes.append(
-                        (
-                            'rocjitsu/isa/arch/amdgpu/shared/scalar_fp.h',
                             False,
                         )
                     )

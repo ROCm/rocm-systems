@@ -3,13 +3,13 @@
 
 // x86-64-v3 gfx1250 sparse floating matrix kernels.
 #include "wmma/gfx1250_backends.h"
-#include "wmma/gfx1250_sparse_float.h"
+#include "wmma/x86_64/gfx1250_sparse_float.h"
 namespace rocjitsu::arith {
 // Evaluate all outputs before publishing stores.
 template <int Bits, bool BfA, bool BfB, int Form>
 void swmmac_float_x86_64_v3(uint64_t flags, uint32_t *const *d, const uint32_t *const *a,
                             const uint32_t *const *b, const uint32_t *const *index) {
-  swmmac1250_float_kernel<Bits, BfA, BfB, Form>(flags, d, a, b, index);
+  swmmac1250_float_vector<Bits, BfA, BfB, Form>(flags, d, a, b, index);
 }
 template void swmmac_float_x86_64_v3<16, false, false, 0>(uint64_t, uint32_t *const *,
                                                           const uint32_t *const *,

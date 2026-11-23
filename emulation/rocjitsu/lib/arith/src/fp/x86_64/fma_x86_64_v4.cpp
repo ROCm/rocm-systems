@@ -50,21 +50,36 @@ void run(uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d, const uint
       vc = _mm512_castsi512_ps(
           _mm512_xor_si512(_mm512_and_si512(_mm512_loadu_si512(c + i), keep_c), flip_c));
     }
-    if (Dx9Zero || (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) {
-      va = flush_denorm_f32(va);
-      vb = flush_denorm_f32(vb);
-      vc = flush_denorm_f32(vc);
-    }
+    __m512 result;
     if constexpr (Dx9Zero) {
-      auto zero = _mm512_setzero_ps();
-      auto has_zero =
-          _mm512_cmp_ps_mask(va, zero, _CMP_EQ_OQ) | _mm512_cmp_ps_mask(vb, zero, _CMP_EQ_OQ);
-      va = _mm512_mask_mov_ps(va, has_zero, zero);
-      vb = _mm512_mask_mov_ps(vb, has_zero, _mm512_set1_ps(1));
-    }
-    auto result = _mm512_fmadd_ps(va, vb, vc);
-    if (Dx9Zero || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
-      result = flush_denorm_f32(result);
+      auto magnitude = [](__m512 v) {
+        return _mm512_and_si512(_mm512_castps_si512(v), _mm512_set1_epi32(INT32_MAX));
+      };
+      auto lower = _mm512_set1_epi32(0x00800000);
+      auto zero_product =
+          _mm512_cmplt_epu32_mask(_mm512_min_epu32(magnitude(va), magnitude(vb)), lower);
+      auto subnormal = [&](auto v) {
+        return _mm512_cmplt_epu32_mask(_mm512_sub_epi32(magnitude(v), _mm512_set1_epi32(1)),
+                                       _mm512_set1_epi32(0x007fffff));
+      };
+      if (zero_product) {
+        va = _mm512_mask_mov_ps(va, zero_product, _mm512_setzero_ps());
+        vb = _mm512_mask_mov_ps(vb, zero_product, _mm512_set1_ps(1));
+      }
+      if (subnormal(vc)) {
+        vc = flush_denorm_f32(vc);
+      }
+      result = flush_denorm_f32(_mm512_fmadd_ps(va, vb, vc));
+    } else {
+      if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+        va = flush_denorm_f32(va);
+        vb = flush_denorm_f32(vb);
+        vc = flush_denorm_f32(vc);
+      }
+      result = _mm512_fmadd_ps(va, vb, vc);
+      if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+        result = flush_denorm_f32(result);
+      }
     }
     if (omod) {
       result = prepare_omod_f32(result, instruction_flags);

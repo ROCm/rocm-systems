@@ -157,7 +157,7 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledColl_CopiesTheRawFiel
 
 // Across trays this path leaves the symmetric kernels out of AllGather only.
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_CrossTrayLeavesOutAllGatherSymmetricKernels) {
-  const uint64_t all = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
+  const rcclTuningMask all = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
   struct ncclRawTask* allGather = scene_.NewColl(ncclFuncAllGather);
   struct ncclRawTask* reduceScatter = scene_.NewColl(ncclFuncReduceScatter);
   ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
@@ -206,6 +206,34 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_ReduceScatter_SizesNBytesAcro
   EXPECT_EQ(ncclFloat32, in.datatype);
   EXPECT_EQ(kCount, in.count);
   EXPECT_EQ(kTwoRanks * kCount * kFloatSize, in.nBytes);
+}
+
+// At rank 0 an in-place AllGather also has sendbuff == recvbuff, so only the other ranks pin the rank offset.
+TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_AllGatherSendingFromItsOwnSlice_IsInPlaceAtEveryRank) {
+  for (int rank = 0; rank < kRanks; ++rank) {
+    TaskPrepScene scene(kRanks, rank);
+    struct ncclRawTask* raw = scene.NewColl(ncclFuncAllGather);
+    raw->coll.sendbuff = static_cast<char*>(raw->coll.recvbuff) + rank * kCollSendBytes;
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+    EXPECT_EQ(1, in.inPlace) << "rank " << rank;
+  }
+
+  // Rank 2 not sending from its own slice is not in place: a separate send buffer, and slice 0, the start of
+  // recvbuff, where a bare sendbuff == recvbuff check would say otherwise.
+  constexpr int kRank = 2;
+  for (int sendSlice : {-1, 0}) {
+    TaskPrepScene scene(kRanks, kRank);
+    struct ncclRawTask* raw = scene.NewColl(ncclFuncAllGather);
+    if (sendSlice >= 0) raw->coll.sendbuff = static_cast<char*>(raw->coll.recvbuff) + sendSlice * kCollSendBytes;
+    ncclTuningInput_t in = TaskPrep_Poisoned<ncclTuningInput_t>();
+
+    ASSERT_EQ(ncclSuccess, fillCollTuningInput(scene.comm(), &raw->coll, &in));
+
+    EXPECT_EQ(0, in.inPlace) << "send slice " << sendSlice;
+  }
 }
 
 TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_FindWindowFails_PropagatesForEitherBuffer) {

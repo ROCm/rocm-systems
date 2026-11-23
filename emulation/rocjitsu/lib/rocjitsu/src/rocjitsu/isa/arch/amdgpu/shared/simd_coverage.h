@@ -48,7 +48,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op,
                                                  uint32_t round_mode = 0) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst))
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst))
     return false;
   auto canonical = [](const auto &operand) {
     if constexpr (E32)
@@ -217,8 +217,9 @@ template <typename T, typename Inst, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_div_scale_simd(Inst &inst, Wavefront &wf,
                                                      WriteResult commit) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst) ||
+      !inst.src0.simd_capable() || !inst.src1.simd_capable() || !inst.src2.simd_capable() ||
+      !inst.vdst.simd_capable())
     return false;
   constexpr uint32_t W = util::native<T>::size();
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -276,7 +277,7 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vopd_simd(const Slot &x, const Slot &y, Wavefront &wf,
                                                 Classify classify = nullptr) {
-  if (simd_force_scalar())
+  if (simd_force_scalar(wf))
     return false;
   auto capable = [](const Slot &slot) {
     return slot.src0->simd_capable() && (slot.op == 8 || slot.src1->simd_capable()) &&

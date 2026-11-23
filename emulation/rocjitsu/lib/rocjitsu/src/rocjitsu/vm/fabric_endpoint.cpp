@@ -372,11 +372,12 @@ void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
   }
 }
 
-void FabricEndpoint::initialize() {
+util::Result FabricEndpoint::initialize(util::DiagnosticEmitter) {
   std::lock_guard lock(state_->mutex);
   ++state_->generation;
   state_->owner = this;
   state_->accepting = true;
+  return util::Result::success();
 }
 
 void FabricEndpoint::shutdown() {

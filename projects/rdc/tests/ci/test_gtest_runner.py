@@ -11,15 +11,19 @@ import pytest
 class TestGoogleTestSuite:
     """Run the rdctst GoogleTest binary and report results."""
 
-    def test_rdctst_embedded_batch(self, rdctst_path, rdcd_path, has_gpu):
+    def test_rdctst_embedded_batch(self, rdctst_path, has_gpu, request):
         if not has_gpu:
             pytest.skip("No AMD GPU -- cannot run rdctst")
+        # rdctst's standalone tests connect to localhost:50051, where the session rdcd
+        # listens. --start_rdcd= (no path) has rdctst test that rdcd instead of starting
+        # its own, which would find the port taken.
+        request.getfixturevalue("rdcd_server")
 
         env = os.environ.copy()
         env["RDC_DISABLE_ROCP"] = "yes"
 
         result = subprocess.run(
-            [rdctst_path, "-b", f"--start_rdcd={rdcd_path}"],
+            [rdctst_path, "-b", "--start_rdcd="],
             capture_output=True,
             text=True,
             timeout=300,

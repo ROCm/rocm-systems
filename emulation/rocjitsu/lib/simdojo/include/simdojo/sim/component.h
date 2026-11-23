@@ -11,6 +11,8 @@
 #include "simdojo/sim/event_queue.h"
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/message.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <atomic>
 #include <cassert>
@@ -115,7 +117,9 @@ public:
   ~Component() override = default;
 
   /// @brief Called once before simulation starts.
-  virtual void initialize() {}
+  /// @details On failure, shutdown() releases any partially initialized resources.
+  /// Lifecycle hooks and event callbacks must not throw.
+  virtual util::Result initialize(util::DiagnosticEmitter = {}) { return util::Result::success(); }
 
   /// @brief Called after initialize to kick off steady-state execution.
   ///

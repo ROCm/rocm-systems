@@ -54,6 +54,26 @@ struct BarrierRoundId {
   auto operator<=>(const BarrierRoundId &) const = default;
 };
 
+/// An LDS barrier cell is one 64-bit LDS word (CDNA5 ISA 11.2.2, Table 70).
+inline constexpr int kBarrierCellBytes = 8;
+
+/// How a wave arrived at an LDS barrier cell (CDNA5 ISA 11.2.2), which
+/// determines the pending operations the arrival is ordered after. Mirrors
+/// amdgpu::LdsBarrierArrivalObservation::Source.
+enum class BarrierCellArrival {
+  /// ds_atomic_barrier_arrive_rtn_b64: in order with the wave's DS operations
+  /// and the LDS lanes of its FLAT operations (CDNA5 ISA 5.7.1.3, 5.7.1.4). It
+  /// returns the cell as it was before the arrival (CDNA5 ISA 11.2.2, "returns
+  /// pre-op barrier value"), so it also reads it.
+  Ds,
+  /// ds_atomic_async_barrier_arrive_b64: in order with the wave's async loads
+  /// to LDS (CDNA5 ISA 10.8).
+  Async,
+  /// The arrival a tensor DMA descriptor requests, sent when the transfer
+  /// completes (CDNA5 ISA 10.11.3).
+  Tensor,
+};
+
 /// A contiguous run of LDS bytes, for events described by byte ranges rather
 /// than per-lane addresses.
 struct LdsByteRange {
@@ -91,6 +111,8 @@ struct RaceViolation {
   // Wave-local source locks own their instruction outside the event registry.
   std::optional<InstructionSnapshot> sourceInstruction;
   bool conflictsWithSrc2Read = false; ///< The conflicting bytes are the LDS source operand.
+  /// The conflicting bytes are the barrier cell a tensor transfer arrives at.
+  bool conflictsWithBarrierArrive = false;
 
   RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
                 EventId conflictingEvent)
