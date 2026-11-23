@@ -7,10 +7,10 @@
 
 // Multi-GPU end-to-end dispatch and combine for rccl_ep.
 //
-// The single-GPU tests in device/RcclEpTests.cpp cover the wave primitives and the window layout arithmetic. Everything
-// below needs peer memory and a communicator, so it runs one process per rank under MPI, in the same shape as
-// SymmetricWindowMPITests.cpp. Dispatch and combine move data over LSA peer memory, so the eight ranks have to share a
-// node.
+// The single-GPU tests in device/RcclEpTests.cpp cover the wave primitives, the combine reduce, the local kernels'
+// handling of out-of-range expert ids and the window layout arithmetic. Everything below needs peer memory and a
+// communicator, so it runs one process per rank under MPI, in the same shape as SymmetricWindowMPITests.cpp. Dispatch
+// and combine move data over LSA peer memory, so the eight ranks have to share a node.
 //
 // Build and run:
 //   ./install.sh --debug -t --enable-mpi-tests --enable-rccl-ep-tests
@@ -634,8 +634,9 @@ protected:
     void CheckScaledByDestinations(const Dispatch& d, const DevBuf& out, hipStream_t stream, int numTokens = -1);
     // ExpandedLayoutGroupsByExpert's round trip at the handle's shape, routed by expertFor: a bf16 dispatch
     // and an fp8 replay of its plan, the expanded layout and its rows checked against the routing, then
-    // `expert` applied to the rows and both combines through the row map checked against the host's sums,
-    // every element. With ExpandedExpert::kExpertValue it also checks that the rows make the order visible.
+    // `expert` applied to the rows and both combines through the row map, with a per-token bias0 and bias1,
+    // checked against the host's sums, every element. With ExpandedExpert::kExpertValue it also checks that
+    // the rows make the order visible.
     void ExpandedRoundTrip(ExpertFn expertFor, ExpandedExpert expert);
 };
 
@@ -1086,6 +1087,22 @@ void RcclEpDispatchCombineTest::ExpandedRoundTrip(ExpertFn expertFor, ExpandedEx
                     hist.Alloc(static_cast<size_t>(std::max(n, 1)) * epr * sizeof(int32_t)) &&
                     rowMap.Alloc(static_cast<size_t>(n) * K * sizeof(int32_t)) && Upload(rowExp, rowExpert) &&
                     Upload(rowPairs, rowPair) && out.Alloc(tokBytes));
+    // Per-token bias rows, exact in bf16 and different from token to token, so a combine that added
+    // another token's (token 0's, say) reads back wrong.
+    auto bias = [&](int which, int t, int c) {
+        const float v = (1.0f + static_cast<float>((rank_ * 7 + t * 5 + c * 3) % 64) / 64.0f) *
+                        Pow2(t % 4 - (which ? 3 : 1));
+        return which ? -v : v;
+    };
+    std::vector<__hip_bfloat16> hBias0(static_cast<size_t>(T) * H), hBias1(static_cast<size_t>(T) * H);
+    for (int t = 0; t < T; ++t) {
+        for (int c = 0; c < H; ++c) {
+            hBias0[static_cast<size_t>(t) * H + c] = __float2bfloat16(bias(0, t, c));
+            hBias1[static_cast<size_t>(t) * H + c] = __float2bfloat16(bias(1, t, c));
+        }
+    }
+    DevBuf bias0, bias1;
+    ASSERT_MPI_TRUE(Upload(bias0, hBias0) && Upload(bias1, hBias1));
 
     for (int fp8 = 0; fp8 <= 1; ++fp8) {
         SCOPED_TRACE(fp8 ? "fp8" : "bf16");
@@ -1190,16 +1207,18 @@ void RcclEpDispatchCombineTest::ExpandedRoundTrip(ExpertFn expertFor, ExpandedEx
             SCOPED_TRACE(grouped ? "grouped combine" : "one row per slot");
             ASSERT_MPI_EQ(hipSuccess, hipMemsetAsync(out.p, 0xFF, tokBytes, stream));
             ASSERT_MPI_EQ(0, ep_combine(handle_, y.u(), 0, rowMap.u(), src.outTopk.u(), src.outSrc.u(), n,
-                                        d.topkIdx.u(), T, 0, 0, grouped, out.u(), 0, kNumSms, s));
+                                        d.topkIdx.u(), T, bias0.u(), bias1.u(), grouped, out.u(), 0, kNumSms, s));
             ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
             std::vector<uint16_t> got;
             ASSERT_MPI_TRUE(Download(out, static_cast<size_t>(T) * H, got));
-            // The token's slot values v summed as the combine must: one row per slot, every slot in
-            // ascending k; grouped, each owner's rows summed in ascending k and rounded once, added at the
-            // owner's last slot. Then rounded once. With ascending false, every one of those orders is
-            // reversed instead.
-            auto sum = [&](bool ascending) {
+            // The token's slot values v summed as the combine must, after the bias values b0 and b1: one
+            // row per slot, every slot in ascending k; grouped, each owner's rows summed in ascending k and
+            // rounded once, added at the owner's last slot. Then rounded once. With ascending false, every
+            // order of the rows is reversed instead.
+            auto sum = [&](bool ascending, float b0, float b1) {
                 float acc = 0.0f;
+                acc += b0;
+                acc += b1;
                 for (int j = 0; j < K; ++j) {
                     const int k = ascending ? j : K - 1 - j;
                     if (owner[k] < 0 || (grouped && !last[k])) continue;
@@ -1216,7 +1235,7 @@ void RcclEpDispatchCombineTest::ExpandedRoundTrip(ExpertFn expertFor, ExpandedEx
                 }
                 return Bf16Round(acc);
             };
-            int orderSensitive = 0;
+            int orderSensitive = 0, biasSensitive = 0;
             for (int t = 0; t < T && bad < 8; ++t) {
                 // Each slot's owner, and whether it is the owner's last slot, where a grouped combine
                 // folds the owner's partial.
@@ -1230,8 +1249,10 @@ void RcclEpDispatchCombineTest::ExpandedRoundTrip(ExpertFn expertFor, ExpandedEx
                 }
                 for (int c = 0; c < H; ++c) {
                     for (int k = 0; k < K; ++k) v[k] = owner[k] >= 0 ? value(t, k, c) : 0.0f;
-                    const float want = sum(true);
-                    orderSensitive += byValue && sum(false) != want ? 1 : 0;
+                    const float b0 = bias(0, t, c), b1 = bias(1, t, c);
+                    const float want = sum(true, b0, b1);
+                    orderSensitive += byValue && sum(false, b0, b1) != want ? 1 : 0;
+                    if (biasSensitive == 0 && t > 0) biasSensitive = sum(true, bias(0, 0, c), bias(1, 0, c)) != want;
                     const float g    = Bf16Bits(got[static_cast<size_t>(t) * H + c]);
                     if (!(g == want)) {
                         ADD_FAILURE() << "rank " << rank_ << " token " << t << " element " << c << ": got " << g
@@ -1244,6 +1265,8 @@ void RcclEpDispatchCombineTest::ExpandedRoundTrip(ExpertFn expertFor, ExpandedEx
             ASSERT_MPI_EQ(0, bad);
             // ExpertValue rows do make the order visible: summed the other way round, some elements differ.
             ASSERT_MPI_TRUE(!byValue || orderSensitive > 0);
+            // And token 0's biases in place of a later token's change some element.
+            ASSERT_MPI_GT(biasSensitive, 0);
         }
     }
 }
@@ -1681,8 +1704,9 @@ TEST_F(RcclEpDispatchCombineTest, DeclinedWindowFailsConfigure)
     ASSERT_MPI_EQ(-1, ep_configure(handle_, nRanks_ * kExpertsPerRank, kTopk));
     ASSERT_MPI_EQ(-1, ep_configure(handle_, nRanks_ * kExpertsPerRank, kTopk));
     ASSERT_MPI_EQ(-1, ep_barrier(handle_, 0));
-    // It reads only the handle; what it reports is the size the configure computed, not a window held.
-    (void)ep_window_bytes(handle_);
+    // It reads only the handle; what it reports is the size the configure computed, not a window held, which is
+    // more than the payload region alone.
+    ASSERT_MPI_GT(ep_window_bytes(handle_), static_cast<size_t>(nRanks_) * kT * kH * sizeof(__hip_bfloat16));
     DestroyEp();
 }
 
@@ -2099,9 +2123,9 @@ TEST_F(RcclEpDispatchCombineTest, Fp8DispatchIsExact)
 // row, grouped by local expert in receive order, each expert's block starting at a multiple of the alignment and its
 // padding rows zeroed. Checked against the routing for bf16 rows and for fp8 rows with the column-major scale layout
 // (sf_row_stride 1, sf_col_stride = rows), then combined through the row map, grouped (each owner sums its rows of a
-// token in ascending k) and one row per slot: the bf16 rows after an expert that scales each row by a power of two of
-// its expert (ExpertScale), the fp8 rows after the fp8 decode, each against the host's sums in the contract's order,
-// every element.
+// token in ascending k) and one row per slot, with a per-token bias0 and bias1: the bf16 rows after an expert that
+// scales each row by a power of two of its expert (ExpertScale), the fp8 rows after the fp8 decode, each against the
+// host's sums in the contract's order, every element.
 TEST_F(RcclEpDispatchCombineTest, ExpandedLayoutGroupsByExpert)
 {
     if (!EnvReady()) {
