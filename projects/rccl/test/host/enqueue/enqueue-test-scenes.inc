@@ -234,6 +234,21 @@ std::unique_ptr<ncclComm> P2pPartsComm(int nNodes, int nRanks, int p2pnChannels,
 }  // namespace
 
 namespace {
+// Every param at its default.
+void ClearParams() {
+  g_loadParam = [](const char*, int64_t deft) { return deft; };
+}
+
 // Per-peer payload for the AllToAll peer-layer cases: large enough to be layered.
 constexpr ssize_t kLayerPeerBytes = ssize_t(16) << 20;
+// Test-only marker: leave RCCL_A2A_P2P_PEERS_IN_FLIGHT unset.
+constexpr int64_t kPeersInFlightUnset = INT64_MIN;
+
+void SetPeersInFlight(int64_t k) {
+  if (k == kPeersInFlightUnset) {
+    ClearParams();
+  } else {
+    SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", k);
+  }
+}
 }  // namespace

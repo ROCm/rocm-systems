@@ -756,47 +756,103 @@ TEST_F(EnqueueMicrotest, PlannerSetCapturingGraph_StreamsFromDifferentGraphs_Are
 }
 
 // ===========================================================================
-// Direct P2P AllToAll peer layers (RCCL_A2A_P2P_PEERS_IN_FLIGHT): the pre-connect of a layer's channel set.
+// Direct P2P AllToAll peer layers (RCCL_A2A_P2P_PEERS_IN_FLIGHT): the group isolation and the pre-connect of a
+// layer's channel set.
 // ===========================================================================
 
-TEST_F(EnqueueMicrotest, A2aP2pLayerPreconnect_MarksTheRoundsSetOnceOnConnectorOne) {
-  // 8 ranks, 32 channels, 2 per peer; 4 in flight gives 8 channels per peer and 4 sets of 8 channels.
-  SetParam("RCCL_A2A_P2P_PEERS_IN_FLIGHT", 4);
-  constexpr int kRanks = 8, kPool = 32, kPerPeer = 2;
-  auto comm = P2pPartsComm(/*nNodes=*/1, kRanks, kPool, kPerPeer);
-  comm->rank = 0;
-  std::vector<ncclComm::P2pSchedulePair> rounds(kRanks);
-  for (int round = 0; round < kRanks; ++round) {
-    rounds[round].sendRank = round;
-    rounds[round].recvRank = (kRanks - round) % kRanks;
-  }
-  comm->p2pSchedule = rounds.data();
-  std::vector<ncclChannelPeer> peers(kPool * kRanks);
-  std::vector<std::vector<ncclChannelPeer*>> slots(kPool, std::vector<ncclChannelPeer*>(kRanks));
-  for (int ch = 0; ch < kPool; ++ch) {
-    for (int r = 0; r < kRanks; ++r) {
-      slots[ch][r] = &peers[ch * kRanks + r];
+namespace {
+// 8 ranks, 32 channels, 2 per peer, one ncclChannelPeer per channel and rank, 4 in flight: 8 channels per peer and 4
+// sets of 8 channels. Round r sends to r and receives from (8 - r) mod 8, as in AllToAllPlanScene.
+struct LayerPreconnectScene {
+  static constexpr int kRanks = 8;
+  static constexpr int kPool = 32;
+  std::unique_ptr<ncclComm> comm = P2pPartsComm(/*nNodes=*/1, kRanks, kPool, /*perPeer=*/2);
+  std::vector<ncclComm::P2pSchedulePair> rounds = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<ncclChannelPeer> peers = std::vector<ncclChannelPeer>(kPool * kRanks);
+  std::vector<std::vector<ncclChannelPeer*>> slots =
+    std::vector<std::vector<ncclChannelPeer*>>(kPool, std::vector<ncclChannelPeer*>(kRanks));
+  std::vector<channelMasks> send = std::vector<channelMasks>(3 * kRanks);
+  std::vector<channelMasks> recv = std::vector<channelMasks>(3 * kRanks);
+
+  LayerPreconnectScene() {
+    SetPeersInFlight(4);
+    comm->rank = 0;
+    for (int round = 0; round < kRanks; ++round) {
+      rounds[round].sendRank = round;
+      rounds[round].recvRank = (kRanks - round) % kRanks;
     }
-    comm->channels[ch].peers = slots[ch].data();
+    comm->p2pSchedule = rounds.data();
+    for (int ch = 0; ch < kPool; ++ch) {
+      for (int r = 0; r < kRanks; ++r) {
+        slots[ch][r] = &peers[ch * kRanks + r];
+      }
+      comm->channels[ch].peers = slots[ch].data();
+    }
+    comm->connectSend = send.data();
+    comm->connectRecv = recv.data();
+    // Not yet in this thread's preconnect list.
+    comm->preconnectNext = reinterpret_cast<ncclComm*>(0x1);
+    ncclGroupCommPreconnectHead = nullptr;
   }
-  std::vector<channelMasks> send(3 * kRanks), recv(3 * kRanks);
-  comm->connectSend = send.data();
-  comm->connectRecv = recv.data();
-  const int parts = rcclA2aP2pLayerParts(comm.get(), ncclFuncAlltoAll, kLayerPeerBytes, /*peer=*/3);
+  ~LayerPreconnectScene() {
+    ncclGroupCommPreconnectHead = nullptr;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, A2aP2pLayerPreconnect_MarksTheRoundsSetOnceOnConnectorOne) {
+  LayerPreconnectScene sc;
+  ncclComm* comm = sc.comm.get();
+  const int parts = rcclA2aP2pLayerParts(comm, ncclFuncAlltoAll, kLayerPeerBytes, /*peer=*/3);
   ASSERT_EQ(8, parts);
 
   // Send to 3 is round 3: set 3 = channels 24-31 (its receive round, 5, would be set 1).
-  rcclA2aP2pLayerPreconnect(comm.get(), /*isSendNotRecv=*/true, /*peer=*/3, parts);
-  EXPECT_EQ(uint64_t(0xff000000), send[3].masks[0]);
-  EXPECT_EQ(uint64_t(0), recv[3].masks[0]);
-  for (int ch = 0; ch < kPool; ++ch) {
+  rcclA2aP2pLayerPreconnect(comm, /*isSendNotRecv=*/true, /*peer=*/3, parts);
+  EXPECT_EQ(uint64_t(0xff000000), sc.send[3].masks[0]);
+  EXPECT_EQ(uint64_t(0), sc.recv[3].masks[0]);
+  for (int ch = 0; ch < LayerPreconnectScene::kPool; ++ch) {
     EXPECT_EQ(ch >= 24 ? 1 : 0, comm->channels[ch].peers[3]->send[1].hasSeen) << "channel " << ch;
+    EXPECT_EQ(ch >= 24 ? 1 : 0, comm->channels[ch].peers[3]->send[1].p2pOnly) << "channel " << ch;
     EXPECT_EQ(0, comm->channels[ch].peers[3]->send[0].hasSeen);
   }
+  EXPECT_EQ(comm, ncclGroupCommPreconnectHead) << "the comm joins the preconnect list";
   // Send to 2 is round 2: set 2 = channels 16-23. A channel already seen keeps its mask bit clear.
   comm->channels[19].peers[2]->send[1].hasSeen = 1;
-  rcclA2aP2pLayerPreconnect(comm.get(), /*isSendNotRecv=*/true, /*peer=*/2, parts);
-  EXPECT_EQ(uint64_t(0x00f70000), send[2].masks[0]);
-  rcclA2aP2pLayerPreconnect(comm.get(), /*isSendNotRecv=*/false, /*peer=*/1, parts);
-  EXPECT_EQ(uint64_t(0xff000000), recv[1].masks[0]) << "receive from 1 is round 7: set 3";
+  rcclA2aP2pLayerPreconnect(comm, /*isSendNotRecv=*/true, /*peer=*/2, parts);
+  EXPECT_EQ(uint64_t(0x00f70000), sc.send[2].masks[0]);
+  rcclA2aP2pLayerPreconnect(comm, /*isSendNotRecv=*/false, /*peer=*/1, parts);
+  EXPECT_EQ(uint64_t(0xff000000), sc.recv[1].masks[0]) << "receive from 1 is round 7: set 3";
+}
+
+TEST_F(EnqueueMicrotest, A2aP2pLayerTaskAppend_IsolatesAndPreconnectsOnlyLayerableTasks) {
+  struct Case {
+    ncclFunc_t collAPI;
+    ssize_t bytes;
+    int maxCTAs;
+    int connIndex;
+    bool isolates;
+    uint64_t sendMask;
+  };
+  // A large uncapped AllToAll send to 3 isolates the group and marks set 3 (channels 24-31). Capped CTAs, a small peer
+  // or another call does neither; a connector other than 1 isolates without marking.
+  const ssize_t small = (ssize_t(4) << 20) - 1;
+  for (Case k : {Case{ncclFuncAlltoAll, kLayerPeerBytes, MAXCHANNELS, 1, true, 0xff000000},
+                 Case{ncclFuncAlltoAll, kLayerPeerBytes, MAXCHANNELS - 1, 1, false, 0},
+                 Case{ncclFuncAlltoAll, small, MAXCHANNELS, 1, false, 0},
+                 Case{ncclFuncSend, kLayerPeerBytes, MAXCHANNELS, 1, false, 0},
+                 Case{ncclFuncGather, kLayerPeerBytes, MAXCHANNELS, 1, false, 0},
+                 Case{ncclFuncAlltoAll, kLayerPeerBytes, MAXCHANNELS, NCCL_CONN_IDX_P2P_CE, true, 0}}) {
+    LayerPreconnectScene sc;
+    ncclTaskP2p task{};
+    task.func = ncclFuncSend;
+    task.collAPI = k.collAPI;
+    task.root = 3;
+    task.bytes = k.bytes;
+    task.maxCTAs = k.maxCTAs;
+    rcclA2aP2pLayerTaskAppend(sc.comm.get(), &task, /*isSendNotRecv=*/true, k.connIndex);
+    EXPECT_EQ(k.isolates, sc.comm->planner.p2pCollNeedsIsolation)
+      << "collAPI=" << int(k.collAPI) << " bytes=" << k.bytes << " maxCTAs=" << k.maxCTAs;
+    EXPECT_EQ(k.sendMask, sc.send[3].masks[0])
+      << "collAPI=" << int(k.collAPI) << " bytes=" << k.bytes << " connIndex=" << k.connIndex;
+  }
 }
