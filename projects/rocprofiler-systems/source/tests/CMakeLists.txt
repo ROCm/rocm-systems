@@ -25,6 +25,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>
     $<TARGET_OBJECTS:library-checker-tests>
+    $<TARGET_OBJECTS:perf-tests>
     $<TARGET_OBJECTS:wall-clock-report-tests>
     $<TARGET_OBJECTS:progress-tests>
     $<TARGET_OBJECTS:logger-tests>
