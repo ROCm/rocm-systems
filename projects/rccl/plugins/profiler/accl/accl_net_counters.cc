@@ -47,13 +47,15 @@ static const char* const kAcclVolumeCounters[] = {
 };
 
 // Recorded when non-zero: drops (out of buffer, RNR, NAK, out of sequence,
-// local ACK timeout) and ECN/CNP. ionic names, then mlx5.
+// local ACK timeout, MTU discard, retry exceeded) and ECN/CNP. ionic names,
+// then mlx5.
 static const char* const kAcclSymptomCounters[] = {
   "resp_rx_outof_buf",
   "req_rx_rnr_retry_err", "resp_tx_rnr_retry_err",
   "req_rx_pkt_seq_err", "req_rx_impl_nak_seq_err", "resp_tx_pkt_seq_err",
   "resp_rx_outouf_seq", "resp_rx_ccl_cts_outouf_seq",
   "tx_rdma_ack_timeout", "tx_rdma_ccl_cts_ack_timeout",
+  "rx_rdma_mtu_discard_pkts", "req_tx_retry_excd_err",
   "rx_rdma_ecn_pkts", "rx_rdma_cnp_pkts", "tx_rdma_cnp_pkts",
   "out_of_buffer", "rnr_nak_retry_err", "packet_seq_err", "out_of_sequence",
   "local_ack_timeout_err", "np_ecn_marked_roce_packets", "np_cnp_sent", "rp_cnp_handled",

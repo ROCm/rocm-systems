@@ -1,439 +1,293 @@
 """Unit tests for net_tel_report.py (ACCL network-counter report)."""
 import json
 import os
+import re
 import sys
+
+import pytest
 
 sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..", "plugins", "profiler", "accl")
 )
 from net_tel_report import (  # noqa: E402
-    load, verdicts, correct_skew, build_trace, main,
+    build_trace, classify_compare, classify_group_single, classify_node, classify_single,
+    fmt_count, fmt_delta, load, main, per_size, totals, whole_run,
 )
 
 S = 1048576
 
 
-def _rec(sn, rank=0, size=S, exec_us=100.0, overlapped=False, unavailable=False,
-         rdma=None, ethtool=None, launch_wait_us=1500, net=True, n_ranks=2):
-    rec = {
+def _snap(sid, t, rdma, ethtool=None, dev="rdma0"):
+    return {"id": sid, "read_start_us": t, "read_end_us": t + 10, "stable": True,
+            "devices": [{"name": dev, "ok": True, "read_start_us": t, "read_end_us": t + 10,
+                         "rdma": rdma, "ethtool": ethtool}]}
+
+
+def _rec(sn, rank=0, size=S, busbw=10.0, rdma=None, ethtool=None, base=None, coordinated=False,
+         overlapped=False, unavailable=False, n_ranks=1, dev="rdma0"):
+    """One window. `base` = absolute counters before it; deltas `rdma`/`ethtool`
+    are added for the after snapshot."""
+    delta = {"tx_rdma_ucast_bytes": size, "rx_rdma_ucast_bytes": size, **(rdma or {})}
+    base = base or {}
+    after = {k: base.get(k, 0) + delta.get(k, 0) for k in set(base) | set(delta)}
+    eth_after = {k: v for k, v in (ethtool or {}).items()}
+    return json.dumps({
         "header": {"rank": rank, "n_ranks": n_ranks},
         "coll_perf": {"coll": "AllReduce", "coll_sn": sn, "coll_msg_size_bytes": size,
-                      "coll_exec_time_us": exec_us, "decomposition": {}},
-    }
-    if net:
-        counters = {"tx_rdma_ucast_bytes": size, "tx_rdma_ucast_pkts": 256,
-                    "rx_rdma_ucast_bytes": size, "rx_rdma_ucast_pkts": 256}
-        counters.update(rdma or {})
-        rec["net_counters"] = {
-            "overlapped": overlapped, "unavailable": unavailable,
-            "completion_verified": True, "coordinated": True,
-            "before_ts_us": 1000 * sn, "after_ts_us": 1000 * sn + 600,
-            "after_read_us": 1400, "launch_wait_us": launch_wait_us,
-            "devices": [{"name": "rdma0", "rdma": None if unavailable else counters,
-                         "ethtool": ethtool}],
-            "sw": None,
-        }
-    return json.dumps(rec)
+                      "coll_busbw_gbs": busbw, "coll_exec_time_us": 100.0},
+        "net_counters": {
+            "overlapped": overlapped, "unavailable": unavailable, "coordinated": coordinated,
+            "completion_verified": True, "before_ts_us": 1000 * sn, "after_ts_us": 1000 * sn + 600,
+            "collective_start_cpu_us": 1000 * sn + 100, "collective_complete_cpu_us": 1000 * sn + 500,
+            "devices": [{"name": dev, "rdma": None if unavailable else delta, "ethtool": ethtool}],
+            "snapshot_before": _snap(2 * sn, 1000 * sn, dict(base), dev=dev),
+            "snapshot_after": _snap(2 * sn + 1, 1000 * sn + 590, after, eth_after or None, dev=dev),
+        },
+    })
 
 
-def _write(tmp_path, lines, rank=0, host="nodeA", comm="0xabc"):
-    p = tmp_path / f"accl_profiler_rank{rank}_{host}_pid1{rank}_{comm}.jsonl"
+def _chain(n, rdma=None, size=S, **kw):
+    """n windows whose snapshots chain: totals grow by `rdma` each window."""
+    lines = []
+    acc = {k: 0 for k in ["tx_rdma_ucast_bytes", "rx_rdma_ucast_bytes", *(rdma or {})]}
+    for sn in range(n):
+        lines.append(_rec(sn, size=size, rdma=rdma, base=dict(acc), **kw))
+        for k, v in {"tx_rdma_ucast_bytes": size, "rx_rdma_ucast_bytes": size, **(rdma or {})}.items():
+            acc[k] = acc.get(k, 0) + v
+    return lines
+
+
+def _write(tmp_path, lines, rank=0, host="nodeA", comm="0xabc", sub=""):
+    d = tmp_path / sub if sub else tmp_path
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"accl_profiler_rank{rank}_{host}_pid1{rank}_{comm}.jsonl"
     p.write_text("\n".join(lines) + "\n")
     return str(p)
 
 
-KEY = ("0xabc", "AllReduce", S)
+# --- Rules ---------------------------------------------------------------------
+@pytest.mark.parametrize("total,expected", [(0, "CLEAN"), (999, "NEGLIGIBLE"), (1000, "ACTIVE")])
+def test_single_counter_default_threshold(total, expected):
+    assert classify_single(total, "tx_rdma_ack_timeout") == expected
 
 
-def _verdict(tmp_path, lines):
-    # Single-rank fixtures must declare a single-rank communicator.
-    lines = [json.dumps({**json.loads(line), 'header': {**json.loads(line)['header'], 'n_ranks': 1}}) for line in lines]
-    recs, _ = load([_write(tmp_path, lines)], warmup=0)
-    return verdicts(recs)[KEY]
+def test_single_counter_pfc_thresholds():
+    assert classify_single(4999, "frames_rx_pripause") == "NEGLIGIBLE"
+    assert classify_single(5000, "frames_rx_pripause") == "ACTIVE"
+    # tx PFC scales with node count.
+    assert classify_single(150, "frames_tx_pripause", nodes=2) == "NEGLIGIBLE"
+    assert classify_single(200, "frames_tx_pripause", nodes=2) == "ACTIVE"
 
 
-def test_clean_with_enough_usable_records(tmp_path):
-    v = _verdict(tmp_path, [_rec(i) for i in range(4)])
-    assert v.verdict == "CLEAN"
-    assert v.n_usable == 4
-    assert v.tx_bytes_per_coll == S
+def test_group_single_uses_flat_1000():
+    assert classify_group_single(0) == "CLEAN"
+    assert classify_group_single(999) == "NEGLIGIBLE"
+    assert classify_group_single(40000) == "ACTIVE"
 
 
-def test_loss_on_receiver_pools_ranks(tmp_path):
-    a = _write(tmp_path, [_rec(i, rank=0) for i in range(3)], rank=0)
-    b = _write(tmp_path, [_rec(i, rank=1, rdma={"resp_rx_outouf_seq": 4})
-                          for i in range(3)], rank=1)
-    recs, _ = load([a, b], warmup=0)
-    v = verdicts(recs)[KEY]
-    assert v.verdict == "NETWORK_SUSPECT"
-    assert v.reason == "loss/retransmit"
-    assert v.drivers["resp_rx_outouf_seq"] == (12, 3, [1])
+@pytest.mark.parametrize("run,base,expected", [
+    (0, 0, "CLEAN"),
+    (500, 0, "IGNORED"),          # below threshold, one side zero
+    (500, 400, "IGNORED"),        # below threshold, > 10% apart
+    (500, 480, "NEGLIGIBLE"),     # below threshold, close
+    (2000, 0, "REGRESSION"),
+    (0, 2000, "IMPROVED"),
+    (2005, 2000, "NO CHANGE"),    # < 1%
+    (2100, 2000, "NO CHANGE"),    # 5%
+    (2200, 2000, "REGRESSION"),   # +10%
+    (1800, 2000, "IMPROVED"),     # -10%
+])
+def test_compare_rules(run, base, expected):
+    assert classify_compare(run, base, "tx_rdma_ack_timeout") == expected
 
 
-def test_congestion_only_is_named(tmp_path):
-    v = _verdict(tmp_path, [_rec(i, rdma={"rx_rdma_cnp_pkts": 2}) for i in range(3)])
-    assert v.verdict == "NETWORK_SUSPECT"
-    assert "congestion" in v.reason
+def test_compare_group_thresholds():
+    assert classify_compare(40000, 0, "__group_PFC__") == "IGNORED"
+    assert classify_compare(60000, 0, "__group_PFC__") == "REGRESSION"
+    assert classify_compare(9000, 0, "__group_CNP__") == "IGNORED"
+    assert classify_compare(1000, 0, "__group_Errors__") == "REGRESSION"
 
 
-def test_loss_wins_over_congestion(tmp_path):
-    v = _verdict(tmp_path, [_rec(i, rdma={"rx_rdma_cnp_pkts": 2, "req_rx_pkt_seq_err": 1})
-                            for i in range(3)])
-    assert v.reason == "loss/retransmit"
+def test_node_classes():
+    assert classify_node(60, 100) == "HOT"
+    assert classify_node(50, 100) == "MODERATE"
+    assert classify_node(10, 100) == "COLD"
+    assert classify_node(0, 0) == "COLD"
 
 
-def test_overlapped_and_unavailable_are_excluded(tmp_path):
-    lines = [_rec(i) for i in range(3)]
-    lines += [_rec(10, overlapped=True, rdma={"resp_rx_outouf_seq": 9})]
-    lines += [_rec(11, unavailable=True)]
-    v = _verdict(tmp_path, lines)
-    assert v.verdict == "CLEAN"
-    assert (v.n_usable, v.n_overlapped, v.n_unavailable) == (3, 1, 1)
+def test_formats():
+    assert fmt_count(999) == "999"
+    assert fmt_count(1000) == "1K"
+    assert fmt_count(1505) == "1.51K"   # half up
+    assert fmt_count(2500000) == "2.50M"
+    assert fmt_count(3 * 10**9) == "3G"
+    assert fmt_delta(0, 0) == "-"
+    assert fmt_delta(5, 0) == "+inf"
+    assert fmt_delta(110, 100) == "+10.0%"
 
 
-def test_inconclusive_when_too_few_or_mostly_overlapped(tmp_path):
-    assert _verdict(tmp_path, [_rec(i) for i in range(2)]).verdict == "INCONCLUSIVE"
-    lines = [_rec(i) for i in range(3)] + [_rec(10 + i, overlapped=True) for i in range(4)]
-    v = _verdict(tmp_path, lines)
-    assert v.verdict == "INCONCLUSIVE"
-    assert "4 overlapped" in v.reason
+# --- Measurements --------------------------------------------------------------
+def test_per_size_is_average_per_iteration_after_warmup(tmp_path):
+    lines = _chain(8, rdma={"resp_rx_outouf_seq": 3})
+    runs = load([_write(tmp_path, lines)], warmup=2, label="r")
+    row = per_size(runs[0])[("AllReduce", S)]
+    assert (row.iters_used, row.iters_total) == (6, 6)
+    assert row.per_iter["resp_rx_outouf_seq"] == 3
+    assert row.per_iter["tx_rdma_ucast_bytes"] == S
 
 
-def test_half_usable_is_not_inconclusive(tmp_path):
-    lines = [_rec(i) for i in range(3)] + [_rec(10 + i, overlapped=True) for i in range(3)]
-    assert _verdict(tmp_path, lines).verdict == "CLEAN"
+def test_per_size_skips_unusable_windows(tmp_path):
+    lines = [_rec(0, rdma={"resp_rx_outof_buf": 9}, overlapped=True),
+             _rec(1, unavailable=True), _rec(2, rdma={"resp_rx_outof_buf": 1})]
+    row = per_size(load([_write(tmp_path, lines)], warmup=0, label="r")[0])[("AllReduce", S)]
+    assert (row.iters_used, row.iters_total) == (1, 3)
+    assert row.per_iter["resp_rx_outof_buf"] == 1
 
 
-def test_unknown_driver_is_inconclusive(tmp_path):
-    lines = []
-    for i in range(3):
-        r = json.loads(_rec(i))
-        r["net_counters"]["devices"][0]["rdma"] = {"out_of_sequence": 0}
-        lines.append(json.dumps(r))
-    v = _verdict(tmp_path, lines)
-    assert v.verdict == "INCONCLUSIVE"
-    assert "not ionic" in v.reason
+def test_shared_nic_counted_once(tmp_path):
+    # Two ranks on one host read the same NIC: count it once (lowest rank).
+    a = _write(tmp_path, _chain(3, rdma={"rx_rdma_cnp_pkts": 5}, n_ranks=2), rank=0)
+    b = _write(tmp_path, [l.replace('"rank": 0', '"rank": 1') for l in
+                          _chain(3, rdma={"rx_rdma_cnp_pkts": 5}, n_ranks=2)], rank=1)
+    run = load([a, b], warmup=0, label="r")[0]
+    assert per_size(run)[("AllReduce", S)].per_iter["rx_rdma_cnp_pkts"] == 5
+    assert totals(whole_run(run))["rx_rdma_cnp_pkts"] == 15
 
 
-def test_no_traffic_is_inconclusive(tmp_path):
-    v = _verdict(tmp_path, [_rec(i, rdma={"tx_rdma_ucast_bytes": 0, "rx_rdma_ucast_bytes": 0})
-                            for i in range(3)])
-    assert v.verdict == "INCONCLUSIVE"
-    assert "no NIC traffic" in v.reason
+def test_whole_run_from_first_and_last_snapshot(tmp_path):
+    run = load([_write(tmp_path, _chain(4, rdma={"tx_rdma_ack_timeout": 2}))], warmup=0, label="r")[0]
+    t = totals(whole_run(run))
+    assert t["tx_rdma_ack_timeout"] == 8
+    assert t["tx_rdma_ucast_bytes"] == 4 * S
 
 
-def test_stale_ethtool_never_drives_a_verdict(tmp_path):
-    eth = {"stale": True, "frames_rx_pri_3": 1000}
-    v = _verdict(tmp_path, [_rec(i, ethtool=eth) for i in range(3)])
-    assert v.verdict == "CLEAN"
-    assert (v.pause_rx, v.pause_tx) == (3000, 0)
+def test_warmup_drops_same_sns_on_every_rank(tmp_path):
+    a = _write(tmp_path, [_rec(sn, n_ranks=2) for sn in range(5, 10)], rank=0)
+    b = _write(tmp_path, [_rec(sn, rank=1, n_ranks=2) for sn in range(5, 10)],
+               rank=1, host="nodeB")
+    run = load([a, b], warmup=2, label="r")[0]
+    assert sorted({w.sn for w in run.windows}) == [7, 8, 9]
 
 
-def test_never_usable_rank_is_inconclusive(tmp_path):
-    a = _write(tmp_path, [_rec(i, rank=0) for i in range(15)], rank=0)
-    b = _write(tmp_path, [_rec(i, rank=1, unavailable=True) for i in range(15)], rank=1)
-    recs, _ = load([a, b], warmup=0)
-    v = verdicts(recs)[KEY]
-    assert v.verdict == "INCONCLUSIVE"
-    assert "rank(s) 1" in v.reason
-
-
-def test_unlisted_counters_are_shown_not_judged(tmp_path):
-    v = _verdict(tmp_path, [_rec(i, rdma={"req_rx_dup_response": 5,
-                                          "tx_rdma_ccl_cts_pkts": 9}) for i in range(3)])
-    assert v.verdict == "INCONCLUSIVE"
-    assert v.other == {"req_rx_dup_response": (15, 3, [0])}
-
-
-def test_records_without_net_counters_are_counted(tmp_path):
-    v = _verdict(tmp_path, [_rec(i) for i in range(3)] + [_rec(9, net=False)])
-    assert v.n_no_net == 1
-    assert v.n_records == 3
-
-
-def test_comms_are_judged_separately(tmp_path):
-    a = _write(tmp_path, [_rec(i, n_ranks=1) for i in range(3)], comm="0x1")
-    b = _write(tmp_path, [_rec(i, n_ranks=1, rdma={"tx_rdma_ack_timeout": 1}) for i in range(3)], comm="0x2")
-    recs, _ = load([a, b], warmup=0)
-    vs = verdicts(recs)
-    assert vs[("0x1", "AllReduce", S)].verdict == "CLEAN"
-    assert vs[("0x2", "AllReduce", S)].verdict == "NETWORK_SUSPECT"
-
-
-def test_warmup_drops_the_same_sns_on_every_rank(tmp_path):
-    # Rank 1 is missing sn 0: dropping per file would desync the skew groups.
-    a = _write(tmp_path, [_rec(i, rank=0) for i in range(4)], rank=0)
-    b = _write(tmp_path, [_rec(i, rank=1) for i in range(1, 4)], rank=1)
-    recs, _ = load([a, b], warmup=2)
-    assert sorted((r.rank, r.sn) for r in recs) == [(0, 2), (0, 3), (1, 2), (1, 3)]
-
-
-def test_warmup_drops_lowest_sn_per_size(tmp_path):
-    recs, _ = load([_write(tmp_path, [_rec(i) for i in (4, 3, 2, 1, 0)])], warmup=2)
-    assert sorted(r.sn for r in recs) == [2, 3, 4]
-
-
-def test_filename_gives_host_and_comm(tmp_path):
-    recs, _ = load([_write(tmp_path, [_rec(0, rank=3)], rank=3, host="pit2-p03-g63", comm="0xdead")],
-                   warmup=0)
-    assert (recs[0].rank, recs[0].host, recs[0].comm) == (3, "pit2-p03-g63", "0xdead")
-
-
-def test_skew_correction_uses_the_slowest_rank(tmp_path):
-    # Rank 0's read ended 600 us before rank 1's: its kernel waited that long.
-    a = _write(tmp_path, [_rec(0, rank=0, exec_us=900.0, launch_wait_us=1000)], rank=0)
-    b = _write(tmp_path, [_rec(0, rank=1, exec_us=310.0, launch_wait_us=1600)], rank=1)
-    recs, _ = load([a, b], warmup=0)
-    correct_skew(recs)
-    got = {r.rank: r.corrected_us for r in recs}
-    assert got == {0: 300.0, 1: 310.0}
-
-
-def test_skew_correction_skips_groups_with_a_timed_out_read(tmp_path):
-    a = _write(tmp_path, [_rec(0, rank=0, exec_us=900.0, launch_wait_us=1000)], rank=0)
-    b = _write(tmp_path, [_rec(0, rank=1, exec_us=310.0, launch_wait_us=1000000,
-                               unavailable=True)], rank=1)
-    recs, _ = load([a, b], warmup=0)
-    correct_skew(recs)
-    assert all(r.corrected_us is None for r in recs)
-
-
-def test_skew_correction_skips_incomplete_groups(tmp_path):
-    a = _write(tmp_path, [_rec(0, rank=0, exec_us=900.0, launch_wait_us=1000, n_ranks=3)], rank=0)
-    b = _write(tmp_path, [_rec(0, rank=1, exec_us=310.0, launch_wait_us=1600, n_ranks=3)], rank=1)
-    recs, _ = load([a, b], warmup=0)
-    correct_skew(recs)
-    assert all(r.corrected_us is None for r in recs)
-
-
-def test_skew_correction_stays_within_a_comm(tmp_path):
-    a = _write(tmp_path, [_rec(0, rank=0, exec_us=500.0, launch_wait_us=1000, n_ranks=1)],
-               rank=0, comm="0x1")
-    b = _write(tmp_path, [_rec(0, rank=1, exec_us=500.0, launch_wait_us=5000, n_ranks=1)],
-               rank=1, comm="0x2")
-    recs, _ = load([a, b], warmup=0)
-    correct_skew(recs)
-    assert all(r.corrected_us == 500.0 for r in recs)
-
-
-def test_trace_has_windows_reads_and_counters(tmp_path):
-    a = _write(tmp_path, [_rec(0, n_ranks=1), _rec(1, rdma={"resp_rx_outouf_seq": 2}, n_ranks=1)],
-               rank=0)
-    recs, _ = load([a], warmup=0)
-    correct_skew(recs)
-    t = build_trace(recs)
-    ev = t["traceEvents"]
-    windows = [e for e in ev if e["ph"] == "X" and e["cat"] != "read"]
-    assert [w["cat"] for w in windows] == ["window", "suspect"]
-    assert windows[1]["args"]["drops"] == {"OOS (resp_rx_outouf_seq)": 2}
-    assert windows[0]["ts"] == 0 and windows[0]["dur"] == 600
-    assert sum(1 for e in ev if e.get("cat") == "read") == 2
-    assert any(e["ph"] == "M" and e["args"]["name"].startswith("nodeA") for e in ev)
-    drops = [e["args"] for e in ev if e["ph"] == "C" and e["name"].endswith("drops")]
-    assert drops == [{"OOS": 0}, {"OOS": 2}]
-    assert windows[0]["args"]["exec_corrected_us"] == 100.0
-
-
-def test_trace_keeps_comms_on_separate_threads(tmp_path):
-    a = _write(tmp_path, [_rec(0, n_ranks=1)], comm="0x1")
-    b = _write(tmp_path, [_rec(0, n_ranks=1)], comm="0x2")
-    recs, _ = load([a, b], warmup=0)
-    ev = build_trace(recs)["traceEvents"]
-    tids = {e["tid"] for e in ev if e["ph"] == "X" and e.get("cat") != "read"}
-    assert len(tids) == 2
-
-
-def test_main_prints_report_and_writes_trace(tmp_path, capsys):
-    path = _write(tmp_path, [_rec(i, n_ranks=1) for i in range(4)] +
-                  [json.dumps({"summary": {"complete": True, "net_counters": {
-                      "records": 4, "overlapped": 0, "unavailable": 0, "reads": 4,
-                      "read_us_mean": 1400.0, "read_us_max": 1500}}})])
-    trace = tmp_path / "t.json"
-    assert main([path, "--warmup", "0", "--trace", str(trace)]) == 0
+# --- Report --------------------------------------------------------------------
+def test_single_run_report(tmp_path, capsys):
+    _write(tmp_path, _chain(6, rdma={"rx_rdma_cnp_pkts": 2000}))
+    assert main([str(tmp_path), "--warmup", "1"]) == 0
     out = capsys.readouterr().out
-    assert "CLEAN" in out
-    assert "EXEC TIME" in out
-    assert "Counter reads: 4, mean 1400 us" in out
-    assert json.loads(trace.read_text())["traceEvents"]
+    assert "Performance : 10.00 GB/s (avg busbw)" in out
+    assert "CNP:         ACTIVE" in out
+    assert "Errors:      CLEAN" in out
+    assert "OVERALL VERDICT" not in out
+    assert "CNP at 1M: rx_rdma_cnp_pkts 2K (per iteration)" in out
+    assert "per-size counts approximate" in out
+    assert "(no PFC frames)" in out
 
 
-def test_inputs_are_found_recursively(tmp_path):
-    sub = tmp_path / "run" / "r1"
-    sub.mkdir(parents=True)
-    _write(sub, [_rec(0)])
-    recs, _ = load([str(tmp_path / "run")], warmup=0)
-    assert len(recs) == 1
+def test_strict_run_is_exact(tmp_path, capsys):
+    _write(tmp_path, _chain(3, coordinated=True))
+    main([str(tmp_path), "--warmup", "0"])
+    out = capsys.readouterr().out
+    assert "Counter accuracy: exact per collective" in out
+    assert "Counts near size boundaries" not in out
 
 
-def test_main_without_net_counters_fails(tmp_path, capsys):
-    path = _write(tmp_path, [_rec(i, net=False) for i in range(3)])
-    assert main([path, "--warmup", "0"]) == 1
-    assert "ACCL_NET_COUNTERS=1" in capsys.readouterr().out
+def test_compare_regression(tmp_path, capsys):
+    _write(tmp_path, _chain(4, rdma={"resp_rx_outouf_seq": 3000}), sub="run")
+    _write(tmp_path, _chain(4), sub="base")
+    main([str(tmp_path / "run"), "--baseline", str(tmp_path / "base"), "--warmup", "0"])
+    out = capsys.readouterr().out
+    assert "Errors:      ACTIVE / REGRESSION" in out
+    assert "OVERALL VERDICT: REGRESSION DETECTED" in out
+    assert "Errors at 1M: resp_rx_outouf_seq 3K (per iteration)" in out
 
 
-def test_skew_groups_by_sn(tmp_path):
-    a = _write(tmp_path, [_rec(0, rank=0, exec_us=900.0, launch_wait_us=1000),
-                          _rec(1, rank=0, exec_us=400.0, launch_wait_us=1000)], rank=0)
-    b = _write(tmp_path, [_rec(0, rank=1, exec_us=310.0, launch_wait_us=1600),
-                          _rec(1, rank=1, exec_us=400.0, launch_wait_us=1000)], rank=1)
-    recs, _ = load([a, b], warmup=0)
-    correct_skew(recs)
-    got = {(r.rank, r.sn): r.corrected_us for r in recs}
-    assert got == {(0, 0): 300.0, (1, 0): 310.0, (0, 1): 400.0, (1, 1): 400.0}
+def test_compare_no_regression(tmp_path, capsys):
+    _write(tmp_path, _chain(4, rdma={"rx_rdma_cnp_pkts": 10}), sub="run")
+    _write(tmp_path, _chain(4, rdma={"rx_rdma_cnp_pkts": 10}), sub="base")
+    main([str(tmp_path / "run"), "--baseline", str(tmp_path / "base"), "--warmup", "0"])
+    out = capsys.readouterr().out
+    assert "Performance : NO CHANGE" in out
+    assert "OVERALL VERDICT: NO REGRESSION" in out
 
 
-def test_skew_correction_clamps_at_zero(tmp_path):
-    a = _write(tmp_path, [_rec(0, rank=0, exec_us=100.0, launch_wait_us=0)], rank=0)
-    b = _write(tmp_path, [_rec(0, rank=1, exec_us=100.0, launch_wait_us=5000)], rank=1)
-    recs, _ = load([a, b], warmup=0)
-    correct_skew(recs)
-    assert {r.rank: r.corrected_us for r in recs} == {0: 0.0, 1: 100.0}
+def test_compare_size_mismatch_is_invalid(tmp_path, capsys):
+    _write(tmp_path, _chain(3), sub="run")
+    _write(tmp_path, _chain(3, size=4 * S), sub="base")
+    main([str(tmp_path / "run"), "--baseline", str(tmp_path / "base"), "--warmup", "0"])
+    cap = capsys.readouterr()
+    assert "OVERALL VERDICT: INVALID COMPARISON" in cap.out
+    assert "different message sizes" in cap.err
 
 
-def test_tx_per_coll_and_pause_use_usable_records_only(tmp_path):
-    eth = {"stale": True, "frames_tx_pri_3": 4, "rx_pripause_3_1us_count": 99}
-    lines = [_rec(i, ethtool=eth) for i in range(3)]
-    lines.append(_rec(9, overlapped=True, rdma={"tx_rdma_ucast_bytes": 10 * S}, ethtool=eth))
-    v = _verdict(tmp_path, lines)
-    assert v.tx_bytes_per_coll == S
-    assert (v.pause_rx, v.pause_tx) == (0, 12)
+def test_compare_mode_mismatch_not_comparable(tmp_path, capsys):
+    _write(tmp_path, _chain(3), sub="run")
+    _write(tmp_path, _chain(3, coordinated=True), sub="base")
+    main([str(tmp_path / "run"), "--baseline", str(tmp_path / "base"), "--warmup", "0"])
+    cap = capsys.readouterr()
+    assert "Performance : NOT COMPARABLE" in cap.out
+    assert "accuracy modes differ" in cap.err
 
 
-def test_devices_are_summed(tmp_path):
-    r = json.loads(_rec(0))
-    r["net_counters"]["devices"].append(
-        {"name": "rdma1", "rdma": {"tx_rdma_ucast_bytes": S, "req_rx_pkt_seq_err": 1},
-         "ethtool": None})
-    lines = [json.dumps(r)] + [_rec(i) for i in range(1, 3)]
-    v = _verdict(tmp_path, lines)
-    assert v.drivers["req_rx_pkt_seq_err"] == (1, 1, [0])
-    assert v.tx_bytes_per_coll == S * 4 / 3
-
-
-def test_trace_marks_overlapped_windows(tmp_path):
-    a = _write(tmp_path, [_rec(0, overlapped=True, n_ranks=1)])
-    recs, _ = load([a], warmup=0)
-    cats = [e["cat"] for e in build_trace(recs)["traceEvents"] if e["ph"] == "X"]
-    assert cats == ["overlapped", "read"]
-
-
-def test_incomplete_summary_warns(tmp_path, capsys):
-    path = _write(tmp_path, [_rec(0, n_ranks=1),
-                             json.dumps({"summary": {"complete": False, "net_counters": {
-                                 "records": 1, "queued_at_finalize": 1}}})])
-    main([path, "--warmup", "0"])
-    captured = capsys.readouterr()
-    assert "complete=false" in captured.err
-    assert "1 not written by finalize" in captured.out
-
-
-def test_bad_lines_and_foreign_files_are_tolerated(tmp_path):
-    p = tmp_path / "other.jsonl"
-    p.write_text("not json\n" + _rec(0, n_ranks=1) + "\n")
-    recs, _ = load([str(p)], warmup=0)
-    assert len(recs) == 1 and recs[0].host == "?"
-
-
-def test_missing_rank_file_cannot_be_clean(tmp_path):
-    path = _write(tmp_path, [_rec(i, rank=0, n_ranks=2) for i in range(3)])
-    rs, _ = load([path], warmup=0)
-    v = verdicts(rs)[KEY]
-    assert v.verdict == 'INCONCLUSIVE'
-    assert 'rank(s) 1' in v.reason
-
-
-def test_rank_without_counters_cannot_be_clean(tmp_path):
-    a = _write(tmp_path, [_rec(i, rank=0) for i in range(3)])
-    b = _write(tmp_path, [_rec(i, rank=1, net=False) for i in range(3)], rank=1)
-    rs, _ = load([a, b], warmup=0)
-    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
-
-
-def test_raw_snapshots_are_deduplicated_and_activity_is_separate(tmp_path):
+def test_pfc_priority_pause_time(tmp_path, capsys):
     lines = []
-    for i in range(3):
-        r = json.loads(_rec(i, n_ranks=1))
-        n = r['net_counters']
-        n.update(completion_verified=True, coordinated=True,
-                 collective_start_cpu_us=1000*i+150, collective_complete_cpu_us=1000*i+500,
-                 snapshot_before={'id': i, 'read_start_us': 1000*i, 'read_end_us': 1000*i+100},
-                 snapshot_after={'id': i+1, 'read_start_us': 1000*(i+1), 'read_end_us': 1000*(i+1)+100})
-        lines.append(json.dumps(r))
-    rs, _ = load([_write(tmp_path, lines)], warmup=0)
-    es = build_trace(rs)['traceEvents']
-    reads = [e for e in es if e.get('cat') == 'read']
-    activity = [e for e in es if e.get('cat') == 'collective']
-    windows = [e for e in es if e.get('cat') == 'window']
-    assert len(reads) == 4 and len(activity) == len(windows) == 3
-    assert activity[0]['dur'] == 350 and windows[0]['dur'] == 900
-    assert activity[0]['tid'] != windows[0]['tid'] != reads[0]['tid']
-    assert activity[0]["args"]["coordinated"] is True
+    for sn in range(2):
+        eth = {"frames_rx_pripause": 100 * (sn + 1), "frames_rx_pri_3": 100 * (sn + 1),
+               "rx_pripause_3_1us_count": 59 * (sn + 1)}
+        rec = json.loads(_rec(sn))
+        before = {"frames_rx_pripause": 100 * sn, "frames_rx_pri_3": 100 * sn,
+                  "rx_pripause_3_1us_count": 59 * sn}
+        rec["net_counters"]["snapshot_before"]["devices"][0]["ethtool"] = before
+        rec["net_counters"]["snapshot_after"]["devices"][0]["ethtool"] = eth
+        lines.append(json.dumps(rec))
+    _write(tmp_path, lines)
+    main([str(tmp_path), "--warmup", "0"])
+    out = capsys.readouterr().out
+    # Span: first read start 0 -> last read end 1600 us; 118 us paused on priority 3.
+    assert re.search(r"frames_rx_pripause +200 +NEGLIGIBLE", out)
+    assert re.search(r"nodeA +rdma0 +3 +200 +0 +7.375% +0.000%", out)
 
 
-def test_discontinuous_counter_window_is_not_usable(tmp_path):
-    lines = []
-    for i in range(3):
-        r = json.loads(_rec(i, n_ranks=1))
-        r['net_counters']['counter_discontinuities'] = ['rdma0/resp_rx_outouf_seq']
-        lines.append(json.dumps(r))
-    rs, _ = load([_write(tmp_path, lines)], warmup=0)
-    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
-    assert not any(e['ph'] == 'C' for e in build_trace(rs)['traceEvents'])
+def test_detail_and_sizes_filter(tmp_path, capsys):
+    _write(tmp_path, _chain(3) + _chain(3, size=4 * S))
+    main([str(tmp_path), "--warmup", "0", "--detail", "--sizes", "4M"])
+    out = capsys.readouterr().out
+    assert "=== Detail: nodeA" in out
+    table = out.split("=== Per-Size Counters")[1].split("\n\n")[0]
+    assert "4M" in table and " 1M " not in table
 
 
-def test_uncoordinated_windows_cannot_be_clean(tmp_path):
-    lines = []
-    for i in range(3):
-        r = json.loads(_rec(i, n_ranks=1))
-        r['net_counters']['coordinated'] = False
-        lines.append(json.dumps(r))
-    rs, _ = load([_write(tmp_path, lines)], warmup=0)
-    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
+def test_no_net_counters_exits_1(tmp_path):
+    (tmp_path / "accl_profiler_rank0_h_pid1_0x1.jsonl").write_text(
+        json.dumps({"header": {"rank": 0}, "coll_perf": {"coll": "AllReduce"}}) + "\n")
+    assert main([str(tmp_path)]) == 1
 
 
-def test_legacy_windows_without_completion_proof_cannot_be_clean(tmp_path):
-    lines = []
-    for i in range(3):
-        r = json.loads(_rec(i, n_ranks=1))
-        r['net_counters'].pop('completion_verified')
-        r['net_counters'].pop('coordinated')
-        lines.append(json.dumps(r))
-    rs, _ = load([_write(tmp_path, lines)], warmup=0)
-    assert verdicts(rs)[KEY].verdict == 'INCONCLUSIVE'
+def test_missing_path_exits_2(tmp_path):
+    with pytest.raises(SystemExit) as e:
+        main([str(tmp_path / "nope")])
+    assert e.value.code == 2
 
 
-def _passive(lines):
-    out = []
-    for line in lines:
-        r = json.loads(line)
-        r["net_counters"]["coordinated"] = False
-        out.append(json.dumps(r))
-    return out
+def test_trace(tmp_path):
+    _write(tmp_path, _chain(2, rdma={"resp_rx_outof_buf": 1}))
+    out = tmp_path / "t.json"
+    assert main([str(tmp_path), "--warmup", "0", "--trace", str(out)]) == 0
+    ev = json.loads(out.read_text())["traceEvents"]
+    windows = [e for e in ev if e.get("ph") == "X" and e["tid"] % 10 == 2]
+    assert len(windows) == 2
+    assert windows[0]["args"]["drops"] == {"OOB (resp_rx_outof_buf)": 1}
+    assert windows[0]["args"]["window"] == "suspect"
+    assert any(e.get("ph") == "C" and e["name"] == "rank 0 drops" and e["args"] == {"OOB": 1}
+               for e in ev)
 
 
-def test_passive_loss_is_still_suspect(tmp_path):
-    v = _verdict(tmp_path, _passive([_rec(i, rdma={"resp_rx_outouf_seq": 2}) for i in range(3)]))
-    assert v.verdict == "NETWORK_SUSPECT"
-    assert v.reason == "loss/retransmit (uncoordinated windows)"
-
-
-def test_passive_without_symptoms_cannot_be_clean(tmp_path):
-    v = _verdict(tmp_path, _passive([_rec(i) for i in range(4)]))
-    assert v.verdict == "INCONCLUSIVE"
-    assert "ACCL_NET_STRICT=1" in v.reason
-
-
-def test_trace_shows_only_selected_counters(tmp_path):
-    eth = {"stale": True, "frames_rx_pri_3": 7, "rx_pripause_3_1us_count": 500}
-    a = _write(tmp_path, [_rec(0, n_ranks=1, ethtool=eth,
-                               rdma={"rx_rdma_cnp_pkts": 3, "req_rx_dup_response": 1})])
-    recs, _ = load([a], warmup=0)
-    ev = build_trace(recs)["traceEvents"]
-    w = [e for e in ev if e["ph"] == "X" and e["cat"] != "read"][0]["args"]
-    assert w["tx_bytes"] == S and w["rx_bytes"] == S
-    assert w["ecn_cnp"] == {"CNP received (rx_rdma_cnp_pkts)": 3}
-    assert w["pfc_frames (stale)"] == {"rx prio 3": 7}
-    assert "drops" not in w
-    assert not any("dup_response" in k for k in w)
-    tracks = {e["name"] for e in ev if e["ph"] == "C"}
-    assert tracks == {"rank 0 MB per collective", "rank 0 ECN/CNP", "rank 0 PFC frames (stale)"}
+def test_trace_marks_exact_and_approximate(tmp_path):
+    _write(tmp_path, _chain(1, coordinated=True), sub="s")
+    _write(tmp_path, _chain(1), sub="p")
+    for sub, quality, color in (("s", "exact", "good"), ("p", "approximate", "yellow")):
+        out = tmp_path / f"{sub}.json"
+        main([str(tmp_path / sub), "--warmup", "0", "--trace", str(out)])
+        w = [e for e in json.loads(out.read_text())["traceEvents"]
+             if e.get("ph") == "X" and e["tid"] % 10 == 2][0]
+        assert (w["args"]["window"], w["cname"]) == (quality, color)
+    assert build_trace([]) ["traceEvents"] == []

@@ -174,7 +174,7 @@ plan, one GPU per process, and one active communicator per process. Every rank
 must enable it consistently. The measured NICs must be isolated from unrelated
 producers. Graphs, host-callback plans, grouped/P2P plans, symmetric/GPU-initiated
 operations, and CE/RMA paths are unsupported. Unsupported or unverified windows
-cannot produce CLEAN. Aborted runs can lose the final snapshot and report it.
+are reported as approximate. Aborted runs can lose the final snapshot and report it.
 Every rank takes part in the boundary exchange of every plan that contains a
 collective, voting invalid when its plan is unsupported, so one rank's local
 state cannot leave its peers waiting; P2P-only plans take no part.
@@ -204,10 +204,10 @@ proxy operation is counted before posting. Coll stop closes registration.
 The completion predicate waits for the registered count as well as all GPU
 channels and all observed proxy operations. Profiler ABI layouts are unchanged.
 The events go only to this plugin (`ACCL-Profiler`). Older RCCL builds without
-this protocol produce unverified counter windows: still measured, never CLEAN.
+this protocol produce unverified counter windows: still measured, never exact.
 
 RDMA netlink STAT_GET reads bypass the sysfs lifespan cache. ethtool pause/PFC
-counters are stale context on ionic and never determine a collective verdict.
+counters refresh about every 5 s on ionic: exact over a whole run, stale per collective.
 Software counters require `RCCL_TELEMETRY_ENABLE=1`. AINIC ucast hardware bytes
 include CTS control traffic; they are not identical to application payload bytes.
 
@@ -232,18 +232,17 @@ Configuration retained for passive compatibility:
 | Variable | Default | Meaning |
 |---|---|---|
 | `ACCL_NET_COUNTERS` | off | Enable counters |
-| `ACCL_NET_STRICT` | off | Coordinate accuracy-first boundaries; required for CLEAN |
+| `ACCL_NET_STRICT` | off | Coordinate accuracy-first boundaries; exact per-size counts |
 | `ACCL_NET_DEVICES` | required | Explicit RDMA devices, port 1 |
 | `ACCL_NET_DEVICE_SELECT` | all | `local_rank` uses rank modulo uniform ranks/node; verify routing |
 | `ACCL_NET_WAIT_MS` | 1000 | Local completion/read timeout |
 | `ACCL_NET_GRACE_US` | 1000 | Passive-mode grace only |
 
-`net_tel_report.py OUTPUT --warmup 0 --trace trace.json` reports per-communicator,
-collective, and size. CLEAN requires registered/coordinated valid windows, all
-expected ranks, and at least three complete collective instances. Recognized
-loss/congestion in any measured window, passive mode included, produces
-NETWORK_SUSPECT; unclassified non-volume counter changes produce INCONCLUSIVE.
-Missing rank files cannot imply a healthy network.
+`net_tel_report.py RUN [--baseline BASE]` prints a network report to stdout:
+PFC, CNP/ECN and error (drop) counter groups, whole-run totals per counter and
+node, and per-size averages per iteration. With `--baseline` it compares the two
+runs and prints an overall verdict. The thresholds and rules are in `--help`.
+`--trace FILE` also writes a Perfetto trace.
 
 The Perfetto trace has separate lanes for host-observed collective activity,
 NIC totals for that collective, and deduplicated raw hardware snapshots. Select
@@ -253,10 +252,8 @@ presented as an exactly aligned GPU timeline. Counter graphs show per-collective
 totals, not instantaneous rates. Each host's CLOCK_MONOTONIC origin is normalized
 independently: timelines from different hosts are not clock synchronized.
 
-Measured GPU times are reported unchanged. `--estimate-read-skew` optionally
-shows the older heuristic subtraction with an explicit warning; it does not
-recover the uninstrumented execution time. Snapshot waits and coordination alter
-the workload's natural overlap and congestion behavior.
+Counter reads and snapshot waits slow collectives and change their natural
+overlap and congestion. Compare only against a baseline made the same way.
 
 ## Requirements
 

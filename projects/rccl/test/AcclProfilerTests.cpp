@@ -2892,7 +2892,8 @@ struct FakeNic {
     std::mutex mu;
     CounterList counters = {{"tx_rdma_ucast_bytes", 0}, {"tx_rdma_ucast_pkts", 0},
                             {"rx_rdma_ucast_bytes", 0}, {"rx_rdma_ucast_pkts", 0},
-                            {"resp_rx_outouf_seq", 0}, {"tx_rdma_retx_pkts", 0}};
+                            {"resp_rx_outouf_seq", 0}, {"tx_rdma_retx_pkts", 0},
+                            {"rx_rdma_mtu_discard_pkts", 0}, {"req_tx_retry_excd_err", 0}};
     std::vector<std::pair<std::string, uint32_t>> devs = {{"mlx5_0", 0}, {"rdma0", 3}, {"rdma1", 4}};
     std::deque<std::vector<char>> replies;
     std::vector<std::vector<char>> requests;
@@ -3311,6 +3312,10 @@ TEST(AcclNetCounters, ChainsSnapshotsAcrossCollectives) {
                 ASSERT_NE(coll, nullptr);
                 nic.Add("tx_rdma_ucast_bytes", 1000 * (i + 1));
                 nic.Add("tx_rdma_ucast_pkts", 1);
+                if (i == 2) {
+                    nic.Add("rx_rdma_mtu_discard_pkts", 2);
+                    nic.Add("req_tx_retry_excd_err", 1);
+                }
                 gFakeSwTx += 100 * (i + 1);
                 NetCompleteColl(ctx, coll);
             }
@@ -3336,6 +3341,8 @@ TEST(AcclNetCounters, ChainsSnapshotsAcrossCollectives) {
                 EXPECT_EQ(JsonNumber(recs[i], "rx_bytes"), 200.0 * (i + 1));
                 EXPECT_EQ(recs[i].back(), '}');
             }
+            EXPECT_EQ(JsonNumber(recs[2], "rx_rdma_mtu_discard_pkts"), 2.0);
+            EXPECT_EQ(JsonNumber(recs[2], "req_tx_retry_excd_err"), 1.0);
             // The "after" of N is the "before" of N+1.
             EXPECT_EQ(JsonNumber(recs[0], "after_ts_us"), JsonNumber(recs[1], "before_ts_us"));
             EXPECT_EQ(JsonNumber(recs[1], "after_ts_us"), JsonNumber(recs[2], "before_ts_us"));
