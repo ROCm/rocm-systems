@@ -49,12 +49,13 @@ class SDMAWriteDataPacket : public SDMAPacket {
     virtual const void *GetPacket() const  { return packetData; }
     // @breif Initialise the packet
     void InitPacket(void* destAddr, unsigned int ndw, void *data, unsigned int packetSizeOffset = 0);
+    void InitPacket_v8(void* destAddr, unsigned int ndw, void *data, unsigned int packetSizeOffset = 0);
     // @returns Packet size in bytes
     virtual unsigned int SizeInBytes() const { return packetSize; }
 
  protected:
     // SDMA_PKT_WRITE_UNTILED struct contains all the packet's data
-    SDMA_PKT_WRITE_UNTILED *packetData;
+    void *packetData;
     unsigned int packetSize;
 };
 
@@ -66,6 +67,8 @@ class SDMACopyDataPacket : public SDMAPacket {
 
     virtual ~SDMACopyDataPacket(void) {}
 
+    void InitPacket(void *const dst[], void *src, int n, unsigned int size);
+    void InitPacket_v8(void *const dst[], void *src, int n, unsigned int size);
     // @returns Pointer to the packet
     virtual const void *GetPacket() const  { return packetData; }
 
@@ -74,7 +77,7 @@ class SDMACopyDataPacket : public SDMAPacket {
 
  protected:
     // SDMA_PKT_COPY_LINEAR struct contains all the packet's data
-    SDMA_PKT_COPY_LINEAR  *packetData;
+    void *packetData;
 
     unsigned int packetSize;
 };
