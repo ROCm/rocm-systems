@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 #include <span>
@@ -202,8 +203,8 @@ struct PcAddressBuilder {
 /// @param target Concrete GPU target whose target-specific instruction semantics
 ///        apply. Invalid selects the architecture's default concrete target.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
-    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders = {},
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text,
+    rocjitsu::IsaFamily arch, std::span<const uint64_t> extra_leaders = {},
     ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
     std::vector<PcAddressBuilder> *pc_builders = nullptr,
     std::span<const uint64_t> extra_split_points = {},

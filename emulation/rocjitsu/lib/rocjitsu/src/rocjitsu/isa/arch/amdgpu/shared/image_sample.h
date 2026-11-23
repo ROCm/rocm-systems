@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_access.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_footprint.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_sampler.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/graphics/image_cube.h"
 #include "rocjitsu/vm/graphics/image_filter.h"
 #include "util/data_types.h"
@@ -219,7 +220,7 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
   if (!resource.width)
     return util::Result::success();
   const bool gfx10 =
-      wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+      wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 || wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
   if (resource.has_unqualified_sample_controls(wf.cu().arch()))
     return fail(InstructionExecutionError::UnimplementedInstruction);
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
@@ -227,7 +228,7 @@ inline util::Result prepare_image_sample(Wavefront &wf, VectorMemState &state,
   // _CL for minimum LOD. The older hardware behavior has not been qualified.
   if (fields.lod_clamp && (gfx9 || gfx10))
     return fail(InstructionExecutionError::UnimplementedInstruction);
-  const bool gfx12 = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = wf.cu().arch() == rocjitsu::IsaFamily::Rdna4;
   const uint32_t type = gfx9 ? resource.type : fields.dim + kImage1d;
   if (!gfx9 && !image_sample_view_matches(fields.dim, resource.type))
     return fail(InstructionExecutionError::UnimplementedInstruction);

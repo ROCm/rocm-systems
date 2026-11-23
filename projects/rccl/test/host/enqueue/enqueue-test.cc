@@ -2065,8 +2065,8 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_TopoGetAlgoTimeFailure_Propagates) 
             updateCollCostTable(cc.get(), &task, 1 << 20, 0, 0, 1, 0, tbl.ptr()));
 }
 
-TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeLargeAllReduce_RingNotPenalised) {
-  // At the DDA LL128 ceiling the ring is exempt; one byte below it is penalized.
+TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeAllReduce_RingNotPenalised) {
+  // With DDA LL128 on, the ring is exempt at any size, including just below the ceiling.
   constexpr size_t kCeiling = 256ULL << 20;
   for (int nRanks : {kFp8RingPenaltyRanks + 1, 16, 32}) {
     for (auto dt : {ncclFloat8e4m3, ncclFloat8e5m2}) {
@@ -2079,8 +2079,7 @@ TEST_F(EnqueueMicrotest, UpdateCollCostTable_Fp8Gfx1250SingleNodeLargeAllReduce_
         auto task = CostTask(ncclFuncAllReduce, dt);
         ScriptAllTimes(2.0f);
         ASSERT_EQ(ncclSuccess, updateCollCostTable(big.get(), &task, nBytes, 0, 0, 1, 0, tbl.ptr()));
-        const float ring = nBytes >= kCeiling ? 2.0f : 2.0f * 1024.0f;
-        EXPECT_FLOAT_EQ(ring, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE])
+        EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_RING][NCCL_PROTO_SIMPLE])
             << "nRanks=" << nRanks << " dtype=" << int(dt) << " nBytes=" << nBytes;
         EXPECT_FLOAT_EQ(2.0f, tbl.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE])
             << "nRanks=" << nRanks << " dtype=" << int(dt) << " nBytes=" << nBytes;
