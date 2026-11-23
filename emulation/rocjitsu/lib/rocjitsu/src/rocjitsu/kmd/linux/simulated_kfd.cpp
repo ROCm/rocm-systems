@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/host_access_guard.h"
@@ -338,7 +339,7 @@ bool SimulatedKfd::supports_pm4_gds_wave_id_reset(uint32_t render_minor) const {
   if (!cp || cp->compute_units().empty())
     return false;
   const auto arch = cp->compute_units().front()->arch();
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
 }
 
 int SimulatedKfd::submit_pm4(uint32_t render_minor, uint64_t queue_key,
@@ -4789,7 +4790,7 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
     case AMDKFD_IOC_GET_CLOCK_COUNTERS: {
       const auto *args = static_cast<const kfd_ioctl_get_clock_counters_args *>(arg);
       const auto *device = args ? find_gpu(args->gpu_id) : nullptr;
-      const auto arch = device && device->soc ? device->soc->arch() : ROCJITSU_CODE_ARCH_INVALID;
+      const auto arch = device && device->soc ? device->soc->arch() : rocjitsu::IsaFamily::Invalid;
       return fill_get_clock_counters_ioctl(arg, amdgpu::gpu_clock_mhz(arch));
     }
     case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
@@ -6408,8 +6409,8 @@ int SimulatedKfd::get_process_apertures_ioctl(void *arg) {
 kfd_process_device_apertures SimulatedKfd::gpu_apertures(uint32_t ordinal) const {
   // GFX10 SH_MEM_BASES represents each aperture by its high 16-bit tag.
   const bool gfx10 =
-      ordinal < gpus_.size() && (gpus_[ordinal].soc->arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
-                                 gpus_[ordinal].soc->arch() == ROCJITSU_CODE_ARCH_RDNA2);
+      ordinal < gpus_.size() && (gpus_[ordinal].soc->arch() == rocjitsu::IsaFamily::Rdna1 ||
+                                 gpus_[ordinal].soc->arch() == rocjitsu::IsaFamily::Rdna2);
   const uint64_t offset = gfx10 ? 0 : static_cast<uint64_t>(ordinal) * kApertureStride;
   const uint64_t lds_base = 0x1000000000000ULL + offset;
   const uint64_t scratch_base = 0x2000000000000ULL + offset;
@@ -7814,25 +7815,38 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
             amdgpu::SdmaPacketCallbacks callbacks;
             callbacks.timestamp = [arch] { return amdgpu::gpu_timestamp(arch); };
             callbacks.acquire_cache_maintenance =
-                [ingress_access, cache_coherence, gpu_id,
-                 resolve_writeback](amdgpu::SdmaCacheOperation operation) {
-                  const std::shared_ptr<CuIngressAccess> access = ingress_access.lock();
-                  if (!access)
-                    throw util::Exception(std::string_view("KFD SDMA cache owner is gone"));
-                  {
-                    std::lock_guard lock(access->mutex);
-                    if (!access->driver)
-                      throw util::Exception(std::string_view("KFD SDMA cache owner is gone"));
-                  }
-                  // Resolution reenters CuIngressAccess after dropping all cache
-                  // locks. Never hold its mutex across group acquisition.
-                  const std::array domains{amdgpu::DeviceCacheDomain{cache_coherence, gpu_id}};
-                  auto leases = amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
-                      domains, operation, resolve_writeback);
-                  if (leases.size() != domains.size())
-                    throw util::Exception(std::string_view("KFD SDMA cache lease is missing"));
-                  return std::move(leases.front());
-                };
+                [ingress_access, cache_coherence, gpu_id, context,
+                 resolve_writeback](amdgpu::SdmaCacheOperation operation)
+                -> util::FailureOr<amdgpu::CacheMaintenanceResult> {
+              auto report = [context](std::string_view message) {
+                util::Logger::warn(
+                    std::format("SDMA{} queue {}:{} stopped after cache maintenance failure: {}",
+                                context.engine_id, context.process_id, context.queue_id, message));
+              };
+              const util::DiagnosticEmitter emit_error(report);
+              const std::shared_ptr<CuIngressAccess> access = ingress_access.lock();
+              if (!access)
+                return emit_error.emit() << "KFD SDMA cache owner is gone";
+              {
+                std::lock_guard lock(access->mutex);
+                if (!access->driver)
+                  return emit_error.emit() << "KFD SDMA cache owner is gone";
+              }
+              // Resolution reenters CuIngressAccess after dropping all cache
+              // locks. Never hold its mutex across group acquisition.
+              const std::array domains{amdgpu::DeviceCacheDomain{cache_coherence, gpu_id}};
+              auto leases = amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+                  domains, operation, resolve_writeback, emit_error);
+              if (leases.failed())
+                return util::Result::failure();
+              if (leases.value().outcome == amdgpu::CacheMaintenanceOutcome::Retry)
+                return amdgpu::CacheMaintenanceResult{.outcome =
+                                                          amdgpu::CacheMaintenanceOutcome::Retry};
+              if (leases.value().leases.size() != domains.size())
+                throw util::Exception(std::string_view("KFD SDMA cache lease is missing"));
+              return amdgpu::CacheMaintenanceResult{.lease =
+                                                        std::move(leases.value().leases.front())};
+            };
             callbacks.admit_memory_ingress = [ingress_access, gpu_id,
                                               process_id = context.process_id](
                                                  const amdgpu::GpuVmAccess &expected,
@@ -9488,7 +9502,7 @@ uint32_t internal_trapsts_from_gfx1250(const kmd::CwsrWaveState &state) {
   return amdgpu::update_trapsts_from_gfx12_excp_flag_user(trapsts, state.excp_flag_user);
 }
 
-kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t arch,
+kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rocjitsu::IsaFamily arch,
                                          bool runtime_save = false) {
   kmd::CwsrWaveState state;
   const bool gfx12_5 = kmd::cwsr_layout_kind(arch) == kmd::CwsrLayoutKind::Gfx12_5;
@@ -9548,8 +9562,8 @@ kmd::CwsrWaveState build_cwsr_wave_state(amdgpu::Wavefront &wf, rj_code_arch_t a
   state.scratch_scoreboard_id = wf.scratch_scoreboard_id();
   state.shader_engine_id = wf.shader_engine_id();
   state.spi_ttmps_setup = true;
-  state.num_sgprs = arch == ROCJITSU_CODE_ARCH_CDNA3 ? cdna3::physical_sgpr_count(wf.num_sgprs())
-                                                     : wf.num_sgprs();
+  state.num_sgprs = arch == rocjitsu::IsaFamily::Cdna3 ? cdna3::physical_sgpr_count(wf.num_sgprs())
+                                                       : wf.num_sgprs();
   state.num_vgprs = wf.num_vgprs();
 
   state.sgprs.resize(state.num_sgprs);
@@ -10257,7 +10271,7 @@ bool SimulatedKfd::on_wave_sendmsg(amdgpu::Wavefront &wave, uint32_t message,
     return false;
 
   const auto arch = wave.cu().arch();
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   // GFX10 SQ auto interrupts carry 23 valid event ID bits in M0. KFD
   // allocates nonzero event IDs; its zero-bit broadcast is a separate IRQ.
   const auto signal_wave_event = [&] {
@@ -10996,7 +11010,7 @@ UniqueDriverFd SimulatedKfd::duplicate_debug_target_mem(pid_t target_pid) const 
 }
 
 void SimulatedKfd::apply_cwsr_to_wave(amdgpu::Wavefront &wave, const kmd::CwsrWaveState &state,
-                                      rj_code_arch_t arch) {
+                                      rocjitsu::IsaFamily arch) {
   constexpr uint32_t kModeDebugEnMask = 1u << 11;
   constexpr uint32_t kStatusHaltMask = amdgpu::Wavefront::kStatusHaltMask;
   const bool gfx12_5 = kmd::cwsr_layout_kind(arch) == kmd::CwsrLayoutKind::Gfx12_5;
@@ -12422,9 +12436,9 @@ int SimulatedKfd::set_xnack_mode_ioctl(KfdProcess &proc, void *arg) {
   if (args->xnack_enabled != 0) {
     for (const auto &gpu : gpus_) {
       const auto arch = gpu.soc->arch();
-      if (arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_CDNA2 &&
-          arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4 &&
-          arch != ROCJITSU_CODE_ARCH_CDNA5)
+      if (arch != rocjitsu::IsaFamily::Cdna1 && arch != rocjitsu::IsaFamily::Cdna2 &&
+          arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4 &&
+          arch != rocjitsu::IsaFamily::Cdna5)
         return -EPERM;
     }
   }

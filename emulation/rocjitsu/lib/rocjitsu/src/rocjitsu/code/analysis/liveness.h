@@ -15,6 +15,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/result.h"
 #include "rocjitsu/vm/amdgpu/vgpr_msb.h"
@@ -41,13 +42,14 @@ class Instruction;
 /// instruction_offset is its byte offset, defaulting to inst.src_loc(). Direct
 /// decoder callers must supply the offset when src_loc() does not describe text.
 [[nodiscard]] bool
-may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text, rj_code_arch_t arch,
+may_enable_gpr_indexing(const Instruction &inst, std::span<const uint8_t> text,
+                        rocjitsu::IsaFamily arch,
                         std::optional<uint64_t> instruction_offset = std::nullopt);
 
 /// @brief Whether an instruction may enable vector-instruction suppression.
 /// @details The result and .text offset convention match may_enable_gpr_indexing.
 [[nodiscard]] bool may_enable_vskip(const Instruction &inst, std::span<const uint8_t> text,
-                                    rj_code_arch_t arch,
+                                    rocjitsu::IsaFamily arch,
                                     std::optional<uint64_t> instruction_offset = std::nullopt);
 
 /// @brief The basic blocks reachable from one kernel entry.
@@ -88,7 +90,7 @@ struct LivenessAnalysisOptions {
   /// @details INVALID preserves the legacy ISA-independent behavior. DBT sets
   /// this to gfx1250 together with entry_block so VGPR_MSB state can resolve
   /// encoded vector operands to physical VGPRs.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   /// @brief Concrete decoding target whose shared-instruction behavior applies.
   ///
@@ -392,7 +394,7 @@ private:
 
   /// @brief Collect whole-kernel register use without running backward dataflow.
   void collect_global_register_usage(KernelBlockScope blocks, std::span<const uint8_t> text,
-                                     rj_code_arch_t arch);
+                                     rocjitsu::IsaFamily arch);
 
   void analyze(KernelBlockScope blocks, bool restrict_live_before_to_instructions,
                std::span<const Instruction *const> live_before_instructions,
