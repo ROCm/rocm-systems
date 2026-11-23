@@ -8,9 +8,13 @@ and leaves call-tree construction to analysis.
 
 | Source | Responsibility |
 | --- | --- |
-| [torch.py](../../src/utils/inject_roctx/_backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
-| [torch_trace_collector.py](../../src/utils/inject_roctx/_backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
-| [core.py](../../src/utils/inject_roctx/core.py) | Python ROCTX runtime emission and source-location resolution |
+| [torch.py](../../src/ml_api_tracing/inject_roctx/backends/torch.py) | Structural Python wrappers and TorchDispatchMode fallback |
+| [torch_trace_collector.py](../../src/ml_api_tracing/inject_roctx/backends/torch_trace_collector.py) | Generic-artifact discovery, runtime loading, C-interface binding, and launcher publication |
+| [torch_wraps.py](../../src/ml_api_tracing/inject_roctx/backends/torch_wraps.py) | Functions and tensor methods that the torch backend wraps |
+| [installer.py](../../src/ml_api_tracing/inject_roctx/installer.py) | Installs the selected backends in the workload |
+| [launch.py](../../src/ml_api_tracing/inject_roctx/launch.py) | Entry point that runs the workload with the backends installed |
+| [orchestrator.py](../../src/ml_api_tracing/profiling/orchestrator.py) | Checks the `--trace-ml-api` options and adds the launcher to the workload command |
+| [marker_ranges.py](../../src/ml_api_tracing/inject_roctx/marker_ranges.py) | Python ROCTX runtime emission and source-location resolution |
 | [marker_format.py](../../src/ml_api_tracing/marker_format.py) | Shared Python marker encoding, composition, parsing, and legacy stacked-wire detection |
 | [constants.py](../../src/ml_api_tracing/constants.py) | Framework and user-region identities shared by profiling, analysis, and marker parsing |
 | [trace_selection.py](../../src/ml_api_tracing/profiling/trace_selection.py) | Resolves the frameworks that `--trace-ml-api` selects, using only the standard library |
@@ -25,7 +29,7 @@ and leaves call-tree construction to analysis.
 | [argument_capture.cpp](../../src/lib/torch_trace_collector/argument_capture.cpp) | Bounded input rendering and schema-name lookup |
 | [wire_format.h](../../src/lib/torch_trace_collector/wire_format.h) | Native marker serialization |
 | [torch_abi.h](../../src/lib/torch_trace_collector/torch_abi/torch_abi.h) | Measured private PyTorch layouts used by the local declarations |
-| [utils_profile.py](../../src/utils/utils_profile.py) | Copy marker and counter CSVs into the workload directory |
+| [storage.py](../../src/ml_api_tracing/profiling/storage.py) | Copy marker and counter CSVs into the workload directory |
 
 ## Installation and callback lifetime
 

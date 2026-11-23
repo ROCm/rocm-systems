@@ -1,11 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Fixtures that build ML API trace inputs."""
+"""Fixtures for the ML API tracing tests: trace inputs and the backend registry."""
 
 import pandas as pd
 import pytest
 
+from ml_api_tracing.inject_roctx import backend_contract
 from utils import csv_compression
 
 TEST_GUID = "00000000-0000-0000-0000-000000000001"
@@ -39,6 +40,13 @@ def guid():
 @pytest.fixture
 def other_guid():
     return TEST_GUID_OTHER
+
+
+@pytest.fixture
+def fresh_registry(monkeypatch):
+    """Isolate the backend registry shared by the contract and installer tests."""
+    monkeypatch.setattr(backend_contract, "_REGISTRY", {})
+    return backend_contract
 
 
 def build_write_ml_api_pass(workload_dir, pass_id, marker_rows, counter_rows):

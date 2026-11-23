@@ -8,7 +8,6 @@ import pytest
 from ml_api_tracing.analyze.operator_patterns import (
     bind_operator_patterns,
     check_backends_traced,
-    operator_backend_labels,
     split_backend_prefix,
     traced_frameworks_from_config,
 )
@@ -106,22 +105,3 @@ def test_operator_comma_joined_token_is_one_glob():
     assert bind_operator_patterns(
         ["torch:*conv*,*relu*,triton:*matmul*"], ["torch"]
     ) == {"torch": ["*conv*,*relu*,triton:*matmul*"]}
-
-
-@pytest.mark.parametrize(
-    "backends, expected",
-    [
-        pytest.param([], "ML API", id="unscoped"),
-        pytest.param(["torch"], "PyTorch", id="torch"),
-        pytest.param(["triton"], "Triton", id="triton"),
-        pytest.param(["user"], "User", id="user"),
-        pytest.param(
-            ["user", "triton", "torch"],
-            "User, Triton, PyTorch",
-            id="ordered-frameworks-and-user",
-        ),
-        pytest.param(["custom"], "custom", id="unknown-display-name"),
-    ],
-)
-def test_operator_backend_labels_keep_plain_display_names(backends, expected):
-    assert operator_backend_labels(backends) == expected

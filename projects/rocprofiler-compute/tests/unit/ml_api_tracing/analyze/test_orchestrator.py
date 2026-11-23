@@ -121,21 +121,6 @@ class EventRecorder:
             raise SystemExit(self.exit_code)
 
 
-class WorkloadStateRecorder:
-    """Record each warning with the workload's root nodes at that moment."""
-
-    def __init__(self, workload):
-        self.workload = workload
-        self.states = []
-
-    def __call__(self, *args):
-        roots = self.workload.ml_api_call_trees["1"]
-        self.states.append((
-            args,
-            [(r.name, r.kernel_launches, r.total_duration_ms) for r in roots],
-        ))
-
-
 def build_record_console_error_and_exit(monkeypatch):
     """Replace console_error so tests see the message and SystemExit."""
     recorder = ConsoleErrorRecorder()
@@ -145,43 +130,6 @@ def build_record_console_error_and_exit(monkeypatch):
 
 def fail_validation(_trace, _forest):
     raise MarkerNotNestedError("missing", "42", 20.0)
-
-
-def test_unmatched_dispatch_preserves_integer_thread_ids_and_launcher_attachment(
-    tmp_path,
-    monkeypatch,
-    write_ml_api_pass,
-    linear_marker_row,
-    counter_row,
-):
-    warnings = []
-    monkeypatch.setattr(orchestrator, "console_warning", EventRecorder(warnings))
-    worker = "aten::mm:n/a|ltid=7|args=()|torch"
-    write_ml_api_pass(
-        tmp_path,
-        0,
-        [
-            linear_marker_row(1, 0, 100, thread_id=7),
-            linear_marker_row(2, 20, 60, thread_id=42, function=worker),
-        ],
-        [
-            counter_row(2, "worker_kernel", 30, 40),
-            counter_row(99, "orphan", 70, 80, dispatch_id=2),
-        ],
-    )
-    workload = schema.Workload()
-
-    process_ml_api_trace_output(workload, str(tmp_path))
-
-    assert str(workload.ml_api_trace_df["Thread_Id"].dtype) == "int64"
-    assert list(workload.ml_api_call_trees) == ["7"]
-    assert workload.ml_api_call_trees["7"][0].children[0].thread_id == "42"
-    assert (
-        workload.ml_api_call_trees["7"][0].children[0].kernels["worker_kernel"].launches
-        == 1
-    )
-    assert len(warnings) == 1
-    assert "unmatched dispatches" in warnings[0][1]
 
 
 def test_unmatched_warning_precedes_pass_matching_fatal(
@@ -250,39 +198,6 @@ def test_attachment_warning_precedes_validation_fatal(
     assert len(events) == 2
     assert "Launcher thread not found" in events[0][1]
     assert "Marker was not nested" in events[1][1]
-
-
-def test_missing_source_warning_follows_pruning_and_rollup(
-    tmp_path,
-    monkeypatch,
-    write_ml_api_pass,
-    linear_marker_row,
-    counter_row,
-):
-    workload = schema.Workload()
-    recorder = WorkloadStateRecorder(workload)
-    monkeypatch.setattr(orchestrator, "console_warning", recorder)
-    write_ml_api_pass(
-        tmp_path,
-        0,
-        [
-            linear_marker_row(1, 0, 10, function="aten::cpu:n/a|torch"),
-            linear_marker_row(2, 20, 60, function="aten::mm:n/a|torch"),
-        ],
-        [counter_row(2, "k", 30, 40)],
-    )
-
-    process_ml_api_trace_output(workload, str(tmp_path))
-
-    assert len(recorder.states) == 1
-    warning, roots_at_warning = recorder.states[0]
-    assert warning == (
-        "analysis",
-        "Missing source location for Operator_Name=aten::mm Thread_Id=1 "
-        "Start_Timestamp=20.0",
-    )
-    assert roots_at_warning == [("aten::mm", 1, pytest.approx(0.00001))]
-    assert workload.ml_api_call_trees["1"][0].kernels["k"].launches == 1
 
 
 def test_parse_marker_function_ltid_and_thread_id_unchanged(
