@@ -8,6 +8,15 @@ import threading
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import gettext as _T
+
 
 class EventCommands:
     def event(self, args, gpu=None):
@@ -30,8 +39,8 @@ class EventCommands:
             args.gpu = [args.gpu]
 
         listeners = self._open_listeners(args.gpu)
-        print("EVENT LISTENING:\n")
-        print("Press q and hit ENTER when you want to stop.")
+        print(_T("EVENT LISTENING:\n"))
+        print(_T("Press q and hit ENTER when you want to stop."))
         self.stop = False
         event_thread = threading.Thread(target=self._event_thread, args=(self, listeners))
         event_thread.start()
@@ -54,7 +63,7 @@ class EventCommands:
                     break
 
                 if user_input == "q":
-                    print("Escape Sequence Detected; Exiting")
+                    print(_T("Escape Sequence Detected; Exiting"))
                     self.stop = True
                     break
         except SystemExit as exc:
@@ -77,7 +86,7 @@ class EventCommands:
         # Open on the main thread: a GPU without event support (e.g. WSL) is reported
         # here instead of ending a listener thread while input() waits.
         if len(devices) == 0:
-            print("No GPUs on machine")
+            print(_T("No GPUs on machine"))
             return []
 
         # Check that KFD permissions are available

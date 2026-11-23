@@ -11,6 +11,15 @@ from amdsmi_helpers import AMDSMIHelpers
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import gettext as _T
+
 
 # Canonical human-readable AMD vendor string, matching `lspci` / pci.ids (vendor 0x1002).
 # The board manufacturer name is reported as the raw AMD PCI vendor ID ("0x1002") when
@@ -1296,7 +1305,7 @@ class StaticCommands:
                     if not_supported and not (
                         self.logger.is_json_format() or self.logger.is_csv_format()
                     ):
-                        static_dict["power_stabilization"] = (
+                        static_dict["power_stabilization"] = _T(
                             "N/A (Power Stabilization is not supported on this ASIC/platform)"
                         )
                     elif self.logger.is_csv_format():

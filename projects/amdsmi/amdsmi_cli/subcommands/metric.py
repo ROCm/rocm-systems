@@ -11,6 +11,15 @@ import amdsmi_metrics_field_support
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_RAIL_INDEX
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import gettext as _T
+
 # metric args whose values_dict section keys are not just the arg name. Only
 # --overdrive differs; --partition and the hypervisor-only args fill no section
 # of their own.
@@ -3513,7 +3522,11 @@ class MetricCommands:
             elif sensors:
                 values["SENSORS"] = sensors
             elif not self.logger.is_json_format():
-                values["SENSORS"] = "No sensors found for this NIC"
+                values["SENSORS"] = (
+                    "No sensors found for this NIC"
+                    if self.logger.is_csv_format()
+                    else _T("No sensors found for this NIC")
+                )
             else:
                 values["SENSORS"] = {}
 
@@ -3590,7 +3603,11 @@ class MetricCommands:
             elif ports_output:
                 values["PORTS"] = ports_output
             elif not self.logger.is_json_format():
-                values["PORTS"] = "No ports found for this NIC"
+                values["PORTS"] = (
+                    "No ports found for this NIC"
+                    if self.logger.is_csv_format()
+                    else _T("No ports found for this NIC")
+                )
             else:
                 values["PORTS"] = {}
 
@@ -3602,7 +3619,11 @@ class MetricCommands:
             elif rdma_devices:
                 values["RDMA_DEVICES"] = rdma_devices
             elif not self.logger.is_json_format():
-                values["RDMA_DEVICES"] = "No RDMA ports found for this NIC"
+                values["RDMA_DEVICES"] = (
+                    "No RDMA ports found for this NIC"
+                    if self.logger.is_csv_format()
+                    else _T("No RDMA ports found for this NIC")
+                )
             else:
                 values["RDMA_DEVICES"] = {}
 

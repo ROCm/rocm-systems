@@ -60,6 +60,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `uuid`/`gpu_uuid` in `amd-smi list` keep reporting the legacy UUID instead of switching to the CUID as 10.1 announced, because a temporary CUID changes with the host's machine ID.
   - The `BUILD_CUID` CMake option now takes `AUTO` (default), `ON` or `OFF`. It was off by default.
 
+- **Added Russian localization of the `amd-smi` CLI**.  
+  - Help, messages, and human-readable labels follow the system locale (e.g. `LANG=ru_RU.UTF-8`); `AMDSMI_LANG=en` forces English, and JSON/CSV output and English-locale output are unchanged.
+
 ### Changed
 
 - **The `amdsmi` Python module no longer loads an AMD SMI library newer than itself**.  

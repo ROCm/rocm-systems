@@ -8,6 +8,15 @@ from _version import __version__
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import gettext as _T
+
 
 class VersionCommands:
     def version(self, args, gpu_version=None, cpu_version=None, nic_version=None):
@@ -122,17 +131,14 @@ class VersionCommands:
                 f"ROCm version: {rocm_version_str}"
             )
             if args.gpu_version:
-                human_readable_output = (
-                    human_readable_output + f" | amdgpu version: {gpu_version_str}"
-                )
+                shown_gpu = _T("not loaded") if gpu_version_str == "not loaded" else gpu_version_str
+                human_readable_output = human_readable_output + f" | amdgpu version: {shown_gpu}"
             if args.cpu_version:
-                human_readable_output = (
-                    human_readable_output + f" | hsmp version: {cpu_version_str}"
-                )
+                shown_cpu = _T("not loaded") if cpu_version_str == "not loaded" else cpu_version_str
+                human_readable_output = human_readable_output + f" | hsmp version: {shown_cpu}"
             if args.nic_version:
-                human_readable_output = (
-                    human_readable_output + f" | ionic version: {nic_version_str}"
-                )
+                shown_nic = _T("not loaded") if nic_version_str == "not loaded" else nic_version_str
+                human_readable_output = human_readable_output + f" | ionic version: {shown_nic}"
             # Custom human readable handling for version
             if self.logger.destination == "stdout":
                 print(human_readable_output)

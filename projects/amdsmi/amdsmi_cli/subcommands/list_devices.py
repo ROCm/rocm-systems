@@ -8,6 +8,15 @@ import sys
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import gettext as _T
+
 # PCI VPD is mode 0600, so an unprivileged run cannot tell a card with no VPD
 # from one it may not read. Identity fields go "N/A" either way.
 _VPD_IDENTITY_FIELDS = ("Product Name", "Part Number", "Serial Number")
@@ -250,7 +259,7 @@ class ListDevicesCommands:
             return
         self.is_vpd_root_hint_pending = False
         if self.logger.is_human_readable_format():
-            print(_VPD_ROOT_HINT, file=sys.stderr)
+            print(_T(_VPD_ROOT_HINT), file=sys.stderr)
 
     def list_nics(self, args):
         if not self.helpers.is_ainic_initialized():
