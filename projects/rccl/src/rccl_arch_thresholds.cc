@@ -683,10 +683,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
-  // 4 MiB per rank is 32 MiB per node at 8 GPUs per node. Up to there Tree/LL128 beats the cost model's Ring/LL128
-  // 1.1-1.3x at 16-32 MiB per node on 4 and 8 nodes; from 64 MiB per node the cost model's choice is within about
-  // 2% of the best.
-  .arTreeMaxPerRankMultiNode = 4ULL*1024*1024,
+  .arTreeMaxPerRankMultiNode = 4ULL*1024*1024,  // Tree/LL128 beats Ring/LL128 1.1-1.3x to 32 MiB per node (8 GPUs)
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,

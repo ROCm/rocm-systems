@@ -8487,6 +8487,9 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_TreeOnlyWhenEveryGuardHold
         table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL] = 2.0f;
         table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL128] = NCCL_ALGO_PROTO_IGNORE;
         EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "no Tree LL128";
+        table.t[NCCL_ALGO_TREE][NCCL_PROTO_LL128] = 2.0f;
+        table.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = NCCL_ALGO_PROTO_IGNORE;
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 1024, table)) << "no Tree Simple";
         DeleteCommWithArch(comm);
         CostTable full;
         comm = MakeTuningComm(8, "gfx950");
@@ -9019,8 +9022,8 @@ namespace real_arch_thresholds {
 #include "rccl_arch_thresholds.cc"
 }  // namespace real_arch_thresholds
 
-// gfx950 multi-node AllReduce runs Tree up to nRanks x 4 MiB, 32 MiB per node at 8 GPUs per node, on any node
-// count; one node keeps Ring.
+// gfx950 multi-node AllReduce with 8 ranks per node runs Tree up to nRanks x 4 MiB, 32 MiB per node, on any node
+// count; one node, other ranks-per-node counts and a cost table without Tree/Simple keep Ring.
 TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_Gfx950MultiNodeAllReduceTakesTree) {
   RUN_ISOLATED_TEST(
       "Wrap_UpdateCollectiveAlgorithm_Gfx950MultiNodeAllReduceTakesTree",
@@ -9039,6 +9042,16 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveAlgorithm_Gfx950MultiNodeAllReduceTa
           EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, cap + 1, table)) << nNodes << " nodes";
           EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllGather, cap, table)) << nNodes << " nodes";
         }
+        comm->nNodes = 4;
+        for (int ranksPerNode : {1, 4, 16, 64}) {
+          comm->nRanks = 4 * ranksPerNode;
+          EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 4 * kMiB, table))
+              << ranksPerNode << " ranks per node";
+        }
+        comm->nRanks = 32;
+        EXPECT_EQ(NCCL_ALGO_TREE, AlgoAfterUpdate(comm, ncclFuncAllReduce, 4 * kMiB, table)) << "control";
+        table.t[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] = NCCL_ALGO_PROTO_IGNORE;
+        EXPECT_EQ(NCCL_ALGO_RING, AlgoAfterUpdate(comm, ncclFuncAllReduce, 4 * kMiB, table)) << "no Tree Simple";
         DeleteCommWithArch(comm);
       });
 }

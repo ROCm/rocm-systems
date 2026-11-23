@@ -194,7 +194,7 @@ struct rcclArchThresholds {
   size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
 
-  // Multi-node (nNodes > 1) AllReduce runs Tree instead of Ring up to nRanks x this, at any rank count;
+  // Multi-node (nNodes > 1) AllReduce with 8 ranks per node runs Tree instead of Ring up to nRanks x this;
   // rcclUpdateCollectiveProtocol then picks the Tree protocol. 0 = keep the cost model's choice.
   size_t arTreeMaxPerRankMultiNode;
 

@@ -262,13 +262,15 @@ void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct 
   size_t maxPerRank = 0;
   if (comm->nNodes == 1) {
     if (const rcclArchThresholds* t = rcclRingTreeTable(comm, /*rankScaled=*/true)) maxPerRank = t->arTreeMaxPerRank;
-  } else if (const rcclArchThresholds* t = extAlgoArchTable(comm)) {
-    maxPerRank = t->arTreeMaxPerRankMultiNode;
+  } else if (comm->nRanks == comm->nNodes * 8) {
+    if (const rcclArchThresholds* t = extAlgoArchTable(comm)) maxPerRank = t->arTreeMaxPerRankMultiNode;
   }
   if (maxPerRank == 0 || nBytes > (uint64_t)comm->nRanks * maxPerRank) return;
-  // rcclUpdateCollectiveProtocol then picks Tree LL or LL128, so both must be on offer.
+  // rcclUpdateCollectiveProtocol then picks Tree LL, LL128 or Simple (above its LL128 ceiling or with LL128 off),
+  // so all three must be on offer.
   if (table[NCCL_ALGO_TREE][NCCL_PROTO_LL] == NCCL_ALGO_PROTO_IGNORE ||
-      table[NCCL_ALGO_TREE][NCCL_PROTO_LL128] == NCCL_ALGO_PROTO_IGNORE)
+      table[NCCL_ALGO_TREE][NCCL_PROTO_LL128] == NCCL_ALGO_PROTO_IGNORE ||
+      table[NCCL_ALGO_TREE][NCCL_PROTO_SIMPLE] == NCCL_ALGO_PROTO_IGNORE)
     return;
   info->algorithm = NCCL_ALGO_TREE;
 }
