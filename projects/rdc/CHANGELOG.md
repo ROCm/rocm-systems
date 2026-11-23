@@ -83,6 +83,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - Certificates signed with the RDC certificate authority setup in `authentication/openssl.cnf` can no longer sign other certificates. A certificate request could ask to become a signing certificate, and its holder could then create client and server certificates that `rdcd` and `rdci` trust.
   - If you signed requests that other people created, check the certificates in the `newcerts` directory of your CA for `CA:TRUE`. If you find one, create a new root certificate and reissue all certificates.
 
+- A compute partition's `RDC_FI_GPU_CLOCK` no longer reports 65535 MHz or another partition's clock when the GPU lists unavailable clock readings before the available ones. It stops updating, instead of reporting a wrong clock, when the GPU's partition count drops to the partition's index or below while the partition is watched (for example, when AMD SMI reports the partition profile as not supported).
+  - A reading of 0 MHz now counts like any other. RDC skipped it, so partitions could report another partition's clock, or no clock.
+
 - `rdci discovery` now reports an error instead of exiting successfully with an incomplete GPU list when `rdcd` cannot read a GPU's attributes. Failed `rdc_device_get_attributes()` calls now return zeroed attributes, and `rdcd` replies to failed requests no longer contain garbage values.
 
 - `rdc_job_get_stats()` and `rdci stats -j` report every GPU of a job. Only the GPU with the lowest ID was summarized, and the entries of the other GPUs were not filled in. Job statistics for a GPU partition, or for a GPU whose ID is above 15, no longer crash `rdcd`. A GPU without a total memory reading reports memory utilization as unavailable instead of failing the call, and memory utilization is no longer inflated on GPUs with 400 GiB of memory or more.
