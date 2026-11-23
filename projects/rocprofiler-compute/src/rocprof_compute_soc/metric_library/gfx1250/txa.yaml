@@ -191,16 +191,15 @@ txa.stall_rate:
   unit: Percent
   description: Percentage of cycles the TXA is stalled by the GL0 cache.
 txa.tdm_async_barrier_inst:
-  name: TDM Async Barrier Instruction
+  name: TDM Async Barrier Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of TDM async barrier instructions processed by TXA.
+  description: Number of TDM async barrier requests processed by TXA.
 txa.tdm_async_cluster_load_insts:
-  name: TDM Async Cluster Load Instructions
+  name: TDM Async Cluster Load Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of TDM async cluster load instructions processed by TXA.
+  description: Number of TDM async cluster load requests processed by TXA.
 txa.tdm_async_load_insts:
   name: TDM Async Load Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
