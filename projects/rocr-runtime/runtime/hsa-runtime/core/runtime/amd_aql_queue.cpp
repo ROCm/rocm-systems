@@ -329,6 +329,10 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Queue event handler failed registration.\n");
     exceptionState = ERROR_HANDLER_DONE;
+
+    // This agent has no second-level trap handler, so report it on the first
+    // queue built on it rather than on every hsa_init.
+    agent_->WarnIfNoSecondLevelTrapHandler();
   }
 
   // Allocate IB for icache flushes.

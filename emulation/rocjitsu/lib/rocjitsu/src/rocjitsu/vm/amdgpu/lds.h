@@ -6,6 +6,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "simdojo/components/memory_interface.h"
 #include "util/bit.h"
 
@@ -21,21 +22,21 @@ namespace amdgpu {
 
 /// \NPI Review allocation and addressable granules for each new ISA.
 /// Physical workgroup allocations are rounded separately from the kernel descriptor encoding.
-constexpr uint32_t lds_allocation_granule(rj_code_arch_t arch) {
+constexpr uint32_t lds_allocation_granule(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Rdna1:
     return 512;
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
     return 1024;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return 1280;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return 2048;
   default:
     // Legacy fallback for architectures without an AMDGPU ISA profile.
@@ -43,16 +44,16 @@ constexpr uint32_t lds_allocation_granule(rj_code_arch_t arch) {
   }
 }
 
-constexpr uint64_t lds_allocation_bytes(rj_code_arch_t arch, uint32_t requested) {
+constexpr uint64_t lds_allocation_bytes(rocjitsu::IsaFamily arch, uint32_t requested) {
   const uint64_t granule = lds_allocation_granule(arch);
   return (uint64_t{requested} + granule - 1) / granule * granule;
 }
 
 /// Size visible to DS and FLAT-LDS instructions, in bytes.
-constexpr uint64_t lds_workgroup_window_bytes(rj_code_arch_t arch, uint32_t requested) {
+constexpr uint64_t lds_workgroup_window_bytes(rocjitsu::IsaFamily arch, uint32_t requested) {
   // GFX11 and GFX12 place workgroups on 1 KiB boundaries but program LDS_SIZE in 512-byte units.
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+      arch == rocjitsu::IsaFamily::Rdna4)
     return util::align_up(uint64_t{requested}, uint64_t{512});
   // RDNA2 ISA §3.6.6 restricts accesses to the allocated 256-DWORD blocks.
   // LDS_SIZE encoding and HWREG reporting units do not reduce this window.

@@ -23,6 +23,7 @@ set(TESTS
     OCLImage2DFromBuffer
     OCLImageCopyPartial
     OCLKernelBinary
+    OCLLargeGridYZ
     OCLLDS32K
     OCLLinearFilter
     OCLMapCount

@@ -122,11 +122,8 @@ A few things to note in this loop:
     `rj_code_basic_block_release` when you are done with it.
 -   `rj_code_basic_block_first_inst` returns `NULL` for an empty block.
     `rj_code_inst_next` returns `NULL` after the last instruction.
--   You can also query per-instruction metadata such as
-    `rj_code_inst_mnemonic`, `rj_code_inst_size`, and
-    `rj_code_inst_flags`. The flags bitmask uses values from
-    `rj_code_inst_flags_t` --- for example, `RJ_CODE_INST_BRANCH` and
-    `RJ_CODE_INST_PROGRAM_TERMINATOR`.
+-   You can also query per-instruction metadata with
+    `rj_code_inst_mnemonic` and `rj_code_inst_size`.
 
 ## Clean up handles
 

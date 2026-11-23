@@ -11,6 +11,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "test_paths.h"
 #include "util/diagnostic.h"
 
@@ -284,7 +285,7 @@ TEST(VectorAddCodeObjectTest, LoadsAndDecodes) {
   ASSERT_NE(co, nullptr);
   ASSERT_FALSE(co->text_sections().empty());
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   const auto *text = co->text_sections()[0];
   const auto *data = reinterpret_cast<const uint32_t *>(text->data());
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, data));

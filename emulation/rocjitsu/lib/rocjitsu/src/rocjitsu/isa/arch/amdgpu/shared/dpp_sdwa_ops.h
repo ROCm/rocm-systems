@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -832,7 +833,8 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
 
 /// GFX10 SDWA ADD/MUL captures scale a rounded half, as VOP3 does.
 inline bool arithmetic_scales_rounded_half(const Wavefront &wf) {
-  return wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA1 || wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  return wf.cu().arch() == rocjitsu::IsaFamily::Rdna1 ||
+         wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
 }
 
 /// Round the arithmetic result, deferring GFX10 SDWA scaling to destination placement.

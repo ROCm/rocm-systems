@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
@@ -37,7 +38,7 @@ bool prepare_ordered_count(Wavefront &wf, VectorMemState &state, uint32_t offset
                            uint32_t addr, uint32_t vdst);
 
 /// An unaligned native GFX12 LDS atomic faults before any active lane accesses bytes.
-bool native_ds_atomic_misaligned(const VectorMemState &state, rj_code_arch_t arch,
+bool native_ds_atomic_misaligned(const VectorMemState &state, rocjitsu::IsaFamily arch,
                                  uint64_t request_lanes);
 
 enum class [[nodiscard]] MemoryAccessCompletion {
