@@ -637,28 +637,44 @@ int RocJpegApiNegativeTests::TestInvalidStreamParse() {
         return EXIT_FAILURE;
     }
 
-    // Scenario 12: Invalid AC Huffman table selector in the SOS marker
-    std::vector<uint8_t> invalid_ac_huffman_sos_data = {
-        0xFF, 0xD8, // SOI
-        0xFF, 0xDA, 0x00, 0x07, // SOS with invalid number of AC Huffman table
-        0x01, 0x00, 0x04, 0x11, 0x00
-    };
-    rocjpeg_status = rocJpegStreamParse(invalid_ac_huffman_sos_data.data(), invalid_ac_huffman_sos_data.size(), rocjpeg_stream_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_BAD_JPEG) {
-        std::cerr << "Expected ROCJPEG_STATUS_BAD_JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    // Scenario 12: Invalid Huffman table selectors in the SOS marker. A baseline
+    // scan may only select DC and AC tables 0 and 1. Each invalid selector is
+    // patched into the color seed, which is otherwise valid, because a hand-built
+    // SOS segment without a frame header and tables in front of it is rejected
+    // for other reasons before its selectors are checked.
+    const std::vector<uint8_t> &selector_seed = ColorSeedJpeg();
+    const size_t selector_sos_offset = FindStructuralMarker(selector_seed, 0xDA);
+    // The scan header holds the marker, a 2-byte length and the scan component
+    // count (offset 4), then a component identifier and a table byte for each
+    // component, so the table byte of component c is at offset 6 + 2c.
+    if (selector_sos_offset + 5 > selector_seed.size() ||
+        selector_sos_offset + 5 + 2 * static_cast<size_t>(selector_seed[selector_sos_offset + 4]) > selector_seed.size()) {
+        std::cerr << "The color seed no longer carries a parsable SOS segment." << std::endl;
         return EXIT_FAILURE;
     }
-
-    // Scenario 13: Invalid DC Huffman table selector in the SOS marker
-    std::vector<uint8_t> invalid_dc_huffman_sos_data = {
-        0xFF, 0xD8, // SOI
-        0xFF, 0xDA, 0x00, 0x07, // SOS with invalid number of DC Huffman table
-        0x01, 0x00, 0x44, 0x11, 0x00
-    };
-    rocjpeg_status = rocJpegStreamParse(invalid_dc_huffman_sos_data.data(), invalid_dc_huffman_sos_data.size(), rocjpeg_stream_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_BAD_JPEG) {
-        std::cerr << "Expected ROCJPEG_STATUS_BAD_JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    rocjpeg_status = rocJpegStreamParse(selector_seed.data(), selector_seed.size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS for the unmodified color seed but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
         return EXIT_FAILURE;
+    }
+    // A table byte holds the DC selector in its high nibble and the AC selector
+    // in its low nibble. Tables 2 and 3 exist only in coding processes other
+    // than baseline, and tables 4 and up in none.
+    static const uint8_t kInvalidTableBytes[] = {0x02, 0x03, 0x20, 0x30, 0x22, 0x33, 0x04, 0x40, 0xFF};
+    const uint8_t selector_scan_components = selector_seed[selector_sos_offset + 4];
+    for (uint8_t component = 0; component < selector_scan_components; component++) {
+        const size_t table_byte_offset = selector_sos_offset + 6 + 2 * static_cast<size_t>(component);
+        for (const uint8_t table_byte : kInvalidTableBytes) {
+            std::vector<uint8_t> invalid_selector_data = selector_seed;
+            invalid_selector_data[table_byte_offset] = table_byte;
+            rocjpeg_status = rocJpegStreamParse(invalid_selector_data.data(), invalid_selector_data.size(), rocjpeg_stream_handle_);
+            if (rocjpeg_status != ROCJPEG_STATUS_BAD_JPEG) {
+                std::cerr << "Expected ROCJPEG_STATUS_BAD_JPEG for Huffman table selector byte 0x" << ToHex(table_byte)
+                          << " in SOS component " << static_cast<int>(component) << " but got "
+                          << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
     }
 
     return EXIT_SUCCESS;
