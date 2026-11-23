@@ -17,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 
 #include <algorithm>
@@ -36,7 +37,7 @@ namespace {
 
 // gfx1250 is Wave32-only.
 constexpr uint8_t kGfx1250WaveSize =
-    static_cast<uint8_t>(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).wave_size_max);
+    static_cast<uint8_t>(isa_properties(rocjitsu::IsaFamily::Cdna5).wave_size_max);
 
 [[nodiscard]] bool always_residual(const Instruction &) { return true; }
 [[nodiscard]] bool scale16_residual(const Instruction &inst);
@@ -572,7 +573,7 @@ ExpandResult expand_gfx1250_s_clause(const Instruction &inst, uint32_t, uint64_t
     return true;
 
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_vgpr_msb_hwreg(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
     return false;
 
   return count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,
@@ -597,7 +598,7 @@ ExpandResult expand_gfx1250_setreg_mode_ordering(const Instruction &inst, uint32
   // SOPK carries the hardware-register selector in SIMM16. Only MODE requires
   // the separation, so the mnemonic alone cannot decide this.
   const uint16_t simm16 = static_cast<uint16_t>(inst.raw_encoding()[0] & 0xffffu);
-  if (amdgpu::decode_vgpr_msb_hwreg(simm16).id != amdgpu::MODE_HWREG)
+  if (amdgpu::decode_hwreg_slice(simm16).id != amdgpu::MODE_HWREG)
     return ExpandResult::not_handled();
 
   const int existing_slots = count_adjacent_canonical_v_nops(inst, kRequiredLeadingVNops,

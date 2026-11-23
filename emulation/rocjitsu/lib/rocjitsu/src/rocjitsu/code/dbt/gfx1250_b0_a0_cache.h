@@ -17,8 +17,8 @@
 #ifndef ROCJITSU_CODE_DBT_GFX1250_B0_A0_CACHE_H_
 #define ROCJITSU_CODE_DBT_GFX1250_B0_A0_CACHE_H_
 
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/code/dbt/translation_store.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <string_view>
 
@@ -53,7 +53,7 @@ constexpr TranslationIdentity kGfx1250B0A0Identity{
 /// same object. Both callers resolve this to the one translator they are linked
 /// against, so they agree by construction rather than by convention.
 inline const void *gfx1250_b0_a0_translator_anchor() {
-  return reinterpret_cast<const void *>(&rj_gfx1250_b0_to_a0_translate);
+  return reinterpret_cast<const void *>(&rocjitsu::translate_gfx1250_b0_to_a0);
 }
 
 } // namespace rocjitsu
