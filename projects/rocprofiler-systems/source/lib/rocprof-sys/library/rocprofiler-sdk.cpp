@@ -882,6 +882,22 @@ should_defer_main_contexts()
     return !g_session->is_active(control::scope::global);
 }
 
+// Creates the GPU perf-counter collector of this session when counters are requested.
+void
+register_gpu_perf_counters()
+{
+#if ROCPROFILER_VERSION >= 600
+    if(get_gpu_perf_counters().empty() ||
+       get_agent_manager_instance().get_gpu_agents_count() == 0)
+    {
+        return;
+    }
+
+    pmc::register_gpu_perf_counter_source(
+        get_agent_manager_instance().get_agents_by_type(agent_type::gpu));
+#endif
+}
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 {
@@ -1277,15 +1293,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             counter_record_callback, data));
     }
 
-#if ROCPROFILER_VERSION >= 600
-    const auto gpu_perf_counters_setting = get_gpu_perf_counters();
-    if(!gpu_perf_counters_setting.empty() &&
-       get_agent_manager_instance().get_gpu_agents_count() > 0)
-    {
-        pmc::register_gpu_perf_counter_source(
-            get_agent_manager_instance().get_agents_by_type(agent_type::gpu));
-    }
-#endif
+    register_gpu_perf_counters();
 
     gpu::add_device_metadata();
 
@@ -1507,6 +1515,9 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
         output::registry::instance().start_new_session();
         trace_cache::get_buffer_storage().start(getpid());
 
+        // The previous session's collector is gone; its provider and contexts are not.
+        register_gpu_perf_counters();
+
         // Restart process sampler (AMD SMI, CPU freq polling thread)
         if(config::get_use_process_sampling())
         {
@@ -1517,9 +1528,15 @@ tool_attach_init([[maybe_unused]] rocprofiler_client_detach_t detach_func,
         ::rocprofsys::state::process::set(::rocprofsys::state::process::Active);
     }
 
-    // Start all contexts provided by the SDK
+    // Start the contexts provided by the SDK, except those of the GPU perf-counter
+    // provider: its devices start them when they sample.
     for(std::uint64_t i = 0; i < context_ids_length; ++i)
     {
+        if(pmc::owns_gpu_perf_counter_context(context_ids[i].handle))
+        {
+            continue;
+        }
+
         ROCPROFILER_CALL(rocprofiler_start_context(context_ids[i]));
     }
 

@@ -120,7 +120,7 @@ static void
 setup_provider_expectations(const std::shared_ptr<MockBackendImpl>& mock,
                             std::uint64_t                           agent_handle,
                             std::vector<counter_setup>&             counters,
-                            std::uint32_t                           context_handle_out)
+                            std::uint32_t context_handle_out, std::uint32_t sessions = 1)
 {
     EXPECT_CALL(
         *mock,
@@ -175,13 +175,21 @@ setup_provider_expectations(const std::shared_ptr<MockBackendImpl>& mock,
                            _, _, _, _))
         .WillOnce(Return(MockBackend::status_success));
 
+    // `sessions` is how often the context is started and stopped; 0 expects neither.
+    if(sessions == 0)
+    {
+        return;
+    }
+
     EXPECT_CALL(*mock, start_context(::testing::Field(&MockBackend::context_id_t::handle,
                                                       context_handle_out)))
-        .WillOnce(Return());
+        .Times(static_cast<int>(sessions))
+        .WillRepeatedly(Return());
 
     EXPECT_CALL(*mock, stop_context(::testing::Field(&MockBackend::context_id_t::handle,
                                                      context_handle_out)))
-        .WillOnce(Return());
+        .Times(static_cast<int>(sessions))
+        .WillRepeatedly(Return());
 }
 
 // ============================================================================
@@ -456,6 +464,75 @@ TEST_F(SdkPmcCollectorWorkflowTest, SampleFailureProducesEmptyMetrics)
     EXPECT_EQ(collector.get_device_count(), 1U);
 
     collector.shutdown();
+}
+
+TEST_F(SdkPmcCollectorWorkflowTest, ProviderOwnsOnlyItsOwnContexts)
+{
+    constexpr std::uint64_t k_agent_handle   = 42;
+    constexpr std::uint32_t k_context_handle = 100;
+    constexpr std::uint64_t k_counter_id     = 10;
+
+    std::vector<counter_setup> counters = {
+        { .id = MockBackend::counter_id_t{ k_counter_id }, .name = "SQ_WAVES" },
+    };
+    setup_provider_expectations(m_mock, k_agent_handle, counters, k_context_handle, 0);
+
+    auto const provider = std::make_shared<MockProvider>(
+        std::vector<std::shared_ptr<rocprofsys::agent>>{
+            make_agent(k_agent_handle, 0, "GPU 0") },
+        test_settings_policy::get_gpu_perf_counter_enabled_metrics());
+
+    EXPECT_TRUE(provider->owns_context(k_context_handle));
+    EXPECT_FALSE(provider->owns_context(k_context_handle + 1));
+}
+
+// An attach session ends by shutting its collector down; the next one builds a new
+// collector on the same provider. The SDK cannot destroy a context, so the provider
+// must create it once and the device must start it again for the second session.
+TEST_F(SdkPmcCollectorWorkflowTest, ProviderServesCollectorsOfSuccessiveSessions)
+{
+    constexpr std::uint64_t k_agent_handle   = 42;
+    constexpr std::uint32_t k_context_handle = 100;
+    constexpr std::uint32_t k_sessions       = 2;
+    constexpr std::uint64_t k_counter_id     = 10;
+    constexpr double        k_counter_value  = 7.0;
+    constexpr std::int64_t  k_timestamp_step = 1000;
+
+    std::vector<counter_setup> counters = {
+        { .id = MockBackend::counter_id_t{ k_counter_id }, .name = "SQ_WAVES" },
+    };
+    setup_provider_expectations(m_mock, k_agent_handle, counters, k_context_handle,
+                                k_sessions);
+
+    EXPECT_CALL(*m_mock, sample_device_counting_service(
+                             ::testing::Field(&MockBackend::context_id_t::handle,
+                                              k_context_handle),
+                             _, _, _, _))
+        .Times(k_sessions)
+        .WillRepeatedly([](MockBackend::context_id_t, MockBackend::user_data_t,
+                           MockBackend::counter_flag_t,
+                           MockBackend::counter_record_t* out, size_t* count) {
+            out[0].id            = k_counter_id;
+            out[0].counter_value = k_counter_value;
+            *count               = 1;
+            return MockBackend::status_success;
+        });
+
+    auto const provider = std::make_shared<MockProvider>(
+        std::vector<std::shared_ptr<rocprofsys::agent>>{
+            make_agent(k_agent_handle, 0, "GPU 0") },
+        test_settings_policy::get_gpu_perf_counter_enabled_metrics());
+
+    for(std::uint32_t session = 0; session < k_sessions; ++session)
+    {
+        test_collector_t collector(provider);
+        collector.setup();
+        collector.config();
+        collector.sample(k_timestamp_step * static_cast<std::int64_t>(session + 1));
+        collector.shutdown();
+    }
+
+    EXPECT_EQ(get_captured_samples().size(), k_sessions);
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing

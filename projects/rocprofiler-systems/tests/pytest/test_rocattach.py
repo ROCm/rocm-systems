@@ -13,7 +13,9 @@ survives all sessions.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sqlite3
 import subprocess
 import time
 from pathlib import Path
@@ -203,6 +205,131 @@ class TestRocattachReattachFormat:
             assert len(traces) == 1, (
                 f"expected exactly one perfetto-trace*.pftrace under {test_output_dir} "
                 f"(from the -F perfetto session), found {len(traces)}: {traces}"
+            )
+        finally:
+            if target_proc.poll() is None:
+                target_proc.terminate()
+                try:
+                    target_proc.wait(timeout=self.TARGET_TERMINATE_TIMEOUT_S)
+                except subprocess.TimeoutExpired:
+                    target_proc.kill()
+                    target_proc.wait()
+
+
+def _counter_event_count(database: Path, counter: str) -> int:
+    """Count the samples of ``counter`` (any dimension instance) in a rocpd database."""
+    with contextlib.closing(
+        sqlite3.connect(f"file:{database}?mode=ro", uri=True)
+    ) as connection:
+        (count,) = connection.execute(
+            "SELECT COUNT(*) FROM rocpd_pmc_event AS event "
+            "JOIN pmc_info AS info ON event.pmc_id = info.id "
+            "WHERE info.name LIKE ?",
+            (f"{counter}%",),
+        ).fetchone()
+    return count
+
+
+@pytest.mark.class_name("rocattach")
+class TestRocattachReattachCounters:
+    """Re-attach to one target while device-wide GPU counters are sampled."""
+
+    GPU_PERF_COUNTER = "GRBM_COUNT"
+    SESSION_DURATION_S = 5
+    TARGET_WARMUP_S = 2
+    INTER_SESSION_PAUSE_S = 1
+    ATTACH_TIMEOUT_S = 60
+    TARGET_TERMINATE_TIMEOUT_S = 10
+
+    def test_reattach_keeps_counter_sampling(
+        self,
+        rocprof_config,
+        test_output_dir: Path,
+    ) -> None:
+        """Two ``-F rocpd`` sessions must both record the GPU counter.
+
+        The counter contexts last as long as the target. A second attach used to
+        start a context whose callback data was already freed, which killed the
+        target, and a surviving second session recorded no counter samples.
+        """
+        if rocprof_config.rocprofsys_attach is None:
+            pytest.skip("rocprof-sys-attach binary not found")
+
+        try:
+            transpose = rocprof_config.get_target_executable("transpose")
+        except FileNotFoundError:
+            pytest.skip("transpose target not found")
+
+        target_env = {
+            **os.environ,
+            "ROCP_TOOL_ATTACH": "1",
+            "LD_LIBRARY_PATH": rocprof_config.get_library_path(),
+        }
+        attach_env = {
+            **os.environ,
+            "ROCPROFSYS_GPU_PERF_COUNTERS": self.GPU_PERF_COUNTER,
+        }
+        target_proc = subprocess.Popen(
+            [str(transpose), "2", "0"],  # 2 threads, nitr=0 (infinite)
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            cwd=str(test_output_dir),
+            env=target_env,
+        )
+
+        try:
+            time.sleep(self.TARGET_WARMUP_S)
+            assert target_proc.poll() is None, (
+                "transpose target exited before first attach "
+                f"(returncode={target_proc.returncode})"
+            )
+
+            for session_idx in range(2):
+                result = subprocess.run(
+                    [
+                        str(rocprof_config.rocprofsys_attach),
+                        "-p",
+                        str(target_proc.pid),
+                        "-d",
+                        str(self.SESSION_DURATION_S),
+                        "-F",
+                        "rocpd",
+                        "-o",
+                        str(test_output_dir / "attach_output"),
+                    ],
+                    timeout=self.ATTACH_TIMEOUT_S,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env=attach_env,
+                )
+                assert result.returncode == 0, (
+                    f"session {session_idx} failed (rc={result.returncode})\n"
+                    f"stdout:\n{result.stdout}\n"
+                    f"stderr:\n{result.stderr}"
+                )
+                assert target_proc.poll() is None, (
+                    f"transpose target died after session {session_idx} "
+                    f"(returncode={target_proc.returncode})"
+                )
+                time.sleep(self.INTER_SESSION_PAUSE_S)
+
+            databases = sorted(test_output_dir.rglob("rocpd-*.db"))
+            assert len(databases) == 2, (
+                f"expected one rocpd-*.db per session under {test_output_dir}, "
+                f"found {len(databases)}: {databases}"
+            )
+
+            counts = [
+                _counter_event_count(database, self.GPU_PERF_COUNTER)
+                for database in databases
+            ]
+            if counts[0] == 0:
+                pytest.skip(f"{self.GPU_PERF_COUNTER} produced no samples on this GPU")
+            assert counts[1] > 0, (
+                f"the re-attached session recorded no {self.GPU_PERF_COUNTER} "
+                f"samples; samples per session database: "
+                f"{dict(zip((db.name for db in databases), counts))}"
             )
         finally:
             if target_proc.poll() is None:

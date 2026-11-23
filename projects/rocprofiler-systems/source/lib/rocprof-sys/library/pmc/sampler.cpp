@@ -65,6 +65,7 @@
 #include <stdexcept>
 #include <sys/resource.h>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace rocprofsys::pmc
@@ -224,11 +225,13 @@ shutdown_amd_smi_collectors()
     is_initialized() = false;
 }
 
-// Tears down the rocprofiler-sdk GPU hardware perf-counter collector. This must
-// NOT run on the post-fork reinit path: the collector is registered once (from
-// sdk_tool_configure) and is never recreated by setup(); its SDK contexts are
-// owned by the parent and survive fork(), so tearing it down would permanently
-// disable GPU hardware-counter sampling. Only the real finalize resets it.
+// Tears down the rocprofiler-sdk GPU hardware perf-counter collector of this session.
+// The provider is kept: it owns the SDK contexts and the data their callbacks read, and
+// the SDK cannot destroy a context. Freeing the provider here would leave a context
+// that the next attach starts with a dangling callback pointer. This must also NOT run
+// on the post-fork reinit path: the contexts are owned by the parent and survive
+// fork(), so tearing the collector down would permanently disable GPU hardware-counter
+// sampling. Only the real finalize resets it.
 void
 shutdown_gpu_hw_collector()
 {
@@ -242,7 +245,6 @@ shutdown_gpu_hw_collector()
         g_gpu_perf_counter_collector->shutdown();
     }
     g_gpu_perf_counter_collector.reset();
-    g_gpu_perf_counter_provider.reset();
 #endif
 }
 
@@ -385,7 +387,6 @@ post_process()
         g_gpu_perf_counter_collector->post_process();
     }
     g_gpu_perf_counter_collector.reset();
-    g_gpu_perf_counter_provider.reset();
 #endif
     g_device_provider.reset();
     g_cpu_provider.reset();
@@ -518,25 +519,30 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
 
     try
     {
-        auto settings =
-            collectors::settings_policy::get_gpu_perf_counter_enabled_metrics();
-
-        auto counters = std::move(settings.explicit_counters);
-        // counters without :device= are broadcast to every GPU agent
-        for(const auto& name : settings.broadcast_names)
+        // The provider creates the SDK contexts, which cannot be destroyed, so it is
+        // created once and every attach session reuses it with a new collector.
+        if(!g_gpu_perf_counter_provider)
         {
-            for(const auto& gpu_agent : agent_list)
+            auto settings =
+                collectors::settings_policy::get_gpu_perf_counter_enabled_metrics();
+
+            auto counters = std::move(settings.explicit_counters);
+            // counters without :device= are broadcast to every GPU agent
+            for(const auto& name : settings.broadcast_names)
             {
-                counters.push_back(
-                    { .name = name, .device_index = gpu_agent->device_type_index });
+                for(const auto& gpu_agent : agent_list)
+                {
+                    counters.push_back(
+                        { .name = name, .device_index = gpu_agent->device_type_index });
+                }
             }
+
+            const auto enabled_metrics =
+                collectors::gpu_perf_counter::enabled_metrics{ std::move(counters) };
+
+            g_gpu_perf_counter_provider = std::make_shared<gpu_perf_counter_provider_t>(
+                agent_list, enabled_metrics);
         }
-
-        const auto enabled_metrics =
-            collectors::gpu_perf_counter::enabled_metrics{ std::move(counters) };
-
-        g_gpu_perf_counter_provider =
-            std::make_shared<gpu_perf_counter_provider_t>(agent_list, enabled_metrics);
         g_gpu_perf_counter_collector =
             std::make_unique<gpu_perf_counter_collector_t>(g_gpu_perf_counter_provider);
 
@@ -548,6 +554,15 @@ register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agen
     {
         LOG_ERROR("Failed to register SDK PMC source: {}", runtime_exception.what());
     }
+}
+
+bool
+owns_gpu_perf_counter_context(std::uint64_t context_handle)
+{
+    auto_lock_t lock{ type_mutex<category::amd_smi>() };
+
+    return g_gpu_perf_counter_provider &&
+           g_gpu_perf_counter_provider->owns_context(context_handle);
 }
 #endif
 }  // namespace rocprofsys::pmc

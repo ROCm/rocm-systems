@@ -53,6 +53,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   version it was built against.
 - Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
   reported several orders of magnitude too small.
+- Fixed `rocprof-sys-attach` killing the target with `SIGSEGV` on a second attach to the same
+  process when `ROCPROFSYS_GPU_PERF_COUNTERS` is set. The GPU perf-counter provider now lives
+  as long as the process and every attach session samples through its own collector, so
+  counter sampling also resumes on re-attach.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

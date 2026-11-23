@@ -11,6 +11,7 @@
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/gpu_perf_counters/backend.hpp"
 
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -75,6 +76,19 @@ public:
     }
 
     void shutdown() { stop(); }
+
+    /**
+     * @brief Whether @p context_handle is one of the SDK contexts this provider created.
+     *
+     * The SDK hands every context of a client to tool_attach, including these, whose
+     * start belongs to the devices (see device::sample_metrics()).
+     */
+    [[nodiscard]] bool owns_context(std::uint64_t context_handle) const noexcept
+    {
+        return std::ranges::any_of(m_devices, [context_handle](const auto& device) {
+            return device->get_context().handle == context_handle;
+        });
+    }
 
     template <typename Device>
     [[nodiscard]] std::vector<std::shared_ptr<Device>> get_devices(device_type type)

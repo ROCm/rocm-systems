@@ -69,6 +69,9 @@ public:
         return m_counter_meta;
     }
 
+    /// @brief The SDK context this device starts and stops.
+    [[nodiscard]] Backend::context_id_t get_context() const noexcept { return m_context; }
+
     [[nodiscard]] const metrics& sample_metrics(
         [[maybe_unused]] const enabled_metrics& enabled,
         [[maybe_unused]] std::uint64_t          timestamp)
@@ -165,6 +168,11 @@ public:
             LOG_WARNING("Failed to stop context for device {} ({})",
                         m_agent->device_type_index, e.what());
         }
+
+        // The context is not running after a stop attempt, also when the SDK reports it
+        // was already stopped (it stops a client's contexts before tool_detach). Clearing
+        // the flag lets sample_metrics() start it again on the next attach.
+        m_context_started = false;
     }
 
 private:

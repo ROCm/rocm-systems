@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <tuple>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
 using ::testing::_;
@@ -397,6 +398,48 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
     auto const            result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
+}
+
+TEST_F(SdkPmcDeviceTest, GetContextReturnsTheConstructedContext)
+{
+    const device<MockBackend> dev(mock_backend, test_context, test_agent,
+                                  test_profile_config, {});
+
+    EXPECT_EQ(dev.get_context().handle, test_context.handle);
+}
+
+// A detach stops the device; the next attach must be able to start it again.
+TEST_F(SdkPmcDeviceTest, StopLetsTheNextSampleStartTheContextAgain)
+{
+    device<MockBackend> dev(mock_backend, test_context, test_agent, test_profile_config,
+                            {});
+
+    const ::testing::InSequence in_sequence;
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
+        .WillOnce([](MockBackend::context_id_t, MockBackend::user_data_t,
+                     MockBackend::counter_flag_t, MockBackend::counter_record_t*,
+                     size_t* count) {
+            *count = 0;
+            return MockBackend::status_success;
+        });
+    EXPECT_CALL(*m_mock_impl, stop_context(_)).WillOnce(Return());
+    EXPECT_CALL(*m_mock_impl, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*m_mock_impl, sample_device_counting_service(_, _, _, _, _))
+        .WillOnce([](MockBackend::context_id_t, MockBackend::user_data_t,
+                     MockBackend::counter_flag_t, MockBackend::counter_record_t*,
+                     size_t* count) {
+            *count = 0;
+            return MockBackend::status_success;
+        });
+
+    constexpr std::uint64_t k_first_timestamp  = 1000000;
+    constexpr std::uint64_t k_second_timestamp = 2000000;
+
+    const enabled_metrics enabled{ {} };
+    std::ignore = dev.sample_metrics(enabled, k_first_timestamp);
+    dev.stop();
+    std::ignore = dev.sample_metrics(enabled, k_second_timestamp);
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing

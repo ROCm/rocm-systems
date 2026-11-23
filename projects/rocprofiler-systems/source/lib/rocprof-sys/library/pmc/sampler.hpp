@@ -58,8 +58,20 @@ void
 postfork_child_reset_sampler_lock();
 
 #if ROCPROFILER_VERSION >= 600
+/**
+ * Creates the GPU perf-counter collector of the current session. The provider behind it
+ * is created on the first call and reused afterwards, because the SDK cannot destroy
+ * the contexts it creates.
+ */
 void
 register_gpu_perf_counter_source(const std::vector<std::shared_ptr<agent>>& agent_list);
+
+/**
+ * Whether @p context_handle is an SDK context of the GPU perf-counter provider. The
+ * collector starts these itself, so an attach must not start them.
+ */
+[[nodiscard]] bool
+owns_gpu_perf_counter_context(std::uint64_t context_handle);
 #endif
 
 }  // namespace rocprofsys::pmc
