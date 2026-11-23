@@ -26,6 +26,11 @@ class VmDirectBacking;
 /// two paths can be compared inside one binary.
 [[nodiscard]] bool vmem_direct_enabled();
 
+/// @brief Whether gapped direct loads read each touched transaction once.
+/// @details RJ_VMEM_LINE_GROUPS=0 keeps them on coalesced runs so the two can
+/// be compared inside one binary.
+[[nodiscard]] bool vmem_line_groups_enabled();
+
 /// One plain vector request whose bounding box local ingress already admitted.
 struct DirectVectorRequest {
   const uint64_t *addrs = nullptr;

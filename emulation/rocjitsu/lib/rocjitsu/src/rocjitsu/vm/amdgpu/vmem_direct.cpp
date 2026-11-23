@@ -15,6 +15,14 @@
 
 namespace rocjitsu::amdgpu {
 
+bool vmem_line_groups_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_VMEM_LINE_GROUPS");
+    return !value || std::strcmp(value, "0") != 0;
+  }();
+  return enabled;
+}
+
 bool vmem_direct_enabled() {
   static const bool enabled = [] {
     const char *value = std::getenv("RJ_VMEM_DIRECT");
@@ -182,6 +190,12 @@ struct LineGroups {
 // staged copy plus a per-lane fill.
 bool find_line_groups(const uint64_t *addrs, uint64_t lanes, uint32_t wf_size, uint32_t stride,
                       uint32_t transaction_bytes, LineGroups &groups) {
+  // Gapped and repeated operands break contiguity at the first lane pair;
+  // contiguous waves and row tiles do not, so they skip the lane scan.
+  const uint32_t first = std::countr_zero(lanes);
+  const uint64_t rest = lanes & (lanes - 1);
+  if (!rest || addrs[std::countr_zero(rest)] == addrs[first] + stride)
+    return false;
   if constexpr (detail::kVectorizedStrideCheck) {
     const bool full_wave =
         (wf_size == 32 && lanes == UINT32_MAX) || (wf_size == 64 && lanes == UINT64_MAX);
@@ -277,7 +291,8 @@ std::optional<VmAccessOutcome> try_direct_vector_access(const DirectVectorReques
     if (find_shared_operands(request.addrs, request.lanes, shared))
       return try_direct_shared_load(request, shared, stride, backing, l2);
     LineGroups groups;
-    if (find_line_groups(request.addrs, request.lanes, request.wf_size, stride,
+    if (vmem_line_groups_enabled() &&
+        find_line_groups(request.addrs, request.lanes, request.wf_size, stride,
                          request.transactions.bytes(), groups))
       return try_direct_line_grouped_load(request, groups, stride, backing, l2);
   }
