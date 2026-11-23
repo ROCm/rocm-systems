@@ -10,10 +10,14 @@
 #include <cinttypes>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
+#include <map>
+#include <sstream>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_container_id_parser.h"
+#include "amd_smi/impl/amd_smi_drm_fdinfo_parser.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
@@ -200,6 +204,52 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t& bdf, long int pid,
 
   info.pid = (uint32_t)pid;
 
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t gpuvsmi_get_self_info(const amdsmi_bdf_t& bdf, amdsmi_proc_info_t& info,
+                                      const char* fdinfo_dir) {
+  char bdf_str[13];
+  snprintf(bdf_str, 13, "%04" PRIx32 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
+           static_cast<uint32_t>(bdf.domain_number & 0xffff),
+           static_cast<uint32_t>(bdf.bus_number & 0xff),
+           static_cast<uint32_t>(bdf.device_number & 0x1f),
+           static_cast<uint32_t>(bdf.function_number & 0x7));
+
+  DIR* d = opendir(fdinfo_dir);
+  if (!d) return AMDSMI_STATUS_NO_PERM;
+
+  std::map<std::string, amd::smi::DrmClientUsage> clients;
+  for (struct dirent* dir; (dir = readdir(d)) != NULL;) {
+    std::ifstream fdinfo(std::string(fdinfo_dir) + dir->d_name);
+    std::stringstream text;
+    text << fdinfo.rdbuf();
+    auto usage = amd::smi::ParseDrmFdinfo(text.str());
+    if (usage.driver == "amdgpu" && usage.pdev == bdf_str) clients[usage.client] = usage;
+  }
+  closedir(d);
+
+  if (clients.empty()) return AMDSMI_STATUS_NOT_FOUND;
+
+  memset(&info, 0, sizeof(info));
+  for (const auto& [key, usage] : clients) {
+    info.memory_usage.vram_mem += usage.vram;
+    info.memory_usage.gtt_mem += usage.gtt;
+    info.memory_usage.cpu_mem += usage.cpu;
+    info.engine_usage.gfx += usage.gfx_ns;
+    info.engine_usage.enc += usage.enc_ns;
+  }
+  info.mem = info.memory_usage.vram_mem + info.memory_usage.gtt_mem + info.memory_usage.cpu_mem;
+  info.pid = static_cast<uint32_t>(getpid());
+
+  char exe_realpath[PATH_MAX] = {0};
+  ssize_t len = readlink("/proc/self/exe", exe_realpath, sizeof(exe_realpath) - 1);
+  amd::smi::CopyBounded(info.name, sizeof(info.name),
+                        len > 0 ? std::string(exe_realpath, static_cast<size_t>(len)) : "N/A");
+
+  info.cu_occupancy = std::numeric_limits<uint32_t>::max();
+  info.evicted_time = std::numeric_limits<uint32_t>::max();
+  info.sdma_usage = std::numeric_limits<uint64_t>::max();
   return AMDSMI_STATUS_SUCCESS;
 }
 

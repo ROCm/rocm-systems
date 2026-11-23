@@ -27,7 +27,7 @@ RUN apt update --yes \
 
 # install Rust toolchain
 # Installer hash from: curl -sSf https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init.sha256
-ARG RUSTUP_INIT_SHA256=4acc9acc76d5079515b46346a485974457b5a79893cfb01112423c89aeb5aa10
+ARG RUSTUP_INIT_SHA256=b1c8cb14e30889e7e2999e6b69e62d9e9b9ffc0f4df8180564d306d9680e6c55
 WORKDIR /tmp
 RUN curl -sSf -O https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init \
     && echo "${RUSTUP_INIT_SHA256}  rustup-init" | sha256sum -c \

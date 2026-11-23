@@ -50,6 +50,7 @@
 #include "amd_smi/impl/amd_smi_ualoe.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/amd_smi_uuid.h"
+#include "amd_smi/impl/fdinfo.h"
 #include "amd_smi/impl/nic/amd_smi_ainic_device.h"
 #include "amd_smi/impl/nic/amd_smi_nic_interface.h"
 #include "amd_smi/impl/nic/amdsmi_unified/interface/smi_nic_interface.h"
@@ -6359,6 +6360,28 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
   }
 
   return (capacity >= num_pids) ? AMDSMI_STATUS_SUCCESS : AMDSMI_STATUS_OUT_OF_RESOURCES;
+}
+
+amdsmi_status_t amdsmi_get_gpu_process_info_self(amdsmi_processor_handle processor_handle,
+                                                 amdsmi_proc_info_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  if (!info) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+  amdsmi_status_t status_code = get_gpu_device_from_handle(processor_handle, &gpu_device);
+  if (status_code != AMDSMI_STATUS_SUCCESS) {
+    return status_code;
+  }
+
+#ifdef ENABLE_WSL_BACKEND
+  // WSL has no amdgpu DRM clients in /proc/self/fdinfo.
+  if (gpu_device->backend()) return AMDSMI_STATUS_NOT_SUPPORTED;
+#endif
+
+  return gpuvsmi_get_self_info(gpu_device->get_bdf(), *info);
 }
 
 amdsmi_status_t amdsmi_get_power_info(amdsmi_processor_handle processor_handle,

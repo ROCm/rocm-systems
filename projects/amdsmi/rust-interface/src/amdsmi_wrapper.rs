@@ -1677,6 +1677,24 @@ const _: () = {
 };
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct AmdsmiCpuLinkT {
+    pub package_id: u32,
+    pub link_type: AmdsmiLinkTypeT,
+    pub reserved: [u64; 4usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiCpuLinkT"][::std::mem::size_of::<AmdsmiCpuLinkT>() - 40usize];
+    ["Alignment of AmdsmiCpuLinkT"][::std::mem::align_of::<AmdsmiCpuLinkT>() - 8usize];
+    ["Offset of field: AmdsmiCpuLinkT::package_id"]
+        [::std::mem::offset_of!(AmdsmiCpuLinkT, package_id) - 0usize];
+    ["Offset of field: AmdsmiCpuLinkT::link_type"]
+        [::std::mem::offset_of!(AmdsmiCpuLinkT, link_type) - 4usize];
+    ["Offset of field: AmdsmiCpuLinkT::reserved"]
+        [::std::mem::offset_of!(AmdsmiCpuLinkT, reserved) - 8usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct AmdsmiVramInfoT {
     pub vram_type: AmdsmiVramTypeT,
     pub vram_vendor: [::std::os::raw::c_char; 256usize],
@@ -5299,6 +5317,13 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_gpu_cpu_links(
+        processor_handle: AmdsmiProcessorHandle,
+        num_cpu_links: *mut u32,
+        cpu_links: *mut AmdsmiCpuLinkT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_link_topology(
         processor_handle_src: AmdsmiProcessorHandle,
         processor_handle_dst: AmdsmiProcessorHandle,
@@ -5589,6 +5614,12 @@ extern "C" {
         num_processors: u32,
         procs: *mut AmdsmiProcInfoByPidT,
         max_processes: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_gpu_process_info_self(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiProcInfoT,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -5885,6 +5916,10 @@ extern "C" {
 }
 extern "C" {
     pub fn amdsmi_reset_ttm_pages_limit() -> AmdsmiStatusT;
+}
+impl AmdsmiHawkInsertionPriorityT {
+    pub const AmdsmiHawkInsertionPriorityLast: AmdsmiHawkInsertionPriorityT =
+        AmdsmiHawkInsertionPriorityT::AmdsmiHawkInsertionPriorityDynamic;
 }
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]

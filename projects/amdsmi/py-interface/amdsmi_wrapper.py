@@ -4921,6 +4921,12 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_gpu_process_info_self = _libraries['libamd_smi.so'].amdsmi_get_gpu_process_info_self
+    amdsmi_get_gpu_process_info_self.restype = amdsmi_status_t
+    amdsmi_get_gpu_process_info_self.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_proc_info_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_gpu_ptl_state = _libraries['libamd_smi.so'].amdsmi_get_gpu_ptl_state
     amdsmi_get_gpu_ptl_state.restype = amdsmi_status_t
     amdsmi_get_gpu_ptl_state.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_bool)]
@@ -6188,6 +6194,7 @@ __all__ = \
     'amdsmi_get_gpu_pci_throughput', 'amdsmi_get_gpu_perf_level',
     'amdsmi_get_gpu_pm_metrics_info',
     'amdsmi_get_gpu_power_profile_presets',
+    'amdsmi_get_gpu_process_info_self',
     'amdsmi_get_gpu_process_isolation', 'amdsmi_get_gpu_process_list',
     'amdsmi_get_gpu_process_list_by_pid',
     'amdsmi_get_gpu_ptl_formats', 'amdsmi_get_gpu_ptl_state',
