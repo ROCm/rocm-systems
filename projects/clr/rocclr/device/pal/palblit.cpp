@@ -2620,6 +2620,51 @@ bool KernelBlitManager::streamOpsWait(device::Memory& memory, uint64_t value, si
 }
 
 // ================================================================================================
+bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
+                                    uint32_t count) const {
+  std::scoped_lock k(lockXferOps_);
+  bool result = false;
+  uint blitType = BatchMemOp;
+  size_t dim = 1;
+
+  size_t globalWorkOffset[1] = {0};
+  // Launch a single work-item; the kernel loops over all ops sequentially, in array order.
+  size_t globalWorkSize[1] = {1};
+  size_t localWorkSize[1] = {1};
+
+  const size_t paramsBytes = count * paramSize;
+  if (kernels_[blitType] == nullptr) {
+    return false;
+  }
+  if (paramsBytes > gpu().xferWrite().MaxSize()) {
+    LogPrintfError("Batch memory operations need %zu bytes, the transfer buffer holds %zu",
+                   paramsBytes, gpu().xferWrite().MaxSize());
+    return false;
+  }
+
+  // The kernel reads the operations from GPU memory
+  Memory& gpuParams = gpu().xferWrite().Acquire(static_cast<uint32_t>(paramsBytes));
+  void* params = gpuParams.map(&gpu(), Resource::NoWait);
+  memcpy(params, paramArray, paramsBytes);
+  gpuParams.unmap(&gpu());
+  Memory* pGpuParams = &gpuParams;
+
+  setArgument(kernels_[blitType], 0, sizeof(cl_mem), &pGpuParams);
+  setArgument(kernels_[blitType], 1, sizeof(uint32_t), &count);
+
+  // Create ND range object for the kernel's execution
+  amd::NDRangeContainer ndrange(dim, globalWorkOffset, globalWorkSize, localWorkSize);
+
+  // Execute the blit
+  address parameters = kernels_[blitType]->parameters().values();
+  result = gpu().submitKernelInternal(ndrange, *kernels_[blitType], parameters);
+  gpu().xferWrite().Release(gpuParams);
+  synchronize();
+
+  return result;
+}
+
+// ================================================================================================
 bool KernelBlitManager::initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
                                  uint heap_size, uint number_of_initial_blocks) const {
   bool result;
