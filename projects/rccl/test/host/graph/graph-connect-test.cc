@@ -639,7 +639,6 @@ TEST_F(GraphConnectMicrotest, TreeChannelLimit_OnlyGfx1250AcrossMnnvlCliquesFoll
 
   for (const char* gcn : {"gfx942", "gfx950"}) {
     Use(4, 2, 0, gcn);
-    comm_->MNNVL = 1;
     EXPECT_EQ(2 * CHANNEL_LIMIT, getTreeChannelLimit(comm_.get())) << gcn;
   }
   Use(4, 2, 0, "gfx90a");
@@ -967,8 +966,8 @@ class GraphConnectPostsetMicrotest : public GraphConnectMicrotest {
     ResetChannels();
   }
 
-  // Runs Postset on the ranks of node 0 of a 2-node communicator, which hold every tree link towards node 1. Returns
-  // the final channel count and lists the channels without a link to the other node.
+  // Runs Postset on node 0 of a 2-node communicator (it holds every link to node 1); returns the final channel count
+  // and lists the channels without a link to the other node.
   int CheckTreeReach(const char* gcn, bool mnnvl, int searched, std::vector<int>& unreached) {
     constexpr int kGpus = 4;
     int total = 0;
@@ -1360,13 +1359,9 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_The64CapSkipsGfx1250SingleNodeAndMn
   EXPECT_EQ(200, comm_->nChannels);
 }
 
-// ncclTopoPostset doubles the channels up to maxChannels / 2, and connectTrees must split the trees at the same
-// threshold. gfx1250 across MNNVL cliques skips the 64-channel cap, so it doubles well past 32 (128 here, the fixture
-// has 304 CUs). With a fixed limit of 32 the channels added by the doubling got no link to the other clique, and Tree
-// AllReduce was silently wrong.
+// gfx1250 over MNNVL doubles past 32, so every doubled tree channel must still reach the other clique.
 TEST_F(GraphConnectPostsetMicrotest, Postset_Gfx1250MnnvlEveryTreeChannelReachesTheOtherClique) {
-  // 16 and 32 never halved; 33..96 doubled but were split as if they could not; 130 is over half the max, so it is
-  // not doubled and is split in two halves.
+  // 130 is over half the max (128 with the fixture's 304 CUs): not doubled, split in two halves.
   for (int searched : {16, 32, 33, 46, 96, 130}) {
     SCOPED_TRACE("searched channels " + std::to_string(searched));
     std::vector<int> unreached;

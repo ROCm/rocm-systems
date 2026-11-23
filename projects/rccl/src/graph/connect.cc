@@ -549,8 +549,7 @@ static ncclResult_t setTreeDown(struct ncclTree* tree, int* indexes, int d, int 
 static int getTreeChannelLimit(const struct ncclComm* comm) {
   const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
 
-  // gfx1250 across MNNVL cliques skips the 64-channel cap in ncclTopoPostset (maxChannels = min(cu, MAXCHANNELS)),
-  // so Postset doubles up to maxChannels / 2. Keep in sync with maxChannels there.
+  // gfx1250 over MNNVL cliques skips the 64-channel cap, so Postset doubles up to maxChannels / 2. Keep in sync.
   if (IsArchMatch(gcn, "gfx1250") && comm->MNNVL && comm->nNodes > 1) {
     return std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) / 2;
   }
