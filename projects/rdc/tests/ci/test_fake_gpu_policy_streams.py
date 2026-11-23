@@ -587,7 +587,9 @@ def test_unregistering_ends_the_stream_of_a_client_that_stopped_reading(tools, t
     try:
         gid = int(_created_id(d.ok("group", "-c", "all_gpus")))
         d.ok("group", "-g", str(gid), "-a", ",".join(str(g) for g in range(gpus)))
-        d.ok("policy", "-g", str(gid), "-T", "1", "-P", "1", "-A", "0")  # both met on every GPU
+        # Both met on every GPU. rdci sets one condition per call.
+        d.ok("policy", "-g", str(gid), "-T", "1", "-A", "0")
+        d.ok("policy", "-g", str(gid), "-P", "1", "-A", "0")
         conn = _Http2(d.port)
         stopped = conn.register(gid, read=False)
         reading = conn.register(gid, read=True)
