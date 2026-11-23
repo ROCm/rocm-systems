@@ -5,11 +5,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <atomic>
 #include <barrier>
 #include <cstdlib>
 #include <new>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace
 {
@@ -43,7 +46,10 @@ operator new(std::size_t size)
         g_fail_next_allocation = false;
         throw std::bad_alloc{};
     }
-    if(void* ptr = std::malloc(size)) return ptr;
+    if(void* ptr = std::malloc(size))
+    {
+        return ptr;
+    }
     throw std::bad_alloc{};
 }
 
@@ -79,6 +85,14 @@ TEST_F(ProcessStateTest, set_to_lesser_value_throws_and_state_is_unchanged)
     EXPECT_EQ(process_state::get(), process_state_value::active);
 }
 
+TEST_F(ProcessStateTest, set_finalized_after_disabled_throws_and_state_is_unchanged)
+{
+    process_state::set(process_state_value::disabled);
+
+    EXPECT_THROW(process_state::set(process_state_value::finalized), std::runtime_error);
+    EXPECT_EQ(process_state::get(), process_state_value::disabled);
+}
+
 TEST_F(ProcessStateTest, reset_bypasses_validation_and_returns_to_pre_init)
 {
     process_state::set(process_state_value::finalized);
@@ -93,7 +107,8 @@ TEST_F(ProcessStateTest, racing_setters_never_lower_the_state)
     constexpr size_t k_iterations = 20'000;
     constexpr size_t k_parties    = 3;
 
-    std::barrier sync{ k_parties };
+    std::barrier        sync{ k_parties };
+    std::atomic<size_t> rejected{ 0 };
 
     auto setter = [&](process_state_value value) {
         for(size_t i = 0; i < k_iterations; ++i)
@@ -103,7 +118,9 @@ TEST_F(ProcessStateTest, racing_setters_never_lower_the_state)
             {
                 process_state::set(value);
             } catch(const std::runtime_error&)
-            {}
+            {
+                rejected.fetch_add(1);
+            }
             sync.arrive_and_wait();
         }
     };
@@ -117,13 +134,18 @@ TEST_F(ProcessStateTest, racing_setters_never_lower_the_state)
         process_state::reset();
         sync.arrive_and_wait();
         sync.arrive_and_wait();
-        if(process_state::get() != process_state_value::finalized) ++lowered;
+        if(process_state::get() != process_state_value::finalized)
+        {
+            ++lowered;
+        }
     }
     activator.join();
     finalizer.join();
 
-    EXPECT_EQ(lowered, 0U) << "set(finalized) always runs, so the final state must be "
-                              "finalized; active means set(active) lowered it";
+    EXPECT_EQ(lowered, 0U)
+        << "set(finalized) always runs, so the final state must be "
+           "finalized; active means set(active) lowered it (rejected sets: "
+        << rejected.load() << ")";
 }
 
 TEST_F(ThreadStateTest, default_state_is_enabled)
@@ -166,6 +188,36 @@ TEST_F(ThreadStateTest, push_and_pop_are_no_ops_once_completed)
 
     auto const _popped = thread_state::pop();
     EXPECT_EQ(_popped, thread_state_value::completed);
+}
+
+TEST_F(ThreadStateTest, nesting_beyond_reserved_depth_unwinds_in_lifo_order)
+{
+    constexpr size_t k_depth = 64;
+
+    std::vector<thread_state_value> observed_on_unwind;
+
+    std::thread worker([&]() {
+        std::vector<thread_state_value> expected_on_unwind;
+        auto                            current = thread_state::get();
+        for(size_t i = 0; i < k_depth; ++i)
+        {
+            expected_on_unwind.push_back(current);
+            current =
+                (i % 2 == 0) ? thread_state_value::internal : thread_state_value::enabled;
+            thread_state::push(current);
+        }
+        for(size_t i = 0; i < k_depth; ++i)
+        {
+            observed_on_unwind.push_back(thread_state::pop());
+        }
+
+        std::reverse(expected_on_unwind.begin(), expected_on_unwind.end());
+        EXPECT_EQ(observed_on_unwind, expected_on_unwind);
+    });
+    worker.join();
+
+    ASSERT_EQ(observed_on_unwind.size(), k_depth);
+    EXPECT_EQ(observed_on_unwind.back(), thread_state_value::enabled);
 }
 
 TEST_F(ThreadStateTest, scoped_guard_restores_state_on_destruction)
@@ -212,7 +264,9 @@ TEST_F(ThreadStateTest, failed_push_leaves_state_unchanged)
 
     std::thread worker([&]() {
         for(size_t i = 0; i < k_reserved_depth; ++i)
+        {
             thread_state::push(thread_state_value::internal);
+        }
 
         thread_state::set(thread_state_value::enabled);
         g_fail_next_allocation = true;
