@@ -547,13 +547,19 @@ TEST_F(SymModelLsaCtaTest, AllGatherST_Gfx950_PicksWithinTheCap) {
 }
 
 // The penalty is charged to selectionTimeUs only, at 2.5% per CTA, never to the timeUs the selection compares.
+// timeUs is the unpenalized estimate, 13 us + softplus(7 * 64 KiB / (nBlocks * 5 GiB/s) - 1), worked out outside the
+// code under test.
 TEST_F(SymModelLsaCtaTest, AllGatherST_ChargesThePerCtaPenaltyOnlyToSelectionTime) {
   constexpr float kSelectionCostPerCta = 0.025f;
-  for (int nBlocks : {1, 6, 24}) {
-    Choice choice = ChooseCtas(LsaInput(size_t(64) << 10, nBlocks, nBlocks));
-    ASSERT_EQ(choice.nBlocks, nBlocks);
-    EXPECT_GT(choice.timeUs, 0.0f);
-    EXPECT_FLOAT_EQ(choice.selectionTimeUs, choice.timeUs * (1.0f + kSelectionCostPerCta * nBlocks));
+  const struct {
+    int nBlocks;
+    float unpenalizedTimeUs;
+  } cases[] = {{1, 97.4492f}, {6, 26.2415f}, {24, 15.6348f}};
+  for (const auto& c : cases) {
+    Choice choice = ChooseCtas(LsaInput(size_t(64) << 10, c.nBlocks, c.nBlocks));
+    ASSERT_EQ(choice.nBlocks, c.nBlocks);
+    EXPECT_NEAR(choice.timeUs, c.unpenalizedTimeUs, 0.001f) << c.nBlocks << " CTAs";
+    EXPECT_FLOAT_EQ(choice.selectionTimeUs, choice.timeUs * (1.0f + kSelectionCostPerCta * c.nBlocks));
   }
 }
 
