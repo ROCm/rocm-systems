@@ -45,13 +45,14 @@ bool hsakmt_hsa_loader_init() {
   fn_hsa_signal_store_screlease = reinterpret_cast<decltype(fn_hsa_signal_store_screlease)>(
       dlsym(handle, "hsa_signal_store_screlease"));
 
-  auto fn_hsa_system_get_extension_table =
-      reinterpret_cast<hsa_status_t (*)(uint16_t, uint16_t, uint16_t, void *)>(
-          dlsym(handle, "hsa_system_get_extension_table"));
-  if (fn_hsa_system_get_extension_table) {
+  auto fn_hsa_system_get_major_extension_table =
+      reinterpret_cast<hsa_status_t (*)(uint16_t, uint16_t, size_t, void *)>(
+          dlsym(handle, "hsa_system_get_major_extension_table"));
+  if (fn_hsa_system_get_major_extension_table) {
     hsa_ven_amd_loader_1_03_pfn_t table;
-    fn_hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 3, &table);
-    fn_hsa_ven_amd_loader_query_host_address = table.hsa_ven_amd_loader_query_host_address;
+    if (fn_hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(table),
+                                                &table) == HSA_STATUS_SUCCESS)
+      fn_hsa_ven_amd_loader_query_host_address = table.hsa_ven_amd_loader_query_host_address;
   }
 
   // Function pointers captured; drop our reference. The library stays resident
@@ -121,9 +122,10 @@ hsa_status_t hsakmt_hsa_ven_amd_loader_query_host_address(
     std::lock_guard<std::mutex> gard(*lock_);
     if (fn_hsa_ven_amd_loader_query_host_address == nullptr) {
       hsa_ven_amd_loader_1_03_pfn_t table;
-      hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 3, &table);
-      fn_hsa_ven_amd_loader_query_host_address =
-          table.hsa_ven_amd_loader_query_host_address;
+      if (hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(table),
+                                               &table) == HSA_STATUS_SUCCESS)
+        fn_hsa_ven_amd_loader_query_host_address =
+            table.hsa_ven_amd_loader_query_host_address;
     }
   }
 

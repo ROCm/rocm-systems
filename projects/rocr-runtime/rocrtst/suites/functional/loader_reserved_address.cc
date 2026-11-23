@@ -45,11 +45,8 @@ void LoaderReservedAddressTest::SetUp(void) {
   ASSERT_SUCCESS(
       hsa_system_major_extension_supported(HSA_EXTENSION_AMD_LOADER, 1, &minor, &supported));
   ASSERT_TRUE(supported);
-  // The reported minor stays 0. 1.04 is visible only to the exact-version query.
+  // The reported minor stays 0. The 1.04 entry points are checked below.
   ASSERT_EQ(minor, uint16_t{0});
-  bool has_104 = false;
-  ASSERT_SUCCESS(hsa_system_extension_supported(HSA_EXTENSION_AMD_LOADER, 1, 4, &has_104));
-  ASSERT_TRUE(has_104);
   ASSERT_SUCCESS(
       hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader_), &loader_));
   ASSERT_NE(loader_.hsa_ven_amd_loader_code_object_reader_get_load_size, nullptr);

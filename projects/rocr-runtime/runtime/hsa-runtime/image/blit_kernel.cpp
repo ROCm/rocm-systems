@@ -53,9 +53,11 @@
 #undef HSA_ARGUMENT_ALIGN_BYTES
 #define HSA_ARGUMENT_ALIGN_BYTES 16
 
+#include "core/inc/amd_elf_image.hpp"
 #include "core/inc/hsa_internal.h"
 #include "core/inc/hsa_ext_amd_impl.h"
 #include "core/inc/hsa_table_interface.h"
+#include "core/inc/isa.h"
 
 namespace rocr {
 namespace image {
@@ -179,15 +181,16 @@ hsa_status_t BlitKernel::BuildImageBlitCode(
   std::lock_guard<std::mutex> lock(lock_);
 
   for (std::pair<uint64_t, hsa_executable_t> pair : code_executable_map_) {
-    bool isa_compatible = false;
     hsa_isa_t code_isa = {pair.first};
 
-    status = HSA::hsa_isa_compatible(code_isa, agent_isa, &isa_compatible);
-    if (HSA_STATUS_SUCCESS != status) {
-      return status;
+    const core::Isa* code_isa_object = core::Isa::Object(code_isa);
+    const core::Isa* agent_isa_object = core::Isa::Object(agent_isa);
+    if (code_isa_object == nullptr || !code_isa_object->IsValid() || agent_isa_object == nullptr ||
+        !agent_isa_object->IsValid()) {
+      return HSA_STATUS_ERROR_INVALID_ISA;
     }
 
-    if (isa_compatible) {
+    if (core::Isa::IsCompatible(*code_isa_object, *agent_isa_object, 0)) {
       return PopulateKernelCode(agent, pair.second, blit_code_catalog);
     }
   }
@@ -216,16 +219,30 @@ hsa_status_t BlitKernel::BuildImageBlitCode(
 
   // Create executable.
   hsa_executable_t executable = {0};
-  status =
-      HSA::hsa_executable_create(HSA_PROFILE_FULL, HSA_EXECUTABLE_STATE_UNFROZEN, "", &executable);
+  status = HSA::hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+                                          "", &executable);
   if (HSA_STATUS_SUCCESS != status) {
     return status;
   }
 
   code_executable_map_[agent_isa.handle] = executable;
 
-  // Load code object.
-  status = HSA::hsa_executable_load_code_object(executable, agent, code_object, "");
+  // Load code object. The blit objects are embedded ELF images without an
+  // explicit length, so derive it from the ELF headers.
+  const size_t code_object_size = amd::elf::ElfSize(patched_code_object, 0);
+  if (code_object_size == 0) {
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  }
+
+  hsa_code_object_reader_t reader = {0};
+  status = HSA::hsa_code_object_reader_create_from_memory(patched_code_object, code_object_size,
+                                                          &reader);
+  if (HSA_STATUS_SUCCESS != status) {
+    return status;
+  }
+
+  status = HSA::hsa_executable_load_agent_code_object(executable, agent, reader, "", nullptr);
+  HSA::hsa_code_object_reader_destroy(reader);
   if (HSA_STATUS_SUCCESS != status) {
     return status;
   }
