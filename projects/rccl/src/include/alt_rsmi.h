@@ -97,7 +97,7 @@ struct ARSMI_fabricInfo {
   uint32_t accel_id;
   uint8_t ppod_id[16];   /* 128-bit UUID, binary (parsed from sysfs hex string) */
   uint32_t ppod_size;
-  uint32_t bandwidth;     /* Mb/s */
+  uint32_t bandwidth;     /* MB/s */
   uint32_t latency;       /* ns */
   uint32_t vpod_id;
   uint32_t vpod_size;

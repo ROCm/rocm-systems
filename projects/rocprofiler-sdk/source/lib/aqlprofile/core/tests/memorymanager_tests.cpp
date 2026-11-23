@@ -25,6 +25,7 @@
 #include "lib/common/scope_destructor.hpp"
 #include "gtest/gtest.h"
 #include <cstring>
+#include <set>
 
 // Dummy alloc/dealloc functions for testing
 hsa_status_t
@@ -221,6 +222,185 @@ TEST(TraceMemoryManagerTest, Gfx11FamilyReservesDisabledSEBuffers)
         EXPECT_EQ(mgr->config.capacity_per_disabled_se, uint64_t{1} << alignment);
         EXPECT_LT(mgr->config.capacity_per_se, parameter.value);
     }
+}
+
+namespace
+{
+constexpr uint32_t att_agent_se_num = 4;
+constexpr uint32_t pm4_wait_reg_mem = 0x3C;
+constexpr uint32_t pm4_copy_data    = 0x40;
+
+aqlprofile_agent_handle_t
+register_att_agent(const char* gfxip)
+{
+    auto info                 = aqlprofile_agent_info_v1_t{};
+    info.agent_gfxip          = gfxip;
+    info.cu_num               = 64;
+    info.se_num               = att_agent_se_num;
+    info.xcc_num              = 1;
+    info.shader_arrays_per_se = 2;
+    return aql_profile::RegisterAgent(&info);
+}
+
+aqlprofile_att_parameter_t
+att_parameter(uint32_t name, uint32_t value)
+{
+    auto parameter           = aqlprofile_att_parameter_t{};
+    parameter.parameter_name = static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(name);
+    parameter.value          = value;
+    return parameter;
+}
+
+struct att_capture
+{
+    std::vector<void*>                allocations{};
+    std::vector<std::vector<uint8_t>> copies{};
+};
+
+hsa_status_t
+capture_alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t flags, void* userdata)
+{
+    const auto status = dummy_alloc(ptr, size, flags, userdata);
+    if(status == HSA_STATUS_SUCCESS)
+        static_cast<att_capture*>(userdata)->allocations.push_back(*ptr);
+    return status;
+}
+
+hsa_status_t
+capture_copy(void* dst, const void* src, size_t size, void* userdata)
+{
+    const auto* bytes = static_cast<const uint8_t*>(src);
+    static_cast<att_capture*>(userdata)->copies.emplace_back(bytes, bytes + size);
+    return dummy_copy(dst, src, size, userdata);
+}
+
+hsa_status_t
+switchable_alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t flags, void* userdata)
+{
+    if(*static_cast<bool*>(userdata)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    return dummy_alloc(ptr, size, flags, userdata);
+}
+
+// Type-3 PM4 packets as (opcode, body)
+std::vector<std::pair<uint32_t, std::vector<uint32_t>>>
+pm4_packets(const std::vector<uint8_t>& bytes)
+{
+    std::vector<uint32_t> dwords(bytes.size() / sizeof(uint32_t));
+    std::memcpy(dwords.data(), bytes.data(), dwords.size() * sizeof(uint32_t));
+
+    std::vector<std::pair<uint32_t, std::vector<uint32_t>>> packets{};
+    for(size_t i = 0; i < dwords.size();)
+    {
+        const size_t count = ((dwords[i] >> 16) & 0x3FFF) + 1;
+        if(dwords[i] >> 30 != 3 || i + 1 + count > dwords.size())
+        {
+            ADD_FAILURE() << "malformed PM4 packet at dword " << i;
+            break;
+        }
+        packets.emplace_back(
+            (dwords[i] >> 8) & 0xFF,
+            std::vector<uint32_t>(dwords.begin() + i + 1, dwords.begin() + i + 1 + count));
+        i += 1 + count;
+    }
+    return packets;
+}
+}  // namespace
+
+TEST(TraceMemoryManagerTest, StopWaitPollsTheStatusRegister)
+{
+    // STOP waits for the trace to go idle, then copies the status register into
+    // TraceControl::status. The wait must poll that same register.
+    for(const auto* gfxip : {"gfx942", "gfx1201"})
+    {
+        SCOPED_TRACE(gfxip);
+        auto capture = att_capture{};
+        auto parameter =
+            att_parameter(HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, 1 << 20);
+        auto profile = aqlprofile_att_profile_t{register_att_agent(gfxip), &parameter, 1};
+        auto handle  = aqlprofile_handle_t{};
+        auto packets = aqlprofile_att_control_aql_packets_t{};
+        ASSERT_EQ(
+            aqlprofile_att_create_packets(
+                &handle, &packets, profile, capture_alloc, dummy_dealloc, capture_copy, &capture),
+            HSA_STATUS_SUCCESS);
+        auto cleanup =
+            rocprofiler::common::scope_destructor{[&] { aqlprofile_att_delete_packets(handle); }};
+        ASSERT_EQ(capture.copies.size(), 2u);
+
+        const auto control     = reinterpret_cast<uint64_t>(capture.allocations.front());
+        const auto control_end = control + att_agent_se_num * sizeof(pm4_builder::TraceControl);
+        std::set<uint32_t> status_registers{};
+        std::set<uint32_t> polled_registers{};
+        for(const auto& [opcode, body] : pm4_packets(capture.copies.back()))
+        {
+            if(opcode == pm4_wait_reg_mem && (body.at(0) & 0x30) == 0)
+                polled_registers.insert(body.at(1));
+            if(opcode == pm4_copy_data && (body.at(0) & 0xF) == 0)
+            {
+                const uint64_t destination = body.at(3) | (uint64_t{body.at(4)} << 32);
+                if(destination >= control && destination < control_end &&
+                   (destination - control) % sizeof(pm4_builder::TraceControl) == 0)
+                    status_registers.insert(body.at(1));
+            }
+        }
+        ASSERT_EQ(status_registers.size(), 1u);
+        EXPECT_EQ(polled_registers, status_registers);
+    }
+}
+
+TEST(TraceMemoryManagerTest, UpdateBufferStatusRejectsUnknownShaderEngine)
+{
+    auto parameter = att_parameter(HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, 1 << 20);
+    auto profile   = aqlprofile_att_profile_t{register_att_agent("gfx942"), &parameter, 1};
+    auto handle    = aqlprofile_handle_t{};
+    auto packets   = aqlprofile_att_control_aql_packets_t{};
+    ASSERT_EQ(aqlprofile_att_create_packets(
+                  &handle, &packets, profile, dummy_alloc, dummy_dealloc, dummy_copy, nullptr),
+              HSA_STATUS_SUCCESS);
+    auto cleanup =
+        rocprofiler::common::scope_destructor{[&] { aqlprofile_att_delete_packets(handle); }};
+
+    for(int shader_engine : {-1, static_cast<int>(att_agent_se_num)})
+    {
+        auto status = aqlprofile_att_buffer_status_t{};
+        EXPECT_EQ(aqlprofile_att_update_buffer_status(&status, handle, shader_engine, 0),
+                  HSA_STATUS_ERROR_INVALID_ARGUMENT)
+            << shader_engine;
+        EXPECT_EQ(status._size, 0u) << shader_engine;
+    }
+    EXPECT_EQ(aqlprofile_att_update_buffer_status(nullptr, handle, 0, 0),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
+TEST(TraceMemoryManagerTest, GetBufferPacketsReturnsAllocationFailure)
+{
+    aqlprofile_att_parameter_t parameters[] = {
+        att_parameter(HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, 1 << 20),
+        att_parameter(AQLPROFILE_ATT_PARAMETER_NAME_NUM_BUFFERS, 2)};
+    auto fail_allocations = false;
+    auto profile          = aqlprofile_att_profile_t{register_att_agent("gfx942"), parameters, 2};
+    auto handle           = aqlprofile_handle_t{};
+    auto packets          = aqlprofile_att_control_aql_packets_t{};
+    ASSERT_EQ(aqlprofile_att_create_packets(&handle,
+                                            &packets,
+                                            profile,
+                                            switchable_alloc,
+                                            dummy_dealloc,
+                                            dummy_copy,
+                                            &fail_allocations),
+              HSA_STATUS_SUCCESS);
+    auto cleanup =
+        rocprofiler::common::scope_destructor{[&] { aqlprofile_att_delete_packets(handle); }};
+
+    fail_allocations  = true;
+    auto header       = uint64_t{0};
+    auto query        = hsa_ext_amd_aql_pm4_packet_t{};
+    auto swap_packets = std::vector<hsa_ext_amd_aql_pm4_packet_t>(2);
+    auto swaps     = std::vector<hsa_ext_amd_aql_pm4_packet_t*>{&swap_packets[0], &swap_packets[1]};
+    auto num_swaps = uint64_t{swaps.size()};
+    EXPECT_EQ(
+        aqlprofile_att_get_buffer_packets(&header, &query, swaps.data(), &num_swaps, handle, 0, 0),
+        HSA_STATUS_ERROR_INVALID_ALLOCATION);
 }
 
 TEST(CodeobjMemoryManagerTest, CmdBufferAlloc)

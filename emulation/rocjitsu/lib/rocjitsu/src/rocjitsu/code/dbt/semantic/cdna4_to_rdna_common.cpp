@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/dbt/semantic/cdna4_to_rdna_common.h"
 #include "rocjitsu/code/dbt/semantic/rules.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/liveness.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
@@ -38,11 +39,11 @@ namespace {
 /// @details RDNA3 and RDNA4 currently share the layout, but selecting the
 /// generated builder by host ISA prevents a future XML change from silently
 /// encoding one target with the other target's format.
-[[nodiscard]] std::array<uint32_t, 2> build_rdna_vop3_sdst(rj_code_arch_t host_arch, uint16_t op,
-                                                           uint8_t vdst, uint8_t sdst,
+[[nodiscard]] std::array<uint32_t, 2> build_rdna_vop3_sdst(rocjitsu::IsaFamily host_arch,
+                                                           uint16_t op, uint8_t vdst, uint8_t sdst,
                                                            uint16_t src0, uint16_t src1 = 0,
                                                            uint16_t src2 = 0) {
-  if (host_arch == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (host_arch == rocjitsu::IsaFamily::Rdna3) {
     return rdna3::build_vop3_sdst_enc(
         op, {.vdst = vdst, .sdst = sdst, .src0 = src0, .src1 = src1, .src2 = src2});
   }
@@ -51,10 +52,10 @@ namespace {
 }
 
 /// @brief Build a plain VOP3 instruction, selecting the builder by host ISA.
-[[nodiscard]] std::array<uint32_t, 2> build_rdna_vop3(rj_code_arch_t host_arch, uint16_t op,
+[[nodiscard]] std::array<uint32_t, 2> build_rdna_vop3(rocjitsu::IsaFamily host_arch, uint16_t op,
                                                       uint8_t vdst, uint16_t src0,
                                                       uint16_t src1 = 0, uint16_t src2 = 0) {
-  if (host_arch == ROCJITSU_CODE_ARCH_RDNA3)
+  if (host_arch == rocjitsu::IsaFamily::Rdna3)
     return rdna3::build_vop3(op, {.vdst = vdst, .src0 = src0, .src1 = src1, .src2 = src2});
   return rdna4::build_vop3(op, {.vdst = vdst, .src0 = src0, .src1 = src1, .src2 = src2});
 }
@@ -93,7 +94,7 @@ bool cdna4_reverse_shift_needs_rewrite(const Instruction &inst) {
   }
 }
 
-template <rj_code_arch_t Host>
+template <rocjitsu::IsaFamily Host>
 ExpandResult lower_cdna4_reverse_shift(const Instruction &inst, uint64_t, std::span<const uint8_t>,
                                        const LivenessAnalysis &, TranslationContext &) {
   cdna4::Vop2MachineInst src{};
@@ -123,31 +124,31 @@ ExpandResult lower_cdna4_reverse_shift(const Instruction &inst, uint64_t, std::s
   uint16_t opcode;
   switch (inst.opcode()) {
   case cdna4::kVLshlrevB16Vop2:
-    opcode = Host == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVLshlrevB16Vop3 : rdna4::kVLshlrevB16Vop3;
+    opcode = Host == rocjitsu::IsaFamily::Rdna3 ? rdna3::kVLshlrevB16Vop3 : rdna4::kVLshlrevB16Vop3;
     break;
   case cdna4::kVLshrrevB16Vop2:
-    opcode = Host == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVLshrrevB16Vop3 : rdna4::kVLshrrevB16Vop3;
+    opcode = Host == rocjitsu::IsaFamily::Rdna3 ? rdna3::kVLshrrevB16Vop3 : rdna4::kVLshrrevB16Vop3;
     break;
   default:
-    opcode = Host == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVAshrrevI16Vop3 : rdna4::kVAshrrevI16Vop3;
+    opcode = Host == rocjitsu::IsaFamily::Rdna3 ? rdna3::kVAshrrevI16Vop3 : rdna4::kVAshrrevI16Vop3;
     break;
   }
   const auto shift = build_rdna_vop3(Host, opcode, src.vdst, count, 256 + src.vsrc1);
   constexpr uint16_t extract =
-      Host == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVBfeU32Vop3 : rdna4::kVBfeU32Vop3;
+      Host == rocjitsu::IsaFamily::Rdna3 ? rdna3::kVBfeU32Vop3 : rdna4::kVBfeU32Vop3;
   const auto extend =
       build_rdna_vop3(Host, extract, src.vdst, 256 + src.vdst, inline_zero, inline_zero + 16);
   return ExpandResult::success({shift[0], shift[1], extend[0], extend[1]});
 }
 
-template <rj_code_arch_t Host>
+template <rocjitsu::IsaFamily Host>
 constexpr RegisteredInstructionRewrite kReverseShiftRules[] = {{"CDNA4 VOP2 reverse shifts",
                                                                 cdna4_reverse_shift_needs_rewrite,
                                                                 lower_cdna4_reverse_shift<Host>,
                                                                 false,
                                                                 {}}};
 
-ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_arch,
+ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rocjitsu::IsaFamily host_arch,
                                   const LivenessAnalysis &liveness, TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
   if (!raw || inst.size() < 8)
@@ -162,7 +163,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   const uint16_t src1 = src.src1;
   const uint16_t src2 = src.src2;
 
-  if (host_arch != ROCJITSU_CODE_ARCH_RDNA3 && host_arch != ROCJITSU_CODE_ARCH_RDNA4)
+  if (host_arch != rocjitsu::IsaFamily::Rdna3 && host_arch != rocjitsu::IsaFamily::Rdna4)
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " v_lshl_add_u64 lowering only supports RDNA3/RDNA4 hosts");
   if (vdst == 255)
@@ -284,11 +285,11 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   // architecture-specific selection explicit so an ISA XML change cannot
   // silently make this shared lowering emit the other target's opcode.
   const uint16_t lshlrev_b64_op =
-      host_arch == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVLshlrevB64Vop3 : rdna4::kVLshlrevB64Vop3;
-  const uint16_t add_co_u32_op = host_arch == ROCJITSU_CODE_ARCH_RDNA3
+      host_arch == rocjitsu::IsaFamily::Rdna3 ? rdna3::kVLshlrevB64Vop3 : rdna4::kVLshlrevB64Vop3;
+  const uint16_t add_co_u32_op = host_arch == rocjitsu::IsaFamily::Rdna3
                                      ? rdna3::kVAddCoU32Vop3SdstEnc
                                      : rdna4::kVAddCoU32Vop3SdstEnc;
-  const uint16_t add_co_ci_u32_op = host_arch == ROCJITSU_CODE_ARCH_RDNA3
+  const uint16_t add_co_ci_u32_op = host_arch == rocjitsu::IsaFamily::Rdna3
                                         ? rdna3::kVAddCoCiU32Vop3SdstEnc
                                         : rdna4::kVAddCoCiU32Vop3SdstEnc;
 
@@ -321,9 +322,9 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
     // 0, 1, 2, 3, 4, 0, 0, 0. V_BFE_U32 uses the low five bits of its
     // bit offset, so multiplying S1 by four selects the corresponding nibble.
     const uint16_t shl =
-        host_arch == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVLshlrevB32Vop3 : rdna4::kVLshlrevB32Vop3;
+        host_arch == rocjitsu::IsaFamily::Rdna3 ? rdna3::kVLshlrevB32Vop3 : rdna4::kVLshlrevB32Vop3;
     const uint16_t bfe =
-        host_arch == ROCJITSU_CODE_ARCH_RDNA3 ? rdna3::kVBfeU32Vop3 : rdna4::kVBfeU32Vop3;
+        host_arch == rocjitsu::IsaFamily::Rdna3 ? rdna3::kVBfeU32Vop3 : rdna4::kVBfeU32Vop3;
     const uint16_t count_src =
         src1 == CdnaSrc::OPR_SRC_SIMPLE_M0 ? amdgpu::kModernM0Selector : src1;
     const auto offset = build_rdna_vop3(host_arch, shl, count_dst, kInlineZero + 2, count_src);
@@ -342,7 +343,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   }
 
   // If S2 is VCC, wait for a previous VALU write before reading the addend.
-  if (host_arch == ROCJITSU_CODE_ARCH_RDNA4 && src2_is_vcc)
+  if (host_arch == rocjitsu::IsaFamily::Rdna4 && src2_is_vcc)
     words.push_back(rdna4::build_sopp(rdna4::kSWaitAlu, {.simm16 = 0xFFFD})[0]);
 
   // vdst = shift_dst + S2. v_add_co_u32 writes the carry into the dead SGPR pair,
@@ -357,7 +358,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 
   // VA_SDST=0 waits for the low add's scalar write before the high add reads the carry.
   // On GFX11 wave64, an earlier high add may have read the same pair as a lane mask.
-  if (host_arch == ROCJITSU_CODE_ARCH_RDNA3)
+  if (host_arch == rocjitsu::IsaFamily::Rdna3)
     words.push_back(rdna3::build_sopp(rdna3::kSWaitcntDepctrSopp, {.simm16 = 0xF19F})[0]);
   else
     words.push_back(rdna4::build_sopp(rdna4::kSWaitAlu, {.simm16 = 0xF1FF})[0]);
@@ -371,7 +372,7 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
   }
 
   if (wait_for_scratch) {
-    const auto wait = host_arch == ROCJITSU_CODE_ARCH_RDNA3
+    const auto wait = host_arch == rocjitsu::IsaFamily::Rdna3
                           ? rdna3::build_sopp(rdna3::kSWaitIdleSopp)
                           : rdna4::build_sopp(rdna4::kSWaitIdleSopp);
     words.insert(words.begin(), wait[0]);
@@ -382,10 +383,10 @@ ExpandResult lower_v_lshl_add_u64(const Instruction &inst, rj_code_arch_t host_a
 } // namespace
 
 std::span<const RegisteredInstructionRewrite>
-cdna4_reverse_shift_rules_for_rdna(rj_code_arch_t host_arch) {
-  if (host_arch == ROCJITSU_CODE_ARCH_RDNA3)
-    return kReverseShiftRules<ROCJITSU_CODE_ARCH_RDNA3>;
-  return kReverseShiftRules<ROCJITSU_CODE_ARCH_RDNA4>;
+cdna4_reverse_shift_rules_for_rdna(rocjitsu::IsaFamily host_arch) {
+  if (host_arch == rocjitsu::IsaFamily::Rdna3)
+    return kReverseShiftRules<rocjitsu::IsaFamily::Rdna3>;
+  return kReverseShiftRules<rocjitsu::IsaFamily::Rdna4>;
 }
 
 ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint32_t host_arch,
@@ -393,7 +394,7 @@ ExpandResult expand_cdna4_v_lshl_add_u64_for_rdna(const Instruction &inst, uint3
                                                   const LivenessAnalysis &liveness,
                                                   TranslationContext &context, const LaneLayout *,
                                                   const LaneLayout *) {
-  return lower_v_lshl_add_u64(inst, static_cast<rj_code_arch_t>(host_arch), liveness, context);
+  return lower_v_lshl_add_u64(inst, static_cast<rocjitsu::IsaFamily>(host_arch), liveness, context);
 }
 
 } // namespace rocjitsu
