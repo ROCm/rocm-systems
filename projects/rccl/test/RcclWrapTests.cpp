@@ -3449,10 +3449,10 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     }
 }
 
-// gfx1250 SPX table: DDA LL to 128 KiB total, DDA LL128 above it to 64 MiB, DDA VMM past that, at every rank count.
+// gfx1250 SPX table: DDA LL to 128 KiB total, DDA LL128 above it to 64 MiB, DDA VMM past that, from 2 to 64 ranks.
 TEST(RcclAlltoAllDecision, Gfx1250Spx_A2aBands)
 {
-    for (int nRanks : {4, 8, 32})
+    for (int nRanks : {2, 4, 8, 16, 32, 64})
     {
         auto comm = std::make_unique<ncclComm>();
         auto topo = std::make_unique<ncclTopoSystem>();
