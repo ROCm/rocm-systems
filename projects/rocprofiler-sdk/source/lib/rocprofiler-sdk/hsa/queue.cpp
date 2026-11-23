@@ -167,6 +167,8 @@ private:
     std::array<shard, shard_count> m_shards         = {};
 };
 
+alignas(64) auto dispatch_time_has_dispatches = std::atomic<bool>{false};
+
 hsa_signal_t
 plain_signal(hsa_signal_t signal)
 {
@@ -272,6 +274,7 @@ dispatch_time_cache::track(hsa_signal_t signal, hsa_signal_t pending, hsa_agent_
     pending = plain_signal(pending);
     m_populated.store(true, std::memory_order_release);
     m_has_dispatches.store(true, std::memory_order_release);
+    dispatch_time_has_dispatches.store(true, std::memory_order_release);
     get_shard(signal).data.wlock([=](map_type& data) {
         data[signal].dispatch = dispatch_time_entry{pending, agent};
     });
@@ -324,6 +327,7 @@ dispatch_time_cache::clear()
     auto locks = lock_lifetimes();
     for(auto& value : m_shards)
         value.data.wlock([](map_type& data) { data.clear(); });
+    dispatch_time_has_dispatches.store(false, std::memory_order_release);
     m_has_dispatches.store(false, std::memory_order_release);
     m_populated.store(false, std::memory_order_release);
 }
@@ -331,8 +335,25 @@ dispatch_time_cache::clear()
 constexpr auto null_hsa_signal = hsa_signal_t{.handle = 0};
 
 // The high bit closes admission; the other bits count interceptors that may use Queue state.
-constexpr auto write_interceptors_closed = uint64_t{1} << 63;
-auto           write_interceptors        = std::atomic<uint64_t>{0};
+constexpr auto   write_interceptors_closed = uint64_t{1} << 63;
+constexpr size_t write_interceptor_shards  = 64;
+
+struct alignas(64) write_interceptor_slot
+{
+    std::atomic<uint64_t> state = {0};
+};
+
+auto write_interceptor_slots     = std::array<write_interceptor_slot, write_interceptor_shards>{};
+auto next_write_interceptor_slot = std::atomic<size_t>{0};
+
+size_t
+get_write_interceptor_slot()
+{
+    static thread_local const size_t slot =
+        next_write_interceptor_slot.fetch_add(1, std::memory_order_relaxed) %
+        write_interceptor_shards;
+    return slot;
+}
 
 dispatch_time_cache*
 get_dispatch_time_cache()
@@ -770,31 +791,36 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
-    auto admitted = write_interceptors.load();
-    do
+    auto& slot_state = write_interceptor_slots[get_write_interceptor_slot()].state;
+    // ROCr can invoke a retry after shutdown has started retiring the Queue objects.
+    if((slot_state.fetch_add(1, std::memory_order_acq_rel) & write_interceptors_closed) != 0)
     {
-        // ROCr can invoke a retry after shutdown has started retiring the Queue objects.
-        if((admitted & write_interceptors_closed) != 0)
-        {
-            writer(packets, pkt_count);
-            return;
-        }
-    } while(!write_interceptors.compare_exchange_weak(admitted, admitted + 1));
-    auto leave = common::scope_destructor{[]() { write_interceptors.fetch_sub(1); }};
+        slot_state.fetch_sub(1, std::memory_order_release);
+        writer(packets, pkt_count);
+        return;
+    }
+    auto leave = common::scope_destructor{
+        [&slot_state]() { slot_state.fetch_sub(1, std::memory_order_release); }};
 
     const auto forget_packet = [](const auto& packet, auto type) {
-        if(type != HSA_PACKET_TYPE_INVALID && packet.completion_signal != null_hsa_signal)
+        if(dispatch_time_has_dispatches.load(std::memory_order_acquire) &&
+           type != HSA_PACKET_TYPE_INVALID && packet.completion_signal != null_hsa_signal)
             forget_dispatch_time(packet.completion_signal);
     };
     const auto forward_packets = [&]() {
-        for(size_t i = 0; i < pkt_count; ++i)
+        if(dispatch_time_has_dispatches.load(std::memory_order_acquire))
         {
-            const auto& packet = static_cast<const rocprofiler_packet*>(packets)[i].kernel_dispatch;
-            const auto  type =
-                bit_extract(packet.header,
-                            HSA_PACKET_HEADER_TYPE,
-                            HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
-            forget_packet(packet, type);
+            for(size_t i = 0; i < pkt_count; ++i)
+            {
+                const auto& packet =
+                    static_cast<const rocprofiler_packet*>(packets)[i].kernel_dispatch;
+                const auto type =
+                    bit_extract(packet.header,
+                                HSA_PACKET_HEADER_TYPE,
+                                HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+                if(type != HSA_PACKET_TYPE_INVALID && packet.completion_signal != null_hsa_signal)
+                    forget_dispatch_time(packet.completion_signal);
+            }
         }
         writer(packets, pkt_count);
     };
@@ -2092,14 +2118,18 @@ queue_init()
 bool
 close_queue_write_interceptors()
 {
-    const auto active = write_interceptors.fetch_or(write_interceptors_closed);
-    return (active & ~write_interceptors_closed) == 0;
+    uint64_t active = 0;
+    for(auto& slot : write_interceptor_slots)
+        active |= (slot.state.fetch_or(write_interceptors_closed, std::memory_order_acq_rel) &
+                   ~write_interceptors_closed);
+    return active == 0;
 }
 
 void
 open_queue_write_interceptors()
 {
-    write_interceptors.fetch_and(~write_interceptors_closed);
+    for(auto& slot : write_interceptor_slots)
+        slot.state.fetch_and(~write_interceptors_closed, std::memory_order_release);
 }
 
 void
