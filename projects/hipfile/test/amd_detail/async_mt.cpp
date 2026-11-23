@@ -93,12 +93,20 @@ ok(hipFileError_t err)
     return err.err == hipFileSuccess;
 }
 
+// Reports a failure in a worker thread and aborts the process.
+//
+// Don't call exit() from a worker thread: it destroys static objects, such
+// as the DriverState singleton, while the other threads are still using
+// them. abort() stops the process where it is, and when the test runs under
+// gdb, gdb prints every thread's backtrace.
 [[noreturn]] static void
 fatal(const string &msg)
 {
-    lock_guard<mutex> guard{io_mutex};
-    cerr << msg << endl;
-    exit(EXIT_FAILURE);
+    {
+        lock_guard<mutex> guard{io_mutex};
+        cerr << msg << endl;
+    }
+    abort();
 }
 
 static void
@@ -241,11 +249,8 @@ thread_function(int id, const SharedPools &pools)
                     stats.syncs++;
                     break;
 
-                default: {
-                    lock_guard<mutex> guard{io_mutex};
-                    cout << "ERROR: Tried to pick a non-existent case" << endl;
-                    exit(EXIT_FAILURE);
-                }
+                default:
+                    fatal("ERROR: Tried to pick a non-existent case");
             }
         }
     }
