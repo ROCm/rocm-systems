@@ -24,7 +24,6 @@ enum class process_lifecycle : std::uint16_t
     init,
     active,
     finalized,
-    disabled,
 };
 
 enum class thread_lifecycle : std::uint16_t
@@ -78,7 +77,6 @@ struct fmt::formatter<rocprofsys::state::process_lifecycle>
             case rocprofsys::state::process_lifecycle::pre_init: str = "PreInit"; break;
             case rocprofsys::state::process_lifecycle::init: str = "Init"; break;
             case rocprofsys::state::process_lifecycle::active: str = "Active"; break;
-            case rocprofsys::state::process_lifecycle::disabled: str = "Disabled"; break;
             case rocprofsys::state::process_lifecycle::finalized:
                 str = "Finalized";
                 break;
@@ -157,7 +155,6 @@ public:
     static constexpr State Init      = State::init;
     static constexpr State Active    = State::active;
     static constexpr State Finalized = State::finalized;
-    static constexpr State Disabled  = State::disabled;
 
     process()                          = delete;
     process(const process&)            = delete;

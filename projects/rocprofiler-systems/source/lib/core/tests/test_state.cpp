@@ -85,14 +85,6 @@ TEST_F(ProcessStateTest, set_to_lesser_value_throws_and_state_is_unchanged)
     EXPECT_EQ(process_state::get(), process_state_value::active);
 }
 
-TEST_F(ProcessStateTest, set_finalized_after_disabled_throws_and_state_is_unchanged)
-{
-    process_state::set(process_state_value::disabled);
-
-    EXPECT_THROW(process_state::set(process_state_value::finalized), std::runtime_error);
-    EXPECT_EQ(process_state::get(), process_state_value::disabled);
-}
-
 TEST_F(ProcessStateTest, reset_bypasses_validation_and_returns_to_pre_init)
 {
     process_state::set(process_state_value::finalized);
@@ -293,7 +285,6 @@ TEST(StateFormatterTest, process_lifecycle_state)
     EXPECT_EQ(fmt::format("{}", process_state_value::init), "Init");
     EXPECT_EQ(fmt::format("{}", process_state_value::active), "Active");
     EXPECT_EQ(fmt::format("{}", process_state_value::finalized), "Finalized");
-    EXPECT_EQ(fmt::format("{}", process_state_value::disabled), "Disabled");
 }
 
 TEST(StateFormatterTest, thread_lifecycle_state)
