@@ -14,41 +14,74 @@ void rocjitsu::arith::mixed_bf16_x86_64_v4(MixedFma destination, uint64_t flags,
                                            const uint32_t *b, const uint32_t *c) {
   const bool clamp = mode & RJ_ARITH_ALU_CLAMP;
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
-  const int width = destination == MixedFma::Float ? 16 : 8;
-  for (int lane = 0; lane < 32; lane += width) {
+  if (destination == MixedFma::Float) {
+    auto input = [](const uint32_t *source, uint32_t mode) {
+      auto bits = _mm512_loadu_si512(source);
+      if (mode & RJ_ARITH_MIX_BF16_A) {
+        bits = mode & RJ_ARITH_ALU_HIGH_A ? _mm512_and_si512(bits, _mm512_set1_epi32(-65536))
+                                          : _mm512_slli_epi32(bits, 16);
+      }
+      if (mode & RJ_ARITH_ALU_ABS_A) {
+        bits = _mm512_and_si512(bits, _mm512_set1_epi32(INT32_MAX));
+      }
+      if (mode & RJ_ARITH_ALU_NEG_A) {
+        bits = _mm512_xor_si512(bits, _mm512_set1_epi32(INT32_MIN));
+      }
+      return _mm512_castsi512_ps(bits);
+    };
+    for (int lane = 0; lane < 32; lane += 16) {
+      auto x = input(a + lane, mode), y = input(b + lane, mode >> 1),
+           z = input(c + lane, mode >> 2);
+      auto result = _mm512_fmadd_ps(x, y, z);
+      if (clamp) {
+        result = _mm512_min_ps(_mm512_max_ps(result, _mm512_setzero_ps()), _mm512_set1_ps(1));
+      }
+      unsigned special = (_mm512_fpclass_ps_mask(x, 0x99) | _mm512_fpclass_ps_mask(y, 0x99) |
+                          _mm512_fpclass_ps_mask(z, 0x99)) &
+                         (exec_mask >> lane);
+      if (special) {
+        // A lone NaN with two finite operands has unambiguous hardware FMA payload.
+        auto nx = _mm512_fpclass_ps_mask(x, 0x81), ny = _mm512_fpclass_ps_mask(y, 0x81),
+             nz = _mm512_fpclass_ps_mask(z, 0x81);
+        auto inf = _mm512_fpclass_ps_mask(x, 0x18) | _mm512_fpclass_ps_mask(y, 0x18) |
+                   _mm512_fpclass_ps_mask(z, 0x18);
+        special &= inf | (nx & ny) | (ny & nz) | (nx & nz);
+      }
+      if (special) {
+        alignas(64) uint32_t av[16], bv[16], cv[16], out[16];
+        _mm512_store_ps(av, x);
+        _mm512_store_ps(bv, y);
+        _mm512_store_ps(cv, z);
+        _mm512_store_ps(out, result);
+        for (; special; special &= special - 1) {
+          int i = __builtin_ctz(special);
+          out[i] = mixed_bf16_value(destination, flags, clamp, av[i], bv[i], cv[i]);
+        }
+        result = _mm512_load_ps(out);
+      }
+      _mm512_mask_storeu_ps(d + lane, __mmask16(exec_mask >> lane), result);
+    }
+    return;
+  }
+  for (int lane = 0; lane < 32; lane += 8) {
     const auto x = mixed_bf16_input8(a + lane, mode);
     const auto y = mixed_bf16_input8(b + lane, mode >> 1);
     const auto z = mixed_bf16_input8(c + lane, mode >> 2);
-    if (destination == MixedFma::Float) {
-      const auto xh = mixed_bf16_input8(a + lane + 8, mode);
-      const auto yh = mixed_bf16_input8(b + lane + 8, mode >> 1);
-      const auto zh = mixed_bf16_input8(c + lane + 8, mode >> 2);
-      const auto result = _mm512_fmadd_ps(_mm512_insertf32x8(_mm512_castps256_ps512(x), xh, 1),
-                                          _mm512_insertf32x8(_mm512_castps256_ps512(y), yh, 1),
-                                          _mm512_insertf32x8(_mm512_castps256_ps512(z), zh, 1));
-      const auto lo = mixed_bf16_finish8(destination, flags, clamp, x, y, z,
-                                         _mm256_castps_si256(_mm512_castps512_ps256(result)));
-      const auto hi = mixed_bf16_finish8(destination, flags, clamp, xh, yh, zh,
-                                         _mm256_castps_si256(_mm512_extractf32x8_ps(result, 1)));
-      _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane),
-                               _mm512_inserti64x4(_mm512_castsi256_si512(lo), hi, 1));
-    } else {
-      const auto product = _mm512_mul_pd(_mm512_cvtps_pd(x), _mm512_cvtps_pd(y));
-      const auto addend = _mm512_cvtps_pd(z);
-      const auto sum = _mm512_add_pd(product, addend);
-      const auto virtual_z = _mm512_sub_pd(sum, product);
-      const auto error = _mm512_add_pd(_mm512_sub_pd(product, _mm512_sub_pd(sum, virtual_z)),
-                                       _mm512_sub_pd(addend, virtual_z));
-      const auto lo = mixed_bf16_narrow4(_mm512_castpd512_pd256(sum), _mm512_castpd512_pd256(error),
-                                         _mm512_castpd512_pd256(product),
-                                         _mm512_castpd512_pd256(addend), rounding, clamp);
-      const auto hi = mixed_bf16_narrow4(
-          _mm512_extractf64x4_pd(sum, 1), _mm512_extractf64x4_pd(error, 1),
-          _mm512_extractf64x4_pd(product, 1), _mm512_extractf64x4_pd(addend, 1), rounding, clamp);
-      auto result = _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
-      result = mixed_bf16_finish8(destination, flags, clamp, x, y, z, result);
-      result = mixed_bf16_merge8(destination, result, d + lane);
-      _mm256_mask_storeu_epi32(d + lane, __mmask8(exec_mask >> lane), result);
-    }
+    const auto product = _mm512_mul_pd(_mm512_cvtps_pd(x), _mm512_cvtps_pd(y));
+    const auto addend = _mm512_cvtps_pd(z);
+    const auto sum = _mm512_add_pd(product, addend);
+    const auto virtual_z = _mm512_sub_pd(sum, product);
+    const auto error = _mm512_add_pd(_mm512_sub_pd(product, _mm512_sub_pd(sum, virtual_z)),
+                                     _mm512_sub_pd(addend, virtual_z));
+    const auto lo = mixed_bf16_narrow4(_mm512_castpd512_pd256(sum), _mm512_castpd512_pd256(error),
+                                       _mm512_castpd512_pd256(product),
+                                       _mm512_castpd512_pd256(addend), rounding, clamp);
+    const auto hi = mixed_bf16_narrow4(
+        _mm512_extractf64x4_pd(sum, 1), _mm512_extractf64x4_pd(error, 1),
+        _mm512_extractf64x4_pd(product, 1), _mm512_extractf64x4_pd(addend, 1), rounding, clamp);
+    auto result = _mm256_inserti128_si256(_mm256_castsi128_si256(lo), hi, 1);
+    result = mixed_bf16_finish8(destination, flags, clamp, x, y, z, result);
+    result = mixed_bf16_merge8(destination, result, d + lane);
+    _mm256_mask_storeu_epi32(d + lane, __mmask8(exec_mask >> lane), result);
   }
 }

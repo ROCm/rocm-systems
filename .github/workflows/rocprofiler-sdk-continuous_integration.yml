@@ -155,23 +155,9 @@ jobs:
           git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
           echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder & ROCDecode & ROCJPEG
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
-          sparse-checkout: |
-            .github/actions/rocprofiler-sdk-util
-            projects/rocprofiler-sdk
-            shared/sha256
-            projects/aqlprofile
-            projects/rocprofiler-register
-            projects/rocprof-trace-decoder
-            projects/rocr-runtime
-            projects/clr
-            projects/hip
-            projects/hrr
-            projects/hipfile
-            projects/rocdecode
-            projects/rocjpeg
           submodules: false
           set-safe-directory: true
 
@@ -395,21 +381,9 @@ jobs:
           git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
           echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
-          sparse-checkout: |
-            .github/actions/rocprofiler-sdk-util
-            projects/rocprofiler-sdk
-            shared/sha256
-            projects/aqlprofile
-            projects/rocprofiler-register
-            projects/rocprof-trace-decoder
-            projects/rocr-runtime
-            projects/clr
-            projects/hip
-            projects/hrr
-            projects/hipfile
           submodules: false
           set-safe-directory: true
 
@@ -599,21 +573,9 @@ jobs:
         git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
         echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
 
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
+    - name: Clone rocm-systems
       uses: actions/checkout@v6
       with:
-        sparse-checkout: |
-          .github/actions/rocprofiler-sdk-util
-          projects/rocprofiler-sdk
-          shared/sha256
-          projects/aqlprofile
-          projects/rocprofiler-register
-          projects/rocprof-trace-decoder
-          projects/rocr-runtime
-          projects/clr
-          projects/hip
-          projects/hrr
-          projects/hipfile
         submodules: false
         set-safe-directory: true
 

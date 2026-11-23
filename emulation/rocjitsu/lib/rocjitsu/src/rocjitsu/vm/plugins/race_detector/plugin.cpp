@@ -516,6 +516,11 @@ namespace {
 // resolve differently, and scalar and direct-to-LDS loads can read scratch.
 std::string_view event_description(const EventRegistry &events, EventId event,
                                    RaceViolation::Space space) {
+  // A barrier arrive is an atomic update that is kept as a read only.
+  if (space == RaceViolation::Space::LDS && events.barrierArrive(event))
+    return events.type(event) == MemoryEventType::LDS_TO_VGPR
+               ? "arrival at an LDS barrier cell returning the cell to VGPRs"
+               : "arrival at an LDS barrier cell";
   if (space == RaceViolation::Space::LDS && events.readsLds(event) && events.writesLds(event))
     return events.registers(event).empty() ? "atomic update of LDS"
                                            : "atomic update of LDS returning values to VGPRs";
@@ -558,7 +563,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     throw std::invalid_argument("race report has an unsupported architecture");
   const EventId event = v.conflictingEvent;
   const bool conflicting_read =
-      v.sourceInstruction || v.conflictsWithSrc2Read ||
+      v.sourceInstruction || v.conflictsWithSrc2Read || v.conflictsWithBarrierArrive ||
       (v.space == RaceViolation::Space::VGPR && isFromVgpr(events.type(event))) ||
       (v.space == RaceViolation::Space::LDS && events.readsLds(event));
   const char *hazard = !v.isWrite         ? "read-after-write (RAW)"
@@ -598,8 +603,9 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   }
   const int owner = events.waveId(event).value;
   oss << "  Conflict: "
-      << (v.conflictsWithSrc2Read ? "read of LDS source operand"
-                                  : event_description(events, event, v.space));
+      << (v.conflictsWithSrc2Read        ? "read of LDS source operand"
+          : v.conflictsWithBarrierArrive ? "arrival at an LDS barrier cell"
+                                         : event_description(events, event, v.space));
   oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
       << ".\n";
   const bool flat_lds = v.space == RaceViolation::Space::LDS && events.usesFlatLds(event);
@@ -877,6 +883,8 @@ void RaceDetectorPlugin::onAmdgpuMixedFlatLdsAccess(const Instruction &, amdgpu:
                                access.atomic_bytes);
     }
   }
+  if (pending.acquires_barrier_cells)
+    detector.acquireBarrierCells(wave, pending.intervals);
   detector.attachLdsIntervals(pending.event, std::move(pending.intervals));
   s->mixed_lds.reset();
 }
@@ -1131,6 +1139,11 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
             (routed.has_value() || access.decoded_space == amdgpu::DecodedMemorySpace::LOCAL) &&
             d.atomic_op != amdgpu::AtomicOp::NONE};
     ldsAccess.aligned_atomic_bytes = ldsAccess.read_modify_write ? d.elem_size : 0;
+    // The DS barrier arrives update an LDS barrier cell (CDNA5 ISA 11.2.2).
+    // Each arrival is reported through onAmdgpuLdsBarrierArrived() once the
+    // instruction executes.
+    ldsAccess.barrier_arrive =
+        ldsAccess.read_modify_write && d.atomic_op == amdgpu::AtomicOp::BARRIER_ARRIVE;
     const auto ldsOrder = ldsAccess.order(memoryOrder);
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
     if (amdgpu::cdna1_ds_atomic_nullified(d, arch, wf.vgpr_alloc())) {
@@ -1209,15 +1222,22 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const bool defer_lds =
         mixedFlat && d.routed_issue_info && !intervals.empty() && !obligations.empty();
     if (defer_lds) {
-      auto &pending = s->mixed_lds.emplace();
+      auto &pending = s->mixed_lds.emplace(RaceWavefrontState::MixedLdsAccess{});
       pending.order = ldsOrder;
       pending.reads = d.is_load || ldsAccess.read_modify_write;
       pending.writes = !d.is_load || ldsAccess.read_modify_write;
     }
+    // When every lane is an aligned atomic of one width, the instruction-wide
+    // check exempts matching atomics as each lane's check does.
     const bool checkReads = !defer_lds && (d.is_load || ldsAccess.read_modify_write) &&
-                            detector->mayConflict(intervals, waveId, /*isWrite=*/false, ldsOrder);
+                            detector->mayConflict(intervals, waveId, /*isWrite=*/false, ldsOrder,
+                                                  ldsAccess.aligned_atomic_bytes);
+    // A barrier arrive updates its cell atomically, so it races with no read
+    // of the cell and is checked only as a read, against writes of it.
     const bool checkWrites = !defer_lds && (!d.is_load || ldsAccess.read_modify_write) &&
-                             detector->mayConflict(intervals, waveId, /*isWrite=*/true, ldsOrder);
+                             !ldsAccess.barrier_arrive &&
+                             detector->mayConflict(intervals, waveId, /*isWrite=*/true, ldsOrder,
+                                                   ldsAccess.aligned_atomic_bytes);
     if (defer_lds || checkReads || checkWrites) {
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         for (size_t set = 0; set < numAddressSets; ++set) {
@@ -1239,6 +1259,13 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         }
       }
     }
+    // A load, or an atomic that returns the old value, of an LDS barrier cell
+    // observes its phase, and acquires what its completed phases released. A
+    // mixed FLAT load does so when its LDS lanes are accessed.
+    if (defer_lds)
+      s->mixed_lds->acquires_barrier_cells = d.is_load;
+    else if (d.is_load)
+      detector->acquireBarrierCells(waveId, intervals);
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       for (uint32_t reg : registers)
@@ -1412,6 +1439,7 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
                                                  const amdgpu::Wavefront &wf) {
   auto *s = get_state(wf);
   assert(s && s->race_state);
+  s->tensor_transfer = {};
   // The hook fires in the tensor instruction's own step, before the transfer's
   // global requests and LDS writes, as onAmdgpuMemoryAccessRouted() does for
   // other memory instructions.
@@ -1470,9 +1498,59 @@ void RaceDetectorPlugin::onAmdgpuTensorDmaIssued(const amdgpu::TensorDmaIssueObs
   // established.
   const std::array obligations{
       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-  rs->registerLdsRangeEvent(
+  s->tensor_transfer = rs->registerLdsRangeEvent(
       instruction, issue.is_load ? MemoryEventType::GLOBAL_TO_LDS : MemoryEventType::LDS_TO_GLOBAL,
       ranges, obligations, memoryOrder);
+}
+
+void RaceDetectorPlugin::onAmdgpuLdsBarrierArrived(
+    const amdgpu::LdsBarrierArrivalObservation &arrival, const amdgpu::Wavefront &wf) {
+  using Source = amdgpu::LdsBarrierArrivalObservation::Source;
+  auto *s = get_state(wf);
+  assert(s && s->race_state);
+  auto *rs = s->race_state;
+  auto *detector = rs->getDetector();
+  const auto waveId = rs->getWaveId();
+  // The simulator reports a cell inside the wave's LDS allocation.
+  assert(detector->validLdsRange(arrival.cell_address, kBarrierCellBytes));
+  if (!detector->validLdsRange(arrival.cell_address, kBarrierCellBytes) ||
+      arrival.cell_address >
+          static_cast<uint32_t>(std::numeric_limits<int>::max()) - kBarrierCellBytes)
+    return;
+  // ds_atomic_barrier_arrive_rtn_b64 with an update of zero leaves the cell
+  // unchanged: it reads the cell without arriving, so it releases nothing. No
+  // phase waits for it, and it can execute after the phase it is reported in
+  // completes. Its read of the cell acquired when the instruction issued.
+  if (arrival.old_state == arrival.new_state)
+    return;
+  const auto kind = [&] {
+    switch (arrival.source) {
+    case Source::DsAtomic:
+      return BarrierCellArrival::Ds;
+    case Source::AsyncDsAtomic:
+      return BarrierCellArrival::Async;
+    case Source::TensorDma:
+      return BarrierCellArrival::Tensor;
+    }
+    return BarrierCellArrival::Tensor;
+  }();
+  // The DS arrives were checked as LDS atomics when they issued. A tensor
+  // transfer's arrival is checked here, against non-atomic writes of the cell:
+  // the ISA does not order it with the wave's DS instructions (CDNA5 ISA
+  // 10.11.1), so as a conservative rule that includes the wave's own pending
+  // writes. A transfer has no lanes, so a violation reports lane -1.
+  // The arrival's atomic update of the cell is then attached to the transfer's
+  // event, so a later write of the cell that the transfer is not ordered before
+  // races with it. The transfer holds the one TENSORcnt slot for both. A
+  // transfer that touches no LDS bytes still has an event, so its arrival is
+  // attached the same way.
+  if (kind == BarrierCellArrival::Tensor) {
+    detector->validateRead(static_cast<int>(arrival.cell_address), waveId, /*lane=*/-1,
+                           kBarrierCellBytes, MemoryOrderClass::UNORDERED, kBarrierCellBytes);
+    if (const EventId transfer = std::exchange(s->tensor_transfer, {}); transfer.isValid())
+      detector->attachBarrierArrive(transfer, arrival.cell_address);
+  }
+  detector->barrierCellArrived(waveId, arrival.cell_address, kind, arrival.phase_completed);
 }
 
 void RaceDetectorPlugin::onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wf, uint32_t physical_reg,
