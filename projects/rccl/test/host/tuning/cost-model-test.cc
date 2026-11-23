@@ -9,8 +9,8 @@
 //
 // The unit is modelMap[], which flattens three kernel families into one id space:
 //   [0, 21)                  general algo*NCCL_NUM_PROTOCOLS + proto
-//   [21, 39)                 ncclSymkKernelId_*   (device-API symmetric kernels)
-//   [39, NCCL_TUNING_COUNT)  ncclCeMethodId_*     (copy engine)
+//   [21, kCeOffset)          ncclSymkKernelId_*   (device-API symmetric kernels)
+//   [kCeOffset, NCCL_TUNING_COUNT)  ncclCeMethodId_* (copy engine)
 // An off-by-one in that layout mis-prices a whole family rather than failing to
 // build, so these tests pin the layout and the dispatch to it.
 //
@@ -254,21 +254,20 @@ static_assert(NCCL_TUNING_COUNT == kCeOffset + ncclCeMethodId_Count, "the id spa
 static_assert(NCCL_TUNING_MASK_ALL ==
                   (NCCL_TUNING_MASK_GENERAL_KERNELS | NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_CE),
               "the three family masks must cover the id space");
-static_assert((NCCL_TUNING_MASK_GENERAL_KERNELS & NCCL_TUNING_MASK_SYM_KERNELS) == 0 &&
-                  (NCCL_TUNING_MASK_GENERAL_KERNELS & NCCL_TUNING_MASK_CE) == 0 &&
-                  (NCCL_TUNING_MASK_SYM_KERNELS & NCCL_TUNING_MASK_CE) == 0,
+static_assert((NCCL_TUNING_MASK_GENERAL_KERNELS & NCCL_TUNING_MASK_SYM_KERNELS).none() &&
+                  (NCCL_TUNING_MASK_GENERAL_KERNELS & NCCL_TUNING_MASK_CE).none() &&
+                  (NCCL_TUNING_MASK_SYM_KERNELS & NCCL_TUNING_MASK_CE).none(),
               "the three family masks must not overlap");
 
 TEST_F(CostModelMicrotest, FamilyMasksPartitionTheIdSpace) {
   // Each family's bits must sit where ncclTuningExpandId decodes that family. This is the half
   // that can go red: tuning_general.cc respells both boundaries instead of reusing the macros.
   for (int i = 0; i < NCCL_TUNING_COUNT; i++) {
-    uint64_t bit = 1ull << i;
     int algo = -9, proto = -9, sym = -9, ce = -9;
     ASSERT_EQ(ncclSuccess, ncclTuningExpandId(i, &algo, &proto, &sym, &ce)) << "id " << i;
-    if (bit & NCCL_TUNING_MASK_GENERAL_KERNELS) {
+    if (NCCL_TUNING_MASK_GENERAL_KERNELS.test(i)) {
       EXPECT_NE(NCCL_ALGO_UNDEF, algo) << "id " << i;
-    } else if (bit & NCCL_TUNING_MASK_SYM_KERNELS) {
+    } else if (NCCL_TUNING_MASK_SYM_KERNELS.test(i)) {
       EXPECT_NE(ncclSymkKernelId_Count, sym) << "id " << i;
     } else {
       EXPECT_NE(ncclCeMethodId_Count, ce) << "id " << i;
@@ -293,7 +292,7 @@ TEST_F(CostModelMicrotest, RegistryNamesEveryModelledGeneralIdAndNoOther) {
         << (name ? "names" : "omits") << " it";
 
     // The row's mask bit IS the tuning id; that is the whole correspondence.
-    if (name != nullptr) EXPECT_NE(0ull, ncclAlgTagMask(name) & (1ull << id)) << name << " -> id " << id;
+    if (name != nullptr) EXPECT_TRUE(ncclAlgTagMask(name).test(id)) << name << " -> id " << id;
   }
 }
 
@@ -310,7 +309,7 @@ TEST_F(CostModelMicrotest, RegistryNamesEverySymmetricKernelId) {
       continue;
     }
     ASSERT_NE(nullptr, name) << "symKernelId " << sym << " (tuning id " << id << ") has no registry row";
-    EXPECT_NE(0ull, ncclAlgTagMask(name) & (1ull << id)) << name << " -> id " << id;
+    EXPECT_TRUE(ncclAlgTagMask(name).test(id)) << name << " -> id " << id;
     // Every symmetric row is priced; modelMap has no null symk entries.
     EXPECT_NE(nullptr, modelMap[id].model) << "tuning id " << id;
   }
@@ -319,9 +318,9 @@ TEST_F(CostModelMicrotest, RegistryNamesEverySymmetricKernelId) {
 TEST_F(CostModelMicrotest, RegistryCollMaskMirrorsModelMapEnabledColumns) {
   // algorithm_registry.cc: "collMask mirrors modelMap[].enabled[func]".
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
-    uint64_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
+    rcclTuningMask valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
     for (int id = 0; id < kCeOffset; id++) {
-      bool inRegistry = (valid >> id) & 1;
+      bool inRegistry = valid.test(id);
       bool inModelMap = modelMap[id].enabled[f] != 0;
       EXPECT_EQ(inRegistry, inModelMap)
           << "func " << ncclFuncStr[f] << " tuning id " << id << ": registry says "
@@ -334,10 +333,10 @@ TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
   // The registry stops before the CE ids, and cost_model.cc's "TODO: allow NCCL_ALGO=CE" is the
   // other half of that gap. Pinned so adding CE rows forces this test and the TODO together.
   for (int f = 0; f < NCCL_NUM_FUNCTIONS; f++) {
-    uint64_t valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
-    EXPECT_EQ(0ull, valid & NCCL_TUNING_MASK_CE) << "func " << ncclFuncStr[f];
+    rcclTuningMask valid = ncclAlgValidForFuncMask(static_cast<ncclFunc_t>(f));
+    EXPECT_TRUE((valid & NCCL_TUNING_MASK_CE).none()) << "func " << ncclFuncStr[f];
   }
-  EXPECT_EQ(0ull, ncclAlgAllBits() & NCCL_TUNING_MASK_CE);
+  EXPECT_TRUE((ncclAlgAllBits() & NCCL_TUNING_MASK_CE).none());
 
   // ...yet they are modelled, which is why the gap is a gap and not dead code.
   for (int id = kCeOffset; id < NCCL_TUNING_COUNT; id++) {
@@ -347,20 +346,20 @@ TEST_F(CostModelMicrotest, CopyEngineIdsAreDeliberatelyOutsideTheRegistry) {
 
 TEST_F(CostModelMicrotest, TagPrefixMatchStaysInsideItsFamily) {
   // Prefix match: "RING" spans the three RING_* rows without reaching SYMK_RailRing_LsaSTMC.
-  uint64_t ring = ncclAlgTagMask("RING");
+  rcclTuningMask ring = ncclAlgTagMask("RING");
   for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
-    EXPECT_NE(0ull, ring & (1ull << (NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + p))) << "proto " << p;
+    EXPECT_TRUE(ring.test(NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + p)) << "proto " << p;
   }
-  EXPECT_EQ(0ull, ring & NCCL_TUNING_MASK_SYM_KERNELS);
+  EXPECT_TRUE((ring & NCCL_TUNING_MASK_SYM_KERNELS).none());
 
   // "NVLS" spans NVLS_SIMPLE and NVLSTREE_SIMPLE, also by prefix.
-  uint64_t nvls = ncclAlgTagMask("NVLS");
-  EXPECT_NE(0ull, nvls & (1ull << (NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)));
-  EXPECT_NE(0ull, nvls & (1ull << (NCCL_ALGO_NVLS_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE)));
+  rcclTuningMask nvls = ncclAlgTagMask("NVLS");
+  EXPECT_TRUE(nvls.test(NCCL_ALGO_NVLS * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE));
+  EXPECT_TRUE(nvls.test(NCCL_ALGO_NVLS_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_SIMPLE));
 
-  EXPECT_EQ(0ull, ncclAlgTagMask("NOT_AN_ALGORITHM"));
-  EXPECT_EQ(0ull, ncclAlgTagMask(""));
-  EXPECT_EQ(0ull, ncclAlgTagMask(nullptr));
+  EXPECT_TRUE(ncclAlgTagMask("NOT_AN_ALGORITHM").none());
+  EXPECT_TRUE(ncclAlgTagMask("").none());
+  EXPECT_TRUE(ncclAlgTagMask(nullptr).none());
 }
 
 // ---------------------------------------------------------------------------
