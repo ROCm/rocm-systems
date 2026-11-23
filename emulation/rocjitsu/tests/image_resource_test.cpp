@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -46,10 +47,10 @@ TEST(ImageResourceDecodeTest, Rdna1UsesSixteenBitDepthAndBaseArray) {
   util::insert_bits_into_words(descriptor.data(), 128, 16, 0x8000u);
   util::insert_bits_into_words(descriptor.data(), 144, 16, 0x8000u);
   const amdgpu::ImageResource resource =
-      amdgpu::decode_image_resource(descriptor, ROCJITSU_CODE_ARCH_RDNA1);
+      amdgpu::decode_image_resource(descriptor, rocjitsu::IsaFamily::Rdna1);
   EXPECT_EQ(resource.depth, 0x8001u);
   EXPECT_EQ(resource.base_array, 0x8000u);
-  EXPECT_EQ(amdgpu::image_resource_info(descriptor, ROCJITSU_CODE_ARCH_RDNA1, 0),
+  EXPECT_EQ(amdgpu::image_resource_info(descriptor, rocjitsu::IsaFamily::Rdna1, 0),
             (std::array<uint32_t, 4>{1, 1, 0x8001u, 1}));
 }
 
@@ -61,7 +62,7 @@ TEST(ImageResourceDecodeTest, Gfx12ArrayViewsIgnoreBitThirteenOfBothEndpoints) {
   for (const uint32_t last : {0x1fffu, 0x3fffu})
     for (const uint32_t first : {0u, 0x1fffu, 0x2000u, 0x3fffu}) {
       descriptor[4] = last | (first << 16);
-      const auto info = amdgpu::image_resource_info(descriptor, ROCJITSU_CODE_ARCH_RDNA4, 0);
+      const auto info = amdgpu::image_resource_info(descriptor, rocjitsu::IsaFamily::Rdna4, 0);
       EXPECT_EQ(info[2], (first & 0x1fff) ? 1u : 8192u);
     }
 }
@@ -81,7 +82,7 @@ TEST(ImageResourceDecodeTest, Gfx12SeparatesWarningThresholdAndLinkedScales) {
         util::insert_bits_into_words(descriptor.data(), 164, 1, static_cast<uint32_t>(uav3d));
         util::insert_bits_into_words(descriptor.data(), 165, 5, depth_scale);
         const amdgpu::ImageResource resource =
-            amdgpu::decode_image_resource(descriptor, ROCJITSU_CODE_ARCH_RDNA4);
+            amdgpu::decode_image_resource(descriptor, rocjitsu::IsaFamily::Rdna4);
         EXPECT_EQ(resource.uav3d, uav3d);
         EXPECT_EQ(resource.depth_scale, linked ? depth_scale : 0u);
         EXPECT_EQ(resource.height_scale, linked ? 31u : 0u);
@@ -107,13 +108,13 @@ TEST(ImageResourceDecodeTest, Gfx12ResinfoKeepsUav3dViewBoundsIndependentOfDepth
       SCOPED_TRACE(testing::Message() << uav3d << ':' << depth_scale);
       util::insert_bits_into_words(descriptor.data(), 164, 1, static_cast<uint32_t>(uav3d));
       util::insert_bits_into_words(descriptor.data(), 165, 5, depth_scale);
-      EXPECT_EQ(amdgpu::image_resource_info(descriptor, ROCJITSU_CODE_ARCH_RDNA4, 1),
+      EXPECT_EQ(amdgpu::image_resource_info(descriptor, rocjitsu::IsaFamily::Rdna4, 1),
                 (std::array<uint32_t, 4>{16, 8, uav3d ? 15u : 2u, 3}));
     }
   }
 }
 
-class ImageResourceTest : public testing::TestWithParam<rj_code_arch_t> {
+class ImageResourceTest : public testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   std::array<uint32_t, 8> descriptor(uint32_t type, bool view, bool uav = false) {
     std::array<uint32_t, 8> r{};
@@ -122,7 +123,7 @@ protected:
         r[(bit + i) / 32] |= ((value >> i) & 1u) << ((bit + i) % 32);
     };
     const bool gfx9 = arch_is_cdna_4_or_lower(GetParam());
-    const bool gfx12 = GetParam() == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool gfx12 = GetParam() == rocjitsu::IsaFamily::Rdna4;
     set(gfx9 ? 64 : 62, gfx12 ? 16 : 14, 127);
     set(78, gfx12 ? 16 : 14, 63);
     set(gfx12 ? 57 : 108, gfx12 ? 5 : 4, view ? 2 : 0);
@@ -210,13 +211,13 @@ TEST_P(ImageResourceTest, DecodedQueryCompactsMaskAndPreservesInactiveLanesWithA
     break;                                                                                         \
   }
   switch (GetParam()) {
-    LEGACY(cdna1, ROCJITSU_CODE_ARCH_CDNA1)
-    LEGACY(cdna2, ROCJITSU_CODE_ARCH_CDNA2)
-    LEGACY(rdna1, ROCJITSU_CODE_ARCH_RDNA1)
-    LEGACY(rdna2, ROCJITSU_CODE_ARCH_RDNA2)
-    LEGACY(rdna3, ROCJITSU_CODE_ARCH_RDNA3)
-    LEGACY(rdna3_5, ROCJITSU_CODE_ARCH_RDNA3_5)
-  case ROCJITSU_CODE_ARCH_RDNA4:
+    LEGACY(cdna1, rocjitsu::IsaFamily::Cdna1)
+    LEGACY(cdna2, rocjitsu::IsaFamily::Cdna2)
+    LEGACY(rdna1, rocjitsu::IsaFamily::Rdna1)
+    LEGACY(rdna2, rocjitsu::IsaFamily::Rdna2)
+    LEGACY(rdna3, rocjitsu::IsaFamily::Rdna3)
+    LEGACY(rdna3_5, rocjitsu::IsaFamily::Rdna3_5)
+  case rocjitsu::IsaFamily::Rdna4:
     words = rdna4::build_vimage(
         rdna4::kImageGetResinfoVimage,
         {.dim = 5, .a16 = 1, .dmask = 10, .vdata = 8, .rsrc = 4, .tfe = 1, .vaddr0 = 8});
@@ -245,7 +246,7 @@ TEST(Cdna2ImageResourceTest, AccumulatorDestinationKeepsLodInVgpr) {
   amdgpu::L2Cache l2("query_acc_l2");
   l2.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  cfg.arch = rocjitsu::IsaFamily::Cdna2;
   cfg.num_wf_slots = 2;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 512;
@@ -290,8 +291,8 @@ TEST(Cdna2ImageResourceTest, AccumulatorDestinationKeepsLodInVgpr) {
 }
 
 INSTANTIATE_TEST_SUITE_P(AllImageTargets, ImageResourceTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                         ROCJITSU_CODE_ARCH_RDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                         rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                         rocjitsu::IsaFamily::Rdna4));
 } // namespace

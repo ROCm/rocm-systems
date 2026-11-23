@@ -13,6 +13,7 @@
 #pragma once
 
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
@@ -75,18 +76,18 @@ public:
   }
 
   /// CS SGPR ABI: count [5:0], ordered append term [17:6], first wave [31].
-  static uint32_t workgroup_info(rj_code_arch_t arch, uint32_t wave_count, uint32_t wave,
+  static uint32_t workgroup_info(rocjitsu::IsaFamily arch, uint32_t wave_count, uint32_t wave,
                                  uint32_t term) {
     uint32_t info = wave_count;
-    if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    if (arch != rocjitsu::IsaFamily::Cdna3 && arch != rocjitsu::IsaFamily::Cdna4)
       info |= term << 6;
     if (!isa_properties(arch).uses_ttmp_workgroup_ids) {
       info |= wave == 0 ? 1u << 31 : 0;
       // CDNA3/4 list a 34-bit concatenation. Their [24:20] position follows
       // RDNA2/3's layout and has no gfx942/gfx950 hardware qualification.
-      if (arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-          arch == ROCJITSU_CODE_ARCH_RDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-          arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+      if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4 ||
+          arch == rocjitsu::IsaFamily::Rdna2 || arch == rocjitsu::IsaFamily::Rdna3 ||
+          arch == rocjitsu::IsaFamily::Rdna3_5)
         info |= wave << 20;
     }
     return info;

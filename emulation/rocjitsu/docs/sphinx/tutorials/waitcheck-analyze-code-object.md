@@ -1,8 +1,8 @@
 ---
 myst:
     html_meta:
-        "description": "Step-by-step tutorial for analyzing an AMDGPU code object for wait hazards using the rocJITsu waitcheck tool."
-        "keywords": "rocJITsu, waitcheck, wait hazard, s_waitcnt, AMDGPU, code object, ROCm, static analysis"
+        "description": "Step-by-step tutorial for analyzing an AMDGPU code object for wait hazards using the rocjitsu waitcheck tool."
+        "keywords": "rocjitsu, waitcheck, wait hazard, s_waitcnt, AMDGPU, code object, ROCm, static analysis"
 ---
 # Analyze a code object for wait hazards with waitcheck
 
@@ -13,7 +13,7 @@ before the memory operation that produces its value has completed. These
 *wait hazards* cause silent data corruption that is difficult to
 reproduce and diagnose at runtime.
 
-rocJITsu's **waitcheck** tool performs a static, forward dataflow
+rocjitsu's **waitcheck** tool performs a static, forward dataflow
 analysis over the final encoded instruction stream in an AMDGPU code
 object. It tracks outstanding wait-counter events across the
 control-flow graph and reports every instruction pair where a consumer
@@ -164,5 +164,5 @@ reported to stderr and the kernel is submitted normally.
     full CLI option reference, environment variables, exit codes, and
     runtime tool configuration.
 -   See [Inspect and disassemble a code object with the C API](inspect-code-object.md)
-    for loading and disassembling code objects through the rocJITsu C
+    for loading and disassembling code objects through the rocjitsu C
     API.

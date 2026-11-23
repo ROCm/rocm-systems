@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -49,7 +50,7 @@ std::array<uint32_t, 2> encode_vector16(uint16_t opcode, uint16_t source, uint8_
 }
 
 struct Vector16Target {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
   uint16_t add_integer;
   uint16_t add_float;
@@ -58,35 +59,35 @@ struct Vector16Target {
 };
 
 constexpr std::array kTargets{
-    Vector16Target{ROCJITSU_CODE_ARCH_CDNA1, "Gfx908", cdna1::kVAddU16Vop3, cdna1::kVAddF16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Cdna1, "Gfx908", cdna1::kVAddU16Vop3, cdna1::kVAddF16Vop3,
                    cdna1::kVCvtF16U16Vop3,
                    encode_vector16<cdna1::Vop3BuilderFields, cdna1::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_CDNA2, "Gfx90a", cdna2::kVAddU16Vop3, cdna2::kVAddF16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Cdna2, "Gfx90a", cdna2::kVAddU16Vop3, cdna2::kVAddF16Vop3,
                    cdna2::kVCvtF16U16Vop3,
                    encode_vector16<cdna2::Vop3BuilderFields, cdna2::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_CDNA3, "Gfx942", cdna3::kVAddU16Vop3, cdna3::kVAddF16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Cdna3, "Gfx942", cdna3::kVAddU16Vop3, cdna3::kVAddF16Vop3,
                    cdna3::kVCvtF16U16Vop3,
                    encode_vector16<cdna3::Vop3BuilderFields, cdna3::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_CDNA4, "Gfx950", cdna4::kVAddU16Vop3, cdna4::kVAddF16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Cdna4, "Gfx950", cdna4::kVAddU16Vop3, cdna4::kVAddF16Vop3,
                    cdna4::kVCvtF16U16Vop3,
                    encode_vector16<cdna4::Vop3BuilderFields, cdna4::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_RDNA1, "Gfx1010", rdna1::kVAddNcU16Vop3, rdna1::kVAddF16Vop3,
-                   rdna1::kVCvtF16U16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Rdna1, "Gfx1010", rdna1::kVAddNcU16Vop3,
+                   rdna1::kVAddF16Vop3, rdna1::kVCvtF16U16Vop3,
                    encode_vector16<rdna1::Vop3BuilderFields, rdna1::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_RDNA2, "Gfx1030", rdna2::kVAddNcU16Vop3, rdna2::kVAddF16Vop3,
-                   rdna2::kVCvtF16U16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Rdna2, "Gfx1030", rdna2::kVAddNcU16Vop3,
+                   rdna2::kVAddF16Vop3, rdna2::kVCvtF16U16Vop3,
                    encode_vector16<rdna2::Vop3BuilderFields, rdna2::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100", rdna3::kVAddNcU16Vop3, rdna3::kVAddF16Vop3,
-                   rdna3::kVCvtF16U16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Rdna3, "Gfx1100", rdna3::kVAddNcU16Vop3,
+                   rdna3::kVAddF16Vop3, rdna3::kVCvtF16U16Vop3,
                    encode_vector16<rdna3::Vop3BuilderFields, rdna3::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_RDNA3_5, "Gfx1150", rdna3_5::kVAddNcU16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Rdna3_5, "Gfx1150", rdna3_5::kVAddNcU16Vop3,
                    rdna3_5::kVAddF16Vop3, rdna3_5::kVCvtF16U16Vop3,
                    encode_vector16<rdna3_5::Vop3BuilderFields, rdna3_5::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201", rdna4::kVAddNcU16Vop3, rdna4::kVAddF16Vop3,
-                   rdna4::kVCvtF16U16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Rdna4, "Gfx1201", rdna4::kVAddNcU16Vop3,
+                   rdna4::kVAddF16Vop3, rdna4::kVCvtF16U16Vop3,
                    encode_vector16<rdna4::Vop3BuilderFields, rdna4::build_vop3>},
-    Vector16Target{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250", cdna5::kVAddNcU16Vop3, cdna5::kVAddF16Vop3,
-                   cdna5::kVCvtF16U16Vop3,
+    Vector16Target{rocjitsu::IsaFamily::Cdna5, "Gfx1250", cdna5::kVAddNcU16Vop3,
+                   cdna5::kVAddF16Vop3, cdna5::kVCvtF16U16Vop3,
                    encode_vector16<cdna5::Vop3BuilderFields, cdna5::build_vop3>},
 };
 
@@ -114,15 +115,15 @@ protected:
   }
 
   bool legacy_cdna() const {
-    return GetParam().arch == ROCJITSU_CODE_ARCH_CDNA1 ||
-           GetParam().arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-           GetParam().arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-           GetParam().arch == ROCJITSU_CODE_ARCH_CDNA4;
+    return GetParam().arch == rocjitsu::IsaFamily::Cdna1 ||
+           GetParam().arch == rocjitsu::IsaFamily::Cdna2 ||
+           GetParam().arch == rocjitsu::IsaFamily::Cdna3 ||
+           GetParam().arch == rocjitsu::IsaFamily::Cdna4;
   }
 
   bool legacy_rdna() const {
-    return GetParam().arch == ROCJITSU_CODE_ARCH_RDNA1 ||
-           GetParam().arch == ROCJITSU_CODE_ARCH_RDNA2;
+    return GetParam().arch == rocjitsu::IsaFamily::Rdna1 ||
+           GetParam().arch == rocjitsu::IsaFamily::Rdna2;
   }
 
   std::unique_ptr<Instruction> decode(uint16_t opcode, uint16_t source, uint8_t half = 0,
@@ -300,9 +301,9 @@ TEST_P(Vector16InlineConstantTest, HighHalfSelectionUsesTheFormattedCarrier) {
 class PackedSatDestinationTest : public Vector16InlineConstantTest {};
 
 TEST_P(PackedSatDestinationTest, Vop1PackedResultClearsTheWholeDestinationWord) {
-  const uint16_t opcode = GetParam().arch == ROCJITSU_CODE_ARCH_RDNA1 ? rdna1::kVSatPkU8I16Vop1
-                                                                      : rdna2::kVSatPkU8I16Vop1;
-  const std::array<uint32_t, 1> encoded = GetParam().arch == ROCJITSU_CODE_ARCH_RDNA1
+  const uint16_t opcode = GetParam().arch == rocjitsu::IsaFamily::Rdna1 ? rdna1::kVSatPkU8I16Vop1
+                                                                        : rdna2::kVSatPkU8I16Vop1;
+  const std::array<uint32_t, 1> encoded = GetParam().arch == rocjitsu::IsaFamily::Rdna1
                                               ? rdna1::build_vop1(opcode, {.src0 = 0, .vdst = 4})
                                               : rdna2::build_vop1(opcode, {.src0 = 0, .vdst = 4});
   const std::array<uint32_t, 2> words{encoded[0], 0};
@@ -316,8 +317,8 @@ TEST_P(PackedSatDestinationTest, Vop1PackedResultClearsTheWholeDestinationWord) 
 }
 
 TEST_P(PackedSatDestinationTest, Vop3PackedResultClearsTheWholeDestinationWord) {
-  const uint16_t opcode = GetParam().arch == ROCJITSU_CODE_ARCH_RDNA1 ? rdna1::kVSatPkU8I16Vop3
-                                                                      : rdna2::kVSatPkU8I16Vop3;
+  const uint16_t opcode = GetParam().arch == rocjitsu::IsaFamily::Rdna1 ? rdna1::kVSatPkU8I16Vop3
+                                                                        : rdna2::kVSatPkU8I16Vop3;
   std::unique_ptr<Instruction> instruction = decode(opcode, 0);
   ASSERT_NE(instruction, nullptr);
   ASSERT_EQ(instruction->size(), 8u);
@@ -330,11 +331,11 @@ TEST_P(PackedSatDestinationTest, Vop3PackedResultClearsTheWholeDestinationWord) 
 class Bf16InlineConstantTest : public Vector16InlineConstantTest {
 protected:
   bool dot() const {
-    return GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3 ||
-           GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4;
+    return GetParam().arch == rocjitsu::IsaFamily::Rdna3 ||
+           GetParam().arch == rocjitsu::IsaFamily::Rdna4;
   }
 
-  bool fp32_carrier() const { return GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5; }
+  bool fp32_carrier() const { return GetParam().arch == rocjitsu::IsaFamily::Cdna5; }
 
   std::unique_ptr<Instruction> numeric(uint16_t source,
                                        std::optional<uint32_t> literal = std::nullopt) {
@@ -343,7 +344,7 @@ protected:
       return decode(opcode, source, fp32_carrier() ? 1 : 0, literal);
     }
     std::array<uint32_t, 2> encoded{};
-    if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    if (GetParam().arch == rocjitsu::IsaFamily::Rdna3) {
       encoded = rdna3::build_vop3(rdna3::kVDot2Bf16Bf16Vop3,
                                   {.vdst = 4, .src0 = 128, .src1 = 128, .src2 = source});
     } else {
@@ -477,10 +478,10 @@ protected:
                                            std::optional<uint32_t> literal = std::nullopt,
                                            bool dpp = false) {
     std::array<uint32_t, 2> encoded{};
-    if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    if (GetParam().arch == rocjitsu::IsaFamily::Rdna3) {
       encoded = rdna3::build_vop3(
           opcode, {.vdst = 4, .op_sel = opsel, .src0 = 128, .src1 = 128, .src2 = source});
-    } else if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    } else if (GetParam().arch == rocjitsu::IsaFamily::Rdna3_5) {
       encoded = rdna3_5::build_vop3(
           opcode, {.vdst = 4, .op_sel = opsel, .src0 = 128, .src1 = 128, .src2 = source});
     } else {
@@ -494,7 +495,7 @@ protected:
         raw.src0 = amdgpu::SRC_DPP;
         // GFX11.0 DPP requires a VGPR in SRC1. v1 contains zero on every lane;
         // the inline or scalar accumulator being tested is independently in SRC2.
-        if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3)
+        if (GetParam().arch == rocjitsu::IsaFamily::Rdna3)
           raw.src1 = 257;
         raw.vsrc0 = 1;
         raw.dpp_ctrl = amdgpu::dpp::ROW_MIRROR;
@@ -504,9 +505,9 @@ protected:
         return std::unique_ptr<Instruction>(
             decode_valid(*decoder_, reinterpret_cast<const uint32_t *>(&raw)));
       };
-      if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3)
+      if (GetParam().arch == rocjitsu::IsaFamily::Rdna3)
         return decode_dpp.template operator()<rdna3::Vop3VopDpp16MachineInst>();
-      if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+      if (GetParam().arch == rocjitsu::IsaFamily::Rdna3_5)
         return decode_dpp.template operator()<rdna3_5::Vop3VopDpp16MachineInst>();
       return decode_dpp.template operator()<rdna4::Vop3VopDpp16MachineInst>();
     }
@@ -572,7 +573,7 @@ TEST_P(Dot2InlineConstantTest, IntegerAccumulatorReplicatesRawHalfBits) {
   // gfx1100 and gfx1201 retain this F16 accumulator subnormal. GFX11 flushes
   // the corresponding BF16 subnormal, while gfx1201 retains it.
   for (bool bf16 : {false, true}) {
-    const uint16_t expected = bf16 && GetParam().arch != ROCJITSU_CODE_ARCH_RDNA4 ? 0u : 64u;
+    const uint16_t expected = bf16 && GetParam().arch != rocjitsu::IsaFamily::Rdna4 ? 0u : 64u;
     for (uint8_t opsel : {0u, 4u}) {
       SCOPED_TRACE(::testing::Message() << "bf16=" << bf16 << " opsel=" << unsigned(opsel));
       std::unique_ptr<Instruction> instruction =

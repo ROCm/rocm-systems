@@ -11,6 +11,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/execution_backend.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/arena_alloc.h"
 
 #include <cstddef>
@@ -81,14 +82,15 @@ public:
                              const DecodeErrorEmitter &emit_error = {});
 
   /// @brief Create a decoder for the given architecture.
-  static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
+  static std::unique_ptr<Decoder> create(rocjitsu::IsaFamily arch);
 
   /// @brief Create a decoder from an explicitly scoped registry and open ID.
   static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
                                          std::string_view target_id);
 
   /// @brief Create a decoder from a built-in architecture in a scoped registry.
-  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry, rj_code_arch_t arch);
+  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
+                                         rocjitsu::IsaFamily arch);
 
   /// @brief Create a decoder for a concrete public GPU target.
   static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,

@@ -4,6 +4,7 @@
 #include "cdna5_sim_test_common.h"
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
@@ -80,7 +81,7 @@ TEST(Gfx1250ExecutionTest, DivisionMacrosCoverScalingAndExceptionalQuotients) {
     wf->set_mode_raw(0xf0); // RNE, preserve input/output denormals in both formats.
     wf->set_exec(0x55555555u);
     const uint32_t base = wf->vgpr_alloc().base;
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     for (bool wide : {false, true}) {
       const std::span<const Case> cases =
@@ -132,7 +133,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
     util::set_force_scalar_for_testing(scalar);
     // RDNA4 is measured hardware; CDNA5 checks the shared model with the same
     // expectations. Physical gfx1250 has not been independently qualified.
-    for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
       SCOPED_TRACE(::testing::Message() << "arch=" << static_cast<int>(arch));
       amdgpu::GpuMemory memory("division_memory");
       amdgpu::L2Cache cache("division_cache");
@@ -231,7 +232,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
           // RDNA4 ISA 7.2.3.1 says exceptions precede CLAMP, but gfx1201
           // suppresses new FIXUP flags under CLAMP; old sticky flags survive.
           // Preserve the existing CDNA5 expectation (not measured here).
-          const uint32_t omod_causes = arch == ROCJITSU_CODE_ARCH_RDNA4 && clamp ? 0u : 1u << 3;
+          const uint32_t omod_causes = arch == rocjitsu::IsaFamily::Rdna4 && clamp ? 0u : 1u << 3;
           wf->set_mode_raw(0);
           write(stride, inf - 1); // Finite quotient before OMOD.
           write(2 * stride, one);

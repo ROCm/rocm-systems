@@ -22,6 +22,13 @@ const fn request(direction: u32, number: u32, size: u32) -> u64 {
 }
 
 pub(super) const GET_VERSION: u64 = request(2, 0x01, 8);
+// Output-only extension of GET_VERSION; old KFD zero-fills the extra bytes.
+pub(super) const GET_VERSION_EXTENSION: u64 = request(2, 0x01, 24);
+// Local checked-SVM protocol v1, shared with the qualified kernel patch.
+// This identifier and operation are not upstream UAPI allocations.
+pub(super) const SVM_EXTENSION_ID: u64 = 0x3156_4d53_5244_4443;
+pub(super) const SVM_FEATURE_CHECKED_PREFETCH: u64 = 1;
+pub(super) const SVM_OP_PREFETCH_CHECKED: u32 = 0x0052_5301;
 // Since UAPI 1.17, CREATE includes an SDMA engine ordinal. The final word
 // became metadata_ring_size in 1.22; we keep it zero on every supported kernel.
 pub(super) const CREATE_QUEUE: u64 = request(3, 0x02, 96);
@@ -46,6 +53,7 @@ pub(super) const ALLOC_MEMORY: u64 = request(3, 0x16, 40);
 pub(super) const FREE_MEMORY: u64 = request(1, 0x17, 8);
 pub(super) const MAP_MEMORY: u64 = request(3, 0x18, 24);
 pub(super) const UNMAP_MEMORY: u64 = request(3, 0x19, 24);
+pub(super) const GET_QUEUE_WAVE_STATE: u64 = request(3, 0x1b, 24);
 pub(super) const SET_CU_MASK: u64 = request(1, 0x1a, 16);
 pub(super) const ALLOC_QUEUE_GWS: u64 = request(3, 0x1e, 16);
 pub(super) const GET_DMABUF_INFO: u64 = request(3, 0x1c, 32);
@@ -125,6 +133,7 @@ pub(super) const SVM_FLAG_GPU_READ_ONLY: u32 = 0x08;
 pub(super) const SVM_FLAG_GPU_EXECUTE: u32 = 0x10;
 pub(super) const SVM_FLAG_GPU_READ_MOSTLY: u32 = 0x20;
 pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
+pub(super) const SVM_FLAG_EXT_COHERENT: u32 = 0x80;
 
 /// KFD UAPI version returned by `GET_VERSION`.
 #[repr(C)]
@@ -132,6 +141,34 @@ pub(super) const SVM_FLAG_GPU_ALWAYS_MAPPED: u32 = 0x40;
 pub(super) struct Version {
     pub major: u32,
     pub minor: u32,
+}
+
+/// Negotiated local extension; the standard KFD version prefix is unchanged.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct VersionExtension {
+    pub version: Version,
+    pub extension_id: u64,
+    pub features: u64,
+}
+
+impl VersionExtension {
+    pub(super) fn checked_prefetch(self) -> bool {
+        self.version.major == 1
+            && self.extension_id == SVM_EXTENSION_ID
+            && self.features & SVM_FEATURE_CHECKED_PREFETCH != 0
+    }
+}
+
+/// Wave-state query; the control address points at retained writable CWSR memory.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct QueueWaveState {
+    pub control_stack_address: u64,
+    pub control_stack_used_size: u32,
+    pub save_area_used_size: u32,
+    pub queue_id: u32,
+    pub pad: u32,
 }
 
 /// GPU, CPU, and system clock readings returned by KFD.
@@ -581,6 +618,7 @@ const _: () = {
     assert!(offset_of!(AllocQueueGws, first_gws) == 8);
     assert!(ALLOC_QUEUE_GWS == 0xc010_4b1e);
     assert!(size_of::<Version>() == 8);
+    assert!(size_of::<VersionExtension>() == 24);
     assert!(size_of::<ClockCounters>() == 40);
     assert!(offset_of!(ClockCounters, gpu_id) == 32);
     assert!(size_of::<AvailableMemory>() == 16);
@@ -650,3 +688,14 @@ const _: () = {
     assert!(offset_of!(SetTrapHandler, tma_address) == 8);
     assert!(offset_of!(SetTrapHandler, gpu_id) == 16);
 };
+
+#[cfg(test)]
+mod core_layout_tests {
+    use super::*;
+    #[test]
+    fn wave_state_matches_vendored_kfd_uapi() {
+        assert_eq!(size_of::<QueueWaveState>(), 24);
+        assert_eq!(offset_of!(QueueWaveState, queue_id), 16);
+        assert_eq!(GET_QUEUE_WAVE_STATE, 0xc018_4b1b);
+    }
+}

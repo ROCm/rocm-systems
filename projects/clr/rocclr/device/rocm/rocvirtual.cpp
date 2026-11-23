@@ -11,6 +11,8 @@
 #include "utils/nontemporal.hpp"
 #include "device/rocm/rocmemory.hpp"
 #include "device/rocm/rocblit.hpp"
+#include "device/rocm/rocabce.hpp"
+#include "device/rocm/rocabceblit.hpp"
 #include "device/rocm/roccounters.hpp"
 #include "platform/activity.hpp"
 #include "platform/kernel.hpp"
@@ -391,6 +393,13 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device, bool completed) {
   if (!timed_use_) {
     cached_timing_.start_ = 0;
     cached_timing_.end_ = 0;
+  } else if (engine_ == HwQueueEngine::SdmaAbce) {
+    // ABCE writes SDMA global-clock timestamps directly into the signal but
+    // does not submit through ROCr's async-copy API.
+    hsa_amd_profiling_dispatch_time_t time = {};
+    Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
+    cached_timing_.start_ = time.start;
+    cached_timing_.end_ = time.end;
   } else if (IsSdmaEngine(engine_)) {
     hsa_amd_profiling_async_copy_time_t time = {};
     Hsa::profiling_get_async_copy_time(signal_, &time);
@@ -1280,6 +1289,7 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
                                                       bool attach_signal, uint64_t aql_slot,
                                                       bool barrier_bit, bool timing_only) {
   amd::Command* cmd = gpu_.command();
+
   // If no signal is needed, decrement the refcount and clear the hw_event of current command
   if (!attach_signal) {
     if (nullptr != cmd) {
@@ -1380,8 +1390,12 @@ hsa_signal_t VirtualGPU::HwQueueTracker::ActiveSignal(hsa_signal_value_t init_va
 }
 
 // ================================================================================================
-std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine) {
+std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngine engine,
+                                                                     uint32_t abce_ring) {
   bool explicit_wait = false;
+  const bool same_abce_ring =
+      engine == HwQueueEngine::SdmaAbce && engine_ == HwQueueEngine::SdmaAbce &&
+      abce_ring != kInvalidAbceRing && abce_ring == abce_ring_;
   // Reset all current waiting signals
   waiting_signals_.clear();
   NoteWaitsSubmitted();
@@ -1389,7 +1403,6 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   // Does runtime switch the active engine?
   if (engine != engine_) {
     // Yes, return the signal from the previous operation for a wait
-    engine_ = engine;
     explicit_wait = true;
   } else {
     // Unknown engine in use, hence return a wait signal always
@@ -1397,12 +1410,16 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
       explicit_wait = true;
     } else {
       // Check if skip wait optimization is enabled. It will try to predict the same engine in ROCr
-      // and ignore the signal wait, relying on in-order engine execution
-      if (engine != HwQueueEngine::Compute) {
+      // and ignore the signal wait, relying on in-order engine execution.
+      if (engine == HwQueueEngine::SdmaAbce) {
+        explicit_wait = !same_abce_ring;
+      } else if (engine != HwQueueEngine::Compute) {
         explicit_wait = true;
       }
     }
   }
+  engine_ = engine;
+  abce_ring_ = engine == HwQueueEngine::SdmaAbce ? abce_ring : kInvalidAbceRing;
 
   // Check if a wait is required
   if (explicit_wait) {
@@ -2532,26 +2549,37 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 }
 
 // ================================================================================================
-void VirtualGPU::adjustHeader(uint16_t& header) {
-  setFenceDirty(true);
-
+void VirtualGPU::applySystemScopeRequest(uint16_t& header) {
   if (TestAndClearStateFlag(kAddSystemScope)) {
     header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                 HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   }
+}
+
+// ================================================================================================
+void VirtualGPU::adjustHeader(uint16_t& header) {
+  setFenceDirty(true);
+
+  applySystemScopeRequest(header);
 
   auto expected_fence_state = extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                                              HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE);
 
+  // A system-scope release publishes the dispatch's writes to all agents and satisfies the
+  // outstanding flush. Clear the dirty flag so later synchronization does not emit a redundant
+  // system-scope barrier.
   if (expected_fence_state == amd::Device::kCacheStateSystem) {
     setFenceDirty(false);
   }
 
+  // `fence_state_` tracks requested, not emitted, scope. Keep the first system-scope release in a
+  // run, then restore the default header on later packets. With an agent-scoped default, their
+  // writes remain dirty until one system-scope barrier publishes them at synchronization, avoiding
+  // a flush after every dispatch. Preserve an explicit any-order request when replacing the header.
   if (fence_state_ == amd::Device::kCacheStateSystem &&
       expected_fence_state == amd::Device::kCacheStateSystem) {
-    // honor an explicit any-order
     const bool any_order = (header & kBarrierBit) == 0;
     header = dispatchPacketHeader_;
     if (any_order) {
@@ -2595,7 +2623,7 @@ template <typename AqlPacket>
 bool VirtualGPU::dispatchAqlPacket(AqlPacket* packet, uint16_t header,
                                    uint16_t rest, bool blocking, bool attach_signal) {
   if (command_ != nullptr && command_->getPktCapturingState()) {
-    adjustHeader(header);
+    applySystemScopeRequest(header);
     packet->header = header;
     if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
       // For ext dispatch packets the first 32 bits are {header(16), amd_format(8), setup(8)}.
@@ -3693,7 +3721,11 @@ bool VirtualGPU::create() {
   }
 
   device::BlitManager::Setup blitSetup;
-  blitMgr_ = new KernelBlitManager(*this, blitSetup);
+  if (DEBUG_CLR_ENABLE_ABCE && roc_device_.abceEngineSet() != nullptr) {
+    blitMgr_ = new AbceBlitManager(*this, blitSetup);
+  } else {
+    blitMgr_ = new KernelBlitManager(*this, blitSetup);
+  }
   if ((nullptr == blitMgr_) || !blitMgr_->create(roc_device_)) {
     LogError("Could not create BlitManager!");
     return false;
@@ -3868,13 +3900,15 @@ address VirtualGPU::allocKernelArguments(size_t size, size_t alignment) {
 
 // ================================================================================================
 void VirtualGPU::ReleaseSdmaEngines() {
-  if (!hasAssignedSdmaEngine()) {
-    return;
-  }
   // Release SDMA engine assignment when queue is idle
   // This allows the engine to be reassigned to other active streams
-  dev().ReleaseSdmaEngine(this);
-  ClearAssignedSdmaEngine();
+  if (hasAssignedSdmaEngine()) {
+    dev().ReleaseSdmaEngine(this);
+    ClearAssignedSdmaEngine();
+  }
+  if (auto* abce_engines = dev().abceEngineSet(); abce_engines != nullptr) {
+    abce_engines->engine_allocator().Release(this);
+  }
 }
 
 // ================================================================================================
@@ -4907,6 +4941,7 @@ void VirtualGPU::submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) {
 }
 
 // ================================================================================================
+
 void VirtualGPU::submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());

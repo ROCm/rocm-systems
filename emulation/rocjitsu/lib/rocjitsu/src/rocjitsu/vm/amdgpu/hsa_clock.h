@@ -8,6 +8,7 @@
 /// @brief Shared synthetic HSA system-clock timestamp helper.
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <chrono>
 #include <cstdint>
@@ -22,13 +23,13 @@ inline uint64_t hsa_system_timestamp() {
 }
 
 /// Architectural RTC frequency in MHz. Other models use a nanosecond device clock.
-constexpr uint32_t gpu_clock_mhz(rj_code_arch_t arch) {
+constexpr uint32_t gpu_clock_mhz(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
     return 25;
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return 100;
   default:
     return 1000;
@@ -40,7 +41,7 @@ constexpr uint64_t gpu_clock_from_ns(uint64_t ns, uint32_t frequency_mhz) {
 }
 
 /// GPU profiling packets and clock calibration share the steady-clock epoch.
-inline uint64_t gpu_timestamp(rj_code_arch_t arch) {
+inline uint64_t gpu_timestamp(rocjitsu::IsaFamily arch) {
   return gpu_clock_from_ns(hsa_system_timestamp(), gpu_clock_mhz(arch));
 }
 

@@ -4,11 +4,16 @@
 #include "cdna5_sim_test_common.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
+#include <algorithm>
 #include <atomic>
+#include <map>
 #include <memory>
 #include <mutex>
+#include <ostream>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -68,6 +73,123 @@ private:
   std::vector<Resolution> resolutions_;
 };
 
+/// Records the barrier hooks in the order they fire.
+class BarrierHookRecorder final : public ExecutionPlugin {
+public:
+  BarrierHookRecorder() : ExecutionPlugin("barrier_hook_recorder") {}
+
+  enum class Hook { Signaled, Resolved, RoundCompleted, WaitPassed };
+
+  struct Event {
+    Hook hook = Hook::Signaled;
+    /// The signalling or waiting wave (Signaled, WaitPassed).
+    const amdgpu::Wavefront *wave = nullptr;
+    /// Sorted: the waves the completion notified (Resolved), or the ones whose
+    /// completion bit it set (RoundCompleted).
+    std::vector<const amdgpu::Wavefront *> members;
+    /// Resolved only.
+    BarrierKind kind = BarrierKind::Workgroup;
+    /// Signaled, RoundCompleted and WaitPassed only.
+    BarrierRound round;
+    /// Workgroup of `wave`, or of each member, captured when the hook fires.
+    std::vector<uint32_t> workgroups;
+
+    bool operator==(const Event &) const = default;
+  };
+
+  static Event signaled(const amdgpu::Wavefront *wave, BarrierRound round) {
+    return {.hook = Hook::Signaled,
+            .wave = wave,
+            .members = {},
+            .kind = BarrierKind::Workgroup,
+            .round = round,
+            .workgroups = {wave->wg_id()}};
+  }
+
+  static Event resolved(std::vector<const amdgpu::Wavefront *> members, BarrierKind kind) {
+    return membersEvent(Hook::Resolved, std::move(members), kind, {});
+  }
+
+  static Event roundCompleted(std::vector<const amdgpu::Wavefront *> members, BarrierRound round) {
+    return membersEvent(Hook::RoundCompleted, std::move(members), BarrierKind::Workgroup, round);
+  }
+
+  static Event waitPassed(const amdgpu::Wavefront *wave, BarrierRound round) {
+    return {.hook = Hook::WaitPassed,
+            .wave = wave,
+            .members = {},
+            .kind = BarrierKind::Workgroup,
+            .round = round,
+            .workgroups = {wave->wg_id()}};
+  }
+
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    record(signaled(&wf, round));
+  }
+
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
+                               BarrierKind kind) override {
+    record(resolved({wavefronts.begin(), wavefronts.end()}, kind));
+  }
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> /*notified*/,
+                                     std::span<amdgpu::Wavefront *> armed,
+                                     const BarrierRound &round) override {
+    record(roundCompleted({armed.begin(), armed.end()}, round));
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    record(waitPassed(&wf, round));
+  }
+
+  std::vector<Event> events() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return events_;
+  }
+
+  std::vector<Event> events(Hook hook) const {
+    std::vector<Event> matching;
+    for (const Event &event : events())
+      if (event.hook == hook)
+        matching.push_back(event);
+    return matching;
+  }
+
+private:
+  static Event membersEvent(Hook hook, std::vector<const amdgpu::Wavefront *> members,
+                            BarrierKind kind, BarrierRound round) {
+    std::ranges::sort(members);
+    std::vector<uint32_t> workgroups;
+    for (const auto *member : members)
+      workgroups.push_back(member->wg_id());
+    return {.hook = hook,
+            .wave = nullptr,
+            .members = std::move(members),
+            .kind = kind,
+            .round = round,
+            .workgroups = std::move(workgroups)};
+  }
+
+  void record(Event event) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    events_.push_back(std::move(event));
+  }
+
+  mutable std::mutex mutex_;
+  std::vector<Event> events_;
+};
+
+void PrintTo(const BarrierHookRecorder::Event &event, std::ostream *os) {
+  static constexpr const char *kHooks[] = {"Signaled", "Resolved", "RoundCompleted", "WaitPassed"};
+  *os << kHooks[static_cast<int>(event.hook)] << "{wave=" << event.wave << " members=[";
+  for (const auto *member : event.members)
+    *os << member << ' ';
+  *os << "] kind=" << static_cast<int>(event.kind)
+      << " round={kind=" << static_cast<int>(event.round.kind)
+      << " bit=" << static_cast<int>(event.round.completion_bit)
+      << " named=" << event.round.named_id << " gen=" << event.round.generation << "}}";
+}
+
 class ForceScalarGuard {
 public:
   ForceScalarGuard() : original_(util::force_scalar()) {}
@@ -109,7 +231,7 @@ TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
     for (uint32_t lane = 0; lane < cases.size(); ++lane)
       sim.cu()->write_vgpr(vgpr_base + kSrc, lane, cases[lane].input);
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     auto check_encoding = [&](const auto &words, std::string_view expected_mnemonic) {
       SCOPED_TRACE(expected_mnemonic);
@@ -158,7 +280,7 @@ TEST(Gfx1250SimulationTest, PackedBf16ArithmeticRoundsOnceAndHonorsOverflowMode)
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   amdgpu::Wavefront *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t vb = wf->vgpr_alloc().base;
   wf->set_exec(1);
@@ -248,7 +370,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
   const auto add_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 129});
   const auto add_minus_one = cdna5::build_sop1(cdna5::kSAddPcI64Sop1, {.ssrc0 = 193});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> increment(decode_valid(*decoder, add_one.data()));
   std::unique_ptr<Instruction> decrement(decode_valid(*decoder, add_minus_one.data()));
@@ -462,7 +584,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSignalIsfirstPreservesSccWithoutAllocati
   auto *wf = sim.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
   std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
@@ -484,7 +606,7 @@ void expect_barrier_init_reads_implicit_m0(uint32_t init_encoding, uint32_t init
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2, 4);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> init_words = {init_encoding};
   const std::array<uint32_t, 1> join_words = {0xBE805281u};   // s_barrier_join 1
@@ -536,7 +658,7 @@ TEST(Gfx1250SimulationTest, NamedBarrierSynchronizesJoinedWavesAcrossPhases) {
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2, 4);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> join_words = {0xBE80527Du};
   const std::array<uint32_t, 1> signal_words = {0xBE804F7Du};
@@ -680,7 +802,7 @@ TEST(Gfx1250SimulationTest, WorkgroupSignalIsfirstAcceptsNegativeInlineBarrierId
   ASSERT_NE(wf1, nullptr);
   cu->begin_workgroup(0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> signal_words = {0xBE804FC1u}; // s_barrier_signal_isfirst -1
   std::unique_ptr<Instruction> signal(decode_valid(*decoder, signal_words.data()));
@@ -818,6 +940,458 @@ TEST(Gfx1250SimulationTest, ClusterBarrierCompletesAfterWorkgroupTerminatesEarly
   step_until_xcd_halted(sim);
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
+}
+
+// --- Split-barrier hooks: each counted signal, each completed round and each
+// --- passed wait is reported with the round it belongs to. ---
+
+BarrierRound workgroupRound(uint64_t generation) {
+  return {.kind = BarrierKind::Workgroup,
+          .completion_bit = amdgpu::kWorkgroupBarrierBit,
+          .named_id = 0,
+          .generation = generation};
+}
+
+BarrierRound namedRound(uint32_t named_id, uint64_t generation) {
+  return {.kind = BarrierKind::Named,
+          .completion_bit = amdgpu::kNamedBarrierBit,
+          .named_id = named_id,
+          .generation = generation};
+}
+
+BarrierRound clusterRound(uint64_t generation) {
+  return {.kind = BarrierKind::Cluster,
+          .completion_bit = amdgpu::kClusterBarrierBit,
+          .named_id = 0,
+          .generation = generation};
+}
+
+/// Two wave32 waves of one workgroup with four named barriers, and a recorder
+/// of the barrier hooks.
+class Gfx1250SplitBarrierHookTest : public ::testing::Test {
+protected:
+  using Event = BarrierHookRecorder::Event;
+  using Hook = BarrierHookRecorder::Hook;
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
+    auto plugin = std::make_unique<BarrierHookRecorder>();
+    recorder = plugin.get();
+    ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
+    cu = sim.cu();
+    wf0 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    wf1 = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+    ASSERT_NE(wf0, nullptr);
+    ASSERT_NE(wf1, nullptr);
+    cu->begin_workgroup(0, 0, /*wf_count=*/2, /*num_named_barriers=*/4);
+  }
+
+  static Event signaled(const amdgpu::Wavefront *wave, BarrierRound round) {
+    return BarrierHookRecorder::signaled(wave, round);
+  }
+  static Event resolved(std::vector<const amdgpu::Wavefront *> members, BarrierKind kind) {
+    return BarrierHookRecorder::resolved(std::move(members), kind);
+  }
+  static Event completed(std::vector<const amdgpu::Wavefront *> members, BarrierRound round) {
+    return BarrierHookRecorder::roundCompleted(std::move(members), round);
+  }
+  static Event waitPassed(const amdgpu::Wavefront *wave, BarrierRound round) {
+    return BarrierHookRecorder::waitPassed(wave, round);
+  }
+
+  Gfx1250Sim sim;
+  BarrierHookRecorder *recorder = nullptr;
+  decltype(sim.cu()) cu = nullptr;
+  amdgpu::Wavefront *wf0 = nullptr;
+  amdgpu::Wavefront *wf1 = nullptr;
+};
+
+// Both waves signal, then each passes its wait with the bit already set.
+TEST_F(Gfx1250SplitBarrierHookTest, HooksFireAtSignalCompletionAndWait) {
+  const BarrierRound round = workgroupRound(0);
+  EXPECT_TRUE(wf0->barrier_signal(-1, 0));
+  EXPECT_FALSE(wf1->barrier_signal(-1, 0));
+  wf0->barrier_wait(-1);
+  wf1->barrier_wait(-1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(recorder->events(),
+            (std::vector<Event>{signaled(wf0, round), signaled(wf1, round),
+                                resolved({wf0, wf1}, BarrierKind::Workgroup),
+                                completed({wf0, wf1}, round), waitPassed(wf0, round),
+                                waitPassed(wf1, round)}));
+}
+
+// A wave parked in s_barrier_wait passes it when the last signal completes
+// the round, after the round is reported.
+TEST_F(Gfx1250SplitBarrierHookTest, WaitBeforeCompletionPassesAfterRoundCompleted) {
+  const BarrierRound round = workgroupRound(0);
+  EXPECT_TRUE(wf0->barrier_signal(-1, 0));
+  wf0->barrier_wait(-1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
+  EXPECT_FALSE(wf1->barrier_signal(-1, 0));
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(recorder->events(),
+            (std::vector<Event>{signaled(wf0, round), signaled(wf1, round),
+                                resolved({wf0, wf1}, BarrierKind::Workgroup),
+                                completed({wf0, wf1}, round), waitPassed(wf0, round)}));
+  wf1->barrier_wait(-1);
+  EXPECT_EQ(recorder->events().back(), waitPassed(wf1, round));
+}
+
+// The completion bit is a flag, not a count (CDNA5 ISA 5.6.1): wave 0's bit,
+// set by round 0, is still set when round 1 completes, so round 1 notifies
+// both waves but sets only wave 1's bit. Wave 0's wait passes for round 0 and
+// its next wait parks.
+TEST_F(Gfx1250SplitBarrierHookTest, WaitPassedReportsRoundThatSetTheBit) {
+  const BarrierRound round0 = workgroupRound(0);
+  const BarrierRound round1 = workgroupRound(1);
+  wf0->barrier_signal(-1, 0);
+  wf1->barrier_signal(-1, 0);
+  wf1->barrier_wait(-1);
+  wf1->barrier_signal(-1, 0);
+  wf0->barrier_signal(-1, 0);
+  wf0->barrier_wait(-1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  wf0->barrier_wait(-1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::BARRIER);
+  EXPECT_EQ(recorder->events(),
+            (std::vector<Event>{signaled(wf0, round0), signaled(wf1, round0),
+                                resolved({wf0, wf1}, BarrierKind::Workgroup),
+                                completed({wf0, wf1}, round0), waitPassed(wf1, round0),
+                                signaled(wf1, round1), signaled(wf0, round1),
+                                resolved({wf0, wf1}, BarrierKind::Workgroup),
+                                completed({wf1}, round1), waitPassed(wf0, round0)}));
+}
+
+// S_BARRIER_JOIN clears the joining wave's completion bit and S_BARRIER_INIT
+// discards counted signals (CDNA5 ISA 5.6.3, Table 22), so each starts a new
+// generation for the waves it affects. Wave 1 never rejoined, so its bit still
+// holds the first round.
+TEST_F(Gfx1250SplitBarrierHookTest, JoinAndInitDiscardPendingRound) {
+  // Generation 0 is discarded by the first init, 1 completes, and 2 is
+  // discarded by the second init.
+  const BarrierRound first = namedRound(1, 1);
+  const BarrierRound second = namedRound(1, 3);
+  wf0->barrier_init(1, 2);
+  wf0->barrier_join(1);
+  wf1->barrier_join(1);
+  wf0->barrier_signal(1, 0);
+  wf1->barrier_signal(1, 0);
+  wf0->barrier_join(1);
+  wf0->barrier_init(1, 2);
+  wf0->barrier_signal(1, 0);
+  wf1->barrier_signal(1, 0);
+  wf0->barrier_wait(1);
+  wf1->barrier_wait(1);
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(
+      recorder->events(),
+      (std::vector<Event>{signaled(wf0, first), signaled(wf1, first),
+                          resolved({wf0, wf1}, BarrierKind::Named), completed({wf0, wf1}, first),
+                          signaled(wf0, second), signaled(wf1, second),
+                          resolved({wf0, wf1}, BarrierKind::Named), completed({wf0}, second),
+                          waitPassed(wf0, second), waitPassed(wf1, first)}));
+}
+
+// These signals act as S_NOP (CDNA5 ISA 5.6, 5.6.3 and 15.3, S_BARRIER_SIGNAL):
+// the null barrier, an unallocated named barrier, the trap barrier without
+// PRIV, the cluster and cluster trap barriers outside a cluster, and any
+// barrier in a single-wave workgroup. The matching waits act as S_NOP too.
+TEST_F(Gfx1250SplitBarrierHookTest, IgnoredSignalsFireNoHook) {
+  constexpr int32_t kUnallocatedNamedBarrier = 5; // SetUp allocates 1-4.
+  for (int32_t id : {0, kUnallocatedNamedBarrier, -2, -3, -4}) {
+    SCOPED_TRACE(id);
+    EXPECT_FALSE(wf0->barrier_signal(id, 0));
+    wf0->barrier_wait(id);
+    EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  }
+  auto *single = cu->dispatch_wf(/*wg_id=*/1, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(single, nullptr);
+  cu->begin_workgroup(0, 1, /*wf_count=*/1);
+  EXPECT_FALSE(single->barrier_signal(-1, 0));
+  single->barrier_wait(-1);
+  EXPECT_EQ(single->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(recorder->events(), std::vector<Event>{});
+}
+
+// A wave ending without signalling completes the round for the others
+// (CDNA5 ISA 5.6); only the waves that signalled report a signal.
+TEST_F(Gfx1250SplitBarrierHookTest, EndedWaveCompletesRoundWithoutSignal) {
+  const BarrierRound round = workgroupRound(0);
+  EXPECT_TRUE(wf0->barrier_signal(-1, 0));
+  wf0->barrier_wait(-1);
+  wf1->halt();
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(recorder->events(),
+            (std::vector<Event>{signaled(wf0, round), resolved({wf0}, BarrierKind::Workgroup),
+                                completed({wf0}, round), waitPassed(wf0, round)}));
+}
+
+// S_BARRIER_LEAVE may complete the barrier if the other members have already
+// signalled (CDNA5 ISA 5.6.3, Table 22).
+TEST_F(Gfx1250SplitBarrierHookTest, LeaveCompletesNamedRound) {
+  // Generation 0 is discarded by the init.
+  const BarrierRound round = namedRound(1, 1);
+  wf0->barrier_init(1, 2);
+  wf0->barrier_join(1);
+  wf1->barrier_join(1);
+  EXPECT_TRUE(wf0->barrier_signal(1, 0));
+  wf0->barrier_wait(1);
+  EXPECT_FALSE(wf1->barrier_leave());
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(recorder->events(),
+            (std::vector<Event>{signaled(wf0, round), resolved({wf0}, BarrierKind::Named),
+                                completed({wf0}, round), waitPassed(wf0, round)}));
+}
+
+// Both waves signal two rounds without waiting. Round 1 notifies them again,
+// but their completion bits are still set by round 0, so it arms neither.
+TEST_F(Gfx1250SplitBarrierHookTest, RoundThatSetsNoBitArmsNoWave) {
+  const BarrierRound round0 = workgroupRound(0);
+  const BarrierRound round1 = workgroupRound(1);
+  for (int pass = 0; pass < 2; ++pass) {
+    wf0->barrier_signal(-1, 0);
+    wf1->barrier_signal(-1, 0);
+  }
+  EXPECT_EQ(recorder->events(),
+            (std::vector<Event>{signaled(wf0, round0), signaled(wf1, round0),
+                                resolved({wf0, wf1}, BarrierKind::Workgroup),
+                                completed({wf0, wf1}, round0), signaled(wf0, round1),
+                                signaled(wf1, round1), resolved({wf0, wf1}, BarrierKind::Workgroup),
+                                completed({}, round1)}));
+}
+
+// The existing hook keeps its members and kind on every completion path.
+TEST_F(Gfx1250SplitBarrierHookTest, ResolvedHookUnchangedForSignalledRound) {
+  wf0->barrier_signal(-1, 0);
+  wf1->barrier_signal(-1, 0);
+  EXPECT_EQ(recorder->events(Hook::Resolved),
+            (std::vector<Event>{resolved({wf0, wf1}, BarrierKind::Workgroup)}));
+}
+
+TEST_F(Gfx1250SplitBarrierHookTest, ResolvedHookUnchangedForEndedWave) {
+  wf0->barrier_signal(-1, 0);
+  wf1->halt();
+  EXPECT_EQ(recorder->events(Hook::Resolved),
+            (std::vector<Event>{resolved({wf0}, BarrierKind::Workgroup)}));
+}
+
+TEST_F(Gfx1250SplitBarrierHookTest, ResolvedHookUnchangedForLeave) {
+  wf0->barrier_init(1, 2);
+  wf0->barrier_join(1);
+  wf1->barrier_join(1);
+  wf0->barrier_signal(1, 0);
+  wf1->barrier_leave();
+  EXPECT_EQ(recorder->events(Hook::Resolved),
+            (std::vector<Event>{resolved({wf0}, BarrierKind::Named)}));
+}
+
+// A cluster round counts one signal per workgroup (CDNA5 ISA 5.6.6). As the
+// ISA recommends, one wave per workgroup signals; every wave of the cluster is
+// notified and passes its wait.
+TEST(Gfx1250SimulationTest, ClusterRoundReportsOneSignalPerWorkgroupAndEveryWait) {
+  constexpr auto read_first_workitem =
+      cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4});
+  constexpr auto is_first_wave =
+      cdna5::build_sopc(cdna5::kSCmpEqU32Sopc, {.ssrc0 = 4, .ssrc1 = 128});
+  constexpr auto skip_signal = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1});
+  const uint32_t code[] = {
+      read_first_workitem[0], // v_readfirstlane_b32 s4, v0
+      is_first_wave[0],       // s_cmp_eq_u32 s4, 0
+      skip_signal[0],         // s_cbranch_scc0 wait
+      0xBE804EC3u,            // s_barrier_signal -3
+      0xBF94FFFDu,            // s_barrier_wait -3
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto plugin = std::make_unique<BarrierHookRecorder>();
+  auto *recorder = plugin.get();
+  ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
+  uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
+                                            false, false, 0, 0, 0, 0, 0, 1);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  // Two workgroups of two wave32 waves each.
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/64);
+  step_until_xcd_halted(sim);
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 4u);
+
+  using Hook = BarrierHookRecorder::Hook;
+  const BarrierRound round = clusterRound(0);
+  const auto signals = recorder->events(Hook::Signaled);
+  ASSERT_EQ(signals.size(), 2u);
+  std::vector<uint32_t> signalling_workgroups;
+  for (const auto &signal : signals) {
+    EXPECT_EQ(signal.round, round);
+    signalling_workgroups.push_back(signal.workgroups.front());
+  }
+  std::ranges::sort(signalling_workgroups);
+  EXPECT_EQ(signalling_workgroups, (std::vector<uint32_t>{0, 1}));
+
+  const auto completions = recorder->events(Hook::RoundCompleted);
+  ASSERT_EQ(completions.size(), 1u);
+  EXPECT_EQ(completions[0].round, round);
+  std::vector<uint32_t> member_workgroups = completions[0].workgroups;
+  std::ranges::sort(member_workgroups);
+  EXPECT_EQ(member_workgroups, (std::vector<uint32_t>{0, 0, 1, 1}));
+
+  const auto waits = recorder->events(Hook::WaitPassed);
+  ASSERT_EQ(waits.size(), 4u);
+  for (const auto &wait : waits)
+    EXPECT_EQ(wait.round, round);
+}
+
+// Only a workgroup's first cluster signal in a round is counted (CDNA5 ISA
+// 5.6.6). Both waves of workgroup 0 signal before workgroup 1's first wave
+// does, so the second wave's signal is ignored and reports nothing.
+TEST(Gfx1250SimulationTest, ClusterRoundIgnoresAWorkgroupsSecondSignal) {
+  // Long enough for both waves of workgroup 0 to signal first.
+  constexpr int16_t kDelay = 16;
+  // TTMP6[3:0] is the workgroup's X position in its cluster.
+  constexpr uint16_t kTtmp6 = 114;
+  constexpr auto is_first_workgroup =
+      cdna5::build_sopc(cdna5::kSBitcmp0B32Sopc, {.ssrc0 = kTtmp6, .ssrc1 = 128});
+  constexpr auto signal_now = cdna5::build_sopp(cdna5::kSCbranchScc1Sopp, {.simm16 = kDelay + 3});
+  constexpr auto read_first_workitem =
+      cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4});
+  constexpr auto is_first_wave =
+      cdna5::build_sopc(cdna5::kSCmpEqU32Sopc, {.ssrc0 = 4, .ssrc1 = 128});
+  constexpr auto skip_signal = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = kDelay + 1});
+  std::vector<uint32_t> code = {
+      is_first_workgroup[0],  // s_bitcmp0_b32 ttmp6, 0
+      signal_now[0],          // s_cbranch_scc1 signal
+      read_first_workitem[0], // v_readfirstlane_b32 s4, v0
+      is_first_wave[0],       // s_cmp_eq_u32 s4, 0
+      skip_signal[0],         // s_cbranch_scc0 wait
+  };
+  code.insert(code.end(), kDelay, 0xBF800000u); // s_nop
+  code.insert(code.end(), {
+                              0xBE804EC3u, // signal: s_barrier_signal -3
+                              0xBF94FFFDu, // wait: s_barrier_wait -3
+                              S_ENDPGM_GFX12,
+                          });
+
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto plugin = std::make_unique<BarrierHookRecorder>();
+  auto *recorder = plugin.get();
+  ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
+  uint64_t kernel_object = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false,
+                                            false, false, 0, 0, 0, 0, 0, 1);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  // Two workgroups of two wave32 waves each.
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/64);
+  step_until_xcd_halted(sim);
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 4u);
+
+  using Hook = BarrierHookRecorder::Hook;
+  const BarrierRound round = clusterRound(0);
+  const auto signals = recorder->events(Hook::Signaled);
+  ASSERT_EQ(signals.size(), 2u);
+  EXPECT_EQ(signals[0].round, round);
+  EXPECT_EQ(signals[0].workgroups, (std::vector<uint32_t>{0}));
+  EXPECT_EQ(signals[1].round, round);
+  EXPECT_EQ(signals[1].workgroups, (std::vector<uint32_t>{1}));
+
+  const auto completions = recorder->events(Hook::RoundCompleted);
+  ASSERT_EQ(completions.size(), 1u);
+  EXPECT_EQ(completions[0].round, round);
+  std::vector<uint32_t> member_workgroups = completions[0].workgroups;
+  std::ranges::sort(member_workgroups);
+  EXPECT_EQ(member_workgroups, (std::vector<uint32_t>{0, 0, 1, 1}));
+
+  const auto waits = recorder->events(Hook::WaitPassed);
+  ASSERT_EQ(waits.size(), 4u);
+  for (const auto &wait : waits)
+    EXPECT_EQ(wait.round, round);
+}
+
+// A workgroup that ends completes the cluster round its peer signalled
+// (CDNA5 ISA 5.6.6), and that completion starts the barrier's next generation
+// like any other: the surviving workgroup's second round is generation 1, and
+// each of its waves passes one wait for each round.
+TEST(Gfx1250SimulationTest, ClusterRoundCompletedByAnExitingWorkgroupAdvancesTheGeneration) {
+  // Long enough for workgroup 0 to signal and park in its first wait before
+  // workgroup 1 ends.
+  constexpr int16_t kDelay = 16;
+  // TTMP6[3:0] is the workgroup's X position in its cluster.
+  constexpr uint16_t kTtmp6 = 114;
+  constexpr auto is_first_workgroup =
+      cdna5::build_sopc(cdna5::kSBitcmp0B32Sopc, {.ssrc0 = kTtmp6, .ssrc1 = 128});
+  constexpr auto exit_workgroup = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 8});
+  constexpr auto read_first_workitem =
+      cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 256, .vdst = 4});
+  constexpr auto is_first_wave =
+      cdna5::build_sopc(cdna5::kSCmpEqU32Sopc, {.ssrc0 = 4, .ssrc1 = 128});
+  constexpr auto skip_signal = cdna5::build_sopp(cdna5::kSCbranchScc0Sopp, {.simm16 = 1});
+  std::vector<uint32_t> code = {
+      is_first_workgroup[0],  // s_bitcmp0_b32 ttmp6, 0
+      exit_workgroup[0],      // s_cbranch_scc0 end
+      read_first_workitem[0], // v_readfirstlane_b32 s4, v0
+      is_first_wave[0],       // s_cmp_eq_u32 s4, 0
+      skip_signal[0],         // s_cbranch_scc0 first_wait
+      0xBE804EC3u,            // s_barrier_signal -3
+      0xBF94FFFDu,            // first_wait: s_barrier_wait -3
+      skip_signal[0],         // s_cbranch_scc0 second_wait
+      0xBE804EC3u,            // s_barrier_signal -3
+      0xBF94FFFDu,            // second_wait: s_barrier_wait -3
+  };
+  code.insert(code.end(), kDelay, 0xBF800000u); // end: s_nop
+  code.push_back(S_ENDPGM_GFX12);
+
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto plugin = std::make_unique<BarrierHookRecorder>();
+  auto *recorder = plugin.get();
+  ASSERT_TRUE(sim.plugin_group->add(std::move(plugin)));
+  sim.cp()->set_dispatch_threads(2);
+  ASSERT_EQ(sim.cp()->dispatch_threads(), 2u);
+  uint64_t kernel_object = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false,
+                                            false, false, 0, 0, 0, 0, 0, 1);
+  test::AqlQueue queue(sim.memory, sim.cp());
+  // Two workgroups of two wave32 waves each.
+  queue.dispatch_clustered(kernel_object, /*cluster_count_x=*/1, /*cluster_size_x=*/2,
+                           /*workgroup_size_x=*/64);
+  step_until_xcd_halted(sim);
+  ASSERT_EQ(sim.snapshot->snapshots().size(), 4u);
+
+  using Hook = BarrierHookRecorder::Hook;
+  const BarrierRound round0 = clusterRound(0);
+  const BarrierRound round1 = clusterRound(1);
+
+  // Only workgroup 0's first wave signals, once for each round.
+  const auto signals = recorder->events(Hook::Signaled);
+  ASSERT_EQ(signals.size(), 2u);
+  EXPECT_EQ(signals[0].round, round0);
+  EXPECT_EQ(signals[1].round, round1);
+  EXPECT_EQ(signals[0].wave, signals[1].wave);
+  EXPECT_EQ(signals[0].workgroups, (std::vector<uint32_t>{0}));
+
+  // Each round notifies the two waves of the surviving workgroup.
+  const auto completions = recorder->events(Hook::RoundCompleted);
+  ASSERT_EQ(completions.size(), 2u);
+  EXPECT_EQ(completions[0].round, round0);
+  EXPECT_EQ(completions[0].workgroups, (std::vector<uint32_t>{0, 0}));
+  EXPECT_EQ(completions[1].round, round1);
+  EXPECT_EQ(completions[1].workgroups, (std::vector<uint32_t>{0, 0}));
+
+  // Each surviving wave passes a wait for round 0, then one for round 1.
+  const auto waits = recorder->events(Hook::WaitPassed);
+  ASSERT_EQ(waits.size(), 4u);
+  std::map<const amdgpu::Wavefront *, std::vector<uint64_t>> generations;
+  for (const auto &wait : waits) {
+    EXPECT_EQ(wait.round.kind, BarrierKind::Cluster);
+    EXPECT_EQ(wait.workgroups, (std::vector<uint32_t>{0}));
+    generations[wait.wave].push_back(wait.round.generation);
+  }
+  ASSERT_EQ(generations.size(), 2u);
+  for (const auto &[wave, passed] : generations)
+    EXPECT_EQ(passed, (std::vector<uint64_t>{0, 1}));
 }
 
 TEST(Gfx1250SimulationTest, VgprMsbModeTracksModeRegisterLayout) {
@@ -1864,7 +2438,7 @@ TEST(Gfx1250SimulationTest, VopdFmamkUsesSrc2HighBank) {
   cu->write_vgpr(vb + kAddend, 0, std::bit_cast<uint32_t>(100.0f));
   cu->write_vgpr(vb + kSrc2Bank * kBankStride + kAddend, 0, std::bit_cast<uint32_t>(4.0f));
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -2041,7 +2615,7 @@ TEST(Gfx1250SimulationTest, DsAddtidLoadAndStoreUseM0ByteBaseAddresses) {
   constexpr uint32_t kM0ByteBase = 0x1000;
   wf->set_m0(kM0ByteBase);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const uint32_t vb = wf->vgpr_alloc().base;
   constexpr uint32_t kLane0Data = 0x12345678u;
@@ -2254,7 +2828,7 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
   wf->set_exec(0x3u);
   wf->set_vcc(0x1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, cndmask.data()));
   ASSERT_NE(inst, nullptr);
@@ -2276,6 +2850,79 @@ TEST(Gfx1250ExecutionTest, Vopd3CndmaskAppliesB32NegModifiers) {
   EXPECT_EQ(cu->read_vgpr(vb + 2, 1), 0xBF000000u);
   EXPECT_EQ(cu->read_vgpr(vb + 5, 0), 0xBF800000u);
   EXPECT_EQ(cu->read_vgpr(vb + 5, 1), 0x40400000u);
+}
+
+// Independent mixed-width slots obey guest rounding and preserve inactive lanes.
+TEST(Gfx1250ExecutionTest, Vopd3MixedWidthGuestRounding) {
+  const auto words = make_vopd3_pair(
+      {.op = VopdOp::AddF64, .src0 = vopd_src0_vgpr(0), .src1 = 4, .src2 = 0, .dst = 2},
+      {.op = VopdOp::AddF32, .src0 = vopd_src0_vgpr(6), .src1 = 7, .src2 = 0, .dst = 9});
+  Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
+  auto *wf = sim.dispatch_scratch_wf();
+  ASSERT_NE(wf, nullptr);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
+  std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+  ASSERT_NE(instruction, nullptr);
+  const uint32_t base = wf->vgpr_alloc().base;
+  for (uint32_t rounding : {0u, 1u}) {
+    wf->set_mode_raw(0xf0u | (rounding << 2));
+    wf->set_exec(0x80000001u);
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      sim.cu()->write_vgpr(base, lane, 0);
+      sim.cu()->write_vgpr(base + 1, lane, 0x3ff00000u); // FP64 1.
+      sim.cu()->write_vgpr(base + 4, lane, 0);
+      sim.cu()->write_vgpr(base + 5, lane, 0x3ca00000u); // Half an ULP at 1.
+      sim.cu()->write_vgpr(base + 2, lane, 0x40000000u); // Inactive X destination.
+      sim.cu()->write_vgpr(base + 6, lane, 0x40000000u); // Disjoint Y input: FP32 2.
+      sim.cu()->write_vgpr(base + 3, lane, 0xdeadbeefu);
+      sim.cu()->write_vgpr(base + 7, lane, 0x3f800000u);
+      sim.cu()->write_vgpr(base + 9, lane, 0xdeadbeefu);
+    }
+    ASSERT_TRUE(sim.cu()->execute_instruction(instruction.get(), *wf).succeeded());
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      const bool active = lane == 0 || lane == 31;
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 2, lane), active ? rounding : 0x40000000u);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 3, lane), active ? 0x3ff00000u : 0xdeadbeefu);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 9, lane), active ? 0x40400000u : 0xdeadbeefu);
+    }
+  }
+}
+
+// Dual FP64 selection applies guest input flushing but retains selected subnormal outputs.
+TEST(Gfx1250ExecutionTest, Vopd3MinMaxInputDenormals) {
+  for (bool maximum : {false, true}) {
+    for (bool flush : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << maximum << ':' << flush);
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize());
+      auto *wf = sim.dispatch_scratch_wf();
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      wf->set_mode_raw(flush ? 0x80 : 0x40);
+      const uint32_t base = wf->vgpr_alloc().base;
+      sim.cu()->write_vgpr(base, 0, 1);
+      sim.cu()->write_vgpr(base + 1, 0, maximum ? 0 : 0x80000000U);
+      sim.cu()->write_vgpr(base + 4, 0, 0);
+      sim.cu()->write_vgpr(base + 5, 0, 0);
+      sim.cu()->write_vgpr(base + 6, 0, 0x12345678U);
+      const auto words = make_vopd3_pair(
+          {.op = maximum ? VopdOp::MaxNumF64 : VopdOp::MinNumF64,
+           .src0 = vopd_src0_vgpr(0),
+           .src1 = 4,
+           .src2 = 0,
+           .dst = 2},
+          {.op = VopdOp::MovB32, .src0 = vopd_src0_vgpr(6), .src1 = 0, .src2 = 0, .dst = 9});
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      ASSERT_EQ(instruction->flags() & INVALID_VOPD_OPERANDS, 0U);
+      ASSERT_TRUE(sim.cu()->execute_instruction(instruction.get(), *wf).succeeded());
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 2, 0), flush ? 0U : 1U);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 3, 0), maximum ? 0U : 0x80000000U);
+      EXPECT_EQ(sim.cu()->read_vgpr(base + 9, 0), 0x12345678U);
+    }
+  }
 }
 
 } // namespace
