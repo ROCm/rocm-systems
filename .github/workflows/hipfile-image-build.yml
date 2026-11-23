@@ -106,6 +106,7 @@ jobs:
             "${GITHUB_WORKSPACE}/projects/hipfile/util/docker"
 
       - name: Build NVIDIA image for AIS CI
+        if: ${{ false }}
         run: |
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \

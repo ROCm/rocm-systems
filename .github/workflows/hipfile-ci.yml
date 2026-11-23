@@ -159,15 +159,16 @@ jobs:
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}
 
-  build_and_test_NVIDIA:
-    # NVIDIA can't build with amdclang++; its meaningful compilers (clang++, g++)
-    # arrive via the cxx_compiler axis, so skip the amdclang++ legs here. Only
-    # run on the default C++20 standard. Only legacy ROCm supports building hipFile
-    # targeted to NVIDIA.
-    if: ${{ startsWith(inputs.rocm_version, '7.2.') && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
-    uses: ./.github/workflows/hipfile-build-nvidia.yml
-    with:
-      ci_image: ${{ inputs.ci_image_nvidia }}
-      cxx_compiler: ${{ inputs.cxx_compiler }}
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
+  # HIP > 7.2.x cannot build with an Nvidia backend.
+  # This job is commented out to suppress all of the skipped `build_and_test_NVIDIA` jobs.
+  # It is not deleted as this workflow may be revisited in the future.
+  # Re-enabling this job requires re-enabling Nvidia CI images being built, and
+  # the check & tests in build-ci-images-matrix.sh.
+  # build_and_test_NVIDIA:
+  #   if: ${{ startsWith(inputs.rocm_version, '7.2.') && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
+  #   uses: ./.github/workflows/hipfile-build-nvidia.yml
+  #   with:
+  #     ci_image: ${{ inputs.ci_image_nvidia }}
+  #     cxx_compiler: ${{ inputs.cxx_compiler }}
+  #     platform: ${{ inputs.platform }}
+  #     rocm_version: ${{ inputs.rocm_version }}

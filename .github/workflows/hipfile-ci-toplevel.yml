@@ -180,7 +180,7 @@ jobs:
         # build_CI_images_matrix is computed by util/build-ci-images-matrix.sh.
         # Sourcing it sets the shell var from CHANGED_DOCKERFILE,
         # FULL_CI_IMAGES_MATRIX and CI_IMAGES: a Dockerfile change rebuilds the
-        # whole catalog, otherwise only nightly rows whose base/nvidia images
+        # whole catalog, otherwise only nightly rows whose base images
         # aren't already published in GHCR (querying the registry) are kept -- so
         # in the common case the set is empty and build_CI_image is skipped.
         run: |
