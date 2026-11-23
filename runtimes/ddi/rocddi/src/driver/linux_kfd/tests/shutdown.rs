@@ -15,11 +15,11 @@ use std::sync::Arc;
 
 fn scripted_driver() -> LinuxKfdDriver {
     let mut driver = LinuxKfdDriver::new();
-    let mut endpoint = sys::Kfd::with_hook(
+    let mut endpoint = connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(|call| match call {
-            sys::Call::RuntimeEnable(args) if args.mode_mask == 0 => Ok(()),
-            sys::Call::DestroyEvent(_) => Ok(()),
+            connection::Call::RuntimeEnable(args) if args.mode_mask == 0 => Ok(()),
+            connection::Call::DestroyEvent(_) => Ok(()),
             _ => panic!("unexpected native call during shutdown"),
         }),
     );
@@ -33,6 +33,7 @@ fn scripted_driver() -> LinuxKfdDriver {
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
         host_aliases: Mutex::new(Vec::new()),
+        svm_registrations: Mutex::new(super::registered_svm::Registry::default()),
         lost: AtomicBool::new(false),
     })
     .unwrap();
@@ -233,7 +234,7 @@ fn retained_kfd_owner_prevents_success_after_other_cleanup_finishes() {
         assert!(driver.local.kfd.get().is_some());
         // SAFETY: This pointer still denotes the sole unconsumed raw resource owner.
         unsafe {
-            drop(Owned::<Shared<sys::Kfd>>::from_raw(abandoned));
+            drop(Owned::<Shared<connection::Kfd>>::from_raw(abandoned));
         }
         driver.shutdown().unwrap();
         assert!(driver.local.kfd.get().is_none());

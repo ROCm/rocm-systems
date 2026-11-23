@@ -50,8 +50,14 @@ get_filename_component(
 )
 
 # Pass the min version into find_package so an old install is skipped, not loaded.
-# Not REQUIRED: we fall back to git. ~/.cmake/packages can still pick another tree.
-find_package(profiler-hub ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION} QUIET)
+# Not REQUIRED: we fall back to git. NO_CMAKE_PACKAGE_REGISTRY: profiler-hub's build
+# trees register themselves in ~/.cmake/packages, and a stale one must not be accepted.
+find_package(
+    profiler-hub
+    ${ROCPROFSYS_PROFILER_HUB_MIN_VERSION}
+    QUIET
+    NO_CMAKE_PACKAGE_REGISTRY
+)
 
 if(profiler-hub_FOUND)
     message(

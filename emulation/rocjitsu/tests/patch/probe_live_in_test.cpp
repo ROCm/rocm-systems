@@ -19,6 +19,7 @@
 #include "rocjitsu/code/patch/probe_live_in.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -193,7 +194,7 @@ ResolvedProbeSymbol whole_body_symbol(const std::vector<uint32_t> &body) {
 // @p num_arg_dwords declared argument dwords.
 std::optional<RegisterSet> live_ins(const std::vector<uint32_t> &body, std::string *err,
                                     uint8_t num_arg_dwords = 0,
-                                    rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA2,
+                                    rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna2,
                                     uint32_t e_flags = EF_AMDGPU_MACH_AMDGCN_GFX90A) {
   const auto image = make_elf(body, e_flags);
   const AmdGpuCodeObject obj(image.data(), image.size());
@@ -205,7 +206,7 @@ std::optional<RegisterSet> live_ins(const std::vector<uint32_t> &body, std::stri
 
 std::optional<RegisterSet> rdna4_live_ins(const std::vector<uint32_t> &body, std::string *err,
                                           uint8_t num_arg_dwords) {
-  return live_ins(body, err, num_arg_dwords, ROCJITSU_CODE_ARCH_RDNA4,
+  return live_ins(body, err, num_arg_dwords, rocjitsu::IsaFamily::Rdna4,
                   EF_AMDGPU_MACH_AMDGCN_GFX1200);
 }
 
@@ -364,7 +365,7 @@ TEST(ProbeLiveInTest, RejectsCdna5) {
 
   std::string err;
   EXPECT_FALSE(
-      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA5,
+      analyze_probe_live_ins(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna5,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              /*wave_size=*/64, &err)
           .has_value());
@@ -372,7 +373,7 @@ TEST(ProbeLiveInTest, RejectsCdna5) {
 }
 
 TEST(ProbeLiveInTest, Cdna5ProvenZeroBanksResolveGuestArgumentRegisters) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
   const util::FailureOr<uint32_t> move = build_v_mov_b32_src(1, 256, kArch);
   ASSERT_TRUE(move.succeeded());
   constexpr util::FailureOr<uint32_t> setpc = build_s_setpc_b64(30, kArch);
@@ -403,7 +404,7 @@ TEST(ProbeLiveInTest, RejectsUnusableAbi) {
   // An ABI this analysis cannot trust supplies an unknown set, so subtracting it
   // would understate the footprint. Refuse rather than answer.
   std::string err;
-  EXPECT_FALSE(analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+  EXPECT_FALSE(analyze_probe_live_ins(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                                       ProbeAbi{}, /*wave_size=*/64, &err)
                    .has_value());
   EXPECT_NE(err.find("probe ABI"), std::string::npos) << err;
@@ -419,7 +420,7 @@ TEST(ProbeLiveInTest, RejectsSymbolOutsideText) {
 
   std::string err;
   EXPECT_FALSE(
-      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+      analyze_probe_live_ins(obj, sym, rocjitsu::IsaFamily::Cdna2,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              /*wave_size=*/64, &err)
           .has_value());
@@ -437,7 +438,7 @@ TEST(ProbeLiveInTest, RejectsEntryThatDoesNotStartABlock) {
 
   std::string err;
   EXPECT_FALSE(
-      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+      analyze_probe_live_ins(obj, sym, rocjitsu::IsaFamily::Cdna2,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              /*wave_size=*/64, &err)
           .has_value());
@@ -456,7 +457,7 @@ TEST(ProbeLiveInTest, RejectsMultipleTextSections) {
 
   std::string err;
   EXPECT_FALSE(
-      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+      analyze_probe_live_ins(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              /*wave_size=*/64, &err)
           .has_value());
@@ -475,7 +476,7 @@ TEST(ProbeLiveInTest, RejectsBodyBeforeItsTextSection) {
 
   std::string err;
   EXPECT_FALSE(
-      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+      analyze_probe_live_ins(obj, sym, rocjitsu::IsaFamily::Cdna2,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              /*wave_size=*/64, &err)
           .has_value());
@@ -492,7 +493,7 @@ TEST(ProbeLiveInTest, RejectsMissingDecoder) {
 
   std::string err;
   EXPECT_FALSE(
-      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_INVALID,
+      analyze_probe_live_ins(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Invalid,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              /*wave_size=*/64, &err)
           .has_value());
@@ -508,7 +509,7 @@ TEST(ProbeLiveInTest, RejectsUndecodableText) {
 
   std::string err;
   EXPECT_FALSE(
-      analyze_probe_live_ins(obj, whole_body_symbol(body), ROCJITSU_CODE_ARCH_CDNA2,
+      analyze_probe_live_ins(obj, whole_body_symbol(body), rocjitsu::IsaFamily::Cdna2,
                              *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
                              /*wave_size=*/64, &err)
           .has_value());

@@ -25,7 +25,9 @@ namespace rocjitsu::amdgpu {
 class LegacyAddressSpaceTestAccess {
 public:
   static auto *backing_atomic_mutex_for(const void *address) {
-    return &LegacyAddressSpace::backing_atomic_mutex(reinterpret_cast<uintptr_t>(address));
+    const auto mapping = rocjitsu::host_mapping_lock().lock_shared();
+    return &LegacyAddressSpace::backing_atomic_mutex(
+        LegacyAddressSpace::host_backing_key(reinterpret_cast<uintptr_t>(address)));
   }
 
   static uint64_t rejected_identity_accesses(const LegacyAddressSpace &address_space) {
@@ -57,6 +59,26 @@ public:
 } // namespace rocjitsu::amdgpu
 
 namespace rocjitsu::test {
+
+class ScopedHostMappingObservation {
+public:
+  explicit ScopedHostMappingObservation(bool observed) : previous_(current()) {
+    host_mapping_lock().set_mapping_changes_observed(observed);
+  }
+
+  ~ScopedHostMappingObservation() { host_mapping_lock().set_mapping_changes_observed(previous_); }
+
+  ScopedHostMappingObservation(const ScopedHostMappingObservation &) = delete;
+  ScopedHostMappingObservation &operator=(const ScopedHostMappingObservation &) = delete;
+
+private:
+  static bool current() {
+    const auto mapping = host_mapping_lock().lock_shared();
+    return host_mapping_lock().mapping_changes_observed();
+  }
+
+  bool previous_;
+};
 
 /// @brief Test-only owner that keeps legacy mappings under a real GpuVm.
 class LegacyGpuMemoryFixture : public amdgpu::GpuMemory {

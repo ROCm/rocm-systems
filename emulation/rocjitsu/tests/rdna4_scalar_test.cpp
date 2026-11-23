@@ -4,6 +4,7 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -14,7 +15,7 @@ namespace rocjitsu {
 namespace {
 class ScalarExecution : public ::testing::Test {
 protected:
-  void initialize(rj_code_arch_t arch) {
+  void initialize(rocjitsu::IsaFamily arch) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 2;
@@ -44,7 +45,7 @@ protected:
 
 class Rdna4Scalar : public ScalarExecution {
 protected:
-  void SetUp() override { initialize(ROCJITSU_CODE_ARCH_RDNA4); }
+  void SetUp() override { initialize(rocjitsu::IsaFamily::Rdna4); }
 
   void check_workgroup_barrier(std::span<const uint32_t> code, std::array<uint32_t, 2> expected) {
     constexpr uint64_t pc = 0x1000;
@@ -74,13 +75,13 @@ protected:
 };
 
 class ScalarFloatingPoint : public ScalarExecution,
-                            public ::testing::WithParamInterface<rj_code_arch_t> {
+                            public ::testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override { initialize(GetParam()); }
 
   void set_mode(uint32_t mode) {
     // GFX11.5 has a selectable IEEE arithmetic mode. GFX12 uses IEEE NaN propagation.
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5)
       mode |= amdgpu::Wavefront::IEEE_BIT;
     wave->set_mode_raw(mode);
   }
@@ -88,7 +89,8 @@ protected:
 
 // Expected bit patterns were measured on gfx1201. Exercise the shared GFX11.5 implementation too.
 INSTANTIATE_TEST_SUITE_P(Architectures, ScalarFloatingPoint,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4));
 
 TEST_P(ScalarFloatingPoint, UnsignedConversionUsesAll32BitsAndFlagsNegativeInputs) {
   struct Case {
@@ -228,6 +230,73 @@ TEST_F(Rdna4Scalar, Wave64NarrowMaskUpdatesPreserveHighWordAndTestLowWord) {
   }
 }
 
+TEST_F(Rdna4Scalar, SingleWaveBarrierIsfirstPreservesSccAfterWaitResumes) {
+  cu->begin_workgroup(0, 0, 1);
+  constexpr uint32_t wait_km = 0xbfc70000u;
+  constexpr uint32_t signal_words[] = {
+      0xbe804fc1u, // -1, workgroup
+      0xbe804fc2u, // -2, trap barrier in a user wave
+      0xbe804f80u, //  0, no barrier
+  };
+  constexpr uint64_t base = 0x1000;
+  for (unsigned i = 0; i < std::size(signal_words); ++i) {
+    memory.write32(base + i * 8, wait_km);
+    memory.write32(base + i * 8 + 4, signal_words[i]);
+  }
+  uint64_t pc = base;
+  for (const auto signal : signal_words) {
+    const std::array<uint32_t, 4> words{signal};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_FALSE(amdgpu::MemoryWaitScoreboard::result_is_written(*inst, *wave));
+    for (const bool initial : {false, true}) {
+      SCOPED_TRACE(signal);
+      SCOPED_TRACE(initial);
+      wave->pc = pc;
+      wave->write_scc(initial);
+      wave->wait_counters().increment(amdgpu::WaitCounterType::KMCNT);
+      cu->step();
+      ASSERT_EQ(wave->state(), amdgpu::WfState::WAITCNT);
+      cu->step();
+      ASSERT_EQ(wave->pc, pc + 4);
+      wave->wait_counters().decrement(amdgpu::WaitCounterType::KMCNT);
+      cu->step();
+      EXPECT_EQ(wave->pc, pc + 8);
+      EXPECT_EQ(wave->read_scc(), initial);
+    }
+    pc += 8;
+  }
+}
+
+TEST_F(Rdna4Scalar, SignalsCompleteBeforePeersWait) {
+  auto *peer = cu->dispatch_wf(0, 0, 106, 16);
+  ASSERT_NE(peer, nullptr);
+  cu->begin_workgroup(0, 0, 2);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbe804fc1)); // s_barrier_signal_isfirst -1
+  EXPECT_TRUE(wave->read_scc());
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbe8250c1)); // s_get_barrier_state s2,-1
+  EXPECT_EQ(cu->read_sgpr(wave->sgpr_alloc().base + 2), 0x10021u);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbf94ffff)); // s_barrier_wait -1
+  EXPECT_EQ(wave->state(), amdgpu::WfState::BARRIER);
+  ASSERT_NO_FATAL_FAILURE(execute(*peer, 0xbe804ec1)); // s_barrier_signal -1
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+  ASSERT_NO_FATAL_FAILURE(execute(*peer, 0xb8820084)); // s_getreg_b32 s2,hwreg(STATE_PRIV,2,1)
+  EXPECT_EQ(cu->read_sgpr(peer->sgpr_alloc().base + 2), 1u);
+  ASSERT_NO_FATAL_FAILURE(execute(*peer, 0xbf94ffff));
+  EXPECT_EQ(peer->state(), amdgpu::WfState::RUNNING);
+  for (const auto signal : {0xbe804fc2u, 0xbe804f80u}) {
+    const std::array<uint32_t, 4> words{signal};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    EXPECT_TRUE(amdgpu::MemoryWaitScoreboard::result_is_written(*inst, *wave));
+    for (const bool initial : {false, true}) {
+      wave->write_scc(initial);
+      ASSERT_NO_FATAL_FAILURE(execute(*wave, signal));
+      EXPECT_FALSE(wave->read_scc()); // User -2 and barrier 0 both clear SCC in a multiwave group.
+    }
+  }
+}
+
 TEST_F(Rdna4Scalar, WorkgroupSignalAndWaitReleaseBothWaves) {
   const uint32_t code[] = {
       0xbe804ec1, // s_barrier_signal -1
@@ -238,5 +307,44 @@ TEST_F(Rdna4Scalar, WorkgroupSignalAndWaitReleaseBothWaves) {
   ASSERT_NO_FATAL_FAILURE(check_workgroup_barrier(code, {1, 1}));
 }
 
+TEST_F(Rdna4Scalar, FirstWorkgroupSignalSelectsExactlyOneWave) {
+  const uint32_t code[] = {
+      0xbf068080, // s_cmp_eq_u32 0, 0
+      0xbe804fc1, // s_barrier_signal_isfirst -1
+      0xbfc70000, // s_wait_kmcnt 0
+      0x98008081, // s_cselect_b32 s0, 1, 0
+      0xbf94ffff, // s_barrier_wait -1
+      0xbfb00000, // s_endpgm
+  };
+  ASSERT_NO_FATAL_FAILURE(check_workgroup_barrier(code, {0, 1}));
+}
+
+TEST_F(Rdna4Scalar, SplitWaitsReplacePreviousTargetAndMaskReservedBits) {
+  auto &counts = wave->wait_counters();
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc00000)); // s_wait_loadcnt 0
+  counts.increment(amdgpu::WaitCounterType::LOADCNT);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc30000)); // s_wait_bvhcnt 0
+  EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc00040)); // LOADCNT threshold [5:0] = 0
+  EXPECT_EQ(wave->state(), amdgpu::WfState::WAITCNT);
+  counts.decrement(amdgpu::WaitCounterType::LOADCNT);
+  EXPECT_TRUE(wave->wait_satisfied());
+
+  wave->set_state(amdgpu::WfState::RUNNING);
+  counts.increment(amdgpu::WaitCounterType::BVHCNT);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc30008)); // BVHCNT threshold [2:0] = 0
+  EXPECT_EQ(wave->state(), amdgpu::WfState::WAITCNT);
+  counts.decrement(amdgpu::WaitCounterType::BVHCNT);
+  EXPECT_TRUE(wave->wait_satisfied());
+
+  wave->set_state(amdgpu::WfState::RUNNING);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc8c1c2)); // s_wait_loadcnt_dscnt 0xc1c2
+  EXPECT_EQ(wave->wait_target().vmcnt, 1u);
+  EXPECT_EQ(wave->wait_target().dscnt, 2u);
+  ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbfc9c3c4)); // s_wait_storecnt_dscnt 0xc3c4
+  EXPECT_EQ(wave->wait_target().vscnt, 3u);
+  EXPECT_EQ(wave->wait_target().dscnt, 4u);
+  EXPECT_EQ(wave->wait_target().vmcnt, amdgpu::WaitCounters::VMCNT_MAX);
+}
 } // namespace
 } // namespace rocjitsu

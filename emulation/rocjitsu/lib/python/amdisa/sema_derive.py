@@ -2121,6 +2121,24 @@ class _DsAtomic(_ScalarDeriver):
             'CalcDsAddr', _cast(_src(0), SemaType.U32), _id('OFFSET', SemaType.U32)
         )
         operand = _cast(_src(1), elem_ty)
+        if '_SRC2_' in sem.name.upper():
+            # MI100 11.3.3 selects the immediate or VGPR high bits as a
+            # signed 15-bit displacement in dwords for both 32- and 64-bit data.
+            raw = _cast(_src(0), SemaType.U32)
+            offset = _id('OFFSET', SemaType.U32)
+            indirect = SemaNode(SemaNodeKind.AND, children=(offset, _lit('0x8000')))
+            low = SemaNode(SemaNodeKind.AND, children=(raw, _lit('0x1ffff')))
+            high = SemaNode(SemaNodeKind.SHR, children=(raw, _lit('17')))
+            base = SemaNode(SemaNodeKind.TERNARY, children=(indirect, low, raw))
+            addr = _addr_call('CalcDsAddr', base, _lit('0'))
+            index = SemaNode(SemaNodeKind.TERNARY, children=(indirect, high, offset))
+            delta = SemaNode(
+                SemaNodeKind.SIGNEXT_FROM_BIT, children=(index, _lit('14'))
+            )
+            scaled = SemaNode(SemaNodeKind.MUL, children=(delta, _lit('4')))
+            operand = _mem_read(
+                SemaNode(SemaNodeKind.ADD, children=(_id('addr'), scaled)), elem_ty
+            )
         stmts = [
             _assign(_id('addr', SemaType.U32), addr),
             SemaNode(

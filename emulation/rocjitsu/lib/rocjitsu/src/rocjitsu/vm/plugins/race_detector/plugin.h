@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
@@ -91,11 +92,12 @@ util::FailureOr<std::string> formatTrace(
 /// @brief Describe a violation: the hazard direction, the current access at
 /// `access_pc`, the conflicting event, and that event's completion and
 /// synchronization observed by the detector, with counter names for `arch`.
+/// Wave-local GDS source locks supply their producing instruction directly.
 /// @throws std::out_of_range if `events` no longer holds the conflicting event.
 /// @throws std::invalid_argument for an architecture without a wait-counter model.
 /// @throws std::logic_error if the event is already retired.
 std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
-                                  uint64_t access_pc, rj_code_arch_t arch);
+                                  uint64_t access_pc, rocjitsu::IsaFamily arch);
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
@@ -108,11 +110,28 @@ struct RaceWavefrontState : WavefrontState {
     uint32_t bytes;
     uint32_t lane;
   };
-  std::optional<LdsOperandRead> lds_operand_read;
+  std::vector<LdsOperandRead> lds_operand_reads;
 
-  // Inline image queries write every selected DWORD on the same
+  struct MixedLdsAccess {
+    struct Lane {
+      int address;
+      int lane;
+      int bytes;
+      uint8_t atomic_bytes;
+    };
+    EventId event;
+    MemoryOrderClass order;
+    bool reads;
+    bool writes;
+    std::vector<Lane> lanes;
+    IntervalSet intervals;
+  };
+  std::optional<MixedLdsAccess> mixed_lds;
+
+  // The GFX10 and GFX11 inline image queries write every selected DWORD on the same
   // active lanes. Gather the actual register writes until execution succeeds.
   struct ImageQuery {
+    amdgpu::VmemWriteback type;
     amdgpu::WaitCounterType counter;
     uint64_t lanes = 0;
     std::vector<uint32_t> registers;
@@ -123,7 +142,9 @@ struct RaceWavefrontState : WavefrontState {
 class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuTrapEntryObserver,
                            public AmdgpuImplicitMemoryWaitObserver,
-                           public AmdgpuImageFeedbackObserver {
+                           public AmdgpuImageFeedbackObserver,
+                           public AmdgpuMixedFlatLdsObserver,
+                           public AmdgpuMemoryCancellationObserver {
 public:
   /// @param config_json Plugin JSON with an optional integer trace_context in
   ///        [2, kTraceHistorySize]. Null or empty uses the default context.
@@ -152,6 +173,8 @@ public:
   void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wf) override;
 
   void onAmdgpuImageFeedbackQualified(const Instruction &inst, amdgpu::Wavefront &wf) override;
+  void onAmdgpuMixedFlatLdsAccess(const Instruction &inst, amdgpu::Wavefront &wf) override;
+  void onAmdgpuMemoryAccessCancelled(const Instruction &inst, amdgpu::Wavefront &wf) override;
   void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
                                   const Instruction &inst, amdgpu::Wavefront &wf) override;
 
@@ -183,8 +206,13 @@ public:
   void onAmdgpuTrapEntered(amdgpu::Wavefront &wf) override;
   void onAmdgpuImplicitMemoryWait(amdgpu::Wavefront &wf, const amdgpu::WaitFields &fields) override;
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wavefronts,
-                               BarrierKind kind) override;
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> notified,
+                                     std::span<amdgpu::Wavefront *> armed,
+                                     const BarrierRound &round) override;
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override;
 
   std::string getSummary() const;
 
@@ -212,6 +240,11 @@ private:
   }
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;
+  }
+  /// The wave's race state, or nullptr for a wave this plugin does not track.
+  /// For hooks that are not filtered by observes_hot_hooks_for_wavefront().
+  WaveRaceState *tracked_race_state(const amdgpu::Wavefront &wf) {
+    return wf.has_plugin_state(slot_index()) ? get_state(wf)->race_state : nullptr;
   }
   void release_wave_state(amdgpu::Wavefront &wf) { wf.clear_plugin_state(slot_index()); }
 

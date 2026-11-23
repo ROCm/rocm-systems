@@ -43,6 +43,7 @@
 
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <optional>
@@ -84,7 +85,7 @@ enum class ProbeEntryState { Unknown, ZeroVgprBanks };
 /// access means its encoded operands do not name every register it reads.
 [[nodiscard]] std::optional<RegisterSet>
 analyze_probe_live_ins(const AmdGpuCodeObject &probe_obj, const ResolvedProbeSymbol &sym,
-                       rj_code_arch_t arch, const ProbeAbi &abi, uint8_t wave_size,
+                       rocjitsu::IsaFamily arch, const ProbeAbi &abi, uint8_t wave_size,
                        std::string *error_out = nullptr,
                        ProbeEntryState entry_state = ProbeEntryState::Unknown);
 

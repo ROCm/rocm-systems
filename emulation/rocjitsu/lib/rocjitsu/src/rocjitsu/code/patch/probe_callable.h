@@ -8,6 +8,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -81,6 +82,8 @@ enum class ProbeArgSource {
   LogBufferPtrHi, ///< High dword of that pointer.
   AnchorVgpr,     ///< Guest VGPR value at the selected observation point.
   EntryVgprLane0, ///< Lane zero of a VGPR, captured once at dispatch entry.
+  EntrySgpr,      ///< Original guest SGPR, captured after wrapper restoration.
+  EntryTtmp,      ///< Original guest trap-temporary register, indexed from zero.
 };
 
 /// @brief One argument dword: where it comes from, and its value when that is a
@@ -88,7 +91,7 @@ enum class ProbeArgSource {
 struct ProbeArgValue {
   ProbeArgSource source = ProbeArgSource::Immediate;
   uint32_t immediate = 0;      ///< Read only when source is Immediate.
-  uint16_t register_index = 0; ///< VGPR index for AnchorVgpr or EntryVgprLane0.
+  uint16_t register_index = 0; ///< Register index for a register-sourced argument.
 
   constexpr bool operator==(const ProbeArgValue &) const = default;
 };
@@ -122,10 +125,32 @@ struct ProbeArgValue {
   return source == ProbeArgSource::AnchorExecLo || source == ProbeArgSource::AnchorExecHi;
 }
 
+/// @brief The register class captured at guest entry, or nullopt for other sources.
+[[nodiscard]] inline constexpr std::optional<RegClass> entry_register_class(ProbeArgSource source) {
+  switch (source) {
+  case ProbeArgSource::EntrySgpr:
+    return RegClass::SGPR;
+  case ProbeArgSource::EntryTtmp:
+    return RegClass::TTMP;
+  case ProbeArgSource::EntryVgprLane0:
+    return RegClass::VGPR;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// @brief Whether entry-TTMP capture supports @p arch without trap-handler privilege.
+/// @details RDNA4 and CDNA5 permit user reads of TTMP0-15. Keep the supported
+/// set explicit: CDNA4 reads return zero, and an unclassified target must not
+/// silently expose unavailable entry inputs.
+[[nodiscard]] inline constexpr bool supports_entry_ttmp_capture(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
+}
+
 /// @brief Does @p source read the framework's persistent entry-storage pair?
 [[nodiscard]] inline constexpr bool reads_entry_storage(ProbeArgSource source) {
   return source == ProbeArgSource::LogBufferPtrLo || source == ProbeArgSource::LogBufferPtrHi ||
-         source == ProbeArgSource::EntryVgprLane0;
+         entry_register_class(source).has_value();
 }
 
 /// @brief Is @p source one of the values ProbeArgSource declares?
@@ -144,6 +169,8 @@ struct ProbeArgValue {
   case ProbeArgSource::LogBufferPtrHi:
   case ProbeArgSource::AnchorVgpr:
   case ProbeArgSource::EntryVgprLane0:
+  case ProbeArgSource::EntrySgpr:
+  case ProbeArgSource::EntryTtmp:
     return true;
   }
   return false;
@@ -233,7 +260,7 @@ derive_probe_abi(ProbeCallingConvention cc, uint8_t num_arg_dwords = 0) {
 ///        relocate verbatim into the instrumented code object.
 struct ProbeCallable {
   std::string symbol;                                        ///< Resolved symbol name.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;          ///< ISA the body decodes as.
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;   ///< ISA the body decodes as.
   rj_code_target_id_t target = ROCJITSU_CODE_TARGET_INVALID; ///< Concrete ISA target, if known.
   std::vector<uint32_t> body_words; ///< The body's instruction words, in order.
   ProbeAbi abi;                     ///< Verified convention and the registers it implies.
@@ -294,7 +321,7 @@ struct ProbeCallable {
 ///   this ABI supplies.
 [[nodiscard]] std::optional<ProbeCallable> build_probe_callable(const AmdGpuCodeObject &probe_obj,
                                                                 const ResolvedProbeSymbol &sym,
-                                                                rj_code_arch_t arch,
+                                                                rocjitsu::IsaFamily arch,
                                                                 uint8_t num_arg_dwords = 0,
                                                                 std::string *error_out = nullptr);
 
