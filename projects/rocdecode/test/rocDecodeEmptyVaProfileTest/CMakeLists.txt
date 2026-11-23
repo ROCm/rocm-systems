@@ -34,6 +34,12 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
+# Set AMD Clang as default compiler. HIP's package config links the compiler's clang_rt builtins when the compiler is
+# clang, which a system clang may not ship.
+if(NOT WIN32 AND NOT DEFINED CMAKE_CXX_COMPILER)
+  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+endif()
 
 project(rocdecodeemptyvaprofiletest)
 
