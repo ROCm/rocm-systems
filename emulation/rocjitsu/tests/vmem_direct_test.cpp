@@ -177,11 +177,14 @@ TEST_F(VmemDirectTest, LineGroupedLoadsReadEachTransactionSpanOnce) {
     int copies;
     uint64_t lanes = UINT32_MAX & ~uint64_t{0x8};
   };
-  const std::array<Shape, 4> shapes = {{
+  const std::array<Shape, 5> shapes = {{
       {"stride2", [](uint32_t lane) { return kBase + 0x200 + lane * 8; }, 2},
       {"grouped",
-       [](uint32_t lane) { return kBase + 0x1000 + (lane / 8) * 0x400 + (lane % 8) * 4; }, 4},
+       [](uint32_t lane) { return kBase + 0x1000 + (lane / 8) * 0x400 + (lane % 8) * 8; }, 4},
       {"reversed pairs", [](uint32_t lane) { return kBase + 0x2080 + (31 - lane) / 2 * 4; }, 1},
+      // Contiguous rows are already few coalesced runs; they are not staged.
+      {"rows", [](uint32_t lane) { return kBase + 0x1860 + (lane / 16) * 0x400 + (lane % 16) * 4; },
+       2, UINT32_MAX},
       // A contiguous wave straddling a transaction stays one coalesced run.
       {"contiguous", [](uint32_t lane) { return kBase + 0x340 + lane * 4; }, 1, UINT32_MAX},
   }};

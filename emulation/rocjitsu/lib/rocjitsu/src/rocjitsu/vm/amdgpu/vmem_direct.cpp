@@ -177,20 +177,25 @@ struct LineGroups {
 };
 
 // Whether every active operand lies inside one of at most kMaxLineGroups
-// transactions, with at least two lanes per transaction on average, and the
-// lanes are not already one lane-ordered contiguous run.
-bool find_line_groups(const uint64_t *addrs, uint64_t lanes, uint32_t stride,
+// transactions and the lane-ordered runs the coalescer would emit number at
+// least twice the transactions; otherwise its direct runs are cheaper than a
+// staged copy plus a per-lane fill.
+bool find_line_groups(const uint64_t *addrs, uint64_t lanes, uint32_t wf_size, uint32_t stride,
                       uint32_t transaction_bytes, LineGroups &groups) {
+  if constexpr (detail::kVectorizedStrideCheck) {
+    const bool full_wave =
+        (wf_size == 32 && lanes == UINT32_MAX) || (wf_size == 64 && lanes == UINT64_MAX);
+    if (full_wave && detail::is_strided_lane_addresses(addrs, wf_size, stride))
+      return false;
+  }
   const uint64_t mask = ~uint64_t{transaction_bytes - 1};
-  bool contiguous = true;
+  uint32_t runs = 0;
   uint64_t previous = 0;
-  bool first = true;
   for (uint64_t remaining = lanes; remaining; remaining &= remaining - 1) {
     const uint64_t address = addrs[std::countr_zero(remaining)];
     if (address > UINT64_MAX - stride || (address & mask) != ((address + stride - 1) & mask))
       return false;
-    contiguous &= first || address == previous + stride;
-    first = false;
+    runs += runs == 0 || address != previous + stride;
     previous = address;
     const uint64_t base = address & mask;
     const uint32_t offset = static_cast<uint32_t>(address - base);
@@ -209,7 +214,7 @@ bool find_line_groups(const uint64_t *addrs, uint64_t lanes, uint32_t stride,
     groups.lo[i] = std::min(groups.lo[i], offset);
     groups.hi[i] = std::max(groups.hi[i], offset + stride);
   }
-  return !contiguous && static_cast<uint32_t>(std::popcount(lanes)) >= 2 * groups.count;
+  return runs >= 2 * groups.count;
 }
 
 std::optional<VmAccessOutcome>
@@ -272,8 +277,8 @@ std::optional<VmAccessOutcome> try_direct_vector_access(const DirectVectorReques
     if (find_shared_operands(request.addrs, request.lanes, shared))
       return try_direct_shared_load(request, shared, stride, backing, l2);
     LineGroups groups;
-    if (find_line_groups(request.addrs, request.lanes, stride, request.transactions.bytes(),
-                         groups))
+    if (find_line_groups(request.addrs, request.lanes, request.wf_size, stride,
+                         request.transactions.bytes(), groups))
       return try_direct_line_grouped_load(request, groups, stride, backing, l2);
   }
   // Resolve every transaction before any effect. Resolution may take
