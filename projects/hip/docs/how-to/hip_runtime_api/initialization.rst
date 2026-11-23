@@ -107,8 +107,10 @@ The function takes three arguments:
 - ``deviceFlags``: scheduling flags, with the same values as
   :cpp:func:`hipSetDeviceFlags`, for example ``hipDeviceScheduleAuto`` or
   ``hipDeviceScheduleBlockingSync``.
-- ``flags``: ``hipInitDeviceFlagsAreValid`` to apply ``deviceFlags``, or ``0``
-  to ignore them.
+- ``flags``: ``hipInitDeviceFlagsAreValid`` to validate and apply
+  ``deviceFlags``, or ``0`` to skip them. With ``0``, the call still validates
+  the device and creates its default stream. Any other value returns
+  ``hipErrorInvalidValue``.
 
 Process creation (`fork()`/`exec()`)
 ================================================================================

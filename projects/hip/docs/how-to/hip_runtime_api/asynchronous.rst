@@ -49,8 +49,8 @@ to the newly created stream:
     overall performance.
 
 - :cpp:func:`hipStreamCreateWithPriority`: Creates a stream with a specified
-  priority. Stream priority is currently disabled, so the runtime treats all
-  streams as normal priority.
+  priority. On AMD GPUs, stream priority is currently disabled, so the runtime
+  treats all streams as normal priority regardless of the value passed.
 
 The :cpp:func:`hipStreamSynchronize` function is used to block the calling host
 thread until all previously submitted tasks in a specified HIP stream have

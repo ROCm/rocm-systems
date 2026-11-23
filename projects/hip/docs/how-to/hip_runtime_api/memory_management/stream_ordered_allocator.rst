@@ -67,7 +67,9 @@ Default pools
 
 Each device has a default memory pool. ``hipMallocAsync()`` allocates from the
 current memory pool of the stream's device, which is the default pool unless
-you set another pool with ``hipDeviceSetMemPool()``.
+you set another pool with ``hipDeviceSetMemPool()``. The stream's device is the
+device the stream was created on, not the calling thread's current device. For
+the null stream, it's the calling thread's current device.
 
 Use :cpp:func:`hipMemGetDefaultMemPool` to get the default pool for a memory
 location and allocation type. Set ``location.type`` to

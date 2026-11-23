@@ -127,10 +127,17 @@ affected by the ``HIP_HOST_COHERENT`` environment variable, if the
 allocation is coarse-grained.
 
 :sup:`2` Registering host memory as coarse-grained is supported on Linux and on
-supported Windows configurations. ``hipExtHostRegisterCoarseGrained`` has the
-same value as ``hipHostRegisterReadOnly``, so passing
-``hipHostRegisterReadOnly`` to :cpp:func:`hipHostRegister` also registers the
-memory as coarse-grained.
+supported Windows configurations.
+
+.. warning::
+
+  On AMD GPUs, ``hipHostRegisterReadOnly`` has the same value as
+  ``hipExtHostRegisterCoarseGrained`` and doesn't make the memory read-only
+  (``hostRegisterReadOnlySupported`` is ``0``). Passing
+  ``hipHostRegisterReadOnly`` to :cpp:func:`hipHostRegister` registers the
+  memory as coarse-grained instead. If your code passes
+  ``hipHostRegisterReadOnly`` for portability with NVIDIA GPUs, account for
+  coarse-grained coherence on AMD GPUs.
 
 .. note::
 

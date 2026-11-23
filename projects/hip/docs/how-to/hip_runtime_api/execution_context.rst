@@ -101,9 +101,9 @@ the first kernel's thread blocks retire.
 Consider a service that continuously runs a background kernel while occasionally
 launching a short, latency-sensitive kernel. If the background kernel occupies
 the available GPU resources, the latency-sensitive kernel cannot begin execution
-until enough of the background kernel's thread blocks complete. Stream priority
-does not help here: it is currently disabled, so the runtime treats all streams
-as normal priority, and a higher-priority kernel would still wait for in-flight
+until enough of the background kernel's thread blocks complete. On AMD GPUs,
+stream priority is currently disabled, so the runtime treats all streams as
+normal priority, and a higher-priority kernel would still wait for in-flight
 thread blocks to drain.
 
 Execution contexts address this contention by partitioning resources before the
