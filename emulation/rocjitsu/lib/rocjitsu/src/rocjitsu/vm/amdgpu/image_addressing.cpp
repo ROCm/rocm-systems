@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/image_addressing.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/vm/amdgpu/gfx10_msaa_patterns.h"
@@ -357,7 +358,7 @@ std::optional<uint32_t> tile_offset(const ImageAddressConfig &config, const Imag
                                     uint32_t z, uint32_t sample = 0) {
   const uint32_t swizzle_mode = layout.swizzle_mode;
   if (layout.samples > 1) {
-    const bool rb_plus = config.arch == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool rb_plus = config.arch == rocjitsu::IsaFamily::Rdna2;
     const uint32_t device = 2 * uint32_t{rb_plus} + (config.gb_addr_config != 0);
     const uint32_t kind = (swizzle_mode >= 28 ? 2u : 0u) + ((swizzle_mode & 3u) == 3u);
     const auto &parts =
@@ -381,18 +382,18 @@ std::optional<uint32_t> tile_offset(const ImageAddressConfig &config, const Imag
       return std::nullopt;
     return gfx9_tile_offset(swizzle_mode, element, block_bits, x, y, layout.dimensions == 3);
   }
-  if (config.arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (config.arch == rocjitsu::IsaFamily::Rdna4)
     return permutation(kGfx12Tiles[element], block_bits, x, y);
   if (swizzle_mode == 30) {
     // The GFX11 256 KiB display equation was qualified for this topology.
     if (config.gb_addr_config != 0x545 ||
-        (config.arch != ROCJITSU_CODE_ARCH_RDNA3 && config.arch != ROCJITSU_CODE_ARCH_RDNA3_5))
+        (config.arch != rocjitsu::IsaFamily::Rdna3 && config.arch != rocjitsu::IsaFamily::Rdna3_5))
       return std::nullopt;
     return gfx11_large_tile_offset(x, y, layout.element_bytes, block_bits, false) ^
            gfx11_image_slice_xor(z, layout.element_bytes, swizzle_mode);
   }
-  const bool rdna1 = config.arch == ROCJITSU_CODE_ARCH_RDNA1;
-  const bool rdna2 = config.arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool rdna1 = config.arch == rocjitsu::IsaFamily::Rdna1;
+  const bool rdna2 = config.arch == rocjitsu::IsaFamily::Rdna2;
   // RB+ keeps the GFX10 display ordering except for the 32-bit microtile.
   constexpr int8_t kRbPlus32[8] = {0, 0, 1, 2, -1, -2, 3, -3};
   const auto *microtile =
@@ -520,11 +521,11 @@ MipAddress thin_mip_address(const ImageAddressConfig &config, const ImageLayout 
   MipAddress result;
   uint32_t tail_width = block_width / 2, tail_height = block_height;
   const bool gfx11 =
-      config.arch == ROCJITSU_CODE_ARCH_RDNA3 || config.arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+      config.arch == rocjitsu::IsaFamily::Rdna3 || config.arch == rocjitsu::IsaFamily::Rdna3_5;
   const uint32_t micro_width = 1u << ((9 - element) / 2);
   const uint32_t micro_height = 1u << ((8 - element) / 2);
   // The projected RDNA1 device is Navi10, which retains the larger Z-mode tail.
-  if (config.arch != ROCJITSU_CODE_ARCH_RDNA1 &&
+  if (config.arch != rocjitsu::IsaFamily::Rdna1 &&
       (layout.swizzle_mode == 24 || layout.swizzle_mode == 28) && element < 2) {
     tail_width /= micro_width / 8;
     tail_height /= (gfx11 ? micro_width : micro_height) / 8;
@@ -569,9 +570,9 @@ MipAddress thin_mip_address(const ImageAddressConfig &config, const ImageLayout 
 MipAddress linear_mip_address(const ImageAddressConfig &config, const ImageLayout &layout,
                               uint32_t mip) {
   const bool gfx9 = arch_is_cdna_4_or_lower(config.arch);
-  const bool gfx12 = config.arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = config.arch == rocjitsu::IsaFamily::Rdna4;
   const bool gfx11 =
-      config.arch == ROCJITSU_CODE_ARCH_RDNA3 || config.arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+      config.arch == rocjitsu::IsaFamily::Rdna3 || config.arch == rocjitsu::IsaFamily::Rdna3_5;
   // The extended mip-zero pitch is the storage width from which smaller linear mips shrink.
   const uint32_t storage_width = (gfx11 || gfx12) && layout.dimensions == 2 && layout.depth == 1
                                      ? std::max(layout.width, layout.pitch)
@@ -598,15 +599,15 @@ MipAddress linear_mip_address(const ImageAddressConfig &config, const ImageLayou
 
 } // namespace
 
-ImageAddressConfig default_image_address_config(rj_code_arch_t arch) {
+ImageAddressConfig default_image_address_config(rocjitsu::IsaFamily arch) {
   return {arch, kmd::gb_addr_config_for_arch(arch)};
 }
 
-bool supports_linear_image_pitch(rj_code_arch_t arch, uint32_t width, uint32_t pitch,
+bool supports_linear_image_pitch(rocjitsu::IsaFamily arch, uint32_t width, uint32_t pitch,
                                  uint32_t element_bytes) {
-  return !pitch ||
-         (pitch >= width && (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                             (uint64_t{pitch} * element_bytes) % 256 == 0));
+  return !pitch || (pitch >= width &&
+                    (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4 ||
+                     (uint64_t{pitch} * element_bytes) % 256 == 0));
 }
 
 std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig &config,
@@ -624,13 +625,13 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
     return std::nullopt;
   if (layout.samples != 1) {
     const bool gfx10 =
-        config.arch == ROCJITSU_CODE_ARCH_RDNA1 || config.arch == ROCJITSU_CODE_ARCH_RDNA2;
-    const bool variable = config.arch == ROCJITSU_CODE_ARCH_RDNA2 &&
+        config.arch == rocjitsu::IsaFamily::Rdna1 || config.arch == rocjitsu::IsaFamily::Rdna2;
+    const bool variable = config.arch == rocjitsu::IsaFamily::Rdna2 &&
                           (layout.swizzle_mode == 28 || layout.swizzle_mode == 31);
     if (!gfx10 || (layout.swizzle_mode != 24 && layout.swizzle_mode != 27 && !variable) ||
         layout.dimensions != 2 || layout.mip_levels != 1 ||
         (config.gb_addr_config &&
-         config.gb_addr_config != (config.arch == ROCJITSU_CODE_ARCH_RDNA1 ? 0x44u : 0x444u)))
+         config.gb_addr_config != (config.arch == rocjitsu::IsaFamily::Rdna1 ? 0x44u : 0x444u)))
       return std::nullopt;
   }
   ImageAddressing result;
@@ -644,8 +645,8 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
   if (swizzle_mode == 0) {
     const bool extended_2d =
         layout.dimensions == 2 && layout.depth == 1 &&
-        (config.arch == ROCJITSU_CODE_ARCH_RDNA3 || config.arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         config.arch == ROCJITSU_CODE_ARCH_RDNA4);
+        (config.arch == rocjitsu::IsaFamily::Rdna3 || config.arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         config.arch == rocjitsu::IsaFamily::Rdna4);
     if ((layout.mip_levels == 1 || extended_2d) &&
         !supports_linear_image_pitch(config.arch, layout.width, layout.pitch, element_bytes))
       return std::nullopt;
@@ -653,12 +654,12 @@ std::optional<ImageAddressing> ImageAddressing::prepare(const ImageAddressConfig
       allocation = linear_mip_address(config, layout, mip);
     } else {
       const uint32_t row_alignment =
-          config.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 128 / element_bytes : 256 / element_bytes;
+          config.arch == rocjitsu::IsaFamily::Rdna4 ? 128 / element_bytes : 256 / element_bytes;
       allocation.pitch = util::align_up<uint64_t>(layout.pitch, row_alignment);
       allocation.slice = uint64_t{layout.height} * allocation.pitch * element_bytes;
     }
   } else {
-    const bool gfx12 = config.arch == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool gfx12 = config.arch == rocjitsu::IsaFamily::Rdna4;
     const bool gfx9 = arch_is_cdna_4_or_lower(config.arch);
     const bool supported =
         gfx12 ? swizzle_mode <= 4

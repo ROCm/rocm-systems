@@ -126,11 +126,15 @@ void RdciDiscoverySubSystem::show_attributes() {
     return;
   }
 
-  // Read every GPU first, so that a failure prints only the error.
+  // Read every GPU first, so that a failure prints only the error. A GPU AMD SMI cannot
+  // identify (RDC_ST_NOT_FOUND) keeps its index and is listed as unavailable.
   std::vector<rdc_device_attributes_t> attributes(count);
+  std::vector<bool> available(count, true);
   for (uint32_t i = 0; i < count; i++) {
     result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attributes[i]);
-    if (result != RDC_ST_OK) {
+    if (result == RDC_ST_NOT_FOUND) {
+      available[i] = false;
+    } else if (result != RDC_ST_OK) {
       throw RdcException(result,
                          "Fail to get the attributes of GPU " + std::to_string(gpu_index_list[i]));
     }
@@ -147,13 +151,18 @@ void RdciDiscoverySubSystem::show_attributes() {
   for (uint32_t i = 0; i < count; i++) {
     const rdc_device_attributes_t& attribute = attributes[i];
     if (is_json_output()) {
-      std::cout << "{\"gpu_index\": \"" << i << "\", \"device_name\": \"" << attribute.device_name
-                << "\"}";
+      if (available[i]) {
+        std::cout << "{\"gpu_index\": \"" << i << "\", \"device_name\": \"" << attribute.device_name
+                  << "\"}";
+      } else {
+        std::cout << "{\"gpu_index\": \"" << i << "\", \"available\": false}";
+      }
       if (i != count - 1) {
         std::cout << ",";
       }
     } else {
-      std::cout << i << "\t\t" << attribute.device_name << std::endl;
+      std::cout << i << "\t\t" << (available[i] ? attribute.device_name : "unavailable")
+                << std::endl;
     }
   }
   if (is_json_output()) {
@@ -180,11 +189,17 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
     return;
   }
 
-  // Read every GPU first, so that a failure prints only the error.
+  // Read every GPU first, so that a failure prints only the error. A GPU AMD SMI cannot
+  // identify (RDC_ST_NOT_FOUND) keeps its index and is listed as unavailable.
   std::vector<rdc_device_attributes_t> attributes(count);
   std::vector<uint16_t> num_partitions(count, 0);
+  std::vector<bool> available(count, true);
   for (uint32_t i = 0; i < count; i++) {
     result = rdc_device_get_attributes(rdc_handle_, gpu_index_list[i], &attributes[i]);
+    if (result == RDC_ST_NOT_FOUND) {
+      available[i] = false;
+      continue;
+    }
     if (result != RDC_ST_OK) {
       throw RdcException(result,
                          "Fail to get the attributes of GPU " + std::to_string(gpu_index_list[i]));
@@ -211,6 +226,16 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
   // Loop over each GPU.
   for (uint32_t i = 0; i < count; i++) {
     const rdc_device_attributes_t& attribute = attributes[i];
+    if (!available[i]) {
+      if (!is_json_output()) {
+        std::cout << std::setw(12) << std::left << i << std::setw(20) << "" << "unavailable"
+                  << std::endl;
+      } else {
+        std::cout << "{\"gpu_index\": \"" << i << "\", \"available\": false"
+                  << (i != count - 1 ? "}," : "}");
+      }
+      continue;
+    }
 
     // Build physical device entity info.
     rdc_entity_info_t phys_info;

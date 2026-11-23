@@ -172,7 +172,7 @@ systemctl show "${background_units[@]}" \
 ```
 
 The sample wrapper below places the complete `/usr/bin/time`, `taskset`, `perf`,
-RocJITsu, and workload chain in a transient sibling scope, then drops privileges
+rocjitsu, and workload chain in a transient sibling scope, then drops privileges
 before measurement. Its pinned CPU pair is a subset of the reservation. Pass
 every required runtime input explicitly to `systemd-run`; do not measure only
 the client process.

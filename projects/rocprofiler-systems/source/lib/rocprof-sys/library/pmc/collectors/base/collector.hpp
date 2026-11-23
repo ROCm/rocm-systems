@@ -168,29 +168,10 @@ struct collector
     }
 
     /**
-     * @brief Get the device entries (devices with cached supported metrics).
-     * @return Const reference to the vector of device entries.
-     */
-    const device_entries_t& get_device_entries() const noexcept
-    {
-        return m_device_entries;
-    }
-
-    /**
      * @brief Get the number of enabled devices.
      * @return Number of devices currently enabled for sampling.
      */
     size_t get_device_count() const noexcept { return m_device_entries.size(); }
-
-    /**
-     * @brief Set the device provider (for backward compatibility).
-     *
-     * @param provider Shared pointer to the device provider instance
-     */
-    void set_device_provider(std::shared_ptr<device_provider> provider)
-    {
-        m_device_provider = std::move(provider);
-    }
 
     /**
      * @brief Write a zero-valued sample for all tracked devices.

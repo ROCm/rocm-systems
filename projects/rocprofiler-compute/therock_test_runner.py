@@ -26,6 +26,9 @@ EXCLUDED_TESTS = [
 
 QUICK_TESTS = [
     "test_utils",
+    "test_schema",
+    "test_ml_api_tracing",
+    "test_rocprof_compute_base",
     "test_num_xcds_cli_output",
     "test_num_xcds_spec_class",
     "test_L1_cache_counters",

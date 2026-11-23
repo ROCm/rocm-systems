@@ -679,6 +679,24 @@ pub(crate) struct DriverVirtualHostMapping<D: VirtualMemoryOperations> {
 }
 
 impl<D: VirtualMemoryOperations> DriverVirtualHostMapping<D> {
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.process.check().map_err(|_| Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "foreign diagnostic mapping",
+        })?;
+        let inner = self
+            .inner
+            .as_ref()
+            .filter(|_| self.host_intervals.is_some())
+            .ok_or(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "virtual host map has retired",
+            })?;
+        D::diagnostic_virtual_host_mapping(inner)
+    }
+
     pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
         self.process.check().map_err(|_| Error::Operation {
             kind: ErrorKind::InvalidArgument,
@@ -767,6 +785,16 @@ pub struct VirtualHostMapping {
 }
 
 impl VirtualHostMapping {
+    /// Borrows a live host mapping for fatal diagnostic reads.
+    ///
+    /// # Errors
+    /// Rejects retired or unsupported backing and foreign processes.
+    pub fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.inner.diagnostic_memory()
+    }
+
     /// Changes process-wide CPU page permissions on a live host map.
     ///
     /// # Errors

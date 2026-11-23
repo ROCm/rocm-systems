@@ -1155,6 +1155,63 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_SharedFabricCliqueMakesUaloeLinks) {
   EXPECT_EQ("16", Attr(link, "ppod_size"));
   EXPECT_EQ("4", Attr(link, "vpod_id"));
   EXPECT_EQ("8", Attr(link, "vpod_size"));
+  EXPECT_EQ("0.4", Attr(link, "fabric_bw_gbps"));
+}
+
+// The platform reports MB/s although amd-smi documents Mb/s: 900000 is 900 GB/s.
+TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricBandwidthIsReportedInGBps) {
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo, [](uint32_t, amdsmiFabricDeviceInfo* info) {
+    *info = amdsmiFabricDeviceInfo{};
+    info->fabricSupported = true;
+    info->cliqueId = 4;
+    info->bandwidth = 900000;
+    return ncclSuccess;
+  });
+
+  std::vector<ncclXmlNode*> links = Links(GpuNode());
+
+  ASSERT_EQ(2u, links.size());
+  for (ncclXmlNode* link : links) {
+    EXPECT_EQ("900", Attr(link, "fabric_bw_gbps"));
+    EXPECT_EQ("900000", Attr(link, "bandwidth"));  // the raw report is kept as is
+  }
+}
+
+TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricWithoutBandwidthHasNoPlatformAttribute) {
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo, [](uint32_t, amdsmiFabricDeviceInfo* info) {
+    *info = amdsmiFabricDeviceInfo{};
+    info->fabricSupported = true;
+    info->cliqueId = 4;
+    info->bandwidth = 0;
+    return ncclSuccess;
+  });
+
+  std::vector<ncclXmlNode*> links = Links(GpuNode());
+
+  ASSERT_EQ(2u, links.size());
+  for (ncclXmlNode* link : links) {
+    EXPECT_EQ("1", Attr(link, "fabric_supported"));
+    EXPECT_EQ("<unset>", Attr(link, "fabric_bw_gbps"));
+  }
+}
+
+// Every peer entry carries the local GPU's bandwidth, not the peer's.
+TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricBandwidthComesFromTheLocalGpu) {
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo, [](uint32_t i, amdsmiFabricDeviceInfo* info) {
+    *info = amdsmiFabricDeviceInfo{};
+    info->fabricSupported = true;
+    info->cliqueId = 4;
+    info->bandwidth = i == 0 ? 900000 : 100000;
+    return ncclSuccess;
+  });
+
+  std::vector<ncclXmlNode*> links = Links(GpuNode());
+
+  ASSERT_EQ(2u, links.size());
+  for (ncclXmlNode* link : links) {
+    EXPECT_EQ("900", Attr(link, "fabric_bw_gbps"));
+    EXPECT_EQ("100000", Attr(link, "bandwidth"));
+  }
 }
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricMismatchFallsBackToXgmiLinks) {
@@ -1173,7 +1230,10 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricMismatchFallsBackToXgmiLinks) {
   std::vector<ncclXmlNode*> links = Links(GpuNode());
 
   ASSERT_EQ(3u, links.size());
-  for (ncclXmlNode* link : links) EXPECT_EQ("0", Attr(link, "fabric_supported"));
+  for (ncclXmlNode* link : links) {
+    EXPECT_EQ("0", Attr(link, "fabric_supported"));
+    EXPECT_EQ("<unset>", Attr(link, "fabric_bw_gbps"));
+  }
 }
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricQueryFailureFallsBackToXgmiLinks) {
