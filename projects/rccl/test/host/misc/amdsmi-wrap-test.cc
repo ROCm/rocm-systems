@@ -1182,6 +1182,22 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_LibPathReadsTheTypedStruct) {
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "GPU 1: UALLink fabric detected - "));
 }
 
+// amd-smi leaves a numeric field it could not read at UINT32_MAX; that is no bandwidth.
+TEST_F(AmdsmiWrapMicrotest, Fabric_LibPathTreatsUnreadBandwidthAsUnreported) {
+  if (!kTypedFabricLayout) GTEST_SKIP() << "extended-union layout reads sysfs";
+  UseLib();
+  FakeProc a;
+  a.hipId = 0;
+  a.bandwidth = UINT32_MAX;
+  g_smi.sockets = {{a}};
+  ASSERT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
+  EXPECT_TRUE(amdsmiFabricDevices[0].fabricSupported);
+  EXPECT_EQ(amdsmiFabricDevices[0].bandwidth, 0u);
+  uint32_t bw = 1;
+  ASSERT_EQ(amd_smi_getFabricBandwidth(0, &bw), ncclSuccess);
+  EXPECT_EQ(bw, 0u);
+}
+
 // A version the library claims but RCCL cannot read is refused; the unreported sentinel reads as v1.
 TEST_F(AmdsmiWrapMicrotest, Fabric_LibVersionGate) {
   if (!kTypedFabricLayout) GTEST_SKIP() << "extended-union layout reads sysfs";
