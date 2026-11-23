@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
@@ -96,7 +97,7 @@ util::FailureOr<std::string> formatTrace(
 /// @throws std::invalid_argument for an architecture without a wait-counter model.
 /// @throws std::logic_error if the event is already retired.
 std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
-                                  uint64_t access_pc, rj_code_arch_t arch);
+                                  uint64_t access_pc, rocjitsu::IsaFamily arch);
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns

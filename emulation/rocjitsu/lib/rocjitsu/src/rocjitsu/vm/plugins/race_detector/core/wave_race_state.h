@@ -4,6 +4,7 @@
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
@@ -78,14 +79,16 @@ struct CounterCapacities {
 /// counter, so each holds 2^n - 1 tokens: 63, or 31 for KMcnt.
 /// The wait policy shared with the core memory-wait checker caps a wait at one
 /// below that all-ones value, so its maximum plus one is the same capacity.
-[[nodiscard]] inline constexpr CounterCapacities counterCapacitiesForArch(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr CounterCapacities
+counterCapacitiesForArch(rocjitsu::IsaFamily arch) {
   const auto properties = isa_properties(arch);
   CounterCapacities capacities{
       .vmcnt = properties.vmcnt_capacity,
       .lgkmcnt = properties.lgkmcnt_capacity,
       .compact_counter_only_issues =
-          arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2,
-      .split_wait_counters = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5,
+          arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2,
+      .split_wait_counters =
+          arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5,
   };
   if (capacities.split_wait_counters) {
     const auto capacity = [](amdgpu::WaitCounterKind kind) {
@@ -97,7 +100,7 @@ struct CounterCapacities {
     capacities.storecnt = capacity(amdgpu::WaitCounterKind::Store);
     capacities.dscnt = capacity(amdgpu::WaitCounterKind::Ds);
     capacities.kmcnt = capacity(amdgpu::WaitCounterKind::Km);
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (arch == rocjitsu::IsaFamily::Cdna5) {
       capacities.asynccnt = capacity(amdgpu::WaitCounterKind::Async);
       capacities.tensorcnt = capacity(amdgpu::WaitCounterKind::Tensor);
     } else {

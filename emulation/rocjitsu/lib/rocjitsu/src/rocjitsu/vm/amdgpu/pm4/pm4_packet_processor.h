@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/diagnostic.h"
 
 #include <array>
@@ -24,7 +25,7 @@ enum class VmAccessOutcome : uint8_t;
 struct Pm4ExecutionContext {
   /// @brief Target architecture for architecture-specific packet behavior.
   /// @details INVALID represents a CP without a compute unit.
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
   /// @brief XCD index used by PRED_EXEC in CDNA vendor command buffers.
   uint32_t xcc_id = 0;
   /// @brief Flush GPU caches before packet memory effects and stream completion.
@@ -71,7 +72,7 @@ struct Pm4ExecutionContext {
 /// packet budget. Retry and fault handling are reported through context callbacks.
 /// Packet admission and execution failures emit a diagnostic and fault the queue
 /// without retiring the rejected packet. Effects preceding a failure are retained.
-/// Host exceptions and unexpected callback exceptions propagate to the caller.
+/// Context callbacks must not throw; expected failures use their returned results.
 /// @param queue CP-owned queue whose command state and cursor are updated in place.
 /// @param gpu_vm Borrowed VM used to acquire pinned access to the queue address space.
 /// @param context Borrowed architecture and synchronous CP services for this turn.

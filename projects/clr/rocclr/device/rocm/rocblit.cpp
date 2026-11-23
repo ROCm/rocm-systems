@@ -3457,6 +3457,10 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   std::vector<hsa_signal_t> priorWaitEvents =
       gpu().Barriers().WaitingSignal(HwQueueEngine::Unknown);
   ProfilingSignal* priorSignal = gpu().Barriers().GetLastSignal();
+  // Held until the command's final barrier so the batch's own signals can't rearm it.
+  if (priorSignal != nullptr) {
+    gpu().Barriers().HoldSignal(priorSignal);
+  }
 
   // Partition into intra-device (kernel blit) and inter-device (DMA batch) groups.
   std::vector<amd::BatchCopyOp> d2dCopyOps;

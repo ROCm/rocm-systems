@@ -22,6 +22,7 @@ endfunction()
 
 rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
 
+rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
@@ -230,7 +231,9 @@ endforeach()
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
     rj_arith_cpu_test
-    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+    PRIVATE
+        RJ_ARITH_IMPL_NAMESPACE=test_cpu
+        "$<FILTER:$<TARGET_PROPERTY:rj_arith,COMPILE_DEFINITIONS>,INCLUDE,^RJ_ARITH_HAVE_>"
 )
 add_subdirectory(headers)
 

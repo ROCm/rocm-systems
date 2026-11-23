@@ -43,8 +43,8 @@ target table sets the allocation ceiling. `cpu_thread_budget` overrides the
 budget; explicit knob settings take priority.
 
 Desktop, MI210 and CDNA3 tables stop at an engine/dispatch cost of 24.
-gfx950 adds eight MMA helpers for 32 total threads; gfx1250 uses up to 40
-engine/dispatch threads and eight helpers for 48 total. See
+The single-GPU gfx950 and gfx1250 presets use eight engines and up to 24 and
+40 shared CU dispatch workers respectively, for totals of 32 and 48 threads. See
 [the allocation table](configuration.md#thread-accounting-and-preferred-allocations)
 and [async MMA policy](async-instructions.md#thread-policy).
 
@@ -79,8 +79,7 @@ below. Multi-GPU presets default to E=1/D=1 for RCCL. Explicit D=0 opts into
 granules that divide each budget's remaining slots among the per-GPU pools;
 positive D overrides also remain available. Mirage uses the same defaults and
 derives the multi-GPU granules from single-GPU tables embedded in the rocjitsu
-backend. Those derived granules convert helper slots to dispatch workers, so
-gfx950 derives from a total budget of 32 and gfx1250 from 48, while desktop
+backend. gfx950 derives from a total budget of 32 and gfx1250 from 48, while desktop
 and CDNA3 use 24. The hardware agent model contains no host tuning. Clocked
 engines and legacy table-free dispatch overrides retain their automatic
 32-thread cap. Explicit overrides remain available.
