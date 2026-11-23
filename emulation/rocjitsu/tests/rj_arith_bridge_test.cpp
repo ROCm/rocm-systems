@@ -10192,8 +10192,7 @@ TEST(ArithBridgeTest, DecodedClassCompareStrictStatusIsArchitectureSpecific) {
     EXPECT_EQ(fixture.wave->vcc(), gfx11 ? 0x80U : 1U);
   }
   // Even finite gfx90a CLASS requests reject unqualified strict FP status.
-  BridgeFixture fixture(rocjitsu::IsaFamily::Cdna2, 64,
-                        parse_arithmetic_policy("bit_exact_empirical"));
+  BridgeFixture fixture(rocjitsu::IsaFamily::Cdna2, 64, {ArithmeticSemantics::BitExactEmpirical});
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   fixture.wave->set_exec(1);
   fixture.wave->set_vcc_mask(0x80);
