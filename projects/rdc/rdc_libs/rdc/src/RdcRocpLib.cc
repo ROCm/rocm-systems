@@ -52,7 +52,11 @@ RdcRocpLib::RdcRocpLib()
   // when hsa_init() is called later, rocprofiler searches for the rocprofiler_configure
   // symbol in the global namespace. Without RTLD_GLOBAL, the symbol is only visible
   // within the library and rocprofiler cannot discover the tool.
-  rdc_status_t status = lib_loader_.load("librdc_rocp.so", RTLD_LAZY | RTLD_GLOBAL);
+  // RTLD_NOW binds every symbol the module needs at the load, so a module from another RDC
+  // build fails here rather than at its first call of a missing symbol. RTLD_NODELETE keeps
+  // it mapped after dlclose(): rocprofiler-sdk keeps the tool functions it registered and
+  // calls tool_fini when it finalizes, at the end of the process.
+  rdc_status_t status = lib_loader_.load("librdc_rocp.so", RTLD_NOW | RTLD_GLOBAL | RTLD_NODELETE);
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
     return;

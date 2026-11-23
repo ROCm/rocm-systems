@@ -33,10 +33,25 @@ if(BUILD_PROFILER)
     find_package(hsa-runtime64 NAMES hsa-runtime64 HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_ROCP_LIB} PARENT_SCOPE)
     add_library(${RDC_ROCP_LIB} SHARED ${RDC_ROCP_LIB_SRC_LIST} ${RDC_ROCP_LIB_INC_LIST})
+    # librdc_bootstrap, for strncpy_with_null: RdcRocpLib binds the module's symbols when it
+    # loads it (RTLD_NOW), and a process can hold librdc_bootstrap outside the global scope (the
+    # Python binding loads it with ctypes' RTLD_LOCAL).
     target_link_libraries(
         ${RDC_ROCP_LIB}
-        PRIVATE hsa-runtime64::hsa-runtime64 rocprofiler-sdk::rocprofiler-sdk pthread dl amd_smi
+        PRIVATE
+            hsa-runtime64::hsa-runtime64
+            rocprofiler-sdk::rocprofiler-sdk
+            ${BOOTSTRAP_LIB}
+            pthread
+            dl
+            amd_smi
     )
+    # The module exports its API and rocprofiler-sdk's tool entry point only (rdc_rocp.map):
+    # RdcRocpLib loads it RTLD_GLOBAL, for rocprofiler_configure, and its own copies of
+    # SmiUtils, the logger and the entity codec would otherwise come before librdc's in later
+    # symbol lookups.
+    target_link_options(${RDC_ROCP_LIB} PRIVATE "LINKER:--version-script=${SRC_DIR}/rdc_rocp.map")
+    set_property(TARGET ${RDC_ROCP_LIB} APPEND PROPERTY LINK_DEPENDS ${SRC_DIR}/rdc_rocp.map)
     target_include_directories(
         ${RDC_ROCP_LIB}
         PRIVATE
