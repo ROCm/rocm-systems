@@ -149,7 +149,7 @@ call("rdc_shutdown")
 """
 
 
-def test_instance_profile_names_its_resource(tools, tmp_path):
+def test_instance_profile_names_its_resource(tools, tmp_path):  # noqa: F811 (fixture)
     bootstrap = _first_file(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
     if bootstrap is None:
         _missing("librdc_bootstrap.so")
