@@ -53,6 +53,9 @@ test_categories:
       - "unit_tests_n4"
       - "tdm_tests_n2"
 
+      # rocprofiler-register integration (no MPI or GPU required)
+      - "rocshmem-rocprofiler-register-import"
+
     labels:
       - "smoke"
       - "pre-commit"
@@ -253,6 +256,12 @@ test_categories:
 
       # Heatmap/performance tests (no timeout)
       - "heatmap_.*"
+
+      # QP (GDA raw queue-pair) and SDMA direct RMA tests
+      - "qp_pingpong_.*"
+      - "qp_putnbi.*"
+      - "sdma_pingpong_.*"
+      - "sdma_putnbi.*"
 
     labels:
       - "weekly"

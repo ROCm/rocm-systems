@@ -20,7 +20,7 @@ namespace rocjitsu {
 [[nodiscard]] inline bool is_program_path_terminator(const Instruction &inst) {
   if ((inst.flags() & PROGRAM_TERMINATOR) != 0)
     return true;
-  if (inst.mnemonic() != "s_trap" || inst.size() != sizeof(uint32_t))
+  if ((inst.flags() & SOFTWARE_TRAP) == 0 || inst.size() != sizeof(uint32_t))
     return false;
   const uint32_t *raw = inst.raw_encoding();
   return raw != nullptr && static_cast<uint16_t>(raw[0]) == 2;
@@ -43,8 +43,9 @@ namespace rocjitsu {
 /// without a branch flag. Traps transfer to a handler even when they have no
 /// explicit PC destination. Check path termination separately.
 [[nodiscard]] inline bool is_control_flow_transfer(const Instruction &inst) {
-  if ((inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL)) != 0 ||
-      inst.mnemonic() == "s_trap")
+  constexpr uint64_t kTransfers =
+      BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | SOFTWARE_TRAP;
+  if ((inst.flags() & kTransfers) != 0)
     return true;
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto *operand = inst.dst_operand(i);

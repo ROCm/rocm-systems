@@ -53,7 +53,7 @@ def test_production_delta_matches_public_provenance_manifest() -> None:
     _verifier().validate(manifest_path)
 
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    assert manifest['llvm_commit'] == '3bcd9a803184e2d3657b9d5cc2a1773e9ce0f116'
+    assert manifest['llvm_commit'] == '5c34792296df2e9e880198205282b17f4d210fbe'
     assert len(manifest['instructions']) == 9
     assert all(
         {'tablegen_definition', 'tablegen_profile', 'tablegen_opcode', 'primary_mc'}

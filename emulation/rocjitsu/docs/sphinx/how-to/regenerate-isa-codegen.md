@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "How to regenerate ISA simulation and DBT source files from AMD Machine-Readable ISA XML using the rocJITsu amdisa Python library."
-        "keywords": "rocJITsu, ROCm, ISA, codegen, DBT, amdisa, regenerate, code generation"
+        "description": "How to regenerate ISA simulation and DBT source files from AMD Machine-Readable ISA XML using the rocjitsu amdisa Python library."
+        "keywords": "rocjitsu, ROCm, ISA, codegen, DBT, amdisa, regenerate, code generation"
 ---
 
 # Regenerate ISA and DBT source files
 
-rocJITsu generates instruction decoders, execution bodies, legalization tables,
+rocjitsu generates instruction decoders, execution bodies, legalization tables,
 and encoding translators from the
 [AMD Machine-Readable ISA (MR ISA)](https://gpuopen.com/machine-readable-isa/)
 XML specification using the `amdisa` Python library in `lib/python/amdisa/`.
@@ -25,7 +25,7 @@ pulling updated MR ISA XML files.
   ```
 
 - MR ISA XML files at `../../shared/machine-readable-isa/isa/` relative to
-  the rocJITsu project root (in the `rocm-systems` repository)
+  the rocjitsu project root (in the `rocm-systems` repository)
 - `clang-format` on `PATH` for formatting generated output
 
 ## Generated file locations

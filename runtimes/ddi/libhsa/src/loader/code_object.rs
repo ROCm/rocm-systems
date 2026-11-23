@@ -60,6 +60,7 @@ pub(crate) fn map_loader_error(error: rocloader::Error) -> Status {
         rocloader::Error::InvalidRange => INVALID_ALLOCATION,
         rocloader::Error::Frozen => FROZEN_EXECUTABLE,
         rocloader::Error::AlreadyDefined => VARIABLE_ALREADY_DEFINED,
+        rocloader::Error::Busy => ERROR,
     }
 }
 
@@ -96,14 +97,6 @@ pub(crate) fn hsa_variable_segment(segment: VariableSegment) -> u32 {
     }
 }
 
-#[cfg(test)]
-/// Parses ELF layout through the production code-object parser for tests.
-fn parse_elf_layout(bytes: &[u8]) -> Result<ElfLayout, Status> {
-    LoaderCodeObject::parse(bytes)
-        .map(|object| object.layout())
-        .map_err(map_loader_error)
-}
-
 impl From<rocloader::Symbol> for ParsedCodeSymbol {
     /// Converts parsed loader metadata to HSA symbol query values.
     fn from(symbol: rocloader::Symbol) -> Self {
@@ -130,48 +123,9 @@ impl From<rocloader::Symbol> for ParsedCodeSymbol {
     }
 }
 
-#[cfg(test)]
-/// Parses symbols with the requested section-table precedence for tests.
-fn parse_symbols(
-    bytes: &[u8],
-    _layout: ElfLayout,
-    preferred_tables: &[u32],
-) -> Result<Vec<ParsedCodeSymbol>, Status> {
-    let order = if preferred_tables.first() == Some(&SECTION_DYNSYM) {
-        SymbolTableOrder::DynamicFirst
-    } else {
-        SymbolTableOrder::RegularFirst
-    };
-    LoaderCodeObject::parse(bytes)
-        .and_then(|object| object.symbols(order))
-        .map(|symbols| symbols.into_iter().map(ParsedCodeSymbol::from).collect())
-        .map_err(map_loader_error)
-}
-
-#[cfg(test)]
-/// Applies AMDGPU relocations to a test image using the production loader.
-fn apply_relocations(
-    bytes: &[u8],
-    layout: ElfLayout,
-    virtual_base: u64,
-    device_base: u64,
-    image: &mut [u8],
-    resolve_external: impl Fn(&str) -> Option<u64>,
-) -> Result<(), Status> {
-    rocelf::apply_amdgpu_relocations(
-        bytes,
-        layout,
-        virtual_base,
-        device_base,
-        image,
-        resolve_external,
-    )
-    .map_err(|error| map_loader_error(error.into()))
-}
-
 /// Resolves executable symbol to a validated runtime resource.
 fn resolve_executable_symbol(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     executable: HsaExecutable,
     agent: HsaAgent,
     name: &str,
@@ -185,24 +139,46 @@ fn resolve_executable_symbol(
 }
 
 /// Parses a code object and loads its segments for the selected agent.
-pub(super) fn parse_and_load(
-    runtime: &HsaState,
+pub(super) unsafe fn parse_and_load(
+    runtime: &HsaSession,
     executable: HsaExecutable,
     agent: HsaAgent,
     code_object: Arc<[u8]>,
     storage: ReaderStorage,
     program: bool,
+    destination: Option<(u64, usize)>,
 ) -> Result<(LoadedObject, Vec<rocloader::Symbol>), Status> {
     let object = LoaderCodeObject::parse(&code_object).map_err(map_loader_error)?;
+    let record = runtime
+        .loader
+        .executables
+        .get(&executable.handle)
+        .ok_or(INVALID_EXECUTABLE)?;
+    let profile = match record.profile {
+        PROFILE_BASE => rocloader::Profile::Base,
+        PROFILE_FULL => rocloader::Profile::Full,
+        _ => return Err(INCOMPATIBLE_ARGUMENTS),
+    };
+    let rounding = match record.default_rounding {
+        DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT => rocloader::FloatRoundingMode::Default,
+        DEFAULT_FLOAT_ROUNDING_MODE_ZERO => rocloader::FloatRoundingMode::Zero,
+        DEFAULT_FLOAT_ROUNDING_MODE_NEAR => rocloader::FloatRoundingMode::Near,
+        _ => return Err(INCOMPATIBLE_ARGUMENTS),
+    };
+    object
+        .contract()
+        .validate(profile, rounding)
+        .map_err(map_loader_error)?;
     let (gpu_index, memory_kind, object_kind) = if program {
         let gpu_index = runtime
+            .agents
             .gpus
             .iter()
             .position(|gpu| object.validate_target(Target::from(&gpu.info())).is_ok())
             .ok_or(INCOMPATIBLE_ARGUMENTS)?;
         (gpu_index, MemoryKind::System, LOADER_OBJECT_KIND_PROGRAM)
     } else {
-        let Some(gpu_index) = runtime.gpu_index(agent) else {
+        let Some(gpu_index) = runtime.agents.gpu_index(agent) else {
             return Err(INVALID_AGENT);
         };
         (
@@ -217,7 +193,7 @@ pub(super) fn parse_and_load(
             LOADER_OBJECT_KIND_AGENT,
         )
     };
-    let gpu = &runtime.gpus[gpu_index];
+    let gpu = &runtime.agents.gpus[gpu_index];
     let uri = match storage {
         ReaderStorage::Memory => format!(
             "memory://{}#offset=0x{:x}&size={}",
@@ -228,13 +204,43 @@ pub(super) fn parse_and_load(
         .into_bytes(),
         ReaderStorage::File { uri } => uri,
     };
-    let (image, symbols) = rocloader::load_image(
-        &gpu.device,
-        code_object,
-        memory_kind,
-        runtime.host_page_size as u64,
-        |name| resolve_executable_symbol(runtime, executable, agent, name),
-    )
+    let resolve = |name: &str| resolve_executable_symbol(runtime, executable, agent, name);
+    let (image, symbols) = if let Some((address, size)) = destination {
+        // SAFETY: The at-address API caller owns the writable/executable GPU
+        // range through executable destruction and any uncertain publication.
+        unsafe {
+            rocloader::load_image_at_address(
+                &gpu.device,
+                code_object,
+                address,
+                size,
+                runtime.agents.host_page_size as u64,
+                resolve,
+            )
+        }
+    } else {
+        // Program resources are visible from every agent that can run this
+        // executable, including agents whose code objects are loaded later.
+        let peers = if program {
+            runtime
+                .agents
+                .gpus
+                .iter()
+                .enumerate()
+                .filter_map(|(index, peer)| (index != gpu_index).then_some(&peer.device))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        rocloader::load_image_with_peers(
+            &gpu.device,
+            &peers,
+            code_object,
+            memory_kind,
+            runtime.agents.host_page_size as u64,
+            resolve,
+        )
+    }
     .map_err(map_loader_error)?;
     Ok((
         LoadedObject {
@@ -252,11 +258,11 @@ pub(super) fn parse_and_load(
 
 /// Returns the ISA handle required by a parsed code object.
 pub(crate) fn code_object_isa(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     object: &LoaderCodeObject<'_>,
 ) -> Result<HsaIsa, Status> {
     let (target, variant) = object.target().map_err(map_loader_error)?;
-    for (index, gpu) in runtime.gpus.iter().enumerate() {
+    for (index, gpu) in runtime.agents.gpus.iter().enumerate() {
         let Some(name) = isa_name(&gpu.info(), gpu.xnack_enabled, variant) else {
             continue;
         };
@@ -276,7 +282,7 @@ pub(crate) fn code_object_isa(
 
 /// Ensures code object symbols exists before use.
 pub(crate) fn ensure_code_object_symbols(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     handle: u64,
 ) -> Result<(), Status> {
     let Some(code_object) = runtime.loader.code_objects.get(&handle) else {
@@ -387,7 +393,3 @@ pub(crate) unsafe fn code_object_get_symbol_impl(
         SUCCESS
     })
 }
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests;

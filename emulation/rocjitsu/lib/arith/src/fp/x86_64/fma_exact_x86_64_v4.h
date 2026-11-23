@@ -6,8 +6,9 @@
 
 #pragma once
 
+#include "common/compiler.h"
 #include "common/x86_64/alu_x86_64_v4.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 #include <immintrin.h>
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
@@ -85,6 +86,7 @@ namespace {
   if (!(zeros & ~exact)) {
     return exact;
   }
+  RJ_ARITH_UNROLL(2)
   for (int half = 0; half < 2; ++half) {
     auto aa = half ? _mm512_extractf32x8_ps(a, 1) : _mm512_castps512_ps256(a);
     auto bb = half ? _mm512_extractf32x8_ps(b, 1) : _mm512_castps512_ps256(b);
@@ -116,6 +118,32 @@ namespace {
     u = _mm512_min_epu32(u, _mm512_set1_epi32(0x3f800000));
   }
   return u;
+}
+
+// Resolve a NaN operand in guest priority order. A zero times infinity has
+// priority over a NaN addend and remains in the scalar repair mask.
+inline __m512i fma_nan_operands(__m512i result, __m512 a, __m512 b, __m512 c, uint64_t flags,
+                                uint32_t mode, bool rdna3, __mmask16 &bad) {
+  auto an = _mm512_fpclass_ps_mask(a, 0x81), bn = _mm512_fpclass_ps_mask(b, 0x81);
+  auto cn = _mm512_fpclass_ps_mask(c, 0x81);
+  // A raw FP32 subnormal also counts as zero when guest input flushing is enabled.
+  const auto is_zero = [flags](__m512 value) {
+    return flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS ? _mm512_fpclass_ps_mask(value, 0x26)
+                                                     : _mm512_fpclass_ps_mask(value, 0x06);
+  };
+  auto invalid_product = (is_zero(a) & _mm512_fpclass_ps_mask(b, 0x18)) |
+                         (is_zero(b) & _mm512_fpclass_ps_mask(a, 0x18));
+  auto nan = __mmask16(bad & (an | bn | cn) & ~invalid_product);
+  auto chosen = _mm512_mask_mov_ps(_mm512_mask_mov_ps(c, bn, b), an, a);
+  auto bits = _mm512_castps_si512(chosen);
+  if (!rdna3 || (flags & RJ_ARITH_FP_IEEE_MODE)) {
+    bits = _mm512_or_si512(bits, _mm512_set1_epi32(0x00400000));
+  }
+  if ((mode & RJ_ARITH_ALU_CLAMP) && !(flags & RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+    bits = _mm512_setzero_si512();
+  }
+  bad &= ~nan;
+  return _mm512_mask_mov_epi32(result, nan, bits);
 }
 
 // Round FP32 vector values to packed FP16 using the supplied guest rounding code.

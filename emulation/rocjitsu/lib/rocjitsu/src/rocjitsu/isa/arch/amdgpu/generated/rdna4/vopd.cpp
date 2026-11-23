@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/execution_backend.h"
+#include <cstring>
 #include <format>
 #include <string>
 
@@ -94,6 +95,52 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
+amdgpu::Operation Vopd::operation(uint16_t op) {
+  switch (op) {
+  case kVopdFmacF32:
+    return amdgpu::Operation::V_DUAL_FMAC_F32;
+  case kVopdFmaakF32:
+    return amdgpu::Operation::V_DUAL_FMAAK_F32;
+  case kVopdFmamkF32:
+    return amdgpu::Operation::V_DUAL_FMAMK_F32;
+  case kVopdMulF32:
+    return amdgpu::Operation::V_DUAL_MUL_F32;
+  case kVopdAddF32:
+    return amdgpu::Operation::V_DUAL_ADD_F32;
+  case kVopdSubF32:
+    return amdgpu::Operation::V_DUAL_SUB_F32;
+  case kVopdSubrevF32:
+    return amdgpu::Operation::V_DUAL_SUBREV_F32;
+  case kVopdMulDx9ZeroF32:
+    return amdgpu::Operation::V_DUAL_MUL_DX9_ZERO_F32;
+  case kVopdMovB32:
+    return amdgpu::Operation::V_DUAL_MOV_B32;
+  case kVopdCndmaskB32:
+    return amdgpu::Operation::V_DUAL_CNDMASK_B32;
+  case kVopdMaxNumF32:
+    return amdgpu::Operation::V_DUAL_MAX_NUM_F32;
+  case kVopdMinNumF32:
+    return amdgpu::Operation::V_DUAL_MIN_NUM_F32;
+  case kVopdDot2AccF32F16:
+    return amdgpu::Operation::V_DUAL_DOT2ACC_F32_F16;
+  case kVopdDot2AccF32Bf16:
+    return amdgpu::Operation::V_DUAL_DOT2ACC_F32_BF16;
+  case kVopdAddNcU32:
+    return amdgpu::Operation::V_DUAL_ADD_NC_U32;
+  case kVopdLshlrevB32:
+    return amdgpu::Operation::V_DUAL_LSHLREV_B32;
+  case kVopdAndB32:
+    return amdgpu::Operation::V_DUAL_AND_B32;
+  default:
+    return amdgpu::Operation::Unknown;
+  }
+}
+
+void Vopd::implicit_uses(RegisterSet &uses) const {
+  if (x_.uses_vcc || y_.uses_vcc)
+    uses.expand(RegisterRef{RegClass::VCC, 0, 1});
+}
+
 Result Vopd::validate_encoding(const MachineInst *inst, const util::DiagnosticEmitter &emit_error) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
   const uint32_t word0 = words[0];
@@ -119,28 +166,28 @@ Vopd::Vopd(const MachineInst *inst)
       srcx2_(32, OperandType::OPR_VGPR, 0), srcy0_(32, OperandType::OPR_SRC, 0),
       srcy1_(32, OperandType::OPR_VGPR, 0), srcy2_(32, OperandType::OPR_VGPR, 0) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
-  raw_encoding_ = words;
-  word0_ = words[0];
-  word1_ = words[1];
+  const uint32_t word0 = words[0];
+  const uint32_t word1 = words[1];
+  uint32_t word2 = 0;
 
   format_ = Format::VopdXy;
   flags_ |= VALU;
   encoding_id_ = 0x32;
-  opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
-  opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
-  uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
-  uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
-  uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-  uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
-  uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
-  uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
+  opx_ = static_cast<uint16_t>((word0 >> 22) & 0xF);
+  opy_ = static_cast<uint16_t>((word0 >> 17) & 0x1F);
+  uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+  uint16_t vsrcx1 = static_cast<uint16_t>((word0 >> 9) & 0xFF);
+  uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+  uint16_t vsrcy1 = static_cast<uint16_t>((word1 >> 9) & 0xFF);
+  uint16_t vdstx = static_cast<uint16_t>((word1 >> 24) & 0xFF);
+  uint16_t vdsty_hi = static_cast<uint16_t>((word1 >> 17) & 0x7F);
   uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
   has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == kVopdFmaakF32 || opx_ == kVopdFmamkF32 ||
                  opy_ == kVopdFmaakF32 || opy_ == kVopdFmamkF32;
   size_ = has_literal_ ? 12 : 8;
   if (has_literal_) {
-    word2_ = words[2];
-    literal_ = word2_;
+    word2 = words[2];
+    literal_ = word2;
   }
 
   constexpr uint32_t x_bits = 32;
@@ -164,7 +211,12 @@ Vopd::Vopd(const MachineInst *inst)
   srcy2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 
   opcode_ = static_cast<uint16_t>((opx_ << 8) | opy_);
+  // Own the encoding so the decoded-instruction cache can keep this
+  // instruction after the fetch window it was decoded from is gone.
+  std::memcpy(raw_words_.data(), words, size_);
+  raw_encoding_ = raw_words_.data();
   init_operands();
+  set_amdgpu_operation(operation(opx_), operation(opy_));
   // Evaluate the qualified operand restrictions once, at decode.
   const bool vopd3 = false;
   const auto bank_conflict = [](const Operand &a, const Operand &b) {

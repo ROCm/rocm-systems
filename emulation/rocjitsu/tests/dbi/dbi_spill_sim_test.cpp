@@ -31,12 +31,14 @@
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
 #include "util/diagnostic.h"
@@ -76,16 +78,16 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
 // = index); vsrc1 and vdst are VGPR indices. Reading a register as a source keeps it live
 // across the anchor without clobbering it -- used to pin many registers live at once.
 util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
-                                          rj_code_arch_t arch,
+                                          rocjitsu::IsaFamily arch,
                                           util::DiagnosticEmitter emit_error = {}) {
   const uint8_t d = static_cast<uint8_t>(vdst);
   const uint8_t s1 = static_cast<uint8_t>(vsrc1);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop2(cdna3::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop2(cdna4::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop2(rdna4::kVAddNcU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
   default:
     return emit_error.emit() << "Unimplemented instruction: v_add_u32 for target architecture";
@@ -95,7 +97,7 @@ util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t
 TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
   util::StringDiagnostic diagnostic;
   EXPECT_TRUE(
-      build_v_add_u32(1, 256, 1, ROCJITSU_CODE_ARCH_INVALID, diagnostic.emitter()).failed());
+      build_v_add_u32(1, 256, 1, rocjitsu::IsaFamily::Invalid, diagnostic.emitter()).failed());
   EXPECT_EQ(diagnostic.message(), "Unimplemented instruction: v_add_u32 for target architecture");
 }
 
@@ -107,16 +109,16 @@ TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
 // arch (for builders), the ELF machine flag, and the wavefront size.
 struct SpillSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
 };
 
-inline constexpr SpillSimArch kCdna3SpillArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
+inline constexpr SpillSimArch kCdna3SpillArch{"cdna3", rocjitsu::IsaFamily::Cdna3,
                                               EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64};
-inline constexpr SpillSimArch kCdna4SpillArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
+inline constexpr SpillSimArch kCdna4SpillArch{"cdna4", rocjitsu::IsaFamily::Cdna4,
                                               EF_AMDGPU_MACH_AMDGCN_GFX950, /*wave_size=*/64};
-inline constexpr SpillSimArch kRdna4SpillArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
+inline constexpr SpillSimArch kRdna4SpillArch{"rdna4", rocjitsu::IsaFamily::Rdna4,
                                               EF_AMDGPU_MACH_AMDGCN_GFX1200, /*wave_size=*/32};
 
 // Patches a kernel with a probe that clobbers the live VGPR v2, forcing a spill,
@@ -136,7 +138,7 @@ protected:
     // v_mov v2, K ; v_mov v3, v2 (ANCHOR at offset 4, v2 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(2, kSentinel), kMovV3V2, endpgm}, /*private_bytes=*/64,
-        /*granulated_sgpr_count=*/3, a_.e_flags);
+        test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {kMovV2Zero, setpc}, a_.e_flags);
 
@@ -281,7 +283,7 @@ protected:
     const uint32_t mov_s8_0 = maybe_s_mov_b32_48.value();
     // s_mov s8, K ; v_mov v3, s8 (ANCHOR at offset 4, s8 live) ; s_endpgm.
     auto target = test::make_amdgpu_kernel_elf({mov_s8_k, kMovV3S8, endpgm}, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.e_flags);
+                                               test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {mov_s8_0, setpc}, a_.e_flags);
 
@@ -424,9 +426,9 @@ protected:
     const uint32_t mov_s9_k = maybe_s_mov_b32_43.value();
     // s_mov s8,K1 ; s_mov s9,K2 ; v_mov v3,s8 (ANCHOR at offset 8: reads s8, s9 read
     // next -> both live) ; v_mov v4,s9 ; s_endpgm.
-    auto target =
-        test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
-                                     /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+    auto target = test::make_amdgpu_kernel_elf({mov_s8_k, mov_s9_k, kMovV3S8, kMovV4S9, endpgm},
+                                               /*private_bytes=*/64,
+                                               test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe =
         test::make_amdgpu_probe_elf("rj_test_probe", {kMovS8Zero, kMovS9Zero, setpc}, a_.e_flags);
@@ -533,7 +535,7 @@ protected:
     auto target = test::make_amdgpu_kernel_elf(
         {kAccWriteA0ZeroLo, test::make_accvgpr_write_a0_inline_hi(kSentinel), kAccReadV3A0Lo,
          kAccReadV3A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {kAccWriteA0ZeroLo, kAccWriteA0ZeroHi, setpc}, a_.e_flags);
@@ -682,7 +684,7 @@ protected:
         {test::make_mov_vgpr_inline(2, kSentinel), mov_s8_k, kAccWriteA0ZeroLo,
          test::make_accvgpr_write_a0_inline_hi(kSentinel), kMovV5V2, kMovV6S8, kAccReadV7A0Lo,
          kAccReadV7A0Hi, endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags,
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags,
         /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
@@ -851,7 +853,7 @@ protected:
     auto target = test::make_amdgpu_kernel_elf(
         {test::make_mov_vgpr_inline(0, kSentinel), mov_s8_k, adds[0].value(), adds[1].value(),
          adds[2].value(), adds[3].value(), adds[4].value(), endpgm},
-        /*private_bytes=*/64, /*granulated_sgpr_count=*/3, a_.e_flags);
+        /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.e_flags);
     target = test::with_descriptor_metadata(target, a_.arch);
     auto probe = test::make_amdgpu_probe_elf(
         "rj_test_probe", {test::make_mov_vgpr_inline(0, 0), kMovS8Zero, setpc}, a_.e_flags);
@@ -957,7 +959,7 @@ struct ExecSimArch {
 
 // CDNA3 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna3_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna3;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_28 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_28.succeeded());
   constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_29 =
@@ -974,7 +976,7 @@ struct ExecSimArch {
 
 // CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna4_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_25 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_25.succeeded());
   constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_26 =
@@ -991,7 +993,7 @@ struct ExecSimArch {
 
 // RDNA4 wave32: narrow exec_lo to 0x0000FFFF (lanes 0..15); restore with exec_lo = -1.
 [[nodiscard]] inline ExecSimArch rdna4_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_21 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_21.succeeded());
   constexpr util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_22 =
@@ -1015,7 +1017,8 @@ struct ExecSimArch {
 // Index of the trampoline's EXEC restore: an s_mov_b64 writing EXEC_LO from a
 // dead SGPR temp (< VCC_LO), not the probe's own `s_mov_b64 exec, 0` (reads
 // inline 0 = 128). text.size() if absent.
-[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text, rj_code_arch_t arch) {
+[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text,
+                                       rocjitsu::IsaFamily arch) {
   util::FailureOr<uint32_t> maybe_sop1_op_mov_b64_20 = sop1_op_mov_b64(arch);
   EXPECT_TRUE(maybe_sop1_op_mov_b64_20.succeeded());
   if (maybe_sop1_op_mov_b64_20.failed())
@@ -1072,8 +1075,8 @@ protected:
     code.push_back(mov_v3_k);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/0,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/0, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe =
@@ -1229,8 +1232,8 @@ protected:
     code.push_back(mov_v3_v2);
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     auto probe = test::make_amdgpu_probe_elf("rj_test_probe", {probe_widen, kMovV2Zero, setpc},
@@ -1393,8 +1396,8 @@ protected:
     code.insert(code.end(), a_.restore_full_mask.begin(), a_.restore_full_mask.end());
     code.push_back(endpgm);
 
-    auto target = test::make_amdgpu_kernel_elf(code, /*private_bytes=*/64,
-                                               /*granulated_sgpr_count=*/3, a_.base.e_flags);
+    auto target = test::make_amdgpu_kernel_elf(
+        code, /*private_bytes=*/64, test::kCallableProbeGranulatedSgprCount, a_.base.e_flags);
 
     target = test::with_descriptor_metadata(target, a_.base.arch);
     AmdGpuCodeObject obj(target.data(), target.size());
@@ -1493,6 +1496,82 @@ TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, ProbeRunsUnderAnchorMask) {
 }
 TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask) {
   expect_missing_anchor_restore_runs_probe_full_mask();
+}
+
+void expect_scalar_relative_probe(bool relative_source, bool with_probe,
+                                  uint16_t selected_value = 7) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
+  ASSERT_LE(selected_value, 64);
+  const util::FailureOr<uint16_t> m0_operand = scalar_operand_m0(kArch);
+  ASSERT_TRUE(m0_operand.succeeded());
+  const std::array<util::FailureOr<uint32_t>, 6> setup = {
+      build_s_mov_b32(0, 128, kArch),
+      build_s_mov_b32(2, static_cast<uint16_t>(128 + selected_value), kArch),
+      build_s_mov_b32(4, 139, kArch),
+      build_s_mov_b32(m0_operand.value(), 130, kArch),
+      relative_source ? build_sop1_encoding(kArch, cdna4::kSMovrelsB32Sop1, 10, 0)
+                      : build_s_mov_b32(10, 4, kArch),
+      build_s_endpgm(kArch)};
+  std::vector<uint32_t> words;
+  for (const util::FailureOr<uint32_t> &word : setup) {
+    ASSERT_TRUE(word.succeeded());
+    words.push_back(word.value());
+  }
+  if (with_probe) {
+    const util::FailureOr<uint32_t> ret = build_s_setpc_b64(30, kArch);
+    ASSERT_TRUE(ret.succeeded());
+    const std::vector<uint8_t> image = test::make_gfx950_kernel_elf(words, 0);
+    const std::vector<uint8_t> probe_image =
+        test::make_gfx950_probe_elf("relative_guest_probe", {ret.value()});
+    const AmdGpuCodeObject source(image.data(), image.size());
+    const AmdGpuCodeObject probe(probe_image.data(), probe_image.size());
+    ASSERT_TRUE(source.is_valid() && probe.is_valid());
+    Instrumentor instrumentor(source, kArch);
+    instrumentor.add_point({.anchor_offset = 16,
+                            .probe_obj = &probe,
+                            .probe_symbol = "relative_guest_probe",
+                            .probe_args = {}});
+    const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
+    if (relative_source) {
+      EXPECT_FALSE(result.errors.empty());
+      EXPECT_TRUE(result.elf_bytes.empty());
+      EXPECT_TRUE(result.sites.empty());
+      EXPECT_TRUE(result.patches.empty());
+    } else {
+      ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+      ASSERT_EQ(result.sites.size(), 1u);
+    }
+    // On rejection execute the pristine program. An erroneously admitted image
+    // is executed too, so the hidden read exposes actual register corruption.
+    if (!result.elf_bytes.empty()) {
+      const AmdGpuCodeObject candidate(result.elf_bytes.data(), result.elf_bytes.size());
+      ASSERT_TRUE(candidate.is_valid());
+      words = test::section_words(candidate, ".text");
+    }
+    EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
+  }
+  test::DbiSim simulator;
+  ASSERT_NO_FATAL_FAILURE(simulator.initialize("cdna4", 64));
+  const std::optional<uint64_t> observed = simulator.run_and_read_sgpr64(words, 0, 10);
+  ASSERT_TRUE(observed) << "guest did not halt";
+  EXPECT_EQ(static_cast<uint32_t>(*observed), relative_source ? selected_value : 11u);
+}
+
+TEST(DbiScalarRelativeProbe, DirectGuestWithoutProbeIsEleven) {
+  expect_scalar_relative_probe(false, false);
+}
+
+TEST(DbiScalarRelativeProbe, DirectGuestWithProbeIsEleven) {
+  expect_scalar_relative_probe(false, true);
+}
+
+TEST(DbiScalarRelativeProbe, RelativeGuestWithoutProbeReadsTheM0SelectedRegister) {
+  expect_scalar_relative_probe(true, false);
+  expect_scalar_relative_probe(true, false, 17);
+}
+
+TEST(DbiScalarRelativeProbe, RejectsProbeWithoutChangingTheRelativeGuest) {
+  expect_scalar_relative_probe(true, true);
 }
 
 } // namespace

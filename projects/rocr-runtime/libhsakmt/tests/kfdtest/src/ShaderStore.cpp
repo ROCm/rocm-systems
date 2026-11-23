@@ -166,10 +166,11 @@ const char *CopyWordsIsa =
 
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORDX2_NSS  v[0:1], v[2:3] scope:SCOPE_DEV
+            s_wait_loadcnt 0
         .else
             FLAT_LOAD_DWORDX2_NSS  v[0:1], v[2:3] slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
         .endif
-        s_waitcnt vmcnt(0) & lgkmcnt(0)
 
         .if (.amdgcn.gfx_generation_number >= 10)
             v_add_nc_u32 v4, 8, v2
@@ -180,19 +181,21 @@ const char *CopyWordsIsa =
         v_mov_b32 v5, v3
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORDX2_NSS  v[6:7], v[4:5] scope:SCOPE_DEV
+            s_wait_loadcnt 0
         .else
             FLAT_LOAD_DWORDX2_NSS v[6:7], v[4:5] slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
         .endif
-        s_waitcnt vmcnt(0) & lgkmcnt(0)
 
         v_mov_b32 v8, s2
         v_mov_b32 v9, s3
         .if (.amdgcn.gfx_generation_number >= 12)
             FLAT_LOAD_DWORD_NSS v10, v[8:9] scope:SCOPE_DEV
+            s_wait_loadcnt 0
         .else
             FLAT_LOAD_DWORD_NSS v10, v[8:9] slc
+            s_waitcnt vmcnt(0) & lgkmcnt(0)
         .endif
-        s_waitcnt vmcnt(0) & lgkmcnt(0)
         v_mov_b32 v8, v10
 
         v_mov_b32 v9, 0
@@ -278,30 +281,27 @@ const char *ScratchCopyDwordIsa =
             v_mov_b32_e32 v3, s3
         .endif
 
-        // Setup the scratch parameters. This assumes a single 16-reg block
-        .if (.amdgcn.gfx_generation_number >= 12)
+        // cast a pointer from private address space to flat address space for gfx1250+
+        // reference: gfx1250/gfx13 Shader Programming Guide->Global Shared Scratch Addressing
+        .if ((.amdgcn.gfx_generation_number == 12) && (.amdgcn.gfx_generation_minor >= 5)) || (.amdgcn.gfx_generation_number > 12)
+            v_mbcnt_lo_u32_b32 v6, -1, 0 // Calculate TID per lane
+            v_lshlrev_b32 v6, 20, v6 // shift TID into address-bits[56:52]
+            v_mov_b32 v7, 0x10000000 // gfx1250+ private base high
+            v_cmp_eq_u32 vcc_lo, v1, v7
+            s_cbranch_vccz DST_SCRATCH
+            v_add_co_u32 v0, vcc_lo, src_flat_scratch_base_lo, v0 // Add flat-scratch-base to TID (per-lane)
+            v_add_co_ci_u32 v1, vcc_lo, src_flat_scratch_base_hi, v6, vcc_lo // Calculate the full flat-address of wave's scratch space
+            v_and_b32 v0, v0, 0xfffff800 // clear per SE/CU offset
+            s_branch OUT
+
+            DST_SCRATCH:
+            v_add_co_u32 v2, vcc_lo, src_flat_scratch_base_lo, v2
+            v_add_co_ci_u32 v3, vcc_lo, src_flat_scratch_base_hi, v6, vcc_lo
+            v_and_b32 v2, v2, 0xfffff800
+            OUT:
+        .elseif (.amdgcn.gfx_generation_number == 12)
             s_setreg_b32 hwreg(HW_REG_SCRATCH_BASE_LO), s4
             s_setreg_b32 hwreg(HW_REG_SCRATCH_BASE_HI), s5
-
-            // cast a pointer from private address space to flat address space for gfx1250+
-            // reference: gfx1250 Shader Programming Guide 4.9.2.1. Global Shared Scratch Addressing
-            .if (.amdgcn.gfx_generation_number > 12) || (.amdgcn.gfx_generation_minor >= 5)
-                v_mbcnt_lo_u32_b32 v6, -1, 0 // Calculate TID per lane
-                v_lshlrev_b32 v6, 20, v6 // shift TID into address-bits[56:52]
-                v_mov_b32 v7, 0x10000000 // gfx1250+ private base high
-                v_cmp_eq_u32 vcc_lo, v1, v7
-                s_cbranch_vccz DST_SCRATCH
-                v_add_co_u32 v0, vcc_lo, src_flat_scratch_base_lo, v0 // Add flat-scratch-base to TID (per-lane)
-                v_add_co_ci_u32 v1, vcc_lo, src_flat_scratch_base_hi, v6, vcc_lo // Calculate the full flat-address of wave's scratch space
-                v_and_b32 v0, v0, 0xfffff800 // clear per SE/CU offset
-                s_branch OUT
-
-                DST_SCRATCH:
-                v_add_co_u32 v2, vcc_lo, src_flat_scratch_base_lo, v2
-                v_add_co_ci_u32 v3, vcc_lo, src_flat_scratch_base_hi, v6, vcc_lo
-                v_and_b32 v2, v2, 0xfffff800
-                OUT:
-            .endif
         .elseif (.amdgcn.gfx_generation_number >= 10)
             s_setreg_b32 hwreg(HW_REG_FLAT_SCR_LO), s4
             s_setreg_b32 hwreg(HW_REG_FLAT_SCR_HI), s5
@@ -1152,6 +1152,8 @@ const char *CheckCuMaskIsa =
                 s_and_b32        s6, s6, 0xFFE3FFFF
                 s_or_b32         s6, s6, s7
             .endif
+        .elseif (.amdgcn.gfx_generation_number >= 11)
+            s_getreg_b32     s6, hwreg(HW_REG_HW_ID1)
         .else
             s_getreg_b32     s6, hwreg(HW_REG_HW_ID)
         .endif

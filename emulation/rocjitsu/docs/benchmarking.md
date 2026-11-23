@@ -8,6 +8,10 @@ Measure each revision in separate Release build directories and alternate their
 run order. Small simulator changes are easily hidden by CPU frequency, process
 startup, JIT caches, and unrelated host activity.
 
+For instruction microbenchmarks, see the [rj-arith measured policies and sampling
+method](arith-design.md#benchmarking). They are distinct from the end-to-end
+simulator measurements below.
+
 ## Metrics
 
 | Metric | Use |
@@ -168,7 +172,7 @@ systemctl show "${background_units[@]}" \
 ```
 
 The sample wrapper below places the complete `/usr/bin/time`, `taskset`, `perf`,
-RocJITsu, and workload chain in a transient sibling scope, then drops privileges
+rocjitsu, and workload chain in a transient sibling scope, then drops privileges
 before measurement. Its pinned CPU pair is a subset of the reservation. Pass
 every required runtime input explicitly to `systemd-run`; do not measure only
 the client process.

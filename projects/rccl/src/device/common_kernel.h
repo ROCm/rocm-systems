@@ -819,6 +819,7 @@ __device__ __forceinline__ bool tryTdmCopy(int thread, int nThreads, bool postOp
         thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
     return false;
 
+  static_assert(RCCL_TDM_STAGE_BYTES_PER_WARP >= tdm::MIN_COPY_LDS_BYTES, "TDM staging below the copy's minimum");
   // WARP_SIZE is a compile-time power of two, so these exact divisions compile to shifts.
   uint32_t w0 = (threadIdx.x - thread) / WARP_SIZE, w1 = w0 + nThreads / WARP_SIZE;
   size_t bytes = (size_t)nElts * sizeof(T);
@@ -838,8 +839,9 @@ template <int Unroll, int useAcc, typename RedFn, typename T, int MultimemSrcs, 
 __device__ __forceinline__ void reduceCopy(int thread, int nThreads, uint64_t redArg, bool postOp, int nSrcs,
                                            void** srcPtrs, int nDsts, void** dstPtrs, IntBytes nElts,
                                            void* accPtr = nullptr) {
-  if (tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(
-        thread, nThreads, postOp, nSrcs, srcPtrs, nDsts, dstPtrs, nElts))
+  if ((!EnableTdmReduce || !tdmReduceTakesCopy(nDsts)) &&
+      tryTdmCopy<useAcc, RedFn, T, MultimemSrcs, MultimemDsts, PreOpSrcs, Pipeline>(thread, nThreads, postOp, nSrcs,
+                                                                                     srcPtrs, nDsts, dstPtrs, nElts))
     return;
   reduceCopy<Unroll, useAcc, RedFn, T, MultimemSrcs, MinSrcs, MaxSrcs, MultimemDsts, MinDsts, MaxDsts, PreOpSrcs,
              IntBytes, Pipeline, EnableTdmReduce>(

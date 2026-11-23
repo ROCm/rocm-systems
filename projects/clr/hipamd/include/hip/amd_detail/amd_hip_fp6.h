@@ -87,8 +87,9 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
   } u{0};
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
   __amd_bf16x32_storage_t in{};
-  in[0] = internal::hipbf16_to_bf16(x.x);
-  in[1] = internal::hipbf16_to_bf16(x.y);
+  const auto bf16x2 = internal::hipbf162_to_bf16x2(x);
+  in[0] = bf16x2[0];
+  in[1] = bf16x2[1];
   __amd_fp6x32_storage_t out{};
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16))
@@ -97,12 +98,14 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, 1.0f /* scale */);
   }
-  u.ui32 = out[0];
+  u.ui32 = out[0] & 0x3Fu;
+  u.ui32 |= ((out[0] & 0xFC0u) << 2);
   return u.fp6x2[0];
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
   __amd_bf16x16_storage_t in{};
-  in[0] = internal::hipbf16_to_bf16(x.x);
-  in[1] = internal::hipbf16_to_bf16(x.y);
+  const auto bf16x2 = internal::hipbf162_to_bf16x2(x);
+  in[0] = bf16x2[0];
+  in[1] = bf16x2[1];
   __amd_fp6x16_storage_t out{};
   if (fp6_interpretation == __HIP_E2M3) {
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk16_fp6_bf16))
@@ -111,7 +114,8 @@ __FP6_HOST_DEVICE_STATIC__ __hip_fp6x2_storage_t __hip_cvt_bfloat16raw2_to_fp6x2
     if (__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk16_bf6_bf16))
       out = __builtin_amdgcn_cvt_scalef32_pk16_bf6_bf16(in, 1.0f /* scale */);
   }
-  u.ui32 = out[0];
+  u.ui32 = out[0] & 0x3Fu;
+  u.ui32 |= ((out[0] & 0xFC0u) << 2);
   return u.fp6x2[0];
 #else
   if (fp6_interpretation == __HIP_E2M3) {
@@ -347,9 +351,9 @@ __FP6_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp6_to_halfraw(
 #else
   using namespace fcbx;
   if (fp6_interpretation_t == __HIP_E2M3) {
-    ret.data = __amd_fp16_storage_t{to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x, 0)};
+    ret = internal::f16_to_halfraw(to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x, 0));
   } else if (fp6_interpretation_t == __HIP_E3M2) {
-    ret.data = __amd_fp16_storage_t{to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x, 0)};
+    ret = internal::f16_to_halfraw(to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x, 0));
   }
 #endif
   return ret;
@@ -386,13 +390,13 @@ __FP6_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp6x2_to_halfraw2(
 #else
   using namespace fcbx;
   if (fp6_interpretation_t == __HIP_E2M3) {
-    ret.data =
+    ret = internal::f16x2_to_halfraw2(
         __amd_fp16x2_storage_t{to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x & 0xFFu, 0),
-                               to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x >> 8, 0)};
+                               to_float<__amd_fp16_storage_t, Encoding::E2M3, true>(x >> 8, 0)});
   } else if (fp6_interpretation_t == __HIP_E3M2) {
-    ret.data =
+    ret = internal::f16x2_to_halfraw2(
         __amd_fp16x2_storage_t{to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x & 0xFFu, 0),
-                               to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x >> 8, 0)};
+                               to_float<__amd_fp16_storage_t, Encoding::E3M2, true>(x >> 8, 0)});
   }
 #endif
   return ret;

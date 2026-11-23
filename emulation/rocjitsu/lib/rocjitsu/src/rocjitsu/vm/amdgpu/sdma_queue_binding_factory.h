@@ -30,6 +30,8 @@ public:
   SdmaQueueBindingFactory(SdmaQueueScheduler &scheduler, SdmaCallbackFactory callback_factory = {},
                           SdmaProgressObserverFactory progress_observer_factory = {});
 
+  /// @brief Resolve callback factories, then attach and create the owning binding.
+  /// @details Callback factories must not throw. Invalid queue requests are rejected.
   [[nodiscard]] QueueBindingCreateResult
   create_binding(const QueueRegistrationRequest &request) override;
 

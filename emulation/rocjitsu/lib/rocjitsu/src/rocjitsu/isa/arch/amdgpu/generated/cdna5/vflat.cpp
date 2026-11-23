@@ -23,8 +23,8 @@ template <typename VmemMachineInst> uint32_t vflat_vaddr_bits(const VmemMachineI
 FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
     : Vflat("flat_load_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadU8Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -43,6 +43,8 @@ FlatLoadU8Vflat::FlatLoadU8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -59,8 +61,8 @@ DecodeResult decodeFlatLoadU8Vflat(const MachineInst *opcode,
 FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
     : Vflat("flat_load_i8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadI8Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -79,6 +81,8 @@ FlatLoadI8Vflat::FlatLoadI8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -95,8 +99,8 @@ DecodeResult decodeFlatLoadI8Vflat(const MachineInst *opcode,
 FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
     : Vflat("flat_load_u16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadU16Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -115,6 +119,8 @@ FlatLoadU16Vflat::FlatLoadU16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_U16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -131,8 +137,8 @@ DecodeResult decodeFlatLoadU16Vflat(const MachineInst *opcode,
 FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
     : Vflat("flat_load_i16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadI16Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -151,6 +157,8 @@ FlatLoadI16Vflat::FlatLoadI16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_I16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -167,8 +175,8 @@ DecodeResult decodeFlatLoadI16Vflat(const MachineInst *opcode,
 FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
     : Vflat("flat_load_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadB32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -187,6 +195,8 @@ FlatLoadB32Vflat::FlatLoadB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -203,8 +213,8 @@ DecodeResult decodeFlatLoadB32Vflat(const MachineInst *opcode,
 FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
     : Vflat("flat_load_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadB64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -223,6 +233,8 @@ FlatLoadB64Vflat::FlatLoadB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -239,8 +251,8 @@ DecodeResult decodeFlatLoadB64Vflat(const MachineInst *opcode,
 FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
     : Vflat("flat_load_b96", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadB96Vflat)),
-      vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(96, OperandType::OPR_GPUMEM, 0) {
@@ -259,6 +271,8 @@ FlatLoadB96Vflat::FlatLoadB96Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -275,8 +289,8 @@ DecodeResult decodeFlatLoadB96Vflat(const MachineInst *opcode,
 FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
     : Vflat("flat_load_b128", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadB128Vflat)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
@@ -295,6 +309,8 @@ FlatLoadB128Vflat::FlatLoadB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -311,9 +327,9 @@ DecodeResult decodeFlatLoadB128Vflat(const MachineInst *opcode,
 FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
     : Vflat("flat_store_b8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB8Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -332,6 +348,8 @@ FlatStoreB8Vflat::FlatStoreB8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -348,9 +366,9 @@ DecodeResult decodeFlatStoreB8Vflat(const MachineInst *opcode,
 FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
     : Vflat("flat_store_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB16Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -369,6 +387,8 @@ FlatStoreB16Vflat::FlatStoreB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -385,9 +405,9 @@ DecodeResult decodeFlatStoreB16Vflat(const MachineInst *opcode,
 FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
     : Vflat("flat_store_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB32Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -405,6 +425,8 @@ FlatStoreB32Vflat::FlatStoreB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -421,9 +443,9 @@ DecodeResult decodeFlatStoreB32Vflat(const MachineInst *opcode,
 FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
     : Vflat("flat_store_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB64Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -441,6 +463,8 @@ FlatStoreB64Vflat::FlatStoreB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -457,9 +481,9 @@ DecodeResult decodeFlatStoreB64Vflat(const MachineInst *opcode,
 FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
     : Vflat("flat_store_b96", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB96Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(96, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(96, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -477,6 +501,8 @@ FlatStoreB96Vflat::FlatStoreB96Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B96);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -493,9 +519,9 @@ DecodeResult decodeFlatStoreB96Vflat(const MachineInst *opcode,
 FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
     : Vflat("flat_store_b128", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreB128Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -513,6 +539,8 @@ FlatStoreB128Vflat::FlatStoreB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -529,8 +557,8 @@ DecodeResult decodeFlatStoreB128Vflat(const MachineInst *opcode,
 FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16U8Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -549,6 +577,9 @@ FlatLoadD16U8Vflat::FlatLoadD16U8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -565,8 +596,8 @@ DecodeResult decodeFlatLoadD16U8Vflat(const MachineInst *opcode,
 FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_i8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16I8Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -585,6 +616,9 @@ FlatLoadD16I8Vflat::FlatLoadD16I8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -601,8 +635,8 @@ DecodeResult decodeFlatLoadD16I8Vflat(const MachineInst *opcode,
 FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16B16Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -621,6 +655,9 @@ FlatLoadD16B16Vflat::FlatLoadD16B16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -637,8 +674,8 @@ DecodeResult decodeFlatLoadD16B16Vflat(const MachineInst *opcode,
 FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_u8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16HiU8Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -657,6 +694,9 @@ FlatLoadD16HiU8Vflat::FlatLoadD16HiU8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_HI_U8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -673,8 +713,8 @@ DecodeResult decodeFlatLoadD16HiU8Vflat(const MachineInst *opcode,
 FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_i8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16HiI8Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -693,6 +733,9 @@ FlatLoadD16HiI8Vflat::FlatLoadD16HiI8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_HI_I8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -709,8 +752,8 @@ DecodeResult decodeFlatLoadD16HiI8Vflat(const MachineInst *opcode,
 FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_load_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadD16HiB16Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
@@ -729,6 +772,9 @@ FlatLoadD16HiB16Vflat::FlatLoadD16HiB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -745,9 +791,9 @@ DecodeResult decodeFlatLoadD16HiB16Vflat(const MachineInst *opcode,
 FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreD16HiB8Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -766,6 +812,9 @@ FlatStoreD16HiB8Vflat::FlatStoreD16HiB8Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_D16_HI_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -782,9 +831,9 @@ DecodeResult decodeFlatStoreD16HiB8Vflat(const MachineInst *opcode,
 FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
     : Vflat("flat_store_d16_hi_b16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatStoreD16HiB16Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(16, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -803,6 +852,9 @@ FlatStoreD16HiB16Vflat::FlatStoreD16HiB16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_STORE_D16_HI_B16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -819,10 +871,10 @@ DecodeResult decodeFlatStoreD16HiB16Vflat(const MachineInst *opcode,
 FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicSwapB32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -847,6 +899,8 @@ FlatAtomicSwapB32Vflat::FlatAtomicSwapB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -863,10 +917,10 @@ DecodeResult decodeFlatAtomicSwapB32Vflat(const MachineInst *opcode,
 FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicCmpswapB32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -891,6 +945,8 @@ FlatAtomicCmpswapB32Vflat::FlatAtomicCmpswapB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -907,10 +963,10 @@ DecodeResult decodeFlatAtomicCmpswapB32Vflat(const MachineInst *opcode,
 FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicAddU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -935,6 +991,8 @@ FlatAtomicAddU32Vflat::FlatAtomicAddU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -951,10 +1009,10 @@ DecodeResult decodeFlatAtomicAddU32Vflat(const MachineInst *opcode,
 FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicSubU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -979,6 +1037,8 @@ FlatAtomicSubU32Vflat::FlatAtomicSubU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -995,10 +1055,10 @@ DecodeResult decodeFlatAtomicSubU32Vflat(const MachineInst *opcode,
 FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_clamp_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicSubClampU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1023,6 +1083,8 @@ FlatAtomicSubClampU32Vflat::FlatAtomicSubClampU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SUB_CLAMP_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1039,10 +1101,10 @@ DecodeResult decodeFlatAtomicSubClampU32Vflat(const MachineInst *opcode,
 FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinI32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1067,6 +1129,8 @@ FlatAtomicMinI32Vflat::FlatAtomicMinI32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1083,10 +1147,10 @@ DecodeResult decodeFlatAtomicMinI32Vflat(const MachineInst *opcode,
 FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1111,6 +1175,8 @@ FlatAtomicMinU32Vflat::FlatAtomicMinU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1127,10 +1193,10 @@ DecodeResult decodeFlatAtomicMinU32Vflat(const MachineInst *opcode,
 FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxI32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1155,6 +1221,8 @@ FlatAtomicMaxI32Vflat::FlatAtomicMaxI32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_I32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1171,10 +1239,10 @@ DecodeResult decodeFlatAtomicMaxI32Vflat(const MachineInst *opcode,
 FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1199,6 +1267,8 @@ FlatAtomicMaxU32Vflat::FlatAtomicMaxU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1215,10 +1285,10 @@ DecodeResult decodeFlatAtomicMaxU32Vflat(const MachineInst *opcode,
 FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicAndB32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1243,6 +1313,8 @@ FlatAtomicAndB32Vflat::FlatAtomicAndB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_AND_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1259,10 +1331,10 @@ DecodeResult decodeFlatAtomicAndB32Vflat(const MachineInst *opcode,
 FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicOrB32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1287,6 +1359,8 @@ FlatAtomicOrB32Vflat::FlatAtomicOrB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_OR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1303,10 +1377,10 @@ DecodeResult decodeFlatAtomicOrB32Vflat(const MachineInst *opcode,
 FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicXorB32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1331,6 +1405,8 @@ FlatAtomicXorB32Vflat::FlatAtomicXorB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_XOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1347,10 +1423,10 @@ DecodeResult decodeFlatAtomicXorB32Vflat(const MachineInst *opcode,
 FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicIncU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1375,6 +1451,8 @@ FlatAtomicIncU32Vflat::FlatAtomicIncU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_INC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1391,10 +1469,10 @@ DecodeResult decodeFlatAtomicIncU32Vflat(const MachineInst *opcode,
 FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicDecU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1419,6 +1497,8 @@ FlatAtomicDecU32Vflat::FlatAtomicDecU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_DEC_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1435,10 +1515,10 @@ DecodeResult decodeFlatAtomicDecU32Vflat(const MachineInst *opcode,
 FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_swap_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicSwapB64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1463,6 +1543,8 @@ FlatAtomicSwapB64Vflat::FlatAtomicSwapB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1479,10 +1561,10 @@ DecodeResult decodeFlatAtomicSwapB64Vflat(const MachineInst *opcode,
 FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cmpswap_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicCmpswapB64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1507,6 +1589,8 @@ FlatAtomicCmpswapB64Vflat::FlatAtomicCmpswapB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_CMPSWAP_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1523,10 +1607,10 @@ DecodeResult decodeFlatAtomicCmpswapB64Vflat(const MachineInst *opcode,
 FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicAddU64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1551,6 +1635,8 @@ FlatAtomicAddU64Vflat::FlatAtomicAddU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1567,10 +1653,10 @@ DecodeResult decodeFlatAtomicAddU64Vflat(const MachineInst *opcode,
 FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_sub_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicSubU64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1595,6 +1681,8 @@ FlatAtomicSubU64Vflat::FlatAtomicSubU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_SUB_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1611,10 +1699,10 @@ DecodeResult decodeFlatAtomicSubU64Vflat(const MachineInst *opcode,
 FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_i64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinI64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1639,6 +1727,8 @@ FlatAtomicMinI64Vflat::FlatAtomicMinI64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1655,10 +1745,10 @@ DecodeResult decodeFlatAtomicMinI64Vflat(const MachineInst *opcode,
 FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinU64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1683,6 +1773,8 @@ FlatAtomicMinU64Vflat::FlatAtomicMinU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1699,10 +1791,10 @@ DecodeResult decodeFlatAtomicMinU64Vflat(const MachineInst *opcode,
 FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_i64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxI64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1727,6 +1819,8 @@ FlatAtomicMaxI64Vflat::FlatAtomicMaxI64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_I64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1743,10 +1837,10 @@ DecodeResult decodeFlatAtomicMaxI64Vflat(const MachineInst *opcode,
 FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxU64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1771,6 +1865,8 @@ FlatAtomicMaxU64Vflat::FlatAtomicMaxU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1787,10 +1883,10 @@ DecodeResult decodeFlatAtomicMaxU64Vflat(const MachineInst *opcode,
 FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_and_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicAndB64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1815,6 +1911,8 @@ FlatAtomicAndB64Vflat::FlatAtomicAndB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_AND_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1831,10 +1929,10 @@ DecodeResult decodeFlatAtomicAndB64Vflat(const MachineInst *opcode,
 FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_or_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicOrB64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1859,6 +1957,8 @@ FlatAtomicOrB64Vflat::FlatAtomicOrB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_OR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1875,10 +1975,10 @@ DecodeResult decodeFlatAtomicOrB64Vflat(const MachineInst *opcode,
 FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_xor_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicXorB64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1903,6 +2003,8 @@ FlatAtomicXorB64Vflat::FlatAtomicXorB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_XOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1919,10 +2021,10 @@ DecodeResult decodeFlatAtomicXorB64Vflat(const MachineInst *opcode,
 FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_inc_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicIncU64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1947,6 +2049,8 @@ FlatAtomicIncU64Vflat::FlatAtomicIncU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_INC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -1963,10 +2067,10 @@ DecodeResult decodeFlatAtomicIncU64Vflat(const MachineInst *opcode,
 FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_dec_u64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicDecU64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -1991,6 +2095,8 @@ FlatAtomicDecU64Vflat::FlatAtomicDecU64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_DEC_U64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2007,10 +2113,10 @@ DecodeResult decodeFlatAtomicDecU64Vflat(const MachineInst *opcode,
 FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_cond_sub_u32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicCondSubU32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2035,6 +2141,8 @@ FlatAtomicCondSubU32Vflat::FlatAtomicCondSubU32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_COND_SUB_U32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2051,10 +2159,10 @@ DecodeResult decodeFlatAtomicCondSubU32Vflat(const MachineInst *opcode,
 FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_num_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinNumF32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2079,6 +2187,8 @@ FlatAtomicMinNumF32Vflat::FlatAtomicMinNumF32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2095,10 +2205,10 @@ DecodeResult decodeFlatAtomicMinNumF32Vflat(const MachineInst *opcode,
 FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_num_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxNumF32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2123,6 +2233,8 @@ FlatAtomicMaxNumF32Vflat::FlatAtomicMaxNumF32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_NUM_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2139,10 +2251,10 @@ DecodeResult decodeFlatAtomicMaxNumF32Vflat(const MachineInst *opcode,
 FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_f64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicAddF64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2167,6 +2279,8 @@ FlatAtomicAddF64Vflat::FlatAtomicAddF64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2183,10 +2297,10 @@ DecodeResult decodeFlatAtomicAddF64Vflat(const MachineInst *opcode,
 FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_add_f32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicAddF32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2211,6 +2325,8 @@ FlatAtomicAddF32Vflat::FlatAtomicAddF32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_ADD_F32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2227,10 +2343,10 @@ DecodeResult decodeFlatAtomicAddF32Vflat(const MachineInst *opcode,
 FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_f16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicPkAddF16Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2255,6 +2371,8 @@ FlatAtomicPkAddF16Vflat::FlatAtomicPkAddF16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2271,10 +2389,10 @@ DecodeResult decodeFlatAtomicPkAddF16Vflat(const MachineInst *opcode,
 FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_pk_add_bf16", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicPkAddBf16Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0), gpumem_in(32, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2299,6 +2417,8 @@ FlatAtomicPkAddBf16Vflat::FlatAtomicPkAddBf16Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2315,10 +2435,10 @@ DecodeResult decodeFlatAtomicPkAddBf16Vflat(const MachineInst *opcode,
 FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_min_num_f64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMinNumF64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2343,6 +2463,8 @@ FlatAtomicMinNumF64Vflat::FlatAtomicMinNumF64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MIN_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2359,10 +2481,10 @@ DecodeResult decodeFlatAtomicMinNumF64Vflat(const MachineInst *opcode,
 FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
     : Vflat("flat_atomic_max_num_f64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatAtomicMaxNumF64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
-      vsrc(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
+      vsrc(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vsrc),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0), gpumem_in(64, OperandType::OPR_GPUMEM, 0) {
   src_operands_[0] = &vaddr;
@@ -2387,6 +2509,8 @@ FlatAtomicMaxNumF64Vflat::FlatAtomicMaxNumF64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_ATOMIC_MAX_NUM_F64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Atomic);
 }
 
 namespace detail {
@@ -2403,7 +2527,7 @@ DecodeResult decodeFlatAtomicMaxNumF64Vflat(const MachineInst *opcode,
 FlatPrefetchB8Vflat::FlatPrefetchB8Vflat(const MachineInst *inst)
     : Vflat("flat_prefetch_b8", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatPrefetchB8Vflat)),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(8, OperandType::OPR_GPUMEM, 0) {
@@ -2416,6 +2540,8 @@ FlatPrefetchB8Vflat::FlatPrefetchB8Vflat(const MachineInst *inst)
   gpumem.apply_fieldless_caps(false, false, false);
   vaddr.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_PREFETCH_B8);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Prefetch);
 }
 
 namespace detail {
@@ -2432,8 +2558,8 @@ DecodeResult decodeFlatPrefetchB8Vflat(const MachineInst *opcode,
 FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b32", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadMonitorB32Vflat)),
-      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(32, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(32, OperandType::OPR_GPUMEM, 0) {
@@ -2452,6 +2578,8 @@ FlatLoadMonitorB32Vflat::FlatLoadMonitorB32Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_MONITOR_B32);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2468,8 +2596,8 @@ DecodeResult decodeFlatLoadMonitorB32Vflat(const MachineInst *opcode,
 FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b64", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadMonitorB64Vflat)),
-      vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(64, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(64, OperandType::OPR_GPUMEM, 0) {
@@ -2488,6 +2616,8 @@ FlatLoadMonitorB64Vflat::FlatLoadMonitorB64Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_MONITOR_B64);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -2504,8 +2634,8 @@ DecodeResult decodeFlatLoadMonitorB64Vflat(const MachineInst *opcode,
 FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
     : Vflat("flat_load_monitor_b128", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::FlatLoadMonitorB128Vflat)),
-      vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
-      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
+      vdst(128, Operand::UnpackedVgpr{}, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      vaddr(vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), Operand::UnpackedVgpr{},
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       saddr(64, OperandType::OPR_SREG, reinterpret_cast<const OpEncoding *>(inst)->saddr),
       gpumem(128, OperandType::OPR_GPUMEM, 0) {
@@ -2524,6 +2654,8 @@ FlatLoadMonitorB128Vflat::FlatLoadMonitorB128Vflat(const MachineInst *inst)
                          amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::DSCNT,
                                                          amdgpu::MemoryCompletionClass::LDS}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::FLAT_LOAD_MONITOR_B128);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Flat, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {

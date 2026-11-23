@@ -29,6 +29,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace sdma_anvil {
 
@@ -115,6 +116,26 @@ inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEngine
                                 uint32_t queuesPerEngine) {
   const uint32_t budget = numEnginesTotal * queuesPerEngine;
   return requested > 0 && budget > 0 && used + static_cast<uint32_t>(requested) > budget;
+}
+
+// Least loaded even engine in preferredMask, lowest id on a tie. Falls back to
+// preferredUsableEngine when the load is unknown or no even engine of the mask is counted.
+inline int leastLoadedPreferredEngine(uint32_t preferredMask,
+                                      const std::vector<uint32_t>& queuesPerEngine) {
+  const uint32_t evenMask = preferredMask & 0x55555555u;
+  int best = -1;
+  for (size_t e = 0; e < queuesPerEngine.size() && e < 32; e += 2) {
+    if ((evenMask & (1u << e)) == 0) continue;
+    if (best < 0 || queuesPerEngine[e] < queuesPerEngine[static_cast<size_t>(best)]) {
+      best = static_cast<int>(e);
+    }
+  }
+  return best >= 0 ? best : preferredUsableEngine(preferredMask);
+}
+
+// Least loaded even engine, or 0 when the load is unknown. Every even engine is preferred.
+inline int leastLoadedUsableEngine(const std::vector<uint32_t>& queuesPerEngine) {
+  return leastLoadedPreferredEngine(0x55555555u, queuesPerEngine);
 }
 
 }  // namespace sdma_anvil

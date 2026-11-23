@@ -11,7 +11,7 @@
 #include "common/semantics.h"
 #include "fp/elementwise.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <algorithm>
 #include <cmath>
@@ -141,12 +141,6 @@ template <int Width, int Lanes, typename Call> void check_frexp_exp(Call call) {
                 call(flags, exec_mask, instruction_flags, r.v + aliasing_offset, r.v, &fp_status);
             if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
-              r.expect_preserved(input, 0, 0);
-              EXPECT_EQ(fp_status, 0x80000000U);
-              continue;
-            }
-            if (Width == 64 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-              EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               r.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;

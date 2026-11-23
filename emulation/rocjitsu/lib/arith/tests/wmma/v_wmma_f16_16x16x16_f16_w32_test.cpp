@@ -9,10 +9,13 @@
 #include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
+#include <algorithm>
 #include <bit>
+#include <cfenv>
 #include <limits>
 
 #include <gtest/gtest.h>
@@ -148,4 +151,31 @@ TEST(WmmaF16F16W32Gfx11, Arithmetic) {
       rj_arith_v_wmma_f16_16x16x16_f16_w32);
   rocjitsu::arith::test::expect_wmma_exact_simd<false, 32, true, true>(
       rj_arith_v_wmma_f16_16x16x16_f16_w32);
+}
+
+TEST(WmmaF16F16W32Gfx11, ExactPackedPreservesHostExceptions) {
+  Registers r;
+  for (int reg = 0; reg < 24; ++reg) {
+    std::fill_n(r.v[reg], 32, 0);
+  }
+  // The first DOT2 adds 2^-11 and 2^-26 to one. Its integer-grid sum
+  // exceeds FP32's precision and rounds just above the FP16 midpoint.
+  std::fill_n(r.v[0], 32, 0x08001000U);
+  std::fill_n(r.v[8], 32, 0x08003c00U);
+  r.v[16][0] = 0x3c00;
+
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    SCOPED_TRACE(cpu);
+    std::fenv_t saved;
+    ASSERT_EQ(std::feholdexcept(&saved), 0);
+    std::feraiseexcept(FE_DIVBYZERO);
+    int before = std::fetestexcept(FE_ALL_EXCEPT);
+    auto status = rj_arith_v_wmma_f16_16x16x16_f16_w32(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL,
+                                                       0, r.v + 24, r.v, r.v + 8, r.v + 16);
+    int after = std::fetestexcept(FE_ALL_EXCEPT);
+    ASSERT_EQ(std::fesetenv(&saved), 0);
+    EXPECT_EQ(status, RJ_ARITH_SUCCESS);
+    EXPECT_EQ(after, before);
+    EXPECT_EQ(uint16_t(r.v[24][0]), 0x3c01);
+  }
 }

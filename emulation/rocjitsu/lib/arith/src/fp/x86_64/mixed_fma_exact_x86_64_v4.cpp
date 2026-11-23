@@ -3,7 +3,8 @@
 
 // AVX-512 bit-exact mixed-precision FMA with per-lane scalar repair.
 
-#include "common/internal.h"
+#include "common/compiler.h"
+#include "common/validation.h"
 #include "fp/mixed_fma.h"
 #include "fp/mixed_fma_control.h"
 #include "fp/scalar_repair.h"
@@ -21,6 +22,7 @@ void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags,
   for (int lane = 0; lane < 32; lane += 16) {
     __m512 values[3];
     __mmask16 bad = 0;
+    RJ_ARITH_UNROLL(3)
     for (int operand = 0; operand < 3; ++operand) {
       auto bits = _mm512_loadu_si512(inputs[operand] + lane);
       uint32_t source_mode = mode >> operand;
@@ -64,17 +66,34 @@ void mixed_fma_exact_x86_64_v4(MixedFma destination, bool rdna3, uint64_t flags,
       auto half = _mm512_cvtepu16_epi32(narrow_half(_mm512_castsi512_ps(odd), rounding));
       half = finish_half_fma(half, odd, flags, mode);
       int shift = destination == MixedFma::High ? 16 : 0;
+      if (bad) {
+        auto unresolved = bad;
+        auto bits = fma_nan_operands(_mm512_setzero_si512(), values[0], values[1], values[2], flags,
+                                     mode, false, unresolved);
+        auto payload = _mm512_and_si512(_mm512_srli_epi32(bits, 13), _mm512_set1_epi32(1023));
+        auto sign = _mm512_and_si512(_mm512_srli_epi32(bits, 16), _mm512_set1_epi32(0x8000));
+        auto nan = _mm512_or_si512(sign, _mm512_or_si512(payload, _mm512_set1_epi32(0x7e00)));
+        if ((mode & RJ_ARITH_ALU_CLAMP) && !(flags & RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+          nan = _mm512_setzero_si512();
+        }
+        half = _mm512_mask_mov_epi32(half, __mmask16(bad & ~unresolved), nan);
+        bad = unresolved;
+      }
       out = _mm512_or_si512(
           _mm512_slli_epi32(half, shift),
           _mm512_and_si512(_mm512_loadu_si512(d + lane), _mm512_set1_epi32(~(0xffffU << shift))));
     }
+    // FP16 input conversion may have quieted a signaling NaN. Preserve the
+    // raw-source repair in that case; all-FP32 inputs retain their encodings.
+    if (bad && destination == MixedFma::Float &&
+        !(mode & (RJ_ARITH_MIX_F16_A | RJ_ARITH_MIX_F16_B | RJ_ARITH_MIX_F16_C))) {
+      out = fma_nan_operands(out, values[0], values[1], values[2], flags, mode, rdna3, bad);
+    }
     _mm512_store_si512(result + lane, out);
     bad &= __mmask16(exec_mask >> lane);
     if (bad) {
-      for (int i = 0; i < 16; ++i) {
-        if (!((bad >> i) & 1)) {
-          continue;
-        }
+      for (; bad; bad &= bad - 1) {
+        int i = __builtin_ctz(bad);
         result[lane + i] = repair_mixed_fma(destination, rdna3, flags, mode, a[lane + i],
                                             b[lane + i], c[lane + i], d[lane + i]);
       }

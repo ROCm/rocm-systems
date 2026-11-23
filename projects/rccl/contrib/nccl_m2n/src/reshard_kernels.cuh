@@ -9,7 +9,7 @@
  * Tensor Reshard — Shared Device Kernel Helpers
  *
  * Header-only device helpers used by reshardKernelUserWindow (RING)
- * and directReshardKernelUserWindow (DIRECT) in reshard_user_window.cu.
+ * in reshard_user_window.cu.
  *
  * All helpers are `__device__ static inline` so each translation unit
  * gets its own copy without ODR violations.

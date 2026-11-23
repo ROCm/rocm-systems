@@ -31,7 +31,9 @@
 #include "nccl_device/gin_barrier.h"
 
 #include "fakes/dev_runtime_micro_fakes.h"
+#include "fakes/fail_loud.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
+#include "fakes/mgmt_task_enq_fakes.h"  // ResetMgmtTaskEnqFakes()
 #include "fakes/nccl_device_core_fakes.h"  // ncclTeam* accessors + ResetNcclDeviceCoreFakes()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
 #include "signature-drift.h"
@@ -56,7 +58,7 @@
 
 
 // devcomm compat tables (defined in devcomm/devcomm_v*.cc in the real build).
-// devcomm-test.cc supplies v22902 and v22907 by compiling their sources; the
+// Binaries that need v22902, v22907 and v23204 compile their sources for real; the
 // rest only need to exist for getNcclVersionCompat's table to link.
 struct ncclDevCommCompat ncclDevCommCompat_v23000 = {};
 struct ncclDevCommCompat ncclDevCommCompat_v23100 = {};
@@ -148,6 +150,12 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // ---------------------------------------------------------------------------
 // Group state machine.
 // ---------------------------------------------------------------------------
+
+// group.cc's thread-local group state, which group.h's inline helpers read, for binaries without group.cc.
+#ifndef RCCL_DEV_RUNTIME_MICRO_FAKES_OMIT_GROUP_STATE
+thread_local int ncclGroupDepth = 0;
+thread_local ncclResult_t ncclGroupError = ncclSuccess;
+#endif
 
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
@@ -305,19 +313,36 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnect
 // stream-capture mode. The default succeeds; a test that needs GIN setup to fail
 // installs its own so the capture-mode restore can be observed.
 static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
-                                           struct ncclDevComm*, uint32_t) {
+                                           struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
+                                           struct ncclDevComm* devComm, uint32_t, struct ncclDevCommCompat const*) {
+  devComm->ginContextCount = 1;
+  devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
   return ncclSuccess;
 }
-std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*, struct ncclDevComm*, uint32_t)>
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*,
+                           struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
+                           struct ncclDevComm*, uint32_t, struct ncclDevCommCompat const*)>
     g_devrGinDevCommSetup = DefaultGinDevCommSetup;
 ASSERT_HOOK_MATCHES_PROD(g_devrGinDevCommSetup, ncclGinDevCommSetup);
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
-                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion) {
-  return g_devrGinDevCommSetup(comm, reqs, devComm, deviceCodeVersion);
+                                 struct ncclDevResourceRequirements* resReqs,
+                                 struct ncclGinBarrierReq const* barrierReqs, int nBarrierReqs,
+                                 struct ncclDevComm* devComm, uint32_t deviceCodeVersion,
+                                 struct ncclDevCommCompat const* devCompat) {
+  return g_devrGinDevCommSetup(comm, reqs, resReqs, barrierReqs, nBarrierReqs, devComm, deviceCodeVersion,
+                               devCompat);
 }
-ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
-void ncclGinDevCommClearFields(struct ncclDevComm*) {}
+
+static ncclResult_t DefaultGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevComm const*)> g_devrGinDevCommFree = DefaultGinDevCommFree;
+ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm) {
+  return g_devrGinDevCommFree(comm, devComm);
+}
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
+  devComm->ginContextCount = 0;
+  for (auto& handle : devComm->ginHandles) handle = nullptr;
+}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -414,8 +439,8 @@ ncclResult_t ncclDevrAllocAndPopulateSegmentWindows(struct ncclDevrState* devr, 
 // The segment cross-rank layout check and the GIN segment-info build, both
 // reached from symMemoryRegisterGin and both real in dev_runtime_segments.cc.
 // dev-runtime-test.cc compiles that source and routes these seams to it, so
-// the no-op defaults here only serve the other suites in this binary, which
-// never enable GIN and so never reach either call.
+// the no-op defaults here only serve the other binaries linking this file,
+// which never enable GIN and so never reach either call.
 static ncclResult_t DefaultVerifySegmentLayouts(struct ncclDevrMemory*, struct ncclComm*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclDevrMemory*, struct ncclComm*)> g_devrVerifySegmentLayouts =
     DefaultVerifySegmentLayouts;
@@ -447,20 +472,19 @@ ncclResult_t ncclDevrCheckRegistrationSupport(void* userPtr, size_t userSize, st
 // ---------------------------------------------------------------------------
 // CFT logical endpoints (real in cft_dev_runtime.cc).
 // ---------------------------------------------------------------------------
-// Sizes first: ncclDevrInitOnce stores both into devrState, so the defaults
-// mirror the real pair's answer on a GPU without CFT support (gpuCftSupport
-// below 13030), which is what a zero-initialised test comm reports.
-static int DefaultComputeCftSize(struct ncclComm* comm) {
-  return (comm != nullptr && comm->devrState.bigSize != 0) ? comm->devrState.cftSize : 1;
+// Sizes first: ncclDevrInitOnce stores both into devrState, so the default
+// mirrors the real computeCftSizes on ROCm (gpuCftSupport == 0, no logical endpoints):
+// both sizes are 1, matching DevRuntimeTestsStubs.cc and cft_dev_runtime.cc:128-136.
+static ncclResult_t DefaultComputeCftSizes(struct ncclComm* /*comm*/, int* cftSize, int* cftMcSize) {
+  *cftSize = 1;
+  *cftMcSize = 1;
+  return ncclSuccess;
 }
-std::function<int(struct ncclComm*)> g_devrComputeCftSize = DefaultComputeCftSize;
-int computeCftSize(struct ncclComm* comm) { return g_devrComputeCftSize(comm); }
-
-static int DefaultComputeCftMcSize(struct ncclComm* comm) {
-  return (comm != nullptr && comm->devrState.bigSize != 0) ? comm->devrState.cftMcSize : 1;
+std::function<ncclResult_t(struct ncclComm*, int*, int*)> g_devrComputeCftSizes = DefaultComputeCftSizes;
+ncclResult_t computeCftSizes(struct ncclComm* comm, int* cftSize, int* cftMcSize) {
+  return g_devrComputeCftSizes(comm, cftSize, cftMcSize);
 }
-std::function<int(struct ncclComm*)> g_devrComputeCftMcSize = DefaultComputeCftMcSize;
-int computeCftMcSize(struct ncclComm* comm) { return g_devrComputeCftMcSize(comm); }
+ASSERT_HOOK_MATCHES_PROD(g_devrComputeCftSizes, computeCftSizes);
 
 // The bind/obtain half. Every call site is guarded by a live logical-endpoint
 // id or an explicit CFT request, and a zero-initialised comm has neither, so
@@ -502,20 +526,11 @@ extern "C" ncclResult_t ncclCftBarrierCreateRequirement(ncclTeam_t, int, ncclCft
   return ncclSuccess;
 }
 
-// ncclRmaProxyEnabled is no longer faked here: the real predicate is linked into
-// this binary, so a fake would be a duplicate. Tests drive its terms instead of
+// ncclRmaProxyEnabled is not faked here: the binaries that reach it link the real
+// predicate (rma.cc), so a fake would be a duplicate. Tests drive its terms instead of
 // its answer.
 
 #undef ASSERT_HOOK_MATCHES_PROD
-
-// The enqueue-rearch job path: collective_stubs.cc defaults
-// ncclParamEnqueueRearchEnable to 0, so call sites take the in-group task
-// branch. DevCommCreateFailureTest turns it on only for requests rejected
-// before this enqueue, so nothing here ever owns a job.
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
-                                 ncclComm_t) {
-  return ncclSuccess;
-}
 
 // ---------------------------------------------------------------------------
 // Params are not cached here (see fakes/dev_runtime_micro_fakes.h), so the default just
@@ -542,6 +557,8 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
+  g_devrGinDevCommFree                          = DefaultGinDevCommFree;
+  ResetMgmtTaskEnqFakes();
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;
@@ -557,8 +574,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrIntruAddressMapInsert                   = DefaultIntruAddressMapInsert;
   g_devrNcclCommWindowDeregister                = DefaultCommWindowDeregister;
   ResetNcclDeviceCoreFakes();
-  g_devrComputeCftSize                          = DefaultComputeCftSize;
-  g_devrComputeCftMcSize                        = DefaultComputeCftMcSize;
+  g_devrComputeCftSizes                         = DefaultComputeCftSizes;
   g_devrNcclCommRegister                        = DefaultCommRegister;
   g_devrNcclCommDeregister                      = DefaultCommDeregister;
   g_devrRmaProxyDeregister                      = DefaultRmaProxyDeregister;

@@ -25,12 +25,12 @@
 
 set -e
 
-src_path=$(dirname "$(realpath $0)")/../../
-if [[ "${ASAN}" == true ]]; then
-    export HSA_XNACK=1
-fi
+script_dir=$(dirname "$(realpath $0)")
+src_path=${script_dir}/../../
+source "${script_dir}/_common.sh"
 
 cmake \
+    "${generator_args[@]}" \
     -DBUILD_CODE_COVERAGE=${CODE_COV:-OFF} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-Release} \
     -DCMAKE_INSTALL_PREFIX=${INSTALL_PREFIX:-~/rocshmem} \
@@ -51,4 +51,4 @@ cmake \
     -DUSE_HDP_FLUSH_HOST_SIDE=OFF \
     -DBUILD_TESTS_ONLY=ON \
     $* $src_path
-cmake --build . --parallel 8
+cmake --build . --parallel ${BUILD_JOBS:-$build_jobs}

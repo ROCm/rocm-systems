@@ -1,0 +1,1 @@
+* On gfx1250 SPX, the AllToAll DDA ceilings are raised: DDA LL up to 128 KiB total (was 64 KiB), DDA LL128 above it up to 16 MiB (was 8 MiB), and the DDA fabric VMM push above that up to 256 MiB (was off). Larger messages take per-peer Send/Recv as before. `RCCL_DDA_LL_THRESHOLD`, `RCCL_DDA_LL128_THRESHOLD` and `RCCL_DDA_THRESHOLD` still override the table.

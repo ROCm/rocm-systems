@@ -12,7 +12,9 @@
 /// mixed SGPR-pair/VGPR-pair case covers the legal scalar source encoding.
 /// In-process inactive lanes must keep the sentinel.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -51,14 +53,14 @@ constexpr uint32_t kMixedVgprLo = 0x55555555u;
 constexpr uint32_t kMixedVgprHi = 0x66666666u;
 
 struct ArchCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
 };
 
 constexpr std::array<ArchCase, 3> kArchCases{{
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2"},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3"},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4"},
+    {rocjitsu::IsaFamily::Cdna2, "cdna2"},
+    {rocjitsu::IsaFamily::Cdna3, "cdna3"},
+    {rocjitsu::IsaFamily::Cdna4, "cdna4"},
 }};
 
 constexpr void vop3p_encode(uint32_t op, uint32_t vdst, uint32_t src0, uint32_t src1,
@@ -102,8 +104,10 @@ struct Fixture {
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create(std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
-                                         &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, std::string("cu_vop3p_mov_b32_") + arch.name, cfg,
+                                            &gpu_mem, &l2);
+    if (!cu)
+      return;
     decoder = Decoder::create(arch.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -150,11 +154,11 @@ struct Fixture {
   std::array<uint64_t, WF_SIZE> run_simd_probe(Instruction *inst, const ArchCase &arch,
                                                uint32_t rot, uint64_t exec, uint32_t op_sel) {
     switch (arch.arch) {
-    case ROCJITSU_CODE_ARCH_CDNA2:
+    case rocjitsu::IsaFamily::Cdna2:
       return run_simd_probe_impl<cdna2::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
-    case ROCJITSU_CODE_ARCH_CDNA3:
+    case rocjitsu::IsaFamily::Cdna3:
       return run_simd_probe_impl<cdna3::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
-    case ROCJITSU_CODE_ARCH_CDNA4:
+    case rocjitsu::IsaFamily::Cdna4:
       return run_simd_probe_impl<cdna4::VPkMovB32Vop3p>(inst, arch, rot, exec, op_sel);
     default:
       ADD_FAILURE() << "unsupported arch case " << arch.name;
@@ -209,6 +213,8 @@ void check(uint64_t exec) {
                       uint32_t op_sel) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
@@ -318,9 +324,12 @@ TEST(Vop3pMovB32SimdCorrectness, MixedSgprPairAndVgprPairGolden) {
        uint64_t{kMixedVgprLo} | (uint64_t{kMixedSgprHi} << 32)},
   }};
 
-  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case, bool force_scalar) {
+  auto run_mode = [&](const ArchCase &arch, const MixedSourceCase &test_case,
+                      bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(arch);
+    if (::testing::Test::HasFatalFailure())
+      return {};
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[2] = {0u, 0u};
