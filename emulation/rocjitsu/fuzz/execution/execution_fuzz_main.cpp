@@ -3,6 +3,8 @@
 
 #include "execution_fuzz_core.h"
 
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 
 #include <algorithm>
@@ -26,7 +28,13 @@
 #include <vector>
 
 #ifdef __AFL_HAVE_MANUAL_CONTROL
+#include <unistd.h>
+
 __AFL_FUZZ_INIT();
+#ifdef __AFL_COVERAGE
+// Request a full-size fallback map for instrumented teardown after __AFL_LOOP.
+__AFL_COVERAGE();
+#endif
 #endif
 
 namespace {
@@ -112,10 +120,12 @@ void usage(std::ostream &stream) {
             "           [--issuers auto|N] [--async auto|on|off] [--async-helpers N]\n";
 }
 
-int run_afl(std::optional<FuzzTarget> target,
-            const std::shared_ptr<rocjitsu::amdgpu::matrix_coexecution::ExecutionResources>
-                &async_resources,
-            AsyncMode async_mode, std::optional<unsigned> issuers) {
+} // namespace
+
+static int run_afl(std::optional<FuzzTarget> target,
+                   const std::shared_ptr<rocjitsu::amdgpu::matrix_coexecution::ExecutionResources>
+                       &async_resources,
+                   AsyncMode async_mode, std::optional<unsigned> issuers) {
 #ifdef __AFL_HAVE_MANUAL_CONTROL
   __AFL_INIT();
   unsigned char *buffer = __AFL_FUZZ_TESTCASE_BUF;
@@ -142,7 +152,6 @@ int run_afl(std::optional<FuzzTarget> target,
   return 2;
 #endif
 }
-} // namespace
 
 int main(int argc, char **argv) {
   bool fuzz_loop_running = false;
@@ -358,7 +367,16 @@ int main(int argc, char **argv) {
               << ",\"threads\":" << reported_threads << ",\"issuers\":\""
               << (issuers ? std::to_string(*issuers) : "auto") << "\"" << ",\"async\":\""
               << reported_async << "\""
-              << ",\"async_helpers\":" << (async_resources ? async_helpers : 0) << "}\n";
+              << ",\"async_helpers\":" << (async_resources ? async_helpers : 0);
+    if (!input.empty() && total.rounds != 0) {
+      const auto semantics = static_cast<rocjitsu::amdgpu::ArithmeticSemantics>(
+          (total.arithmetic_flags & RJ_ARITH_SEMANTICS_MASK) >> 16);
+      std::cout << ",\"arithmetic_semantics\":\""
+                << rocjitsu::amdgpu::arithmetic_semantics_name(semantics)
+                << "\",\"arithmetic_cpu\":\"" << rj_arith_cpu_name(total.arithmetic_flags)
+                << "\",\"force_scalar\":" << (total.force_scalar ? "true" : "false");
+    }
+    std::cout << "}\n";
     return 0;
   } catch (const std::invalid_argument &error) {
     if (fuzz_loop_running)

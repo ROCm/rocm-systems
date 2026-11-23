@@ -148,6 +148,14 @@ bool deallocates_vgprs(const Instruction &instruction, rocjitsu::IsaFamily arch)
          (message->encoding_value() & 0xffu) == kDeallocVgprsMessage;
 }
 
+bool uses_dynamic_vgprs(rocjitsu::IsaFamily arch, const amdhsa::kernel_descriptor_t &descriptor) {
+  if (arch == rocjitsu::IsaFamily::Rdna4)
+    return (descriptor.compute_pgm_rsrc2 & amdhsa::COMPUTE_PGM_RSRC2_GFX120_ENABLE_DYNAMIC_VGPR) !=
+           0;
+  return arch == rocjitsu::IsaFamily::Cdna5 &&
+         (descriptor.compute_pgm_rsrc3 & amdhsa::COMPUTE_PGM_RSRC3_GFX125_ENABLE_DYNAMIC_VGPR) != 0;
+}
+
 enum class CallableState { GprIndexing, Vskip, UnavailableStorage };
 
 enum class StateWrite { Unchanged, Safe, Unsafe };
@@ -219,31 +227,65 @@ callable_state_write(const Instruction &inst, std::span<const uint8_t> text,
   return StateWrite::Unchanged;
 }
 
-// A resolved straight-line helper can preserve the required state without an
-// ABI assumption. More complex or unresolved callees remain unknown here.
-bool callee_preserves_state(const BasicBlock::CallEdge &edge, std::span<const uint8_t> text,
-                            rocjitsu::IsaFamily arch, CallableState state) {
-  if (edge.callee == nullptr || !edge.callee->successors().empty() ||
-      !edge.callee->predecessors().empty())
-    return false;
-  const Instruction *ret = edge.callee->terminator();
-  if (ret == nullptr || (ret->mnemonic() != "s_setpc_b64" && ret->mnemonic() != "s_set_pc_i64"))
-    return false;
-  const Operand *link = ret->src_operand(0);
-  if (link == nullptr || link->encoding_value() != edge.return_sreg)
-    return false;
-  for (const Instruction &inst : edge.callee->instructions()) {
-    if (&inst == ret)
-      break;
-    if (inst.mnemonic().starts_with("s_movrel") ||
-        callable_state_write(inst, text, arch, state) != StateWrite::Unchanged)
-      return false;
-    const InstDefUse effects(inst, 64);
-    if (effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
-        effects.defs.contains({RegClass::SGPR, static_cast<uint16_t>(edge.return_sreg + 1), 1}))
-      return false;
+using HelperEntryLinks = std::unordered_map<uint64_t, std::optional<uint16_t>>;
+using CalleeReturns = std::unordered_map<const BasicBlock *, std::vector<const Instruction *>>;
+
+bool preserves_helper_link(const Instruction &inst, RegisterRef link, uint32_t ordinary_bound) {
+  // A numeric SGPR in the special-register tail can also be defined through a
+  // named or implicit operand. A nop preserves either spelling of the link.
+  if (uint32_t{link.index} + link.width > ordinary_bound)
+    return inst.mnemonic() == "s_nop";
+  return !inst.mnemonic().starts_with("s_movrel") && !InstDefUse(inst, 64).defs.intersects(link);
+}
+
+// A call supplies the link only at the helper entry. Visit a join once all its
+// predecessors have been proven, so external branches and cycles fail closed.
+std::vector<const Instruction *>
+preserving_callee_returns(const BasicBlock &callee, uint16_t return_sreg, uint32_t ordinary_bound,
+                          const HelperEntryLinks &entry_links, std::span<const uint8_t> text,
+                          rocjitsu::IsaFamily arch, CallableState state) {
+  if (!callee.predecessors().empty())
+    return {};
+  const RegisterRef link = {RegClass::SGPR, return_sreg, 2};
+  std::vector<const Instruction *> returns;
+  std::vector<const BasicBlock *> ready = {&callee};
+  std::unordered_map<const BasicBlock *, size_t> pending;
+  while (!ready.empty()) {
+    const BasicBlock *block = ready.back();
+    ready.pop_back();
+    const Instruction *term = block->terminator();
+    if (term == nullptr || !block->call_edges().empty())
+      return {};
+    const bool is_return = term->mnemonic() == "s_setpc_b64" || term->mnemonic() == "s_set_pc_i64";
+    for (const Instruction &inst : block->instructions()) {
+      // A descriptor or another callee entry can reach this instruction with
+      // a different return link, bypassing the ordinary predecessor list.
+      if (inst.src_loc() != callee.start_offset() && entry_links.contains(inst.src_loc()))
+        return {};
+      if (inst.mnemonic().starts_with("s_rfe") ||
+          callable_state_write(inst, text, arch, state) != StateWrite::Unchanged ||
+          ((!is_return || &inst != term) && !preserves_helper_link(inst, link, ordinary_bound)))
+        return {};
+    }
+    if (is_return) {
+      const Operand *source = term->src_operand(0);
+      if (!block->successors().empty() || source == nullptr || source->to_register_ref() != link)
+        return {};
+      returns.push_back(term);
+      continue;
+    }
+    if (block->successor_issue() != BasicBlock::SuccessorIssue::None || block->successors().empty())
+      return {};
+    for (const BasicBlock *successor : block->successors()) {
+      if (++pending[successor] == successor->predecessors().size()) {
+        pending.erase(successor);
+        ready.push_back(successor);
+      }
+    }
   }
-  return true;
+  if (!pending.empty())
+    return {};
+  return returns;
 }
 
 // Recognize a contiguous negative 64-bit PC adjustment with its carry intact.
@@ -291,25 +333,35 @@ std::optional<uint64_t> adjusted_pc_entry_target(const std::array<const Instruct
 }
 
 std::optional<uint64_t> callee_reentry_target(const BasicBlock::CallEdge &edge,
-                                              std::span<const KernelDescriptorInfo> kernels) {
+                                              std::span<const KernelDescriptorInfo> kernels,
+                                              rocjitsu::IsaFamily arch,
+                                              const HelperEntryLinks *entry_links = nullptr) {
   if (edge.callee == nullptr || edge.continuation == nullptr ||
       !edge.callee->successors().empty() || !edge.callee->predecessors().empty())
     return std::nullopt;
   std::array<const Instruction *, 3> tail = {};
-  for (const Instruction &inst : edge.callee->instructions())
+  for (const Instruction &inst : edge.callee->instructions()) {
+    if (entry_links != nullptr) {
+      const HelperEntryLinks::const_iterator entry = entry_links->find(inst.src_loc());
+      if (entry != entry_links->end() &&
+          (inst.src_loc() != edge.callee->start_offset() || entry->second != edge.return_sreg))
+        return std::nullopt;
+    }
     tail = {tail[1], tail[2], &inst};
+  }
   const std::optional<uint64_t> target =
       adjusted_pc_entry_target(tail, edge.continuation->start_offset(), edge.return_sreg, kernels);
   if (!target)
     return std::nullopt;
-  const uint16_t high = edge.return_sreg + 1;
+  const uint32_t sgpr_count = AmdGpuCodeObject::min_kernel_sgpr_count(arch, kernels).value_or(0);
+  const RegisterRef link = {RegClass::SGPR, edge.return_sreg, 2};
+  if (uint32_t{link.index} + link.width > sgpr_count)
+    return std::nullopt;
+  const uint32_t ordinary_bound = ordinary_sgpr_bound(arch, sgpr_count);
   for (const Instruction &inst : edge.callee->instructions()) {
     if (&inst == tail[0])
       break;
-    const InstDefUse effects(inst, 64);
-    if (inst.mnemonic().starts_with("s_movrel") ||
-        effects.defs.contains({RegClass::SGPR, edge.return_sreg, 1}) ||
-        effects.defs.contains({RegClass::SGPR, high, 1}))
+    if (!preserves_helper_link(inst, link, ordinary_bound))
       return std::nullopt;
   }
   return target;
@@ -339,7 +391,9 @@ std::optional<uint64_t> static_pc_reentry_target(const BasicBlock &block,
 bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<BasicBlock>> blocks,
                                                 std::span<const KernelDescriptorInfo> kernels,
                                                 std::span<const uint8_t> text,
-                                                rocjitsu::IsaFamily arch, CallableState state) {
+                                                rocjitsu::IsaFamily arch, CallableState state,
+                                                const CalleeReturns &preserving_returns,
+                                                const HelperEntryLinks &entry_links) {
   std::unordered_set<const Instruction *> known_returns;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
@@ -353,15 +407,16 @@ bool callable_state_is_preserved_in_closed_text(std::span<const std::unique_ptr<
       }
     }
     for (const BasicBlock::CallEdge &edge : block->call_edges()) {
-      if (edge.callee == nullptr ||
-          std::ranges::any_of(kernels,
-                              [&](const KernelDescriptorInfo &kernel) {
-                                return kernel.entry_text_offset == edge.callee->start_offset();
-                              }) ||
-          (!callee_preserves_state(edge, text, arch, state) &&
-           !callee_reentry_target(edge, kernels)))
+      if (edge.callee == nullptr)
         return false;
-      known_returns.insert(edge.callee->terminator());
+      const CalleeReturns::const_iterator found = preserving_returns.find(edge.callee);
+      if (found != preserving_returns.end()) {
+        known_returns.insert(found->second.begin(), found->second.end());
+      } else if (callee_reentry_target(edge, kernels, arch, &entry_links)) {
+        known_returns.insert(edge.callee->terminator());
+      } else {
+        return false;
+      }
     }
   }
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1480,11 +1535,13 @@ private:
 bool mode_state_is_preserved_in_closed_text(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                                             std::span<const KernelDescriptorInfo> kernels,
                                             std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
-                                            CallableState state, uint64_t entry_text_size) {
+                                            CallableState state, uint64_t entry_text_size,
+                                            const HelperEntryLinks &entry_links) {
   if (!arch_is_cdna_4_or_lower(arch) ||
       (state != CallableState::GprIndexing && state != CallableState::Vskip))
     return false;
   std::unordered_set<const BasicBlock *> proven_reentries;
+  std::unordered_map<const BasicBlock *, bool> bounded_callees;
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
       const bool enables = state == CallableState::GprIndexing
@@ -1503,10 +1560,17 @@ bool mode_state_is_preserved_in_closed_text(const std::vector<std::unique_ptr<Ba
     if (static_pc_reentry_target(*block, kernels))
       proven_reentries.insert(block.get());
     for (const BasicBlock::CallEdge &edge : block->call_edges()) {
-      if (callee_reentry_target(edge, kernels))
-        proven_reentries.insert(edge.callee);
+      if (edge.callee == nullptr)
+        continue;
+      bool &bounded = bounded_callees.try_emplace(edge.callee, true).first->second;
+      bounded = bounded && callee_reentry_target(edge, kernels, arch, &entry_links).has_value();
     }
   }
+  // A computed return can depend on the caller's continuation. Every call
+  // into the block must establish a bounded destination.
+  for (const auto &[callee, bounded] : bounded_callees)
+    if (bounded)
+      proven_reentries.insert(callee);
   const BlockOffsetIndex offsets = build_block_offset_index(blocks);
   const BlockPositionIndex positions = build_block_position_index(blocks);
   for (const KernelDescriptorInfo &kernel : kernels) {
@@ -1784,8 +1848,15 @@ public:
                         uint64_t source_text_size) {
     const uint64_t entry_text_size = std::min<uint64_t>(text.size(), source_text_size);
     std::unordered_set<uint64_t> entries;
+    // A return is bounded only if every entry into its helper supplies the
+    // same link. Hardware dispatch and conflicting calls supply no such proof.
+    HelperEntryLinks entry_links;
+    std::unordered_set<uint64_t> dynamic_entries;
     for (const KernelDescriptorInfo &kernel : kernels) {
       entries.insert(kernel.entry_text_offset);
+      entry_links.emplace(kernel.entry_text_offset, std::nullopt);
+      if (uses_dynamic_vgprs(arch, kernel.descriptor))
+        dynamic_entries.insert(kernel.entry_text_offset);
       if (!has_kernarg_preload_firmware_entry(kernel, arch))
         continue;
       const std::optional<uint64_t> firmware =
@@ -1798,12 +1869,23 @@ public:
         continue;
       }
       entries.insert(*firmware);
+      entry_links.emplace(*firmware, std::nullopt);
     }
-    std::unordered_set<const BasicBlock *> reachable;
-    std::vector<const BasicBlock *> work;
+    std::vector<const BasicBlock *> dynamic_roots;
+    std::vector<const BasicBlock *> static_roots;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
-      if (entries.contains(block->start_offset()))
-        work.push_back(block.get());
+      if (dynamic_entries.contains(block->start_offset()))
+        dynamic_roots.push_back(block.get());
+      else if (entries.contains(block->start_offset()))
+        static_roots.push_back(block.get());
+      for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+        if (edge.callee == nullptr)
+          continue;
+        const auto [entry, inserted] =
+            entry_links.try_emplace(edge.callee->start_offset(), edge.return_sreg);
+        if (!inserted && entry->second != edge.return_sreg)
+          entry->second.reset();
+      }
       for (const Instruction &inst : block->instructions()) {
         states_.try_emplace(&inst);
         has_mfma_producer_ |= inst.is_mfma();
@@ -1813,20 +1895,40 @@ public:
             arch == rocjitsu::IsaFamily::Cdna5 && requires_cdna5_valu_follower(inst);
       }
     }
-    while (!work.empty()) {
-      const BasicBlock *block = work.back();
-      work.pop_back();
-      if (!reachable.insert(block).second)
-        continue;
-      work.insert(work.end(), block->successors().begin(), block->successors().end());
-      for (const BasicBlock::CallEdge &edge : block->call_edges())
-        if (edge.callee != nullptr)
-          work.push_back(edge.callee);
+    std::unordered_set<const BasicBlock *> reachable;
+    const auto visit = [&](std::vector<const BasicBlock *> &work) {
+      while (!work.empty()) {
+        const BasicBlock *block = work.back();
+        work.pop_back();
+        if (!reachable.insert(block).second)
+          continue;
+        work.insert(work.end(), block->successors().begin(), block->successors().end());
+        for (const BasicBlock::CallEdge &edge : block->call_edges())
+          if (edge.callee != nullptr)
+            work.push_back(edge.callee);
+      }
+    };
+    // A dynamic wave's initial allocation can be smaller than the descriptor
+    // count. Growing that count does not allocate the envelope's save VGPRs.
+    // Walk dynamic roots first so a shared block inherits their restriction.
+    const uint8_t storage = state_bit(CallableState::UnavailableStorage);
+    const PointState dynamic_storage = {.before = storage, .after = storage};
+    bool unknown_dynamic_target = dynamic_roots.size() != dynamic_entries.size();
+    visit(dynamic_roots);
+    for (const BasicBlock *block : reachable) {
+      unknown_dynamic_target |= block->successor_issue() != BasicBlock::SuccessorIssue::None;
+      for (const Instruction &inst : block->instructions())
+        states_.at(&inst) = dynamic_storage;
     }
+    if (unknown_dynamic_target)
+      for (auto &[inst, point] : states_)
+        point = dynamic_storage;
+    visit(static_roots);
     for (const CallableState state :
          {CallableState::GprIndexing, CallableState::Vskip, CallableState::UnavailableStorage}) {
       if (has_callable_state(arch, state))
-        analyze_state(blocks, kernels, text, arch, state, entries, reachable, entry_text_size);
+        analyze_state(blocks, kernels, text, arch, state, entries, reachable, entry_links,
+                      entry_text_size);
     }
   }
 
@@ -1865,7 +1967,19 @@ private:
                      rocjitsu::IsaFamily arch, CallableState state,
                      const std::unordered_set<uint64_t> &entries,
                      const std::unordered_set<const BasicBlock *> &reachable,
-                     uint64_t entry_text_size) {
+                     const HelperEntryLinks &entry_links, uint64_t entry_text_size) {
+    CalleeReturns preserving_returns;
+    const uint32_t sgpr_count = AmdGpuCodeObject::min_kernel_sgpr_count(arch, kernels).value_or(0);
+    const uint32_t ordinary_bound = ordinary_sgpr_bound(arch, sgpr_count);
+    for (const std::unique_ptr<BasicBlock> &block : blocks) {
+      const HelperEntryLinks::const_iterator entry = entry_links.find(block->start_offset());
+      if (entry == entry_links.end() || !entry->second || uint32_t{*entry->second} + 2 > sgpr_count)
+        continue;
+      std::vector<const Instruction *> returns = preserving_callee_returns(
+          *block, *entry->second, ordinary_bound, entry_links, text, arch, state);
+      if (!returns.empty())
+        preserving_returns.emplace(block.get(), std::move(returns));
+    }
     std::unordered_set<const Instruction *> preserving_calls;
     std::unordered_set<const Instruction *> known_returns;
     for (const std::unique_ptr<BasicBlock> &block : blocks) {
@@ -1873,12 +1987,14 @@ private:
           block->call_edges().empty())
         continue;
       if (std::ranges::all_of(block->call_edges(), [&](const BasicBlock::CallEdge &edge) {
-            return callee_preserves_state(edge, text, arch, state);
+            return preserving_returns.contains(edge.callee);
           })) {
         preserving_calls.insert(block->terminator());
         if (reachable.contains(block.get()))
-          for (const BasicBlock::CallEdge &edge : block->call_edges())
-            known_returns.insert(edge.callee->terminator());
+          for (const BasicBlock::CallEdge &edge : block->call_edges()) {
+            const std::vector<const Instruction *> &returns = preserving_returns.at(edge.callee);
+            known_returns.insert(returns.begin(), returns.end());
+          }
       }
     }
     // Unknown transfers can introduce incoming MODE/storage state at every
@@ -1895,14 +2011,11 @@ private:
       incomplete |=
           issue != BasicBlock::SuccessorIssue::None && !known_returns.contains(block->terminator());
     }
-    // The general proof models straight-line callees. Each MODE bit can also
-    // use the bounded return-link proof with its own writer scan. Storage and
-    // the stricter post-anchor completeness checks retain their existing gates.
     const bool closed_state =
-        incomplete &&
-        (callable_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state) ||
-         mode_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state,
-                                                entry_text_size));
+        incomplete && (callable_state_is_preserved_in_closed_text(
+                           blocks, kernels, text, arch, state, preserving_returns, entry_links) ||
+                       mode_state_is_preserved_in_closed_text(blocks, kernels, text, arch, state,
+                                                              entry_text_size, entry_links));
 
     // Each bit denotes a possible incoming state; zero has no proven source.
     // Constant writes seed the worklist even inside cycles. Ordinary edges join
@@ -2307,7 +2420,7 @@ bool Instrumentor::ensure_liveness_built(uint8_t wave_size,
     if (!add_entry_edge(block, static_pc_reentry_target(*block, kernels)))
       return false;
     for (const BasicBlock::CallEdge &call : block->call_edges())
-      if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels)))
+      if (!add_entry_edge(call.callee, callee_reentry_target(call, kernels, arch_)))
         return false;
   }
 
@@ -3029,10 +3142,18 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                              "per code object");
         continue;
       }
-      bool unsafe_state = false;
-      // Dispatch enters a separate stub once. Guest backedges to the original
-      // entry do not revisit this callback and cannot change its initial state.
-      if (pt.kind != InstrumentationKind::KernelEntry) {
+      if (pt.kind == InstrumentationKind::KernelEntry) {
+        // Only dispatch executes the entry stub. Guest backedges to the original
+        // entry do not change the storage available to this callback.
+        if (out.kernels.size() != 1 || pt.anchor_offset != out.kernels.front().entry_text_offset) {
+          out.errors.emplace_back("KernelEntry must name the sole kernel's descriptor entry");
+          continue;
+        }
+        if (uses_dynamic_vgprs(arch_, out.kernels.front().descriptor)) {
+          out.errors.emplace_back("KernelEntry requires a static VGPR allocation at dispatch");
+          continue;
+        }
+      } else {
         const Instruction *state_anchor = find_instruction_at_offset(pt.anchor_offset);
         if (state_anchor == nullptr) {
           out.errors.emplace_back("effective anchor is unavailable for callable-state analysis");
@@ -3064,6 +3185,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                                   "CDNA5 code object containing packed permutes");
           continue;
         }
+        bool unsafe_state = false;
         for (const CallableState state : {CallableState::GprIndexing, CallableState::Vskip,
                                           CallableState::UnavailableStorage}) {
           if (callable_state_analysis_->may_be_unsafe(
@@ -3079,9 +3201,9 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
             break;
           }
         }
+        if (unsafe_state)
+          continue;
       }
-      if (unsafe_state)
-        continue;
       auto index = resolve_probe_index(pt, perr);
       if (!index) {
         out.errors.push_back(std::move(perr));
@@ -3355,13 +3477,6 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   std::optional<uint16_t> entry_storage_base;
   const bool has_entry_callback = std::ranges::any_of(
       sites, [](const auto &site) { return site.kind == InstrumentationKind::KernelEntry; });
-  for (const ResolvedInstrumentationSite &site : sites) {
-    if (site.kind == InstrumentationKind::KernelEntry &&
-        (kernels.size() != 1 || site.anchor_offset != kernels.front().entry_text_offset)) {
-      result.errors.emplace_back("KernelEntry must name the sole kernel's descriptor entry");
-      return result;
-    }
-  }
   if (probes_read_entry_storage(resolved.probes) || has_entry_callback) {
     std::string err;
     entry_patch = plan_entry_prologue(kernels, kernel_sgpr_count, liveness_scope, resolved.probes,

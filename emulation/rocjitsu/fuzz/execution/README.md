@@ -8,24 +8,37 @@ zero-valued GWS INIT, so arbitrary streams begin from defined GWS state.
 
 An input has three parts:
 
-- Byte zero selects `gfx908`, `gfx90a`, `gfx942`, `gfx950`, `gfx1010`,
-  `gfx1030`, `gfx1100`, `gfx1150`, `gfx1200`, `gfx1201`, `gfx1250`, or
-  `gfx1251`. Their selector values are 0 through 11. Each selects a concrete
-  registry binding. Other values do no work.
+- The low nibble of byte zero selects `gfx908`, `gfx90a`, `gfx942`, `gfx950`,
+  `gfx1010`, `gfx1030`, `gfx1100`, `gfx1150`, `gfx1200`, `gfx1201`, `gfx1250`,
+  or `gfx1251` using values 0 through 11. The high nibble selects arithmetic
+  semantics using values 0 through 4 in this order: `compatibility`, `loose`,
+  `bit_exact_empirical_allow_loose`, `bit_exact_empirical_no_fp_status`,
+  `bit_exact_empirical`. Unassigned values do no work in automatic target mode.
 - Byte one selects asynchronous execution, concurrent issuers, and full EXEC.
   Bit `0x10` enables runtime memory-wait diagnostics, including XCNT on CDNA5.
   Bit `0x20` selects the cache-backed memory path for the same bounded mapping.
-  These two bits are excluded from the seed for initial register and memory
-  contents, so toggling them on replay preserves the starting guest state.
+  Bits 6 and 7 select the host backend: 0 uses the best available CPU tier,
+  1 forces scalar execution, 2 caps rj-arith at x86-64-v3, and 3 caps it at
+  x86-64-v4. CPU and OS detection and the compiled backend set determine the
+  effective tier. Legacy SIMD uses the build's native vector width unless
+  scalar execution is requested or `RJ_FORCE_SCALAR` is set.
+  The backend selectors, wait checking, and cache routing can be changed on
+  replay while preserving the initial register and memory state.
   Execution can diverge once the memory paths see different cache state.
   For example, a scalar load on the cache-backed path can read an older
   cached value after a FLAT store to the same address.
 - The remaining bytes are the instruction stream.
 
+A one-byte input uses the whole byte as a target selector and runs with the
+default backend and arithmetic semantics.
+
 `--target NAME`, `--async auto|on|off`, and `--issuers auto|N` override those
 header fields during focused replay without changing the saved input. Pin a
-CDNA5 target to generate the WMMA prefixes. These inputs request full EXEC so
-an async override preserves their guest state.
+CDNA5 target to generate the WMMA prefixes. These inputs use the semantics
+supported by the prefixed instructions and request full EXEC so an async
+override preserves their guest state. The replay JSON reports the
+effective arithmetic semantics and CPU tier and whether scalar execution was
+forced. Replay on the same build and CPU to reproduce that backend.
 
 `--random` mixes arbitrary bytes, streams assembled from generated target
 encodings, and bounded generated kernels. The kernel generator independently
@@ -36,8 +49,9 @@ memory operation and its target-specific waits form a single branchable unit.
 Generated kernels enable wait checking, which reports warnings to stderr.
 In streams assembled from target encodings, half of the single-bit mutations
 are biased toward the first 32 bytes after any protected WMMA prefix. All input
-families sample both memory paths. Inputs contain the encoded instructions for
-replay and mutation.
+families sample both memory paths, arithmetic semantics, and CPU backends.
+Inputs contain the encoded instructions and backend selectors for replay
+and mutation.
 
 To run the mix with one issuer and no matrix helpers:
 

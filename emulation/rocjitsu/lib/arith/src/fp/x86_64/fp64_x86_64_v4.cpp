@@ -215,8 +215,8 @@ __m512d nan_priority(Fp64 op, __m512d value, __m512d x, __m512d y, __m512d z, bo
 
 // Evaluate all lanes into result. NanPriority applies nan_priority; otherwise host NaNs are kept,
 // and the return value tells whether any lane produced a NaN.
-template <bool NanPriority>
-bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_t *const *a,
+template <Fp64 op, bool NanPriority>
+bool evaluate(uint64_t flags, uint32_t instruction_flags, const uint32_t *const *a,
               const uint32_t *const *b, const uint32_t *const *c, uint32_t (&result)[2][32],
               bool quiet_snan, bool cdna) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
@@ -274,16 +274,19 @@ bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_
   return nan != 0;
 }
 
-} // namespace
-
-void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                    uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                    const uint32_t *const *c, bool quiet_snan, bool cdna) {
+template <Fp64 op>
+void run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
+         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+         bool quiet_snan, bool cdna) {
   uint32_t result[2][32];
   // A NaN source or an invalid operation always yields a NaN. Such results are rare, so this
   // re-evaluates with NaN priority only when the host produced one.
-  if (evaluate<false>(op, flags, instruction_flags, a, b, c, result, quiet_snan, cdna)) {
-    evaluate<true>(op, flags, instruction_flags, a, b, c, result, quiet_snan, cdna);
+  if constexpr (op == Fp64::Add || op == Fp64::Mul || op == Fp64::Fma) {
+    if (evaluate<op, false>(flags, instruction_flags, a, b, c, result, quiet_snan, cdna)) {
+      evaluate<op, true>(flags, instruction_flags, a, b, c, result, quiet_snan, cdna);
+    }
+  } else {
+    evaluate<op, false>(flags, instruction_flags, a, b, c, result, quiet_snan, cdna);
   }
   // Delay writes until every input has been consumed, including cross-half aliases.
   for (int reg = 0; reg < 2; ++reg) {
@@ -292,6 +295,35 @@ void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instru
           d[reg] + lane, __mmask8(exec_mask >> lane),
           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[reg] + lane)));
     }
+  }
+}
+
+} // namespace
+
+void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                    uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                    const uint32_t *const *c, bool quiet_snan, bool cdna) {
+  switch (op) {
+  case Fp64::Add:
+    return run<Fp64::Add>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::Mul:
+    return run<Fp64::Mul>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::Fma:
+    return run<Fp64::Fma>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::Trunc:
+    return run<Fp64::Trunc>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::Ceil:
+    return run<Fp64::Ceil>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::Rndne:
+    return run<Fp64::Rndne>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::Floor:
+    return run<Fp64::Floor>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::Fract:
+    return run<Fp64::Fract>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  case Fp64::FrexpMant:
+    return run<Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, cdna);
+  default:
+    __builtin_unreachable();
   }
 }
 

@@ -35,16 +35,36 @@ void mixed_mad_x86_64_v4(MixedFma destination, uint64_t flags, uint32_t exec_mas
 void mixed_narrow_x86_64_v4(MixedFma destination, uint64_t flags, uint32_t exec_mask, uint32_t *d,
                             const uint32_t *source) {
   for (int lane = 0; lane < 32; lane += 16) {
-    auto low = mixed_mad_merge(
-        destination,
-        narrow_mixed_half(_mm256_loadu_ps(reinterpret_cast<const float *>(source + lane)), flags),
-        d + lane);
-    auto high = mixed_mad_merge(
-        destination,
-        narrow_mixed_half(_mm256_loadu_ps(reinterpret_cast<const float *>(source + lane + 8)),
-                          flags),
-        d + lane + 8);
-    auto result = _mm512_inserti64x4(_mm512_castsi256_si512(low), high, 1);
+    auto value = _mm512_castsi512_ps(_mm512_loadu_si512(source + lane));
+    __m256i half;
+    switch ((flags & RJ_ARITH_FP_ROUND_MASK) >> 24) {
+    case 1:
+      half = _mm512_cvtps_ph(value, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+      break;
+    case 2:
+      half = _mm512_cvtps_ph(value, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+      break;
+    case 3:
+      half = _mm512_cvtps_ph(value, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+      break;
+    default:
+      half = _mm512_cvtps_ph(value, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+      break;
+    }
+    auto result = _mm512_cvtepu16_epi32(half);
+    if (flags & RJ_ARITH_FP16_OVFL) {
+      auto finite = ~_mm512_fpclass_ps_mask(value, 0x99);
+      auto inf = _mm512_cmpeq_epi32_mask(_mm512_and_si512(result, _mm512_set1_epi32(0x7fff)),
+                                         _mm512_set1_epi32(0x7c00));
+      result = _mm512_mask_sub_epi32(result, __mmask16(finite & inf), result, _mm512_set1_epi32(1));
+    }
+    auto old = _mm512_loadu_si512(d + lane);
+    if (destination == MixedFma::High) {
+      result = _mm512_or_si512(_mm512_and_si512(old, _mm512_set1_epi32(0xffff)),
+                               _mm512_slli_epi32(result, 16));
+    } else if (destination == MixedFma::Low) {
+      result = _mm512_or_si512(_mm512_and_si512(old, _mm512_set1_epi32(-65536)), result);
+    }
     _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), result);
   }
 }
