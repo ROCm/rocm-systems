@@ -28,8 +28,10 @@
 #include <bit>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <optional>
 #include <span>
+#include <string_view>
 
 namespace rocjitsu {
 namespace amdgpu {
@@ -394,6 +396,17 @@ inline BufferAddressRegisters read_buffer_address_registers(RegisterAccess &regs
   return result;
 }
 
+/// @brief Whether linear CDNA buffer lanes take the one-pass in-range path.
+/// @details RJ_VMEM_LINEAR_BUFFER=0 keeps every lane on the per-lane check so
+/// the two can be compared inside one binary.
+inline bool linear_buffer_lanes_enabled() {
+  static const bool enabled = [] {
+    const char *value = std::getenv("RJ_VMEM_LINEAR_BUFFER");
+    return !value || std::string_view(value) != "0";
+  }();
+  return enabled;
+}
+
 /// @brief Address a linear GFX9/CDNA raw buffer access when every active lane is in range.
 /// @details Linear means no IDXEN, swizzle or ADD_TID, and not MI100's raw
 /// check (which excludes SOFFSET). Each lane's byte offset is the 32-bit
@@ -528,12 +541,13 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
       read_buffer_address_registers(regs, vgpr_base, inst.idxen, inst.offen, exec);
   // Linear raw CDNA buffers whose lanes are all in range need no per-lane
   // bounds bookkeeping; any clamped lane takes the exact loop below.
-  const bool linear = gfx9 && !inst.idxen && !gfx9_srd.swizzle_enable && !gfx9_srd.add_tid_enable &&
-                      arch != rocjitsu::IsaFamily::Cdna1 &&
-                      gfx9_linear_buffer_lanes(
-                          inst.offen ? address_regs.offsets : std::span<const uint32_t>{}, exec,
-                          wf.wf_size(), static_cast<uint32_t>(inst.offset), soffset_val, base_addr,
-                          num_records, uint64_t{d.elem_size} * d.num_elems, d.per_lane_addr);
+  const bool linear =
+      gfx9 && linear_buffer_lanes_enabled() && !inst.idxen && !gfx9_srd.swizzle_enable &&
+      !gfx9_srd.add_tid_enable && arch != rocjitsu::IsaFamily::Cdna1 &&
+      gfx9_linear_buffer_lanes(inst.offen ? address_regs.offsets : std::span<const uint32_t>{},
+                               exec, wf.wf_size(), static_cast<uint32_t>(inst.offset), soffset_val,
+                               base_addr, num_records, uint64_t{d.elem_size} * d.num_elems,
+                               d.per_lane_addr);
   for (uint32_t lane = 0; !linear && lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
