@@ -33,6 +33,8 @@ THE SOFTWARE.
 
 #include <gtest/gtest.h>
 
+#include <chrono>
+#include <climits>
 #include <cstdint>
 #include <limits>
 #include <thread>
@@ -76,6 +78,10 @@ struct FakeGpu {
 };
 FakeGpu g_gpu;
 int g_socket;
+int g_placeholder;                 // a processor whose type AMD SMI cannot report
+bool g_with_placeholder = false;   // listed after the GPU: the GPU table retries at every use
+int g_listings = 0;                // listings of the sockets so far
+int g_gpu_listed_until = INT_MAX;  // the listing from which on the GPU is no longer listed
 
 constexpr uint64_t kFirmwareMs = 100000;  // firmware timestamps are in 10 ns units
 
@@ -117,6 +123,7 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t* socket_count,
                                           amdsmi_socket_handle* socket_handles) {
   if (socket_handles != nullptr && *socket_count > 0) {
     socket_handles[0] = &g_socket;
+    g_listings++;
   }
   *socket_count = 1;
   return AMDSMI_STATUS_SUCCESS;
@@ -124,15 +131,27 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t* socket_count,
 
 amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle, uint32_t* processor_count,
                                              amdsmi_processor_handle* processor_handles) {
-  if (processor_handles != nullptr && *processor_count > 0) {
-    processor_handles[0] = &g_gpu;
+  std::vector<amdsmi_processor_handle> listed;
+  if (g_listings < g_gpu_listed_until) {
+    listed.push_back(&g_gpu);
   }
-  *processor_count = 1;
+  if (g_with_placeholder) {
+    listed.push_back(&g_placeholder);
+  }
+  if (processor_handles != nullptr) {
+    for (uint32_t p = 0; p < *processor_count && p < listed.size(); p++) {
+      processor_handles[p] = listed[p];
+    }
+  }
+  *processor_count = static_cast<uint32_t>(listed.size());
   return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle,
+amdsmi_status_t amdsmi_get_processor_type(amdsmi_processor_handle processor_handle,
                                           amdsmi_processor_type_t* processor_type) {
+  if (processor_handle == &g_placeholder) {
+    return AMDSMI_STATUS_UNKNOWN_ERROR;
+  }
   *processor_type = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -189,6 +208,43 @@ TEST_F(MemoryBandwidthTest, NotAvailableWhenTheAccumulatorGoesBack) {
   rdc_field_value value;
   EXPECT_EQ(fetch_second(2000, 0, &value), RDC_ST_SMI_ERROR);
   EXPECT_EQ(value.status, AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+// The ECC getters look the GPU up again after fetch_smi_field() did. A GPU that is no longer
+// listed in between reads as not found, which the getter returns instead of calling AMD SMI
+// with no handle.
+class EccLookupTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    g_with_placeholder = true;
+    amd::rdc::set_flat_gpu_table_retry_period(std::chrono::milliseconds(0));
+  }
+  void TearDown() override {
+    g_with_placeholder = false;
+    g_gpu_listed_until = INT_MAX;
+    amd::rdc::set_flat_gpu_table_retry_period(std::chrono::milliseconds(5000));
+    amd::rdc::reset_flat_gpu_table();
+  }
+  amd::rdc::RdcMetricFetcherImpl fetcher_;
+};
+
+TEST_F(EccLookupTest, AGpuThatIsNoLongerListedReadsNotFound) {
+  // RDC_FI_ECC_UMC_CE goes through get_ecc(), RDC_FI_ECC_UMC_DE through get_ecc_deferred(),
+  // RDC_FI_ECC_CORRECT_TOTAL through get_ecc_total() and RDC_FI_ECC_DEFERRED_TOTAL through
+  // get_ecc_deferred_total().
+  for (rdc_field_t field : {RDC_FI_ECC_UMC_CE, RDC_FI_ECC_UMC_DE, RDC_FI_ECC_CORRECT_TOTAL,
+                            RDC_FI_ECC_DEFERRED_TOTAL}) {
+    g_gpu_listed_until = INT_MAX;
+    amd::rdc::reset_flat_gpu_table();
+    ASSERT_EQ(amd::rdc::get_flat_gpu_table()->size(), 2u);  // the GPU and the placeholder
+    // fetch_smi_field() lists the processors once and finds the GPU; the getter's own lookup
+    // lists them again, without the GPU.
+    g_gpu_listed_until = g_listings + 2;
+    rdc_field_value value = {};
+    fetcher_.fetch_smi_field(0, field, &value);
+    EXPECT_EQ(value.status, AMDSMI_STATUS_NOT_FOUND) << "field " << field;
+    EXPECT_EQ(g_listings, g_gpu_listed_until) << "field " << field << ": not two lookups";
+  }
 }
 
 TEST_F(MemoryBandwidthTest, NotAvailableWhenSamplesAreMoreThanAMinuteApart) {

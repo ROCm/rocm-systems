@@ -1473,6 +1473,14 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxGridDim_[1] = std::min(grid_max_dim.y, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
   info_.maxGridDim_[2] = std::min(grid_max_dim.z, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
 
+  // gfx12+ packs workgroup IDs Y and Z into 16-bit halves of an architected SGPR,
+  // so a kernel can't address more than 2^16 work-groups in those dimensions.
+  if (isa().versionMajor() >= 12) {
+    constexpr uint32_t kMaxWorkGroupCountYZ = std::numeric_limits<uint16_t>::max() + 1;
+    info_.maxWorkGroupCount_[1] = kMaxWorkGroupCountYZ;
+    info_.maxWorkGroupCount_[2] = kMaxWorkGroupCountYZ;
+  }
+
   info_.nativeVectorWidthChar_ = info_.preferredVectorWidthChar_ = 4;
   info_.nativeVectorWidthShort_ = info_.preferredVectorWidthShort_ = 2;
   info_.nativeVectorWidthInt_ = info_.preferredVectorWidthInt_ = 1;
@@ -2500,7 +2508,8 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
   return ptr;
 }
 
-void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
+void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment,
+                        bool mapAllAgents) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
@@ -2508,8 +2517,16 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
     memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
+  // gpu_agents_ is every GPU visible to this process.
+  hsa_agent_t* agents = const_cast<hsa_agent_t*>(&bkendDevice_);
+  int numAgents = 1;
+  if (mapAllAgents && !gpu_agents_.empty()) {
+    agents = gpu_agents_.data();
+    numAgents = static_cast<int>(gpu_agents_.size());
+  }
+
   hsa_status_t status = Hsa::memory_lock_to_pool(
-      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, memFlags, &deviceMemory);
+      hostMem, size, agents, numAgents, pool, memFlags, &deviceMemory);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Locking to pool %p, size 0x%zx, hostMem = %p,"
           " deviceMemory = %p, memSegment = %d",

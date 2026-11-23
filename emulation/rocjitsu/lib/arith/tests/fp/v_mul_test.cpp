@@ -336,12 +336,12 @@ TEST(FpMulF64, GuestRounding) {
                 {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL,
                  0x7fefffffffffffffULL}}};
   for (const auto &sample : cases) {
-    for (auto call : {rj_arith_v_mul_f64_w32, rj_arith_v_mul_f64_w32_gfx12}) {
-      check_binary64_rounding<32>(call, sample.a, sample.b, sample.expected);
-    }
-    for (auto call : {rj_arith_v_mul_f64_w64, rj_arith_v_mul_f64_w64_gfx12}) {
-      check_binary64_rounding<64>(call, sample.a, sample.b, sample.expected);
-    }
+    check_binary64_rounding<32>(rj_arith_v_mul_f64_w32, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, sample.a, sample.b, sample.expected);
+    check_binary64_rounding<64>(rj_arith_v_mul_f64_w64, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<64>(rj_arith_v_mul_f64_w64_gfx12, sample.a, sample.b, sample.expected);
   }
 }
 
@@ -366,15 +366,15 @@ TEST(FpMulF64, TinyAfterRounding) {
                            0x000fffffffffffffULL};
   const uint64_t not_tiny_flushed[] = {0x0010000000000000ULL, 0x0010000000000000ULL, 0, 0};
   const uint64_t not_tiny_doubled[] = {0x0020000000000000ULL, 0x0020000000000000ULL, 0, 0};
-  for (auto call : {rj_arith_v_mul_f64_w32, rj_arith_v_mul_f64_w32_gfx12}) {
-    check_binary64_rounding<32>(call, tiny, 0x0010000000000000ULL, zero, 0,
-                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
-    check_binary64_rounding<32>(call, not_tiny, 0x0010000000000001ULL, not_tiny_flushed, 0,
-                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
-  }
-  for (auto call : {rj_arith_v_mul_f64_w64, rj_arith_v_mul_f64_w64_gfx12}) {
-    check_binary64_rounding<64>(call, tiny, 0x0010000000000000ULL, zero, 0,
-                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  for (bool gfx12 : {false, true}) {
+    auto w32 = gfx12 ? rj_arith_v_mul_f64_w32_gfx12 : rj_arith_v_mul_f64_w32;
+    auto w64 = gfx12 ? rj_arith_v_mul_f64_w64_gfx12 : rj_arith_v_mul_f64_w64;
+    check_binary64_rounding<32>(w32, tiny, 0x0010000000000000ULL, zero, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, gfx12);
+    check_binary64_rounding<32>(w32, not_tiny, 0x0010000000000001ULL, not_tiny_flushed, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, gfx12);
+    check_binary64_rounding<64>(w64, tiny, 0x0010000000000000ULL, zero, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, gfx12);
   }
   check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, tiny, 0x0010000000000000ULL, kept);
   check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, tiny, 0x0010000000000000ULL, zero,
@@ -462,11 +462,49 @@ TEST(FpMulF16Gfx11, CapturedClampedNans) {
   check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_clamp_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 FP64 MUL NaN lanes.
+// Compatibility and strict exact reproduce captured gfx1100 FP64 MUL NaN lanes.
 TEST(FpMulF64Gfx11, CapturedNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_lanes);
-  check_captured_gfx11<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) lanes: hw1100-noieee (2026-09-25, MODE.IEEE clear) for the OMOD rows,
+// hw2-gfx1100 (2026-10-06, MODE.IEEE set) for the IEEE row and the Track C hw1100-wide corpus
+// (2026-11-18) for directed rounding. RDNA3 applies OMOD only with output denormals flushed and
+// IEEE clear: mul:2 of 1.0 * min normal stays min normal with denormals kept (0x1f0) or IEEE
+// set (0x300), while min normal squared under mul:2 with flushing is still flushed. Max * max
+// toward -inf or zero stays finite.
+const CapturedGfx11 mul_f64_rules[] = {
+    {"Mul2MinNormalDenormalsKept", RJ_ARITH_ALU_OMOD_2, 0x1f0, 0x3ff0000000000000,
+     0x0010000000000000, 0, 0x0010000000000000},
+    {"Mul2NegMinNormalDenormalsKept", RJ_ARITH_ALU_OMOD_2, 0x1f0, 0xbff0000000000000,
+     0x0010000000000000, 0, 0x8010000000000000},
+    {"Mul2MinNormalIeeeFlush", RJ_ARITH_ALU_OMOD_2, 0x300, 0x3ff0000000000000, 0x0010000000000000,
+     0, 0x0010000000000000},
+    {"Mul2TinyProductFlushed", RJ_ARITH_ALU_OMOD_2, 0x100, 0x0010000000000000, 0x0010000000000000,
+     0, 0},
+    {"Mul2HalfTimesMinNormalFlushed", RJ_ARITH_ALU_OMOD_2, 0x100, 0x3fe0000000000000,
+     0x0010000000000000, 0, 0},
+    {"MaxSquaredRoundDown", 0, 0x1fa, 0x7fefffffffffffff, 0x7fefffffffffffff, 0,
+     0x7fefffffffffffff},
+    {"MaxSquaredRoundZero", 0, 0x1ff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0,
+     0x7fefffffffffffff},
+    {"NegativeProductRoundUp", 0, 0x1f5, 0xbff8000000000000, 0x7fefffffffffffff, 0,
+     0xffefffffffffffff},
+    {"HalfBelowOneTimesMax", 0, 0x1f0, 0x3fdfffffffffffff, 0x7fefffffffffffff, 0,
+     0x7fdffffffffffffe},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce the captured RDNA3 OMOD gate, tininess and rounding.
+TEST(FpMulF64Gfx11, CapturedOmodTininessAndRounding) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_rules);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_rules);
 }
 
 // Compatibility retains a normal FP16 product recovered by narrowing before OMOD.

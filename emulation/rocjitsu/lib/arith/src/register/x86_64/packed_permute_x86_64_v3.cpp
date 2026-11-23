@@ -13,7 +13,26 @@ template <int Bits>
 void permute(int lanes, uint64_t exec_mask, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *c) {
   constexpr int bits = Bits, words = Bits / 2, low_words = Bits == 4 ? 1 : 2;
+  if constexpr (Bits == 8) {
+    for (uint64_t active = exec_mask; active; active &= active - 1) {
+      int lane = __builtin_ctzll(active);
+      auto table = _mm_setr_epi32(b[0][lane], b[1][lane], a[0][lane], a[1][lane]);
+      auto packed = _mm_cvtsi64_si128(uint64_t(c[0][lane]) | (uint64_t(c[1][lane]) << 32));
+      auto mask = _mm_set1_epi8(15);
+      auto index = _mm_unpacklo_epi8(_mm_and_si128(packed, mask),
+                                     _mm_and_si128(_mm_srli_epi16(packed, 4), mask));
+      auto result = _mm_shuffle_epi8(table, index);
+      d[0][lane] = _mm_cvtsi128_si32(result);
+      d[1][lane] = _mm_extract_epi32(result, 1);
+      d[2][lane] = _mm_extract_epi32(result, 2);
+      d[3][lane] = _mm_extract_epi32(result, 3);
+    }
+    return;
+  }
   for (int lane = 0; lane < lanes; lane += 8) {
+    if (uint8_t(exec_mask >> lane) == 0) {
+      continue;
+    }
     __m256i table[5], result[4], selectors[2];
     for (int word = 0; word < 5; ++word) {
       table[word] = _mm256_setzero_si256();

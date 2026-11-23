@@ -7,6 +7,7 @@
 
 #include "integer/boolean.h"
 #include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "register/dpp.h"
 #include "rj_arith/detail/rj_arith_integer.h"
 
@@ -40,8 +41,13 @@ int boolean(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   if constexpr (Op != rocjitsu::arith::Boolean::Not && Op != rocjitsu::arith::Boolean::Prng) {
     bp = b[0];
   }
+  constexpr bool light =
+      Op == rocjitsu::arith::Boolean::And || Op == rocjitsu::arith::Boolean::Or ||
+      Op == rocjitsu::arith::Boolean::Xor || Op == rocjitsu::arith::Boolean::Xnor;
+  [[maybe_unused]] const auto level = rocjitsu::arith::wave_cpu_level(
+      flags, Half || !light || rocjitsu::arith::aligned_for_512(a[0]));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     rocjitsu::arith::boolean_x86_64_v4<Op, Half>(exec_mask, mode, d[0], a[0], bp);
     return RJ_ARITH_SUCCESS;
   }
@@ -50,7 +56,7 @@ int boolean(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   // Half OR/XOR/NOT are faster as portable half-word operations. Keep the
   // decision opcode-based: half selectors and EXEC do not alter dispatch.
   if constexpr (!Half || Op == rocjitsu::arith::Boolean::And) {
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if (level >= RJ_ARITH_CPU_X86_64_V3) {
       rocjitsu::arith::boolean_x86_64_v3<Op, Half>(exec_mask, mode, d[0], a[0], bp);
       return RJ_ARITH_SUCCESS;
     }

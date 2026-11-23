@@ -695,15 +695,25 @@ impl Kfd {
         {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
-        self.call(Call::Svm(
-            &mut uapi::SvmArgs {
-                start_address: address,
-                size,
-                operation,
-                attribute_count,
-            },
-            attributes,
-        ))
+        let mut args = uapi::SvmArgs {
+            start_address: address,
+            size,
+            operation,
+            attribute_count,
+        };
+        loop {
+            // Legacy SVM validation can race with MMU invalidation or splitting.
+            // Like libhsakmt, retry those requests with the same inputs/outputs.
+            // Checked prefetch uses EAGAIN for incomplete placement (e.g. pinned
+            // pages), which must reach its caller before that condition can change.
+            // EINTR remains visible to the owner; generic ioctls are not replayed.
+            match self.call(Call::Svm(&mut args, attributes)) {
+                Err(source)
+                    if matches!(operation, uapi::SVM_OP_SET_ATTR | uapi::SVM_OP_GET_ATTR)
+                        && source.raw_os_error() == Some(errno::EAGAIN) => {}
+                result => return result,
+            }
+        }
     }
 
     pub(super) fn spm(&self, args: &mut uapi::Spm) -> io::Result<()> {

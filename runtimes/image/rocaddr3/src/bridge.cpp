@@ -108,17 +108,12 @@ bool ValidLinearPitch(const RocAddr3Input& request) {
   // checks. Validate its row minimum and alignment before entering native code.
   const uint64_t element_bytes = request.bits_per_pixel / 8;
   const uint64_t row_bytes = request.pitch_in_elements * element_bytes;
-  const uint64_t minimum_row_bytes =
-      ((request.width * element_bytes + 255) / 256) * 256;
   const uint64_t row_alignment = request.family == 0x98 ? 128 : 256;
-  if (row_bytes < minimum_row_bytes || row_bytes % row_alignment != 0) {
-    return false;
-  }
-  // GFX12 permits 128-byte rows, but array and 3D slices still require full
-  // 256-byte blocks. Reduce before multiplying to avoid a slice-size overflow.
-  return request.family != 0x98 ||
-         (request.resource_type != ADDR_RSRC_TEX_3D && request.slices == 1) ||
-         ((row_bytes % 256) * request.height) % 256 == 0;
+  const uint64_t minimum_row_bytes =
+      ((request.width * element_bytes + row_alignment - 1) / row_alignment) *
+      row_alignment;
+  // AddrLib sizes GFX12 slices separately from their 128-byte-aligned rows.
+  return row_bytes >= minimum_row_bytes && row_bytes % row_alignment == 0;
 }
 
 // GFX9/10/11 share AddrLib2's public surface ABI. The selected family still

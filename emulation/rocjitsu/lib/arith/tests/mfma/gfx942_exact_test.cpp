@@ -1,0 +1,279 @@
+// SPDX-License-Identifier: MIT
+
+// gfx942 MFMA captured outputs, exact-mode selection, architecture isolation and aliasing.
+#include "common/cpu.h"
+#include "common/half_reference.h"
+#include "mfma/gfx942_cases.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_mfma.h"
+#include <array>
+#include <bit>
+#include <cmath>
+#include <gtest/gtest.h>
+#include <span>
+
+namespace {
+using namespace rocjitsu::arith::test;
+using Entry = decltype(&rj_arith_v_mfma_f32_16x16x16_f16_w64);
+struct Form {
+  const char *name;
+  int m, k, batches, format_a, format_b;
+  Entry entry, gfx950;
+  std::span<const uint32_t> captured;
+};
+
+const Form kForms[] = {
+    {"f16_32x32x8", 32, 8, 1, 0, 0, rj_arith_v_mfma_f32_32x32x8_f16_w64,
+     rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx950, kf16_32x32x8},
+    {"f16_16x16x16", 16, 16, 1, 0, 0, rj_arith_v_mfma_f32_16x16x16_f16_w64,
+     rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx950, kf16_16x16x16},
+    {"f16_32x32x4_2b", 32, 4, 2, 0, 0, rj_arith_v_mfma_f32_32x32x4_2b_f16_w64,
+     rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950, kf16_32x32x4_2b},
+    {"f16_16x16x4_4b", 16, 4, 4, 0, 0, rj_arith_v_mfma_f32_16x16x4_4b_f16_w64,
+     rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx950, kf16_16x16x4_4b},
+    {"f16_4x4x4_16b", 4, 4, 16, 0, 0, rj_arith_v_mfma_f32_4x4x4_16b_f16_w64,
+     rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx950, kf16_4x4x4_16b},
+    {"bf16_32x32x8", 32, 8, 1, 1, 1, rj_arith_v_mfma_f32_32x32x8_bf16_w64,
+     rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx950, kbf16_32x32x8},
+    {"bf16_16x16x16", 16, 16, 1, 1, 1, rj_arith_v_mfma_f32_16x16x16_bf16_w64,
+     rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950, kbf16_16x16x16},
+    {"bf16_32x32x4_2b", 32, 4, 2, 1, 1, rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64,
+     rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950, kbf16_32x32x4_2b},
+    {"bf16_16x16x4_4b", 16, 4, 4, 1, 1, rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64,
+     rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx950, kbf16_16x16x4_4b},
+    {"bf16_4x4x4_16b", 4, 4, 16, 1, 1, rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64,
+     rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950, kbf16_4x4x4_16b},
+    {"xf32_32x32x4", 32, 4, 1, 2, 2, rj_arith_v_mfma_f32_32x32x4_xf32_w64,
+     rj_arith_v_mfma_f32_32x32x4_xf32_w64_gfx950, kxf32_32x32x4},
+    {"xf32_16x16x8", 16, 8, 1, 2, 2, rj_arith_v_mfma_f32_16x16x8_xf32_w64,
+     rj_arith_v_mfma_f32_16x16x8_xf32_w64_gfx950, kxf32_16x16x8},
+    {"fp8_32x32x16", 32, 16, 1, 3, 3, rj_arith_v_mfma_f32_32x32x16_fp8_fp8_w64,
+     rj_arith_v_mfma_f32_32x32x16_fp8_fp8_w64_gfx950, kfp8_32x32x16},
+    {"bf8_32x32x16", 32, 16, 1, 4, 4, rj_arith_v_mfma_f32_32x32x16_bf8_bf8_w64,
+     rj_arith_v_mfma_f32_32x32x16_bf8_bf8_w64_gfx950, kbf8_32x32x16},
+    {"fp8_bf8_32x32x16", 32, 16, 1, 3, 4, rj_arith_v_mfma_f32_32x32x16_fp8_bf8_w64,
+     rj_arith_v_mfma_f32_32x32x16_fp8_bf8_w64_gfx950, kfp8_bf8_32x32x16},
+    {"bf8_fp8_32x32x16", 32, 16, 1, 4, 3, rj_arith_v_mfma_f32_32x32x16_bf8_fp8_w64,
+     rj_arith_v_mfma_f32_32x32x16_bf8_fp8_w64_gfx950, kbf8_fp8_32x32x16},
+    {"fp8_fp8_16x16x32", 16, 32, 1, 3, 3, rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64,
+     rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64_gfx950, kfp8_fp8_16x16x32},
+    {"bf8_bf8_16x16x32", 16, 32, 1, 4, 4, rj_arith_v_mfma_f32_16x16x32_bf8_bf8_w64,
+     rj_arith_v_mfma_f32_16x16x32_bf8_bf8_w64_gfx950, kbf8_bf8_16x16x32},
+    {"fp8_bf8_16x16x32", 16, 32, 1, 3, 4, rj_arith_v_mfma_f32_16x16x32_fp8_bf8_w64,
+     rj_arith_v_mfma_f32_16x16x32_fp8_bf8_w64_gfx950, kfp8_bf8_16x16x32},
+    {"bf8_fp8_16x16x32", 16, 32, 1, 4, 3, rj_arith_v_mfma_f32_16x16x32_bf8_fp8_w64,
+     rj_arith_v_mfma_f32_16x16x32_bf8_fp8_w64_gfx950, kbf8_fp8_16x16x32},
+};
+
+// Encode a staged capture without sharing the implementation's source decoder.
+uint32_t encode(uint32_t bits, int format) {
+  if (format == 0) {
+    return half_bits(std::bit_cast<float>(bits));
+  }
+  if (format == 1) {
+    return bits >> 16;
+  }
+  if (format == 2) {
+    return bits;
+  }
+  if ((bits & 0x7fffffffU) > 0x7f800000U) {
+    return 0x80;
+  }
+  const int fraction = format == 4 ? 2 : 3;
+  const int bias = format == 4 ? 16 : 8;
+  for (int code = 0; code < 256; ++code) {
+    if (code == 0x80) {
+      continue;
+    }
+    const int exponent = (code & 0x7f) >> fraction;
+    const int mantissa = code & ((1 << fraction) - 1);
+    float value = std::ldexp(float(exponent ? (1 << fraction) + mantissa : mantissa),
+                             (exponent ? exponent : 1) - bias - fraction);
+    if (code & 0x80) {
+      value = -value;
+    }
+    if (std::bit_cast<uint32_t>(value) == bits) {
+      return uint32_t(code);
+    }
+  }
+  ADD_FAILURE() << "Capture is not representable: " << bits;
+  return 0;
+}
+
+struct Placement {
+  int batch, row, col;
+};
+
+// Place the same captured dot in a selected matrix/batch; other finite outputs are zero.
+void captured_wave(const Form &form, Placement position = {}, bool zero_other_outputs = true) {
+  SCOPED_TRACE(::testing::Message() << form.name << " batch " << position.batch << " row "
+                                    << position.row << " column " << position.col);
+  const int per_word = form.format_a == 2 ? 1 : form.format_a < 2 ? 2 : 4;
+  const int inputs = form.m * form.k * form.batches / (64 * per_word);
+  const int outputs = form.m * form.m * form.batches / 64;
+  const int per_lane = form.k * form.m * form.batches / 64;
+  std::array<std::array<uint32_t, 64>, 72> input{};
+  for (int depth = 0; depth < form.k; ++depth) {
+    const int lane = position.batch * form.m + depth / per_lane * form.m * form.batches;
+    const int reg = depth % per_lane / per_word;
+    const int shift = 32 / per_word * (depth % per_word);
+    input[reg][lane + position.row] |= encode(form.captured[depth], form.format_a) << shift;
+    input[inputs + reg][lane + position.col] |= encode(form.captured[form.k + depth], form.format_b)
+                                                << shift;
+  }
+  // In the 4x4 form each VGPR carries 16 batches, one per four-lane group.
+  const int blocks_per_register = form.m == 4 ? 16 : 1;
+  const int output_reg = position.batch * (form.m * form.m / 64) +
+                         position.row / (256 / form.m) * 4 + position.row % 4;
+  const int output_lane = position.batch % blocks_per_register * form.m +
+                          position.row / 4 % (64 / form.m) * blocks_per_register * form.m +
+                          position.col;
+  input[2 * inputs + output_reg][output_lane] = form.captured[2 * form.k];
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      for (int aliasing_offset : {0, inputs, 2 * inputs, 2 * inputs + outputs}) {
+        auto storage = input;
+        const uint32_t *a[8], *b[8], *c[32];
+        uint32_t *d[32];
+        for (int reg = 0; reg < inputs; ++reg) {
+          a[reg] = storage[reg].data();
+          b[reg] = storage[inputs + reg].data();
+        }
+        for (int reg = 0; reg < outputs; ++reg) {
+          c[reg] = storage[2 * inputs + reg].data();
+          d[reg] = storage[aliasing_offset + reg].data();
+        }
+        ASSERT_EQ(form.entry(cpu | semantics, 0, d, a, b, c), RJ_ARITH_SUCCESS);
+        for (int reg = 0; reg < int(storage.size()); ++reg) {
+          for (int lane = 0; lane < 64; ++lane) {
+            const bool written = reg >= aliasing_offset && reg < aliasing_offset + outputs;
+            if (written && !zero_other_outputs &&
+                (reg != aliasing_offset + output_reg || lane != output_lane)) {
+              continue;
+            }
+            const uint32_t expected = !written ? input[reg][lane]
+                                      : reg == aliasing_offset + output_reg && lane == output_lane
+                                          ? form.captured[2 * form.k + 1]
+                                          : 0;
+            ASSERT_EQ(storage[reg][lane], expected) << "register " << reg << " lane " << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MfmaGfx942Exact, CapturedOutputsAndAliasing) {
+  for (const auto &form : kForms) {
+    const size_t row_words = size_t(2 * form.k + 2);
+    ASSERT_EQ(form.captured.size() % row_words, 0U);
+    for (size_t offset = 0; offset < form.captured.size(); offset += row_words) {
+      SCOPED_TRACE(offset / row_words);
+      auto test = form;
+      test.captured = form.captured.subspan(offset, row_words);
+      bool finite_factors = true;
+      for (int i = 0; i < 2 * form.k; ++i) {
+        finite_factors &= ((test.captured[i] >> 23) & 0xffU) != 0xffU;
+      }
+      for (Placement position :
+           {Placement{0, 0, 0}, Placement{form.batches / 2, form.m / 2, form.m / 2 + 1},
+            Placement{form.batches - 1, form.m - 1, form.m - 1}}) {
+        captured_wave(test, position, finite_factors);
+      }
+    }
+  }
+}
+
+TEST(MfmaGfx942Exact, SpecialValues) {
+  for (const auto &form : kForms) {
+    const bool f16 = form.format_a == 0 && form.m == 32 && form.k == 8;
+    const bool bf8 = form.format_a == 4 && form.format_b == 4 && form.m == 32;
+    if (!f16 && !bf8) {
+      continue;
+    }
+    std::array<uint32_t, 66> values{};
+    // Infinity times zero is canonical NaN; a large BF8 dot must retain an infinite C.
+    values[0] = bf8 ? 0x47000000U : 0x7f800000U;
+    values[form.k] = bf8 ? 0x47000000U : 0;
+    values[2 * form.k] = bf8 ? 0x7f800000U : 0;
+    values[2 * form.k + 1] = bf8 ? 0x7f800000U : 0xffc00000U;
+    auto test = form;
+    test.captured = std::span<const uint32_t>(values).first(2 * form.k + 2);
+    captured_wave(test, {}, false);
+  }
+}
+
+TEST(MfmaGfx942Exact, ProductsAt2To128CountAsInfinite) {
+  // Model-derived BF16 overflow: a 2^64 * 2^64 product counts as +Inf even with C = -2^127,
+  // and opposite-sign +-2^128 products produce canonical NaN.
+  constexpr uint32_t kPos2To64 = 0x5f800000U;
+  constexpr uint32_t kNeg2To64 = 0xdf800000U;
+  for (const auto &form : kForms) {
+    if (form.format_a != 1 || form.format_b != 1) {
+      continue;
+    }
+    std::array<uint32_t, 34> single_overflow{};
+    single_overflow[0] = kPos2To64;
+    single_overflow[form.k] = kPos2To64;
+    single_overflow[2 * form.k] = 0xff000000U;
+    single_overflow[2 * form.k + 1] = 0x7f800000U;
+    auto test = form;
+    test.captured = std::span<const uint32_t>(single_overflow).first(2 * form.k + 2);
+    captured_wave(test);
+
+    std::array<uint32_t, 34> opposite_overflows{};
+    opposite_overflows[0] = kPos2To64;
+    opposite_overflows[1] = kNeg2To64;
+    opposite_overflows[form.k] = kPos2To64;
+    opposite_overflows[form.k + 1] = kPos2To64;
+    opposite_overflows[2 * form.k + 1] = 0xffc00000U;
+    test.captured = std::span<const uint32_t>(opposite_overflows).first(2 * form.k + 2);
+    captured_wave(test);
+  }
+}
+
+TEST(MfmaGfx942Exact, Bf16OutputDenormals) {
+  // Model-derived subnormal BF16 product outputs and nearest-even ties at C = 0.
+  struct DenormalCase {
+    uint16_t a, b;
+    uint32_t expected;
+  };
+  constexpr DenormalCase kDenormals[] = {
+      {0x0080U, 0x3f00U, 0x00400000U},
+      {0x0001U, 0x3780U, 0x00000001U},
+      {0x0001U, 0x3700U, 0x00000000U},
+      {0x0001U, 0x37c0U, 0x00000002U},
+  };
+  for (const auto &form : kForms) {
+    if (form.format_a != 1 || form.format_b != 1) {
+      continue;
+    }
+    for (const auto &denormal : kDenormals) {
+      std::array<uint32_t, 34> values{};
+      values[0] = uint32_t(denormal.a) << 16;
+      values[form.k] = uint32_t(denormal.b) << 16;
+      values[2 * form.k + 1] = denormal.expected;
+      auto test = form;
+      test.captured = std::span<const uint32_t>(values).first(2 * form.k + 2);
+      captured_wave(test);
+    }
+  }
+}
+
+TEST(MfmaGfx942Exact, QualificationIsLocalToTargetAndControls) {
+  for (const auto &form : kForms) {
+    SCOPED_TRACE(form.name);
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      EXPECT_EQ(form.entry(semantics, 1, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(form.entry(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+    }
+  }
+}
+} // namespace

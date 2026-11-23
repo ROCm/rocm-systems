@@ -11,7 +11,7 @@ VFIO-user peer transport, along with the remaining qualification work.
 `configs/gfx1250_mi455x_kmd_2node_net.json` is a schematic system
 manifest with one gfx1250 GPU on each of two nodes. Its network link records
 intended reachability. The GPUs have distinct KFD identities and each node
-projects only its own GPU into a separate rocJITsu daemon.
+projects only its own GPU into a separate rocjitsu daemon.
 
 The same-host runner starts one rank per node and requests the loopback Socket
 transport. With `RcclTest.*`, it checks all five rank tests against host

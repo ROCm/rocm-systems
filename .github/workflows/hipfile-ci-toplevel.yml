@@ -305,6 +305,26 @@ jobs:
     with:
       ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
 
+  # Checks that building with include-what-you-use still works. IWYU's
+  # suggestions are advisory and don't fail the job. Compiler- and
+  # standard-independent, so run once against a single fixed image (the same
+  # convention as clang_tidy above).
+  iwyu:
+    if: >-
+      ${{
+        !cancelled() && (
+          needs.build_CI_image.result == 'success' ||
+          needs.build_CI_image.result == 'skipped'
+        )
+      }}
+    needs: [Precheck, build_CI_image]
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/hipfile-iwyu.yml
+    with:
+      ci_image: ${{ fromJSON(needs.Precheck.outputs.ci_images)['ubuntu-7.14.0'].ci_image }}
+
   # Compile-only check that hipFile's dispatch-table ABI still satisfies the
   # rocprofiler-sdk profiler's static_asserts. Guards against the profiler build
   # breaking post-merge when a hipFile ABI change lands without a matching
