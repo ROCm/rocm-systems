@@ -41,6 +41,7 @@ constexpr int kRanks = nccl_dda_detail::kDdaNranks;
 constexpr auto kRendezvousTimeout = std::chrono::seconds(3);
 
 int64_t g_ddaEnable = 1;
+int64_t g_addonDoneEventOrdering = 1;
 
 class SimBootstrap {
 public:
@@ -140,6 +141,7 @@ class DdaIpcLifecycleMicrotest : public ::testing::Test {
 protected:
   void SetUp() override {
     g_ddaEnable = 1;
+    g_addonDoneEventOrdering = 1;
     std::memset(allocTracker, 0, sizeof(allocTracker));
     for (int rank = 0; rank < kRanks; ++rank) {
       peerInfo_[rank].rank = rank;
@@ -150,6 +152,7 @@ protected:
       comm->cudaDev = rank;
       comm->nRanks = kRanks;
       comm->nNodes = 1;
+      comm->cudaDev = rank;
       comm->archName = archName_;
       comm->peerInfo = peerInfo_;
       comm->bootstrap = bootstrap_.handle(rank);
@@ -436,6 +439,54 @@ TEST_F(DdaIpcLifecycleMicrotest, ClosePeerMappingsWaitsForInFlightDdaKernelsBefo
   EXPECT_TRUE(liveAllocations_.empty());
 }
 
+TEST_F(DdaIpcLifecycleMicrotest, ClosePeerMappingsWithOrderingOffDeviceSyncsBeforeUnmapping) {
+  g_addonDoneEventOrdering = 0;
+  initializeDdaIpcForAllRanks();
+  for (int rank = 0; rank < kRanks; ++rank) {
+    // doneEvent must be ignored when ordering is off.
+    comms_[rank]->doneEvent = reinterpret_cast<hipEvent_t>(static_cast<uintptr_t>(0x1000 + rank));
+  }
+
+  std::vector<int> syncedDevs;
+  std::vector<int> closesAtSync;
+  int eventSyncCalls = 0;
+  int currentDev = 0;
+  ScopedHook getDevice(g_hipGetDevice, [&](int* dev) {
+    *dev = currentDev;
+    return hipSuccess;
+  });
+  ScopedHook setDevice(g_hipSetDevice, [&](int dev) {
+    currentDev = dev;
+    return hipSuccess;
+  });
+  ScopedHook eventSync(g_hipEventSynchronize, [&](hipEvent_t) {
+    ++eventSyncCalls;
+    return hipSuccess;
+  });
+  ScopedHook deviceSync(g_hipDeviceSynchronize, [&]() {
+    std::lock_guard<std::mutex> lock(memoryMu_);
+    syncedDevs.push_back(currentDev);
+    closesAtSync.push_back(closeCalls_);
+    return hipSuccess;
+  });
+
+  for (int rank = 0; rank < kRanks; ++rank) {
+    currentDev = 0;  // wrong device; close must set to this rank's cudaDev
+    const int closesBefore = closeCalls_;
+    EXPECT_EQ(ncclSuccess, ncclDdaIpcCommClosePeerMappings(comms_[rank].get())) << "rank " << rank;
+    ASSERT_EQ(static_cast<size_t>(rank + 1), syncedDevs.size()) << "rank " << rank;
+    EXPECT_EQ(rank, syncedDevs[rank]) << "rank " << rank;
+    EXPECT_EQ(closesBefore, closesAtSync[rank]) << "rank " << rank << " unmapped before waiting";
+    EXPECT_GT(closeCalls_, closesBefore) << "rank " << rank;
+  }
+  EXPECT_EQ(0, eventSyncCalls);
+  EXPECT_EQ(0, openMappingCount());
+
+  finalizeDdaIpcSerially();
+  EXPECT_EQ(0, earlyFrees_);
+  EXPECT_TRUE(liveAllocations_.empty());
+}
+
 TEST_F(DdaIpcLifecycleMicrotest, FiniWithoutPriorCloseStaysLocalAndClosesPeerMappings) {
   initializeDdaIpcForAllRanks();
   abortFlags_[0] = 1;
@@ -543,4 +594,8 @@ TEST(DdaIpcMemHandlerMicrotest, PartialOpenFailureClosesMappingsOpenedBeforeTheF
 
 int64_t rcclParamDdaEnable() {
   return g_ddaEnable;
+}
+
+int64_t rcclParamAddonDoneEventOrdering() {
+  return g_addonDoneEventOrdering;
 }

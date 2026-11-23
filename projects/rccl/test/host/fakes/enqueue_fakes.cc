@@ -98,6 +98,11 @@ int64_t ncclParamGraphRegister() { return g_loadParam("GRAPH_REGISTER", 1); }
 int64_t ncclParamGraphRegister() { return g_loadParam("GRAPH_REGISTER", 0); }
 #endif
 
+// Defined in enqueue/enqueue.cc; init.cc / ipc_init.cu only see RCCL_PARAM_DECLARE.
+// MicroInit links this fake instead of enqueue.cc. Key matches param_redirect.h's
+// RCCL_PARAM rewrite (g_loadParam("RCCL_" env, deft)).
+int64_t rcclParamAddonDoneEventOrdering() { return g_loadParam("RCCL_ADDON_DONE_EVENT_ORDERING", 1); }
+
 // Generous default: no real collnet/registration to report, matching a plain host-only comm.
 static ncclResult_t DefaultGetCollNetSupport(struct ncclComm*, struct ncclTaskColl*, int* out) {
   if (out) *out = 0;

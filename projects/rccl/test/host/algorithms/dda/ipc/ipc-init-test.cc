@@ -230,3 +230,6 @@ TEST_F(IpcInitMicrotest, CommInit_ReadyGatherFails_SkipsDdaIpc) {
 }
 
 }  // namespace
+
+// ipc_init.cu references this via RCCL_PARAM_DECLARE; this binary does not link enqueue.cc.
+int64_t rcclParamAddonDoneEventOrdering() { return 1; }
