@@ -341,6 +341,9 @@ typedef struct {
  *
  * This function creates a RocJpegHandle for JPEG decoding using the specified backend and device ID.
  *
+ * The calling thread's current HIP device is not changed, whether the function succeeds or fails. To allocate the
+ * output buffers on device_id, make device_id current first, for example with hipSetDevice().
+ *
  * @param backend The backend to be used for JPEG decoding.
  * @param device_id The ID of the device to be used for JPEG decoding.
  * @param handle Pointer to a RocJpegHandle variable to store the created handle.

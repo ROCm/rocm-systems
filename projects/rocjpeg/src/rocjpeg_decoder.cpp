@@ -82,14 +82,16 @@ RocJpegDecoder::~RocJpegDecoder() {
 /**
  * @brief Initializes the HIP environment for the RocJpegDecoder.
  *
- * This function initializes the HIP environment for the RocJpegDecoder by setting the device, 
- * creating a HIP stream, and retrieving device properties.
+ * This function initializes the HIP environment for the RocJpegDecoder by retrieving the device properties and
+ * creating a HIP stream on the device. The device is made current only until this function returns, so the calling
+ * thread's current HIP device is left unchanged whether the initialization succeeds or fails.
  *
  * @param device_id The ID of the device to be used for decoding.
  * @return The status of the initialization process.
  *         - ROCJPEG_STATUS_SUCCESS if the initialization is successful.
  *         - ROCJPEG_STATUS_NOT_INITIALIZED if no GPU device is found.
  *         - ROCJPEG_STATUS_INVALID_PARAMETER if the requested device_id is not found.
+ *         - ROCJPEG_STATUS_EXECUTION_FAILED if device_id cannot be made current or a HIP call fails.
  */
 RocJpegStatus RocJpegDecoder::InitHIP(int device_id) {
     FunctionEntryLogWithArgs(g_rocjpeg_logger, ROCJPEG_TOSTR(device_id));
@@ -104,7 +106,14 @@ RocJpegStatus RocJpegDecoder::InitHIP(int device_id) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
-    CHECK_HIP(hipSetDevice(device_id));
+    // hipStreamCreate creates the stream on the current device. The guard makes device_id current only until this
+    // function returns, so rocJpegCreate does not move the application's later HIP work to device_id.
+    ScopedHipDevice device_guard(device_id);
+    if (device_guard.Failed()) {
+        CriticalLog(g_rocjpeg_logger, "Failed to make device_id " + ROCJPEG_TOSTR(device_id) + " current!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_EXECUTION_FAILED;
+    }
     CHECK_HIP(hipGetDeviceProperties(&hip_dev_prop_, device_id));
     CHECK_HIP(hipStreamCreate(&hip_stream_));
     FunctionExitLog(g_rocjpeg_logger);
