@@ -262,9 +262,9 @@ TEST(SystemUnit, status_code_to_string__KnownStatusCodesResolveToTheirOwnName) {
   }
 }
 
-// Negative: a status value in an enum gap (no case, no rsmi mapping) must fall
-// through the default branch to AMDSMI_STATUS_UNKNOWN_ERROR with a non-empty
-// description, rather than leaving status_string stale or empty.
+// Negative: a status value in an enum gap (matches no case) must return
+// AMDSMI_STATUS_UNKNOWN_ERROR with a non-empty description, rather than leaving
+// status_string stale or empty.
 TEST(SystemUnit, status_code_to_string__UndefinedStatusCodeYieldsUnknownError) {
   const char* status_string = nullptr;
   // 100 sits in an enum gap (above the highest normal code, below the two
