@@ -2563,8 +2563,8 @@ own shared state should retain the parallel default.</p>
 <code>observes_memory_instruction_routing()</code>, <code>observes_vgpr_reads()</code>,
 <code>observes_vgpr_writes()</code>, <code>observes_sgpr_reads()</code>,
 <code>observes_scalar_register_writes()</code>, <code>observes_memory_routing()</code>,
-<code>observes_tensor_dma_memory_access()</code>, or <code>observes_tensor_dma_issue()</code>. The
-group samples these stable flags when the plugin is added and avoids both
+<code>observes_tensor_dma_memory_access()</code>, <code>observes_tensor_dma_issue()</code>, or
+<code>observes_lds_barrier_arrival()</code>. The group samples these stable flags when the plugin is added and avoids both
 fanout and upstream observation work when no contained plugin consumes a hook.</p>
 <p>For finer-grained selection, <code>observes_hot_hooks_for_wavefront(wf)</code> controls
 all high-frequency callbacks for one wavefront. After every plugin's
@@ -2709,6 +2709,24 @@ accesses: for a tile wholly past the allocation, a load still reads its
 in-bounds tensor elements from global memory and can fault there, and a store
 still writes zeros to its global destination. Consumers must opt in through
 <code>observes_tensor_dma_issue()</code>.</p>
+<p><code>onAmdgpuLdsBarrierArrived(arrival, wf)</code> fires for each arrival at an LDS
+barrier cell, a 64-bit LDS word holding a pending count and a phase (CDNA5 ISA
+11.2.2), after the cell has been updated. The observation gives the source of
+the arrival, the cell's LDS address, its contents before and after, and whether
+the arrival rolled the pending count under, which changes the phase.
+<code>ds_atomic_barrier_arrive_rtn_b64</code> and <code>ds_atomic_async_barrier_arrive_b64</code>
+report one arrival per active lane whose address is in range, each at that
+lane's address, in the simulator's lane order, within the issuing wavefront's
+instruction step and after <code>onAmdgpuMemoryAccessRouted</code>; with EXEC zero they
+report nothing. <code>ds_atomic_barrier_arrive_rtn_b64</code> with an update value of zero
+reads the cell without arriving, and is reported with <code>old_state</code> equal to
+<code>new_state</code>. A tensor DMA instruction whose descriptor requests an arrival
+reports one, after <code>onAmdgpuTensorDmaIssued</code> and after the transfer has written
+LDS, with <code>wf</code> the wavefront that issued it; it ignores EXEC (CDNA5 ISA
+10.11.1), and reports nothing only for a NULL descriptor. A transfer that
+waits for memory arrives when it resumes, outside any instruction step of its
+wavefront and before that wavefront issues another instruction. Consumers must
+opt in through <code>observes_lds_barrier_arrival()</code>.</p>
 <p>SGPR owner resolution is skipped when no contained plugin observes scalar
 register reads. Plugins that consume neither <code>onAmdgpuReadScalarRegister</code> nor
 <code>onAmdgpuReadSgpr</code> should override
@@ -2817,9 +2835,10 @@ from this hook.</p>
    plugin consumes. Use <code>observes_hot_hooks_for_wavefront()</code> when subscription
    also depends on the dispatched wavefront; keep that predicate lock-free,
    thread-safe, and stable after dispatch. A consumer of
-   <code>onAmdgpuMemoryAccessRouted</code>, <code>onAmdgpuTensorDmaMemoryAccess</code>, or
-   <code>onAmdgpuTensorDmaIssued</code> must explicitly return <code>true</code> from the corresponding
-   interest method because those conservative defaults are <code>false</code>.</li>
+   <code>onAmdgpuMemoryAccessRouted</code>, <code>onAmdgpuTensorDmaMemoryAccess</code>,
+   <code>onAmdgpuTensorDmaIssued</code>, or <code>onAmdgpuLdsBarrierArrived</code> must explicitly
+   return <code>true</code> from the corresponding interest method because those
+   conservative defaults are <code>false</code>.</li>
 <li>Enable it by adding <code>"myname": { ... }</code> to the <code>plugins</code> section of
    the config file.</li>
 <li>Return <code>true</code> from <code>supports_async_instructions()</code> only when the plugin accepts
