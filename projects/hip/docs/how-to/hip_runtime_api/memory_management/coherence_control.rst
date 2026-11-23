@@ -136,8 +136,8 @@ supported Windows configurations.
   (``hostRegisterReadOnlySupported`` is ``0``). Passing
   ``hipHostRegisterReadOnly`` to :cpp:func:`hipHostRegister` registers the
   memory as coarse-grained instead. If your code passes
-  ``hipHostRegisterReadOnly`` for portability with NVIDIA GPUs, account for
-  coarse-grained coherence on AMD GPUs.
+  ``hipHostRegisterReadOnly``, account for coarse-grained coherence on the
+  registered memory.
 
 .. note::
 
