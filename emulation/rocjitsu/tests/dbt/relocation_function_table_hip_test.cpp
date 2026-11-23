@@ -17,6 +17,7 @@
 #include "rocjitsu/code/executable.h"
 #include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -96,10 +97,10 @@ TEST(RelocationFunctionTableHip, TranslatesEightWayDeviceDispatch) {
   std::ranges::sort(source_targets);
   EXPECT_EQ(std::ranges::adjacent_find(source_targets), source_targets.end());
 
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const auto blocks =
-      rocjitsu::build_valid_blocks(*source, *decoder, ROCJITSU_CODE_ARCH_CDNA5, source_targets);
+      rocjitsu::build_valid_blocks(*source, *decoder, rocjitsu::IsaFamily::Cdna5, source_targets);
   const auto dispatches =
       rocjitsu::analyze_relocation_pairs(blocks, source_tables, source->text_sections()[0]->vaddr(),
                                          /*wave_size=*/32)
@@ -110,7 +111,7 @@ TEST(RelocationFunctionTableHip, TranslatesEightWayDeviceDispatch) {
   rocjitsu::BinaryTranslatorOptions options;
   options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
   options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+  rocjitsu::BinaryTranslator translator(rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Cdna5, 0,
                                         options);
   auto result = translator.translate(*source);
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? "translation failed without diagnostics"
@@ -155,7 +156,7 @@ TEST(RelocationFunctionTableHip, TranslationIgnoresExplicitNonAllocatedRelocatio
   options.input_revision = rocjitsu::ProcessorRevision::Gfx1250B0;
   options.output_revision = rocjitsu::ProcessorRevision::Gfx1250A0;
   options.verify_rewrite_discharge = true;
-  rocjitsu::BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_CDNA5, 0,
+  rocjitsu::BinaryTranslator translator(rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Cdna5, 0,
                                         options);
   const auto result = translator.translate(augmented);
 

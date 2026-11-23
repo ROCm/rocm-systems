@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
@@ -101,15 +102,22 @@ void MemoryPipeline::release_wait_counters(Wavefront &wf, const WaitCounterToken
     wf.release_wait_counter(counters.types[i]);
 }
 
-VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
+VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry,
+                                               std::unique_ptr<Instruction> &inst) {
+  assert(inst.get() == entry.inst);
   MemoryAccessDeferredCompletion deferred_completion = [this, inst = entry.inst, wf = entry.wf,
                                                         counters = entry.counters,
                                                         wave_generation = entry.wave_generation]() {
-    finish_completed_access(inst, *wf, counters, wave_generation);
+    std::unique_ptr<Instruction> completed(inst);
+    finish_completed_access(completed, *wf, counters, wave_generation);
   };
+  // A Deferred backend may call the callback inline, destroying the instruction
+  // before complete_access returns. Only Complete and Failed leave ownership here.
+  inst.release();
   const MemoryAccessCompletion completion =
       complete_access(*entry.inst, *entry.wf, std::move(deferred_completion));
   if (completion == MemoryAccessCompletion::Failed) {
+    inst.reset(entry.inst);
     [[maybe_unused]] const bool cancelled = cancel_wait_check_issue(entry);
     assert(cancelled && "Rejected writeback has no matching wait-check producer");
     // Failure cleanup must not resume a waiter or retire an ENDING wave.
@@ -119,21 +127,23 @@ VmAccessOutcome MemoryPipeline::complete_entry(PipelineEntry entry) {
       entry.wf->set_state(WfState::RUNNING);
     if (entry.wf->instruction_execution_failed())
       entry.wf->preserve_instruction_execution_error_mnemonic(entry.inst->mnemonic());
-    delete entry.inst;
+    inst.reset();
     return VmAccessOutcome::Malformed;
   }
-  if (completion == MemoryAccessCompletion::Complete)
-    finish_completed_access(entry.inst, *entry.wf, entry.counters, entry.wave_generation);
+  if (completion == MemoryAccessCompletion::Complete) {
+    inst.reset(entry.inst);
+    finish_completed_access(inst, *entry.wf, entry.counters, entry.wave_generation);
+  }
   return VmAccessOutcome::Complete;
 }
 
-VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
+VmAccessOutcome MemoryPipeline::issue_impl(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                            bool retain_unavailable, bool routing_observed) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
   const VmAccessOutcome access = initiate_access(*inst, wf);
   if (access == VmAccessOutcome::Unavailable && retain_unavailable) {
-    issued_.push({.inst = inst,
+    issued_.push({.inst = inst.release(),
                   .wf = &wf,
                   .counters = counters,
                   .wave_generation = wf.dispatch_generation(),
@@ -148,7 +158,7 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
       // An immediate fault can be retained by the same exception owner as a
       // retry fault. Discard its diagnostic producer before losing the instruction.
       [[maybe_unused]] const bool cancelled =
-          cancel_wait_check_issue({.inst = inst,
+          cancel_wait_check_issue({.inst = inst.get(),
                                    .wf = &wf,
                                    .counters = counters,
                                    .wave_generation = wf.dispatch_generation(),
@@ -159,22 +169,30 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
     release_wait_counters(wf, counters);
     if (wf.instruction_execution_failed())
       wf.preserve_instruction_execution_error_mnemonic(inst->mnemonic());
-    delete inst;
+    inst.reset();
     return access;
   }
-  return complete_entry({.inst = inst,
+  return complete_entry({.inst = inst.get(),
                          .wf = &wf,
                          .counters = counters,
                          .wave_generation = wf.dispatch_generation(),
                          .issue_pc = wf.pc,
-                         .routing_observed = routing_observed});
+                         .routing_observed = routing_observed},
+                        inst);
 }
 
 VmAccessOutcome MemoryPipeline::issue(Instruction *inst, Wavefront &wf) {
-  return issue_impl(inst, wf, false, false);
+  std::unique_ptr<Instruction> owner(inst);
+  return issue_impl(owner, wf, false, false);
 }
 
 VmAccessOutcome MemoryPipeline::issue_deferred(Instruction *inst, Wavefront &wf,
+                                               bool routing_observed) {
+  std::unique_ptr<Instruction> owner(inst);
+  return issue_impl(owner, wf, true, routing_observed);
+}
+
+VmAccessOutcome MemoryPipeline::issue_deferred(std::unique_ptr<Instruction> &inst, Wavefront &wf,
                                                bool routing_observed) {
   return issue_impl(inst, wf, true, routing_observed);
 }
@@ -323,7 +341,8 @@ void MemoryPipeline::retry_entries(bool all_queues, uint32_t process_id, uint32_
       continue;
     }
     if (access == VmAccessOutcome::Complete) {
-      const VmAccessOutcome completion = complete_entry(entry);
+      std::unique_ptr<Instruction> completed(entry.inst);
+      const VmAccessOutcome completion = complete_entry(entry, completed);
       if (completion != VmAccessOutcome::Complete && fault_handler_) {
         fault_handler_(*entry.wf, completion, entry.issue_pc);
         if (all_queues)
@@ -535,10 +554,10 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
     const auto &status = *d.image_status;
     const uint64_t misses = status.written_misses();
     const uint64_t warnings = status.written_warnings();
-    if (warnings && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3 ||
-                     wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5))
+    if (warnings && (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
+                     wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5))
       wf.set_mode_raw(wf.mode_raw() | (1u << 10)); // MODE.LOD_CLAMPED is sticky.
-    if (warnings && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4)
+    if (warnings && wf.cu().arch() == rocjitsu::IsaFamily::Rdna4)
       wf.set_gfx12_excp_flag_user_extra_raw(wf.gfx12_excp_flag_user_extra_raw() | (1u << 31));
     const uint32_t data_words = d.destination_vgpr_count();
     for (uint64_t lanes = misses | warnings; lanes; lanes &= lanes - 1) {
@@ -1708,14 +1727,14 @@ void execute_lds_access(VectorMemState &d, Wavefront &wf, Lds &lds,
                         const std::array<uint64_t, 64> &addresses, uint64_t lane_mask,
                         const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
-  const bool rdna2 = wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool rdna2 = wf.cu().arch() == rocjitsu::IsaFamily::Rdna2;
   const auto window = ds_address_window(d, wf, lds.size_bytes());
   const bool native_ds = d.flat_local_lane_mask == 0 && !d.gds_m0 && !d.gds;
   const auto arch = wf.cu().arch();
   const bool full_tuple = native_ds && checks_entire_native_ds_address(arch);
   const uint32_t bytes_per_lane = d.num_elems * d.elem_size;
   const bool gfx12_native =
-      native_ds && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5);
+      native_ds && (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5);
   const uint32_t granule = gfx12_native && d.atomic_op == AtomicOp::NONE
                                ? (d.is_load ? std::min(d.elem_size, 4u) : 1u)
                                : d.elem_size;
@@ -1848,8 +1867,8 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
     return VmAccessOutcome::Faulted;
   if (d.rejects_private_atomic(request_lanes)) {
     const auto arch = wf.cu().arch();
-    if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-        arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) {
+    if (arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5 &&
+        arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5) {
       wf.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue,
                                             "64-bit FLAT atomic addressing private memory");
       return VmAccessOutcome::Malformed;
@@ -2261,7 +2280,7 @@ bool prepare_ordered_count(Wavefront &wf, VectorMemState &d, uint32_t offset0, u
 }
 
 void LocalMemPipeline::capture_gds_violations(VectorMemState &data, const Wavefront &wf) {
-  assert(data.gds_m0 && wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA2);
+  assert(data.gds_m0 && wf.cu().arch() == rocjitsu::IsaFamily::Rdna2);
   const auto window = ds_address_window(data, wf, GwsDevice::kGfx10GdsSizeKiB * 1024u);
   const uint64_t bytes = data.elem_size * (data.atomic_op == AtomicOp::NONE ? data.num_elems : 1u);
   const auto capture = [&](const auto &addresses, uint64_t lanes) {
@@ -2316,9 +2335,9 @@ VmAccessOutcome GwsDevice::execute_gds(VectorMemState &d, Wavefront &wf) {
   return VmAccessOutcome::Complete;
 }
 
-bool native_ds_atomic_misaligned(const VectorMemState &d, rj_code_arch_t arch,
+bool native_ds_atomic_misaligned(const VectorMemState &d, rocjitsu::IsaFamily arch,
                                  uint64_t request_lanes) {
-  if ((arch != ROCJITSU_CODE_ARCH_RDNA4 && arch != ROCJITSU_CODE_ARCH_CDNA5) ||
+  if ((arch != rocjitsu::IsaFamily::Rdna4 && arch != rocjitsu::IsaFamily::Cdna5) ||
       d.flat_local_lane_mask || d.lds_stack_inputs || d.gds || d.atomic_op == AtomicOp::NONE ||
       !d.elem_size)
     return false;

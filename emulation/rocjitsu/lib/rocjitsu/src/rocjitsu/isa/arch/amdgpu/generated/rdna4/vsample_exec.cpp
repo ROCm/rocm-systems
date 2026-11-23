@@ -29,7 +29,8 @@ void ImageMsaaLoadVsample::execute_impl(amdgpu::Wavefront &wf) {
 void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
       amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    std::unique_ptr<amdgpu::VectorMemState> d =
+        acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->is_load = true;
     d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
     d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -54,7 +55,8 @@ void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
     set_data(std::move(d));
     return;
   }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -77,7 +79,8 @@ void ImageSampleVsample::execute_impl(amdgpu::Wavefront &wf) {
 void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
       amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    std::unique_ptr<amdgpu::VectorMemState> d =
+        acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->is_load = true;
     d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
     d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -102,7 +105,8 @@ void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
     set_data(std::move(d));
     return;
   }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -125,7 +129,8 @@ void ImageSampleDVsample::execute_impl(amdgpu::Wavefront &wf) {
 void ImageSampleLVsample::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
       amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    std::unique_ptr<amdgpu::VectorMemState> d =
+        acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->is_load = true;
     d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
     d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -150,7 +155,8 @@ void ImageSampleLVsample::execute_impl(amdgpu::Wavefront &wf) {
     set_data(std::move(d));
     return;
   }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -178,7 +184,8 @@ void ImageSampleBVsample::execute_impl(amdgpu::Wavefront &wf) {
 void ImageSampleLzVsample::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
       amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    std::unique_ptr<amdgpu::VectorMemState> d =
+        acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->is_load = true;
     d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
     d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -203,7 +210,8 @@ void ImageSampleLzVsample::execute_impl(amdgpu::Wavefront &wf) {
     set_data(std::move(d));
     return;
   }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -301,7 +309,8 @@ void ImageSampleCLzOVsample::execute_impl(amdgpu::Wavefront &wf) {
 void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
       amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    std::unique_ptr<amdgpu::VectorMemState> d =
+        acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->is_load = true;
     d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
     d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -326,7 +335,8 @@ void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
     set_data(std::move(d));
     return;
   }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -350,7 +360,8 @@ void ImageGather4Vsample::execute_impl(amdgpu::Wavefront &wf) {
 void ImageGather4LVsample::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
       amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    std::unique_ptr<amdgpu::VectorMemState> d =
+        acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->is_load = true;
     d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
     d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -375,7 +386,8 @@ void ImageGather4LVsample::execute_impl(amdgpu::Wavefront &wf) {
     set_data(std::move(d));
     return;
   }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -404,7 +416,8 @@ void ImageGather4BVsample::execute_impl(amdgpu::Wavefront &wf) {
 void ImageGather4LzVsample::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.dmask && !inst_.r128 && !inst_.tfe && !inst_.lwe &&
       amdgpu::use_linear_image_path(wf, inst_.rsrc, inst_.samp, inst_.dim, inst_.unorm, true)) {
-    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    std::unique_ptr<amdgpu::VectorMemState> d =
+        acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
     d->is_load = true;
     d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
     d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;
@@ -429,7 +442,8 @@ void ImageGather4LzVsample::execute_impl(amdgpu::Wavefront &wf) {
     set_data(std::move(d));
     return;
   }
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx12(inst_.scope, inst_.th);
   d->wait_counter_type = amdgpu::WaitCounterType::SAMPLECNT;

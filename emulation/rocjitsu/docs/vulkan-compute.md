@@ -1,6 +1,6 @@
 # Vulkan compute through RADV
 
-Rocjitsu runs native compute shaders emitted by Mesa RADV for its RDNA3 and
+rocjitsu runs native compute shaders emitted by Mesa RADV for its RDNA3 and
 RDNA4 models. The Vulkan loader, RADV, ACO and libdrm run normally; the Linux
 interposer supplies the DRM device and sends PM4 submissions through the
 existing command processor and wavefront execution path. Supported commands
@@ -9,7 +9,7 @@ and timestamps on compute and graphics-capable queues.
 
 ## Running a workload
 
-Build Rocjitsu with the shared interposer and use the same executable, shader
+Build rocjitsu with the shared interposer and use the same executable, shader
 inputs, RADV and libdrm for simulator and hardware runs. From this directory's
 parent, a typical Linux invocation is:
 
@@ -20,7 +20,7 @@ LD_LIBRARY_PATH=/lib/x86_64-linux-gnu DRI_PRIME= \
   --config configs/gfx1100_w7900.json -- /path/to/compute-workload
 ```
 
-Use `gfx1201_r9700.json` for RDNA4. For hardware, omit the Rocjitsu launcher and
+Use `gfx1201_r9700.json` for RDNA4. For hardware, omit the rocjitsu launcher and
 select the corresponding physical device with `DRI_PRIME`. Run IREE workloads
 from a build with the Vulkan runtime driver and SPIR-V compiler backend enabled.
 Compare individual test results as well as suite results: an additional skipped

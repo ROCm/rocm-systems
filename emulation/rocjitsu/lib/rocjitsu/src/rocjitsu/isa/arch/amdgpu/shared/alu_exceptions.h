@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <bit>
@@ -112,13 +113,13 @@ inline uint32_t classify_mul_f32(float lhs, float rhs, float omod_scale = 1.0f) 
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop2(const Inst &inst, Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) {
     const uint32_t causes =
         rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.vsrc1);
     wf.raise_alu_causes(causes);
     return causes;
   }
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1) {
     const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.vsrc1);
     wf.raise_alu_causes(causes);
     return causes;
@@ -128,13 +129,13 @@ template <typename Inst> uint32_t classify_mul_f32_vop2(const Inst &inst, Wavefr
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefront &wf) {
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) {
     const uint32_t causes =
         rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.src1);
     wf.raise_alu_causes(causes);
     return causes;
   }
-  if (wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA1) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1) {
     const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.src1);
     wf.raise_alu_causes(causes);
     return causes;
@@ -144,8 +145,8 @@ template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefr
   const uint32_t omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                 wf.ieee_mode(), inst.inst_.omod);
   const float omod_scale = omod == 1 ? 2.0f : omod == 2 ? 4.0f : omod == 3 ? 0.5f : 1.0f;
-  const uint32_t suppressed = omod != 0 && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
-                                            wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)
+  const uint32_t suppressed = omod != 0 && (wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 ||
+                                            wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)
                                   ? (1u << 4) | (1u << 5)
                                   : 0;
   return detail::classify_mul_lanes(inst.src0, inst.src1, wf, [&](float lhs, float rhs) {
