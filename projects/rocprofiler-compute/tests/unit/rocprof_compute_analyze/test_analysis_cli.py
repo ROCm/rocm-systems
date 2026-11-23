@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from ml_api_tracing.analyze.definitions import CallTreeNode, KernelStats
 from rocprof_compute_analyze.analysis_cli import (
     _check_listed_backends,
     _intersect_with_user_dispatch_filter,
@@ -17,7 +18,7 @@ from rocprof_compute_analyze.analysis_cli import (
     cli_analysis,
 )
 from utils import schema
-from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
+from utils.utils_analysis import iter_call_tree_paths
 
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
 RELU_PMC_GROUP_KEY = (2, "relu_kernel", 0, 0, 0)
@@ -210,12 +211,12 @@ def test_list_operators_joint_backend_heading(capsys):
     assert "PyTorch, Triton Operator Call Tree" in captured.out
 
 
-def test_handle_operator_prints_matched_subtree(capsys):
+def test_show_operator_report_prints_matched_subtree(capsys):
     cli = cli_analysis(argparse.Namespace(), {})
     workload = workload_with_operator_forest()
     workload.operator_patterns = {"torch": ["*addmm*"]}
     cli.apply_operator_filter(workload, "/workload")
-    cli.handle_operator(workload)
+    cli.show_operator_report(workload)
     captured = capsys.readouterr()
     assert "Matched PyTorch Operators: *addmm*" in captured.out
     assert "aten::addmm" in captured.out
@@ -369,7 +370,7 @@ def test_run_analysis_prints_matched_tree_for_every_path(monkeypatch):
         lambda self: None,
     )
     monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.cli_analysis.handle_operator",
+        "rocprof_compute_analyze.analysis_cli.cli_analysis.show_operator_report",
         lambda self, workload: handled_workloads.append(workload),
     )
     monkeypatch.setattr(

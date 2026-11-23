@@ -11,9 +11,9 @@ from abc import abstractmethod
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from ml_api_tracing.profiling.trace_selection import select_traced_frameworks
 from pc_sampling.pc_sampling_profile import PCSamplingProfile
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from utils.inject_roctx.constants import KNOWN_ML_API_BACKENDS
 from utils.logger import (
     console_debug,
     console_error,
@@ -93,13 +93,6 @@ def _find_python_script_index(argv: List[str]) -> Tuple[Optional[int], Optional[
             continue
         return i, None
     return None, None
-
-
-def _frameworks_to_trace(trace_ml_api: Optional[List[str]]) -> Optional[List[str]]:
-    """Return the --trace-ml-api frameworks. With no values, it traces all of them."""
-    if trace_ml_api == []:
-        return list(KNOWN_ML_API_BACKENDS)
-    return trace_ml_api
 
 
 def _prepare_ml_api_trace_injection(
@@ -237,7 +230,7 @@ class RocProfCompute_Base:
                 current.append("30")
                 args.filter_blocks = current
 
-        frameworks = _frameworks_to_trace(args.trace_ml_api)
+        frameworks = select_traced_frameworks(args.trace_ml_api)
         if frameworks and is_only_pc_sampling(args.filter_blocks):
             console_error(
                 "--trace-ml-api cannot be used with PC-sampling-only profiling, "
@@ -361,7 +354,9 @@ class RocProfCompute_Base:
         ) as f:
             args_dict = dict(vars(self.__args))
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
-            args_dict["trace_ml_api"] = _frameworks_to_trace(args_dict["trace_ml_api"])
+            args_dict["trace_ml_api"] = select_traced_frameworks(
+                args_dict["trace_ml_api"]
+            )
             yaml.dump(args_dict, f)
 
         gen_sysinfo(

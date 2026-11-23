@@ -17,9 +17,9 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from ml_api_tracing.marker_format import cap_args, encode_args
 from utils.inject_roctx import core
 from utils.inject_roctx._backends import torch_trace_collector
-from utils.inject_roctx.marker_format import cap_args, encode_args
 from utils.inject_roctx.registry import register
 from utils.logger import console_log, console_warning
 

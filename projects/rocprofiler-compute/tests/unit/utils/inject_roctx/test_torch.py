@@ -102,6 +102,20 @@ def test_format_wrap_args_renders_tensors_and_skips_non_tensors():
     assert torch_backend.format_wrap_args((), {}) == "n/a"
 
 
+@pytest.mark.parametrize(
+    ("delimiter", "encoded"),
+    [
+        pytest.param("|", "%7C", id="pipe"),
+        pytest.param(";", "%3B", id="semicolon"),
+        pytest.param("%", "%25", id="percent"),
+    ],
+)
+def test_format_wrap_args_caps_raw_text_before_encoding(delimiter, encoded):
+    rendered = torch_backend.format_wrap_args((), {delimiter * 512: fake_tensor()})
+
+    assert rendered == "(" + encoded * 511 + "...)"
+
+
 def test_dispatcher_marker_name_for_aten_packet():
     from utils.inject_roctx._backends.torch import dispatcher_marker_name_for
 

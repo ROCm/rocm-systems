@@ -1,22 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from typing import Optional
+"""ML API trace analysis errors."""
 
-import pandas as pd
+from typing import List, Optional
 
 _UNMATCHED_KERNEL_NAME_PREVIEW = 10
 
 
-def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
-    count = len(unmatched_rows)
-    names: list[str] = []
-    if "Kernel_Name" in unmatched_rows.columns:
-        names = list(
-            dict.fromkeys(str(value) for value in unmatched_rows["Kernel_Name"])
-        )
-    preview = ", ".join(names[:_UNMATCHED_KERNEL_NAME_PREVIEW])
-    if len(names) > _UNMATCHED_KERNEL_NAME_PREVIEW:
+def _format_unmatched_kernel_message(count: int, kernel_names: List[str]) -> str:
+    """Summarize unmatched dispatches with a bounded list of kernel names."""
+    preview = ", ".join(kernel_names[:_UNMATCHED_KERNEL_NAME_PREVIEW])
+    if len(kernel_names) > _UNMATCHED_KERNEL_NAME_PREVIEW:
         return (
             f"{count} unmatched dispatches; first "
             f"{_UNMATCHED_KERNEL_NAME_PREVIEW} Kernel_Names: {preview}"
@@ -30,15 +25,22 @@ class MlApiTraceError(Exception):
     """Base class for ML API trace analyze failures."""
 
 
+class FatalMlApiTraceError(MlApiTraceError):
+    """A trace integrity error that stops analyze. Other trace errors only warn."""
+
+
 class UnaccountedKernelError(MlApiTraceError):
     """Dispatch unmatched on Correlation_ID and GUID."""
 
-    def __init__(self, unmatched_rows: pd.DataFrame) -> None:
-        self.unmatched_rows = unmatched_rows
-        super().__init__(_format_unmatched_kernel_message(unmatched_rows))
+    def __init__(self, unmatched_count: int, kernel_names: List[str]) -> None:
+        self.unmatched_count = unmatched_count
+        self.kernel_names = kernel_names
+        super().__init__(
+            _format_unmatched_kernel_message(unmatched_count, kernel_names)
+        )
 
 
-class PassMarkerMismatchError(MlApiTraceError):
+class PassMarkerMismatchError(FatalMlApiTraceError):
     """Operator calls or kernel-name sets disagree across profiling passes."""
 
     def __init__(
@@ -108,7 +110,7 @@ class UncorrelatedLauncherIntervalError(MlApiTraceError):
         )
 
 
-class OverlappingMarkerRangeError(MlApiTraceError):
+class OverlappingMarkerRangeError(FatalMlApiTraceError):
     """Two markers on the same Thread_Id overlap and neither contains the other."""
 
     def __init__(
@@ -155,7 +157,7 @@ class MissingSourceLocationError(MlApiTraceError):
         )
 
 
-class KernelSequenceLengthMismatchError(MlApiTraceError):
+class KernelSequenceLengthMismatchError(FatalMlApiTraceError):
     """Kernel name and timestamp lists on one marker row have unequal lengths."""
 
     def __init__(
@@ -176,7 +178,7 @@ class KernelSequenceLengthMismatchError(MlApiTraceError):
         )
 
 
-class MarkerNotNestedError(MlApiTraceError):
+class MarkerNotNestedError(FatalMlApiTraceError):
     """A consolidated marker row is missing from the nested call forest."""
 
     def __init__(

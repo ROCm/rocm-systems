@@ -9,6 +9,13 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 from membw_analysis.engine import run_membw_analysis
+from ml_api_tracing.analyze.definitions import CallTreeForest, CallTreeNode
+from ml_api_tracing.analyze.operator_patterns import (
+    bind_operator_patterns,
+    check_backends_traced,
+    operator_backend_labels,
+    traced_frameworks_from_config,
+)
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
@@ -16,29 +23,15 @@ from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
-    CallTreeNode,
-    bind_operator_patterns,
     build_operator_summary,
-    check_backends_traced,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
     impute_counters_iteration_multiplex,
     iter_call_tree_paths,
     process_ml_api_trace_output,
     rollup_node_stats,
-    traced_frameworks_from_config,
 )
 from utils.utils_common import selects_roofline, validate_roofline_csv
-
-# Display names for the backends in operator headings and messages.
-_OPERATOR_LABELS = {"torch": "PyTorch", "triton": "Triton", "user": "User"}
-
-
-def _labels_for_backends(backends: List[str]) -> str:
-    """Join backend display names."""
-    if not backends:
-        return "ML API"
-    return ", ".join(_OPERATOR_LABELS.get(backend, backend) for backend in backends)
 
 
 def _operator_pattern_text(operator_patterns: Dict[str, List[str]]) -> str:
@@ -75,9 +68,9 @@ def _operator_patterns_for_workload(
 
 
 def _collect_glob_matched_nodes(
-    forest: dict[str, list[CallTreeNode]],
-    framewise_patterns: dict[str, list[str]],
-) -> list[CallTreeNode]:
+    forest: CallTreeForest,
+    operator_patterns: Dict[str, List[str]],
+) -> List[CallTreeNode]:
     """Return nodes whose backend matches and whose path or name glob-matches."""
     return [
         node
@@ -86,7 +79,7 @@ def _collect_glob_matched_nodes(
         if any(
             parser.torch_operator_pattern_matches(pattern, "/".join(path))
             or parser.torch_operator_pattern_matches(pattern, node.name)
-            for pattern in framewise_patterns.get(node.backend or "", [])
+            for pattern in operator_patterns.get(node.backend or "", [])
         )
     ]
 
@@ -265,7 +258,7 @@ class cli_analysis(OmniAnalyze_Base):
                 )
                 process_ml_api_trace_output(workload, path_info[0])
                 pmc_group_keys = self.apply_operator_filter(workload, path_info[0])
-                labels = _labels_for_backends(list(workload.operator_patterns))
+                labels = operator_backend_labels(list(workload.operator_patterns))
                 workload.raw_pmc, slot_to_id, workload.pass_tables = (
                     file_io.create_df_pmc_with_slot_ids(path_info[0], args.verbose)
                 )
@@ -340,7 +333,7 @@ class cli_analysis(OmniAnalyze_Base):
         # Listing exits in pre_processing, so this runs only for a filter.
         if args.operator is not None:
             for path_info in args.path:
-                self.handle_operator(self._runs[path_info[0]])
+                self.show_operator_report(self._runs[path_info[0]])
 
         if args.list_stats:
             tty.show_kernel_stats(
@@ -443,14 +436,14 @@ class cli_analysis(OmniAnalyze_Base):
         tty.list_ml_operators(
             workload_path,
             forest_view,
-            framework_labels=[_labels_for_backends(backends)],
+            framework_labels=[operator_backend_labels(backends)],
         )
 
     def apply_operator_filter(
         self, workload: schema.Workload, workload_path: str
     ) -> List[Tuple]:
         """Keep the operators matching workload.operator_patterns; return pmc keys."""
-        labels = _labels_for_backends(list(workload.operator_patterns))
+        labels = operator_backend_labels(list(workload.operator_patterns))
         matched_nodes = _collect_glob_matched_nodes(
             workload.ml_api_call_trees, workload.operator_patterns
         )
@@ -480,11 +473,11 @@ class cli_analysis(OmniAnalyze_Base):
             )
         return pmc_group_keys
 
-    def handle_operator(self, workload: schema.Workload) -> None:
+    def show_operator_report(self, workload: schema.Workload) -> None:
         """Display the matched operator call tree."""
         if not workload.ml_api_call_trees:
             return
-        labels = _labels_for_backends(list(workload.operator_patterns))
+        labels = operator_backend_labels(list(workload.operator_patterns))
         subtree = workload.ml_api_call_trees
         print(f"\n{'=' * 80}")
         print(
