@@ -870,6 +870,9 @@ void hipFileBatchIODestroy(hipFileBatchHandle_t batch_idp);
  * @note hipFile reserves the device's greatest stream priority for its fallback
  *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
  *       unless the device has only one priority level.
+ * @note `buffer_base` must be device memory. A buffer registered from host
+ *       memory returns `hipFileAsyncNotSupported`; use `hipFileRead()` or
+ *       `hipFileWrite()` for host buffers.
  *
  * @return \hipfile_error_return
  */
@@ -902,6 +905,9 @@ hipFileError_t hipFileReadAsync(hipFileHandle_t fh, void *buffer_base, size_t *s
  * @note hipFile reserves the device's greatest stream priority for its fallback
  *       I/O. A stream created at that priority returns `hipFileAsyncNotSupported`,
  *       unless the device has only one priority level.
+ * @note `buffer_base` must be device memory. A buffer registered from host
+ *       memory returns `hipFileAsyncNotSupported`; use `hipFileRead()` or
+ *       `hipFileWrite()` for host buffers.
  *
  * @return \hipfile_error_return
  */

@@ -492,4 +492,23 @@ TEST_F(HipFileStreamImplicit, async_io_on_reserved_priority_stream_is_not_suppor
     EXPECT_EQ(hipFileStreamDeregister(nonnull_stream), HipFileOpError(hipFileInvalidValue));
 }
 
+TEST_F(HipFileStreamImplicit, async_io_on_host_buffer_is_not_supported)
+{
+    void *host_buf{reinterpret_cast<void *>(0x2)};
+    expect_buffer_registration(mhip, hipMemoryTypeHost);
+    ASSERT_EQ(hipFileBufRegister(host_buf, 4096, 0), HIPFILE_SUCCESS);
+    EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
+    EXPECT_CALL(mhip, hipExtMallocWithFlags).Times(0);
+
+    size_t  size{4096};
+    hoff_t  file_offset{0};
+    hoff_t  buf_offset{0};
+    ssize_t bytes{0};
+    EXPECT_EQ(hipFileReadAsync(fh, host_buf, &size, &file_offset, &buf_offset, &bytes, nonnull_stream),
+              HipFileOpError(hipFileAsyncNotSupported));
+    EXPECT_EQ(hipFileWriteAsync(fh, host_buf, &size, &file_offset, &buf_offset, &bytes, nonnull_stream),
+              HipFileOpError(hipFileAsyncNotSupported));
+    EXPECT_EQ(hipFileBufDeregister(host_buf), HIPFILE_SUCCESS);
+}
+
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

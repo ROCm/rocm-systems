@@ -77,6 +77,11 @@ copies while it waits for a transfer, so hipFile rejects it:
 asynchronous I/O. A device with only one stream priority level has no reserved
 priority. See :ref:`hipfile-greatest-priority-streams` for a related case.
 
+Asynchronous I/O accepts only device memory. ``hipFileReadAsync()`` and
+``hipFileWriteAsync()`` return ``hipFileAsyncNotSupported`` for a buffer
+registered from host memory; use the synchronous ``hipFileRead()`` and
+``hipFileWrite()`` for host buffers.
+
 Stream registration flags
 ===========================
 

@@ -68,6 +68,7 @@ struct AsyncTest : public ::testing::Test {
     {
         configure(nonnull_stream(), true);
         ON_CALL(*buffer, getLength).WillByDefault(Return(4096));
+        ON_CALL(*buffer, getType).WillByDefault(Return(hipMemoryTypeDevice));
         ON_CALL(*buffer, getGpuId).WillByDefault(Return(0));
     }
 
@@ -260,6 +261,24 @@ TEST_F(AsyncTest, GpuMismatchThrows)
     EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
 
     EXPECT_THROW(enqueue(), std::invalid_argument);
+}
+
+TEST_F(AsyncTest, HostBufferIsNotSupported)
+{
+    // A host buffer's gpu_id of -1 would also fail the device check; the explicit rejection must win.
+    ON_CALL(*buffer, getType).WillByDefault(Return(hipMemoryTypeHost));
+    ON_CALL(*buffer, getGpuId).WillByDefault(Return(-1));
+    EXPECT_CALL(*stream, nextSignalTarget).Times(0);
+    EXPECT_CALL(mhip, hipLaunchHostFunc).Times(0);
+
+    try {
+        enqueue();
+        FAIL() << "enqueueAsync accepted a host buffer";
+    }
+    catch (const hipFileError_t &e) {
+        EXPECT_EQ(e.err, hipFileAsyncNotSupported);
+        EXPECT_EQ(e.hip_drv_err, hipSuccess);
+    }
 }
 
 TEST_F(AsyncTest, DispatchBlockingOpWaitsForIo)

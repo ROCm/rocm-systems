@@ -126,6 +126,11 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType io_type, std::shared_ptr<I
     if (!paramsValid(buffer, limited_size, *file_offset, *buffer_offset)) {
         throw std::invalid_argument("The selected file or buffer region is invalid");
     }
+    // Host buffers haven't been tested on the async path, so reject them up front rather than letting
+    // their gpu_id of -1 fail the device check below as a less specific error.
+    if (buffer->getType() == hipMemoryTypeHost) {
+        throw hipFileError_t{hipFileAsyncNotSupported, hipSuccess};
+    }
     if (buffer->getGpuId() != stream->getHipDevice()) {
         throw std::invalid_argument("Buffer GPU ID does not match Stream GPU ID");
     }
