@@ -476,6 +476,65 @@ std::vector<uint8_t> FlatColorJpeg(uint16_t width, uint16_t height) {
     return jpeg;
 }
 
+/**
+ * @brief Builds a flat JPEG of the smallest size the decoder accepts and parses it into a stream handle.
+ *
+ * @param handle The decoder handle whose minimum image size is used.
+ * @param stream_handle The stream handle to parse the JPEG into.
+ * @param jpeg Receives the stream, which must stay alive while stream_handle is decoded.
+ * @param width Receives the image width.
+ * @param height Receives the image height.
+ * @return EXIT_SUCCESS if the stream was built and parsed, EXIT_FAILURE otherwise.
+ */
+int ParseMinimumSizeFlatJpeg(RocJpegHandle handle, RocJpegStreamHandle stream_handle, std::vector<uint8_t> &jpeg,
+                             uint16_t &width, uint16_t &height) {
+    RocJpegDecodeCaps decode_caps = {};
+    RocJpegStatus rocjpeg_status = rocJpegGetDecoderCaps(handle, &decode_caps);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegGetDecoderCaps: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    // Round the minimum size the decoder accepts up to whole 16x16 MCUs.
+    width = static_cast<uint16_t>((std::max(decode_caps.min_width, 16u) + 15u) & ~15u);
+    height = static_cast<uint16_t>((std::max(decode_caps.min_height, 16u) + 15u) & ~15u);
+    jpeg = FlatColorJpeg(width, height);
+    if (jpeg.empty()) {
+        std::cerr << "The color seed no longer carries parsable SOF and SOS segments." << std::endl;
+        return EXIT_FAILURE;
+    }
+    rocjpeg_status = rocJpegStreamParse(jpeg.data(), jpeg.size(), stream_handle);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the " << width << "x" << height << " flat JPEG but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
+/**
+ * @brief Raw output format values that the decode APIs must reject.
+ *
+ * ROCJPEG_OUTPUT_FORMAT_MAX is the number of output formats, not an output format. The other values lie outside the
+ * enum, as a C caller or a language binding can pass them.
+ */
+const std::vector<int32_t> &InvalidOutputFormats() {
+    static const std::vector<int32_t> kValues = {ROCJPEG_OUTPUT_FORMAT_MAX, 99, -1};
+    return kValues;
+}
+
+/**
+ * @brief Builds decode parameters with the given raw output format value and no cropping.
+ *
+ * The value is copied into output_format as a C caller would store it, because converting a value outside the range
+ * of RocJpegOutputFormat to the enum is undefined in C++.
+ */
+RocJpegDecodeParams OutputFormatDecodeParams(int32_t output_format) {
+    RocJpegDecodeParams decode_params = {};
+    static_assert(sizeof(decode_params.output_format) == sizeof(output_format), "RocJpegOutputFormat is not 32 bits wide");
+    std::memcpy(&decode_params.output_format, &output_format, sizeof(output_format));
+    return decode_params;
+}
+
 }  // namespace
 
 RocJpegApiNegativeTests:: RocJpegApiNegativeTests() {};
@@ -835,6 +894,38 @@ int RocJpegApiNegativeTests::TestInvalidDecode() {
        }
    }
 
+   // Scenario 6: Pass an output format that is not a RocJpegOutputFormat value below ROCJPEG_OUTPUT_FORMAT_MAX, to
+   // rocJpegDecode and rocJpegDecodeAsync. The image is large enough to decode, so the call must be rejected for its
+   // output format before it is submitted, instead of decoding and returning success without writing the output.
+   std::vector<uint8_t> flat_jpeg;
+   uint16_t width = 0;
+   uint16_t height = 0;
+   if (ParseMinimumSizeFlatJpeg(rocjpeg_handle_, rocjpeg_stream_handle_, flat_jpeg, width, height) != EXIT_SUCCESS) {
+       return EXIT_FAILURE;
+   }
+   for (int32_t output_format : InvalidOutputFormats()) {
+       decode_params = OutputFormatDecodeParams(output_format);
+       rocjpeg_status = rocJpegDecode(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecode with output format " << output_format << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+       rocjpeg_status = rocJpegDecodeAsync(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecodeAsync with output format " << output_format << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+       // A rejected submit must not leave a decode pending for the destination.
+       rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecodeSync after a rejected output format " << output_format << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+   }
+
    return EXIT_SUCCESS;
 }
 
@@ -898,24 +989,10 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
     // Scenario 3: Submit two images with rocJpegDecodeBatchedAsync, then pass rocJpegDecodeBatchedSync a third
     // destination that has nothing pending. The call must fail without taking the two pending decodes, so syncing
     // the original two afterwards must still succeed.
-    RocJpegDecodeCaps decode_caps = {};
-    rocjpeg_status = rocJpegGetDecoderCaps(rocjpeg_handle_, &decode_caps);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "rocJpegGetDecoderCaps: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
-        return EXIT_FAILURE;
-    }
-    // Round the minimum size the decoder accepts up to whole 16x16 MCUs.
-    const uint16_t width = static_cast<uint16_t>((std::max(decode_caps.min_width, 16u) + 15u) & ~15u);
-    const uint16_t height = static_cast<uint16_t>((std::max(decode_caps.min_height, 16u) + 15u) & ~15u);
-    const std::vector<uint8_t> flat_jpeg = FlatColorJpeg(width, height);
-    if (flat_jpeg.empty()) {
-        std::cerr << "The color seed no longer carries parsable SOF and SOS segments." << std::endl;
-        return EXIT_FAILURE;
-    }
-    rocjpeg_status = rocJpegStreamParse(flat_jpeg.data(), flat_jpeg.size(), rocjpeg_stream_handle_);
-    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
-        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the " << width << "x" << height << " flat JPEG but got "
-                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+    std::vector<uint8_t> flat_jpeg;
+    uint16_t width = 0;
+    uint16_t height = 0;
+    if (ParseMinimumSizeFlatJpeg(rocjpeg_handle_, rocjpeg_stream_handle_, flat_jpeg, width, height) != EXIT_SUCCESS) {
         return EXIT_FAILURE;
     }
     constexpr int kNumSubmitted = 2;
@@ -958,7 +1035,88 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
             (void)hipFree(sync_destinations[k].channel[0]);
         }
     }
-    return result;
+    if (result != EXIT_SUCCESS) {
+        return result;
+    }
+
+    // Scenario 4: Pass a batch whose first image requests native output and whose second image has an output format
+    // that is not a RocJpegOutputFormat value below ROCJPEG_OUTPUT_FORMAT_MAX, to rocJpegDecodeBatched and
+    // rocJpegDecodeBatchedAsync. The whole batch must be rejected before it is submitted, so the output of the first
+    // image must not be written and no decode may be left pending. A valid batch must still decode afterwards.
+    // Native output is copied image by image, so a decoder that rejected the second image only after decoding the
+    // batch would still write the first output whatever the number of JPEG cores, whereas an RGB conversion can be
+    // queued for several images and dropped with them. The destinations have a single channel, sized for the RGB
+    // output of the valid batch, so native output writes only the luma plane of the 4:2:0 image.
+    constexpr uint8_t kFill = 0xA5;
+    const size_t rgb_size = static_cast<size_t>(width) * 3u * height;
+    std::unique_ptr<void, HipBufferDeleter> rgb_buffers[2];
+    RocJpegImage rgb_destinations[2] = {};
+    for (int k = 0; k < 2; k++) {
+        void *buffer = nullptr;
+        if (hipMalloc(&buffer, rgb_size) != hipSuccess) {
+            std::cerr << "hipMalloc failed for the output of destination " << k << std::endl;
+            return EXIT_FAILURE;
+        }
+        rgb_buffers[k].reset(buffer);
+        rgb_destinations[k].channel[0] = static_cast<uint8_t *>(buffer);
+        rgb_destinations[k].pitch[0] = width * 3u;
+    }
+    if (hipMemset(rgb_destinations[0].channel[0], kFill, rgb_size) != hipSuccess) {
+        std::cerr << "hipMemset failed for the output of destination 0" << std::endl;
+        return EXIT_FAILURE;
+    }
+    // Returns the number of bytes of the first output that differ from the fill, or -1 if it cannot be read back.
+    auto num_bytes_written = [&]() -> int64_t {
+        std::vector<uint8_t> output(rgb_size);
+        if (hipMemcpy(output.data(), rgb_destinations[0].channel[0], rgb_size, hipMemcpyDeviceToHost) != hipSuccess) {
+            std::cerr << "Failed to copy the output of destination 0 to the host" << std::endl;
+            return -1;
+        }
+        return std::count_if(output.begin(), output.end(), [](uint8_t value) { return value != kFill; });
+    };
+    RocJpegDecodeParams mixed_decode_params[2] = {};
+    mixed_decode_params[0].output_format = ROCJPEG_OUTPUT_NATIVE;
+    for (int32_t output_format : InvalidOutputFormats()) {
+        mixed_decode_params[1] = OutputFormatDecodeParams(output_format);
+        rocjpeg_status = rocJpegDecodeBatched(rocjpeg_handle_, stream_handles, 2, mixed_decode_params, rgb_destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatched with output format " << output_format << " for the second image: Expected "
+                      << "ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        if (num_bytes_written() != 0) {
+            std::cerr << "rocJpegDecodeBatched with output format " << output_format << " for the second image: Expected the "
+                      << "output of the first image to be left unwritten" << std::endl;
+            return EXIT_FAILURE;
+        }
+        rocjpeg_status = rocJpegDecodeBatchedAsync(rocjpeg_handle_, stream_handles, 2, mixed_decode_params, rgb_destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedAsync with output format " << output_format << " for the second image: Expected "
+                      << "ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        // A rejected submit must not leave decodes pending for any destination in the batch.
+        for (int k = 0; k < 2; k++) {
+            rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &rgb_destinations[k]);
+            if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+                std::cerr << "rocJpegDecodeSync for destination " << k << " after a rejected output format " << output_format
+                          << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+    }
+    rocjpeg_status = rocJpegDecodeBatched(rocjpeg_handle_, stream_handles, 2, rgb_decode_params, rgb_destinations);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegDecodeBatched of a valid batch after the rejected output formats: Expected ROCJPEG_STATUS_SUCCESS but got "
+                  << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    if (num_bytes_written() <= 0) {
+        std::cerr << "rocJpegDecodeBatched of a valid batch after the rejected output formats: Expected the output of the first "
+                  << "image to be written" << std::endl;
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }
 
 int RocJpegApiNegativeTests::TestInvalidGetDecoderCaps() {

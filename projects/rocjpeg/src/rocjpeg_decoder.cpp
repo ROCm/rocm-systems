@@ -262,6 +262,27 @@ RocJpegStatus RocJpegDecoder::ValidateCropRectangle(const RocJpegDecodeParams &d
 }
 
 /**
+ * @brief Checks the decode parameters of one image before anything is submitted for it.
+ *
+ * Checking the output format here, rather than only when the decoded output is copied, rejects an image with an
+ * unknown output format before it is decoded, and a batch holding one before any of its images is decoded.
+ *
+ * @param decode_params The decode parameters to check.
+ * @param jpeg_stream_params The parsed JPEG stream parameters holding the image dimensions.
+ * @return ROCJPEG_STATUS_SUCCESS if the output format is a RocJpegOutputFormat value below ROCJPEG_OUTPUT_FORMAT_MAX
+ *         and the crop rectangle passes ValidateCropRectangle(), ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
+ */
+RocJpegStatus RocJpegDecoder::ValidateDecodeParams(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params) {
+    // Compare as unsigned, so that a negative value stored by a C caller is rejected as well.
+    const uint32_t output_format = static_cast<uint32_t>(decode_params.output_format);
+    if (output_format >= static_cast<uint32_t>(ROCJPEG_OUTPUT_FORMAT_MAX)) {
+        ErrorLog(g_rocjpeg_logger, "Invalid output format " + ROCJPEG_TOSTR(static_cast<int32_t>(output_format)));
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    return ValidateCropRectangle(decode_params, jpeg_stream_params);
+}
+
+/**
  * @brief Decodes a JPEG image using the RocJpegDecoder.
  *
  * This function decodes a JPEG image from the provided JPEG stream handle and decode parameters,
@@ -289,7 +310,7 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
     // SubmitDecode writes the crop rectangle into the parameters it is given, so decode a copy
     // rather than the stream handle's own parameters, as DecodeAsync and DecodeBatched do.
     JpegStreamParameters jpeg_stream_params = *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
-    if (ValidateCropRectangle(*decode_params, jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+    if (ValidateDecodeParams(*decode_params, jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
@@ -322,7 +343,7 @@ RocJpegStatus RocJpegDecoder::DecodeAsync(RocJpegStreamHandle jpeg_stream_handle
 
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
     const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
-    if (ValidateCropRectangle(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+    if (ValidateDecodeParams(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
@@ -491,7 +512,10 @@ RocJpegStatus RocJpegDecoder::FinalizeSubBatches(const VASurfaceID *surface_ids,
                     CHECK_ROCJPEG(AccumulateColorConvertToRGBPlanar(mem, picture_width, picture_height, &destinations[idx], &decode_params[idx], is_roi_valid));
                     break;
                 default:
-                    break;
+                    // The decode functions reject any other output format before submitting the image. Fail rather
+                    // than report success with nothing written; FinalizeDecodeBatched releases the surfaces.
+                    ErrorLog(g_rocjpeg_logger, "Unknown output format " + ROCJPEG_TOSTR(static_cast<int32_t>(decode_params[idx].output_format)));
+                    return ROCJPEG_STATUS_INVALID_PARAMETER;
             }
         }
 
@@ -537,8 +561,8 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
     // Validate every image before submitting any, so an invalid one does not leave earlier images in flight.
     for (int i = 0; i < batch_size; i++) {
         auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
-        if (ValidateCropRectangle(decode_params[i], *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters()) != ROCJPEG_STATUS_SUCCESS) {
-            ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle for the image at index " + ROCJPEG_TOSTR(i));
+        if (ValidateDecodeParams(decode_params[i], *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters()) != ROCJPEG_STATUS_SUCCESS) {
+            ErrorLog(g_rocjpeg_logger, "Invalid decode parameters for the image at index " + ROCJPEG_TOSTR(i));
             FunctionExitLog(g_rocjpeg_logger);
             return ROCJPEG_STATUS_INVALID_PARAMETER;
         }
@@ -614,8 +638,8 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
     for (int i = 0; i < batch_size; i++) {
         auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
         const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
-        if (ValidateCropRectangle(decode_params[i], *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
-            ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle for the image at index " + ROCJPEG_TOSTR(i));
+        if (ValidateDecodeParams(decode_params[i], *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+            ErrorLog(g_rocjpeg_logger, "Invalid decode parameters for the image at index " + ROCJPEG_TOSTR(i));
             FunctionExitLog(g_rocjpeg_logger);
             return ROCJPEG_STATUS_INVALID_PARAMETER;
         }
