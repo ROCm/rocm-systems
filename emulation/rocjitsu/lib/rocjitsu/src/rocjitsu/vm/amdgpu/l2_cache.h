@@ -444,6 +444,10 @@ public:
 
   /// Apply CDNA4 BUFFER_INV to this XCD's noncoherent lines. Device scope
   /// retains a sole L2. System scope applies regardless of the topology.
+  /// @brief GFX12 GLOBAL_INV at device (false) or system (true) scope.
+  /// @details A device-scope acquire leaves an L2 shared by every CU alone;
+  /// otherwise the whole L2 is written back and discarded.
+  VmAccessOutcome invalidate_for_scope(bool system_scope);
   VmAccessOutcome invalidate_buffer_scope(bool system_scope);
 
   /// @brief Publish and invalidate only the specified address space.

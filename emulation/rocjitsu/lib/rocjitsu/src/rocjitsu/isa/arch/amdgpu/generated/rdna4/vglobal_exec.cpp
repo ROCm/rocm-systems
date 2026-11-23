@@ -473,7 +473,7 @@ void GlobalInvVglobal::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.scope < 2)
     return;
   if (auto *l2 = wf.cu().l2())
-    l2->invalidate_buffer_scope(inst_.scope == 3);
+    l2->invalidate_for_scope(inst_.scope == 3);
 }
 
 void GlobalWbVglobal::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }

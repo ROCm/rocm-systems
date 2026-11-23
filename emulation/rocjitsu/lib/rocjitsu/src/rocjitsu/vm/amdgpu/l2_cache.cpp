@@ -1341,6 +1341,13 @@ VmAccessOutcome L2Cache::flush_line(uint64_t addr, uint32_t vmid) {
   return flush_line_locked(addr, vmid);
 }
 
+VmAccessOutcome L2Cache::invalidate_for_scope(bool system_scope) {
+  // Device scope reaches L2 only when CUs do not all share this one.
+  if (!system_scope && !coherence_->has_multiple_l2_caches())
+    return VmAccessOutcome::Complete;
+  return flush_all(0);
+}
+
 VmAccessOutcome L2Cache::invalidate_buffer_scope(bool system_scope) {
   // Consult the device before taking an L2 lock, matching the lock order used
   // by device-wide atomics. Only the issuing XCD's L2 performs the invalidation.
