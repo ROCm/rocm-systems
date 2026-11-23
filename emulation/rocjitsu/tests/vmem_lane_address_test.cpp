@@ -454,11 +454,13 @@ TEST(Gfx9LinearBufferLanesTest, MatchesThePerLaneRulesOrDeclines) {
     const uint32_t soffset = rng() % 8 == 0 ? static_cast<uint32_t>(rng()) : rng() % 512;
     const uint64_t base = rng() & ((uint64_t{1} << 48) - 1);
     std::array<uint32_t, 64> offsets;
-    const bool spill = rng() % 4 == 0;
+    const uint32_t kind = rng() % 4;
     for (uint32_t lane = 0; lane < 64; ++lane)
-      offsets[lane] = spill ? static_cast<uint32_t>(rng())
-                            : static_cast<uint32_t>(lane * 4 + rng() % 4096 +
-                                                    (rng() % 64 == 0 ? 0xffff0000u : 0));
+      offsets[lane] = kind == 0 ? static_cast<uint32_t>(rng())
+                      // VOFFSET + inst_offset wraps in 32 bits back into the buffer.
+                      : kind == 1 ? static_cast<uint32_t>(0x100000000ull - inst_offset + lane * 4)
+                                  : static_cast<uint32_t>(lane * 4 + rng() % 4096 +
+                                                          (rng() % 64 == 0 ? 0xffff0000u : 0));
     std::array<uint64_t, 64> addresses;
     addresses.fill(0xdead);
     const bool fast = gfx9_linear_buffer_lanes(
