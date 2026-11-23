@@ -342,6 +342,13 @@ static int ROCDECAPI HandleVideoSequence(void *user_data, RocdecVideoFormat *for
         return 0;
     }
     if (!caps.is_supported || format->coded_width > caps.max_width || format->coded_height > caps.max_height) {
+        // Skip (exit 77) only before anything is decoded; a later sequence the GPU cannot decode
+        // truncates the output, which is a failure.
+        if (dec.decoder != nullptr) {
+            std::cerr << "Error: reconfigured stream format not supported on this GPU" << std::endl;
+            dec.failed = true;
+            return 0;
+        }
         std::cout << "info: Stream format not supported on this GPU" << std::endl;
         dec.unsupported = true;
         return 0;
@@ -613,9 +620,12 @@ static void ConsumerLoop(AsyncDecoder &dec, MD5Generator *md5, std::ofstream *md
         // but cannot report it, so the digest would silently leave the frame out.
         if (frame && (md5 || md5_frames)) {
             host_frame.resize(item.geometry.FrameSize());
-            hipError_t status = hipMemcpyDtoH(host_frame.data(), frame, host_frame.size());
+            // Copy on the consumer's stream: hipMemcpyDtoH uses the legacy null stream, which waits for
+            // the producer's stream and would count the consumer's copies as producer time.
+            hipError_t status = hipMemcpyAsync(host_frame.data(), frame, host_frame.size(), hipMemcpyDeviceToHost, stream);
+            if (status == hipSuccess) status = hipStreamSynchronize(stream);
             if (status != hipSuccess) {
-                std::cerr << "Error: hipMemcpyDtoH of frame " << item.index << " failed: " << hipGetErrorName(status) << std::endl;
+                std::cerr << "Error: copying frame " << item.index << " to the host failed: " << hipGetErrorName(status) << std::endl;
                 result->ok = false;
             } else {
                 OutputSurfaceInfo info = DescribePackedFrame(item.geometry);
