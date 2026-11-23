@@ -384,9 +384,9 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTableKeepsTheGridBudget
   EXPECT_EQ(ncclReduceScatterDdaFabricLL128Blocks(mock_.get(), 64 * kMiBFloats, ncclFloat8e4m3), 256u);
 }
 
-// Past the narrow window a batched block packs 16 slices instead of 8 while the grid keeps half the 256-block
-// budget, so 2 MiB shards stay on 137 blocks, 4 MiB shards drop to 137 and 8 MiB shards keep the full budget.
-TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTablePacksWhileTheGridKeepsHalfTheBudget) {
+// Past the narrow window a batched block packs 16 slices instead of 8 only where that adds no pass through the slice
+// loop: shards up to 2048 slices fit one pass of the 256-block grid and keep it, 4 MiB shards drop to 137 blocks.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTablePacksWithoutAddingAPass) {
   using Shape = std::pair<unsigned, unsigned>;
   constexpr size_t kMiB = size_t{1} << 20;
   struct Cell {
@@ -395,8 +395,9 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTablePacksWhileTheGridK
     Shape shape;
   };
   const Cell cells[] = {
-    {8, kMiB, {137u, 128u}},       {8, 2 * kMiB, {137u, 256u}},  {8, 4 * kMiB, {137u, 256u}},
-    {8, 8 * kMiB, {256u, 256u}},   {12, 3 * kMiB / 2, {103u, 256u}}, {12, 2 * kMiB, {137u, 256u}},
+    {8, kMiB, {137u, 128u}},       {8, 2 * kMiB, {137u, 256u}},  {8, 15 * kMiB / 4, {256u, 256u}},
+    {8, 4 * kMiB, {137u, 256u}},   {8, 6 * kMiB, {205u, 256u}},  {8, 8 * kMiB, {256u, 256u}},
+    {12, 3 * kMiB / 2, {103u, 256u}}, {12, 2 * kMiB, {137u, 256u}},
     {16, kMiB, {256u, 512u}},      {16, 2 * kMiB, {137u, 256u}}, {16, 4 * kMiB, {137u, 256u}},
     {24, 3 * kMiB, {205u, 256u}},  {32, 2 * kMiB, {137u, 256u}}, {32, 4 * kMiB, {137u, 256u}},
     {64, kMiB, {137u, 128u}},      {64, 2 * kMiB, {137u, 256u}}, {64, 4 * kMiB, {137u, 256u}},
@@ -416,19 +417,22 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTablePacksWhileTheGridK
   }
 }
 
-// The packing doubles only while ceil(slices / packed) stays at or above half the budget, up to a 512-thread block's
-// slices, and never applies to a threads override, smaller comms or no table.
+// The packing doubles, up to a 512-thread block's slices, only while it keeps the unpacked grid's pass count, and never
+// applies to a threads override, smaller comms or no table.
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ShapeTablePackingBoundaries) {
   using Shape = std::pair<unsigned, unsigned>;
   UseShapeTable();
-  EXPECT_EQ(GridBlock(2032 * kSliceFloats), Shape(254u, 256u)) << "16 per block would leave 127 blocks";
-  EXPECT_EQ(GridBlock(2033 * kSliceFloats), Shape(128u, 256u)) << "16 per block keeps 128";
-  comm().ddaFabricMaxBlocks = 101;
-  EXPECT_EQ(GridBlock(800 * kSliceFloats), Shape(50u, 256u)) << "half of an odd budget rounds down";
-  EXPECT_EQ(GridBlock(783 * kSliceFloats), Shape(98u, 256u));
+  EXPECT_EQ(GridBlock(2033 * kSliceFloats), Shape(255u, 256u)) << "one pass: packing would add one";
+  EXPECT_EQ(GridBlock(2048 * kSliceFloats), Shape(256u, 256u)) << "the last shard 256 blocks take in one pass";
+  EXPECT_EQ(GridBlock(2049 * kSliceFloats), Shape(129u, 256u)) << "two passes either way";
+  comm().ddaFabricMaxBlocks = 100;
+  EXPECT_EQ(GridBlock(800 * kSliceFloats), Shape(100u, 256u)) << "one pass on a 100-block budget";
+  EXPECT_EQ(GridBlock(801 * kSliceFloats), Shape(51u, 256u)) << "two passes either way";
+  EXPECT_EQ(GridBlock(1104 * kSliceFloats), Shape(69u, 256u)) << "1.38 passes round up to 2, as 69 blocks take exactly";
   comm().ddaFabricMaxBlocks = 256;
   g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 128; };
-  EXPECT_EQ(GridBlock(2185 * kSliceFloats), Shape(137u, 128u)) << "packs twice up to 16 slices";
+  EXPECT_EQ(GridBlock(2185 * kSliceFloats), Shape(256u, 128u)) << "packs once: 16 slices would add a pass";
+  EXPECT_EQ(GridBlock(3277 * kSliceFloats), Shape(205u, 128u)) << "packs twice: four passes at 4, 8 and 16 slices";
   EXPECT_EQ(GridBlock(1093 * kSliceFloats), Shape(137u, 128u)) << "packs once";
   g_rcclDdaFabricRsLL128Threads = [](const ncclComm*) { return 512; };
   EXPECT_EQ(GridBlock(4370 * kSliceFloats), Shape(256u, 512u)) << "a 512-thread block is already at the limit";

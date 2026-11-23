@@ -84,16 +84,22 @@ static inline bool ddaLL128RsNarrow(const rcclArchThresholds* t, size_t shardByt
 }
 
 // Slices per batched block from rankScaledMinRanks ranks: a slice a warp, doubled up to a kDdaLL128RsMaxThreads
-// block's worth while the grid keeps at least half the budget. Each warp then takes more passes through the slice loop.
+// block's worth while the smaller grid takes no more passes through the slice loop than a slice a warp would.
 static inline size_t ddaLL128RsPackedSlicesPerBlock(const rcclArchThresholds* t, size_t slices, unsigned threads,
                                                      int nBlocksMax) {
-  size_t slicesPerBlock = threads / (unsigned)kDdaLL128Warp;
-  if (t == nullptr || ddaLL128RsThreadsFit(rcclParamDdaLL128RSThreads())) {
-    return slicesPerBlock;
+  const size_t warps = threads / (unsigned)kDdaLL128Warp;
+  if (t == nullptr || slices == 0 || ddaLL128RsThreadsFit(rcclParamDdaLL128RSThreads())) {
+    return warps;
   }
+  // Passes each warp makes when blocks are sized at slicesPerBlock slices.
+  const auto passes = [&](size_t slicesPerBlock) {
+    const size_t blocks = std::min((slices + slicesPerBlock - 1) / slicesPerBlock, (size_t)nBlocksMax);
+    return (slices + blocks * warps - 1) / (blocks * warps);
+  };
   const size_t maxSlicesPerBlock = kDdaLL128RsMaxThreads / (unsigned)kDdaLL128Warp;
-  while (slicesPerBlock * 2 <= maxSlicesPerBlock &&
-         (slices + slicesPerBlock * 2 - 1) / (slicesPerBlock * 2) >= (size_t)(nBlocksMax / 2)) {
+  const size_t unpackedPasses = passes(warps);
+  size_t slicesPerBlock = warps;
+  while (slicesPerBlock * 2 <= maxSlicesPerBlock && passes(slicesPerBlock * 2) == unpackedPasses) {
     slicesPerBlock *= 2;
   }
   return slicesPerBlock;
@@ -109,7 +115,7 @@ struct DdaLL128RsGeom {
 // A warp (batched) or a warp group (peer-parallel) carries one slice, so blocks = ceil(slices / slicesPerBlock),
 // capped by the grid budget. More slices than the grid holds just means more passes through the slice loop. From
 // rankScaledMinRanks ranks, small batched shards start at narrow blocks and widen to the batched block size once the
-// budget is full; larger ones pack more slices per block while the grid keeps half the budget.
+// budget is full; larger ones pack more slices per block while that adds no pass through the slice loop.
 static inline DdaLL128RsGeom ddaReduceScatterFabricLL128Geom(ncclComm* comm, size_t shardBytes) {
   const size_t slices = ddaLL128Slices(shardBytes);
   int nBlocksMax = comm->ddaFabricMaxBlocks;
