@@ -1380,8 +1380,14 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     retInfo.global_flags = thunkInfo.MemFlags.ui32.CoarseGrain
         ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED
         : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
-    retInfo.global_flags |=
-        thunkInfo.MemFlags.ui32.Uncached ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT : 0;
+    // The device kernarg region is marked by the region, not by an Uncached thunk flag. Report it
+    // the same way the pool does, so a tool that skips KERNARG_INIT memory (e.g. rocprofiler's
+    // kernel replay snapshot) also skips these allocations.
+    const bool region_kernarg = record != nullptr && record->region != nullptr &&
+        static_cast<const AMD::MemoryRegion*>(record->region)->kernarg();
+    retInfo.global_flags |= (thunkInfo.MemFlags.ui32.Uncached || region_kernarg)
+        ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
+        : 0;
     retInfo.global_flags |= thunkInfo.MemFlags.ui32.ExtendedCoherent
         ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_EXTENDED_SCOPE_FINE_GRAINED
         : 0;

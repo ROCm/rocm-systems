@@ -672,6 +672,9 @@ void MemoryFragment::FragmentDeviceKernargTest(void) {
       ASSERT_EQ(hsa_amd_pointer_info(ptrs[n], &info, NULL, NULL, NULL), HSA_STATUS_SUCCESS);
       EXPECT_NE(info.alloc_flags & HSA_AMD_POINTER_INFO_ALLOC_FLAG_EXECUTABLE, 0u)
           << "Device kernarg allocation " << n << " is not executable";
+      // The pointer must report the same pool flag as the pool itself.
+      EXPECT_NE(info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT, 0u)
+          << "Device kernarg allocation " << n << " does not report KERNARG_INIT";
     }
 
     ASSERT_EQ(hsa_agent_get_info(gpus[i], (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MEMORY_AVAIL,
