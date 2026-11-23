@@ -3167,12 +3167,16 @@ def coco_comparisons(comparisons: list[dict], metric_key: str, workload_type: st
     for c in comparisons:
         base, cand = c[BASELINE] or {}, c[CANDIDATE] or {}
         ratio = _finite(c["ratio"])
+        # The values the gate scored, so that ratio is candidate over baseline
+        # even when it scored the iteration medians rather than the means.
+        base_val, cand_val = c["gate_values"] or (base.get("metric_value"),
+                                                  cand.get("metric_value"))
         records.append({
             "point_key": c["precision"][:128],
             "metric": metric_key[:128],
             "threshold": threshold,
-            "baseline_value": _finite(base.get("metric_value")),
-            "candidate_value": _finite(cand.get("metric_value")),
+            "baseline_value": _finite(base_val),
+            "candidate_value": _finite(cand_val),
             "ratio": ratio,
             "baseline_tflops": _finite(base.get("tflops_avg")),
             "candidate_tflops": _finite(cand.get("tflops_avg")),

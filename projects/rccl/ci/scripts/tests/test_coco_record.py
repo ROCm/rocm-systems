@@ -59,9 +59,9 @@ class CocoComparisons(unittest.TestCase):
         records = tm.coco_comparisons(
             [
                 {"precision": "BF16", tm.BASELINE: side(100.0, 700.0),
-                 tm.CANDIDATE: side(96.0, 690.0), "ratio": 0.96},
+                 tm.CANDIDATE: side(96.0, 690.0), "ratio": 0.96, "gate_values": (100.0, 96.0)},
                 {"precision": "FP8", tm.BASELINE: side(100.0), tm.CANDIDATE: side(98.0),
-                 "ratio": 0.98},
+                 "ratio": 0.98, "gate_values": (100.0, 98.0)},
             ],
             "tok_per_s_per_gpu_avg", "training",
         )
@@ -73,13 +73,25 @@ class CocoComparisons(unittest.TestCase):
     def test_a_point_missing_a_side_or_a_number_has_no_verdict(self):
         (record,) = tm.coco_comparisons(
             [{"precision": "isl1024_osl1024_con64", tm.BASELINE: None,
-              tm.CANDIDATE: side(float("nan")), "ratio": None}],
+              tm.CANDIDATE: side(float("nan")), "ratio": None, "gate_values": None}],
             "throughput", "inference",
         )
         self.assertIsNone(record["regression"])
         self.assertIsNone(record["candidate_value"])
         self.assertIsNone(record["baseline_status"])
         self.assertEqual(record["threshold"], tm.REGRESSION_THRESHOLD_INFERENCE)
+
+    def test_the_values_are_the_ones_the_gate_scored(self):
+        stalled = {**side(94.7), "median": 100.2}
+        (record,) = tm.coco_comparisons(
+            [{"precision": "FP8", tm.BASELINE: {**side(100.0), "median": 100.0},
+              tm.CANDIDATE: stalled, "ratio": 1.002, "metric": "median",
+              "gate_values": (100.0, 100.2)}],
+            "tok_per_s_per_gpu_avg", "training",
+        )
+        self.assertEqual((record["baseline_value"], record["candidate_value"]), (100.0, 100.2))
+        self.assertAlmostEqual(record["ratio"], record["candidate_value"] / record["baseline_value"])
+        self.assertFalse(record["regression"])
 
 
 class CocoPhase(unittest.TestCase):
