@@ -21,6 +21,9 @@ fn shared<T>(value: T) -> Shared<T> {
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
 
+#[path = "memory/staging.rs"]
+mod staging;
+
 enum Reply {
     Xnack(i32, Option<i32>),
     SetScratch(Option<i32>),

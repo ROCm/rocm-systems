@@ -5,6 +5,9 @@
 
 use super::*;
 
+mod diagnostics;
+use diagnostics::AllocationDiagnostic;
+
 /// Allocates native pool memory and publishes its HSA pointer metadata.
 pub(crate) unsafe fn memory_pool_allocate(
     pool: HsaMemoryPool,
@@ -13,7 +16,9 @@ pub(crate) unsafe fn memory_pool_allocate(
     pointer: *mut *mut c_void,
     invalid_pool: Status,
 ) -> Status {
-    boundary(|| {
+    let mut diagnostic = AllocationDiagnostic::new(pool, size, flags);
+    let status = boundary(|| {
+        diagnostic.phase = "validation";
         let (
             device,
             kind,
@@ -45,6 +50,7 @@ pub(crate) unsafe fn memory_pool_allocate(
                 Some(size) => size,
                 None => return INVALID_ALLOCATION,
             };
+            diagnostic.rounded_bytes = Some(rounded);
             let cpu_pool_index = runtime.decode_cpu_pool(pool).map(|(index, _)| index);
             let (device_index, kind) = if let Some(cpu_index) = cpu_pool_index {
                 let Some(lifetime) = runtime.session().map(Session::driver_context_lifetime) else {
@@ -78,6 +84,7 @@ pub(crate) unsafe fn memory_pool_allocate(
             } else {
                 return invalid_pool;
             };
+            diagnostic.memory_kind = Some(kind);
             let maximum = if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
                 if pool_kind == GpuPoolKind::Group {
                     0
@@ -124,10 +131,12 @@ pub(crate) unsafe fn memory_pool_allocate(
                 in_flight,
             )
         };
+        diagnostic.phase = "native_allocate";
         let allocation = match device.allocate(kind, rounded as u64, page as u64, permissions) {
             Ok(allocation) => allocation,
-            Err(error) => return map_error(error),
+            Err(error) => return diagnostic.map_error(error),
         };
+        diagnostic.phase = "metadata";
         let info = allocation.info();
         let pointer_value = info.host_address.unwrap_or(info.device_address as usize);
         let mut accessible = vec![HsaAgent {
@@ -145,17 +154,25 @@ pub(crate) unsafe fn memory_pool_allocate(
             flags,
             accessible,
         );
+        diagnostic.phase = "publication";
         let mut guard = match lock() {
             Ok(guard) => guard,
-            Err(status) => return retire_unpublished_memory(memory, &in_flight, status),
+            Err(status) => {
+                return retire_unpublished_memory(memory, &in_flight, status, &mut diagnostic);
+            }
         };
         if !in_flight.is_current(&guard) {
             drop(guard);
-            return retire_unpublished_memory(memory, &in_flight, INVALID_RUNTIME_STATE);
+            return retire_unpublished_memory(
+                memory,
+                &in_flight,
+                INVALID_RUNTIME_STATE,
+                &mut diagnostic,
+            );
         }
         let Some(runtime) = guard.as_mut() else {
             drop(guard);
-            return retire_unpublished_memory(memory, &in_flight, NOT_INITIALIZED);
+            return retire_unpublished_memory(memory, &in_flight, NOT_INITIALIZED, &mut diagnostic);
         };
         if runtime.memory_state.allocations.try_reserve(1).is_err()
             || runtime
@@ -164,7 +181,12 @@ pub(crate) unsafe fn memory_pool_allocate(
                 .contains_key(&pointer_value)
         {
             drop(guard);
-            return retire_unpublished_memory(memory, &in_flight, OUT_OF_RESOURCES);
+            return retire_unpublished_memory(
+                memory,
+                &in_flight,
+                OUT_OF_RESOURCES,
+                &mut diagnostic,
+            );
         }
         runtime
             .memory_state
@@ -174,7 +196,8 @@ pub(crate) unsafe fn memory_pool_allocate(
         // allocation is registered before its address is exposed.
         unsafe { pointer.write(pointer_value as *mut c_void) };
         SUCCESS
-    })
+    });
+    diagnostic.finish(status)
 }
 
 /// Retires an allocation that failed before frontend publication.
@@ -182,13 +205,16 @@ fn retire_unpublished_memory(
     mut memory: Memory,
     in_flight: &InFlightGeneration,
     status: Status,
+    diagnostic: &mut AllocationDiagnostic,
 ) -> Status {
+    diagnostic.phase = "retire_unpublished";
+    diagnostic.publication_status = Some(status);
     match memory.free() {
         Ok(()) => status,
         Err(error) => {
             in_flight.quarantine();
             std::mem::forget(memory);
-            map_error(error)
+            diagnostic.map_error(error)
         }
     }
 }

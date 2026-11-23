@@ -191,6 +191,7 @@ identity is independent of the resulting HSA agent order.
 | `HSA_SCRATCH_SINGLE_LIMIT`, `HSA_SCRATCH_SINGLE_LIMIT_ASYNC` | Per-queue byte thresholds, clamped to the device scratch aperture. The asynchronous threshold can also be updated through the AMD agent API. |
 | `HSA_DISABLE_FRAGMENT_ALLOCATOR` | `1` disables allocation fragments. |
 | `HSA_FORCE_FINE_GRAIN_PCIE` | `1` exposes the fine-grain PCIe pool policy. |
+| `ROCDDI_HSA_MEMORY_DIAGNOSTICS` | `1` writes memory-pool allocation failures to stderr with the request, allocation phase, original native error and final HSA status. Unpublished-allocation cleanup also retains the original publication failure status in the diagnostic. |
 
 ## Build and verification
 
