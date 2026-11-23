@@ -24,7 +24,7 @@ has no comments; the comments here only explain the fields.
   "blocks": [
     {"id": "cu", "title": "Compute Units", "column": 0, "row": 0, "order": 0,
      "style": "list", "content": [
-      {"metric_id": "3.1.0", "title": "VGPRs", "category": "util", "bar": false}
+      {"metric_id": "3.1.0", "title": "VGPRs", "category": "neutral", "bar": false}
     ]},
     {"id": "l2", "title": "L2", "column": 1, "row": 0, "order": 0,
      "style": "panel", "content": [
@@ -58,7 +58,7 @@ The terminal chart looks roughly like this sketch. The ids and values are made u
 |------------------------ GPU -------------------------|- Fabric -|
 
 ╭─ Compute Units ─╮            ╭──── L2 ────╮          ╭─ Fabric ─╮
-│ VGPRs 12        │Read : 100  │ Hit 42.0%  │Read BW   │          │   row 0
+│ VGPRs 12        │Read:100 req│ Hit 42.0%  │Read BW   │          │   row 0
 │                 │<---------- │ ████░░░░░░ │1.0 GB/s  │          │
 │                 │            │            │<-------- │          │
 ╰─────────────────╯            ╰────────────╯          ╰──────────╯
@@ -130,7 +130,7 @@ All fields are required.
 |---|---|---|
 | `read`, `write`, `atomic` | arrows and metrics | Read, write, or atomic traffic. |
 | `neutral` | arrows and metrics | Anything else, such as mixed traffic. |
-| `util`, `hit`, `stall` | metrics | Utilization, hit rate, or stall rate. |
+| `util`, `hit`, `stall` | metrics | Utilization, hit rate, or stall rate, in percent. |
 | `bw` | metrics | Bandwidth shown inside a block. |
 
 ## Rules
