@@ -198,7 +198,9 @@ class ArtifactBuild(unittest.TestCase):
 def comparison(precision: str, base: float | None, cand: float | None) -> dict:
     rows = {phase: {"metric_value": v, "status": "pass"} if v else None
             for phase, v in ((tm.BASELINE, base), (tm.CANDIDATE, cand))}
-    return {"precision": precision, **rows, "ratio": cand / base if base and cand else None}
+    ratio = cand / base if base and cand else None
+    return {"precision": precision, **rows, "ratio": ratio, "ratio_avg": ratio,
+            "metric": "avg", "gate_values": (base, cand) if ratio else None}
 
 
 class ScoreComparisons(unittest.TestCase):
