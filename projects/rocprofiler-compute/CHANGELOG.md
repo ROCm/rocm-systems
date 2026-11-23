@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count. They now use `SQ_WAVE_CYCLES`.
+
 ### Upcoming changes
 
 ### Known issues
