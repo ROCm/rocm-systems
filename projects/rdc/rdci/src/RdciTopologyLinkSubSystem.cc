@@ -40,6 +40,7 @@ void RdciTopologyLinkSubSystem::parse_cmd_opts(int argc, char** argv) {
                                         {nullptr, 0, nullptr, 0}};
   int option_index = 0;
   int opt = 0;
+  bool help = false;
   while ((opt = getopt_long(argc, argv, "hui:", long_options, &option_index)) != -1) {
     {
       switch (opt) {
@@ -47,7 +48,7 @@ void RdciTopologyLinkSubSystem::parse_cmd_opts(int argc, char** argv) {
           ip_port_ = optarg;
           break;
         case 'h':
-          show_help();
+          help = true;
           break;
         case 'u':
           use_auth_ = false;
@@ -67,6 +68,11 @@ void RdciTopologyLinkSubSystem::parse_cmd_opts(int argc, char** argv) {
       }
     }
   }
+  if (help) {
+    show_help();
+    topology_ops_ = TOPOLOGY_HELP;
+    return;
+  }
   if (is_group_index_set == false) {
     show_help();
     throw RdcException(RDC_ST_BAD_PARAMETER, "Need to specify the group index to notify");
@@ -76,11 +82,11 @@ void RdciTopologyLinkSubSystem::parse_cmd_opts(int argc, char** argv) {
 void RdciTopologyLinkSubSystem::show_help() const {
   std::cout << " topo -- Used to  topology will show how the GPU connected.\n\n";
   std::cout << "Usage\n";
-  std::cout << "    rdci topo [--host <IP/FQDN>:port] [--reg] -g <groupId>\n";
+  std::cout << "    rdci topo [--host <IP/FQDN>:port] -i <gpuIndex>\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
-  std::cout << "  -i  --index                      display the topology"
-            << "information for GPU index 0 .\n";
+  std::cout << "  -i  --gpu_index <gpuIndex>     display the topology"
+            << " information of that GPU.\n";
 }
 
 static const char* topology_link_type_to_str(rdc_topology_link_type_t type) {
@@ -90,6 +96,9 @@ static const char* topology_link_type_to_str(rdc_topology_link_type_t type) {
 }
 
 void RdciTopologyLinkSubSystem::process() {
+  if (topology_ops_ == TOPOLOGY_HELP) {
+    return;  // parse_cmd_opts() printed it
+  }
   rdc_status_t result = RDC_ST_OK;
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   uint32_t count = 0;

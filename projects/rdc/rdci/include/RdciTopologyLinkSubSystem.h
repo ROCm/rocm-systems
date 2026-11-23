@@ -36,6 +36,7 @@ class RdciTopologyLinkSubSystem : public RdciSubSystem {
   enum OPERATIONS {
     TOPOLOGY_UNKNOWN = 0,
     TOPOLOGY_INDEX,
+    TOPOLOGY_HELP,
   } topology_ops_;
   uint32_t group_index_;
   bool is_group_index_set;
