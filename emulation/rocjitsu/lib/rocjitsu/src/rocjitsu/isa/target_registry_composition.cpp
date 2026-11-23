@@ -5,6 +5,7 @@
 /// @brief Checked-in implementation shared by static registry compositions.
 
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_registry.h"
 
 #ifndef RJ_ISA_TARGET_HEADERS
@@ -25,7 +26,7 @@ const IsaTargetRegistry &default_isa_target_registry() {
   return registry;
 }
 
-std::unique_ptr<Decoder> Decoder::create(rj_code_arch_t arch) {
+std::unique_ptr<Decoder> Decoder::create(rocjitsu::IsaFamily arch) {
   return create(default_isa_target_registry(), arch);
 }
 

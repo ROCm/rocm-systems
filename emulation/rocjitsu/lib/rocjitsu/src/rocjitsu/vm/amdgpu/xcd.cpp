@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -14,7 +15,7 @@
 namespace rocjitsu {
 namespace amdgpu {
 
-Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
+Xcd::Xcd(std::string name, const Config &config, rocjitsu::IsaFamily arch, GpuMemory *memory,
          simdojo::ExecMode exec_mode, std::shared_ptr<DeviceCacheCoherence> coherence)
     : simdojo::CompositeComponent(std::move(name)), exec_mode_(exec_mode),
       coherence_(std::move(coherence)) {

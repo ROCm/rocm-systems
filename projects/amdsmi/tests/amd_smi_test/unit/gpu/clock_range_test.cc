@@ -1,21 +1,37 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Unit tests for smi_amdgpu_parse_od_clk_range(), the pp_od_clk_voltage parser
-// behind amd-smi's per-domain min/max clock. Driven over in-memory streams --
-// no GPU required. Guards the MI45x case where pp_od_clk_voltage carries no
-// OD_FCLK section: the parser must report the domain absent so the caller falls
-// back to pp_dpm_fclk instead of reporting a max of 0 MHz.
+// Hardware-free clock tests. OdClkRange* and DpmRanges* drive the
+// pp_od_clk_voltage / pp_dpm_* parsers over in-memory streams. DpmFrequency*,
+// DpmClockInfo* and DpmMixed* drive amdsmi_get_clk_freq / amdsmi_get_clock_info
+// on fake sysfs GPUs; add new behavior cases there.
+//
+// MI45x pp_od_clk_voltage has no OD_FCLK section (kOdNoFclk), so FCLK min/max
+// must fall back to pp_dpm_fclk instead of reporting a max of 0 MHz.
 
 #include <gtest/gtest.h>
 
 #include <climits>
+#include <cstdint>
+#include <memory>
 #include <sstream>
+#include <string>
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_clk_testing.h"
+#include "amd_smi/impl/amd_smi_drm.h"
+#include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
+#include "rocm_smi/rocm_smi_gpu_metrics.h"
+#include "test_fixture_utils.h"
 
 namespace {
+
+using amd::smi::AMDSmiDrm;
+using amd::smi::AMDSmiGPUDevice;
+using amd::smi::testing::ScopedOverride;
+using amd::smi::testing::ScopedProcessorRegistration;
 
 // pp_od_clk_voltage as seen on MI45x: SCLK and MCLK sections plus an OD_RANGE
 // footer, but no OD_FCLK section.
@@ -261,6 +277,172 @@ TEST(GpuUnit, DpmRangesEmptyStreamKeepsUnavailableMin) {
   EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(ranges.max_freq, 0);
   EXPECT_EQ(ranges.min_freq, -1);
+  EXPECT_EQ(ranges.sleep_state_freq, -1);
+}
+
+// --- Public clock APIs on fake sysfs GPUs ---
+
+constexpr char kDpmFclkValid[] = "0: 1300Mhz\n1: 1550Mhz *\n2: 1800Mhz\n";
+
+// Blank or whitespace-only lines: malformed driver data (the Raphael iGPU
+// returns "\n").
+constexpr const char* kDpmFclkBlank[] = {"\n", " \t\r\n", "\n\n", "\n0: 1300Mhz\n",
+                                         "0: 1300Mhz\n\n"};
+
+const char* OdLabel(const char* od) { return od == kOdWithFclk ? "kOdWithFclk" : "kOdNoFclk"; }
+
+// amdsmi_init without discovery, a fake sysfs tree behind the DRM root override,
+// and registered GPUs card0, card1, ... in the order AddGpu() is called.
+class FakeClockHost {
+ public:
+  FakeClockHost()
+      : root_guard_(amd::smi::test_hooks::SysfsDrmRoot, amd::smi::test_hooks::SetSysfsDrmRoot,
+                    tree_.root()) {}
+
+  // Release in reverse: each ScopedRocmSmiDevice truncates RocmSMI's device
+  // vector to its own index.
+  ~FakeClockHost() {
+    while (!gpus_.empty()) gpus_.pop_back();
+  }
+
+  // Adds the next card with valid gpu_metrics (amdsmi_get_clock_info reads them
+  // even for FCLK) and pp_od_clk_voltage `od`, but no pp_dpm_fclk.
+  amdsmi_processor_handle AddGpu(const char* od) {
+    const size_t gpu = gpus_.size();
+    amd::smi::AMDGpuMetrics_v10_t metrics{};
+    metrics.m_common_header = {sizeof(metrics), 1, 0};
+    WriteDeviceFile(gpu, "gpu_metrics",
+                    std::string(reinterpret_cast<const char*>(&metrics), sizeof(metrics)));
+    SetOd(gpu, od);
+    gpus_.push_back(std::make_unique<Gpu>(tree_.root(), Card(gpu), drm_));
+    return gpus_.back()->registration.handle();
+  }
+
+  void SetOd(size_t gpu, const char* od) { WriteDeviceFile(gpu, "pp_od_clk_voltage", od); }
+  void SetDpmFclk(size_t gpu, const char* dpm) { WriteDeviceFile(gpu, "pp_dpm_fclk", dpm); }
+
+ private:
+  struct Gpu {
+    Gpu(const std::string& root, const std::string& card, AMDSmiDrm& drm)
+        : rocm(root + "/" + card),
+          device(rocm.index(), card, amdsmi_bdf_t{}, drm),
+          registration(&device) {}
+    ScopedRocmSmiDevice rocm;
+    AMDSmiGPUDevice device;
+    ScopedProcessorRegistration registration;
+  };
+
+  static std::string Card(size_t gpu) { return "card" + std::to_string(gpu); }
+
+  void WriteDeviceFile(size_t gpu, const std::string& name, const std::string& contents) {
+    tree_.WriteFile(Card(gpu) + "/device/" + name, contents);
+  }
+
+  ScopedAmdsmiInit init_;
+  FakeSysfsTree tree_;
+  ScopedOverride<std::string> root_guard_;
+  AMDSmiDrm drm_;
+  std::vector<std::unique_ptr<Gpu>> gpus_;
+};
+
+TEST(GpuUnit, DpmFrequencyMissingTableNotSupported) {
+  FakeClockHost host;
+  const auto gpu = host.AddGpu(kOdNoFclk);
+  amdsmi_frequencies_t frequencies{};
+  EXPECT_EQ(amdsmi_get_clk_freq(gpu, AMDSMI_CLK_TYPE_DF, &frequencies),
+            AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST(GpuUnit, DpmFrequencyEmptyTablesPreserveDataError) {
+  FakeClockHost host;
+  const auto gpu = host.AddGpu(kOdNoFclk);
+  for (const char* contents : {"", "\n", " \t\r\n", "\n\n"}) {
+    SCOPED_TRACE(::testing::PrintToString(std::string(contents)));
+    host.SetDpmFclk(0, "0: 1300Mhz *\n");
+    amdsmi_frequencies_t frequencies{};
+    ASSERT_EQ(amdsmi_get_clk_freq(gpu, AMDSMI_CLK_TYPE_DF, &frequencies), AMDSMI_STATUS_SUCCESS);
+    ASSERT_EQ(frequencies.num_supported, 1u);
+
+    host.SetDpmFclk(0, contents);
+    EXPECT_EQ(amdsmi_get_clk_freq(gpu, AMDSMI_CLK_TYPE_DF, &frequencies),
+              AMDSMI_STATUS_UNEXPECTED_DATA);
+    EXPECT_EQ(frequencies.num_supported, 0u);
+  }
+}
+
+TEST(GpuUnit, DpmFrequencyValidTableStillReportsLevels) {
+  FakeClockHost host;
+  const auto gpu = host.AddGpu(kOdNoFclk);
+  host.SetDpmFclk(0, kDpmFclkValid);
+  amdsmi_frequencies_t frequencies{};
+  ASSERT_EQ(amdsmi_get_clk_freq(gpu, AMDSMI_CLK_TYPE_DF, &frequencies), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(frequencies.num_supported, 3u);
+  EXPECT_EQ(frequencies.current, 1u);
+  EXPECT_EQ(frequencies.frequency[0], 1300000000u);
+  EXPECT_EQ(frequencies.frequency[1], 1550000000u);
+  EXPECT_EQ(frequencies.frequency[2], 1800000000u);
+}
+
+// A valid OD_FCLK range must not turn a blank pp_dpm_fclk into SUCCESS. Clock
+// info only: rsmi asserts on the leading-blank row in Debug builds.
+TEST(GpuUnit, DpmClockInfoBlankTablesReportIo) {
+  FakeClockHost host;
+  const auto gpu = host.AddGpu(kOdNoFclk);
+  for (const char* od : {kOdNoFclk, kOdWithFclk}) {
+    host.SetOd(0, od);
+    for (const char* dpm : kDpmFclkBlank) {
+      SCOPED_TRACE(::testing::Message() << OdLabel(od) << ", pp_dpm_fclk "
+                                        << ::testing::PrintToString(std::string(dpm)));
+      host.SetDpmFclk(0, dpm);
+      amdsmi_clk_info_t info{};
+      EXPECT_EQ(amdsmi_get_clock_info(gpu, AMDSMI_CLK_TYPE_DF, &info), AMDSMI_STATUS_IO);
+    }
+  }
+}
+
+// Unlike "\n", a zero-byte pp_dpm_fclk has always returned SUCCESS: the OD_FCLK
+// range when present, otherwise max 0 and an unavailable min.
+TEST(GpuUnit, DpmClockInfoZeroByteTableKeepsExistingResult) {
+  FakeClockHost host;
+  const auto gpu = host.AddGpu(kOdNoFclk);
+  host.SetDpmFclk(0, "");
+  amdsmi_clk_info_t info{};
+  ASSERT_EQ(amdsmi_get_clock_info(gpu, AMDSMI_CLK_TYPE_DF, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.max_clk, 0u);
+  EXPECT_EQ(info.min_clk, UINT32_MAX);
+
+  host.SetOd(0, kOdWithFclk);
+  ASSERT_EQ(amdsmi_get_clock_info(gpu, AMDSMI_CLK_TYPE_DF, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.max_clk, 1100u);
+  EXPECT_EQ(info.min_clk, 1000u);
+}
+
+TEST(GpuUnit, DpmMixedDevicesPreservePublicApiErrors) {
+  FakeClockHost host;
+  const auto dgpu = host.AddGpu(kOdNoFclk);
+  const auto igpu = host.AddGpu(kOdNoFclk);
+  host.SetDpmFclk(0, kDpmFclkValid);
+  host.SetDpmFclk(1, "\n");
+
+  amdsmi_frequencies_t frequencies{};
+  ASSERT_EQ(amdsmi_get_clk_freq(dgpu, AMDSMI_CLK_TYPE_DF, &frequencies), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(frequencies.num_supported, 3u);
+  EXPECT_EQ(frequencies.current, 1u);
+  amdsmi_clk_info_t info{};
+  ASSERT_EQ(amdsmi_get_clock_info(dgpu, AMDSMI_CLK_TYPE_DF, &info), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(info.min_clk, 1300u);
+  EXPECT_EQ(info.max_clk, 1800u);
+
+  // These distinct errors capture current newline-only behavior, not a
+  // prescribed cross-API status contract.
+  for (const char* od : {kOdNoFclk, kOdWithFclk}) {
+    SCOPED_TRACE(OdLabel(od));
+    host.SetOd(1, od);
+    EXPECT_EQ(amdsmi_get_clk_freq(igpu, AMDSMI_CLK_TYPE_DF, &frequencies),
+              AMDSMI_STATUS_UNEXPECTED_DATA);
+    EXPECT_EQ(frequencies.num_supported, 0u);
+    EXPECT_EQ(amdsmi_get_clock_info(igpu, AMDSMI_CLK_TYPE_DF, &info), AMDSMI_STATUS_IO);
+  }
 }
 
 // A genuinely out-of-range value (> INT_MAX, not the sentinel) is still

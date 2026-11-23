@@ -7,6 +7,7 @@
 #include <hip_test_common.hh>
 
 #include "kernels.hh"
+#include "mip_selection_common.hh"
 #include "test_fixture.hh"
 
 /**
@@ -167,6 +168,22 @@ HIP_TEMPLATE_TEST_CASE(Unit_tex3DGrad_Positive_ReadModeNormalizedFloat, char, un
       REQUIRE(false);
     }
   }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Verify nonzero mip selection through 3D gradients with pointer and value overloads.
+ * Test source
+ * ------------------------
+ *    - unit/texture/tex3DGrad.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.7
+ */
+HIP_TEST_CASE(Unit_tex3DGrad_NonzeroMipSelection) {
+  CHECK_IMAGE_SUPPORT;
+  CheckMipSelection<3, false>();
 }
 
 /**

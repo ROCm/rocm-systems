@@ -1,13 +1,13 @@
 ---
 myst:
     html_meta:
-        "description": "Command reference for the rj_dbt_translate tool in rocJITsu, covering all CLI flags, output modes, supported targets, and exit codes."
-        "keywords": "rocJITsu, rj_dbt_translate, DBT, dynamic binary translation, CLI, AMDGPU, ROCm, code object, disassembly"
+        "description": "Command reference for the rj_dbt_translate tool in rocjitsu, covering all CLI flags, output modes, supported targets, and exit codes."
+        "keywords": "rocjitsu, rj_dbt_translate, DBT, dynamic binary translation, CLI, AMDGPU, ROCm, code object, disassembly"
 ---
 # `rj_dbt_translate` command reference
 
 `rj_dbt_translate` inspects or translates an AMDGPU code object using
-the rocJITsu dynamic binary translation (DBT) pipeline. It accepts
+the rocjitsu dynamic binary translation (DBT) pipeline. It accepts
 either a standalone AMDGPU code object or a host object containing
 bundled AMDGPU code objects. The tool is primarily intended for
 debugging DBT behavior.

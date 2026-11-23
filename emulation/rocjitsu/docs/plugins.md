@@ -173,7 +173,7 @@ The logging plugin records kernel dispatch metadata and detects MMA
 ### Perfsim compatibility plugin
 
 The optional Linux-only Perfsim adapter loads a separately built Perfsim backend at
-runtime. RocJITsu does not build, link, vendor, or install Perfsim and does not
+runtime. rocjitsu does not build, link, vendor, or install Perfsim and does not
 write a persistent Perfsim trace; Perfsim continues to own its `GPUCSIM_*`
 configuration and reports. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md)
 for the runtime-first setup, independent build boundary, compatibility
@@ -236,7 +236,7 @@ configured through a profile or an explicit `--config <file>`.
 
 ### Plugin loader boundary
 
-Plugins are repository-owned components built and shipped with rocJitsu. The
+Plugins are repository-owned components built and shipped with rocjitsu. The
 loader boundary does not provide compatibility or versioning for independently
 built plugins; the host and plugins must always be rebuilt together.
 
@@ -552,7 +552,7 @@ plugins may override the observation-only
 instead override `onAmdgpuMemoryAccessRouted(access, wf)`, avoiding a shared
 identity lookup. Plugins that also need the decoded instruction may override
 the context-preserving `onAmdgpuMemoryAccessRouted(access, inst, wf)` form.
-RocJITsu calls the most specific form; its defaults forward through the
+rocjitsu calls the most specific form; its defaults forward through the
 wavefront-aware form to the observation-only form. The borrowed instruction and
 wavefront already reflect the selected route and are valid only during the
 callback.

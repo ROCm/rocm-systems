@@ -14,6 +14,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
@@ -636,7 +637,7 @@ public:
   /// DS2 offsets are wave-uniform. CDNA1–4 and GFX10 coalesce equal
   /// offsets into one memory access, including reads with two result words.
   /// Their two-address DS specification also uses only DATA0 for such writes.
-  [[nodiscard]] bool has_second_ds_address(rj_code_arch_t arch, uint64_t lanes) const {
+  [[nodiscard]] bool has_second_ds_address(rocjitsu::IsaFamily arch, uint64_t lanes) const {
     if (!ds2_active || !lanes)
       return false;
     const unsigned lane = std::countr_zero(lanes);
@@ -657,7 +658,7 @@ static_assert(std::is_nothrow_constructible_v<VectorMemState, MemPipelineTag>);
 
 /// CDNA1-4 buffer-OOB reads still write zeros to legal LDS destinations.
 /// Later architectures suppress the LDS write for lanes that did not request data.
-inline uint64_t lds_destination_write_mask(const VectorMemState &state, rj_code_arch_t arch) {
+inline uint64_t lds_destination_write_mask(const VectorMemState &state, rocjitsu::IsaFamily arch) {
   uint64_t mask = arch_is_cdna_4_or_lower(arch) ? state.exec_mask : state.lane_mask;
   if (state.lds_per_lane_addr)
     for (uint32_t lane = 0; lane < state.wf_size; ++lane)

@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -105,7 +106,7 @@ std::optional<EncodingWords> gfx1250_encoding(std::string_view mnemonic) {
 
 class ScalarSccProfile {
 public:
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   std::string_view name;
   EncodingLookup find_encoding;
   WrexecDialect wrexec_dialect;
@@ -113,16 +114,16 @@ public:
 };
 
 const std::array<ScalarSccProfile, 10> kScalarSccProfiles{{
-    {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna1_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna2_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna3_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna4_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_encoding, WrexecDialect::Andn, true},
-    {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna2_encoding, WrexecDialect::Andn, true},
-    {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Cdna1, "cdna1", cdna1_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna2, "cdna2", cdna2_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna3, "cdna3", cdna3_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna4, "cdna4", cdna4_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Rdna1, "rdna1", rdna1_encoding, WrexecDialect::Andn, true},
+    {rocjitsu::IsaFamily::Rdna2, "rdna2", rdna2_encoding, WrexecDialect::Andn, true},
+    {rocjitsu::IsaFamily::Rdna3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Rdna3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Rdna4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Cdna5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
 }};
 
 EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view mnemonic) {
@@ -250,7 +251,7 @@ public:
 
 TEST(ScalarSccTest, Gfx10SubvectorLoopUsesOnlyExecAndItsScratchSgpr) {
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2)
       continue;
     ScalarSccFixture f(profile, "subvector", 64);
     ASSERT_TRUE(f.ready());
@@ -266,7 +267,7 @@ TEST(ScalarSccTest, Gfx10SubvectorLoopUsesOnlyExecAndItsScratchSgpr) {
     EXPECT_NE(end->flags() & COND_BRANCH, 0u);
     const RegisterRef scratch{RegClass::SGPR, 2, 1};
     EXPECT_EQ(InstDefUse(*begin, 64).uses.contains(scratch),
-              profile.arch == ROCJITSU_CODE_ARCH_RDNA1);
+              profile.arch == rocjitsu::IsaFamily::Rdna1);
     EXPECT_TRUE(InstDefUse(*end, 64).uses.contains(scratch));
     EXPECT_EQ(begin->disassemble(), "s_subvector_loop_begin s2, 4");
     const auto execute = [&](Instruction &inst, uint64_t pc) {
@@ -306,7 +307,7 @@ TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
   using amdgpu::WaitCounterKind;
   using amdgpu::WaitCounterPolicy;
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2)
       continue;
     ScalarSccFixture f(profile, "wait_register");
     ASSERT_TRUE(f.ready());
@@ -345,7 +346,7 @@ TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
 
 TEST(ScalarSccTest, Rdna2HwregsUseTheExecutingWavesState) {
   const auto profile =
-      std::ranges::find(kScalarSccProfiles, ROCJITSU_CODE_ARCH_RDNA2, &ScalarSccProfile::arch);
+      std::ranges::find(kScalarSccProfiles, rocjitsu::IsaFamily::Rdna2, &ScalarSccProfile::arch);
   ASSERT_NE(profile, kScalarSccProfiles.end());
   ScalarSccFixture f(*profile, "hwreg");
   ASSERT_TRUE(f.ready());
@@ -430,7 +431,7 @@ TEST(ScalarSccTest, CdnaForkConsumesOneSharedLiteralWord) {
       {0x9480ffffu, 0, 0x100, 0x100},     // One literal shared by both sources.
   };
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch > ROCJITSU_CODE_ARCH_CDNA4)
+    if (profile.arch > rocjitsu::IsaFamily::Cdna4)
       continue;
     SCOPED_TRACE(profile.name);
     ScalarSccFixture f(profile, "fork_literal");
@@ -733,7 +734,7 @@ TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
       continue;
     SCOPED_TRACE(profile.name);
     // The CDNA5 ISA exposes these B32 operations on wave32.
-    const uint32_t wave_size = profile.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+    const uint32_t wave_size = profile.arch == rocjitsu::IsaFamily::Cdna5 ? 32 : 64;
     ScalarSccFixture fixture(profile, "b32_exec", wave_size);
     ASSERT_TRUE(fixture.ready());
     const char *wrexec = profile.wrexec_dialect == WrexecDialect::Andn ? "s_andn1_wrexec_b32"
@@ -756,7 +757,7 @@ TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
 
 TEST(ScalarSccTest, Gfx10WaitUsesTheRegisterAndForgetsEarlierCounterLimits) {
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2)
       continue;
     ScalarSccFixture f(profile, "gfx10_wait");
     ASSERT_TRUE(f.ready());

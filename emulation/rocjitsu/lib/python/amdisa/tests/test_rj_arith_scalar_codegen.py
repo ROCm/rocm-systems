@@ -1,27 +1,9 @@
-from amdisa.codegen.execute.rj_arith_scalar import GFX1250_CONVERSION_NAMES
-from amdisa.codegen.execute.rj_arith_scalar import GFX1250_FMA_NAMES
-from amdisa.codegen.execute.rj_arith_scalar import GFX1250_BINARY_NAMES
-
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
 from pathlib import Path
 from types import SimpleNamespace
 from amdisa.codegen.execute import ExecuteContext
-
-
-def context(arch, name, dst, src):
-    return ExecuteContext(
-        inst=SimpleNamespace(name=name),
-        sem=None,
-        profile=None,
-        arch_name=arch,
-        dst_ops=dst,
-        src_ops=src,
-        enc_name="",
-        is_vop3=False,
-        has_abs=False,
-    )
 
 
 import pytest
@@ -38,8 +20,24 @@ from amdisa.codegen.execute.rj_arith_scalar import (
     FLOAT_ROUNDING,
     IMMEDIATE,
     SCALAR,
+    WIDE_INTEGER_NAMES,
+    supports_scalar,
     gen_scalar,
 )
+
+
+def context(arch, name, dst, src):
+    return ExecuteContext(
+        inst=SimpleNamespace(name=name),
+        sem=None,
+        profile=None,
+        arch_name=arch,
+        dst_ops=dst,
+        src_ops=src,
+        enc_name="",
+        is_vop3=False,
+        has_abs=False,
+    )
 
 
 @pytest.mark.parametrize('name', sorted(IMMEDIATE))
@@ -67,7 +65,8 @@ def test_bitset_reads_full_destination_and_word_index_without_scc(name, bits):
             'registers.write_scalar'
         )
         assert 'scc' not in body
-    assert gen_scalar(context('rdna3_5', name, ['dst'], ['index'])) is None
+    for arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'):
+        assert (gen_scalar(context(arch, name, ['dst'], ['index'])) is None) == (False)
 
 
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
@@ -160,7 +159,9 @@ def test_guest_mode_updates_are_functional_state_independent_of_exec(name):
         assert 'wf.exec()' not in body
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5']
+)
 @pytest.mark.parametrize('name', sorted(SCALAR))
 def test_cdna_integer_shapes_match_existing_bindings(arch, name):
     shape = SCALAR[name]
@@ -309,3 +310,24 @@ def test_cdna_first_zero_is_independent_of_other_scalar_migration(arch, bits):
     )
     assert 'scc' not in body
     assert gen_scalar(context(arch, 'S_FF1_I32_B32', ['dst'], ['src'])) is not None
+
+
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'))
+def test_older_wide_scalar_migration_keeps_word_and_routing_boundaries(arch):
+    assert all(supports_scalar(arch, name) for name in WIDE_INTEGER_NAMES)
+    assert supports_scalar(arch, 'S_ADD_U32')
+    assert supports_scalar(arch, 'S_CMPK_GT_U32')
+    assert not supports_scalar(arch, 'S_MOV_B64')
+    assert not supports_scalar(arch, 'S_AND_SAVEEXEC_B64')
+
+
+@pytest.mark.parametrize('arch', ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'))
+def test_older_wide_count_and_shift_keep_their_mixed_widths(arch):
+    body = gen_scalar(context(arch, 'S_LSHL_B64', ['dst'], ['a', 'count']))
+    assert 'uint64_t input0 = registers.read_scalar64(a)' in body
+    assert 'uint32_t input1 = registers.read_scalar(count)' in body
+    assert 'write_scalar64(dst, result)' in body
+    body = gen_scalar(context(arch, 'S_BCNT1_I32_B64', ['dst'], ['a']))
+    assert 'uint64_t input0 = registers.read_scalar64(a)' in body
+    assert 'uint32_t result = 0' in body
+    assert 'registers.write_scalar(dst, result)' in body

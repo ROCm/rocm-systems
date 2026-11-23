@@ -1,6 +1,6 @@
 # Configuration
 
-Rocjitsu behavior is configured declaratively in JSON. Simulator configs
+rocjitsu behavior is configured declaratively in JSON. Simulator configs
 specify the component hierarchy, link connectivity, and simulation parameters;
 DBT guest configs select the guest and host targets and execution backend.
 
@@ -43,7 +43,7 @@ The gfx1250 PCI profile intentionally advertises no UVD, VCN, or JPEG hardware.
 Compute-only guests therefore require an AMDGPU kernel containing commit
 `4e07da515d1c` (`drm/amdgpu: enumerate UMSCH HW IP`) or an equivalent backport.
 That change makes multimedia discovery accept a device with no VCN instance.
-Rocjitsu does not emulate a placeholder media block, and adding one would expand
+rocjitsu does not emulate a placeholder media block, and adding one would expand
 the device contract beyond the compute functionality modeled here.
 
 The generic `scripts/run-vfio-guest.py` launcher requires externally prepared
@@ -290,7 +290,7 @@ so these retained pools do not imply simultaneous execution on every GPU.
 Dispatch workers can accelerate compute batches. The E=1 pin addresses the
 documented RCCL hang; the D=1 default preserves small-collective performance.
 
-Mirage embeds the tables in its RocJITsu backend at build time and
+Mirage embeds the tables in its rocjitsu backend at build time and
 selects them by the agent's GPU target and GPU count. The hardware agent format carries no
 host scheduling policy. Unknown targets use the serial fallback. For multiple
 GPUs, it uses the matching native preset when available. Other GPU counts

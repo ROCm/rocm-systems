@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -24,7 +25,7 @@ protected:
   void SetUp() override {
     cache_.set_backing_memory(&memory_);
     amdgpu::ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_RDNA2;
+    config.arch = rocjitsu::IsaFamily::Rdna2;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256; // The wave below requests 16 registers from this block.
@@ -693,7 +694,7 @@ TEST_F(Rdna2MemoryTest, IndexedGdsUsesDeviceBackingAndSnapshotsTheM0Window) {
   EXPECT_EQ(wave_->lds().read32(1024), 0xccccu);
 
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA2;
+  config.arch = rocjitsu::IsaFamily::Rdna2;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;
