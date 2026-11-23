@@ -57,7 +57,9 @@ struct ncclShmemGroup {
   void* srcs[NCCL_MAX_ARITY + 1];
   void* dsts[NCCL_MAX_ARITY + 1];
   void* acc;
+#if !RCCL_HAVE_NAMED_BARRIERS
   uint64_t barrier;
+#endif
   union {
     unpackGroupShmem unpack;
   } devicePlugin;
@@ -96,7 +98,9 @@ struct ncclShmemData {
 #ifdef ENABLE_FAULT_INJECTION
   uint64_t faults;
 #endif
+#if !RCCL_HAVE_NAMED_BARRIERS
   uint64_t barrier_pat;
+#endif
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
   // A separate __shared__ should work better as it does not instantiate this for LL and LL128
   alignas(RCCL_TDM_ALIGN) char tdmStage[RCCL_TDM_STAGE_BYTES_PER_WARP * (NCCL_MAX_NTHREADS / WARP_SIZE)];
@@ -115,6 +119,8 @@ extern __shared__ ulong2
   ncclShmemPerWarp[ncclShmemScratchWarpSize() * (NCCL_MAX_NTHREADS / WARP_SIZE) / sizeof(ulong2)];
 #endif
 #endif
+
+#include "sub_barrier.h"
 
 #if RCCL_TDM_STAGE_BYTES_PER_WARP
 __device__ inline void* ncclTdmStageForWarp(int warp) {
@@ -567,10 +573,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     }
     break;
   case 1:
-    if (tid < WARP_SIZE + NCCL_MAX_GROUPS) {
-      if (tid == WARP_SIZE) ncclShmem.barrier_pat = 0;
-      ncclShmem.groups[tid - WARP_SIZE].barrier = 0;
-    }
+    rcclInitSubBarriers(tid);
     break;
   case 2:
 #ifdef ENABLE_FAULT_INJECTION
@@ -698,10 +701,7 @@ __device__ __forceinline__ void ncclKernelMain(struct ncclDevKernelArgs const* a
     __syncthreads();
     switch (tid / WARP_SIZE) {
     case 1:
-      if (tid < WARP_SIZE + NCCL_MAX_GROUPS) {
-        if (tid == WARP_SIZE) ncclShmem.barrier_pat = 0;
-        ncclShmem.groups[tid - WARP_SIZE].barrier = 0;
-      }
+      rcclResetSubBarriers(tid);
       break;
     default:
       break;

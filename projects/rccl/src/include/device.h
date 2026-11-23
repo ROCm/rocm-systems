@@ -74,6 +74,17 @@ extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 #define RCCL_TDM_STAGE_BYTES_PER_WARP 0
 #endif
 
+// gfx1250 has hardware named barriers that can synchronize a subset of a workgroup's waves, so
+// the primitives' sub-block barriers use them instead of spinning on a shared-memory counter
+// (see sub_barrier.h). Here rather than there because ncclShmemData's members depend on it.
+#if defined(__HIP_DEVICE_COMPILE__) && (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
+  __has_builtin(__builtin_amdgcn_s_barrier_init) && __has_builtin(__builtin_amdgcn_s_barrier_join) && \
+  __has_builtin(__builtin_amdgcn_s_barrier_signal_var)
+#define RCCL_HAVE_NAMED_BARRIERS 1
+#else
+#define RCCL_HAVE_NAMED_BARRIERS 0
+#endif
+
 #ifdef __CUDA_ARCH__
 #define NCCL_CUDA_ARCH __CUDA_ARCH__
 #else

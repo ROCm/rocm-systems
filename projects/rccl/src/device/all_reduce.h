@@ -202,6 +202,10 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
   int nthreadsSplit;
   if (Proto::Id == NCCL_PROTO_SIMPLE) {
     nthreadsSplit = nthreads / 2;
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+    // Named barriers count whole waves, so a wave split across both groups would signal both.
+    nthreadsSplit &= ~(WARP_SIZE - 1);
+#endif
     if (nthreadsSplit >= 256) nthreadsSplit += 64;
   } else { // LL & LL128
       // Receiving from up to 3 sources is more compute intensive than sending
@@ -739,6 +743,10 @@ struct RunWorkColl<ncclFuncAllReduce, T, RedOp, NCCL_ALGO_COLLNET_CHAIN, NCCL_PR
     const ssize_t size = work->collnet.count;
 
     int nthreadsSplit = nthreads / 2;
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+    // Named barriers count whole waves, so a wave split across both groups would signal both.
+    nthreadsSplit &= ~(WARP_SIZE - 1);
+#endif
     if (nthreadsSplit >= 256) nthreadsSplit += 64;
 
     int group, connIndex, send, recv, groupTid, groupNthreads;
