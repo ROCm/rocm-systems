@@ -21,7 +21,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
 
-* Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a). It was twice the real value.
+* Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a), which was twice the real value.
 
 ### Upcoming changes
 
