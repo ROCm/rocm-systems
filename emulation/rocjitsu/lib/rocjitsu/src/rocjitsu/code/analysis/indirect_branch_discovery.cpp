@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/indirect_branch_discovery.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -357,7 +358,7 @@ struct InstructionFacts {
 struct AnalysisContext {
   std::span<const Instruction *const> insts;
   std::span<const uint8_t> text;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   bool setreg_vgpr_msb_fixup = false;
   std::vector<InstructionFacts> facts;
 
@@ -642,7 +643,7 @@ private:
   return word;
 }
 
-[[nodiscard]] std::optional<uint8_t> scalar_pc_opcode(rj_code_arch_t arch, ScalarPcOp op) {
+[[nodiscard]] std::optional<uint8_t> scalar_pc_opcode(rocjitsu::IsaFamily arch, ScalarPcOp op) {
   // s_getpc/setpc/swappc are adjacent SOP1 opcodes within each AMDGPU ISA
   // family currently supported by rocjitsu. Keep this mapping local to the
   // analysis because it is an instruction-recognition detail, not semantic
@@ -661,39 +662,39 @@ private:
 
   // \NPI new ISA family: classify its scalar PC instruction encodings here.
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return add_base(0x1c);
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
     return add_base(0x1f);
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
     return add_base(0x47);
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Count:
     return std::nullopt;
   }
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint8_t> scalar_sop2_opcode(rj_code_arch_t arch, ScalarSop2Op op) {
+[[nodiscard]] std::optional<uint8_t> scalar_sop2_opcode(rocjitsu::IsaFamily arch, ScalarSop2Op op) {
   // \NPI new ISA family: classify its scalar SOP2 opcode mapping here.
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -709,7 +710,7 @@ private:
       return std::nullopt;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     switch (op) {
     case ScalarSop2Op::AddU32:
       return 0;
@@ -725,16 +726,16 @@ private:
       return 83;
     }
     return std::nullopt;
-  case ROCJITSU_CODE_ARCH_RV32I:
-  case ROCJITSU_CODE_ARCH_RV64I:
-  case ROCJITSU_CODE_ARCH_NUM_ARCHS:
+  case rocjitsu::IsaFamily::Rv32i:
+  case rocjitsu::IsaFamily::Rv64i:
+  case rocjitsu::IsaFamily::Count:
     return std::nullopt;
   }
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint16_t> scalar_pc_sreg(rj_code_arch_t arch, const Instruction &inst,
-                                                     uint32_t word, ScalarPcOp op) {
+[[nodiscard]] std::optional<uint16_t>
+scalar_pc_sreg(rocjitsu::IsaFamily arch, const Instruction &inst, uint32_t word, ScalarPcOp op) {
   // This function intentionally recognizes only the canonical 32-bit SOP1
   // encoding. If the instruction is not exactly the scalar PC form, returning
   // nullopt is safer than trying to recover from the generic Instruction API:
@@ -1075,7 +1076,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 }
 
 [[nodiscard]] bool apply_low_literal_update(const Instruction &inst, uint32_t word,
-                                            std::span<const uint8_t> text, rj_code_arch_t arch,
+                                            std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
                                             uint16_t pair_lo, PcValue &value) {
   // The low-half update is where the byte target usually changes. We interpret
   // literal add/sub forms only when the destination and first source are the
@@ -1110,7 +1111,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 }
 
 [[nodiscard]] bool apply_high_carry_update(const Instruction &inst, uint32_t word,
-                                           std::span<const uint8_t> text, rj_code_arch_t arch,
+                                           std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
                                            uint16_t pair_lo, PcValue &value) {
   // The high-half carry instruction completes the 64-bit edit. The common
   // getpc-relative chains use 0 or -1 as the second operand so the high half
@@ -1147,7 +1148,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 
 [[nodiscard]] bool apply_gfx1250_add_nc_u64_update(const Instruction &inst, uint32_t word,
                                                    std::span<const uint8_t> text,
-                                                   rj_code_arch_t arch, uint16_t pair_lo,
+                                                   rocjitsu::IsaFamily arch, uint16_t pair_lo,
                                                    PcValue &value) {
   // gfx1250 compilers use one SCC-neutral 64-bit add instead of the legacy
   // low-add/high-carry pair:
@@ -1158,7 +1159,7 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   //
   // Match only the self-update literal forms. Register addends would require a
   // separate constant-propagation proof and must continue to fail closed.
-  if (arch != ROCJITSU_CODE_ARCH_CDNA5 ||
+  if (arch != rocjitsu::IsaFamily::Cdna5 ||
       inst.amdgpu_operation() != amdgpu::Operation::S_ADD_NC_U64 || inst.num_dst_operands() != 1 ||
       inst.num_src_operands() != 2)
     return false;
@@ -1343,7 +1344,7 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
 }
 
 [[nodiscard]] AnalysisContext build_context(std::span<const Instruction *const> insts,
-                                            std::span<const uint8_t> text, rj_code_arch_t arch,
+                                            std::span<const uint8_t> text, rocjitsu::IsaFamily arch,
                                             rj_code_target_id_t target_id) {
   // Phase 1a: collect cheap facts that are independent of CFG. We do not build
   // full def-use information here. Generic writes are intentionally lazy because
@@ -1356,12 +1357,12 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
   const IsaTargetRegistry &registry = default_isa_target_registry();
   const IsaTargetDescriptor *architecture = registry.find(arch);
   const IsaTargetDescriptor *target_architecture = registry.find(target_id);
-  const IsaGpuTargetDescription *target =
-      target_architecture != nullptr && target_architecture->architecture_id == arch
-          ? registry.find_gpu_target(target_id)
+  const IsaTargetBinding *target =
+      target_architecture != nullptr && target_architecture->family == arch
+          ? registry.find_target(target_id)
           : nullptr;
   if (target == nullptr && architecture != nullptr)
-    target = registry.find_default_gpu_target(*architecture);
+    target = registry.find_default_target(*architecture);
   ctx.setreg_vgpr_msb_fixup = target != nullptr && target->capabilities.setreg_vgpr_msb_fixup;
 
   ctx.facts.resize(insts.size());
@@ -1588,7 +1589,7 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
+    if (ctx.arch != rocjitsu::IsaFamily::Cdna5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     // The gfx1250 sequence drains XCNT before an instruction prefetch. The
@@ -1674,7 +1675,7 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
     return std::nullopt;
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
+    if (ctx.arch != rocjitsu::IsaFamily::Cdna5)
       return false;
     const Instruction &inst = *ctx.insts[index];
     if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_XCNT ||
@@ -1743,7 +1744,7 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     // half before adding the function displacement. This preserves the PC
     // used by SETPC/SWAPPC. Keep the normalization outside the relocatable
     // arithmetic range so it still executes if the displacement is rewritten.
-    if (ctx.arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+    if (ctx.arch == rocjitsu::IsaFamily::Rdna4 &&
         updated.source_recovery_end_offset == updated.source_getpc_offset + sizeof(uint32_t) &&
         sop1_same_sreg(inst, word, amdgpu::Operation::S_SEXT_I32_I16, pair_lo + 1)) {
       updated.source_recovery_begin_offset = inst.src_loc() + inst.size();
@@ -2524,7 +2525,7 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  const bool writes_mode = amdgpu::decode_vgpr_msb_hwreg(hwreg).id == amdgpu::MODE_HWREG;
+  const bool writes_mode = amdgpu::decode_hwreg_slice(hwreg).id == amdgpu::MODE_HWREG;
   if (setreg_vgpr_msb_fixup && writes_mode) {
     if (operation == amdgpu::Operation::S_SETREG_B32) {
       mode = std::nullopt;
@@ -2551,7 +2552,7 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
 }
 
 void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &inst,
-                            std::span<const uint8_t> text, rj_code_arch_t arch) {
+                            std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
   if (!isa_properties(arch).mode_has_gpr_idx_en)
     return;
   constexpr uint16_t kGprIdxEnableBit = 27;
@@ -2579,7 +2580,7 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
     enabled = std::nullopt;
     return;
   }
-  const amdgpu::HwregSlice slice = amdgpu::decode_vgpr_msb_hwreg(hwreg);
+  const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(hwreg);
   const auto literal = instruction_literal(inst, text);
   enabled = literal
                 ? std::optional<bool>{((*literal >> (kGprIdxEnableBit - slice.begin)) & 1u) != 0}
@@ -2670,7 +2671,7 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
-  if (ctx.arch != ROCJITSU_CODE_ARCH_CDNA5)
+  if (ctx.arch != rocjitsu::IsaFamily::Cdna5)
     return;
 
   if (blocks.empty())
@@ -3559,10 +3560,11 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
 }
 
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges_unfiltered(
-    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
-    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target) {
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text,
+    rocjitsu::IsaFamily arch, std::span<const uint64_t> extra_leaders,
+    ExternalEntryPolicy entry_policy, std::vector<PcAddressBuilder> *pc_builders,
+    std::span<const uint64_t> extra_split_points, std::span<const uint64_t> analysis_root_offsets,
+    rj_code_target_id_t target) {
   std::vector<IndirectCallFixup> recovered;
   FixupIndex recovered_index;
   AnalysisContext ctx = build_context(insts, text, arch, target);
@@ -3671,10 +3673,11 @@ bool is_callee_saved_sgpr(uint16_t sgpr) {
 }
 
 std::vector<IndirectCallFixup> discover_indirect_branch_edges(
-    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders, ExternalEntryPolicy entry_policy,
-    std::vector<PcAddressBuilder> *pc_builders, std::span<const uint64_t> extra_split_points,
-    std::span<const uint64_t> analysis_root_offsets, rj_code_target_id_t target) {
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text,
+    rocjitsu::IsaFamily arch, std::span<const uint64_t> extra_leaders,
+    ExternalEntryPolicy entry_policy, std::vector<PcAddressBuilder> *pc_builders,
+    std::span<const uint64_t> extra_split_points, std::span<const uint64_t> analysis_root_offsets,
+    rj_code_target_id_t target) {
   if (pc_builders != nullptr)
     pc_builders->clear();
   if (insts.empty())

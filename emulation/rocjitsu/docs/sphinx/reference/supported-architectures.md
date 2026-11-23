@@ -1,7 +1,7 @@
 ---
 myst:
     html_meta:
-        "description": "Supported GPU architectures for rocjitsu, including GFX target IDs, ISA families, and architecture enum mappings."
+        "description": "Supported GPU architectures for rocjitsu, including GFX target IDs, ISA families, and concrete target selection."
         "keywords": "rocjitsu, ROCm, GPU architecture, CDNA, RDNA, RISC-V, GFX target, ISA, simulation, DBT, DBI"
 ---
 
@@ -26,13 +26,22 @@ rocjitsu supports simulation, dynamic binary translation (DBT), and dynamic bina
 | RV32I | --- | RV |
 | RV64I | --- | RV |
 
-## Architecture enum
+## Target selection
 
-The `rj_code_arch_e` enumeration identifies an ISA architecture throughout the rocjitsu C API. Use these values when creating decoders, specifying translation options, or querying architecture properties. For the full enumeration and the rest of the code object and instruction API, see [API reference: code object](/reference/api-code-object.md).
+The public code API uses `rj_code_target_id_t` for decoder creation,
+code-object filtering, instruction and basic-block lists, and the guest and
+host of binary translation. Select the concrete target, such as
+`ROCJITSU_CODE_TARGET_GFX1251`, to preserve its instruction legality and
+semantic capabilities. Family names such as CDNA5 describe shared internal
+implementations; they are not a second public enum.
 
-## Target ID enum
+`rj_code_decoder_create_for_target()` also accepts canonical target strings
+and provider aliases. Existing family aliases retain their provider's default
+selection (for example, `cdna5` selects gfx1250). Prefer concrete names when
+inspecting code for a known processor. RV64I has a decoder target binding;
+RV32I remains unsupported.
 
-The `rj_code_target_id_t` enumeration identifies a specific GPU target within an architecture. Use these values when filtering code objects inside an executable or creating instruction lists. For the full enumeration, see [API reference: code object](/reference/api-code-object.md).
+For all target values, see [API reference: code object](/reference/api-code-object.md).
 
 gfx1250 and gfx1251 both have concrete functional-simulator bindings. The
 checked-in gfx1251 configuration is a minimal synthetic topology for functional
@@ -65,4 +74,4 @@ split `S_WAIT_*` instructions replace `S_WAITCNT`.
 
 ### RV (RISC-V)
 
-The RV32I and RV64I architectures represent 32-bit and 64-bit RISC-V integer base ISAs. These targets are available for simulation.
+The RV32I and RV64I architectures represent 32-bit and 64-bit RISC-V integer base ISAs. RV64I is available for simulation; RV32I has no registered implementation.

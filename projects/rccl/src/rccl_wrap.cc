@@ -2148,7 +2148,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     // gfx1250: a registered call whose symk symMaxR2 withdrew takes DDA where DDA beats the backend that runs.
     const bool symkWithdrawn =
       ddaFabricArch1250 && symkRequested && !symSuppressedByMin && symSuppressedByMax && !ginYield;
-    // In graph capture that backend is Ring (no CE); re-route only where the planner picks Ring (fp8 plans Tree).
+    // In graph capture that backend is Ring (no CE); re-route only where the planner picks Ring (fp8 too).
     // Check-mode, suspended and revoked comms divert to enqueue, which plans Ring itself.
     struct rcclCollDecision ringChoice;
     memset(&ringChoice, 0, sizeof(ringChoice));

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
@@ -962,7 +963,7 @@ GpuPciDevice::make_sdma_callbacks(const amdgpu::SdmaQueueContext &context) {
                           .engine_id = engine_id})
         .outcome;
   };
-  callbacks.timestamp = [arch = soc_ ? soc_->arch() : ROCJITSU_CODE_ARCH_INVALID] {
+  callbacks.timestamp = [arch = soc_ ? soc_->arch() : rocjitsu::IsaFamily::Invalid] {
     return amdgpu::gpu_timestamp(arch);
   };
   return callbacks;
