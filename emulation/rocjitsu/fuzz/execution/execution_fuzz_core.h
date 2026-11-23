@@ -23,6 +23,10 @@ namespace rocjitsu::execution_fuzz {
 inline constexpr size_t kHeaderSize = 2;
 inline constexpr size_t kMaxInputSize = 1024;
 inline constexpr size_t kGeneratedKernelSeedSize = 256;
+inline constexpr uint8_t kTargetMask = 0x0f;
+inline constexpr unsigned kArithmeticSemanticsShift = 4;
+inline constexpr uint8_t kArithmeticCpuMask = 0xc0;
+inline constexpr unsigned kArithmeticCpuShift = 6;
 inline constexpr uint8_t kAsyncSelectBit = 0x1;
 inline constexpr uint8_t kConcurrentIssuerMask = 0x6;
 inline constexpr uint8_t kFullExecMaskBit = 0x8;
@@ -68,6 +72,9 @@ struct RunStats {
   /// @brief L2 backing reads observed for the cache-backed data route.
   /// @details Used by the routing test and omitted from the CLI summary.
   uint64_t l2_backing_reads = 0;
+  /// @brief Resolved arithmetic flags for a single input, including any host fallback.
+  uint64_t arithmetic_flags = 0;
+  bool force_scalar = false;
 };
 
 std::optional<FuzzTarget> parse_target(std::string_view name);
@@ -88,9 +95,10 @@ bool targets_cover_amdgpu_execution_registry();
 std::optional<FuzzTarget> indexed_target(uint8_t index);
 
 /// @brief Execute an arbitrary instruction stream.
-/// @details Byte zero selects a target, byte one selects execution modes, and
-/// the remaining bytes are instructions. The wait-checking and cache bits can
-/// be flipped without changing the initial register and memory contents.
+/// @details Byte zero selects a target and arithmetic semantics. Byte one selects
+/// execution modes and the host CPU backend. The remaining bytes are instructions.
+/// Backend, wait-checking, and cache selectors can change independently of
+/// the initial register and memory contents.
 /// Unassigned targets, decode rejection, unsupported execution, and the
 /// instruction budget are normal outcomes;
 /// host failures remain visible to the fuzzing runtime. All process-scoped GWS

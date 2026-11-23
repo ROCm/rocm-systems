@@ -15,6 +15,55 @@
 
 namespace {
 
+// Biased exponents in [96,159] meet both product bounds. Zeros and nonfinite
+// factors impose no exponent bound. A subnormal accumulator still needs the
+// general backend. Check the frequent range before computing per-input extrema.
+template <int Lanes, bool Rdna3, bool Packed>
+static bool bf16_fast_range(uint32_t flags, const uint32_t *const *a, const uint32_t *const *b,
+                            const uint32_t *const *c) {
+  auto out_of_range = _mm512_setzero_si512();
+  // Removing the sign puts the exponent in bits 8..15. After subtracting the
+  // lower bound, bits 14..15 are clear throughout the accepted interval.
+  auto range = [](__m512i words) {
+    auto magnitude = _mm512_slli_epi16(words, 1);
+    auto nonzero_finite = _mm512_cmplt_epu16_mask(_mm512_sub_epi16(magnitude, _mm512_set1_epi16(1)),
+                                                  _mm512_set1_epi16(short(0xfeff)));
+    return _mm512_maskz_sub_epi16(nonzero_finite, magnitude, _mm512_set1_epi16(96 << 8));
+  };
+  for (int reg = 0; reg < (Rdna3 ? 8 : 128 / Lanes); ++reg) {
+    // RDNA3 replicates both factors across 16-lane groups.
+    for (int lane = 0; lane < (Rdna3 ? 16 : Lanes); lane += 16) {
+      auto x = range(_mm512_loadu_si512(a[reg] + lane));
+      auto y = range(_mm512_loadu_si512(b[reg] + lane));
+      out_of_range = _mm512_ternarylogic_epi32(out_of_range, x, y, 0xfe);
+    }
+  }
+  // Subtracting one maps zero to the unsigned maximum and makes the lowest
+  // nonzero magnitude sufficient to detect any subnormal.
+  auto minimum = _mm512_set1_epi32(-1);
+  constexpr int Registers = 256 / Lanes / (Packed && !Rdna3 ? 2 : 1);
+  for (int reg = 0; reg < Registers; ++reg) {
+    for (int lane = 0; lane < Lanes; lane += 16) {
+      auto words = _mm512_loadu_si512(c[reg] + lane);
+      if constexpr (Packed) {
+        if constexpr (Rdna3) {
+          words =
+              _mm512_srl_epi32(words, _mm_cvtsi32_si128(flags & RJ_ARITH_WMMA_HIGH_C_D ? 16 : 0));
+          words = _mm512_and_si512(words, _mm512_set1_epi32(0xffff));
+        }
+        auto mag = _mm512_and_si512(words, _mm512_set1_epi16(0x7fff));
+        minimum = _mm512_min_epu16(minimum, _mm512_sub_epi16(mag, _mm512_set1_epi16(1)));
+      } else {
+        auto mag = _mm512_and_si512(words, _mm512_set1_epi32(INT32_MAX));
+        minimum = _mm512_min_epu32(minimum, _mm512_sub_epi32(mag, _mm512_set1_epi32(1)));
+      }
+    }
+  }
+  bool subnormal = Packed ? bool(_mm512_cmplt_epu16_mask(minimum, _mm512_set1_epi16(127)))
+                          : bool(_mm512_cmplt_epu32_mask(minimum, _mm512_set1_epi32(0x007fffff)));
+  return !(_mm512_test_epi16_mask(out_of_range, _mm512_set1_epi16(short(0xc000))) | subnormal);
+}
+
 // Return the smallest unsigned 16-bit exponent across all packed halfwords.
 int min_exponent(__m512i value) {
   value = _mm512_min_epu16(value, _mm512_srli_epi32(value, 16));
@@ -146,7 +195,8 @@ static void wmma_bf16(uint32_t instruction_flags, uint32_t *const *d, const uint
 template <int Lanes, bool Rdna3, bool Packed>
 bool wmma_x86_64_v4_bf16(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
                          const uint32_t *const *b, const uint32_t *const *c) {
-  if (!supports_bf16_dot<Lanes, Rdna3, Packed>(instruction_flags, a, b, c)) {
+  if (!bf16_fast_range<Lanes, Rdna3, Packed>(instruction_flags, a, b, c) &&
+      !supports_bf16_dot<Lanes, Rdna3, Packed>(instruction_flags, a, b, c)) {
     return false;
   }
   wmma_bf16<Lanes, Rdna3, Packed>(instruction_flags, d, a, b, c);

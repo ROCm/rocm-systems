@@ -1537,6 +1537,12 @@ inline uint64_t mfma_permuted_lane_mask(auto permute) {
   return lanes;
 }
 
+template <typename Cu> bool force_scalar(const Cu &cu) {
+  if constexpr (requires { cu.force_scalar(); })
+    return cu.force_scalar();
+  return util::force_scalar();
+}
+
 /// Wave64 MFMA from register snapshots, published by register. Returns false without reading
 /// registers when the shape or wave size needs the generic handler. Callers with fixed input
 /// widths pass them as std::integral_constant so the register layout is known at compile time.
@@ -1554,7 +1560,7 @@ bool try_exec_mfma_snapshot(auto &cu, uint32_t M, uint32_t N, uint32_t K, uint32
     constexpr uint32_t W = static_cast<uint32_t>(util::native<T>::size());
     constexpr uint32_t kWordsPerElement = sizeof(T) / sizeof(uint32_t);
     using Staging = MfmaSnapshotStaging<T>;
-    if (util::force_scalar() || cu.wf_size() != 64 ||
+    if (force_scalar(cu) || cu.wf_size() != 64 ||
         !mfma_snapshot_shape_fits<T>(M, N, K, B, a_bits, b_bits))
       return false;
     const uint32_t stride = ((N + W - 1) / W) * W;
@@ -1833,7 +1839,7 @@ RJ_NOINLINE void exec_f32_mixed_generic(auto &cu, uint32_t a_bits, uint32_t b_bi
     // anything larger (or a forced-scalar run) falls back to the scalar path.
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
     const uint32_t stride = ((N + W - 1) / W) * W;
-    if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
+    if (force_scalar(cu) || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
       run_scalar();
     } else {
@@ -2142,7 +2148,7 @@ RJ_NOINLINE inline void exec_i32_i8_generic(auto &cu, uint32_t M, uint32_t N, ui
     static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(int32_t) <= 48 * 1024,
                   "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
-    if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
+    if (force_scalar(cu) || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
       run_scalar();
     } else {
@@ -2326,7 +2332,7 @@ void exec_rdna_wmma_i32_impl(auto &cu, uint32_t wave_size, uint32_t dst, uint32_
             c[col] += a[j] * b[j * 16 + col];
       };
       if constexpr (util::has_stdx_simd) {
-        if (util::force_scalar())
+        if (force_scalar(cu))
           scalar_group();
         else
           wmma_simd_matmul<int64_t>(1, 16, step, util::native<int64_t>::size(), 16, a + k,
@@ -2503,7 +2509,7 @@ RJ_NOINLINE inline void exec_f64_generic(auto &cu, uint32_t M, uint32_t N, uint3
     static_assert((MAX_AB + MAX_BSTRIDE + MAX_C) * sizeof(double) <= 48 * 1024,
                   "MFMA SIMD staging buffers exceed the 48 KiB stack budget");
     const uint32_t stride = ((N + W - 1) / W) * W;
-    if (util::force_scalar() || static_cast<size_t>(M) * K > MAX_AB ||
+    if (force_scalar(cu) || static_cast<size_t>(M) * K > MAX_AB ||
         static_cast<size_t>(K) * stride > MAX_BSTRIDE || static_cast<size_t>(M) * stride > MAX_C) {
       run_scalar();
     } else {
@@ -2604,7 +2610,7 @@ void exec_f32_mfma_f32_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
+    if (force_scalar(cu) || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32<M, N, K, BATCH>(cu, in_bits, dst, s0, s1, s2, extract_f32, extract_f32, const_acc,
                                cbsz, abid, blgp, denorm);
@@ -2712,7 +2718,7 @@ void exec_f32_mfma_f16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, ui
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
+    if (force_scalar(cu) || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_f16, amdgpu::extract_f16,
                            const_acc, cbsz, abid, blgp, denorm);
@@ -2825,7 +2831,7 @@ void exec_f32_mfma_bf16_spec(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, u
     return;
   } else {
     constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-    if (util::force_scalar() || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
+    if (force_scalar(cu) || cbsz != 0 || blgp != 0 || !mma_f32_native_width_supported(N, W) ||
         cu.wf_size() != 64) {
       exec_f32<M, N, K, B>(cu, in_bits, dst, s0, s1, s2, amdgpu::extract_bf16, amdgpu::extract_bf16,
                            const_acc, cbsz, abid, blgp, denorm);
