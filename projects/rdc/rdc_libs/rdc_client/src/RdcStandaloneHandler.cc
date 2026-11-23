@@ -813,9 +813,14 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
   request.set_test_case(static_cast<::rdc::DiagnosticTestCaseRunRequest_TestCaseType>(test_case));
 
   auto reader = stub_->DiagnosticTestCaseRun(&context, request);
-  // A reply with an error status ends a run that failed or was rejected.
+  // A reply with a log message reports progress, as in rdc_diagnostic_run(). A reply with an
+  // error status ends a run that failed or was rejected.
   rdc_status_t run_status = RDC_ST_OK;
   while (reader->Read(&reply)) {
+    if (reply.has_log()) {
+      std::cout << "LOG: " << reply.log() << std::endl;
+      continue;
+    }
     if (reply.status() != RDC_ST_OK) {
       run_status = static_cast<rdc_status_t>(reply.status());
       continue;

@@ -1561,6 +1561,9 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *  runs two diagnostics.
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
  *  be reached, or the connection failed during the run.
+ *  @retval ::RDC_ST_BAD_PARAMETER response is NULL, or, on a handle from
+ *  rdc_connect(), the run reported more test cases or GPU results than
+ *  rdc_diag_response_t holds.
  */
 rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                 rdc_diag_level_t level, const char* config, size_t config_size,
@@ -1594,6 +1597,9 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
  *  runs two diagnostics.
  *  @retval ::RDC_ST_CLIENT_ERROR On a handle from rdc_connect(): rdcd cannot
  *  be reached, or the connection failed during the run.
+ *  @retval ::RDC_ST_BAD_PARAMETER result is NULL, or, on a handle from
+ *  rdc_connect(), the run reported more GPU results than rdc_diag_test_result_t
+ *  holds.
  */
 rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                rdc_diag_test_cases_t test_case, const char* config,
