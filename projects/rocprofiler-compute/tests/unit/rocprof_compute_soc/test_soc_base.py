@@ -72,8 +72,8 @@ FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
 UNCACHED_READ_TRAFFIC_COUNTERS = [
     pytest.param(
         "gfx908",
-        "TCC_EA0_RD_UNCACHED_32B_sum",
-        ("TCC_EA0_RDREQ_32B_sum + 2 * (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)"),
+        "TCC_EA_RD_UNCACHED_32B_sum",
+        ("TCC_EA_RDREQ_32B_sum + 2 * (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)"),
         id="gfx908",
     ),
     pytest.param(
