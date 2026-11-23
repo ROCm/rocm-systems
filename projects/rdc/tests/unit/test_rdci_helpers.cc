@@ -23,15 +23,19 @@ THE SOFTWARE.
 // Helpers rdci uses for what rdcd sends: rdc_escape_text() and rdc_is_clean_text()
 // (rdc_lib/rdc_common.h) keep terminal control characters out of rdci's output and out of new
 // group and field group names; GpuPartitions() (common/rdc_utils.h) gives each GPU index the
-// socket and partition that RDC's partition IDs (gS.P) name.
+// socket and partition that RDC's partition IDs (gS.P) name. is_field_id_valid(),
+// get_field_id_from_number() (common/rdc_fields_supported.h) and rdc_field_id_number()
+// check a field ID as a number, before it becomes an rdc_field_t.
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "common/rdc_fields_supported.h"
 #include "common/rdc_utils.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -175,5 +179,40 @@ TEST(GpuPartitions, AnotherCountEndsASocket) {
 }
 
 TEST(GpuPartitions, NoGpus) { EXPECT_TRUE(slots({}).empty()); }
+
+TEST(FieldIds, TheFieldTablesIdsAreValid) {
+  EXPECT_TRUE(amd::rdc::is_field_id_valid(RDC_FI_GPU_CLOCK));
+  EXPECT_TRUE(amd::rdc::is_field_id_valid(RDC_FI_GPU_MEMORY_USAGE));
+}
+
+TEST(FieldIds, OtherIdsAreNot) {
+  for (const uint32_t id : {0u, 99999u, 0x7fffffffu, 0x80000000u, 0xffffffffu}) {
+    EXPECT_FALSE(amd::rdc::is_field_id_valid(id)) << id;
+  }
+}
+
+TEST(FieldIds, ADecimalNumberOfAKnownField) {
+  rdc_field_t field = RDC_FI_INVALID;
+  ASSERT_TRUE(amd::rdc::get_field_id_from_number("100", &field));
+  EXPECT_EQ(field, RDC_FI_GPU_CLOCK);
+}
+
+TEST(FieldIds, TextThatIsNoKnownFieldsNumber) {
+  for (const char* text : {"", "0", "99999", "4294967295", "4294967296", "99999999999999999999999",
+                           "-1", "+100", " 100", "100 ", "1e2", "0x64"}) {
+    rdc_field_t field = RDC_FI_GPU_CLOCK;
+    EXPECT_FALSE(amd::rdc::get_field_id_from_number(text, &field)) << '"' << text << '"';
+    EXPECT_EQ(field, RDC_FI_GPU_CLOCK) << '"' << text << '"';
+  }
+}
+
+TEST(FieldIds, AFieldIdIsReadAsANumber) {
+  // A caller can hand RDC any 32-bit value as an rdc_field_t.
+  for (const uint32_t id : {100u, 99999u, 0xffffffffu}) {
+    rdc_field_t field;
+    std::memcpy(&field, &id, sizeof(field));
+    EXPECT_EQ(rdc_field_id_number(field), id);
+  }
+}
 
 }  // namespace
