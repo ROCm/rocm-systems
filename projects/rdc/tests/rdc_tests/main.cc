@@ -20,11 +20,18 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <dirent.h>
 #include <gtest/gtest.h>
+#include <netdb.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/prctl.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
+#include <cerrno>
+#include <chrono>
 #include <cstdlib>
-#include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -104,91 +111,131 @@ TEST(rdctstReadOnly, TestRdciStats) {
   RunGenericTest(&tst);
 }
 
-static int getPIDFromName(std::string name) {
-  int pid = -1;
+// rdctst's standalone tests connect to localhost:50051 (functional/rdci_*.cc).
+static const char kRdcdPort[] = "50051";
 
-  DIR* dir_ptr = opendir("/proc");
-  if (dir_ptr != NULL) {
-    struct dirent* dentry;
-    while (pid < 0 && (dentry = readdir(dir_ptr))) {
-      int id = atoi(dentry->d_name);
-      if (id > 0) {
-        std::string commPath = std::string("/proc/") + dentry->d_name + "/comm";
-        std::ifstream cmdFile(commPath.c_str());
-        std::string cmdLine;
-        getline(cmdFile, cmdLine);
-        if (!cmdLine.empty()) {
-          if (name == cmdLine) {
-            pid = id;
-            break;
-          }
-        }
-      }
-    }
-  }
-  closedir(dir_ptr);
-  return pid;
+// Errors that leave an address unused: nothing listens there, or the host cannot use the address
+// (as ::1 on a host without IPv6).
+static bool addressUnused(int error) {
+  return error == ECONNREFUSED || error == EAFNOSUPPORT || error == EPROTONOSUPPORT ||
+         error == EADDRNOTAVAIL || error == ENETUNREACH || error == EHOSTUNREACH;
 }
 
-static int killRDCD(int pid = 0) {
-  if (pid == 0) {
-    pid = getPIDFromName("rdcd");
+// Whether something accepts connections on localhost:50051: 1 yes, 0 no, -1 unknown (no answer,
+// or another error). Each connection gets a second: a listener whose accept queue is full does
+// not answer, and a blocking connect() would wait for about two minutes.
+static int rdcdPortInUse() {
+  struct addrinfo hints = {};
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  struct addrinfo* addresses = nullptr;
+  if (getaddrinfo("localhost", kRdcdPort, &hints, &addresses) != 0) {
+    return -1;
+  }
+  int in_use = 0;
+  for (struct addrinfo* a = addresses; a != nullptr && in_use != 1; a = a->ai_next) {
+    int fd = socket(a->ai_family, a->ai_socktype | SOCK_NONBLOCK, a->ai_protocol);
+    if (fd < 0) {
+      if (!addressUnused(errno)) {
+        in_use = -1;
+      }
+      continue;
+    }
+    int error = connect(fd, a->ai_addr, a->ai_addrlen) == 0 ? 0 : errno;
+    if (error == EINPROGRESS) {
+      struct pollfd connecting = {fd, POLLOUT, 0};
+      socklen_t length = sizeof(error);
+      if (poll(&connecting, 1, 1000) != 1 ||
+          getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &length) != 0) {
+        error = -1;  // no answer
+      }
+    }
+    if (error == 0) {
+      in_use = 1;
+    } else if (!addressUnused(error)) {
+      in_use = -1;
+    }
+    close(fd);
+  }
+  freeaddrinfo(addresses);
+  return in_use;
+}
 
-    if (pid == -1) {
-      // rdcd is apparently not running
+// Stops the rdcd that startRDCD() started, and only that one: SIGTERM, then SIGKILL if it
+// has not exited within 15 seconds. Returns 0 once it is reaped.
+static int stopRDCD(pid_t pid) {
+  kill(pid, SIGTERM);
+  for (int i = 0; i < 150; ++i) {
+    pid_t ret = waitpid(pid, nullptr, WNOHANG);
+    if (ret == pid) {
       return 0;
     }
-  }
-
-  int ret = kill(pid, SIGTERM);
-
-  if (ret != 0) {
-    perror("Failed to kill existing rdcd instance. Error: ");
-    return errno;
-  }
-
-  int status;
-  int err = waitpid(pid, &status, WNOHANG);
-  if (err < 0) {
-    perror("waitpid() failed for rdcd.");
-    return errno;
-  } else if (err > 0) {
-    std::cout << "Killed rdcd process " << pid << std::endl;
-  }
-  // Try several times; it may take some time for rdcd to clean up.
-  for (int i = 0; i < 20; ++i) {
-    sleep(0.01);
-
-    pid = getPIDFromName("rdcd");
-
-    if (pid == -1) {
-      return 0;
+    if (ret < 0) {
+      perror("waitpid() failed for rdcd");
+      return -1;
     }
-    ret = kill(pid, SIGTERM);
+    usleep(100 * 1000);
   }
-
+  std::cout << "rdcd did not exit within 15 s of SIGTERM; killing it" << std::endl;
+  kill(pid, SIGKILL);
+  if (waitpid(pid, nullptr, 0) != pid) {
+    perror("waitpid() failed for rdcd");
+    return -1;
+  }
   return 0;
 }
 
-static int startRDCD(std::string* rdcd_path, char* envp[]) {
-  assert(rdcd_path != nullptr);
-  const char* rdcd_cl[128] = {rdcd_path->c_str(), "-u", NULL};
-  int pid = fork();
-
+// Starts rdcd and waits until it accepts connections on localhost:50051. Returns its pid, or
+// -1. Another server on that port is left alone: rdctst fails instead.
+static pid_t startRDCD(const std::string& rdcd_path, char* envp[]) {
+  const int in_use = rdcdPortInUse();
+  if (in_use > 0) {
+    std::cout << "localhost:" << kRdcdPort << " is in use. Stop the server there, or test it"
+              << " with --start_rdcd= (no path)." << std::endl;
+    return -1;
+  }
+  if (in_use < 0) {
+    std::cout << "localhost:" << kRdcdPort << " does not answer. Free the port and run again."
+              << std::endl;
+    return -1;
+  }
+  const char* rdcd_cl[] = {rdcd_path.c_str(), "-u", nullptr};
+  const pid_t parent = getpid();
+  pid_t pid = fork();
+  if (pid < 0) {
+    perror("fork() failed");
+    return -1;
+  }
   if (pid == 0) {
-    if (-1 == execve(rdcd_cl[0], (char**)rdcd_cl, envp)) {  // NOLINT
-      std::string err_msg = "ERROR: Child process failed to start ";
-      err_msg += *rdcd_path;
-      perror(err_msg.c_str());
-      return -1;
+    // rdcd gets SIGTERM if rdctst dies first.
+    if (prctl(PR_SET_PDEATHSIG, SIGTERM) != 0 || getppid() != parent) {
+      _exit(127);
     }
+    execve(rdcd_cl[0], const_cast<char**>(rdcd_cl), envp);
+    std::string err_msg = "ERROR: Child process failed to start " + rdcd_path;
+    perror(err_msg.c_str());
+    _exit(127);
   }
 
-  // Give rdcd a second to get to steady state.
-  sleep(1);
-
-  return pid;
+  // Give rdcd up to 30 seconds to listen.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (std::chrono::steady_clock::now() < deadline) {
+    int status = 0;
+    if (waitpid(pid, &status, WNOHANG) == pid) {
+      std::cout << "rdcd exited at start with " << (WIFEXITED(status) ? "status " : "signal ")
+                << (WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status)) << std::endl;
+      return -1;
+    }
+    if (rdcdPortInUse() == 1) {
+      return pid;
+    }
+    usleep(100 * 1000);
+  }
+  std::cout << "rdcd did not listen on localhost:" << kRdcdPort << " within 30 s" << std::endl;
+  stopRDCD(pid);
+  return -1;
 }
+
 int main(int argc, char** argv, char* envp[]) {
   ::testing::InitGoogleTest(&argc, argv);
   // disable ROCProfiler because its RDC plugin implementation does not work
@@ -260,21 +307,20 @@ int main(int argc, char** argv, char* envp[]) {
 
     if (settings.monitor_server_ip == "") {
       if (settings.rdcd_path != "") {
-        if (killRDCD()) {
-          return -1;
-        }
-
-        rdcd_pid = startRDCD(&settings.rdcd_path, envp);
-        assert(rdcd_pid == getPIDFromName("rdcd"));
-        if (rdcd_pid != getPIDFromName("rdcd")) {
+        rdcd_pid = startRDCD(settings.rdcd_path, envp);
+        if (rdcd_pid == -1) {
           std::cout << "Failed to start rdcd. Exiting" << std::endl;
           return -1;
         }
       } else {
-        if (getPIDFromName("rdcd") == -1) {
-          std::cout << "rdcd is not running. Use -d (--start_rdcd) to have "
-                       "rdcd started."
-                       " Exiting test."
+        const int in_use = rdcdPortInUse();
+        if (in_use == 0) {
+          std::cout << "rdcd is not running on localhost:" << kRdcdPort
+                    << ". Use -d (--start_rdcd) to have rdcd started. Exiting test." << std::endl;
+          return 1;
+        }
+        if (in_use < 0) {
+          std::cout << "rdcd on localhost:" << kRdcdPort << " does not answer. Exiting test."
                     << std::endl;
           return 1;
         }
@@ -282,7 +328,7 @@ int main(int argc, char** argv, char* envp[]) {
     }
     ret = RUN_ALL_TESTS();
     if (rdcd_pid != -1) {
-      if (killRDCD(rdcd_pid)) {
+      if (stopRDCD(rdcd_pid)) {
         return -1;
       }
     }

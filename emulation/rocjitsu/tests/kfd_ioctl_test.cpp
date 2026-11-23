@@ -8331,7 +8331,7 @@ TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueued
   const VmAccessOutcome disconnected_outcome = requester_access->read(
       imported.va_addr + kReadOffset, disconnected, disconnected_progress, disconnected_token);
   const auto disconnected_submissions = endpoint->diagnostics().submissions;
-  endpoint->initialize();
+  ASSERT_TRUE(endpoint->initialize().succeeded());
   EXPECT_EQ(disconnected_outcome, VmAccessOutcome::Faulted);
   EXPECT_EQ(disconnected_progress, 0u);
   EXPECT_EQ(disconnected_submissions, 2u);

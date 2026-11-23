@@ -10,6 +10,7 @@
 #include "rj_arith/detail/rj_arith_common.h"
 
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <stddef.h>
 #include <stdint.h>
 #include <type_traits>
@@ -60,34 +61,47 @@ int call_sources(Fn fn, uint64_t flags, Mask exec, uint64_t modifiers, uint32_t 
   }
 }
 
-// Compatibility reproduces each lane in every wave lane at every CPU level. Width selects the
-// MODE fields; 64-bit values occupy two registers, low word first.
+// Each requested semantics reproduces each lane in every wave lane at every CPU level. Width
+// selects the MODE fields; 64-bit values occupy two registers, low word first.
 template <int Lanes, int Width, typename Fn, size_t N>
-void check_captured_gfx11(Fn fn, const CapturedGfx11 (&lanes)[N]) {
+void check_captured_gfx11(Fn fn, const CapturedGfx11 (&lanes)[N],
+                          std::initializer_list<uint64_t> semantics = {
+                              RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
   for (const CapturedGfx11 &c : lanes) {
     SCOPED_TRACE(c.name);
     for (uint64_t cpu : supported_cpu_levels()) {
-      Registers<8, Lanes> r;
-      for (int lane = 0; lane < Lanes; ++lane) {
-        int reg = 0;
-        for (uint64_t value : {c.a, c.b, c.c, uint64_t(0xa5a5a5a5a5a5a5a5ULL)}) {
-          r.v[reg++][lane] = uint32_t(value);
-          r.v[reg++][lane] = uint32_t(value >> 32);
+      for (uint64_t mode : semantics) {
+        Registers<8, Lanes> r;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          int reg = 0;
+          for (uint64_t value : {c.a, c.b, c.c, uint64_t(0xa5a5a5a5a5a5a5a5ULL)}) {
+            r.v[reg++][lane] = uint32_t(value);
+            r.v[reg++][lane] = uint32_t(value >> 32);
+          }
         }
-      }
-      ASSERT_EQ(call_sources(
-                    fn, cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | gfx11_guest_flags<Width>(c.mode),
-                    ~WaveMask<Lanes>(0), c.modifiers, r.v + 6, r.v, r.v + 2, r.v + 4),
-                RJ_ARITH_SUCCESS);
-      for (int lane = 0; lane < Lanes; ++lane) {
-        uint64_t result = r.v[6][lane];
-        if constexpr (Width == 64) {
-          result |= uint64_t(r.v[7][lane]) << 32;
+        ASSERT_EQ(call_sources(fn, cpu | mode | gfx11_guest_flags<Width>(c.mode),
+                               ~WaveMask<Lanes>(0), c.modifiers, r.v + 6, r.v, r.v + 2, r.v + 4),
+                  RJ_ARITH_SUCCESS)
+            << cpu << '/' << mode;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          uint64_t result = r.v[6][lane];
+          if constexpr (Width == 64) {
+            result |= uint64_t(r.v[7][lane]) << 32;
+          }
+          ASSERT_EQ(result, c.expected) << cpu << '/' << mode << '/' << lane;
         }
-        ASSERT_EQ(result, c.expected) << cpu << '/' << lane;
       }
     }
   }
+}
+
+// Entry points whose Compatibility resolves to strict exact must reproduce captured lanes in
+// both; a faster loose path cannot then change default-mode results.
+template <int Lanes, int Width, typename Fn, size_t N>
+void check_captured_gfx11_exact(Fn fn, const CapturedGfx11 (&lanes)[N]) {
+  check_captured_gfx11<Lanes, Width>(
+      fn, lanes,
+      {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS});
 }
 
 } // namespace rocjitsu::arith::test

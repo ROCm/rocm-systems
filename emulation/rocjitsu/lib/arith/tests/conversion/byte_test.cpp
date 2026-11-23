@@ -33,7 +33,10 @@ template <int Lanes, int Byte, bool Gfx12, typename Call> void check_byte(Call c
 }
 
 // Check selected-byte packing and preservation of untouched bytes for the supplied entry point.
-template <int Lanes, bool Accumulate = false, typename Call> void check_byte_pack(Call call) {
+// Exact is false for PKACCUM and for entry points that stay loose-only until their captures
+// are reviewed.
+template <int Lanes, bool Accumulate = false, bool Exact = !Accumulate, typename Call>
+void check_byte_pack(Call call) {
   auto input = conversion_inputs<Lanes>(32);
   // Ties, saturation around 255, and all four insertion positions.
   const uint32_t edges[] = {0x3f000000, 0x3fc00000, 0x40200000, 0x437e8000, 0x437f0000, 0x437f8000};
@@ -58,7 +61,7 @@ template <int Lanes, bool Accumulate = false, typename Call> void check_byte_pac
       conversion_bits,
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP |
           (Accumulate ? RJ_ARITH_ALU_OMOD_MASK : 0),
-      false,
+      Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
 }
@@ -190,4 +193,42 @@ TEST(ConversionCvtPkaccumU8F32W32, Arithmetic) {
 }
 TEST(ConversionCvtPkaccumU8F32W64, Arithmetic) {
   check_byte_pack<64, true>(rj_arith_v_cvt_pkaccum_u8_f32_w64);
+}
+
+// gfx1201 captures: byte packing rounds in the guest FP32 mode before inserting at B's byte.
+TEST(ConversionBytePackGfx12, ExactMatchesHardware) {
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pk_u8_f32_w32_gfx12, 0, 0x3fc00000, 0, 0, 0, 2);
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pk_u8_f32_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0x3fc00000, 0, 0, 0, 1);
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pk_u8_f32_w32_gfx12, 0, 0x3fc00000, 1, 0, 0,
+                                   0x200);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtPkU8F32W32Gfx1250, Arithmetic) {
+  check_byte_pack<32, false, false>(rj_arith_v_cvt_pk_u8_f32_w32_gfx1250);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtPkU8F32W64Gfx1250, Arithmetic) {
+  check_byte_pack<64, false, false>(rj_arith_v_cvt_pk_u8_f32_w64_gfx1250);
+}
+
+// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
+TEST(ConversionCvtPkU8F32W32Gfx942, Arithmetic) {
+  check_byte_pack<32, false, false>(rj_arith_v_cvt_pk_u8_f32_w32_gfx942);
+}
+
+// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
+TEST(ConversionCvtPkU8F32W64Gfx942, Arithmetic) {
+  check_byte_pack<64, false, false>(rj_arith_v_cvt_pk_u8_f32_w64_gfx942);
+}
+
+// gfx1100 (W7900, mkm2) hw1100-noieee lanes (2026-09-25, MODE.IEEE clear): byte packing
+// saturates to 255 and rounds 1.5 to 2 under the FP32 guest rounding of these words (nearest).
+TEST(ConversionBytePackGfx11, ExactMatchesHardware) {
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<3, 1, 32>(
+      rj_arith_v_cvt_pk_u8_f32_w32, 0x1f0, 0, 0x7f7fffff, 0, 0, 0, 0xffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<3, 1, 32>(
+      rj_arith_v_cvt_pk_u8_f32_w32, 0x150, 0, 0x3fc00000, 0, 0, 0, 2);
 }
