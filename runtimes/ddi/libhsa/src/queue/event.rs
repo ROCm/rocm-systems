@@ -7,6 +7,53 @@ use super::*;
 use rocddi::device::gpu::queue::{
     AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
 };
+use std::io::Write as _;
+
+/// Native protocol that supplied a queue fault payload.
+#[derive(Clone, Copy)]
+enum QueueFaultOrigin {
+    /// Command processor's queue inactive signal.
+    CpInactiveSignal,
+    /// KFD queue-error event's separate signal payload.
+    KfdErrorEvent,
+}
+
+/// Unmodified native fault observation retained until callback delivery.
+#[derive(Clone, Copy)]
+struct QueueFaultDiagnostic {
+    /// Protocol needed to interpret the raw payload.
+    origin: QueueFaultOrigin,
+    /// Full signal payload, including bits unknown to the current decoder.
+    payload: u64,
+    /// HSA status selected by the existing error handling path.
+    status: Status,
+}
+
+impl QueueFaultDiagnostic {
+    /// Reports a terminal observation outside the registry lock before delivery.
+    fn emit(self, queue: usize, delivery: &str) {
+        // A fork-inherited process must not access environment or I/O locks.
+        if !crate::platform::process_is_current() {
+            return;
+        }
+        if std::env::var_os("ROCDDI_HSA_QUEUE_DIAGNOSTICS").is_none_or(|value| value != "1") {
+            return;
+        }
+        let origin = match self.origin {
+            QueueFaultOrigin::CpInactiveSignal => "cp_inactive_signal",
+            QueueFaultOrigin::KfdErrorEvent => "kfd_error_event",
+        };
+        // SAFETY: The event worker retains the public header through delivery.
+        let queue_id = unsafe { (*(queue as *const HsaQueue)).id };
+        // Diagnostic I/O cannot replace or suppress the original fault callback.
+        let _ = writeln!(
+            std::io::stderr().lock(),
+            "rocddi HSA queue: origin={origin}; queue_id={queue_id}; raw=0x{:016x}; status=0x{:08x}; delivery={delivery}",
+            self.payload,
+            self.status,
+        );
+    }
+}
 
 /// Queue error callback detached from the registry lock before invocation.
 struct PendingCallback {
@@ -35,6 +82,8 @@ struct QueueEventOutcome {
     callback: Option<PendingCallback>,
     /// Whether the native event should be armed for another notification.
     rearm: bool,
+    /// Terminal status, including when callback delivery is absent or deferred.
+    error_status: Option<Status>,
 }
 
 /// Maps a native queue error code to an HSA status.
@@ -121,6 +170,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         return Some(QueueEventOutcome {
             callback: None,
             rearm: true,
+            error_status: None,
         });
     }
     if error == 512 {
@@ -130,9 +180,11 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         let (native, backing) = unsafe { queue.native.parts_mut() };
         // SAFETY: Backing remains owned until clearing the stopped descriptor succeeds.
         if let Err(error) = unsafe { native.clear_scratch() } {
+            let status = map_error(error);
             return Some(QueueEventOutcome {
-                callback: pending_callback(runtime, key, map_error(error)),
+                callback: pending_callback(runtime, key, status),
                 rearm: false,
+                error_status: Some(status),
             });
         }
         let old = backing.scratch.take();
@@ -147,12 +199,15 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
         return Some(QueueEventOutcome {
             callback: None,
             rearm: true,
+            error_status: None,
         });
     }
     let Some(lanes_per_wave) = aql_scratch_lanes(error) else {
+        let status = queue_error_status(error);
         return Some(QueueEventOutcome {
-            callback: pending_error_callback(runtime, key, queue_error_status(error)),
+            callback: pending_error_callback(runtime, key, status),
             rearm: false,
+            error_status: Some(status),
         });
     };
     let (
@@ -173,6 +228,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
             return Some(QueueEventOutcome {
                 callback: pending_callback(runtime, key, ERROR),
                 rearm: false,
+                error_status: Some(ERROR),
             });
         };
         (
@@ -265,6 +321,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
             QueueEventOutcome {
                 callback: None,
                 rearm: true,
+                error_status: None,
             },
             old,
             old_visible,
@@ -273,6 +330,7 @@ fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOut
             QueueEventOutcome {
                 callback: pending_callback(runtime, key, status),
                 rearm: false,
+                error_status: Some(status),
             },
             None,
             false,
@@ -425,6 +483,7 @@ pub(super) fn queue_event_worker(
             continue;
         };
         let error = signal.load_error();
+        let mut diagnostic = None;
         let callback = if !observer_failure_checked && observer_failed.load(Ordering::Acquire) {
             observer_failure_checked = true;
             let mut guard = match lock() {
@@ -455,7 +514,13 @@ pub(super) fn queue_event_worker(
             if !runtime.queue_state.queues.contains_key(&key) {
                 return;
             }
-            let callback = pending_error_callback(runtime, key, queue_error_status(error as u64));
+            let status = queue_error_status(error as u64);
+            diagnostic = Some(QueueFaultDiagnostic {
+                origin: QueueFaultOrigin::KfdErrorEvent,
+                payload: error as u64,
+                status,
+            });
+            let callback = pending_error_callback(runtime, key, status);
             signal.release_error();
             callback
         } else {
@@ -471,6 +536,13 @@ pub(super) fn queue_event_worker(
                 handle_queue_event(key, observed).and_then(|outcome| {
                     inactive_armed = outcome.rearm;
                     reclaim_enabled &= outcome.rearm;
+                    if let Some(status) = outcome.error_status {
+                        diagnostic = Some(QueueFaultDiagnostic {
+                            origin: QueueFaultOrigin::CpInactiveSignal,
+                            payload: observed as u64,
+                            status,
+                        });
+                    }
                     outcome.callback
                 })
             } else {
@@ -481,7 +553,12 @@ pub(super) fn queue_event_worker(
             if stop.load(Ordering::Acquire) || !alive.load(Ordering::Acquire) {
                 return;
             }
+            if let Some(diagnostic) = diagnostic {
+                diagnostic.emit(key, "callback");
+            }
             callback.invoke();
+        } else if let Some(diagnostic) = diagnostic {
+            diagnostic.emit(key, "detected");
         }
         if reclaim_enabled && reclaim_check.elapsed() >= Duration::from_millis(25) {
             reclaim_check = std::time::Instant::now();
@@ -510,6 +587,77 @@ pub(super) fn queue_event_worker(
 mod tests {
     use super::*;
     use rocddi::ErrorKind;
+
+    #[test]
+    fn queue_fault_diagnostics_require_exact_opt_in_and_preserve_observations() {
+        const CHILD: &str = "ROCDDI_TEST_QUEUE_DIAGNOSTIC_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let queue = HsaQueue {
+                queue_type: 0,
+                features: 0,
+                base_address: std::ptr::null_mut(),
+                doorbell_signal: HsaSignal { handle: 0 },
+                size: 0,
+                reserved: 0,
+                id: u64::MAX,
+            };
+            for (origin, payload, delivery) in [
+                (
+                    QueueFaultOrigin::CpInactiveSignal,
+                    0x8000_0000_0000_1000,
+                    "callback",
+                ),
+                (
+                    QueueFaultOrigin::KfdErrorEvent,
+                    0x4000_0000_0000_0004,
+                    "detected",
+                ),
+            ] {
+                QueueFaultDiagnostic {
+                    origin,
+                    payload,
+                    status: queue_error_status(payload),
+                }
+                .emit((&raw const queue) as usize, delivery);
+            }
+            return;
+        }
+        // Subprocesses exercise the production environment lookup and stderr
+        // writer without mutating the multithreaded test runner's environment.
+        for value in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some("01"),
+            Some("1 "),
+            Some("1"),
+        ] {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args([
+                    "--exact",
+                    "queue::event::tests::queue_fault_diagnostics_require_exact_opt_in_and_preserve_observations",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env_remove("ROCDDI_HSA_QUEUE_DIAGNOSTICS");
+            if let Some(value) = value {
+                command.env("ROCDDI_HSA_QUEUE_DIAGNOSTICS", value);
+            }
+            let output = command.output().unwrap();
+            assert!(output.status.success(), "{output:?}");
+            let expected = if value == Some("1") {
+                concat!(
+                    "rocddi HSA queue: origin=cp_inactive_signal; queue_id=18446744073709551615; raw=0x8000000000001000; status=0x00001000; delivery=callback\n",
+                    "rocddi HSA queue: origin=kfd_error_event; queue_id=18446744073709551615; raw=0x4000000000000004; status=0x00001003; delivery=detected\n",
+                )
+            } else {
+                ""
+            };
+            assert_eq!(String::from_utf8(output.stderr).unwrap(), expected);
+        }
+    }
 
     fn error(kind: ErrorKind) -> rocddi::Error {
         rocddi::Error::Operation {
